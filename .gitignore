@@ -1,0 +1,154 @@
+# FrameNest .gitignore
+#
+# This file protects local secrets, development byproducts, and FrameNest
+# runtime data without hiding future source packages, documentation, migrations,
+# or deterministic test fixtures.
+
+# ---------------------------------------------------------------------------
+# Secrets and credentials
+# ---------------------------------------------------------------------------
+.env
+.env.*
+!.env.example
+!.env.*.example
+
+/.secrets/
+/secrets/
+/credentials/
+/private/
+
+api-key.txt
+api-keys.txt
+*-api-key.txt
+*-api-keys.txt
+token.txt
+tokens.txt
+*-token.txt
+*-tokens.txt
+auth-token.txt
+auth-tokens.txt
+
+*.key
+*.pem.key
+*-private.pem
+*.p12
+*.pfx
+service-account*.json
+service-account*.yaml
+service-account*.yml
+
+cookies.txt
+cookies-*.txt
+*.cookies.txt
+yt-dlp-cookies*.txt
+
+# ---------------------------------------------------------------------------
+# macOS artifacts
+# ---------------------------------------------------------------------------
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.TemporaryItems
+.Trashes
+.fseventsd
+
+# ---------------------------------------------------------------------------
+# Python artifacts
+# ---------------------------------------------------------------------------
+.venv/
+venv/
+env/
+ENV/
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.pyright/
+.ruff_cache/
+.tox/
+.nox/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+*.cover
+*.egg-info/
+.eggs/
+build/
+dist/
+site/
+
+# ---------------------------------------------------------------------------
+# Node and frontend artifacts
+# ---------------------------------------------------------------------------
+node_modules/
+.npm/
+.pnpm-store/
+.yarn/cache/
+.yarn/unplugged/
+.yarn/build-state.yml
+.yarn/install-state.gz
+.vite/
+.next/
+.nuxt/
+.svelte-kit/
+.astro/
+.turbo/
+.parcel-cache/
+coverage/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+bun-debug.log*
+
+# ---------------------------------------------------------------------------
+# Rust and Tauri artifacts
+# ---------------------------------------------------------------------------
+target/
+src-tauri/target/
+
+# ---------------------------------------------------------------------------
+# IDE and local editor state
+# ---------------------------------------------------------------------------
+.idea/
+*.swp
+*.swo
+*.tmp
+*.temp
+*~
+.vscode/settings.local.json
+.vscode/*.log
+.cursor/local/
+.cursor/**/*.local.json
+
+# ---------------------------------------------------------------------------
+# FrameNest local runtime artifacts
+# ---------------------------------------------------------------------------
+# These root-scoped names are reserved for local runtime state. They avoid
+# broad patterns such as data/ so future source, docs, migrations, and fixtures
+# remain visible to Git.
+/.framenest/
+/runtime/
+/cache/
+/caches/
+/logs/
+/tmp/
+/temp/
+/processing/
+/downloads/
+/downloaded-media/
+/thumbnails/
+/support-bundles/
+/crash-reports/
+
+/*.sqlite
+/*.sqlite3
+/*.db
+/*.db-wal
+/*.db-shm
+/*.log
+/*.pid
