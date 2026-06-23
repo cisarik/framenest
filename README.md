@@ -71,6 +71,8 @@ Current foundation files:
 - [`.editorconfig`](.editorconfig) defines baseline editor formatting.
 - [`SECURITY.md`](SECURITY.md) defines the initial pre-alpha security policy.
 - [`PRODUCT.md`](PRODUCT.md) defines the approved product vision, users, outcomes, experience principles, capabilities, and non-goals.
+- [`SPEC.md`](SPEC.md) defines the initial normative product and system requirements.
+- [`ROADMAP.md`](ROADMAP.md) defines the staged evidence-based development roadmap.
 - [`AGENTS.md`](AGENTS.md) defines FrameNest-specific agent operating rules.
 - [`AP.md`](AP.md) defines the general Analytic Programming protocol.
 - [`AP_ORCHESTRATOR.md`](AP_ORCHESTRATOR.md) defines the Orchestrator operating handbook.
