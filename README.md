@@ -82,6 +82,7 @@ Current foundation files:
 - [`docs/adr/README.md`](docs/adr/README.md) indexes accepted architecture decision records.
 - [`docs/adr/0001-supported-python-version.md`](docs/adr/0001-supported-python-version.md) records the accepted CPython 3.13 runtime decision.
 - [`docs/adr/0002-python-environment-and-dependency-manager.md`](docs/adr/0002-python-environment-and-dependency-manager.md) records the accepted Poetry dependency and environment management decision.
+- [`docs/adr/0003-initial-server-api-framework.md`](docs/adr/0003-initial-server-api-framework.md) records the accepted FastAPI initial server API framework decision.
 
 ## Non-Goals for the Current Stage
 

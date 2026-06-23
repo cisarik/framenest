@@ -22,16 +22,19 @@ After this evidence package was written:
 
 - **Decision 1 — Supported Python version** was accepted as **CPython 3.13** in [ADR-0001](adr/0001-supported-python-version.md).
 - **Decision 2 — Python environment and dependency manager** was accepted as **Poetry** in [ADR-0002](adr/0002-python-environment-and-dependency-manager.md).
+- **Decision 3 — Initial server API framework** was accepted as **FastAPI** in [ADR-0003](adr/0003-initial-server-api-framework.md).
 
 The Cooperator selected Poetry, the strongest alternative identified in this evidence package, based on project familiarity and maintainability preference. The original provisional recommendation for `uv` below remains historical research evidence, not current project authority.
 
-**Decisions 3 through 5 remain `Not accepted`.** The provisional recommendation sections below remain historical decision evidence from the original research.
+The provisional recommendation for FastAPI in Decision 3 matched the Cooperator's later acceptance. The framework comparison sections below remain historical decision evidence and must not be rewritten to alter the original research record.
+
+**Decisions 4 and 5 remain `Not accepted`.**
 
 | Decision | Current status | Authority |
 |---|---|---|
 | 1. Python version | **Accepted** — CPython 3.13 | [ADR-0001](adr/0001-supported-python-version.md) |
 | 2. Python tooling | **Accepted** — Poetry | [ADR-0002](adr/0002-python-environment-and-dependency-manager.md) |
-| 3. API framework | Not accepted | — |
+| 3. API framework | **Accepted** — FastAPI | [ADR-0003](adr/0003-initial-server-api-framework.md) |
 | 4. Repository layout | Not accepted | — |
 | 5. Configuration strategy | Not accepted | — |
 
@@ -79,7 +82,7 @@ The recommended future decision order is:
 
 Decisions 3 and 4 are partially independent once Python version is fixed, but repository layout should not be finalized before the server framework category is understood. Decision 5 should wait until the server process boundary and repository locations are known.
 
-Decision 1 is accepted per [ADR-0001](adr/0001-supported-python-version.md). Decision 2 is accepted per [ADR-0002](adr/0002-python-environment-and-dependency-manager.md). Decisions 3 through 5 remain not accepted.
+Decision 1 is accepted per [ADR-0001](adr/0001-supported-python-version.md). Decision 2 is accepted per [ADR-0002](adr/0002-python-environment-and-dependency-manager.md). Decision 3 is accepted per [ADR-0003](adr/0003-initial-server-api-framework.md). Decisions 4 and 5 remain not accepted.
 
 ---
 
@@ -501,7 +504,7 @@ Provisional recommendations only. Nothing here is accepted.
 |---|---|---|---|---|---|
 | 1. Python version | 3.13 | 3.12 | Medium | Future media/native wheel audit | **Accepted** — see [ADR-0001](adr/0001-supported-python-version.md) |
 | 2. Python tooling | uv | Poetry | Medium | Cooperator preference on tool maturity | **Accepted** — Poetry; see [ADR-0002](adr/0002-python-environment-and-dependency-manager.md) |
-| 3. API framework | FastAPI | Litestar | Medium | Background-work and auth boundary ADRs | Not accepted |
+| 3. API framework | FastAPI | Litestar | Medium | Background-work and auth boundary ADRs | **Accepted** — see [ADR-0003](adr/0003-initial-server-api-framework.md) |
 | 4. Repository layout | Hybrid staged monorepo (Option C) | Python-first root (Option A) | Medium | Future web/Tauri packaging choice | Not accepted |
 | 5. Configuration strategy | Layered model (Option C) | Env + `.env` (Option A) | Medium | Secret storage ADR on Fedora NUC | Not accepted |
 

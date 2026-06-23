@@ -46,16 +46,22 @@ Accepted so far:
 
 - Supported Python version: CPython 3.13 through [ADR-0001](docs/adr/0001-supported-python-version.md).
 - Python environment and dependency manager: Poetry through [ADR-0002](docs/adr/0002-python-environment-and-dependency-manager.md).
+- Initial server API framework: FastAPI through [ADR-0003](docs/adr/0003-initial-server-api-framework.md).
 
-Remaining open decisions include server API framework, repository layout, local application configuration strategy, local database/query strategy, sidecar manifest format and versioning, server/domain boundaries, initial authentication boundary, media-tool distribution strategy, macOS development runtime details, and Fedora deployment details.
+Remaining immediate decisions:
 
-Key deliverables: decision material and accepted ADRs for the remaining initial architecture decisions.
+- repository layout boundary,
+- local application configuration strategy.
+
+Broader later architecture decisions still open include local database/query strategy, sidecar manifest format and versioning, server/domain boundaries, initial authentication boundary, media-tool distribution strategy, macOS development runtime details, and Fedora deployment details.
+
+Key deliverables: accepted ADRs for the two remaining immediate architecture decisions.
 
 Entry conditions: [SPEC.md](SPEC.md) and this roadmap are accepted.
 
-Exit evidence: accepted ADRs for the required initial architecture decisions without silently selecting unresolved options.
+Exit evidence: accepted ADRs for repository layout and local configuration strategy without silently selecting other unresolved options.
 
-Boundaries: do not scaffold the application; project scaffolding remains forbidden until the required initial decisions are accepted through ADRs.
+Boundaries: do not scaffold the application; project scaffolding remains forbidden until the two remaining immediate decisions are accepted through ADRs.
 
 ## Phase 3 — Domain and Metadata Core
 

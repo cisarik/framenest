@@ -448,6 +448,26 @@ Local tests, continuous integration, and Fedora deployment MUST install from the
 
 Package mode and Poetry virtual-environment location remain unresolved until repository-layout scaffolding is accepted.
 
+### Initial Server API Framework
+
+FrameNest MUST use FastAPI for the initial server HTTP API adapter per [ADR-0003](docs/adr/0003-initial-server-api-framework.md).
+
+Domain and application logic MUST remain independent of FastAPI and MUST be testable without starting an HTTP server.
+
+API route handlers MUST remain thin and SHOULD delegate to application services or use cases rather than contain filesystem, media-processing, database, downloader, or destructive-operation logic directly.
+
+API request and response contracts MUST be typed.
+
+HTTP and validation errors MUST be translated into structured, sanitized responses that do not leak secrets, absolute private paths, or raw stack traces to ordinary clients.
+
+The API MUST support dependency replacement or injection for tests.
+
+The initial server MUST be configurable for loopback-only binding and MUST NOT be publicly exposed by default.
+
+Long-running downloads, media processing, scans, and transfers MUST NOT be implemented as unbounded synchronous work inside route handlers.
+
+Future implementation MUST include API contract tests and domain tests that do not import FastAPI.
+
 ## 27. Accessibility and Performance
 
 FrameNest SHOULD support reduced motion, reduced transparency, keyboard access, focus visibility, touch targets, useful errors, responsive interaction, bounded background work, large-library scalability, and weaker-device degradation modes.
@@ -478,9 +498,9 @@ Success MUST NOT be claimed without evidence.
 
 ## 31. Explicitly Deferred Decisions
 
-Deferred decisions include frontend framework, API framework, ORM/query strategy, manifest format, schema, IPC, authentication above Tailscale, synchronization protocol, FFmpeg distribution, yt-dlp packaging/update strategy, player invocation, thumbnail formats and sizes, full-text search, packaging/signing/update mechanisms, telemetry, and license.
+Deferred decisions include frontend framework, repository layout, local application configuration implementation, ORM/query strategy, manifest format, schema, IPC, authentication above Tailscale, synchronization protocol, FFmpeg distribution, yt-dlp packaging/update strategy, player invocation, thumbnail formats and sizes, full-text search, packaging/signing/update mechanisms, telemetry, and license.
 
-The supported Python minor version is recorded in [ADR-0001](docs/adr/0001-supported-python-version.md). Poetry dependency and environment management is recorded in [ADR-0002](docs/adr/0002-python-environment-and-dependency-manager.md). Exact 3.13 patch pinning, package mode, and Poetry virtual-environment location remain implementation concerns governed by those ADRs and the authorized scaffold task.
+The supported Python minor version is recorded in [ADR-0001](docs/adr/0001-supported-python-version.md). Poetry dependency and environment management is recorded in [ADR-0002](docs/adr/0002-python-environment-and-dependency-manager.md). The initial server API framework is recorded in [ADR-0003](docs/adr/0003-initial-server-api-framework.md). Exact dependency versions, 3.13 patch pinning, package mode, Poetry virtual-environment location, ASGI process runner, background jobs, authentication, and API versioning remain implementation concerns governed by those ADRs and later authorized tasks.
 
 None of these may be silently selected during implementation.
 

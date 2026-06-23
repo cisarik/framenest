@@ -40,7 +40,7 @@ When commits are pushed, the Orchestrator should compare the public commit SHA, 
 
 ## Source-of-Truth Conflict Handling
 
-Repository files describe documented and implemented state. Tests describe verified behavior. Git history describes committed changes. Product foundation documents (`PRODUCT.md`, `SPEC.md`, and `ROADMAP.md`) are committed. [ADR-0001](docs/adr/0001-supported-python-version.md) accepts CPython 3.13. [ADR-0002](docs/adr/0002-python-environment-and-dependency-manager.md) accepts Poetry. Decisions 3 through 5 from the architecture evidence package remain unresolved. Future accepted decisions require bounded tasks and ADRs recorded in [docs/adr/](docs/adr/README.md).
+Repository files describe documented and implemented state. Tests describe verified behavior. Git history describes committed changes. Product foundation documents (`PRODUCT.md`, `SPEC.md`, and `ROADMAP.md`) are committed. [ADR-0001](docs/adr/0001-supported-python-version.md) accepts CPython 3.13. [ADR-0002](docs/adr/0002-python-environment-and-dependency-manager.md) accepts Poetry. [ADR-0003](docs/adr/0003-initial-server-api-framework.md) accepts FastAPI as the initial API adapter. Repository layout and local configuration strategy remain unresolved. Domain and application logic must not depend on FastAPI. Future accepted decisions require bounded tasks and ADRs recorded in [docs/adr/](docs/adr/README.md).
 
 Handoff files describe session state but do not independently redefine permanent strategy.
 
@@ -76,4 +76,4 @@ FrameNest uses exactly these four lifecycle files:
 - [SPEC.md](SPEC.md): normative product and system requirements.
 - [ROADMAP.md](ROADMAP.md): staged, evidence-based development plan.
 
-[ADR-0001](docs/adr/0001-supported-python-version.md) accepts CPython 3.13. [ADR-0002](docs/adr/0002-python-environment-and-dependency-manager.md) accepts Poetry. Decisions 3 through 5 from the architecture evidence package remain unresolved. Future accepted decisions require bounded tasks and ADRs recorded in [docs/adr/](docs/adr/README.md).
+[ADR-0001](docs/adr/0001-supported-python-version.md) accepts CPython 3.13. [ADR-0002](docs/adr/0002-python-environment-and-dependency-manager.md) accepts Poetry. [ADR-0003](docs/adr/0003-initial-server-api-framework.md) accepts FastAPI as the initial API adapter. Repository layout and local configuration strategy remain unresolved. Domain and application logic must not depend on FastAPI. Future accepted decisions require bounded tasks and ADRs recorded in [docs/adr/](docs/adr/README.md).
