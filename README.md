@@ -78,6 +78,7 @@ Current foundation files:
 - [`AP_ORCHESTRATOR.md`](AP_ORCHESTRATOR.md) defines the Orchestrator operating handbook.
 - [`AP_WORKER.md`](AP_WORKER.md) defines the Worker operating handbook.
 - [`BOOT_WORKER.md`](BOOT_WORKER.md) defines the stable FrameNest Worker bootstrap.
+- [`docs/ARCHITECTURE_FOUNDATION_EVIDENCE.md`](docs/ARCHITECTURE_FOUNDATION_EVIDENCE.md) collects primary-source evidence for the first architecture decisions. It is not an ADR and does not approve any option.
 
 ## Non-Goals for the Current Stage
 

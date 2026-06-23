@@ -40,7 +40,7 @@ When commits are pushed, the Orchestrator should compare the public commit SHA, 
 
 ## Source-of-Truth Conflict Handling
 
-Repository files describe documented and implemented state. Tests describe verified behavior. Git history describes committed changes. ADRs and product specifications will be added later when authorized.
+Repository files describe documented and implemented state. Tests describe verified behavior. Git history describes committed changes. Product foundation documents (`PRODUCT.md`, `SPEC.md`, and `ROADMAP.md`) are committed. Architecture ADRs have not yet been accepted. Future ADRs must be created through bounded tasks.
 
 Handoff files describe session state but do not independently redefine permanent strategy.
 
@@ -72,5 +72,8 @@ FrameNest uses exactly these four lifecycle files:
 - [AP_ORCHESTRATOR.md](AP_ORCHESTRATOR.md): operational handbook for Orchestrators.
 - [AP_WORKER.md](AP_WORKER.md): operational handbook for Workers.
 - [BOOT_WORKER.md](BOOT_WORKER.md): FrameNest-specific Worker bootstrap.
+- [PRODUCT.md](PRODUCT.md): approved product direction and experience principles.
+- [SPEC.md](SPEC.md): normative product and system requirements.
+- [ROADMAP.md](ROADMAP.md): staged, evidence-based development plan.
 
-Product specifications and ADRs will be added later through bounded tasks.
+Architecture ADRs have not yet been accepted. Future ADRs must be created through bounded tasks.

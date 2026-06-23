@@ -297,8 +297,8 @@ This document complements the repository overview in [README.md](README.md).
 
 Agent and protocol behavior are defined in [AGENTS.md](AGENTS.md) and [AP.md](AP.md).
 
-`SPEC.md` is a future normative specification and is not yet present.
+[SPEC.md](SPEC.md) defines normative product and system requirements.
 
-`ROADMAP.md` is a future staged plan and is not yet present.
+[ROADMAP.md](ROADMAP.md) defines the staged, evidence-based development plan.
 
-This document is product foundation, not a technical architecture decision record.
+This document defines product direction. `SPEC.md` defines normative requirements. `ROADMAP.md` defines staged development. Architecture ADRs will record accepted architecture decisions later.
