@@ -38,17 +38,23 @@ Boundaries: unresolved architecture decisions remain unresolved.
 
 ## Phase 2 — Architecture Decision Package
 
-Status: next.
+Status: in progress.
 
-Goal: prepare individual ADR evidence before scaffolding.
+Goal: prepare individual ADR evidence before scaffolding and record accepted architecture decisions one at a time.
 
-Key deliverables: decision material for supported Python version and environment manager, server API framework, local database/query strategy, sidecar manifest format and versioning, repository layout, server/domain boundaries, initial authentication boundary, media-tool distribution strategy, macOS development runtime, and Fedora deployment boundary.
+Accepted so far:
+
+- Supported Python version: CPython 3.13 through [ADR-0001](docs/adr/0001-supported-python-version.md).
+
+Remaining open decisions include environment manager, server API framework, local database/query strategy, sidecar manifest format and versioning, repository layout, server/domain boundaries, initial authentication boundary, media-tool distribution strategy, macOS development runtime, and Fedora deployment boundary.
+
+Key deliverables: decision material and accepted ADRs for the remaining initial architecture decisions.
 
 Entry conditions: [SPEC.md](SPEC.md) and this roadmap are accepted.
 
-Exit evidence: Orchestrator-reviewed ADR tasks or ADR drafts that compare options without silently selecting them.
+Exit evidence: accepted ADRs for the required initial architecture decisions without silently selecting unresolved options.
 
-Boundaries: do not scaffold the application and do not choose options without approved ADR authority.
+Boundaries: do not scaffold the application; project scaffolding remains forbidden until the required initial decisions are accepted through ADRs.
 
 ## Phase 3 — Domain and Metadata Core
 

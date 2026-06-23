@@ -40,7 +40,7 @@ When commits are pushed, the Orchestrator should compare the public commit SHA, 
 
 ## Source-of-Truth Conflict Handling
 
-Repository files describe documented and implemented state. Tests describe verified behavior. Git history describes committed changes. Product foundation documents (`PRODUCT.md`, `SPEC.md`, and `ROADMAP.md`) are committed. Architecture ADRs have not yet been accepted. Future ADRs must be created through bounded tasks.
+Repository files describe documented and implemented state. Tests describe verified behavior. Git history describes committed changes. Product foundation documents (`PRODUCT.md`, `SPEC.md`, and `ROADMAP.md`) are committed. [ADR-0001](docs/adr/0001-supported-python-version.md) is accepted and selects CPython 3.13. All other initial architecture decisions remain unresolved. Future decisions require bounded tasks and accepted ADRs recorded in [docs/adr/](docs/adr/README.md).
 
 Handoff files describe session state but do not independently redefine permanent strategy.
 
@@ -76,4 +76,4 @@ FrameNest uses exactly these four lifecycle files:
 - [SPEC.md](SPEC.md): normative product and system requirements.
 - [ROADMAP.md](ROADMAP.md): staged, evidence-based development plan.
 
-Architecture ADRs have not yet been accepted. Future ADRs must be created through bounded tasks.
+[ADR-0001](docs/adr/0001-supported-python-version.md) is accepted and selects CPython 3.13. All other initial architecture decisions remain unresolved. Future decisions require bounded tasks and accepted ADRs recorded in [docs/adr/](docs/adr/README.md).

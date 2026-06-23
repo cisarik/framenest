@@ -79,6 +79,8 @@ Current foundation files:
 - [`AP_WORKER.md`](AP_WORKER.md) defines the Worker operating handbook.
 - [`BOOT_WORKER.md`](BOOT_WORKER.md) defines the stable FrameNest Worker bootstrap.
 - [`docs/ARCHITECTURE_FOUNDATION_EVIDENCE.md`](docs/ARCHITECTURE_FOUNDATION_EVIDENCE.md) collects primary-source evidence for the first architecture decisions. It is not an ADR and does not approve any option.
+- [`docs/adr/README.md`](docs/adr/README.md) indexes accepted architecture decision records.
+- [`docs/adr/0001-supported-python-version.md`](docs/adr/0001-supported-python-version.md) records the accepted CPython 3.13 runtime decision.
 
 ## Non-Goals for the Current Stage
 

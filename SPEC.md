@@ -418,6 +418,18 @@ Browser/PWA access remains conceptual direction.
 
 Platform adapters MUST isolate OS-specific behavior.
 
+### Supported Python Runtime
+
+FrameNest MUST target CPython 3.13 as the initial supported runtime.
+
+Future project metadata MUST constrain supported Python to an equivalent of `>=3.13,<3.14` unless a later ADR supersedes [ADR-0001](docs/adr/0001-supported-python-version.md).
+
+Local tests, continuous integration, and server deployment verification MUST run under Python 3.13.
+
+Project commands MUST use an isolated project environment independent of a developer's global Python installation once project tooling exists.
+
+The exact 3.13 patch release is pinned by accepted project tooling and ADR-0001; it MAY advance within the 3.13 series after tests pass.
+
 ## 27. Accessibility and Performance
 
 FrameNest SHOULD support reduced motion, reduced transparency, keyboard access, focus visibility, touch targets, useful errors, responsive interaction, bounded background work, large-library scalability, and weaker-device degradation modes.
@@ -448,7 +460,9 @@ Success MUST NOT be claimed without evidence.
 
 ## 31. Explicitly Deferred Decisions
 
-Deferred decisions include frontend framework, Python version/tooling, API framework, ORM/query strategy, manifest format, schema, IPC, authentication above Tailscale, synchronization protocol, FFmpeg distribution, yt-dlp packaging/update strategy, player invocation, thumbnail formats and sizes, full-text search, packaging/signing/update mechanisms, telemetry, and license.
+Deferred decisions include frontend framework, Python environment and dependency manager, API framework, ORM/query strategy, manifest format, schema, IPC, authentication above Tailscale, synchronization protocol, FFmpeg distribution, yt-dlp packaging/update strategy, player invocation, thumbnail formats and sizes, full-text search, packaging/signing/update mechanisms, telemetry, and license.
+
+The supported Python minor version is recorded in [ADR-0001](docs/adr/0001-supported-python-version.md). Exact 3.13 patch pinning remains an implementation concern governed by that ADR and accepted project tooling.
 
 None of these may be silently selected during implementation.
 

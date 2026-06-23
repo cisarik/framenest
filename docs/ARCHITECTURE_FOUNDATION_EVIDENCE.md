@@ -11,10 +11,24 @@ It is **not** an Architecture Decision Record (ADR). It does **not** approve, se
 | Research date | 2026-06-23 |
 | Repository starting HEAD | `584b4fde3a7d84f413150702e148921f8273cc45` |
 | Scope | Supported Python version; Python environment and dependency manager; initial server API framework; initial repository layout boundary; local development configuration strategy |
-| Decision status | **Not accepted** for all five decisions |
+| Decision status at research time | **Not accepted** for all five decisions |
 | Methodology | Primary and official sources only; time-sensitive claims include retrieval date and URL |
 
 Verified facts are cited to primary sources. Worker inference, provisional recommendations, and uncertainty are explicitly labeled.
+
+### Decision status update (2026-06-23)
+
+After this evidence package was written, **Decision 1 — Supported Python version** was accepted as **CPython 3.13** in [ADR-0001](adr/0001-supported-python-version.md). That ADR is the authoritative source for the accepted runtime.
+
+**Decisions 2 through 5 remain `Not accepted`.** The provisional recommendation sections below remain historical decision evidence from the original research. They are not current project authority.
+
+| Decision | Current status | Authority |
+|---|---|---|
+| 1. Python version | **Accepted** — CPython 3.13 | [ADR-0001](adr/0001-supported-python-version.md) |
+| 2. Python tooling | Not accepted | — |
+| 3. API framework | Not accepted | — |
+| 4. Repository layout | Not accepted | — |
+| 5. Configuration strategy | Not accepted | — |
 
 ---
 
@@ -60,7 +74,7 @@ The recommended future decision order is:
 
 Decisions 3 and 4 are partially independent once Python version is fixed, but repository layout should not be finalized before the server framework category is understood. Decision 5 should wait until the server process boundary and repository locations are known.
 
-No item in this sequence is marked accepted.
+Decision 1 is accepted per [ADR-0001](adr/0001-supported-python-version.md). Decisions 2 through 5 remain not accepted.
 
 ---
 
@@ -480,7 +494,7 @@ Provisional recommendations only. Nothing here is accepted.
 
 | Decision | Provisional recommendation | Strongest alternative | Confidence | Unresolved blocker | Status |
 |---|---|---|---|---|---|
-| 1. Python version | 3.13 | 3.12 | Medium | Future media/native wheel audit | Not accepted |
+| 1. Python version | 3.13 | 3.12 | Medium | Future media/native wheel audit | **Accepted** — see [ADR-0001](adr/0001-supported-python-version.md) |
 | 2. Python tooling | uv | Poetry | Medium | Cooperator preference on tool maturity | Not accepted |
 | 3. API framework | FastAPI | Litestar | Medium | Background-work and auth boundary ADRs | Not accepted |
 | 4. Repository layout | Hybrid staged monorepo (Option C) | Python-first root (Option A) | Medium | Future web/Tauri packaging choice | Not accepted |
