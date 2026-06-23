@@ -240,17 +240,49 @@ Next-session handoff files SHOULD describe session state but MUST NOT redefine p
 
 The set of handoff files is project-specific and SHOULD be documented in repository rules.
 
-## 28. Stopping Conditions
+## 28. Session Rotation and Context Pressure
+
+Conversational context is temporary. It MUST NOT be treated as the sole project memory.
+
+Repository files, tests, commits, ADRs, and handoff documents are the durable source of truth.
+
+Automatic context compaction or summarization MAY help continuity, but it MUST NOT replace an explicit handoff when a session is ending or when durable state has changed.
+
+Visible context percentages are heuristics. Different tools measure and display context differently, so percentage thresholds are guidance rather than universal guarantees.
+
+At approximately 80% context usage, a role SHOULD avoid starting a large new task and SHOULD plan a checkpoint instead.
+
+At approximately 85% or more, a role SHOULD normally finish only the current bounded task, create or update the appropriate handoff, and stop.
+
+Earlier rotation is required when a role repeats questions, forgets constraints, confuses commits, expands scope, or shows inconsistent reasoning.
+
+A natural architectural or implementation checkpoint is preferable to waiting for complete context exhaustion.
+
+BOOT files describe stable role or project initialization.
+
+NEXT files describe current session state.
+
+Neither BOOT nor NEXT files grants modification authority.
+
+Every Worker still requires a separate authoritative task from the Orchestrator.
+
+Handoff files SHOULD be replaced with current state rather than grow into endless chronological logs.
+
+The closing session MUST stop after the handoff report.
+
+A new session MUST independently verify the current repository HEAD and public committed state.
+
+## 29. Stopping Conditions
 
 The Worker MUST stop when required identity checks fail, authorized files differ from expectations, secrets would be exposed, required evidence is missing, authentication fails in an unsafe way, or completion would require out-of-scope changes.
 
 The Orchestrator MUST stop or reframe when the next step requires Cooperator approval.
 
-## 29. Anti-Patterns
+## 30. Anti-Patterns
 
 Anti-patterns include silent scope expansion, implementation before inspection, treating reports as proof, conflating public commits with local changes, inventing decisions, hiding failures, broad filesystem inspection, unnecessary package installation, and Git writes without permission.
 
-## 30. Minimal Orchestrator Loop
+## 31. Minimal Orchestrator Loop
 
 1. Understand Cooperator intent.
 2. Inspect source-of-truth evidence.
@@ -260,7 +292,7 @@ Anti-patterns include silent scope expansion, implementation before inspection, 
 6. Verify public commits when available.
 7. Decide to accept, correct, continue, pause, or close.
 
-## 31. Minimal Worker Loop
+## 32. Minimal Worker Loop
 
 1. Read the complete task.
 2. Verify working directory, repository identity, and preconditions.
@@ -270,7 +302,7 @@ Anti-patterns include silent scope expansion, implementation before inspection, 
 6. Perform authorized Git operations only when explicitly allowed.
 7. Report evidence, deviations, risks, and final state.
 
-## 32. Example Task Lifecycle
+## 33. Example Task Lifecycle
 
 The Cooperator asks for a capability.
 

@@ -133,6 +133,28 @@ After reviewing a Worker report, the Orchestrator decides whether to accept, cor
 
 Session closure SHOULD include a deliberate handoff when the project uses handoff files. Handoff files describe session state but do not replace permanent repository documents.
 
+## Session Rotation and Context Pressure
+
+The Orchestrator SHOULD detect context pressure proactively.
+
+When context is high, the Orchestrator MUST refuse to start a large implementation task that is unlikely to finish safely in the current session.
+
+The Orchestrator SHOULD select a coherent checkpoint rather than forcing continuation past reliable reasoning.
+
+Permanent decisions MUST already be recorded in durable repository files before session close.
+
+The Orchestrator MAY request Worker handoff updates when repository state has changed and the Worker handoff is stale.
+
+The Orchestrator SHOULD prepare or authorize `NEXT_ORCHESTRATOR.md` at intentional session close.
+
+The Orchestrator MUST verify the public handoff commit before treating the handoff as complete.
+
+The Orchestrator SHOULD give the Cooperator a small bootstrap prompt for the next Orchestrator session.
+
+The old Orchestrator session MUST stop after successful handoff verification.
+
+An Orchestrator without a visible context meter SHOULD use conversation length, number of completed cycles, difficulty recalling exact state, quality drift, and natural project checkpoints as rotation signals.
+
 ## Failure and Recovery
 
 When a Worker reports failure, the Orchestrator SHOULD determine whether the failure blocks the task, requires correction, requires Cooperator input, or indicates a broader repository issue.

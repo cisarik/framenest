@@ -64,14 +64,18 @@ FrameNest uses exactly these four lifecycle files:
 - `NEXT_ORCHESTRATOR.md`: session-close handoff for a future Orchestrator.
 - `NEXT_WORKER.md`: concise repository-local Worker handoff.
 
-`BOOT_ORCHESTRATOR.md` is the one-time founding Orchestrator bootstrap. `BOOT_WORKER.md` is stable Worker bootstrap protocol. `NEXT_WORKER.md` carries the latest Worker-session handoff when a Worker session is intentionally closed. `NEXT_ORCHESTRATOR.md` is created only when an Orchestrator session is intentionally closed. Do not create `NEXT_AGENT.md`.
+`BOOT_ORCHESTRATOR.md` is the stable Orchestrator bootstrap. `BOOT_WORKER.md` is stable Worker bootstrap protocol. `NEXT_ORCHESTRATOR.md` carries the latest Orchestrator-session handoff when an Orchestrator session is intentionally closed. `NEXT_WORKER.md` carries the latest Worker-session handoff when a Worker session is intentionally closed. Do not create `NEXT_AGENT.md`.
+
+General session rotation and context-pressure rules are in [AP.md](AP.md), section **Session Rotation and Context Pressure**.
 
 ## Protocol Documents
 
 - [AP.md](AP.md): general Analytic Programming protocol.
 - [AP_ORCHESTRATOR.md](AP_ORCHESTRATOR.md): operational handbook for Orchestrators.
 - [AP_WORKER.md](AP_WORKER.md): operational handbook for Workers.
+- [BOOT_ORCHESTRATOR.md](BOOT_ORCHESTRATOR.md): stable Orchestrator bootstrap.
 - [BOOT_WORKER.md](BOOT_WORKER.md): FrameNest-specific Worker bootstrap.
+- [NEXT_ORCHESTRATOR.md](NEXT_ORCHESTRATOR.md): current Orchestrator session handoff.
 - [PRODUCT.md](PRODUCT.md): approved product direction and experience principles.
 - [SPEC.md](SPEC.md): normative product and system requirements.
 - [ROADMAP.md](ROADMAP.md): staged, evidence-based development plan.

@@ -77,7 +77,10 @@ Current foundation files:
 - [`AP.md`](AP.md) defines the general Analytic Programming protocol.
 - [`AP_ORCHESTRATOR.md`](AP_ORCHESTRATOR.md) defines the Orchestrator operating handbook.
 - [`AP_WORKER.md`](AP_WORKER.md) defines the Worker operating handbook.
+- [`BOOT_ORCHESTRATOR.md`](BOOT_ORCHESTRATOR.md) defines the stable FrameNest Orchestrator bootstrap.
 - [`BOOT_WORKER.md`](BOOT_WORKER.md) defines the stable FrameNest Worker bootstrap.
+- [`NEXT_ORCHESTRATOR.md`](NEXT_ORCHESTRATOR.md) carries the current Orchestrator session handoff.
+- [`NEXT_WORKER.md`](NEXT_WORKER.md) carries the current Worker session handoff.
 - [`docs/ARCHITECTURE_FOUNDATION_EVIDENCE.md`](docs/ARCHITECTURE_FOUNDATION_EVIDENCE.md) collects primary-source evidence for the first architecture decisions. It is not an ADR and does not approve any option.
 - [`docs/adr/README.md`](docs/adr/README.md) indexes accepted architecture decision records.
 - [`docs/adr/0001-supported-python-version.md`](docs/adr/0001-supported-python-version.md) records the accepted CPython 3.13 runtime decision.

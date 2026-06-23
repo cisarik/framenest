@@ -157,3 +157,21 @@ If a commit or push was authorized, the Worker SHOULD report local HEAD, remote 
 - Record commit and push evidence if applicable.
 - Report deviations and risks.
 - Suggest only the next smallest authorized or review step.
+
+## Session Rotation and Context Pressure
+
+The Worker SHOULD report visible context pressure when a tool exposes it.
+
+The Worker MUST NOT begin a large new task at high context usage unless the Orchestrator explicitly accepts that risk.
+
+The Worker SHOULD complete only the authorized current task, then stop.
+
+The Worker MUST write or update `NEXT_WORKER.md` only when explicitly instructed by the task.
+
+Before closeout, the Worker MUST verify final repository state and return one final structured report.
+
+The Worker MUST stop after closeout without beginning another task.
+
+A fresh bootstrap and separate authoritative task are required in the next Worker session.
+
+The Worker MUST NOT silently rely on automatic summarization as a substitute for repository evidence or explicit handoff files.
