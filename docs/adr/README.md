@@ -28,3 +28,4 @@ An accepted ADR may only be changed by a later ADR that supersedes it. Editing a
 | 0001 | Supported Python Version | Accepted | 2026-06-23 | [0001-supported-python-version.md](0001-supported-python-version.md) |
 | 0002 | Python Environment and Dependency Manager | Accepted | 2026-06-23 | [0002-python-environment-and-dependency-manager.md](0002-python-environment-and-dependency-manager.md) |
 | 0003 | Initial Server API Framework | Accepted | 2026-06-23 | [0003-initial-server-api-framework.md](0003-initial-server-api-framework.md) |
+| 0004 | Repository Layout | Accepted | 2026-06-23 | [0004-repository-layout.md](0004-repository-layout.md) |

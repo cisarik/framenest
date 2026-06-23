@@ -446,7 +446,25 @@ Lockfile updates MUST occur only in explicit bounded tasks and MUST be accompani
 
 Local tests, continuous integration, and Fedora deployment MUST install from the committed lock-based Poetry environment.
 
-Package mode and Poetry virtual-environment location remain unresolved until repository-layout scaffolding is accepted.
+Poetry virtual-environment location remains unresolved until the authorized scaffold task.
+
+### Repository Layout
+
+FrameNest MUST use the hybrid staged monorepo layout per [ADR-0004](docs/adr/0004-repository-layout.md).
+
+The initial Python project MUST live at repository root with root `pyproject.toml`, root `poetry.lock`, `src/framenest/`, root `tests/`, and `docs/`.
+
+Poetry package mode MUST be used. The importable package name MUST be `framenest`.
+
+The initial internal boundaries MUST be `domain`, `application`, `adapters/api`, and `infrastructure` under `src/framenest/`.
+
+`domain` MUST NOT import FastAPI or infrastructure adapters. `application` MUST NOT depend on FastAPI route objects. `adapters/api` MAY depend on FastAPI and application interfaces.
+
+Tests MUST be organized under `tests/unit/`, `tests/integration/`, and `tests/contract/` and MUST reflect these boundaries.
+
+Package imports MUST be resolved through the Poetry-managed installed project environment. Reliance on `sys.path` manipulation MUST NOT be the standard import mechanism.
+
+Empty future web or desktop scaffolds MUST NOT be created. Future `web/` and `desktop/` top-level boundaries MAY be added only when real implementation work begins.
 
 ### Initial Server API Framework
 
@@ -498,9 +516,9 @@ Success MUST NOT be claimed without evidence.
 
 ## 31. Explicitly Deferred Decisions
 
-Deferred decisions include frontend framework, repository layout, local application configuration implementation, ORM/query strategy, manifest format, schema, IPC, authentication above Tailscale, synchronization protocol, FFmpeg distribution, yt-dlp packaging/update strategy, player invocation, thumbnail formats and sizes, full-text search, packaging/signing/update mechanisms, telemetry, and license.
+Deferred decisions include frontend framework, local application configuration implementation, frontend workspace tooling, ORM/query strategy, manifest format, schema, IPC, authentication above Tailscale, synchronization protocol, FFmpeg distribution, yt-dlp packaging/update strategy, player invocation, thumbnail formats and sizes, full-text search, packaging/signing/update mechanisms, telemetry, and license.
 
-The supported Python minor version is recorded in [ADR-0001](docs/adr/0001-supported-python-version.md). Poetry dependency and environment management is recorded in [ADR-0002](docs/adr/0002-python-environment-and-dependency-manager.md). The initial server API framework is recorded in [ADR-0003](docs/adr/0003-initial-server-api-framework.md). Exact dependency versions, 3.13 patch pinning, package mode, Poetry virtual-environment location, ASGI process runner, background jobs, authentication, and API versioning remain implementation concerns governed by those ADRs and later authorized tasks.
+The supported Python minor version is recorded in [ADR-0001](docs/adr/0001-supported-python-version.md). Poetry dependency and environment management is recorded in [ADR-0002](docs/adr/0002-python-environment-and-dependency-manager.md). The initial server API framework is recorded in [ADR-0003](docs/adr/0003-initial-server-api-framework.md). Repository layout and Poetry package mode are recorded in [ADR-0004](docs/adr/0004-repository-layout.md). Exact dependency versions, 3.13 patch pinning, Poetry virtual-environment location, ASGI process runner, background jobs, authentication, and API versioning remain implementation concerns governed by those ADRs and later authorized tasks.
 
 None of these may be silently selected during implementation.
 
