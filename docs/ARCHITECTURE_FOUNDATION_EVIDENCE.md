@@ -24,12 +24,13 @@ After this evidence package was written:
 - **Decision 2 — Python environment and dependency manager** was accepted as **Poetry** in [ADR-0002](adr/0002-python-environment-and-dependency-manager.md).
 - **Decision 3 — Initial server API framework** was accepted as **FastAPI** in [ADR-0003](adr/0003-initial-server-api-framework.md).
 - **Decision 4 — Repository layout** was accepted as the **hybrid staged monorepo** in [ADR-0004](adr/0004-repository-layout.md).
+- **Decision 5 — Configuration strategy** was accepted as the **layered configuration model** in [ADR-0005](adr/0005-configuration-strategy.md).
 
 The Cooperator selected Poetry, the strongest alternative identified in this evidence package, based on project familiarity and maintainability preference. The original provisional recommendation for `uv` below remains historical research evidence, not current project authority.
 
-The provisional recommendation for FastAPI in Decision 3 matched the Cooperator's later acceptance. The provisional recommendation for Option C — Hybrid staged monorepo in Decision 4 matched the Cooperator's later acceptance. The framework and layout comparison sections below remain historical decision evidence and must not be rewritten to alter the original research record.
+The provisional recommendation for FastAPI in Decision 3 matched the Cooperator's later acceptance. The provisional recommendation for Option C — Hybrid staged monorepo in Decision 4 matched the Cooperator's later acceptance. The provisional recommendation for Option C — Layered configuration model in Decision 5 matched the Cooperator's later acceptance. The framework and layout comparison sections below remain historical decision evidence and must not be rewritten to alter the original research record.
 
-**Decision 5 remains `Not accepted`.**
+All five initial scaffold-gating decisions are now accepted. No application implementation exists yet.
 
 | Decision | Current status | Authority |
 |---|---|---|
@@ -37,7 +38,7 @@ The provisional recommendation for FastAPI in Decision 3 matched the Cooperator'
 | 2. Python tooling | **Accepted** — Poetry | [ADR-0002](adr/0002-python-environment-and-dependency-manager.md) |
 | 3. API framework | **Accepted** — FastAPI | [ADR-0003](adr/0003-initial-server-api-framework.md) |
 | 4. Repository layout | **Accepted** — Hybrid staged monorepo | [ADR-0004](adr/0004-repository-layout.md) |
-| 5. Configuration strategy | Not accepted | — |
+| 5. Configuration strategy | **Accepted** — Layered configuration | [ADR-0005](adr/0005-configuration-strategy.md) |
 
 ---
 
@@ -83,7 +84,7 @@ The recommended future decision order is:
 
 Decisions 3 and 4 are partially independent once Python version is fixed, but repository layout should not be finalized before the server framework category is understood. Decision 5 should wait until the server process boundary and repository locations are known.
 
-Decision 1 is accepted per [ADR-0001](adr/0001-supported-python-version.md). Decision 2 is accepted per [ADR-0002](adr/0002-python-environment-and-dependency-manager.md). Decision 3 is accepted per [ADR-0003](adr/0003-initial-server-api-framework.md). Decision 4 is accepted per [ADR-0004](adr/0004-repository-layout.md). Decision 5 remains not accepted.
+Decision 1 is accepted per [ADR-0001](adr/0001-supported-python-version.md). Decision 2 is accepted per [ADR-0002](adr/0002-python-environment-and-dependency-manager.md). Decision 3 is accepted per [ADR-0003](adr/0003-initial-server-api-framework.md). Decision 4 is accepted per [ADR-0004](adr/0004-repository-layout.md). Decision 5 is accepted per [ADR-0005](adr/0005-configuration-strategy.md).
 
 ---
 
@@ -507,7 +508,7 @@ Provisional recommendations only. Nothing here is accepted.
 | 2. Python tooling | uv | Poetry | Medium | Cooperator preference on tool maturity | **Accepted** — Poetry; see [ADR-0002](adr/0002-python-environment-and-dependency-manager.md) |
 | 3. API framework | FastAPI | Litestar | Medium | Background-work and auth boundary ADRs | **Accepted** — see [ADR-0003](adr/0003-initial-server-api-framework.md) |
 | 4. Repository layout | Hybrid staged monorepo (Option C) | Python-first root (Option A) | Medium | Future web/Tauri packaging choice | **Accepted** — see [ADR-0004](adr/0004-repository-layout.md) |
-| 5. Configuration strategy | Layered model (Option C) | Env + `.env` (Option A) | Medium | Secret storage ADR on Fedora NUC | Not accepted |
+| 5. Configuration strategy | Layered model (Option C) | Env + `.env` (Option A) | Medium | Secret storage ADR on Fedora NUC | **Accepted** — see [ADR-0005](adr/0005-configuration-strategy.md) |
 
 ---
 

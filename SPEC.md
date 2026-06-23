@@ -466,6 +466,24 @@ Package imports MUST be resolved through the Poetry-managed installed project en
 
 Empty future web or desktop scaffolds MUST NOT be created. Future `web/` and `desktop/` top-level boundaries MAY be added only when real implementation work begins.
 
+### Configuration Strategy
+
+FrameNest MUST use a layered configuration model with explicit precedence per [ADR-0005](docs/adr/0005-configuration-strategy.md).
+
+Precedence from lowest to highest authority MUST be: safe program defaults; optional committed non-secret configuration; ignored local `.env` values; process environment variables; future approved secret-store values.
+
+The default server host MUST be `127.0.0.1`. Public bind addresses MUST NOT be the default.
+
+Configuration MUST be loaded through a centralized boundary. Application and domain logic MUST NOT read environment variables directly throughout the codebase. The domain layer MUST remain independent of the concrete configuration library.
+
+Configuration values MUST be typed and validated. Invalid configuration MUST fail clearly with sanitized errors.
+
+Secrets MUST NOT be committed or stored in normal version-controlled configuration. Secret values MUST be redacted from representations, logs, errors, and ordinary API responses.
+
+Local `.env` files MUST remain Git-ignored. Process environment variables MUST override `.env` and lower-precedence values. Production deployment MUST NOT depend on a developer `.env` file.
+
+Tests MUST use deterministic, isolated configuration state and MUST NOT rely on the developer's real shell environment.
+
 ### Initial Server API Framework
 
 FrameNest MUST use FastAPI for the initial server HTTP API adapter per [ADR-0003](docs/adr/0003-initial-server-api-framework.md).
@@ -516,9 +534,9 @@ Success MUST NOT be claimed without evidence.
 
 ## 31. Explicitly Deferred Decisions
 
-Deferred decisions include frontend framework, local application configuration implementation, frontend workspace tooling, ORM/query strategy, manifest format, schema, IPC, authentication above Tailscale, synchronization protocol, FFmpeg distribution, yt-dlp packaging/update strategy, player invocation, thumbnail formats and sizes, full-text search, packaging/signing/update mechanisms, telemetry, and license.
+Deferred decisions include frontend framework, frontend workspace tooling, concrete Python settings library, committed configuration file format, exact configuration schema, operating-system secret-store implementation, ORM/query strategy, manifest format, schema, IPC, authentication above Tailscale, synchronization protocol, FFmpeg distribution, yt-dlp packaging/update strategy, player invocation, thumbnail formats and sizes, full-text search, packaging/signing/update mechanisms, telemetry, and license.
 
-The supported Python minor version is recorded in [ADR-0001](docs/adr/0001-supported-python-version.md). Poetry dependency and environment management is recorded in [ADR-0002](docs/adr/0002-python-environment-and-dependency-manager.md). The initial server API framework is recorded in [ADR-0003](docs/adr/0003-initial-server-api-framework.md). Repository layout and Poetry package mode are recorded in [ADR-0004](docs/adr/0004-repository-layout.md). Exact dependency versions, 3.13 patch pinning, Poetry virtual-environment location, ASGI process runner, background jobs, authentication, and API versioning remain implementation concerns governed by those ADRs and later authorized tasks.
+The supported Python minor version is recorded in [ADR-0001](docs/adr/0001-supported-python-version.md). Poetry dependency and environment management is recorded in [ADR-0002](docs/adr/0002-python-environment-and-dependency-manager.md). The initial server API framework is recorded in [ADR-0003](docs/adr/0003-initial-server-api-framework.md). Repository layout and Poetry package mode are recorded in [ADR-0004](docs/adr/0004-repository-layout.md). Configuration strategy is recorded in [ADR-0005](docs/adr/0005-configuration-strategy.md). Exact dependency versions, 3.13 patch pinning, Poetry virtual-environment location, ASGI process runner, background jobs, authentication, and API versioning remain implementation concerns governed by those ADRs and later authorized tasks.
 
 None of these may be silently selected during implementation.
 

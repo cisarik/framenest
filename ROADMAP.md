@@ -48,20 +48,19 @@ Accepted so far:
 - Python environment and dependency manager: Poetry through [ADR-0002](docs/adr/0002-python-environment-and-dependency-manager.md).
 - Initial server API framework: FastAPI through [ADR-0003](docs/adr/0003-initial-server-api-framework.md).
 - Hybrid staged repository layout through [ADR-0004](docs/adr/0004-repository-layout.md).
+- Configuration strategy: layered configuration with explicit precedence through [ADR-0005](docs/adr/0005-configuration-strategy.md).
 
-Remaining immediate decision:
+The initial scaffold decision gate is complete. The next bounded task may begin the first test-first Python server scaffold on macOS. Scaffolding is now eligible but not automatically authorized.
 
-- local application configuration strategy.
+Broader architecture decisions still open include local database/query strategy, sidecar manifest format and versioning, server/domain boundaries, initial authentication boundary, media-tool distribution strategy, macOS development runtime details, and Fedora deployment details.
 
-Broader later architecture decisions still open include local database/query strategy, sidecar manifest format and versioning, server/domain boundaries, initial authentication boundary, media-tool distribution strategy, macOS development runtime details, and Fedora deployment details.
-
-Key deliverables: accepted ADR for local configuration strategy.
+Key deliverables: remaining broader architecture ADRs and evidence as needed before later implementation phases.
 
 Entry conditions: [SPEC.md](SPEC.md) and this roadmap are accepted.
 
-Exit evidence: accepted ADR for local configuration strategy without silently selecting other unresolved options.
+Exit evidence: broader architecture package completed without silently selecting unresolved options beyond the initial scaffold gate.
 
-Boundaries: do not scaffold the application; project scaffolding becomes eligible only after the configuration ADR is accepted.
+Boundaries: Phase 2 remains `in progress` until the broader architecture package is completed. Application code is not implemented by this decision gate alone.
 
 ## Phase 3 — Domain and Metadata Core
 
