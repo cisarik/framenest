@@ -66,10 +66,15 @@ The full documentation set will be added in later bounded cycles. Expected futur
 
 Current foundation files:
 
-- `.gitignore` defines the first repository safety perimeter.
-- `.gitattributes` defines cross-platform text and binary handling.
-- `.editorconfig` defines baseline editor formatting.
-- `SECURITY.md` defines the initial pre-alpha security policy.
+- [`.gitignore`](.gitignore) defines the first repository safety perimeter.
+- [`.gitattributes`](.gitattributes) defines cross-platform text and binary handling.
+- [`.editorconfig`](.editorconfig) defines baseline editor formatting.
+- [`SECURITY.md`](SECURITY.md) defines the initial pre-alpha security policy.
+- [`AGENTS.md`](AGENTS.md) defines FrameNest-specific agent operating rules.
+- [`AP.md`](AP.md) defines the general Analytic Programming protocol.
+- [`AP_ORCHESTRATOR.md`](AP_ORCHESTRATOR.md) defines the Orchestrator operating handbook.
+- [`AP_WORKER.md`](AP_WORKER.md) defines the Worker operating handbook.
+- [`BOOT_WORKER.md`](BOOT_WORKER.md) defines the stable FrameNest Worker bootstrap.
 
 ## Non-Goals for the Current Stage
 
