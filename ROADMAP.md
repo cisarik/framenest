@@ -45,8 +45,9 @@ Goal: prepare individual ADR evidence before scaffolding and record accepted arc
 Accepted so far:
 
 - Supported Python version: CPython 3.13 through [ADR-0001](docs/adr/0001-supported-python-version.md).
+- Python environment and dependency manager: Poetry through [ADR-0002](docs/adr/0002-python-environment-and-dependency-manager.md).
 
-Remaining open decisions include environment manager, server API framework, local database/query strategy, sidecar manifest format and versioning, repository layout, server/domain boundaries, initial authentication boundary, media-tool distribution strategy, macOS development runtime, and Fedora deployment boundary.
+Remaining open decisions include server API framework, repository layout, local application configuration strategy, local database/query strategy, sidecar manifest format and versioning, server/domain boundaries, initial authentication boundary, media-tool distribution strategy, macOS development runtime details, and Fedora deployment details.
 
 Key deliverables: decision material and accepted ADRs for the remaining initial architecture decisions.
 

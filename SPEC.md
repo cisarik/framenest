@@ -430,6 +430,24 @@ Project commands MUST use an isolated project environment independent of a devel
 
 The exact 3.13 patch release is pinned by accepted project tooling and ADR-0001; it MAY advance within the 3.13 series after tests pass.
 
+### Python Dependency and Environment Management
+
+FrameNest MUST use Poetry as the Python dependency and virtual-environment manager per [ADR-0002](docs/adr/0002-python-environment-and-dependency-manager.md).
+
+Future Python project metadata MUST be stored in `pyproject.toml`.
+
+The FrameNest application MUST commit `poetry.lock` for reproducible development, test, continuous integration, and deployment dependency resolution.
+
+Python dependencies MUST NOT be installed globally for FrameNest.
+
+Project commands MUST execute through the Poetry-managed isolated CPython 3.13 environment.
+
+Lockfile updates MUST occur only in explicit bounded tasks and MUST be accompanied by test evidence and verification that `pyproject.toml` and `poetry.lock` remain synchronized.
+
+Local tests, continuous integration, and Fedora deployment MUST install from the committed lock-based Poetry environment.
+
+Package mode and Poetry virtual-environment location remain unresolved until repository-layout scaffolding is accepted.
+
 ## 27. Accessibility and Performance
 
 FrameNest SHOULD support reduced motion, reduced transparency, keyboard access, focus visibility, touch targets, useful errors, responsive interaction, bounded background work, large-library scalability, and weaker-device degradation modes.
@@ -460,9 +478,9 @@ Success MUST NOT be claimed without evidence.
 
 ## 31. Explicitly Deferred Decisions
 
-Deferred decisions include frontend framework, Python environment and dependency manager, API framework, ORM/query strategy, manifest format, schema, IPC, authentication above Tailscale, synchronization protocol, FFmpeg distribution, yt-dlp packaging/update strategy, player invocation, thumbnail formats and sizes, full-text search, packaging/signing/update mechanisms, telemetry, and license.
+Deferred decisions include frontend framework, API framework, ORM/query strategy, manifest format, schema, IPC, authentication above Tailscale, synchronization protocol, FFmpeg distribution, yt-dlp packaging/update strategy, player invocation, thumbnail formats and sizes, full-text search, packaging/signing/update mechanisms, telemetry, and license.
 
-The supported Python minor version is recorded in [ADR-0001](docs/adr/0001-supported-python-version.md). Exact 3.13 patch pinning remains an implementation concern governed by that ADR and accepted project tooling.
+The supported Python minor version is recorded in [ADR-0001](docs/adr/0001-supported-python-version.md). Poetry dependency and environment management is recorded in [ADR-0002](docs/adr/0002-python-environment-and-dependency-manager.md). Exact 3.13 patch pinning, package mode, and Poetry virtual-environment location remain implementation concerns governed by those ADRs and the authorized scaffold task.
 
 None of these may be silently selected during implementation.
 

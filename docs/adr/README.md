@@ -26,3 +26,4 @@ An accepted ADR may only be changed by a later ADR that supersedes it. Editing a
 | ADR | Title | Status | Decision date | Link |
 |---|---|---|---|---|
 | 0001 | Supported Python Version | Accepted | 2026-06-23 | [0001-supported-python-version.md](0001-supported-python-version.md) |
+| 0002 | Python Environment and Dependency Manager | Accepted | 2026-06-23 | [0002-python-environment-and-dependency-manager.md](0002-python-environment-and-dependency-manager.md) |
