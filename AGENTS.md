@@ -64,7 +64,7 @@ FrameNest uses exactly these four lifecycle files:
 - `NEXT_ORCHESTRATOR.md`: session-close handoff for a future Orchestrator.
 - `NEXT_WORKER.md`: concise repository-local Worker handoff.
 
-Only `BOOT_WORKER.md` exists after the current documentation-foundation task. Do not create `NEXT_AGENT.md`.
+`BOOT_ORCHESTRATOR.md` is the one-time founding Orchestrator bootstrap. `BOOT_WORKER.md` is stable Worker bootstrap protocol. `NEXT_WORKER.md` carries the latest Worker-session handoff when a Worker session is intentionally closed. `NEXT_ORCHESTRATOR.md` is created only when an Orchestrator session is intentionally closed. Do not create `NEXT_AGENT.md`.
 
 ## Protocol Documents
 

@@ -6,6 +6,10 @@ This file is the stable FrameNest-specific bootstrap protocol for Workers.
 
 This file is not a current task. It contains no concrete implementation task. A concrete task must arrive separately from the Orchestrator. If no concrete task exists, the Worker must stop and report that it lacks task authority.
 
+A fresh Worker session should read this file once near the beginning of that session. This means once per new Worker session, not once per repository lifetime. After bootstrap, the Worker should read `NEXT_WORKER.md` if it exists.
+
+Neither `BOOT_WORKER.md` nor `NEXT_WORKER.md` grants authority to modify files, run broad commands, or perform Git operations. A separate concrete Orchestrator task is always required. This bootstrap file should not be rewritten for ordinary session state.
+
 ## Project Identity
 
 FrameNest is a local-first, privacy-conscious, cross-platform library for video and animated media. It is in a foundation-stage, pre-alpha state.
