@@ -15,6 +15,27 @@ PRODUCTION_VERSIONS_PACKAGE = (
     "framenest.infrastructure.persistence.alembic_environment.versions"
 )
 EXPECTED_HEAD_REVISION = "0002"
+CURRENT_HEAD_REVISION = "0003"
+
+
+def _upgrade_to_revision(database_path: Path, revision: str) -> None:
+    from alembic import command
+
+    from framenest.infrastructure.persistence.engine import create_sqlite_engine, dispose_engine
+    from framenest.infrastructure.persistence.migrations import _alembic_config
+
+    settings = _settings_for(database_path)
+    settings.database_path.parent.mkdir(parents=True, exist_ok=True)
+    engine = create_sqlite_engine(settings.database_path)
+    try:
+        with engine.connect() as connection:
+            with _alembic_config(
+                "framenest.infrastructure.persistence.alembic_environment"
+            ) as config:
+                config.attributes["connection"] = connection
+                command.upgrade(config, revision)
+    finally:
+        dispose_engine(engine)
 
 
 def _settings_for(database_path: Path) -> FrameNestSettings:
@@ -52,20 +73,16 @@ def _devices_sql(database_path: Path) -> str:
     return row[0]
 
 
-def test_empty_database_upgrades_to_head_revision_0002(tmp_path: Path) -> None:
-    from framenest.infrastructure.persistence.migrations import (
-        inspect_database_migration_status,
-        upgrade_database_to_head,
-    )
+def test_empty_database_upgrades_to_revision_0002(tmp_path: Path) -> None:
+    from framenest.infrastructure.persistence.migrations import inspect_database_migration_status
 
     settings = _settings_for(tmp_path / "head-0002.sqlite3")
-    status = upgrade_database_to_head(settings)
+    _upgrade_to_revision(settings.database_path, "0002")
     inspected = inspect_database_migration_status(settings)
 
-    assert status.state == "at_head"
-    assert status.current_revision == EXPECTED_HEAD_REVISION
-    assert status.head_revision == EXPECTED_HEAD_REVISION
-    assert inspected == status
+    assert inspected.state == "behind"
+    assert inspected.current_revision == EXPECTED_HEAD_REVISION
+    assert inspected.head_revision == CURRENT_HEAD_REVISION
 
 
 def test_database_at_0001_upgrades_to_0002(tmp_path: Path) -> None:
@@ -92,31 +109,30 @@ def test_database_at_0001_upgrades_to_0002(tmp_path: Path) -> None:
 
     at_0001 = inspect_database_migration_status(settings)
     assert at_0001.current_revision == "0001"
-    assert at_0001.head_revision == EXPECTED_HEAD_REVISION
+    assert at_0001.head_revision == CURRENT_HEAD_REVISION
 
-    from framenest.infrastructure.persistence.migrations import upgrade_database_to_head
-
-    upgraded = upgrade_database_to_head(settings)
+    _upgrade_to_revision(settings.database_path, "0002")
+    upgraded = inspect_database_migration_status(settings)
     assert upgraded.current_revision == EXPECTED_HEAD_REVISION
-    assert upgraded.head_revision == EXPECTED_HEAD_REVISION
+    assert upgraded.head_revision == CURRENT_HEAD_REVISION
     assert _table_names(settings.database_path) == {"alembic_version", "devices"}
 
 
-def test_repeated_migration_at_head_is_safe(tmp_path: Path) -> None:
-    from framenest.infrastructure.persistence.migrations import upgrade_database_to_head
+def test_repeated_upgrade_to_0002_is_safe(tmp_path: Path) -> None:
+    from framenest.infrastructure.persistence.migrations import inspect_database_migration_status
 
     settings = _settings_for(tmp_path / "repeat-0002.sqlite3")
-    first = upgrade_database_to_head(settings)
-    second = upgrade_database_to_head(settings)
+    _upgrade_to_revision(settings.database_path, "0002")
+    first = inspect_database_migration_status(settings)
+    _upgrade_to_revision(settings.database_path, "0002")
+    second = inspect_database_migration_status(settings)
     assert first == second
     assert first.current_revision == EXPECTED_HEAD_REVISION
 
 
 def test_devices_table_exists_with_required_schema(tmp_path: Path) -> None:
-    from framenest.infrastructure.persistence.migrations import upgrade_database_to_head
-
     settings = _settings_for(tmp_path / "schema-0002.sqlite3")
-    upgrade_database_to_head(settings)
+    _upgrade_to_revision(settings.database_path, "0002")
 
     assert _table_names(settings.database_path) == {"alembic_version", "devices"}
     columns = {row[1]: row for row in _devices_columns(settings.database_path)}

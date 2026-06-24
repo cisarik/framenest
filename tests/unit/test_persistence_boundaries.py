@@ -112,6 +112,7 @@ def test_importing_persistence_modules_does_not_connect_or_bind_socket() -> None
         "framenest.infrastructure.persistence.migrations",
         "framenest.infrastructure.persistence.cli",
         "framenest.infrastructure.persistence.device_repository",
+        "framenest.infrastructure.persistence.library_repository",
         "framenest.infrastructure.persistence.catalog_schema",
     )
     with (

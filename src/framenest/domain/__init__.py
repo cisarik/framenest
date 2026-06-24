@@ -10,13 +10,25 @@ from framenest.domain.identities import (
     SeriesId,
     StorageVolumeId,
 )
+from framenest.domain.libraries import (
+    FrameNestLibraryError,
+    FrameNestLibraryRootError,
+    Library,
+    LibraryPathFlavor,
+    LibraryRoot,
+)
 
 __all__ = [
     "Device",
     "DeviceId",
     "FrameNestDeviceError",
     "FrameNestIdentityError",
+    "FrameNestLibraryError",
+    "FrameNestLibraryRootError",
+    "Library",
     "LibraryId",
+    "LibraryPathFlavor",
+    "LibraryRoot",
     "MediaId",
     "MediaLocationId",
     "SeriesId",
