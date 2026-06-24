@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "A local-first library for organizing video and animated media."
 readme = "README.md"
 requires-python = ">=3.13,<3.14"
-dependencies = ["pydantic-settings (>=2.14.2,<3.0.0)"]
+dependencies = ["pydantic-settings (>=2.14.2,<3.0.0)", "fastapi (>=0.138.0,<0.139.0)"]
 
 [tool.poetry]
 package-mode = true
@@ -14,6 +14,7 @@ packages = [
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^9.1.1"
+httpx = "^0.28.1"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
