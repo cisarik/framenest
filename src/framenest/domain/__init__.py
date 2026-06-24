@@ -1,5 +1,6 @@
 """Pure FrameNest domain primitives."""
 
+from framenest.domain.devices import Device, FrameNestDeviceError
 from framenest.domain.identities import (
     DeviceId,
     FrameNestIdentityError,
@@ -11,7 +12,9 @@ from framenest.domain.identities import (
 )
 
 __all__ = [
+    "Device",
     "DeviceId",
+    "FrameNestDeviceError",
     "FrameNestIdentityError",
     "LibraryId",
     "MediaId",

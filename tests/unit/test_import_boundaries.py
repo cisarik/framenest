@@ -24,6 +24,11 @@ FORBIDDEN_DOMAIN_IMPORT_ROOTS = frozenset(
         "uvicorn",
     }
 )
+FORBIDDEN_FRAMENEST_DOMAIN_IMPORT_PREFIXES = (
+    "framenest.infrastructure",
+    "framenest.adapters",
+    "framenest.application",
+)
 
 
 def _module_name_from_import(node: ast.Import | ast.ImportFrom) -> str | None:
@@ -47,13 +52,35 @@ def test_domain_package_imports_no_framework_or_persistence_modules() -> None:
                 forbidden_roots.append(root)
             if root == "framenest":
                 module = node.module if isinstance(node, ast.ImportFrom) else node.names[0].name
-                if module.startswith("framenest.infrastructure") or module.startswith(
-                    "framenest.adapters"
-                ):
+                if module.startswith(FORBIDDEN_FRAMENEST_DOMAIN_IMPORT_PREFIXES):
                     forbidden_roots.append(module)
         if forbidden_roots:
             violations.append(
                 f"{path.relative_to(REPOSITORY_ROOT)}: {sorted(set(forbidden_roots))}"
+            )
+    assert violations == []
+
+
+def test_application_ports_import_no_infrastructure_or_sqlalchemy() -> None:
+    application_root = REPOSITORY_ROOT / "src" / "framenest" / "application"
+    violations: list[str] = []
+    forbidden_roots = FORBIDDEN_DOMAIN_IMPORT_ROOTS | {"sqlite3"}
+    for path in sorted(application_root.rglob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        found: list[str] = []
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.Import, ast.ImportFrom)):
+                continue
+            root = _module_name_from_import(node)
+            if root in forbidden_roots:
+                found.append(root or "")
+            if root == "framenest":
+                module = node.module if isinstance(node, ast.ImportFrom) else node.names[0].name
+                if module.startswith("framenest.infrastructure"):
+                    found.append(module)
+        if found:
+            violations.append(
+                f"{path.relative_to(REPOSITORY_ROOT)}: {sorted(set(found))}"
             )
     assert violations == []
 

@@ -36,3 +36,4 @@ An accepted ADR may only be changed by a later ADR that supersedes it. Editing a
 | 0009 | Initial Structured Logging Approach | Accepted | 2026-06-24 | [0009-structured-logging-approach.md](0009-structured-logging-approach.md) |
 | 0010 | Initial SQLite Persistence and Migration Strategy | Accepted | 2026-06-24 | [0010-initial-persistence-foundation.md](0010-initial-persistence-foundation.md) |
 | 0011 | Stable Domain Identities | Accepted | 2026-06-24 | [0011-stable-domain-identities.md](0011-stable-domain-identities.md) |
+| 0012 | Initial Device Registry and Repository Boundary | Accepted | 2026-06-24 | [0012-initial-device-registry.md](0012-initial-device-registry.md) |

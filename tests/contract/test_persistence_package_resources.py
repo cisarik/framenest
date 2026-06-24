@@ -61,7 +61,8 @@ def test_migration_resources_are_discoverable_from_installed_wheel(
                 "print(json.dumps({\n"
                 "    'env': root.joinpath('env.py').is_file(),\n"
                 "    'template': root.joinpath('script.py.mako').is_file(),\n"
-                "    'revision': root.joinpath('versions', '0001_initial_foundation.py').is_file(),\n"
+                "    'revision_0001': root.joinpath('versions', '0001_initial_foundation.py').is_file(),\n"
+                "    'revision_0002': root.joinpath('versions', '0002_device_registry.py').is_file(),\n"
                 "}, sort_keys=True))\n"
             ),
         ],
@@ -75,7 +76,8 @@ def test_migration_resources_are_discoverable_from_installed_wheel(
     assert probe.returncode == 0, probe.stderr
     assert json.loads(probe.stdout) == {
         "env": True,
-        "revision": True,
+        "revision_0001": True,
+        "revision_0002": True,
         "template": True,
     }
     assert not (REPOSITORY_ROOT / "dist").exists()

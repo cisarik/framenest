@@ -498,7 +498,7 @@ Tests MUST use deterministic, isolated configuration state and MUST NOT rely on 
 
 FrameNest MUST use FastAPI for the initial server HTTP API adapter per [ADR-0003](docs/adr/0003-initial-server-api-framework.md).
 
-FrameNest MUST use synchronous SQLAlchemy 2.x Core with Alembic for the initial local SQLite persistence and migration foundation per [ADR-0010](docs/adr/0010-initial-persistence-foundation.md). SQLAlchemy ORM mapped entities, SQLModel, and async SQLite access are not accepted for the initial foundation. A minimal migration foundation and explicit database command boundary exist; the media catalog schema, repository API, durable sidecars, and local library scanning remain unimplemented.
+FrameNest MUST use synchronous SQLAlchemy 2.x Core with Alembic for the initial local SQLite persistence and migration foundation per [ADR-0010](docs/adr/0010-initial-persistence-foundation.md). SQLAlchemy ORM mapped entities, SQLModel, and async SQLite access are not accepted for the initial foundation. A minimal migration foundation and explicit database command boundary exist. A minimal device domain entity and local device registry now exist per [ADR-0012](docs/adr/0012-initial-device-registry.md), with canonical UUID text storage accepted for the initial `devices` table. The broader media catalog schema, repository API beyond the device registry, durable sidecars, availability tracking, libraries, storage volumes, media locations, synchronization, and local library scanning remain unimplemented.
 
 Domain and application logic MUST remain independent of FastAPI and MUST be testable without starting an HTTP server.
 

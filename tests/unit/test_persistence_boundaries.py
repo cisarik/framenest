@@ -111,6 +111,8 @@ def test_importing_persistence_modules_does_not_connect_or_bind_socket() -> None
         "framenest.infrastructure.persistence.engine",
         "framenest.infrastructure.persistence.migrations",
         "framenest.infrastructure.persistence.cli",
+        "framenest.infrastructure.persistence.device_repository",
+        "framenest.infrastructure.persistence.catalog_schema",
     )
     with (
         patch("sqlite3.connect", side_effect=AssertionError("sqlite3.connect must not run")),

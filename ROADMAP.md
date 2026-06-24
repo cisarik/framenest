@@ -82,10 +82,11 @@ Implemented so far:
 
 - Stable identity format accepted through [ADR-0011](docs/adr/0011-stable-domain-identities.md)
 - Immutable pure-domain identity primitives for logical media, physical locations, devices, libraries, storage volumes, and series
+- Minimal pure-domain `Device` entity and local device registry core accepted through [ADR-0012](docs/adr/0012-initial-device-registry.md)
 
 Still required for phase exit:
 
-- Logical media, physical location, device, library, storage volume, and series entities beyond identity values
+- Logical media, physical location, library, storage volume, and series entities beyond identity values
 - Canonical tags
 - Sidecar contracts
 - Exact roundtrip tests for durable metadata behavior
@@ -113,11 +114,12 @@ Implemented so far:
 - Runtime health smoke verification
 - Structured logging foundation per [ADR-0009](docs/adr/0009-structured-logging-approach.md)
 - Persistence strategy accepted through [ADR-0010](docs/adr/0010-initial-persistence-foundation.md)
-- Minimal SQLAlchemy Core/Alembic persistence foundation with `FRAMENEST_DATABASE_PATH`, packaged empty revision `0001`, explicit `framenest-db status`, and explicit `framenest-db migrate`
+- Minimal SQLAlchemy Core/Alembic persistence foundation with `FRAMENEST_DATABASE_PATH`, packaged revisions `0001` and `0002`, explicit `framenest-db status`, and explicit `framenest-db migrate`
+- Initial local device registry core with pure-domain `Device`, application repository port, SQLAlchemy Core adapter, and `devices` table through revision `0002`
 
 Still required for phase exit:
 
-- Actual media catalog schema and repository boundary
+- Actual media catalog schema and repository boundaries beyond the device registry
 - Local catalog behavior that supports the first library-scanning tasks
 
 The next bounded implementation step should build on the persistence foundation without treating the empty `0001` migration as a media catalog.
