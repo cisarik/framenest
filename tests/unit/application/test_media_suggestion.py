@@ -1,0 +1,244 @@
+"""Unit tests for provider-neutral media suggestion application values and service."""
+
+from __future__ import annotations
+
+import ast
+from pathlib import Path
+
+import pytest
+
+from framenest.application.library_scan import LibraryScanCandidateKind
+from framenest.application.media_analysis import (
+    FrameNestMediaAnalysisError,
+    MediaRelativePath,
+    PNG_SIGNATURE,
+    PreparedAnalysisResult,
+    RepresentativeFrame,
+    TechnicalMetadata,
+    build_representative_frame,
+    REQUESTED_FRAME_COUNT,
+)
+from framenest.application.media_suggestion import (
+    FrameNestMediaSuggestionError,
+    MediaSuggestion,
+    MediaSuggestionNotFoundError,
+    MediaSuggestionPreviewResult,
+    MediaSuggestionProviderFailedError,
+    MediaSuggestionRequest,
+    PreviewMediaSuggestion,
+    PROMPT_VERSION,
+    build_suggestion_request,
+    validate_suggested_filename,
+)
+from framenest.domain import DeviceId, Library, LibraryId, LibraryPathFlavor, LibraryRoot
+
+REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
+APPLICATION_SUGGESTION = REPOSITORY_ROOT / "src" / "framenest" / "application" / "media_suggestion.py"
+_VALID_PNG = PNG_SIGNATURE + b"png"
+
+
+def _sample_metadata() -> TechnicalMetadata:
+    return TechnicalMetadata(
+        duration_ms=1000,
+        width=64,
+        height=48,
+        video_codec="h264",
+        container_formats=("mp4",),
+        has_audio=False,
+    )
+
+
+def _sample_frame() -> RepresentativeFrame:
+    return build_representative_frame(timestamp_ms=0, payload=_VALID_PNG)
+
+
+def _sample_prepared() -> PreparedAnalysisResult:
+    return PreparedAnalysisResult(
+        relative_path=MediaRelativePath("clips/sample.mp4"),
+        candidate_kind=LibraryScanCandidateKind.VIDEO,
+        technical_metadata=_sample_metadata(),
+        representative_frames=(_sample_frame(),),
+        requested_frame_count=REQUESTED_FRAME_COUNT,
+        warnings=(),
+        ffprobe_version="ffprobe version 8.1.2",
+        ffmpeg_version="ffmpeg version 8.1.2",
+    )
+
+
+def _sample_suggestion(*, filename: str = "evening-clip.mp4") -> MediaSuggestion:
+    return MediaSuggestion(
+        title="Evening clip",
+        description="A short evening scene with warm light.",
+        collection="Home",
+        tags=("evening", "clip"),
+        suggested_filename=filename,
+        confidence=0.72,
+        evidence=("Warm light is visible in the frame.",),
+        uncertainties=("Exact location is unknown.",),
+        provider_id="nvidia-nim",
+        model_id="nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
+        prompt_version=PROMPT_VERSION,
+    )
+
+
+class _FakeLibraryRepository:
+    def __init__(self, library: Library | None) -> None:
+        self._library = library
+        self.write_calls = 0
+
+    def add(self, library: Library) -> None:
+        self.write_calls += 1
+
+    def get(self, library_id: LibraryId) -> Library | None:
+        if self._library is None or self._library.id != library_id:
+            return None
+        return self._library
+
+    def list_all(self) -> tuple[Library, ...]:
+        return () if self._library is None else (self._library,)
+
+
+class _FakePreparer:
+    def __init__(self, prepared: PreparedAnalysisResult) -> None:
+        self.prepared = prepared
+        self.calls = 0
+
+    def prepare(self, root: LibraryRoot, relative_path: MediaRelativePath) -> PreparedAnalysisResult:
+        self.calls += 1
+        return self.prepared
+
+
+class _FakeProvider:
+    def __init__(self, suggestion: MediaSuggestion) -> None:
+        self.suggestion = suggestion
+        self.calls = 0
+        self.last_request: MediaSuggestionRequest | None = None
+
+    def suggest(self, request: MediaSuggestionRequest) -> MediaSuggestion:
+        self.calls += 1
+        self.last_request = request
+        return self.suggestion
+
+
+def _sample_library() -> Library:
+    return Library(
+        id=LibraryId.from_string("12345678-1234-4234-9234-123456789abc"),
+        device_id=DeviceId.from_string("abcdefab-cdef-4abc-8def-abcdefabcdef"),
+        display_name="Videos",
+        root=LibraryRoot(flavor=LibraryPathFlavor.POSIX, path="/tmp/videos"),
+    )
+
+
+def test_request_uses_basename_without_absolute_path() -> None:
+    prepared = _sample_prepared()
+    request = build_suggestion_request(prepared)
+    assert request.basename == "sample.mp4"
+    assert "/" not in request.basename
+
+
+def test_hidden_segments_rejected_for_suggestion_paths() -> None:
+    with pytest.raises(FrameNestMediaAnalysisError):
+        MediaRelativePath(".hidden/clip.mp4")
+
+
+def test_suggestion_validates_bounds_and_unique_tags() -> None:
+    with pytest.raises(FrameNestMediaSuggestionError):
+        MediaSuggestion(
+            title="x" * 121,
+            description="Valid description",
+            collection="Home",
+            tags=("a",),
+            suggested_filename="clip.mp4",
+            confidence=0.5,
+            evidence=("evidence",),
+            uncertainties=(),
+            provider_id="nvidia-nim",
+            model_id="model",
+            prompt_version=PROMPT_VERSION,
+        )
+    with pytest.raises(FrameNestMediaSuggestionError):
+        MediaSuggestion(
+            title="Title",
+            description="Valid description",
+            collection="Home",
+            tags=("Evening", "evening"),
+            suggested_filename="clip.mp4",
+            confidence=0.5,
+            evidence=("evidence",),
+            uncertainties=(),
+            provider_id="nvidia-nim",
+            model_id="model",
+            prompt_version=PROMPT_VERSION,
+        )
+
+
+@pytest.mark.parametrize("filename", ["CON.mp4", "bad/name.mp4", "clip.mov", "clip.mp4 "])
+def test_validate_suggested_filename_rejects_unsafe_names(filename: str) -> None:
+    with pytest.raises(FrameNestMediaSuggestionError):
+        validate_suggested_filename(filename, required_extension=".mp4")
+
+
+def test_validate_suggested_filename_preserves_extension() -> None:
+    assert validate_suggested_filename("evening-clip.mp4", required_extension=".mp4") == "evening-clip.mp4"
+
+
+def test_preview_service_prepares_once_and_invokes_provider_once() -> None:
+    library = _sample_library()
+    prepared = _sample_prepared()
+    suggestion = _sample_suggestion()
+    repository = _FakeLibraryRepository(library)
+    preparer = _FakePreparer(prepared)
+    provider = _FakeProvider(suggestion)
+    service = PreviewMediaSuggestion(repository, preparer, provider)
+
+    result = service.execute(library.id, MediaRelativePath("clips/sample.mp4"))
+
+    assert isinstance(result, MediaSuggestionPreviewResult)
+    assert preparer.calls == 1
+    assert provider.calls == 1
+    assert provider.last_request is not None
+    assert provider.last_request.basename == "sample.mp4"
+    assert result.suggestion.provider_id == "nvidia-nim"
+    assert repository.write_calls == 0
+
+
+def test_preview_service_raises_not_found_for_missing_library() -> None:
+    service = PreviewMediaSuggestion(
+        _FakeLibraryRepository(None),
+        _FakePreparer(_sample_prepared()),
+        _FakeProvider(_sample_suggestion()),
+    )
+    with pytest.raises(MediaSuggestionNotFoundError):
+        service.execute(LibraryId.new(), MediaRelativePath("clip.mp4"))
+
+
+def test_preview_service_propagates_provider_failures() -> None:
+    class _FailingProvider:
+        def suggest(self, request: MediaSuggestionRequest) -> MediaSuggestion:
+            raise MediaSuggestionProviderFailedError("provider failed")
+
+    service = PreviewMediaSuggestion(
+        _FakeLibraryRepository(_sample_library()),
+        _FakePreparer(_sample_prepared()),
+        _FailingProvider(),
+    )
+    with pytest.raises(MediaSuggestionProviderFailedError):
+        service.execute(
+            LibraryId.from_string("12345678-1234-4234-9234-123456789abc"),
+            MediaRelativePath("clips/sample.mp4"),
+        )
+
+
+def test_application_suggestion_module_imports_no_infrastructure() -> None:
+    tree = ast.parse(APPLICATION_SUGGESTION.read_text(encoding="utf-8"), filename=str(APPLICATION_SUGGESTION))
+    violations: list[str] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            module = node.names[0].name
+        elif isinstance(node, ast.ImportFrom):
+            module = node.module or ""
+        else:
+            continue
+        if module.startswith("framenest.infrastructure"):
+            violations.append(module)
+    assert violations == []

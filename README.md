@@ -101,10 +101,21 @@ Library registration requires an already registered owning device and a database
 
 `library analyze-preview` requires the same migrated database, an already registered library, and one explicit relative MP4 or GIF candidate path. The command is read-only, uses optional local `ffprobe` and `ffmpeg` executables when present, returns bounded technical metadata plus at most three exact-distinct representative PNG frames in memory only, writes no media records, leaves no extracted frame files on disk, and performs no provider or network calls. This remains a development/operator boundary, not the final desktop UX.
 
+`library suggest-preview` requires the same migrated database, an already registered library, one explicit relative MP4 or GIF candidate path, `--confirm-cloud-upload`, and `NVIDIA_API_KEY` in the process environment. The command reuses local read-only preparation, sends only bounded PNG frames and metadata to NVIDIA NIM when explicitly confirmed, returns one validated non-persistent suggestion preview, performs no catalog or filesystem mutation, and does not persist suggestions. This remains a development/operator boundary, not the final desktop UX.
+
 ```text
 poetry run framenest-catalog library analyze-preview \
   --id "<library-id>" \
   --path "relative/path.mp4"
+```
+
+```text
+poetry run framenest-catalog library suggest-preview \
+  --id "<library-id>" \
+  --path "relative/path.mp4" \
+  --provider nvidia-nim \
+  --model nvidia/nemotron-3-nano-omni-30b-a3b-reasoning \
+  --confirm-cloud-upload
 ```
 
 ## Structured Logging

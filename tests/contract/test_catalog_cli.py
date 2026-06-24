@@ -1267,3 +1267,186 @@ def test_library_analyze_preview_does_not_execute_migrations(
         ]
     ) == 4
     assert not database_path.exists()
+
+
+def test_library_suggest_preview_help_lists_command(tmp_path: Path) -> None:
+    result = subprocess.run(
+        [str(_require_catalog_console_script()), "library", "suggest-preview", "--help"],
+        cwd=tmp_path,
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=8.0,
+    )
+    assert result.returncode == 0
+    assert "--confirm-cloud-upload" in result.stdout
+    assert "--provider" in result.stdout
+    assert "--model" in result.stdout
+
+
+def test_library_suggest_preview_missing_confirmation_returns_exit_2(tmp_path: Path) -> None:
+    database_path = tmp_path / "catalog.sqlite3"
+    _run_db_migrate(cwd=tmp_path, database_path=str(database_path))
+
+    result = _run_catalog_command(
+        "library",
+        "suggest-preview",
+        "--id",
+        CANONICAL_UUID4_TEXT,
+        "--path",
+        "clip.mp4",
+        cwd=tmp_path,
+        database_path=str(database_path),
+    )
+
+    assert result.returncode == 2
+    payload = _parse_single_json_line(result.stderr)
+    assert payload["error_code"] == "FRAMENEST_CATALOG_CLOUD_CONFIRMATION_REQUIRED"
+
+
+def test_library_suggest_preview_missing_confirmation_skips_local_preparation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from framenest.adapters.cli import catalog
+
+    monkeypatch.delenv("NVIDIA_API_KEY", raising=False)
+    calls: list[bool] = []
+
+    class _SpyAdapter:
+        def prepare(self, *args: object, **kwargs: object) -> object:
+            calls.append(True)
+            raise AssertionError("local preparation should not run")
+
+    monkeypatch.setattr(catalog, "LocalMediaAnalysisAdapter", _SpyAdapter)
+
+    assert catalog.main(
+        [
+            "library",
+            "suggest-preview",
+            "--id",
+            CANONICAL_UUID4_TEXT,
+            "--path",
+            "clip.mp4",
+        ]
+    ) == 2
+    assert calls == []
+
+
+def test_library_suggest_preview_missing_credential_returns_exit_2(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database_path = tmp_path / "catalog.sqlite3"
+    _run_db_migrate(cwd=tmp_path, database_path=str(database_path))
+    monkeypatch.delenv("NVIDIA_API_KEY", raising=False)
+
+    result = _run_catalog_command(
+        "library",
+        "suggest-preview",
+        "--id",
+        CANONICAL_UUID4_TEXT,
+        "--path",
+        "clip.mp4",
+        "--confirm-cloud-upload",
+        cwd=tmp_path,
+        database_path=str(database_path),
+    )
+
+    assert result.returncode == 2
+    payload = _parse_single_json_line(result.stderr)
+    assert payload["error_code"] == "FRAMENEST_CATALOG_NVIDIA_CREDENTIAL_MISSING"
+
+
+def test_library_suggest_preview_unsupported_provider_returns_exit_2(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database_path = tmp_path / "catalog.sqlite3"
+    _run_db_migrate(cwd=tmp_path, database_path=str(database_path))
+    monkeypatch.setenv("NVIDIA_API_KEY", "test-secret-not-real")
+
+    result = _run_catalog_command(
+        "library",
+        "suggest-preview",
+        "--id",
+        CANONICAL_UUID4_TEXT,
+        "--path",
+        "clip.mp4",
+        "--provider",
+        "other-provider",
+        "--confirm-cloud-upload",
+        cwd=tmp_path,
+        database_path=str(database_path),
+    )
+
+    assert result.returncode == 2
+    payload = _parse_single_json_line(result.stderr)
+    assert payload["error_code"] == "FRAMENEST_CATALOG_UNSUPPORTED_PROVIDER"
+
+
+def test_library_suggest_preview_success_returns_deterministic_json(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from framenest.adapters.cli import catalog
+
+    monkeypatch.setenv("NVIDIA_API_KEY", "test-secret-not-real")
+
+    def _fake_with_suggest_preview(
+        settings: object,
+        library_id: object,
+        relative_path: object,
+        *,
+        provider_id: str,
+        model_id: str,
+    ) -> dict[str, object]:
+        return {
+            "library_id": str(library_id),
+            "relative_path": "clip.mp4",
+            "provider_id": provider_id,
+            "model_id": model_id,
+            "prompt_version": "framenest-media-suggestion-v1",
+            "sent_frame_count": 1,
+            "technical_metadata": {
+                "duration_ms": 1000,
+                "width": 64,
+                "height": 48,
+                "video_codec": "h264",
+                "container_formats": ["mp4"],
+                "has_audio": False,
+            },
+            "suggestion": {
+                "title": "Evening clip",
+                "description": "A short evening scene with warm light.",
+                "collection": "Home",
+                "tags": ["evening", "clip"],
+                "suggested_filename": "evening-clip.mp4",
+                "confidence": 0.72,
+                "evidence": ["Warm light is visible in the frame."],
+                "uncertainties": ["Exact location is unknown."],
+            },
+        }
+
+    monkeypatch.setattr(catalog, "_with_suggest_preview", _fake_with_suggest_preview)
+
+    exit_code = catalog.main(
+        [
+            "library",
+            "suggest-preview",
+            "--id",
+            CANONICAL_UUID4_TEXT,
+            "--path",
+            "clip.mp4",
+            "--confirm-cloud-upload",
+        ]
+    )
+    assert exit_code == 0
+    captured = capsys.readouterr()
+    payload = _parse_single_json_line(captured.out)
+    assert payload["operation"] == "library.suggest_preview"
+    assert payload["state"] == "ok"
+    assert payload["prompt_version"] == "framenest-media-suggestion-v1"
+    assert "test-secret-not-real" not in captured.out
+    assert "base64" not in json.dumps(payload)

@@ -55,6 +55,8 @@ The initial SQLite persistence foundation uses explicit operator commands for da
 
 The initial local media-analysis preparation boundary uses optional external `ffprobe` and `ffmpeg` executables through a shell-free subprocess boundary. Operator commands and sanitized errors must not include absolute private media paths, database paths, raw OS errors, raw subprocess stderr, environment values, or PNG frame payloads. Representative frames are runtime in-memory artifacts only and must not be printed, base64-encoded, or persisted by the catalog CLI.
 
+The initial media suggestion preview uses an explicit `--confirm-cloud-upload` gate and reads `NVIDIA_API_KEY` only at the CLI composition boundary. Operator commands and sanitized errors must not include API keys, Authorization headers, absolute paths, raw provider responses, raw prompts, PNG/base64 payloads, or reasoning/chain-of-thought content. Suggestion output is untrusted preview data and must not be persisted automatically.
+
 Avoid exposing:
 
 - Home-directory paths when they are not necessary.

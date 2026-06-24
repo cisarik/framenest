@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from collections.abc import Callable, Sequence
 from typing import Any, NoReturn
@@ -33,6 +34,18 @@ from framenest.application.media_analysis import (
     PreparedAnalysisResult,
     PrepareLocalMediaAnalysis,
 )
+from framenest.application.media_suggestion import (
+    MediaSuggestionNotFoundError,
+    MediaSuggestionPreparationFailedError,
+    MediaSuggestionPreparationUnavailableError,
+    MediaSuggestionPreviewResult,
+    MediaSuggestionProviderAuthError,
+    MediaSuggestionProviderFailedError,
+    MediaSuggestionProviderInvalidResponseError,
+    MediaSuggestionProviderRateLimitedError,
+    MediaSuggestionProviderUnavailableError,
+    PreviewMediaSuggestion,
+)
 from framenest.application.ports.library_repository import (
     FrameNestLibraryRepositoryError,
     LibraryAlreadyExistsError,
@@ -51,6 +64,9 @@ from framenest.domain import (
     LibraryId,
     LibraryRoot,
 )
+from framenest.infrastructure.ai import NvidiaNimMediaSuggestionProvider
+from framenest.infrastructure.ai.constants import DEFAULT_MODEL_ID, DEFAULT_PROVIDER_ID, MAX_MODEL_ID_LENGTH
+from framenest.infrastructure.ai.credentials import NvidiaApiCredential
 from framenest.infrastructure.filesystem.library_scanner import LocalLibraryScanner
 from framenest.infrastructure.media_analysis import LocalMediaAnalysisAdapter
 from framenest.infrastructure.persistence.device_repository import SqliteDeviceRepository
@@ -79,6 +95,24 @@ SCAN_UNAVAILABLE_CODE = "FRAMENEST_LIBRARY_SCAN_UNAVAILABLE"
 SCAN_UNAVAILABLE_MESSAGE = "Library scan preview is not available."
 ANALYSIS_UNAVAILABLE_CODE = "FRAMENEST_LIBRARY_ANALYSIS_UNAVAILABLE"
 ANALYSIS_UNAVAILABLE_MESSAGE = "Local media analysis preparation is not available."
+CLOUD_CONFIRMATION_REQUIRED_CODE = "FRAMENEST_CATALOG_CLOUD_CONFIRMATION_REQUIRED"
+CLOUD_CONFIRMATION_REQUIRED_MESSAGE = "Cloud upload confirmation is required."
+NVIDIA_CREDENTIAL_MISSING_CODE = "FRAMENEST_CATALOG_NVIDIA_CREDENTIAL_MISSING"
+NVIDIA_CREDENTIAL_MISSING_MESSAGE = "NVIDIA API credential is not available."
+UNSUPPORTED_PROVIDER_CODE = "FRAMENEST_CATALOG_UNSUPPORTED_PROVIDER"
+UNSUPPORTED_PROVIDER_MESSAGE = "Media suggestion provider is not supported."
+INVALID_MODEL_CODE = "FRAMENEST_CATALOG_INVALID_MODEL"
+INVALID_MODEL_MESSAGE = "Media suggestion model is not valid."
+SUGGESTION_PREPARATION_UNAVAILABLE_CODE = "FRAMENEST_LIBRARY_SUGGESTION_PREPARATION_UNAVAILABLE"
+SUGGESTION_PREPARATION_UNAVAILABLE_MESSAGE = "Local media preparation is not available."
+SUGGESTION_PROVIDER_UNAVAILABLE_CODE = "FRAMENEST_MEDIA_SUGGESTION_PROVIDER_UNAVAILABLE"
+SUGGESTION_PROVIDER_UNAVAILABLE_MESSAGE = "Media suggestion provider is not available."
+SUGGESTION_PROVIDER_RATE_LIMITED_CODE = "FRAMENEST_MEDIA_SUGGESTION_PROVIDER_RATE_LIMITED"
+SUGGESTION_PROVIDER_RATE_LIMITED_MESSAGE = "Media suggestion provider rate limit was reached."
+SUGGESTION_PROVIDER_AUTH_CODE = "FRAMENEST_MEDIA_SUGGESTION_PROVIDER_AUTH_REJECTED"
+SUGGESTION_PROVIDER_AUTH_MESSAGE = "Media suggestion provider authentication was rejected."
+SUGGESTION_PROVIDER_INVALID_RESPONSE_CODE = "FRAMENEST_MEDIA_SUGGESTION_PROVIDER_INVALID_RESPONSE"
+SUGGESTION_PROVIDER_INVALID_RESPONSE_MESSAGE = "Media suggestion provider response was invalid."
 
 
 class _UsageError(Exception):
@@ -118,6 +152,42 @@ class _ScanUnavailableError(Exception):
 
 
 class _AnalysisUnavailableError(Exception):
+    pass
+
+
+class _CloudConfirmationRequiredError(Exception):
+    pass
+
+
+class _NvidiaCredentialMissingError(Exception):
+    pass
+
+
+class _UnsupportedProviderError(Exception):
+    pass
+
+
+class _InvalidModelError(Exception):
+    pass
+
+
+class _SuggestionPreparationUnavailableError(Exception):
+    pass
+
+
+class _SuggestionProviderUnavailableError(Exception):
+    pass
+
+
+class _SuggestionProviderRateLimitedError(Exception):
+    pass
+
+
+class _SuggestionProviderAuthError(Exception):
+    pass
+
+
+class _SuggestionProviderInvalidResponseError(Exception):
     pass
 
 
@@ -207,6 +277,69 @@ def main(argv: Sequence[str] | None = None) -> int:
             message=ANALYSIS_UNAVAILABLE_MESSAGE,
         )
         return 6
+    except _CloudConfirmationRequiredError:
+        _write_error(
+            operation=operation,
+            error_code=CLOUD_CONFIRMATION_REQUIRED_CODE,
+            message=CLOUD_CONFIRMATION_REQUIRED_MESSAGE,
+        )
+        return 2
+    except _NvidiaCredentialMissingError:
+        _write_error(
+            operation=operation,
+            error_code=NVIDIA_CREDENTIAL_MISSING_CODE,
+            message=NVIDIA_CREDENTIAL_MISSING_MESSAGE,
+        )
+        return 2
+    except _UnsupportedProviderError:
+        _write_error(
+            operation=operation,
+            error_code=UNSUPPORTED_PROVIDER_CODE,
+            message=UNSUPPORTED_PROVIDER_MESSAGE,
+        )
+        return 2
+    except _InvalidModelError:
+        _write_error(
+            operation=operation,
+            error_code=INVALID_MODEL_CODE,
+            message=INVALID_MODEL_MESSAGE,
+        )
+        return 2
+    except _SuggestionPreparationUnavailableError:
+        _write_error(
+            operation=operation,
+            error_code=SUGGESTION_PREPARATION_UNAVAILABLE_CODE,
+            message=SUGGESTION_PREPARATION_UNAVAILABLE_MESSAGE,
+        )
+        return 6
+    except _SuggestionProviderUnavailableError:
+        _write_error(
+            operation=operation,
+            error_code=SUGGESTION_PROVIDER_UNAVAILABLE_CODE,
+            message=SUGGESTION_PROVIDER_UNAVAILABLE_MESSAGE,
+        )
+        return 7
+    except _SuggestionProviderRateLimitedError:
+        _write_error(
+            operation=operation,
+            error_code=SUGGESTION_PROVIDER_RATE_LIMITED_CODE,
+            message=SUGGESTION_PROVIDER_RATE_LIMITED_MESSAGE,
+        )
+        return 7
+    except _SuggestionProviderAuthError:
+        _write_error(
+            operation=operation,
+            error_code=SUGGESTION_PROVIDER_AUTH_CODE,
+            message=SUGGESTION_PROVIDER_AUTH_MESSAGE,
+        )
+        return 7
+    except _SuggestionProviderInvalidResponseError:
+        _write_error(
+            operation=operation,
+            error_code=SUGGESTION_PROVIDER_INVALID_RESPONSE_CODE,
+            message=SUGGESTION_PROVIDER_INVALID_RESPONSE_MESSAGE,
+        )
+        return 7
     except (
         FrameNestPersistenceError,
         FrameNestDeviceRepositoryError,
@@ -261,6 +394,24 @@ def _build_parser() -> argparse.ArgumentParser:
     library_analyze_preview = library_commands.add_parser("analyze-preview")
     library_analyze_preview.add_argument("--id", required=True, dest="library_id")
     library_analyze_preview.add_argument("--path", required=True, dest="relative_path")
+    library_suggest_preview = library_commands.add_parser("suggest-preview")
+    library_suggest_preview.add_argument("--id", required=True, dest="library_id")
+    library_suggest_preview.add_argument("--path", required=True, dest="relative_path")
+    library_suggest_preview.add_argument(
+        "--provider",
+        default=DEFAULT_PROVIDER_ID,
+        dest="provider_id",
+    )
+    library_suggest_preview.add_argument(
+        "--model",
+        default=DEFAULT_MODEL_ID,
+        dest="model_id",
+    )
+    library_suggest_preview.add_argument(
+        "--confirm-cloud-upload",
+        action="store_true",
+        dest="confirm_cloud_upload",
+    )
 
     return parser
 
@@ -330,6 +481,19 @@ def _dispatch_library(args: argparse.Namespace, settings: FrameNestSettings) -> 
         library_id = _parse_library_id(args.library_id)
         relative_path = _parse_media_relative_path(args.relative_path)
         return _with_analyze_preview(settings, library_id, relative_path)
+    if args.operation == "suggest-preview":
+        library_id = _parse_library_id(args.library_id)
+        relative_path = _parse_media_relative_path(args.relative_path)
+        _validate_suggest_preview_prerequisites(confirm_cloud_upload=args.confirm_cloud_upload)
+        provider_id = _parse_suggestion_provider_id(args.provider_id)
+        model_id = _parse_suggestion_model_id(args.model_id)
+        return _with_suggest_preview(
+            settings,
+            library_id,
+            relative_path,
+            provider_id=provider_id,
+            model_id=model_id,
+        )
     raise _UsageError(INVALID_INPUT_MESSAGE)
 
 
@@ -445,6 +609,27 @@ def _parse_media_relative_path(value: str) -> MediaRelativePath:
         return MediaRelativePath(value)
     except FrameNestMediaAnalysisError:
         raise _InvalidInputError() from None
+
+
+def _validate_suggest_preview_prerequisites(*, confirm_cloud_upload: bool) -> None:
+    if not confirm_cloud_upload:
+        raise _CloudConfirmationRequiredError()
+    if not os.environ.get("NVIDIA_API_KEY", "").strip():
+        raise _NvidiaCredentialMissingError()
+
+
+def _parse_suggestion_provider_id(value: str) -> str:
+    if value != DEFAULT_PROVIDER_ID:
+        raise _UnsupportedProviderError()
+    return value
+
+
+def _parse_suggestion_model_id(value: str) -> str:
+    if not isinstance(value, str) or not value or len(value) > MAX_MODEL_ID_LENGTH:
+        raise _InvalidModelError()
+    if any(ord(char) < 32 or ord(char) == 127 for char in value):
+        raise _InvalidModelError()
+    return value
 
 
 def _parse_scan_limits(max_entries: object, max_candidates: object) -> LibraryScanLimits:
@@ -585,6 +770,105 @@ def _with_analyze_preview(
     try:
         repository = SqliteLibraryRepository(engine)
         return _analyze_preview(repository, library_id, relative_path)
+    finally:
+        dispose_engine(engine)
+
+
+def _suggest_preview(
+    repository: LibraryRepository,
+    library_id: LibraryId,
+    relative_path: MediaRelativePath,
+    *,
+    provider_id: str,
+    model_id: str,
+) -> dict[str, Any]:
+    credential = NvidiaApiCredential(os.environ["NVIDIA_API_KEY"])
+    provider = NvidiaNimMediaSuggestionProvider(
+        credential,
+        model_id=model_id,
+        provider_id=provider_id,
+    )
+    service = PreviewMediaSuggestion(
+        repository,
+        LocalMediaAnalysisAdapter(),
+        provider,
+    )
+    try:
+        preview = service.execute(library_id, relative_path)
+    except MediaSuggestionNotFoundError:
+        raise _LibraryNotFoundError() from None
+    except MediaSuggestionPreparationUnavailableError:
+        raise _SuggestionPreparationUnavailableError() from None
+    except (
+        MediaSuggestionPreparationFailedError,
+        MediaAnalysisFailedError,
+    ):
+        raise
+    except MediaSuggestionProviderUnavailableError:
+        raise _SuggestionProviderUnavailableError() from None
+    except MediaSuggestionProviderRateLimitedError:
+        raise _SuggestionProviderRateLimitedError() from None
+    except MediaSuggestionProviderAuthError:
+        raise _SuggestionProviderAuthError() from None
+    except MediaSuggestionProviderInvalidResponseError:
+        raise _SuggestionProviderInvalidResponseError() from None
+    except MediaSuggestionProviderFailedError:
+        raise
+    return _suggest_preview_payload(preview)
+
+
+def _suggest_preview_payload(preview: MediaSuggestionPreviewResult) -> dict[str, Any]:
+    metadata = preview.prepared.technical_metadata
+    suggestion = preview.suggestion
+    return {
+        "library_id": preview.library_id.to_string(),
+        "relative_path": preview.relative_path.value,
+        "provider_id": suggestion.provider_id,
+        "model_id": suggestion.model_id,
+        "prompt_version": suggestion.prompt_version,
+        "sent_frame_count": preview.sent_frame_count,
+        "technical_metadata": {
+            "duration_ms": metadata.duration_ms,
+            "width": metadata.width,
+            "height": metadata.height,
+            "video_codec": metadata.video_codec,
+            "container_formats": list(metadata.container_formats),
+            "has_audio": metadata.has_audio,
+        },
+        "suggestion": {
+            "title": suggestion.title,
+            "description": suggestion.description,
+            "collection": suggestion.collection,
+            "tags": list(suggestion.tags),
+            "suggested_filename": suggestion.suggested_filename,
+            "confidence": suggestion.confidence,
+            "evidence": list(suggestion.evidence),
+            "uncertainties": list(suggestion.uncertainties),
+        },
+    }
+
+
+def _with_suggest_preview(
+    settings: FrameNestSettings,
+    library_id: LibraryId,
+    relative_path: MediaRelativePath,
+    *,
+    provider_id: str,
+    model_id: str,
+) -> dict[str, Any]:
+    status = inspect_database_migration_status(settings)
+    if status.state != "at_head":
+        raise _NotReadyError()
+    engine = create_sqlite_engine(settings.database_path)
+    try:
+        repository = SqliteLibraryRepository(engine)
+        return _suggest_preview(
+            repository,
+            library_id,
+            relative_path,
+            provider_id=provider_id,
+            model_id=model_id,
+        )
     finally:
         dispose_engine(engine)
 
