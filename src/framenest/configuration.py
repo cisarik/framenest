@@ -4,11 +4,33 @@ from __future__ import annotations
 
 from ipaddress import ip_address
 from pathlib import Path
+import tempfile
+from typing import Any
 
 from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 DEFAULT_ENV_FILE = Path(".env")
+DEVELOPMENT_DATABASE_DIRECTORY = "framenest-development"
+DEVELOPMENT_DATABASE_FILENAME = "catalog.sqlite3"
+
+
+def _default_database_path() -> Path:
+    return _normalize_database_path(
+        Path(tempfile.gettempdir())
+        / DEVELOPMENT_DATABASE_DIRECTORY
+        / DEVELOPMENT_DATABASE_FILENAME
+    )
+
+
+def _normalize_database_path(value: Any) -> Path:
+    try:
+        path = Path(value).expanduser()
+    except (RuntimeError, TypeError, ValueError) as exc:
+        raise ValueError("database path must be an absolute path") from exc
+    if not path.is_absolute():
+        raise ValueError("database path must be an absolute path")
+    return path.resolve(strict=False)
 
 
 class FrameNestSettings(BaseSettings):
@@ -24,6 +46,7 @@ class FrameNestSettings(BaseSettings):
     host: str = Field(default="127.0.0.1")
     port: int = Field(default=8000, ge=0, le=65535)
     api_key: SecretStr | None = Field(default=None)
+    database_path: Path = Field(default_factory=_default_database_path, repr=False)
 
     @field_validator("host")
     @classmethod
@@ -33,6 +56,11 @@ class FrameNestSettings(BaseSettings):
         except ValueError as exc:
             raise ValueError("host must be a valid IP address") from exc
         return value
+
+    @field_validator("database_path", mode="before")
+    @classmethod
+    def validate_database_path(cls, value: Any) -> Path:
+        return _normalize_database_path(value)
 
 
 def load_settings(

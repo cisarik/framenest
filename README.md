@@ -6,7 +6,9 @@ FrameNest is a local-first, privacy-conscious, cross-platform library for video 
 
 FrameNest is in an early foundation, pre-alpha stage.
 
-A minimal Poetry package scaffold exists at the repository root with centralized settings, a FastAPI application factory, a typed `GET /health` endpoint, in-process contract tests, and a loopback-first Uvicorn development server. There is no functional user application, database, gallery, catalog, downloader, desktop shell, installer, deployment, or supported release yet.
+A minimal Poetry package scaffold exists at the repository root with centralized settings, a FastAPI application factory, a typed `GET /health` endpoint, in-process contract tests, and a loopback-first Uvicorn development server. There is no functional user application, media catalog schema, gallery, downloader, desktop shell, installer, deployment, or supported release yet.
+
+The repository also contains the first persistence foundation: a centralized SQLite database path setting, synchronous SQLAlchemy Core engine helpers, packaged Alembic resources, and explicit database commands. This is not a media catalog schema and does not provide library scanning or gallery data yet.
 
 Supported runtime: CPython `>=3.13,<3.14`. Local development uses a uv-managed CPython 3.13.14 interpreter with Poetry as the dependency, environment, and lockfile manager. The initial `poetry.lock` was generated with Poetry 2.1.4. The local virtual environment lives in `.venv/` and is not committed.
 
@@ -38,6 +40,32 @@ FrameNest-owned runtime logs are compact JSON lines written to `stderr` by the d
 Override bind address with `FRAMENEST_HOST` and `FRAMENEST_PORT`. Default binding is loopback-only (`127.0.0.1`). Setting `FRAMENEST_HOST=0.0.0.0` is an explicit exposure override and is not the recommended default.
 
 Reload, deployment, systemd, and Tailscale behavior are not provided yet.
+
+## Local Database Foundation
+
+FrameNest reads `FRAMENEST_DATABASE_PATH` through the centralized settings boundary.
+
+The current default is temporary development behavior:
+
+```text
+Path(tempfile.gettempdir()) / "framenest-development" / "catalog.sqlite3"
+```
+
+This fallback is intentionally outside the repository and is not the final production storage policy. Persistent deployments are expected to set an explicit absolute `FRAMENEST_DATABASE_PATH`. `~` is expanded before validation. Relative paths are rejected with sanitized errors.
+
+Inspect migration status without creating a missing database:
+
+```text
+poetry run framenest-db status
+```
+
+Explicitly upgrade the configured database to the packaged Alembic head:
+
+```text
+poetry run framenest-db migrate
+```
+
+Normal `poetry run framenest-server` startup does not apply migrations. The initial packaged revision is `0001` and creates no media catalog, library, device, location, gallery, sidecar, user, or authentication schema.
 
 ## Structured Logging
 
@@ -79,6 +107,7 @@ Accepted implementation foundations so far:
 - `pydantic-settings` ([ADR-0007](docs/adr/0007-settings-library.md))
 - FastAPI ([ADR-0003](docs/adr/0003-initial-server-api-framework.md))
 - Uvicorn as the initial ASGI runtime ([ADR-0008](docs/adr/0008-asgi-runtime.md)), installed and wired for loopback-first local development
+- SQLAlchemy Core and Alembic for the initial SQLite migration foundation ([ADR-0010](docs/adr/0010-initial-persistence-foundation.md)), installed and wired behind explicit database commands
 
 Exact frontend framework, packaging choices, IPC design, data schema, deployment model, production update mechanisms, and many server operational details remain subject to later documented decisions.
 
@@ -138,6 +167,8 @@ Current foundation files:
 - [`docs/adr/0006-macos-python-interpreter-provider.md`](docs/adr/0006-macos-python-interpreter-provider.md) records the accepted macOS interpreter provider decision.
 - [`docs/adr/0007-settings-library.md`](docs/adr/0007-settings-library.md) records the accepted `pydantic-settings` decision.
 - [`docs/adr/0008-asgi-runtime.md`](docs/adr/0008-asgi-runtime.md) records the accepted Uvicorn ASGI runtime decision.
+- [`docs/adr/0009-structured-logging-approach.md`](docs/adr/0009-structured-logging-approach.md) records the accepted structured logging decision.
+- [`docs/adr/0010-initial-persistence-foundation.md`](docs/adr/0010-initial-persistence-foundation.md) records the accepted SQLAlchemy Core and Alembic SQLite persistence foundation decision.
 
 ## Non-Goals for the Current Stage
 
@@ -149,7 +180,7 @@ The current stage does not provide:
 - Embedded libVLC.
 - AI-generated covers.
 - Public internet exposure.
-- A functional gallery, catalog, database, or downloader.
+- A functional gallery, media catalog schema, library scanner, or downloader.
 - Production deployment.
 
 ## License

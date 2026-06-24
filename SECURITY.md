@@ -51,6 +51,8 @@ FrameNest now implements a structured logging foundation with centralized redact
 
 Launcher, interpreter, shell, supervisor, and future service-manager diagnostics are separate output sources outside the FrameNest logging graph. Captured combined `stderr` from a wrapped command must not automatically be treated as entirely application-generated. External diagnostics must still be reviewed and sanitized before sharing.
 
+The initial SQLite persistence foundation uses explicit operator commands for database migration. `framenest-db status` and `framenest-db migrate` produce deterministic machine-readable output that must not include the configured database path, database URL, SQL text, SQL parameters, environment values, or raw SQLAlchemy, SQLite, or Alembic exception messages. Normal `framenest-server` startup does not apply migrations.
+
 Avoid exposing:
 
 - Home-directory paths when they are not necessary.

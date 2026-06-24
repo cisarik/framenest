@@ -4,15 +4,19 @@ version = "0.1.0"
 description = "A local-first library for organizing video and animated media."
 readme = "README.md"
 requires-python = ">=3.13,<3.14"
-dependencies = ["pydantic-settings (>=2.14.2,<3.0.0)", "fastapi (>=0.138.0,<0.139.0)", "uvicorn (>=0.49.0,<0.50.0)"]
+dependencies = ["pydantic-settings (>=2.14.2,<3.0.0)", "fastapi (>=0.138.0,<0.139.0)", "uvicorn (>=0.49.0,<0.50.0)", "sqlalchemy (>=2.0.51,<2.1.0)", "alembic (>=1.18.4,<1.19.0)"]
 
 [project.scripts]
 framenest-server = "framenest.server:main"
+framenest-db = "framenest.infrastructure.persistence.cli:main"
 
 [tool.poetry]
 package-mode = true
 packages = [
     { include = "framenest", from = "src" },
+]
+include = [
+    { path = "src/framenest/infrastructure/persistence/alembic_environment/script.py.mako", format = ["sdist", "wheel"] },
 ]
 
 [tool.poetry.group.dev.dependencies]

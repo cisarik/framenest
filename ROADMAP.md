@@ -53,12 +53,13 @@ Accepted so far:
 - Python settings library: `pydantic-settings` through [ADR-0007](docs/adr/0007-settings-library.md).
 - Initial ASGI runtime: Uvicorn through [ADR-0008](docs/adr/0008-asgi-runtime.md).
 - Initial structured logging approach: standard-library `logging` with a FrameNest-owned JSON formatter and redaction boundary through [ADR-0009](docs/adr/0009-structured-logging-approach.md); implementation complete.
+- Initial SQLite persistence and migration foundation: synchronous SQLAlchemy Core with Alembic through [ADR-0010](docs/adr/0010-initial-persistence-foundation.md); minimal explicit migration implementation complete.
 
 The initial scaffold decision gate is complete. A Poetry package scaffold, centralized configuration boundary, FastAPI application factory, typed health endpoint, contract tests, Uvicorn runtime dependency, startup wiring, and a runnable loopback-only server command now exist.
 
 Broader architecture decisions still open include sidecar manifest format and versioning, server/domain boundaries beyond the current skeleton, initial authentication boundary, media-tool distribution strategy, and Fedora deployment details.
 
-Persistence strategy is accepted through [ADR-0010](docs/adr/0010-initial-persistence-foundation.md). SQLite catalog and migration implementation remain unimplemented.
+Persistence strategy is accepted through [ADR-0010](docs/adr/0010-initial-persistence-foundation.md). The minimal SQLAlchemy/Alembic migration foundation is implemented. The actual media catalog schema remains unimplemented.
 
 Key deliverables: remaining broader architecture ADRs and evidence as needed before later implementation phases.
 
@@ -99,13 +100,14 @@ Implemented so far:
 - Runtime health smoke verification
 - Structured logging foundation per [ADR-0009](docs/adr/0009-structured-logging-approach.md)
 - Persistence strategy accepted through [ADR-0010](docs/adr/0010-initial-persistence-foundation.md)
+- Minimal SQLAlchemy Core/Alembic persistence foundation with `FRAMENEST_DATABASE_PATH`, packaged empty revision `0001`, explicit `framenest-db status`, and explicit `framenest-db migrate`
 
 Still required for phase exit:
 
-- SQLite development catalog implementation
-- Migration mechanism implementation
+- Actual media catalog schema and repository boundary
+- Local catalog behavior that supports the first library-scanning tasks
 
-The next bounded implementation step is a minimal SQLAlchemy Core and Alembic persistence foundation per ADR-0010, not the media catalog.
+The next bounded implementation step should build on the persistence foundation without treating the empty `0001` migration as a media catalog.
 
 Key deliverables: loopback-only local development server skeleton, health endpoint, configuration boundary, structured logging, SQLite development catalog, migration mechanism, and tests.
 

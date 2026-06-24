@@ -146,9 +146,16 @@ src-tauri/target/
 /crash-reports/
 
 /*.sqlite
+/*.sqlite-wal
+/*.sqlite-shm
+/*.sqlite-journal
 /*.sqlite3
+/*.sqlite3-wal
+/*.sqlite3-shm
+/*.sqlite3-journal
 /*.db
 /*.db-wal
 /*.db-shm
+/*.db-journal
 /*.log
 /*.pid
