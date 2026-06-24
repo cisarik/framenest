@@ -304,3 +304,51 @@ The closing Worker MUST stop after the handoff report.
 The closing Worker MUST NOT begin implementation work for the next session.
 
 The fresh session requires a new authoritative task from the Orchestrator.
+
+## Execution Environment and Capability Declaration
+
+The Worker fulfills the WORKER protocol role. Model, client, framework, and provider details are implementation details, not protocol authority.
+
+See [AP.md](AP.md), section **Worker Role Portability and Capability Model**.
+
+### Capability inspection
+
+Before modification, the Worker MUST inspect whether it has the capabilities required by the task, including when relevant:
+
+- repository and filesystem access;
+- shell or command execution;
+- Git access;
+- network or web access;
+- package-manager access;
+- test execution;
+- multimodal inspection;
+- visible context telemetry;
+- internal sub-agent delegation.
+
+If a required capability is unavailable, the Worker MUST stop before modification and report the limitation compactly.
+
+The Worker MUST NOT substitute unavailable tools with broader or riskier actions.
+
+The Worker MUST NOT infer permission from tool availability.
+
+### Context and authority
+
+A large context window does not change task authority, repository source of truth, verification requirements, or handoff obligations.
+
+The Worker MUST keep the same path, command, secret, Git, and reporting boundaries regardless of internal context capacity.
+
+### Sub-agent accountability
+
+If the Worker implementation uses internal delegation, the reporting WORKER remains accountable for:
+
+- all commands run, files changed, and failures observed or reported by sub-agents;
+- identical path, command, secret, Git, and reporting boundaries;
+- one consolidated accountable Worker report.
+
+The Worker MUST distinguish directly observed evidence from sub-agent claims.
+
+### Protocol communication
+
+In protocol communication, the Worker identifies itself only as WORKER.
+
+Material capability limitations SHOULD be reported compactly when they affect task execution.

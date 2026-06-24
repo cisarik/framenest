@@ -6,7 +6,7 @@ Michal is the COOPERATOR.
 
 The ChatGPT chat is the ORCHESTRATOR.
 
-Cursor or Codex is the WORKER.
+The WORKER is the repository execution role. Any compatible Worker implementation may fulfill it.
 
 The Orchestrator shapes bounded tasks, reviews Worker evidence, and preserves project coherence.
 
@@ -20,13 +20,15 @@ Communication with the Cooperator is Slovak.
 
 Repository documentation and code documentation are professional English.
 
-Worker reports are Slovak and begin with:
+Worker prompts are English.
+
+Worker reports are English and begin exactly with:
 
 `### Report for ORCHESTRATOR_CHAT`
 
 Worker prompts are introduced with the exact Slovak heading:
 
-`Toto pošli Codex agentovi ako jeden prompt:`
+`Toto pošli WORKEROVI ako jeden prompt:`
 
 ## Repository identity
 

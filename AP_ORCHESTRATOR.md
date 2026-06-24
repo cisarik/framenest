@@ -69,7 +69,7 @@ The Orchestrator SHOULD define exact working directories, exact file boundaries,
 
 When presenting a user-facing Worker prompt, the Orchestrator MUST introduce it using this exact heading:
 
-`Toto pošli Codex agentovi ako jeden prompt:`
+`Toto pošli WORKEROVI ako jeden prompt:`
 
 The heading is intentionally fixed so the Cooperator can identify the prompt that should be sent to the Worker.
 
@@ -333,3 +333,43 @@ The Orchestrator MUST distinguish committed handoff state from local-only handof
 - Include an integrated read-only bootstrap gate when repository identity or cleanliness must be verified first.
 - Instruct the fresh Worker to read repository rules, stable bootstrap, role handbook, and current handoff directly from the repository.
 - Do not ask the Cooperator to manually copy committed handoff files unless the exceptional fallback applies.
+
+## Worker Portability and Capability-Aware Task Shaping
+
+Worker tasks MUST depend on required capabilities, not on a vendor name. See [AP.md](AP.md), section **Worker Role Portability and Capability Model**.
+
+### Orchestrator obligations
+
+The Orchestrator MUST:
+
+- address the protocol role as WORKER;
+- avoid vendor-specific assumptions in reusable prompts;
+- define required capabilities functionally in each task;
+- distinguish protocol requirements from execution-environment conveniences;
+- shape task size using the active Worker's observed context and capabilities;
+- avoid hard-coded universal token limits;
+- treat visible context percentages as relative heuristics for the active implementation;
+- request early stop when required tools or access are unavailable;
+- preserve the same safety and evidence standards for large-context Workers;
+- treat multi-agent delegation as an internal Worker implementation detail;
+- require one accountable report and complete evidence from the reporting WORKER;
+- place genuinely necessary vendor-specific instructions only in the task-specific operational context, never in the reusable protocol.
+
+### Capability checklist
+
+Before issuing a task, the Orchestrator SHOULD decide which capabilities the task requires. Not every task needs every capability.
+
+| Capability | Question for the task |
+|---|---|
+| Repository access | Must the Worker read the repository directly? |
+| Filesystem write access | Must the Worker modify tracked or untracked paths? |
+| Shell | Must the Worker run commands? |
+| Git | Must the Worker read or write Git state? |
+| Network or web | Must the Worker reach external systems? |
+| Tests | Must the Worker execute the test suite or other validation commands? |
+| Package management | Must the Worker install or update dependencies? |
+| Context telemetry | Should the Worker report visible context pressure? |
+| Sub-agent delegation | May the Worker use internal delegation, and what remains directly accountable? |
+| Independently inspectable remote state | Must the Orchestrator verify a public commit or remote ref? |
+
+If a required capability may be unavailable, the task SHOULD instruct the Worker to stop before modification and report the limitation compactly.

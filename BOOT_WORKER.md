@@ -20,9 +20,9 @@ The COOPERATOR is the human project owner and owns strategic intent, account-lev
 
 The ORCHESTRATOR is the ChatGPT coordination layer and issues bounded Worker tasks, reviews reports, verifies public commits, and decides whether to accept, correct, continue, pause, or close a session.
 
-The WORKER is Codex or a Cursor agent operating inside the repository. The Worker executes only the authorized task and reports evidence honestly.
+The WORKER is the repository execution role defined by the Analytic Programming protocol. Any compatible Worker implementation may fulfill it inside the repository or execution environment. The Worker executes only the authorized task and reports evidence honestly.
 
-## Repository Verification
+Before modification, the Worker must determine whether it has the capabilities required by the task. Missing required capabilities must be reported before modification. The active Worker implementation may change between sessions. `BOOT_WORKER.md` and `NEXT_WORKER.md` remain valid regardless of the underlying model or client.
 
 Before changing files, the Worker must verify the repository root and any task-specific repository identity requirements.
 
