@@ -2,206 +2,200 @@
 
 ## 1. Purpose and authority
 
-This file is a non-authoritative Worker-session handoff. It is state-restoration evidence only. It is not a task and grants no modification, architecture, dependency, migration, command, filesystem, network, AI-provider, or Git authority.
+This file is a non-authoritative Worker-session handoff. It restores current context only. It is not a task and grants no implementation, command, filesystem, network, provider, secret, migration, dependency, or Git authority.
 
-A fresh Worker instance assigned to the WORKER role requires one separate authoritative Orchestrator task prompt before doing any work. The Cooperator normally does not paste this file manually. The fresh Worker instance reads it directly from the repository during bootstrap.
+A fresh Worker instance assigned to the persistent WORKER protocol role requires one separate authoritative Orchestrator task prompt before doing any work. The future authoritative prompt is the only concrete task authority and overrides stale recommendations in this file.
 
-Repository state, accepted ADRs, tests, Git history, and the new authoritative task override stale handoff claims.
+The persistent protocol roles are COOPERATOR, ORCHESTRATOR, and WORKER. Concrete Orchestrator and Worker instances are temporary execution instances assigned to those persistent roles. Execution client, agent implementation, model, provider, instance, and session are separate identity layers. Do not describe a fresh Worker instance as a new persistent role.
 
-Current Worker instance session: **CLOSED**. The persistent WORKER protocol role continues.
+Current Worker instance session: **CLOSED**. The persistent WORKER role continues.
 
-## 2. Repository identity
+## 2. Startup identity
 
 - Repository: `https://github.com/cisarik/framenest.git`
-- Local path used by the closing Worker instance: `/Users/agile/framenest`
-- Branch used: `main`
-- Provider-protocol commit: `b4f432497106c19f20dc3107ef618dd779067a7e`
-- Provider-protocol subject: `fix: support NVIDIA non-thinking pending responses`
-- Provider-protocol parent: `ce5801c2ba1ea6fd9cde1c281943ea8d8f714765`
-- Handoff commit: the commit containing this file; a fresh Worker instance must resolve it from public `main`
+- Normal working directory: `/Users/agile/framenest`
+- Branch: `main`
+- Expected handoff parent state before this closeout: `3e6008886ad7925ca14e171839ad479eafa443a0`
+- Closeout commit: the commit containing this file; a fresh Worker instance must verify the actual current public `main` HEAD because this closeout commit is newer than the parent state above.
 
-A fresh Worker instance must independently resolve final local `HEAD`, local `origin/main`, remote `main`, and final commit subjects and parents. Do not infer current public state from this file alone.
+Mandatory early reading for a fresh Worker instance:
 
-## 3. Implemented architecture summary
+1. `AGENTS.md`
+2. `BOOT_WORKER.md`
+3. `AP_WORKER.md`
+4. `NEXT_WORKER.md`
+5. the future authoritative Orchestrator task prompt
 
-FrameNest remains a foundation-stage, pre-alpha, local-first, privacy-conscious library for video and animated media.
+Repository code, accepted ADRs, tests, Git history, and the future authoritative task override stale handoff claims.
 
-The repository currently implements:
+## 3. Verified implementation state
 
-- centralized typed settings with `FRAMENEST_DATABASE_PATH`;
-- FastAPI application factory and typed `GET /health`;
-- loopback-first Uvicorn runtime through `framenest-server`;
-- FrameNest-owned structured JSON logging and redaction;
+FrameNest is a foundation-stage, pre-alpha, local-first, privacy-conscious library for video and animated media.
+
+Implemented foundations include:
+
+- CPython 3.13 and Poetry package foundation;
+- centralized typed settings with loopback-safe server defaults and `FRAMENEST_DATABASE_PATH`;
+- FastAPI application factory, typed unchanged `GET /health`, and loopback-first Uvicorn runtime through `framenest-server`;
+- FrameNest-owned structured JSON logging and centralized redaction boundary;
 - synchronous SQLAlchemy Core SQLite persistence with Alembic revisions through `0003`;
-- explicit `framenest-db status` and `framenest-db migrate`;
-- pure-domain identity primitives, `Device`, and `Library` with `LibraryRoot`;
-- SQLAlchemy Core device and library repository adapters;
-- development catalog CLI for device and library registry operations;
-- ADR-0014 read-only library scan preview;
-- ADR-0015 deterministic local media analysis preparation;
-- ADR-0016 provider-neutral media suggestion preview with first NVIDIA NIM adapter;
-- `library scan-preview`, `library analyze-preview`, and `library suggest-preview`.
+- explicit database commands: `framenest-db status` and `framenest-db migrate`;
+- pure-domain identity primitives, `Device`, `Library`, and device-local `LibraryRoot`;
+- application repository ports and SQLAlchemy Core adapters for device and library registries;
+- development catalog CLI registration boundaries for devices and libraries;
+- deterministic read-only library scan preview through the application scanner port and standard-library filesystem adapter;
+- deterministic read-only local media analysis through the application preparation boundary and optional local `ffprobe`/`ffmpeg` infrastructure;
+- provider-neutral AI suggestion boundary;
+- NVIDIA NIM prototype with unresolved sanitized live response evidence;
+- packaged vanilla HTML/CSS/JavaScript local application shell;
+- ADR-0017 local web application delivery;
+- `GET /` for the packaged web document;
+- `/assets/{asset_name}` for packaged CSS and JavaScript;
+- `GET /api/libraries` for read-only registered-library listing;
+- explicit `POST /api/libraries/{library_id}/scan-preview` for bounded read-only scan preview;
+- browser states for library loading, empty catalog, unavailable catalog, generic error, scan success, scanning, summary, truncation, and candidate rendering;
+- same-origin and loopback security boundaries.
 
-No media catalog table, storage-volume table, migration `0004`, suggestion persistence, sidecar mutation, GUI, gallery, playback backend, LM Studio adapter, Vercel adapter, or review/apply workflow exists yet.
+Current non-implemented boundaries include:
 
-## 4. NVIDIA protocol state
+- no persistent media catalog;
+- no storage-volume registry;
+- no automatic migration on server startup;
+- no automatic scan;
+- no browser-visible library roots;
+- no browser-visible secrets;
+- no automatic AI;
+- no persistent media records from scan candidates.
 
-Commit `b4f432497106c19f20dc3107ef618dd779067a7e` preserved documented provider-protocol corrections:
+## 4. Latest Worker-observed runtime evidence
 
-- NVIDIA request body sends exact first system message `{"role": "system", "content": "/no_think"}`;
-- the existing multimodal user message remains second;
-- undocumented `chat_template_kwargs.enable_thinking` was removed;
-- `response_format`, tool calls, retries, generic JSON extraction, and reasoning stripping were not added;
-- the HTTPS transport now supports authenticated bounded `GET` in addition to bounded `POST`;
-- NVIDIA `202` pending responses are handled by validating a strict `requestId` and polling `https://integrate.api.nvidia.com/v1/status/{requestId}`;
-- polling is bounded by a monotonic-clock deadline and one-second interval policy;
-- polling does not resend media frames or request body payloads;
-- request IDs, raw provider bodies, Authorization headers, credentials, and frame data remain absent from public errors.
+The following is Worker-observed evidence from the preceding cycles. A fresh Worker instance must rerun the baseline required by its future authoritative task.
 
-The strict final suggestion parser remains unchanged: it accepts only one raw JSON object or one exact `json` Markdown fence containing the JSON object.
+Untouched Cycle 055 baseline before web/library browser work:
 
-## 5. Test and validation evidence
+- `627` tests collected;
+- `624 passed`;
+- `3 skipped`.
 
-Observed before the provider-protocol commit:
+Final Cycle 055 state:
 
-- `poetry run pytest -q tests/unit/infrastructure/ai/test_nvidia_nim.py -W error`: `21 passed`
-- `poetry run pytest -q tests/unit/application/test_media_suggestion.py tests/unit/infrastructure/ai tests/integration/test_media_suggestion_readonly.py tests/contract/test_catalog_cli.py -W error`: `91 passed`
-- `poetry check --lock`: passed
-- `poetry run python -m compileall -q src tests`: passed
-- `git diff --check`: passed
-- changed implementation/test paths were limited to:
-  - `src/framenest/infrastructure/ai/nvidia_nim.py`
-  - `src/framenest/infrastructure/ai/transport.py`
-  - `tests/unit/infrastructure/ai/test_nvidia_nim.py`
+- `644` tests collected;
+- `641 passed`;
+- `3 skipped`.
 
-The expected ordinary default baseline from Cycle 052 remains:
+Additional final Cycle 055 evidence:
 
-- `597` tests collected
-- `594 passed`
-- `3 skipped`
+- full `-W error`: `641 passed`, `3 skipped`;
+- targeted tests: `31 passed`;
+- `poetry check --lock`: passed;
+- `poetry run python -m compileall -q src tests`: passed;
+- build and wheel inspection: passed;
+- in-process API smoke: passed;
+- no visual browser inspection was performed.
 
-The three default skips are one opt-in NVIDIA test and the MP4/GIF real-media-tool parameter cases.
+## 5. Latest commits
 
-## 6. Sanitized live response-shape diagnosis
+### Cycle 054
 
-Exactly one additional synthetic NVIDIA diagnostic call was made during closeout using the modified local implementation and the ignored credential boundary. No raw assistant content, raw reasoning text, raw provider response, request body, image/base64 data, Authorization header, credential, absolute path, generated natural-language output, or private media path was printed or persisted.
+- SHA: `46da061d0443176a1067d18e30bf5aaff2259b3d`
+- Parent: `d94b65bc761e754cfba9034d8ea21edb15406952`
+- Subject: `feat: add local web application shell`
+- Result: packaged local web application foundation and ADR-0017.
 
-Sanitized structural result:
+### Cycle 055
 
-- diagnostic stage: `MediaSuggestionProviderInvalidResponseError`
-- HTTP status code: `200`
-- top-level response keys: `choices`, `created`, `id`, `kv_transfer_params`, `model`, `object`, `prompt_logprobs`, `prompt_token_ids`, `service_tier`, `system_fingerprint`, `usage`
-- `choices` type: `list`
-- choice count: `1`
-- first-choice keys: `finish_reason`, `index`, `logprobs`, `message`, `stop_reason`, `token_ids`
-- `finish_reason`: `stop`
-- `stop_reason`: present, `null`
-- assistant-message keys: `annotations`, `audio`, `content`, `function_call`, `reasoning`, `reasoning_content`, `refusal`, `role`, `tool_calls`
-- `content`: `null`
-- `reasoning_content`: string, length `4`, not whitespace-only
-- `refusal`: present, null
-- tool-call count: `0`
-- usage prompt tokens: `568`
-- usage completion tokens: `3`
-- usage total tokens: `571`
-- returned model ID: `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning`
-- structured error object: absent
+- SHA: `3e6008886ad7925ca14e171839ad479eafa443a0`
+- Parent: `46da061d0443176a1067d18e30bf5aaff2259b3d`
+- Subject: `feat: add read-only library browser`
+- Result: real registered-library listing and explicit read-only scan-preview API/UI.
 
-No real `printit.mp4` preview has been run yet. Do not run it until a future task first passes synthetic live NVIDIA validation.
+## 6. Security and mutation boundaries
 
-## 7. Product handoff
+- Do not inspect secrets without task-specific authority.
+- `.secrets/nvidia.env.fish` remains ignored and must not be read, printed, hashed, encoded, committed, or reported without explicit task authority.
+- Do not make any provider call without explicit authority.
+- Do not run a library scan automatically on page load.
+- Do not run migrations automatically.
+- Do not persist media records.
+- Do not rename, move, delete, tag, write sidecars, choose covers, download media, or mutate catalog truth.
+- Do not expose non-loopback service behavior.
+- Do not add CORS without authority.
+- Do not use browser credentials.
+- Do not install dependencies without authority.
 
-FrameNest AI analysis must remain strictly user-triggered and on-demand.
+## 7. Recommended next technical boundary
 
-Future gallery direction:
+This is non-authoritative planning context, not a task.
 
-- expose an explicit `Analyze` action;
-- show selected provider and model;
-- show local versus cloud execution;
-- show whether representative frames will leave the device;
-- allow canceling in-progress analysis;
-- present truthful animated progress states such as `Preparing representative frames...`, `Analyzing visual content...`, `Generating title and tags...`, and `Validating suggestions...`;
-- use premium motion such as subtle shimmer or fade transitions only when it does not imply unavailable backend certainty.
+The strongest next candidate is **user-triggered local media-analysis preview through the existing local web application**. The future Orchestrator should reassess this from current source before authorizing anything.
 
-AI output is an editable suggestion, not catalog truth. The review experience must allow the user to edit proposed title, description, collection, tags, and suggested filename; add or remove tags; accept the complete edited proposal; or reject it without mutation.
+Likely intended scope:
 
-No automatic library-wide analysis, background cloud submission, automatic tagging, automatic renaming, collection assignment, sidecar mutation, or suggestion persistence is permitted without future explicit authority.
+- select one candidate produced by explicit scan preview;
+- explicitly request local read-only analysis;
+- reuse the existing deterministic media-analysis application service;
+- return bounded technical metadata;
+- make up to three exact-distinct representative PNG frames available to the browser through a deliberately designed bounded delivery contract;
+- show a truthful local analysis state;
+- no automatic analysis;
+- no AI provider call;
+- no cloud transmission;
+- no persistence;
+- no temporary frame files left behind;
+- no arbitrary file access;
+- no path traversal;
+- no raw absolute media path in browser output;
+- no media streaming or full playback;
+- no cover selection yet.
 
-Cover and playback direction:
+The future Orchestrator must inspect and decide:
 
-- the user must later be able to scrub a video and select an exact frame as the cover;
-- store the selected cover timestamp independently from playback state;
-- the selected cover frame becomes the displayed cover and may be regenerated deterministically from its timestamp;
-- normal `Play` always starts at `00:00`;
-- a future explicit `Play from this position` action may start at the selected timestamp, but that is separate from normal Play and is not part of current implementation.
+- whether frames should use bounded inline encoding, a short-lived in-memory resource contract, or another testable same-origin mechanism;
+- request and response size limits;
+- cancellation and timeout behavior;
+- content types and cache headers;
+- safe resolution of library ID plus relative candidate path;
+- API error sanitization;
+- lifecycle and cleanup of any transient frame representation.
 
-## 8. Maintainability debt
+This handoff does not pre-accept any of those alternatives.
 
-Record only; no broad refactor is authorized by this handoff:
+## 8. Additional future boundaries
 
-- `tests/contract/test_catalog_cli.py` is oversized;
-- CLI command-family tests should likely be split by command family;
-- provider-specific composition and error mapping in the shared catalog CLI deserve a bounded review;
-- repetitive fixtures and assertions may be extractable without losing behavior-focused names;
-- long files or long test names alone do not justify architecture rewrites.
+- Persistent media catalog and migration `0004` remain undecided.
+- Premium gallery cards, covers, playback, downloads, Settings, provider selection, model discovery, and editable AI review remain future tasks.
+- AI remains on-demand.
+- AI output remains editable suggestion only.
+- Cover timestamp remains independent of playback start.
+- Normal Play must begin at `00:00`.
+- Unresolved NVIDIA `content=null` plus `reasoning_content` evidence remains preserved but must not block local UI progress.
+- Reasoning content must not be surfaced as the user-facing suggestion.
 
-## 9. Explicitly unimplemented scope
+## 9. Sanitized NVIDIA evidence
 
-Not implemented:
+Preserved sanitized facts only:
 
-- persistent scan records or scan history;
-- logical media, physical media-location, storage-volume, and series entities beyond existing identity values;
-- media catalog tables and migration `0004`;
-- persistent suggestions, automatic tagging, automatic rename, or review/apply workflow;
-- sidecars, thumbnails, covers, premium gallery, playback, sync, server aggregation, deployment;
-- GUI Settings, secure secret store, LM Studio adapter, Vercel adapter;
-- real `printit.mp4` validation after the latest response-shape diagnosis.
+- the last real synthetic provider call reached NVIDIA;
+- HTTP `200`;
+- one choice;
+- `finish_reason=stop`;
+- assistant `content=null`;
+- assistant `reasoning_content` was a short string;
+- no refusal;
+- no tool calls;
+- returned model: `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning`;
+- strict parser remained closed;
+- no successful real `printit.mp4` suggestion preview followed that diagnosis.
 
-## 10. Fresh Worker instance next sequence
+No raw reasoning content is included here.
 
-Planning context only; not task authority. The next authoritative Orchestrator prompt should use the smallest safe boundary.
+## 10. Handoff lifecycle
 
-1. Verify both closeout commits publicly.
-2. Reproduce the sanitized live response shape.
-3. Implement one narrow correction based only on the observed shape.
-4. Add one regression test.
-5. Rerun synthetic live NVIDIA validation.
-6. Run the real `printit.mp4` preview after synthetic success.
-7. Assess suggestion quality.
-8. Perform a bounded CLI/test maintainability refactor.
-9. Begin the first on-demand gallery Analyze UX vertical slice.
-10. Continue toward GUI Settings, secure secret store, LM Studio, Vercel, review/apply workflow, persistent media catalog, premium gallery, cover selection, and playback.
+- Classification: non-authoritative Worker-session handoff.
+- Intended consumer: fresh Worker instances during bootstrap.
+- Discoverability: repository root and Worker bootstrap reading order.
+- Retention: replace only at a future explicitly authorized Worker-session closeout.
+- Supersession and cleanup owner: a future closing Worker instance acting under explicit Orchestrator authority.
+- Git history is the archive; the active tree should contain only the latest handoff.
 
-## 11. Fresh Worker reading order
-
-1. [AGENTS.md](AGENTS.md)
-2. [BOOT_WORKER.md](BOOT_WORKER.md)
-3. [AP_WORKER.md](AP_WORKER.md)
-4. [NEXT_WORKER.md](NEXT_WORKER.md)
-5. [PRODUCT.md](PRODUCT.md), [SPEC.md](SPEC.md), [ROADMAP.md](ROADMAP.md), [SECURITY.md](SECURITY.md), [README.md](README.md)
-6. [docs/adr/README.md](docs/adr/README.md) and ADR-0001 through ADR-0016
-7. task-relevant source and tests
-8. the separate authoritative Orchestrator task prompt
-
-## 12. Worker-session context pressure
-
-This Worker instance handled multiple continuation tasks, live provider attempts, a provider-protocol implementation, a sanitized response-shape diagnosis, and closeout. Exact context telemetry is not exposed in the repository, but the session is materially context-heavy and is intentionally closed after this handoff to protect coherence.
-
-## 13. Protocol and lifecycle
-
-- Orchestrator communication with the Cooperator is Slovak.
-- Worker prompts and reports are English.
-- Worker reports must begin exactly with `### Report for ORCHESTRATOR_CHAT`.
-- The persistent protocol role is `WORKER`, independent of execution client, agent implementation, model, or model provider.
-- One Worker instance is a concrete agent temporarily assigned to the WORKER role.
-
-Artifact lifecycle:
-
-- classification: non-authoritative Worker-session handoff
-- intended consumer: future fresh Worker instances during bootstrap
-- discoverability: repository root and Worker bootstrap reading order
-- retention: replace only at a future explicitly authorized Worker-session closeout
-- supersession and cleanup owner: future closing Worker instance acting under explicit Orchestrator authority
-- Git history is the archive; the active tree must contain only the latest handoff
-
-Current Worker instance session: **CLOSED**. The persistent WORKER protocol role continues.
+Current Worker instance session: **CLOSED**. The persistent WORKER role continues.
