@@ -119,6 +119,7 @@ Implemented so far:
 - Initial local device registry core with pure-domain `Device`, application repository port, SQLAlchemy Core adapter, and `devices` table through revision `0002`
 - Initial local library registry core with pure-domain `Library`, `LibraryRoot`, application repository port, SQLAlchemy Core adapter, and `libraries` table through revision `0003`
 - Development operator catalog CLI (`framenest-catalog`) for device register, get, and list operations
+- Library catalog CLI commands for local library register, get, and list with lexical root-path preparation
 
 Still required for phase exit:
 

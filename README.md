@@ -69,18 +69,24 @@ Normal `poetry run framenest-server` startup does not apply migrations. Migratio
 
 ## Device Catalog CLI
 
-The `framenest-catalog` command is a development/operator boundary for local device registry operations. It does not migrate automatically and is not the final desktop UX. Only device registry commands exist today.
+The `framenest-catalog` command is a development/operator boundary for local device and library registry operations. It does not migrate automatically and is not the final desktop UX. Device and library registration commands exist today; library registration does not scan directory contents.
 
-After migrating the database:
+After migrating the database and registering a device:
 
 ```text
 poetry run framenest-db migrate
 poetry run framenest-catalog device register --display-name "My MacBook"
 poetry run framenest-catalog device list
 poetry run framenest-catalog device get --id "<device-id>"
+poetry run framenest-catalog library register \
+  --device-id "<device-id>" \
+  --display-name "Videos" \
+  --root "$HOME/Videos"
+poetry run framenest-catalog library list
+poetry run framenest-catalog library get --id "<library-id>"
 ```
 
-Each non-help invocation emits one compact JSON object to `stdout` on success or `stderr` on error.
+Library registration requires an already registered owning device and a database migrated to the packaged head. It checks that the supplied local root path exists and is a directory. It does not enumerate files, resolve symlinks to their targets, or scan the library contents. This remains an operator CLI, not the final desktop UX.
 
 ## Structured Logging
 

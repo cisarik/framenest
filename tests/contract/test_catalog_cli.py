@@ -484,3 +484,329 @@ def test_catalog_works_from_working_directory_outside_repository(tmp_path: Path)
 
     assert result.returncode == 0
     assert _parse_single_json_line(result.stdout)["device"]["display_name"] == "Remote CWD"
+
+
+def _register_device_for_library_tests(
+    *,
+    cwd: Path,
+    database_path: str,
+    display_name: str = "Studio Mac",
+) -> str:
+    result = _run_catalog_command(
+        "device",
+        "register",
+        "--display-name",
+        display_name,
+        cwd=cwd,
+        database_path=database_path,
+    )
+    assert result.returncode == 0
+    return _parse_single_json_line(result.stdout)["device"]["id"]
+
+
+def _native_root_flavor() -> str:
+    import os
+
+    return "windows" if os.name == "nt" else "posix"
+
+
+def test_library_help_lists_library_commands(tmp_path: Path) -> None:
+    result = subprocess.run(
+        [str(_require_catalog_console_script()), "library", "--help"],
+        cwd=tmp_path,
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=8.0,
+    )
+    assert result.returncode == 0
+    assert "register" in result.stdout
+    assert "list" in result.stdout
+
+
+def test_library_list_on_empty_registry(tmp_path: Path) -> None:
+    database_path = tmp_path / "catalog.sqlite3"
+    _run_db_migrate(cwd=tmp_path, database_path=str(database_path))
+
+    result = _run_catalog_command(
+        "library",
+        "list",
+        cwd=tmp_path,
+        database_path=str(database_path),
+    )
+
+    assert result.returncode == 0
+    assert result.stderr == ""
+    assert _parse_single_json_line(result.stdout) == {
+        "operation": "library.list",
+        "state": "ok",
+        "libraries": [],
+    }
+
+
+def test_library_register_and_get_roundtrip(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    database_path = tmp_path / "catalog.sqlite3"
+    library_dir = tmp_path / "Videos"
+    library_dir.mkdir()
+    _run_db_migrate(cwd=tmp_path, database_path=str(database_path))
+    device_id = _register_device_for_library_tests(
+        cwd=tmp_path,
+        database_path=str(database_path),
+    )
+
+    register = _run_catalog_command(
+        "library",
+        "register",
+        "--device-id",
+        device_id,
+        "--display-name",
+        "Videos",
+        "--root",
+        str(library_dir),
+        cwd=tmp_path,
+        database_path=str(database_path),
+    )
+
+    assert register.returncode == 0
+    payload = _parse_single_json_line(register.stdout)
+    assert payload["operation"] == "library.register"
+    library = payload["library"]
+    assert library["device_id"] == device_id
+    assert library["display_name"] == "Videos"
+    assert library["root"]["flavor"] == _native_root_flavor()
+    assert library["root"]["path"] == os.path.normpath(str(library_dir))
+
+    get_result = _run_catalog_command(
+        "library",
+        "get",
+        "--id",
+        library["id"],
+        cwd=tmp_path,
+        database_path=str(database_path),
+    )
+    assert get_result.returncode == 0
+    assert _parse_single_json_line(get_result.stdout)["library"] == library
+
+
+def test_library_register_relative_root_from_cwd(tmp_path: Path) -> None:
+    database_path = tmp_path / "catalog.sqlite3"
+    workdir = tmp_path / "work"
+    library_dir = workdir / "nested" / "library"
+    library_dir.mkdir(parents=True)
+    _run_db_migrate(cwd=tmp_path, database_path=str(database_path))
+    device_id = _register_device_for_library_tests(
+        cwd=tmp_path,
+        database_path=str(database_path),
+    )
+
+    result = _run_catalog_command(
+        "library",
+        "register",
+        "--device-id",
+        device_id,
+        "--display-name",
+        "Nested",
+        "--root",
+        "nested/library",
+        cwd=workdir,
+        database_path=str(database_path),
+    )
+
+    assert result.returncode == 0
+    library = _parse_single_json_line(result.stdout)["library"]
+    assert library["root"]["path"] == os.path.normpath(str(library_dir))
+
+
+def test_library_register_missing_device_returns_exit_3(tmp_path: Path) -> None:
+    database_path = tmp_path / "catalog.sqlite3"
+    library_dir = tmp_path / "Videos"
+    library_dir.mkdir()
+    _run_db_migrate(cwd=tmp_path, database_path=str(database_path))
+
+    result = _run_catalog_command(
+        "library",
+        "register",
+        "--device-id",
+        CANONICAL_UUID4_TEXT,
+        "--display-name",
+        "Videos",
+        "--root",
+        str(library_dir),
+        cwd=tmp_path,
+        database_path=str(database_path),
+    )
+
+    assert result.returncode == 3
+    payload = _parse_single_json_line(result.stderr)
+    assert payload == {
+        "operation": "library.register",
+        "state": "error",
+        "error_code": "FRAMENEST_LIBRARY_DEVICE_NOT_FOUND",
+        "message": "Owning device not found.",
+    }
+    assert CANONICAL_UUID4_TEXT not in result.stderr
+
+
+def test_library_register_duplicate_root_on_same_device_returns_exit_5(tmp_path: Path) -> None:
+    database_path = tmp_path / "catalog.sqlite3"
+    library_dir = tmp_path / "shared-root"
+    library_dir.mkdir()
+    _run_db_migrate(cwd=tmp_path, database_path=str(database_path))
+    device_id = _register_device_for_library_tests(
+        cwd=tmp_path,
+        database_path=str(database_path),
+    )
+    common_args = (
+        "library",
+        "register",
+        "--device-id",
+        device_id,
+        "--root",
+        str(library_dir),
+    )
+
+    first = _run_catalog_command(
+        *common_args,
+        "--display-name",
+        "First",
+        cwd=tmp_path,
+        database_path=str(database_path),
+    )
+    assert first.returncode == 0
+
+    second = _run_catalog_command(
+        *common_args,
+        "--display-name",
+        "Second",
+        cwd=tmp_path,
+        database_path=str(database_path),
+    )
+    assert second.returncode == 5
+    payload = _parse_single_json_line(second.stderr)
+    assert payload["error_code"] == "FRAMENEST_LIBRARY_ROOT_ALREADY_REGISTERED"
+    assert str(library_dir) not in second.stderr
+
+
+def test_library_register_same_root_on_different_devices_succeeds(tmp_path: Path) -> None:
+    database_path = tmp_path / "catalog.sqlite3"
+    library_dir = tmp_path / "shared-root"
+    library_dir.mkdir()
+    _run_db_migrate(cwd=tmp_path, database_path=str(database_path))
+    first_device = _register_device_for_library_tests(
+        cwd=tmp_path,
+        database_path=str(database_path),
+        display_name="First Device",
+    )
+    second_device = _register_device_for_library_tests(
+        cwd=tmp_path,
+        database_path=str(database_path),
+        display_name="Second Device",
+    )
+
+    first = _run_catalog_command(
+        "library",
+        "register",
+        "--device-id",
+        first_device,
+        "--display-name",
+        "First",
+        "--root",
+        str(library_dir),
+        cwd=tmp_path,
+        database_path=str(database_path),
+    )
+    second = _run_catalog_command(
+        "library",
+        "register",
+        "--device-id",
+        second_device,
+        "--display-name",
+        "Second",
+        "--root",
+        str(library_dir),
+        cwd=tmp_path,
+        database_path=str(database_path),
+    )
+
+    assert first.returncode == 0
+    assert second.returncode == 0
+
+
+def test_library_register_missing_root_returns_exit_2_without_path_leak(tmp_path: Path) -> None:
+    database_path = tmp_path / "catalog.sqlite3"
+    missing_root = tmp_path / "missing-library-root"
+    _run_db_migrate(cwd=tmp_path, database_path=str(database_path))
+    device_id = _register_device_for_library_tests(
+        cwd=tmp_path,
+        database_path=str(database_path),
+    )
+
+    result = _run_catalog_command(
+        "library",
+        "register",
+        "--device-id",
+        device_id,
+        "--display-name",
+        "Videos",
+        "--root",
+        str(missing_root),
+        cwd=tmp_path,
+        database_path=str(database_path),
+    )
+
+    assert result.returncode == 2
+    payload = _parse_single_json_line(result.stderr)
+    assert payload["error_code"] == "FRAMENEST_LIBRARY_ROOT_NOT_USABLE"
+    assert str(missing_root) not in result.stderr
+
+
+def test_library_get_missing_returns_exit_3(tmp_path: Path) -> None:
+    database_path = tmp_path / "catalog.sqlite3"
+    _run_db_migrate(cwd=tmp_path, database_path=str(database_path))
+
+    result = _run_catalog_command(
+        "library",
+        "get",
+        "--id",
+        CANONICAL_UUID4_TEXT,
+        cwd=tmp_path,
+        database_path=str(database_path),
+    )
+
+    assert result.returncode == 3
+    payload = _parse_single_json_line(result.stderr)
+    assert payload["error_code"] == "FRAMENEST_LIBRARY_NOT_FOUND"
+    assert CANONICAL_UUID4_TEXT not in result.stderr
+
+
+def test_library_get_rejects_malformed_ids(tmp_path: Path) -> None:
+    database_path = tmp_path / "catalog.sqlite3"
+    _run_db_migrate(cwd=tmp_path, database_path=str(database_path))
+    rejected = "12345678-1234-4234-9234-123456789ABC"
+
+    result = _run_catalog_command(
+        "library",
+        "get",
+        "--id",
+        rejected,
+        cwd=tmp_path,
+        database_path=str(database_path),
+    )
+
+    assert result.returncode == 2
+    assert rejected not in result.stdout + result.stderr
+
+
+def test_library_list_at_database_revision_0002_returns_not_ready(tmp_path: Path) -> None:
+    database_path = tmp_path / "behind-0002.sqlite3"
+    _upgrade_database_to_revision(database_path, "0002")
+
+    result = _run_catalog_command(
+        "library",
+        "list",
+        cwd=tmp_path,
+        database_path=str(database_path),
+    )
+
+    assert result.returncode == 4
+    assert _parse_single_json_line(result.stderr)["error_code"] == "FRAMENEST_CATALOG_NOT_READY"
