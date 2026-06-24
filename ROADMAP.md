@@ -56,7 +56,9 @@ Accepted so far:
 
 The initial scaffold decision gate is complete. A Poetry package scaffold, centralized configuration boundary, FastAPI application factory, typed health endpoint, contract tests, Uvicorn runtime dependency, startup wiring, and a runnable loopback-only server command now exist.
 
-Broader architecture decisions still open include local database/query strategy, sidecar manifest format and versioning, server/domain boundaries beyond the current skeleton, initial authentication boundary, media-tool distribution strategy, and Fedora deployment details.
+Broader architecture decisions still open include sidecar manifest format and versioning, server/domain boundaries beyond the current skeleton, initial authentication boundary, media-tool distribution strategy, and Fedora deployment details.
+
+Persistence strategy is accepted through [ADR-0010](docs/adr/0010-initial-persistence-foundation.md). SQLite catalog and migration implementation remain unimplemented.
 
 Key deliverables: remaining broader architecture ADRs and evidence as needed before later implementation phases.
 
@@ -96,11 +98,14 @@ Implemented so far:
 - Runnable loopback-only server process verified by tests and command output
 - Runtime health smoke verification
 - Structured logging foundation per [ADR-0009](docs/adr/0009-structured-logging-approach.md)
+- Persistence strategy accepted through [ADR-0010](docs/adr/0010-initial-persistence-foundation.md)
 
 Still required for phase exit:
 
-- SQLite development catalog
-- Migration mechanism
+- SQLite development catalog implementation
+- Migration mechanism implementation
+
+The next bounded implementation step is a minimal SQLAlchemy Core and Alembic persistence foundation per ADR-0010, not the media catalog.
 
 Key deliverables: loopback-only local development server skeleton, health endpoint, configuration boundary, structured logging, SQLite development catalog, migration mechanism, and tests.
 

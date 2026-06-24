@@ -34,3 +34,4 @@ An accepted ADR may only be changed by a later ADR that supersedes it. Editing a
 | 0007 | Python Settings Library | Accepted | 2026-06-24 | [0007-settings-library.md](0007-settings-library.md) |
 | 0008 | Initial ASGI Runtime | Accepted | 2026-06-24 | [0008-asgi-runtime.md](0008-asgi-runtime.md) |
 | 0009 | Initial Structured Logging Approach | Accepted | 2026-06-24 | [0009-structured-logging-approach.md](0009-structured-logging-approach.md) |
+| 0010 | Initial SQLite Persistence and Migration Strategy | Accepted | 2026-06-24 | [0010-initial-persistence-foundation.md](0010-initial-persistence-foundation.md) |
