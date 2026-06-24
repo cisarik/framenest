@@ -35,6 +35,12 @@ Override bind address with `FRAMENEST_HOST` and `FRAMENEST_PORT`. Default bindin
 
 Reload, deployment, systemd, and Tailscale behavior are not provided yet.
 
+## Structured Logging
+
+The development server emits one compact JSON object per log line to `stderr`.
+
+Logging uses a FrameNest-owned JSON formatter and centralized redaction boundary. Uvicorn access logging is initially disabled for privacy. There are no log files, rotation, retention enforcement, remote shipping, or correlation middleware yet.
+
 ## Product Vision
 
 FrameNest is intended to help people acquire, organize, browse, and maintain personal video and animated-media libraries while keeping local ownership central.

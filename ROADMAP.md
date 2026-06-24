@@ -52,7 +52,7 @@ Accepted so far:
 - macOS Python interpreter provider: `uv` for CPython 3.13.14 on Apple Silicon macOS through [ADR-0006](docs/adr/0006-macos-python-interpreter-provider.md).
 - Python settings library: `pydantic-settings` through [ADR-0007](docs/adr/0007-settings-library.md).
 - Initial ASGI runtime: Uvicorn through [ADR-0008](docs/adr/0008-asgi-runtime.md).
-- Initial structured logging approach: standard-library `logging` with a FrameNest-owned JSON formatter and redaction boundary through [ADR-0009](docs/adr/0009-structured-logging-approach.md); implementation pending.
+- Initial structured logging approach: standard-library `logging` with a FrameNest-owned JSON formatter and redaction boundary through [ADR-0009](docs/adr/0009-structured-logging-approach.md); implementation complete.
 
 The initial scaffold decision gate is complete. A Poetry package scaffold, centralized configuration boundary, FastAPI application factory, typed health endpoint, contract tests, Uvicorn runtime dependency, startup wiring, and a runnable loopback-only server command now exist.
 
@@ -95,10 +95,10 @@ Implemented so far:
 - Uvicorn runtime dependency and startup wiring
 - Runnable loopback-only server process verified by tests and command output
 - Runtime health smoke verification
+- Structured logging foundation per [ADR-0009](docs/adr/0009-structured-logging-approach.md)
 
 Still required for phase exit:
 
-- Structured logging implementation per [ADR-0009](docs/adr/0009-structured-logging-approach.md)
 - SQLite development catalog
 - Migration mechanism
 

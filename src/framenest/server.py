@@ -6,6 +6,7 @@ import uvicorn
 
 from framenest.adapters.api.application import create_app
 from framenest.configuration import FrameNestSettings, load_settings
+from framenest.structured_logging import build_uvicorn_log_config
 
 
 def create_server(
@@ -20,6 +21,8 @@ def create_server(
         workers=1,
         proxy_headers=False,
         forwarded_allow_ips="",
+        access_log=False,
+        log_config=build_uvicorn_log_config(),
     )
     return uvicorn.Server(config)
 

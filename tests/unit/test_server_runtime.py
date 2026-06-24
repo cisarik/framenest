@@ -164,6 +164,19 @@ def test_uvicorn_host_and_port_env_vars_do_not_override_framenest_settings(
     assert server.config.port == 8000
 
 
+def test_create_server_passes_framenest_log_config_and_disables_access_log(
+    settings_with_secret: FrameNestSettings,
+) -> None:
+    from framenest.server import create_server
+
+    server = create_server(settings=settings_with_secret)
+    assert isinstance(server.config.log_config, dict)
+    assert server.config.log_config["formatters"]["framenest_json"]["()"].endswith(
+        "FrameNestJsonFormatter"
+    )
+    assert server.config.access_log is False
+
+
 def test_proxy_headers_are_disabled_without_wildcard_trust(
     settings_with_secret: FrameNestSettings,
 ) -> None:
