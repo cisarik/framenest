@@ -84,9 +84,20 @@ poetry run framenest-catalog library register \
   --root "$HOME/Videos"
 poetry run framenest-catalog library list
 poetry run framenest-catalog library get --id "<library-id>"
+poetry run framenest-catalog library scan-preview \
+  --id "<library-id>"
 ```
 
-Library registration requires an already registered owning device and a database migrated to the packaged head. It checks that the supplied local root path exists and is a directory. It does not enumerate files, resolve symlinks to their targets, or scan the library contents. This remains an operator CLI, not the final desktop UX.
+Optional bounded limits:
+
+```text
+--max-entries
+--max-candidates
+```
+
+Library registration requires an already registered owning device and a database migrated to the packaged head. It checks that the supplied local root path exists and is a directory. It does not enumerate files, resolve symlinks to their targets, or scan the library contents.
+
+`library scan-preview` requires the same migrated database and an already registered library. The preview is read-only, writes no media records, skips nested symlinks and dot-prefixed entries, classifies candidates by extension only, and may return relative candidate paths. This remains a development/operator boundary, not the final desktop UX.
 
 ## Structured Logging
 

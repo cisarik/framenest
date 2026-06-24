@@ -14,6 +14,16 @@ from framenest.application.ports.device_repository import (
     DeviceRepository,
     FrameNestDeviceRepositoryError,
 )
+from framenest.application.library_scan import (
+    FrameNestLibraryScanError,
+    LibraryScanFailedError,
+    LibraryScanLimits,
+    LibraryScanNotFoundError,
+    LibraryScanPreviewResult,
+    LibraryScanUnavailableError,
+    PreviewLibraryScan,
+    default_scan_limits,
+)
 from framenest.application.ports.library_repository import (
     FrameNestLibraryRepositoryError,
     LibraryAlreadyExistsError,
@@ -32,6 +42,7 @@ from framenest.domain import (
     LibraryId,
     LibraryRoot,
 )
+from framenest.infrastructure.filesystem.library_scanner import LocalLibraryScanner
 from framenest.infrastructure.persistence.device_repository import SqliteDeviceRepository
 from framenest.infrastructure.persistence.engine import create_sqlite_engine, dispose_engine
 from framenest.infrastructure.persistence.errors import FrameNestPersistenceError
@@ -54,6 +65,8 @@ NOT_READY_CODE = "FRAMENEST_CATALOG_NOT_READY"
 NOT_READY_MESSAGE = "Catalog database is not ready. Run framenest-db migrate."
 COMMAND_FAILED_CODE = "FRAMENEST_CATALOG_COMMAND_FAILED"
 COMMAND_FAILED_MESSAGE = "Catalog command failed."
+SCAN_UNAVAILABLE_CODE = "FRAMENEST_LIBRARY_SCAN_UNAVAILABLE"
+SCAN_UNAVAILABLE_MESSAGE = "Library scan preview is not available."
 
 
 class _UsageError(Exception):
@@ -85,6 +98,10 @@ class _RootAlreadyRegisteredError(Exception):
 
 
 class _NotReadyError(Exception):
+    pass
+
+
+class _ScanUnavailableError(Exception):
     pass
 
 
@@ -160,6 +177,13 @@ def main(argv: Sequence[str] | None = None) -> int:
             message=NOT_READY_MESSAGE,
         )
         return 4
+    except _ScanUnavailableError:
+        _write_error(
+            operation=operation,
+            error_code=SCAN_UNAVAILABLE_CODE,
+            message=SCAN_UNAVAILABLE_MESSAGE,
+        )
+        return 6
     except (
         FrameNestPersistenceError,
         FrameNestDeviceRepositoryError,
@@ -197,6 +221,20 @@ def _build_parser() -> argparse.ArgumentParser:
     library_get = library_commands.add_parser("get")
     library_get.add_argument("--id", required=True, dest="library_id")
     library_commands.add_parser("list")
+    library_scan_preview = library_commands.add_parser("scan-preview")
+    library_scan_preview.add_argument("--id", required=True, dest="library_id")
+    library_scan_preview.add_argument(
+        "--max-entries",
+        type=int,
+        default=default_scan_limits().max_entries,
+        dest="max_entries",
+    )
+    library_scan_preview.add_argument(
+        "--max-candidates",
+        type=int,
+        default=default_scan_limits().max_candidates,
+        dest="max_candidates",
+    )
 
     return parser
 
@@ -206,7 +244,8 @@ def _operation_name(args: argparse.Namespace) -> str:
     operation = getattr(args, "operation", None)
     if resource not in {"device", "library"} or operation is None:
         return "unknown"
-    return f"{resource}.{operation}"
+    normalized_operation = str(operation).replace("-", "_")
+    return f"{resource}.{normalized_operation}"
 
 
 def _dispatch(args: argparse.Namespace, settings: FrameNestSettings) -> dict[str, Any]:
@@ -257,6 +296,10 @@ def _dispatch_library(args: argparse.Namespace, settings: FrameNestSettings) -> 
         )
     if args.operation == "list":
         return _with_library_repository(settings, _list_libraries)
+    if args.operation == "scan-preview":
+        library_id = _parse_library_id(args.library_id)
+        limits = _parse_scan_limits(args.max_entries, args.max_candidates)
+        return _with_scan_preview(settings, library_id, limits)
     raise _UsageError(INVALID_INPUT_MESSAGE)
 
 
@@ -365,6 +408,78 @@ def _get_library(repository: LibraryRepository, library_id: LibraryId) -> dict[s
 def _list_libraries(repository: LibraryRepository) -> dict[str, Any]:
     libraries = repository.list_all()
     return {"libraries": [_library_payload(library) for library in libraries]}
+
+
+def _parse_scan_limits(max_entries: object, max_candidates: object) -> LibraryScanLimits:
+    try:
+        return LibraryScanLimits(max_entries=max_entries, max_candidates=max_candidates)
+    except FrameNestLibraryScanError:
+        raise _InvalidInputError() from None
+
+
+def _scan_preview(
+    repository: LibraryRepository,
+    library_id: LibraryId,
+    limits: LibraryScanLimits,
+) -> dict[str, Any]:
+    service = PreviewLibraryScan(repository, LocalLibraryScanner())
+    try:
+        preview = service.execute(library_id, limits)
+    except LibraryScanNotFoundError:
+        raise _LibraryNotFoundError() from None
+    except LibraryScanUnavailableError:
+        raise _ScanUnavailableError() from None
+    except LibraryScanFailedError:
+        raise
+    return _scan_preview_payload(preview)
+
+
+def _scan_preview_payload(preview: LibraryScanPreviewResult) -> dict[str, Any]:
+    return {
+        "library_id": preview.library_id.to_string(),
+        "limits": {
+            "max_entries": preview.limits.max_entries,
+            "max_candidates": preview.limits.max_candidates,
+        },
+        "summary": {
+            "entries_seen": preview.summary.entries_seen,
+            "directories_seen": preview.summary.directories_seen,
+            "regular_files_seen": preview.summary.regular_files_seen,
+            "candidate_files_seen": preview.summary.candidate_files_seen,
+            "candidate_bytes_seen": preview.summary.candidate_bytes_seen,
+            "skipped_hidden_entries": preview.summary.skipped_hidden_entries,
+            "skipped_symlink_entries": preview.summary.skipped_symlink_entries,
+            "skipped_other_entries": preview.summary.skipped_other_entries,
+            "inaccessible_entries": preview.summary.inaccessible_entries,
+            "truncated": preview.summary.truncated,
+            "candidates_truncated": preview.summary.candidates_truncated,
+        },
+        "candidates": [
+            {
+                "relative_path": candidate.relative_path,
+                "kind": candidate.kind.value,
+                "extension": candidate.extension,
+                "size_bytes": candidate.size_bytes,
+            }
+            for candidate in preview.candidates
+        ],
+    }
+
+
+def _with_scan_preview(
+    settings: FrameNestSettings,
+    library_id: LibraryId,
+    limits: LibraryScanLimits,
+) -> dict[str, Any]:
+    status = inspect_database_migration_status(settings)
+    if status.state != "at_head":
+        raise _NotReadyError()
+    engine = create_sqlite_engine(settings.database_path)
+    try:
+        repository = SqliteLibraryRepository(engine)
+        return _scan_preview(repository, library_id, limits)
+    finally:
+        dispose_engine(engine)
 
 
 def _device_payload(device: Device) -> dict[str, str]:

@@ -810,3 +810,260 @@ def test_library_list_at_database_revision_0002_returns_not_ready(tmp_path: Path
 
     assert result.returncode == 4
     assert _parse_single_json_line(result.stderr)["error_code"] == "FRAMENEST_CATALOG_NOT_READY"
+
+
+def _register_library_for_scan_tests(
+    *,
+    cwd: Path,
+    database_path: str,
+    library_dir: Path,
+    display_name: str = "Videos",
+) -> str:
+    device_id = _register_device_for_library_tests(cwd=cwd, database_path=database_path)
+    register = _run_catalog_command(
+        "library",
+        "register",
+        "--device-id",
+        device_id,
+        "--display-name",
+        display_name,
+        "--root",
+        str(library_dir),
+        cwd=cwd,
+        database_path=database_path,
+    )
+    assert register.returncode == 0
+    return _parse_single_json_line(register.stdout)["library"]["id"]
+
+
+def test_library_scan_preview_help_lists_command(tmp_path: Path) -> None:
+    result = subprocess.run(
+        [str(_require_catalog_console_script()), "library", "scan-preview", "--help"],
+        cwd=tmp_path,
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=8.0,
+    )
+    assert result.returncode == 0
+    assert "--id" in result.stdout
+    assert "--max-entries" in result.stdout
+
+
+def test_library_scan_preview_returns_one_json_object(tmp_path: Path) -> None:
+    database_path = tmp_path / "catalog.sqlite3"
+    library_dir = tmp_path / "Videos"
+    library_dir.mkdir()
+    (library_dir / "clip.mkv").write_bytes(b"x" * 3)
+    _run_db_migrate(cwd=tmp_path, database_path=str(database_path))
+    library_id = _register_library_for_scan_tests(
+        cwd=tmp_path,
+        database_path=str(database_path),
+        library_dir=library_dir,
+    )
+
+    result = _run_catalog_command(
+        "library",
+        "scan-preview",
+        "--id",
+        library_id,
+        cwd=tmp_path,
+        database_path=str(database_path),
+    )
+
+    assert result.returncode == 0
+    assert result.stderr == ""
+    payload = _parse_single_json_line(result.stdout)
+    assert payload["operation"] == "library.scan_preview"
+    assert payload["state"] == "ok"
+    assert payload["library_id"] == library_id
+    assert payload["limits"] == {"max_entries": 100000, "max_candidates": 1000}
+    assert payload["candidates"] == [
+        {
+            "relative_path": "clip.mkv",
+            "kind": "video",
+            "extension": ".mkv",
+            "size_bytes": 3,
+        }
+    ]
+    combined = result.stdout + result.stderr
+    assert str(library_dir) not in combined
+    assert str(database_path) not in combined
+
+
+def test_library_scan_preview_custom_limits(tmp_path: Path) -> None:
+    database_path = tmp_path / "catalog.sqlite3"
+    library_dir = tmp_path / "Videos"
+    library_dir.mkdir()
+    _run_db_migrate(cwd=tmp_path, database_path=str(database_path))
+    library_id = _register_library_for_scan_tests(
+        cwd=tmp_path,
+        database_path=str(database_path),
+        library_dir=library_dir,
+    )
+
+    result = _run_catalog_command(
+        "library",
+        "scan-preview",
+        "--id",
+        library_id,
+        "--max-entries",
+        "10",
+        "--max-candidates",
+        "5",
+        cwd=tmp_path,
+        database_path=str(database_path),
+    )
+
+    assert result.returncode == 0
+    payload = _parse_single_json_line(result.stdout)
+    assert payload["limits"] == {"max_entries": 10, "max_candidates": 5}
+
+
+def test_library_scan_preview_invalid_limits_return_exit_2(tmp_path: Path) -> None:
+    from framenest.adapters.cli import catalog
+
+    database_path = tmp_path / "catalog.sqlite3"
+    library_dir = tmp_path / "Videos"
+    library_dir.mkdir()
+    _run_db_migrate(cwd=tmp_path, database_path=str(database_path))
+    library_id = _register_library_for_scan_tests(
+        cwd=tmp_path,
+        database_path=str(database_path),
+        library_dir=tmp_path / "Videos",
+    )
+
+    exit_code = catalog.main(
+        [
+            "library",
+            "scan-preview",
+            "--id",
+            library_id,
+            "--max-entries",
+            "0",
+        ]
+    )
+    assert exit_code == 2
+
+
+def test_library_scan_preview_missing_library_returns_exit_3(tmp_path: Path) -> None:
+    database_path = tmp_path / "catalog.sqlite3"
+    _run_db_migrate(cwd=tmp_path, database_path=str(database_path))
+
+    result = _run_catalog_command(
+        "library",
+        "scan-preview",
+        "--id",
+        CANONICAL_UUID4_TEXT,
+        cwd=tmp_path,
+        database_path=str(database_path),
+    )
+
+    assert result.returncode == 3
+    payload = _parse_single_json_line(result.stderr)
+    assert payload == {
+        "operation": "library.scan_preview",
+        "state": "error",
+        "error_code": "FRAMENEST_LIBRARY_NOT_FOUND",
+        "message": "Library not found.",
+    }
+
+
+def test_library_scan_preview_unavailable_root_returns_exit_6(tmp_path: Path) -> None:
+    database_path = tmp_path / "catalog.sqlite3"
+    library_dir = tmp_path / "Videos"
+    library_dir.mkdir()
+    _run_db_migrate(cwd=tmp_path, database_path=str(database_path))
+    library_id = _register_library_for_scan_tests(
+        cwd=tmp_path,
+        database_path=str(database_path),
+        library_dir=library_dir,
+    )
+    library_dir.rmdir()
+
+    result = _run_catalog_command(
+        "library",
+        "scan-preview",
+        "--id",
+        library_id,
+        cwd=tmp_path,
+        database_path=str(database_path),
+    )
+
+    assert result.returncode == 6
+    payload = _parse_single_json_line(result.stderr)
+    assert payload == {
+        "operation": "library.scan_preview",
+        "state": "error",
+        "error_code": "FRAMENEST_LIBRARY_SCAN_UNAVAILABLE",
+        "message": "Library scan preview is not available.",
+    }
+    assert str(library_dir) not in result.stderr
+
+
+def test_library_scan_preview_at_database_revision_0002_returns_not_ready(tmp_path: Path) -> None:
+    database_path = tmp_path / "behind-0002.sqlite3"
+    _upgrade_database_to_revision(database_path, "0002")
+
+    result = _run_catalog_command(
+        "library",
+        "scan-preview",
+        "--id",
+        CANONICAL_UUID4_TEXT,
+        cwd=tmp_path,
+        database_path=str(database_path),
+    )
+
+    assert result.returncode == 4
+    assert _parse_single_json_line(result.stderr)["error_code"] == "FRAMENEST_CATALOG_NOT_READY"
+
+
+def test_library_scan_preview_does_not_execute_migrations(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from framenest.adapters.cli import catalog
+
+    database_path = tmp_path / "no-migrate.sqlite3"
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("FRAMENEST_DATABASE_PATH", str(database_path))
+
+    def fail_upgrade(*args: object, **kwargs: object) -> object:
+        raise AssertionError("catalog CLI must not execute migrations")
+
+    monkeypatch.setattr(
+        "framenest.infrastructure.persistence.migrations.upgrade_database_to_head",
+        fail_upgrade,
+    )
+
+    assert catalog.main(["library", "scan-preview", "--id", CANONICAL_UUID4_TEXT]) == 4
+    assert not database_path.exists()
+
+
+def test_library_scan_preview_direct_process_has_no_traceback_or_leaks(tmp_path: Path) -> None:
+    database_path = tmp_path / "process.sqlite3"
+    library_dir = tmp_path / "Videos"
+    library_dir.mkdir()
+    _run_db_migrate(cwd=tmp_path, database_path=str(database_path))
+    library_id = _register_library_for_scan_tests(
+        cwd=tmp_path,
+        database_path=str(database_path),
+        library_dir=library_dir,
+    )
+    outside_cwd = tmp_path / "outside"
+    outside_cwd.mkdir()
+
+    result = _run_catalog_command(
+        "library",
+        "scan-preview",
+        "--id",
+        library_id,
+        cwd=outside_cwd,
+        database_path=str(database_path),
+    )
+
+    assert result.returncode == 0
+    assert "Traceback" not in result.stdout + result.stderr
+    assert PRIVATE_DATABASE_PATH not in result.stdout + result.stderr
+    assert "INSERT INTO" not in result.stdout + result.stderr
+    assert str(library_dir) not in result.stdout + result.stderr

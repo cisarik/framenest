@@ -138,9 +138,23 @@ Boundaries: server-first implementation priority MUST NOT make the desktop produ
 
 ## Phase 5 — Local Catalog and Library Scanning
 
-Status: planned.
+Status: in progress.
 
 Goal: register and scan local libraries safely.
+
+Implemented within this phase:
+
+- library registration through the development catalog CLI;
+- safe read-only library scan preview through `framenest-catalog library scan-preview` per [ADR-0014](docs/adr/0014-safe-library-scan-preview.md).
+
+Still unimplemented within this phase:
+
+- persistent metadata collection;
+- media catalog tables;
+- availability tracking;
+- storage capacity reporting;
+- rebuildable local index persistence;
+- sidecars and rebuild behavior.
 
 Key deliverables: library registration, safe scanning, metadata collection, availability tracking, storage capacity reporting, rebuildable local index, and tests.
 

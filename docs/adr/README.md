@@ -38,3 +38,4 @@ An accepted ADR may only be changed by a later ADR that supersedes it. Editing a
 | 0011 | Stable Domain Identities | Accepted | 2026-06-24 | [0011-stable-domain-identities.md](0011-stable-domain-identities.md) |
 | 0012 | Initial Device Registry and Repository Boundary | Accepted | 2026-06-24 | [0012-initial-device-registry.md](0012-initial-device-registry.md) |
 | 0013 | Initial Library Registry and Device-Local Root Locators | Accepted | 2026-06-24 | [0013-initial-library-registry.md](0013-initial-library-registry.md) |
+| 0014 | Safe Read-Only Library Scan Preview | Accepted | 2026-06-24 | [0014-safe-library-scan-preview.md](0014-safe-library-scan-preview.md) |
