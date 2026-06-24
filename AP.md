@@ -317,3 +317,68 @@ The Orchestrator evaluates the report, asks the Cooperator to approve a directio
 The Worker implements only the authorized change, validates it, reports the result, and commits only if Git writes are authorized.
 
 The Orchestrator verifies the public commit before authorizing the next step.
+
+## 34. Compact Communication Mode
+
+Repositories MAY use a compact communication mode to reduce prompt and report verbosity without weakening authority, safety, or evidence requirements.
+
+### Worker prompts
+
+A compact prompt MAY reference stable protocol documents such as `AGENTS.md`, `BOOT_WORKER.md`, and `AP_WORKER.md` instead of repeating them verbatim.
+
+A compact prompt MUST still explicitly contain:
+
+- task ID and goal;
+- working directory;
+- expected repository state or HEAD;
+- task-specific allowed paths;
+- task-specific scope prohibitions;
+- Git write authority;
+- required validation;
+- acceptance and stopping conditions;
+- required report format.
+
+Stable restrictions already defined in repository protocol documents need not be copied into every prompt.
+
+### Worker reports
+
+Worker reports MUST be evidence-dense and MUST NOT restate the task.
+
+Unless a task explicitly requires more detail, a report SHOULD contain:
+
+1. status;
+2. start and end HEAD;
+3. changed files and short purpose;
+4. tests and validation results;
+5. commit and push result;
+6. deviations or risks;
+7. one proposed next step.
+
+Summarize command execution instead of listing every command.
+
+Include full command output only when:
+
+- a command failed;
+- unexpected state occurred;
+- evidence cannot be summarized safely;
+- the Orchestrator explicitly requested the full output.
+
+Target a concise report, normally no more than approximately 800–1,000 words.
+
+Safety-relevant evidence MUST NOT be omitted merely to satisfy brevity.
+
+### Fresh Worker startup
+
+A separate bootstrap-only task is optional, not universally mandatory.
+
+For a normal low- or medium-risk continuation, the first implementation prompt MAY contain a short mandatory read-only bootstrap gate before modifications.
+
+A separate bootstrap-only task SHOULD still be used when:
+
+- repository identity is uncertain;
+- the working tree may be dirty;
+- environment state is uncertain;
+- security-sensitive work is next;
+- the Orchestrator explicitly requires it.
+
+The Worker MUST stop before modification if the integrated bootstrap gate fails.

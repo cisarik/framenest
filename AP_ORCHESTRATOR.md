@@ -178,3 +178,29 @@ Recovery tasks MUST remain bounded. The Orchestrator SHOULD avoid turning a fail
 - Verify public commits when available.
 - Decide the next smallest step.
 - Close or hand off the session deliberately.
+
+## Compact Communication Mode
+
+The Orchestrator SHOULD use compact Worker prompts and reports when repository protocol documents already define stable safety rules.
+
+### Prompt shaping
+
+A compact prompt MUST still include task ID, goal, working directory, expected HEAD or repository state, allowed paths, prohibitions, Git authority, validation, acceptance criteria, stopping conditions, and report format.
+
+The Orchestrator MAY omit verbatim repetition of rules already recorded in `AGENTS.md`, `BOOT_WORKER.md`, and `AP_WORKER.md`.
+
+### Report review
+
+The Orchestrator SHOULD expect evidence-dense English Worker reports using the heading `### Report for ORCHESTRATOR_CHAT`.
+
+Unless a task requires more detail, the report SHOULD cover status, start and end HEAD, changed files, validation, commit or push result, deviations, and one next step.
+
+The Orchestrator communicates with the Cooperator in Slovak.
+
+### Fresh Worker startup
+
+A separate bootstrap-only task is optional. For low- or medium-risk continuation, the first implementation prompt MAY include a short read-only bootstrap gate before modifications.
+
+Require a separate bootstrap-only task when repository identity, working-tree cleanliness, environment state, or security sensitivity is uncertain.
+
+At session close, update the relevant NEXT handoff and stop.

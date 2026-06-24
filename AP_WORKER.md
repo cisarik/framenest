@@ -175,3 +175,43 @@ The Worker MUST stop after closeout without beginning another task.
 A fresh bootstrap and separate authoritative task are required in the next Worker session.
 
 The Worker MUST NOT silently rely on automatic summarization as a substitute for repository evidence or explicit handoff files.
+
+## Compact Communication Mode
+
+### Prompts
+
+Worker prompts are English.
+
+A compact prompt MAY reference stable protocol documents instead of repeating them.
+
+The Worker MUST still verify every task-specific boundary explicitly stated in the current prompt: goal, working directory, expected HEAD, allowed paths, prohibitions, Git authority, validation, acceptance criteria, stopping conditions, and report format.
+
+### Reports
+
+Worker reports are English and MUST begin with:
+
+`### Report for ORCHESTRATOR_CHAT`
+
+Unless the task requires more detail, the report SHOULD contain:
+
+1. status;
+2. start and end HEAD;
+3. changed files and short purpose;
+4. tests and validation results;
+5. commit and push result;
+6. deviations or risks;
+7. one proposed next step.
+
+Summarize commands instead of listing every command.
+
+Include full command output only for failures, unexpected state, safety-critical evidence, or explicit Orchestrator request.
+
+Target approximately 800–1,000 words unless failure evidence requires more.
+
+### Integrated bootstrap gate
+
+A separate bootstrap-only task is optional.
+
+When the current task includes a short read-only bootstrap gate, the Worker MUST complete it before modification and MUST stop if it fails.
+
+Use a separate bootstrap-only task when repository identity, cleanliness, environment state, or security sensitivity is uncertain.

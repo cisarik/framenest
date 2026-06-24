@@ -14,13 +14,17 @@ The WORKER is Codex or a Cursor agent operating inside the repository. The Worke
 
 ## Language Rules
 
-Repository documentation must be written in professional English unless a task explicitly says otherwise.
+Repository documentation and code must be written in professional English unless a task explicitly says otherwise.
 
-Worker reports to the Orchestrator must be written in Slovak and begin with:
+Worker prompts are English.
+
+Worker reports are English and must begin with:
 
 `### Report for ORCHESTRATOR_CHAT`
 
-Do not use Czech in repository documents or Worker reports.
+Orchestrator communication with the Cooperator is Slovak.
+
+Do not use Czech in repository documents, Worker prompts, or Worker reports.
 
 ## Operating Rules
 
@@ -40,7 +44,7 @@ When commits are pushed, the Orchestrator should compare the public commit SHA, 
 
 ## Source-of-Truth Conflict Handling
 
-Repository files describe documented and implemented state. Tests describe verified behavior. Git history describes committed changes. Product foundation documents (`PRODUCT.md`, `SPEC.md`, and `ROADMAP.md`) are committed. The initial accepted architecture package includes [ADR-0001](docs/adr/0001-supported-python-version.md) (CPython 3.13), [ADR-0002](docs/adr/0002-python-environment-and-dependency-manager.md) (Poetry), [ADR-0003](docs/adr/0003-initial-server-api-framework.md) (FastAPI), [ADR-0004](docs/adr/0004-repository-layout.md) (hybrid staged repository layout), and [ADR-0005](docs/adr/0005-configuration-strategy.md) (layered configuration strategy). The initial scaffold decision gate is complete. A subsequent accepted decision, [ADR-0006](docs/adr/0006-macos-python-interpreter-provider.md), records `uv` as the Apple Silicon macOS CPython 3.13.14 interpreter provider while Poetry remains the unchanged project dependency and virtual-environment authority. Application code still requires a separate bounded Orchestrator task. Safe loopback defaults and configuration precedence tests are mandatory. Domain code must not depend on a concrete settings library. Future accepted decisions require bounded tasks and ADRs recorded in [docs/adr/](docs/adr/README.md).
+Repository files describe documented and implemented state. Tests describe verified behavior. Git history describes committed changes. Product foundation documents (`PRODUCT.md`, `SPEC.md`, and `ROADMAP.md`) are committed. The initial accepted architecture package includes [ADR-0001](docs/adr/0001-supported-python-version.md) (CPython 3.13), [ADR-0002](docs/adr/0002-python-environment-and-dependency-manager.md) (Poetry), [ADR-0003](docs/adr/0003-initial-server-api-framework.md) (FastAPI), [ADR-0004](docs/adr/0004-repository-layout.md) (hybrid staged repository layout), and [ADR-0005](docs/adr/0005-configuration-strategy.md) (layered configuration strategy). The initial scaffold decision gate is complete. A subsequent accepted decision, [ADR-0006](docs/adr/0006-macos-python-interpreter-provider.md), records `uv` as the Apple Silicon macOS CPython 3.13.14 interpreter provider while Poetry remains the unchanged project dependency and virtual-environment authority. A further accepted decision, [ADR-0007](docs/adr/0007-settings-library.md), records `pydantic-settings` as the concrete settings adapter while the domain layer remains independent of Pydantic. Application code still requires a separate bounded Orchestrator task. Safe loopback defaults and configuration precedence tests are mandatory. Domain code must not depend on a concrete settings library. Future accepted decisions require bounded tasks and ADRs recorded in [docs/adr/](docs/adr/README.md).
 
 Handoff files describe session state but do not independently redefine permanent strategy.
 
@@ -80,4 +84,4 @@ General session rotation and context-pressure rules are in [AP.md](AP.md), secti
 - [SPEC.md](SPEC.md): normative product and system requirements.
 - [ROADMAP.md](ROADMAP.md): staged, evidence-based development plan.
 
-The initial accepted architecture package includes [ADR-0001](docs/adr/0001-supported-python-version.md) (CPython 3.13), [ADR-0002](docs/adr/0002-python-environment-and-dependency-manager.md) (Poetry), [ADR-0003](docs/adr/0003-initial-server-api-framework.md) (FastAPI), [ADR-0004](docs/adr/0004-repository-layout.md) (hybrid staged repository layout), and [ADR-0005](docs/adr/0005-configuration-strategy.md) (layered configuration strategy). The initial scaffold decision gate is complete. A subsequent accepted decision, [ADR-0006](docs/adr/0006-macos-python-interpreter-provider.md), records `uv` as the Apple Silicon macOS CPython 3.13.14 interpreter provider while Poetry remains the unchanged project dependency and virtual-environment authority. Application code still requires a separate bounded Orchestrator task. Safe loopback defaults and configuration precedence tests are mandatory. Domain code must not depend on a concrete settings library. Future accepted decisions require bounded tasks and ADRs recorded in [docs/adr/](docs/adr/README.md).
+The initial accepted architecture package includes [ADR-0001](docs/adr/0001-supported-python-version.md) (CPython 3.13), [ADR-0002](docs/adr/0002-python-environment-and-dependency-manager.md) (Poetry), [ADR-0003](docs/adr/0003-initial-server-api-framework.md) (FastAPI), [ADR-0004](docs/adr/0004-repository-layout.md) (hybrid staged repository layout), and [ADR-0005](docs/adr/0005-configuration-strategy.md) (layered configuration strategy). The initial scaffold decision gate is complete. A subsequent accepted decision, [ADR-0006](docs/adr/0006-macos-python-interpreter-provider.md), records `uv` as the Apple Silicon macOS CPython 3.13.14 interpreter provider while Poetry remains the unchanged project dependency and virtual-environment authority. A further accepted decision, [ADR-0007](docs/adr/0007-settings-library.md), records `pydantic-settings` as the concrete settings adapter while the domain layer remains independent of Pydantic. Application code still requires a separate bounded Orchestrator task. Safe loopback defaults and configuration precedence tests are mandatory. Domain code must not depend on a concrete settings library. Future accepted decisions require bounded tasks and ADRs recorded in [docs/adr/](docs/adr/README.md).

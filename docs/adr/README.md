@@ -31,3 +31,4 @@ An accepted ADR may only be changed by a later ADR that supersedes it. Editing a
 | 0004 | Repository Layout | Accepted | 2026-06-23 | [0004-repository-layout.md](0004-repository-layout.md) |
 | 0005 | Configuration Strategy | Accepted | 2026-06-23 | [0005-configuration-strategy.md](0005-configuration-strategy.md) |
 | 0006 | macOS Python Interpreter Provider | Accepted | 2026-06-23 | [0006-macos-python-interpreter-provider.md](0006-macos-python-interpreter-provider.md) |
+| 0007 | Python Settings Library | Accepted | 2026-06-24 | [0007-settings-library.md](0007-settings-library.md) |

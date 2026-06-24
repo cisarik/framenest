@@ -82,11 +82,17 @@ The Worker must not claim success without evidence.
 
 ## Language and Reports
 
-Repository documentation must be written in professional English unless a task explicitly says otherwise.
+Repository documentation and code must be written in professional English unless a task explicitly says otherwise.
 
-Worker reports must be written in Slovak and begin with:
+Worker prompts are English.
+
+Worker reports are English and must begin with:
 
 `### Report for ORCHESTRATOR_CHAT`
+
+Orchestrator communication with the Cooperator is Slovak.
+
+Do not use Czech in repository documents, Worker prompts, or Worker reports.
 
 ## Partial Completion and Deviations
 
