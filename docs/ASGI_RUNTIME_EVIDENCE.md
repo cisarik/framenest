@@ -9,6 +9,14 @@
 | Repository start HEAD | `ee04aa649eb77d72e46166c00da38b09636bb465` |
 | Implementation status | **Unauthorized.** No ASGI runtime is installed, wired, or selected by this document. |
 | ADR status | No ADR created or modified by this task |
+| **Classification** | Temporary committed decision evidence |
+| **Authority** | Non-authoritative |
+| **Intended consumer** | The future Accepted ADR selecting the FrameNest ASGI runtime |
+| **Discoverability** | Linked from [docs/adr/README.md](adr/README.md) while the decision remains open |
+| **Retention trigger** | Delete after material conclusions and relevant primary-source references are transferred into the Accepted ASGI runtime ADR |
+| **Cleanup timing** | Deletion and inbound-link removal MUST occur in the same bounded ADR-acceptance task |
+| **Cleanup owner** | An Orchestrator-authorized Worker |
+| **Historical preservation** | Git history remains the archive |
 
 This file collects primary-source research to support a future Cooperator decision and a separate bounded ADR task. Provisional analysis appears only in sections explicitly marked **Worker analysis**.
 

@@ -106,6 +106,25 @@ Unexpected state MUST be reported with evidence.
 
 Risks should be evidence-based and should not be used to introduce unauthorized work.
 
+## Artifact Creation, Consumption, and Cleanup
+
+The Worker executes artifact lifecycle authority but does not invent product or architecture decisions.
+
+The Worker MUST:
+
+- create committed research or evidence documentation only when explicitly authorized;
+- verify that the task specifies classification, consumer, status, discoverability, retention trigger, and cleanup responsibility;
+- stop before creating a new committed evidence artifact if required lifecycle authority is materially missing;
+- never infer that a retention trigger grants deletion permission;
+- delete an artifact only when the current task explicitly authorizes that exact cleanup;
+- transfer material conclusions, constraints, and necessary references into the durable consumer before deleting temporary evidence;
+- remove or replace inbound links in the same authorized change;
+- never delete normative or retained artifacts merely because they appear old;
+- avoid leaving temporary, generated, duplicate, or orphan repository files;
+- report whether each relevant artifact was created, retained, consumed, superseded, or deleted;
+- report its consumer and final discoverability state;
+- verify changed paths and broken relative links before completion.
+
 ## Report Evidence
 
 Worker reports SHOULD include commands run, key outputs, files changed, validation results, Git status, commit SHAs when applicable, deviations, risks, and next smallest suggested step.
@@ -130,6 +149,7 @@ If a commit or push was authorized, the Worker SHOULD report local HEAD, remote 
 - Confirm files allowed to change.
 - Confirm allowed and forbidden commands.
 - Identify stopping conditions.
+- If creating committed evidence, confirm classification, consumer, authority, discoverability, retention trigger, and cleanup owner are defined in the task.
 
 ## Worker Checklist: During Change
 
@@ -139,6 +159,7 @@ If a commit or push was authorized, the Worker SHOULD report local HEAD, remote 
 - Do not access secrets.
 - Do not install dependencies unless explicitly authorized.
 - Keep evidence for important decisions.
+- When consuming temporary evidence, transfer material conclusions and citations into the durable consumer before deletion.
 
 ## Worker Checklist: After Change
 
@@ -148,6 +169,14 @@ If a commit or push was authorized, the Worker SHOULD report local HEAD, remote 
 - Confirm changed paths are exactly authorized.
 - Confirm Git status.
 - Review diffs before any authorized Git write.
+- Verify inbound links to created, retained, consumed, or deleted artifacts.
+
+## Worker Checklist: Before Deletion
+
+- Confirm the current task explicitly authorizes deletion of the exact artifact.
+- Confirm material conclusions and necessary references were transferred to the durable consumer.
+- Confirm inbound links will be removed or replaced in the same authorized change.
+- Do not delete normative or retained artifacts without explicit supersession or retirement authority.
 
 ## Worker Checklist: Before Report
 
@@ -156,6 +185,7 @@ If a commit or push was authorized, the Worker SHOULD report local HEAD, remote 
 - Record validation results.
 - Record commit and push evidence if applicable.
 - Report deviations and risks.
+- Report artifact lifecycle state for relevant documentation artifacts.
 - Suggest only the next smallest authorized or review step.
 
 ## Session Rotation and Context Pressure

@@ -70,6 +70,8 @@ Suitable artifacts include individual files, diffs, Git status, test output, com
 
 The Orchestrator SHOULD avoid requesting broad scans when a targeted inspection is sufficient.
 
+Committed documentation and evidence artifacts MUST follow the classification, consumer, retention, and cleanup rules in section **Artifact Lifecycle and Repository Hygiene**.
+
 ## 8. Task Shaping
 
 A Worker task SHOULD be small enough to verify and large enough to produce a coherent result.
@@ -176,9 +178,11 @@ High-risk tasks include destructive operations, credential handling, production 
 
 Destructive operations MUST require explicit authorization.
 
-Examples include deleting files, dropping data, overwriting history, rotating credentials, removing remote resources, or changing production configuration.
+Examples include deleting files, dropping data, overwriting history, rotating credentials, removing remote resources, changing production configuration, or deleting committed evidence artifacts.
 
 The Worker MUST stop if destructive scope is ambiguous.
+
+Deleting temporary or retained evidence is destructive even when a retention trigger has been reached. A retention trigger identifies when cleanup may be appropriate; it does not grant deletion permission by itself.
 
 ## 21. Security-Sensitive Operations
 
@@ -268,6 +272,8 @@ Every Worker still requires a separate authoritative task from the Orchestrator.
 
 Handoff files SHOULD be replaced with current state rather than grow into endless chronological logs.
 
+Handoffs MAY reference temporary committed evidence while a decision remains open. After that evidence is consumed by a durable artifact, handoffs MUST reference the accepted durable artifact instead.
+
 The closing session MUST stop after the handoff report.
 
 A new session MUST independently verify the current repository HEAD and public committed state.
@@ -280,27 +286,29 @@ The Orchestrator MUST stop or reframe when the next step requires Cooperator app
 
 ## 30. Anti-Patterns
 
-Anti-patterns include silent scope expansion, implementation before inspection, treating reports as proof, conflating public commits with local changes, inventing decisions, hiding failures, broad filesystem inspection, unnecessary package installation, and Git writes without permission.
+Anti-patterns include silent scope expansion, implementation before inspection, treating reports as proof, conflating public commits with local changes, inventing decisions, hiding failures, broad filesystem inspection, unnecessary package installation, Git writes without permission, orphaned committed evidence, unnecessary research-file creation, stale evidence references, and retaining consumed temporary evidence without explicit continuing-value justification.
 
 ## 31. Minimal Orchestrator Loop
 
 1. Understand Cooperator intent.
 2. Inspect source-of-truth evidence.
 3. Choose the smallest coherent next step.
-4. Issue one bounded Worker task.
-5. Review the Worker report.
-6. Verify public commits when available.
-7. Decide to accept, correct, continue, pause, or close.
+4. Decide whether a Worker report is sufficient or a committed artifact is genuinely needed.
+5. Issue one bounded Worker task with artifact lifecycle metadata when documentation is required.
+6. Review the Worker report.
+7. Verify public commits when available.
+8. Decide to accept, correct, continue, pause, or close.
 
 ## 32. Minimal Worker Loop
 
 1. Read the complete task.
 2. Verify working directory, repository identity, and preconditions.
-3. Inspect before changing.
-4. Modify only authorized paths.
-5. Run permitted validation.
-6. Perform authorized Git operations only when explicitly allowed.
-7. Report evidence, deviations, risks, and final state.
+3. Verify artifact lifecycle authority before creating, consuming, or deleting documentation.
+4. Inspect before changing.
+5. Modify only authorized paths.
+6. Run permitted validation.
+7. Perform authorized Git operations only when explicitly allowed.
+8. Report evidence, artifact lifecycle state, deviations, risks, and final state.
 
 ## 33. Example Task Lifecycle
 
@@ -382,3 +390,58 @@ A separate bootstrap-only task SHOULD still be used when:
 - the Orchestrator explicitly requires it.
 
 The Worker MUST stop before modification if the integrated bootstrap gate fails.
+
+## 35. Artifact Lifecycle and Repository Hygiene
+
+Repository hygiene requires every committed documentation or evidence artifact to have a defined lifecycle. Artifact lifecycle rules apply proportionally and MUST NOT create bureaucracy heavier than the artifact itself.
+
+### Classification model
+
+1. **Transient evidence**
+   - Command output, reports, chat findings, or observations that normally remain uncommitted.
+   - Preferred when one-use evidence is sufficient.
+
+2. **Temporary committed evidence**
+   - Research or decision-support material committed only when multi-session review, independent inspection, or durable pre-decision evidence is genuinely needed.
+   - Non-authoritative.
+   - MUST have an explicit future consumer and cleanup trigger.
+
+3. **Retained evidence**
+   - Durable audits, reproducible benchmarks, incident evidence, compatibility records, or other material with continuing independent value.
+   - MUST have an explicit retention rationale and discoverable index or reference.
+
+4. **Normative durable artifacts**
+   - Accepted ADRs, specifications, policies, schemas, or equivalent authoritative project records.
+   - Remain until explicitly superseded or retired.
+
+5. **Operational lifecycle artifacts**
+   - Bootstrap, session handoff, checkpoint, or similar working-state documents.
+   - Follow replacement or session-specific lifecycle rules and MUST NOT become endless historical logs.
+
+### Required metadata for newly committed documentation or evidence
+
+Every task that authorizes a new committed documentation or evidence artifact MUST define:
+
+- artifact classification;
+- authoritative or non-authoritative status;
+- intended consumer;
+- discoverability or inbound reference;
+- retention or cleanup trigger;
+- cleanup owner or responsible role.
+
+### Normative principles
+
+- Use the lightest sufficient artifact.
+- Prefer an evidence-dense Worker report over a committed research file when the report is sufficient.
+- Do not create an artifact without a concrete consumer.
+- No committed documentation artifact may remain unintentionally orphaned.
+- Git history is the historical archive; the active working tree represents current usable project knowledge.
+- When temporary evidence is consumed by an Accepted ADR, specification, test suite, or other durable artifact:
+  - transfer the material conclusions, constraints, and necessary source references;
+  - remove the temporary evidence;
+  - remove or replace its inbound links;
+  - perform these actions in the same bounded task and preferably the same commit.
+- Retaining consumed evidence is an exception requiring an explicit continuing-value rationale.
+- Handoffs may reference temporary evidence while a decision is open, but must reference the durable decision after consumption.
+- A retention trigger does not itself authorize deletion. Deletion still requires explicit task-specific authority.
+- Do not introduce a mandatory global artifact registry; use existing indexes, ADR indexes, README sections, or handoffs when sufficient.

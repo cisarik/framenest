@@ -21,6 +21,18 @@ Evidence packages such as [ARCHITECTURE_FOUNDATION_EVIDENCE.md](../ARCHITECTURE_
 
 An accepted ADR may only be changed by a later ADR that supersedes it. Editing an accepted ADR in place without a superseding ADR is not permitted.
 
+## Open Decision Evidence
+
+The following temporary, non-authoritative evidence supports an architecture decision that is not yet accepted. It is listed here for discoverability while the decision remains open.
+
+| Evidence | Consumer | Status |
+|---|---|---|
+| [ASGI Runtime Evidence](../ASGI_RUNTIME_EVIDENCE.md) | Future Accepted ADR selecting the FrameNest ASGI runtime | Temporary committed decision evidence |
+
+This evidence file and its inbound link in this section MUST be removed in the same bounded task that accepts the ADR, after material conclusions and relevant primary-source references are transferred into that ADR. Git history remains the archive.
+
+Accepted ADRs in the index below are authoritative. Open decision evidence is not.
+
 ## Index
 
 | ADR | Title | Status | Decision date | Link |

@@ -161,6 +161,41 @@ When a Worker reports failure, the Orchestrator SHOULD determine whether the fai
 
 Recovery tasks MUST remain bounded. The Orchestrator SHOULD avoid turning a failure into an open-ended repair request.
 
+## Artifact Lifecycle Governance
+
+The Orchestrator governs artifact creation, consumption, retention, and cleanup across the repository.
+
+The Orchestrator MUST:
+
+- decide whether a Worker report is sufficient before authorizing a new committed document;
+- classify every requested evidence or documentation artifact;
+- identify its consumer before creation;
+- define authoritative status, discoverability, retention trigger, and cleanup owner in the Worker task;
+- avoid duplicate sources of truth;
+- ensure temporary evidence has an inbound reference while active;
+- reject or correct orphan artifacts;
+- include temporary-evidence deletion and reference cleanup in the same bounded task that creates the consuming durable artifact;
+- verify that material conclusions and citations were transferred before deletion;
+- replace temporary-evidence references in handoffs with the accepted durable artifact;
+- verify public commits include both the durable replacement and authorized cleanup;
+- explicitly justify retained evidence;
+- avoid creating a separate registry when an existing index is sufficient.
+
+### Artifact review checklist
+
+Before accepting artifact-related work, the Orchestrator SHOULD verify:
+
+- classification;
+- consumer;
+- authority;
+- inbound reference;
+- retention trigger;
+- cleanup authority;
+- consumption state;
+- stale links;
+- duplicate truth;
+- final repository hygiene.
+
 ## Practical Orchestrator Checklist
 
 - Identify the Cooperator's actual intent.
@@ -173,6 +208,7 @@ Recovery tasks MUST remain bounded. The Orchestrator SHOULD avoid turning a fail
 - State Git write permissions explicitly.
 - Define validation and acceptance criteria.
 - Include stopping conditions.
+- Define artifact classification, consumer, authority, discoverability, retention trigger, and cleanup owner when a committed evidence document is required.
 - Require structured reporting.
 - Review the report against the task.
 - Verify public commits when available.
