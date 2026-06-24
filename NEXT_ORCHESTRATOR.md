@@ -10,7 +10,7 @@ The ORCHESTRATOR communicates with Michal in Slovak and uses feminine grammatica
 
 The ORCHESTRATOR independently verifies public commits and raw file content. Issue one bounded task at a time. Analytic Programming is provider- and model-neutral. The repository, accepted ADRs, tests, and Git history are the source of truth.
 
-This file restores orchestration state only. It is not an executable task and grants no implementation or Git authority.
+This file restores orchestration state only. It is not an executable task and grants no implementation, provider, filesystem, network, secret, or Git authority.
 
 **Current outgoing ORCHESTRATOR session: CLOSED.**
 
@@ -19,11 +19,12 @@ This file restores orchestration state only. It is not an executable task and gr
 - Repository: `https://github.com/cisarik/framenest.git`
 - Local path used by the closing Worker instance: `/Users/agile/framenest`
 - Branch: `main`
-- Pre-handoff public HEAD: `a488e0672382d75bf4939db09e9999b365ebab1a`
-- Pre-handoff subject: `feat: add NVIDIA NIM suggestion prototype`
-- Pre-handoff parent: `8c923a816cfeb5f5ab49f0b043072c09a6d53797`
+- Provider-protocol commit: `b4f432497106c19f20dc3107ef618dd779067a7e`
+- Provider-protocol subject: `fix: support NVIDIA non-thinking pending responses`
+- Provider-protocol parent: `ce5801c2ba1ea6fd9cde1c281943ea8d8f714765`
+- Handoff commit: the commit containing this file; resolve it from public `main`
 
-The fresh Orchestrator must resolve the final handoff commit from public `main` after the Cycle 051 closeout push. Do not assume this file contains the post-handoff SHA.
+The fresh Orchestrator must independently resolve final local `HEAD`, local `origin/main`, remote `main`, final commit subjects, parents, tree, diffs, and raw handoff contents.
 
 Required reading before authorizing work:
 
@@ -38,172 +39,166 @@ Required reading before authorizing work:
 9. [PRODUCT.md](PRODUCT.md), [SPEC.md](SPEC.md), [ROADMAP.md](ROADMAP.md), [SECURITY.md](SECURITY.md), [README.md](README.md)
 10. [docs/adr/README.md](docs/adr/README.md) and ADR-0001 through ADR-0016
 11. task-relevant source and tests
-12. recent public Git history from the persistence foundation through the final handoff commit
+12. recent public Git history through the final handoff commit
 
 ## 3. Verified project state
 
-### Directly committed public facts
+The repository implements the foundation-stage FrameNest backend, persistence, registry, scan-preview, media-analysis preparation, and provider-neutral suggestion preview described in accepted ADRs through ADR-0016.
 
-The repository implements:
+Not implemented: media catalog persistence, storage volumes, sidecars, persistent suggestions, review/apply workflow, GUI, gallery, playback backend, LM Studio adapter, Vercel adapter, production secret store, deployment, or Tailscale integration.
 
-- centralized typed settings with loopback-safe defaults and `FRAMENEST_DATABASE_PATH`
-- FastAPI application factory and typed `GET /health`
-- Uvicorn loopback-first runtime through `framenest-server`
-- FrameNest-owned structured JSON logging with centralized redaction
-- synchronous SQLAlchemy 2.x Core SQLite persistence with Alembic
-- explicit `framenest-db status` and `framenest-db migrate` commands
-- packaged migrations `0001` (foundation), `0002` (`devices`), `0003` (`libraries`)
-- stable UUIDv4 domain identities
-- pure-domain `Device` and `Library` entities with `LibraryRoot` locators
-- application `DeviceRepository` and `LibraryRepository` ports with SQLAlchemy Core adapters
-- development catalog CLI for device and library registry
-- ADR-0014 bounded read-only library scan preview
-- ADR-0015 deterministic local media analysis preparation with optional external tools
-- ADR-0016 provider-neutral media suggestion preview with first NVIDIA NIM adapter
-- `framenest-catalog library scan-preview`, `analyze-preview`, and `suggest-preview`
+The ordinary default-suite expectation after the recent real-tool test additions is:
 
-There is no migration `0004`, no media table, no storage-volume table, no persistent suggestion storage, no LM Studio or Vercel adapter, and no review/accept/reject UX.
+- `597` tests collected
+- `594 passed`
+- `3 skipped`
 
-### Closing-Worker-instance-observed default-suite evidence
+The three default skips are one opt-in NVIDIA live test and two opt-in real-media-tool parameter cases.
 
-Worker-observed at Cycle 050 public commit `a488e06`; not re-run during Cycle 051 documentation closeout:
+The fresh Orchestrator and Worker must reverify from the final public commit.
 
-- CPython `3.13.14` in project `.venv/`
-- Poetry `2.1.4`
-- `poetry check --lock`: passed at Cycle 050 closeout
-- `poetry run pytest --collect-only -q`: **597 tests collected**
-- `poetry run pytest -q`: **596 passed, 1 skipped**
-- `poetry run pytest -q -W error`: **596 passed, 1 skipped**
-- skipped: opt-in NVIDIA live smoke
+## 4. NVIDIA provider state
 
-The fresh Orchestrator and Worker instance must reverify these values from the final public commit.
+Public commit `b4f432497106c19f20dc3107ef618dd779067a7e` contains independently useful provider-protocol corrections:
 
-### Cycle 051 live NVIDIA validation evidence
+- exact `/no_think` system message first;
+- multimodal user message second;
+- removed `chat_template_kwargs.enable_thinking`;
+- no `response_format`, retries, tool calls, generic JSON extraction, or reasoning stripping;
+- bounded authenticated HTTPS `GET` transport support;
+- documented NVIDIA `202` pending-response handling through validated `requestId` and fixed status URL polling;
+- bounded pending deadline and interval;
+- no frame or media payload resend during polling;
+- sanitized errors that do not expose request IDs, provider bodies, credentials, Authorization headers, frame data, or paths.
 
-Worker-observed operational evidence; distinct from public commit evidence:
+Deterministic evidence observed before that commit:
 
-- **LIVE NVIDIA SYNTHETIC SMOKE: FAIL**
-- **REAL MP4 NVIDIA PREVIEW: NOT RUN**
-- ignored local credential file was sourced successfully; no credential material was printed, copied, committed, or reported
-- real NVIDIA endpoint was reached; authentication and transport succeeded
-- failure category: provider response validation — assistant content was not parseable as required structured JSON for prompt version `framenest-media-suggestion-v1`
-- likely next correction: narrow handling for reasoning-model output shape before or during JSON extraction; confirm with one regression test and re-run opt-in live smoke
+- NVIDIA unit tests: `21 passed`
+- targeted application/AI/catalog tests: `91 passed`
+- `poetry check --lock`: passed
+- `compileall`: passed
+- `git diff --check`: passed
 
-Authorized real-media preview for a future live-validation task remains Cooperator-approved representative MP4/GIF meme corpus; do not record private absolute paths in committed repository artifacts.
+## 5. Sanitized live response diagnosis
 
-### Recent public commit sequence
+The closing Worker made exactly one additional synthetic NVIDIA diagnostic call using the modified local implementation/request contract. It did not print or persist raw assistant content, raw reasoning text, raw provider response, request body, image/base64 data, Authorization header, credential, absolute path, generated natural-language output, or private media data.
 
-Meaningful sequence through NVIDIA suggestion prototype:
+Observed structural metadata:
 
-- `8cd4f3f` — deterministic local media analysis preparation (ADR-0015)
-- `2f739c8` — subprocess output bounds hardening
-- `82a2e0a` — subprocess completion race fixes
-- `8c923a8` — subprocess completion race closeout
-- `a488e06` — provider-neutral media suggestions and NVIDIA NIM prototype (ADR-0016)
+- diagnostic stage: `MediaSuggestionProviderInvalidResponseError`
+- HTTP status code: `200`
+- top-level response keys: `choices`, `created`, `id`, `kv_transfer_params`, `model`, `object`, `prompt_logprobs`, `prompt_token_ids`, `service_tier`, `system_fingerprint`, `usage`
+- `choices` type: `list`
+- choice count: `1`
+- first-choice keys: `finish_reason`, `index`, `logprobs`, `message`, `stop_reason`, `token_ids`
+- `finish_reason`: `stop`
+- `stop_reason`: present, `null`
+- assistant-message keys: `annotations`, `audio`, `content`, `function_call`, `reasoning`, `reasoning_content`, `refusal`, `role`, `tool_calls`
+- `content`: `null`
+- `reasoning_content`: string, length `4`, not whitespace-only
+- `refusal`: present, null
+- tool-call count: `0`
+- usage prompt tokens: `568`
+- usage completion tokens: `3`
+- usage total tokens: `571`
+- returned model ID: `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning`
+- structured error object: absent
 
-Cycle 051 closeout commit subject: `docs: close live NVIDIA worker session`
+No real `printit.mp4` call has been run after this diagnosis. The next Worker must not run private-media preview until synthetic live validation passes.
 
-## 4. Product invariants
+## 6. Product invariants and UX direction
 
-Preserve the established FrameNest direction:
+FrameNest AI analysis is strictly on-demand. Future gallery work should expose an explicit `Analyze` button, not automatic library-wide analysis or background cloud submission.
 
-- local-first and privacy-conscious
-- cross-platform
-- multiple independently registered libraries with stable identities
-- one logical medium may have multiple physical locations
-- portable sidecars plus rebuildable local indexes
-- premium gallery and acquisition are flagship capabilities
-- optional server aggregation must not replace desktop autonomy
-- external VLC is the initial full-player path; future `MediaPlayerBackend` remains a product direction
-- MEME collection for GIFs and short videos is a product direction
-- local inline looping previews for GIFs and short clips are a product direction
-- Tailscale only for remote features unless explicitly superseded
-- Fedora KDE on an Intel NUC is a later deployment target
-- API keys for remotely consumed AI features must eventually remain server-side or behind a secure secret-store boundary, not in ordinary client installations
-- GUI Settings for provider/model selection remains a strategic product goal
+The analysis UI must indicate selected provider, selected model, local versus cloud execution, and whether representative frames leave the device. The user must be able to cancel an in-progress analysis.
 
-See [PRODUCT.md](PRODUCT.md) and [SPEC.md](SPEC.md) for normative detail.
+Premium analysis animation may use masked shimmer or subtle fade transitions with truthful rotating messages such as:
 
-## 5. Maintainability debt
+- `Preparing representative frames...`
+- `Analyzing visual content...`
+- `Generating title and tags...`
+- `Validating suggestions...`
 
-Record for future bounded tasks; not authorization to refactor broadly:
+The UI must not claim backend stage certainty that FrameNest cannot actually determine.
 
-- `tests/contract/test_catalog_cli.py` is oversized
-- split CLI command-family tests where practical
-- review provider-specific composition and error mapping in the shared catalog CLI
-- extract repetitive fixtures/assertions cautiously while preserving behavior-focused test names
-- large files alone do not justify architecture rewrites
+AI output is an editable suggestion, not catalog truth. Review must allow editing title, description, collection, tags, and suggested filename; adding and removing tags; accepting the edited proposal; or rejecting it without mutation.
 
-## 6. Recommended orchestration sequence
+No automatic rename, tagging, collection assignment, sidecar mutation, suggestion persistence, or catalog mutation is permitted without explicit future user confirmation and authorized implementation.
 
-Strategy for the fresh Orchestrator to reassess — not an executable task.
+Cover and playback semantics:
 
-### Immediate next bounded step
+- the user must later be able to scrub a video and select an exact frame as cover;
+- the selected cover timestamp is stored independently from playback state;
+- the selected cover frame becomes the displayed cover and can be regenerated deterministically from its timestamp;
+- normal `Play` always starts at `00:00`;
+- a separate future `Play from this position` action may start at the selected timestamp.
 
-After public verification of the Cycle 051 closeout commit:
+## 7. Maintainability debt
 
-1. inspect live-validation evidence
-2. if synthetic live smoke still fails: authorize one narrow evidence-driven correction plus regression test, then re-run opt-in live smoke
-3. if synthetic live smoke passes but real-media preview has not yet passed: authorize operational live validation on Cooperator-approved representative media
-4. if live validation passes: authorize bounded maintainability refactor without behavior change
+Record only; not authorization:
 
-### Subsequent stages
+- `tests/contract/test_catalog_cli.py` is oversized;
+- CLI command-family tests should likely be split;
+- provider-specific composition and error mapping in the shared catalog CLI deserve bounded review;
+- repetitive fixtures/assertions may be extractable carefully;
+- long files alone do not justify broad architecture work.
 
-- provider/model Settings architecture and secure secret-store boundary
-- LM Studio adapter behind the existing `MediaSuggestionProvider` port
-- Vercel AI Gateway adapter behind the same port
-- review/accept/reject suggestion UX with no automatic rename
-- persistent media and location catalog
-- premium gallery and playback according to [PRODUCT.md](PRODUCT.md) and [ROADMAP.md](ROADMAP.md)
+## 8. Recommended orchestration sequence
+
+Strategy for the fresh Orchestrator to reassess; not an executable task.
+
+1. Verify both closeout commits publicly.
+2. Reproduce the sanitized live response shape.
+3. Implement one narrow correction based only on the observed shape.
+4. Add one regression test.
+5. Rerun synthetic live NVIDIA validation.
+6. Run the real `printit.mp4` preview after synthetic success.
+7. Assess suggestion quality.
+8. Perform a bounded CLI/test maintainability refactor.
+9. Begin the first on-demand gallery Analyze UX vertical slice.
+10. Continue toward GUI Settings, secure secret store, LM Studio, Vercel, review/apply workflow, persistent media catalog, premium gallery, cover selection, and playback.
 
 The fresh Orchestrator must choose the smallest safe next bounded step after public verification.
 
-## 7. AI and privacy guardrails
+## 9. AI and privacy guardrails
 
-Record for future tasks:
+- Cloud analysis is optional and explicitly user-triggered.
+- Local scan and gallery must remain functional without AI or internet.
+- Representative frames may contain private imagery.
+- Absolute local paths must never be transmitted.
+- Avoid whole-video upload initially.
+- No biometric or person-identification claim.
+- No automatic person naming.
+- No secret in source, database, logs, reports, tests, or subprocess arguments.
+- API responses are untrusted external data.
+- Provider output is suggestion evidence, not catalog truth.
+- User confirmation is mandatory before mutation.
 
-- cloud analysis is optional; local scan and gallery must remain functional without AI or internet
-- representative frames may contain private imagery
-- payloads require explicit user action (`--confirm-cloud-upload` today; future GUI equivalent)
-- absolute local paths must never be transmitted
-- only relative identifiers and metadata required by the prompt should be sent
-- avoid whole-video upload initially
-- no biometric or person-identification claim
-- no automatic person naming
-- no secret in source, database, logs, reports, tests, or subprocess arguments where avoidable
-- API responses must be validated as untrusted external data
-- provider output is suggestion evidence, not catalog truth
-- user confirmation is mandatory before mutation
+## 10. Session and context strategy
 
-## 8. Session and context strategy
-
-- initialize one fresh Worker instance assigned to the WORKER role per coherent Worker session
-- subsequent tasks use short continuation prompts within the same Worker instance when safe
-- do not close solely because automatic compaction occurred
-- close when context pressure, coherence loss, usage limits, milestone boundaries, or domain shifts make continuation unsafe for the current Worker instance
-- context pressure belongs to the Worker instance and Worker session, not to the persistent WORKER role
-- update [NEXT_WORKER.md](NEXT_WORKER.md) only at Worker-session closeout
-- update [NEXT_ORCHESTRATOR.md](NEXT_ORCHESTRATOR.md) only at Orchestrator-session closeout
-- verify every closing handoff commit publicly
-- do not manually copy repository handoffs into new Worker sessions; the fresh Worker instance reads handoffs from the repository
+- This Worker instance is intentionally closed after a context-heavy NVIDIA live/protocol/debug cycle.
+- Exact context telemetry is not exposed in repository files, but the session accumulated enough live-debug and handoff state that a fresh Worker instance is safer for the next correction.
+- Initialize one fresh Worker instance assigned to the WORKER role for the next coherent implementation session.
+- Do not manually copy repository handoffs into new Worker sessions; the fresh Worker reads them from the repository.
+- Verify every closing handoff commit publicly.
 
 User-facing Worker prompts may use: `Toto pošli WORKEROVI ako jeden prompt:`
 
-## 9. First response expected from fresh Orchestrator
+## 11. First response expected from fresh Orchestrator
 
 The fresh Orchestrator must:
 
-1. read and independently verify public repository state
-2. resolve the final handoff commit after Cycle 051 closeout
-3. verify both NEXT files against public raw content
-4. summarize implemented state, Worker-observed test baseline, and live-validation evidence
-5. identify any contradiction or stale claim
-6. propose the smallest safe next task based on live-validation outcome
-7. provide one authoritative prompt for a fresh Worker instance assigned to the WORKER role only after verification
-8. not implement code in ORCHESTRATOR chat
-9. not ask the Cooperator to paste repository files that already exist in the repository
+1. read and independently verify public repository state;
+2. resolve the final handoff commit;
+3. verify both NEXT files against public raw content;
+4. summarize implemented state, deterministic evidence, and sanitized live response shape;
+5. identify stale or contradictory handoff claims;
+6. propose the smallest safe next task;
+7. provide one authoritative prompt for a fresh Worker instance assigned to the WORKER role only after verification;
+8. not implement code in ORCHESTRATOR chat;
+9. not ask the Cooperator to paste repository files that already exist in the repository.
 
-## 10. Handoff lifecycle
+## 12. Handoff lifecycle
 
 - classification: non-authoritative Orchestrator-session handoff
 - intended consumer: one fresh future ORCHESTRATOR session
