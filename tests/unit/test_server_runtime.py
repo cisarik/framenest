@@ -1,0 +1,265 @@
+"""Unit tests for the Uvicorn runtime composition boundary."""
+
+from __future__ import annotations
+
+import ast
+import importlib
+import socket
+import sys
+from pathlib import Path
+from typing import Any
+from unittest.mock import MagicMock, patch
+
+import pytest
+import uvicorn
+from pydantic import SecretStr
+
+from framenest.configuration import FrameNestSettings, load_settings
+
+FORBIDDEN_UVICORN_IMPORT_ROOT = "uvicorn"
+ALLOWED_UVICORN_MODULE = Path("src/framenest/server.py")
+SOURCE_ROOT = Path("src/framenest")
+REPRESENTATIVE_SECRET = "runtime-unit-test-api-key-secret"
+
+
+def _module_name_from_import(node: ast.Import | ast.ImportFrom) -> str | None:
+    if isinstance(node, ast.Import):
+        return node.names[0].name.split(".")[0]
+    if node.module is None:
+        return None
+    return node.module.split(".")[0]
+
+
+def _collect_uvicorn_imports(path: Path) -> list[str]:
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    violations: list[str] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.Import, ast.ImportFrom)):
+            continue
+        root = _module_name_from_import(node)
+        if root == FORBIDDEN_UVICORN_IMPORT_ROOT:
+            violations.append(root)
+    return violations
+
+
+@pytest.fixture
+def settings_with_secret() -> FrameNestSettings:
+    return FrameNestSettings(
+        host="127.0.0.1",
+        port=8000,
+        api_key=SecretStr(REPRESENTATIVE_SECRET),
+        _env_file=None,
+    )
+
+
+def test_importing_server_module_has_no_runtime_side_effects(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bind_attempts: list[tuple[Any, ...]] = []
+    original_bind = socket.socket.bind
+
+    def tracked_bind(self, address: tuple[Any, ...]) -> None:
+        bind_attempts.append(address)
+        return original_bind(self, address)
+
+    monkeypatch.setattr(socket.socket, "bind", tracked_bind)
+
+    load_settings_mock = MagicMock(side_effect=AssertionError("load_settings must not run on import"))
+    create_app_mock = MagicMock(side_effect=AssertionError("create_app must not run on import"))
+    config_mock = MagicMock(side_effect=AssertionError("uvicorn.Config must not run on import"))
+    server_mock = MagicMock(side_effect=AssertionError("uvicorn.Server must not run on import"))
+
+    monkeypatch.setattr("framenest.server.load_settings", load_settings_mock)
+    monkeypatch.setattr("framenest.server.create_app", create_app_mock)
+    monkeypatch.setattr("uvicorn.Config", config_mock)
+    monkeypatch.setattr("uvicorn.Server", server_mock)
+
+    module_name = "framenest.server"
+    sys.modules.pop(module_name, None)
+    importlib.import_module(module_name)
+
+    assert bind_attempts == []
+    load_settings_mock.assert_not_called()
+    create_app_mock.assert_not_called()
+    config_mock.assert_not_called()
+    server_mock.assert_not_called()
+
+
+def test_create_server_returns_uvicorn_server(
+    settings_with_secret: FrameNestSettings,
+) -> None:
+    from framenest.server import create_server
+
+    server = create_server(settings=settings_with_secret)
+    assert isinstance(server, uvicorn.Server)
+
+
+def test_supplied_settings_bypass_load_settings(
+    settings_with_secret: FrameNestSettings,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from framenest.server import create_server
+
+    load_settings_mock = MagicMock(side_effect=AssertionError("load_settings must not be called"))
+    monkeypatch.setattr("framenest.server.load_settings", load_settings_mock)
+    server = create_server(settings=settings_with_secret)
+    load_settings_mock.assert_not_called()
+    assert server.config.app.state.settings is settings_with_secret
+
+
+def test_omitted_settings_invoke_load_settings_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from framenest.server import create_server
+
+    expected_settings = FrameNestSettings(host="127.0.0.1", port=8000, _env_file=None)
+    load_settings_mock = MagicMock(return_value=expected_settings)
+    monkeypatch.setattr("framenest.server.load_settings", load_settings_mock)
+    server = create_server()
+    load_settings_mock.assert_called_once_with()
+    assert server.config.app.state.settings is expected_settings
+
+
+def test_default_config_host_is_loopback(
+    settings_with_secret: FrameNestSettings,
+) -> None:
+    from framenest.server import create_server
+
+    server = create_server(settings=settings_with_secret)
+    assert server.config.host == "127.0.0.1"
+
+
+def test_default_config_port_is_8000(
+    settings_with_secret: FrameNestSettings,
+) -> None:
+    from framenest.server import create_server
+
+    server = create_server(settings=settings_with_secret)
+    assert server.config.port == 8000
+
+
+def test_framenest_host_and_port_overrides_propagate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from framenest.server import create_server
+
+    monkeypatch.setenv("FRAMENEST_HOST", "10.0.0.5")
+    monkeypatch.setenv("FRAMENEST_PORT", "8765")
+    server = create_server()
+    assert server.config.host == "10.0.0.5"
+    assert server.config.port == 8765
+
+
+def test_uvicorn_host_and_port_env_vars_do_not_override_framenest_settings(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from framenest.server import create_server
+
+    monkeypatch.setenv("FRAMENEST_HOST", "127.0.0.1")
+    monkeypatch.setenv("FRAMENEST_PORT", "8000")
+    monkeypatch.setenv("UVICORN_HOST", "0.0.0.0")
+    monkeypatch.setenv("UVICORN_PORT", "9999")
+    server = create_server()
+    assert server.config.host == "127.0.0.1"
+    assert server.config.port == 8000
+
+
+def test_proxy_headers_are_disabled_without_wildcard_trust(
+    settings_with_secret: FrameNestSettings,
+) -> None:
+    from framenest.server import create_server
+
+    server = create_server(settings=settings_with_secret)
+    assert server.config.proxy_headers is False
+    assert server.config.forwarded_allow_ips != "*"
+    assert "*" not in str(server.config.forwarded_allow_ips)
+
+
+def test_reload_disabled_and_single_worker(
+    settings_with_secret: FrameNestSettings,
+) -> None:
+    from framenest.server import create_server
+
+    server = create_server(settings=settings_with_secret)
+    assert server.config.reload is False
+    assert server.config.workers == 1
+
+
+def test_api_secret_not_disclosed_in_server_representations(
+    settings_with_secret: FrameNestSettings,
+) -> None:
+    from framenest.server import create_server
+
+    server = create_server(settings=settings_with_secret)
+    surfaces = (
+        f"{server!r}",
+        f"{server.config!r}",
+        f"{server.config.app!r}",
+        str(server.config),
+    )
+    for surface in surfaces:
+        assert REPRESENTATIVE_SECRET not in surface
+
+
+def test_run_server_invokes_server_run_once_without_real_listener(
+    settings_with_secret: FrameNestSettings,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from framenest.server import run_server
+
+    run_mock = MagicMock()
+    server_mock = MagicMock()
+    server_mock.run = run_mock
+    create_server_mock = MagicMock(return_value=server_mock)
+    monkeypatch.setattr("framenest.server.create_server", create_server_mock)
+
+    run_server(settings=settings_with_secret)
+
+    create_server_mock.assert_called_once_with(settings=settings_with_secret)
+    run_mock.assert_called_once_with()
+
+
+def test_main_delegates_to_run_server(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from framenest.server import main
+
+    run_server_mock = MagicMock()
+    monkeypatch.setattr("framenest.server.run_server", run_server_mock)
+    main()
+    run_server_mock.assert_called_once_with()
+
+
+def test_production_uvicorn_imports_are_confined_to_server_module() -> None:
+    repository_root = Path(__file__).resolve().parents[2]
+    violations: list[str] = []
+    for path in sorted((repository_root / SOURCE_ROOT).rglob("*.py")):
+        relative_path = path.relative_to(repository_root)
+        if relative_path == ALLOWED_UVICORN_MODULE:
+            continue
+        forbidden_roots = _collect_uvicorn_imports(path)
+        if forbidden_roots:
+            violations.append(f"{relative_path}: {sorted(set(forbidden_roots))}")
+    assert violations == []
+
+
+def test_fastapi_imports_remain_confined_to_adapters_api() -> None:
+    repository_root = Path(__file__).resolve().parents[2]
+    forbidden_import_roots = frozenset({"fastapi", "starlette"})
+    allowed_fastapi_package_root = Path("src/framenest/adapters/api")
+    violations: list[str] = []
+    for path in sorted((repository_root / SOURCE_ROOT).rglob("*.py")):
+        relative_path = path.relative_to(repository_root)
+        if allowed_fastapi_package_root in relative_path.parents:
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        forbidden_roots: list[str] = []
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.Import, ast.ImportFrom)):
+                continue
+            root = _module_name_from_import(node)
+            if root in forbidden_import_roots:
+                forbidden_roots.append(root)
+        if forbidden_roots:
+            violations.append(f"{relative_path}: {sorted(set(forbidden_roots))}")
+    assert violations == []

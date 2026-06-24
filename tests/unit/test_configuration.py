@@ -10,7 +10,7 @@ from pydantic import SecretStr, ValidationError
 
 from framenest.configuration import load_settings
 
-FRAMENEST_ENV_VARS = ("FRAMENEST_HOST", "FRAMENEST_API_KEY")
+FRAMENEST_ENV_VARS = ("FRAMENEST_HOST", "FRAMENEST_PORT", "FRAMENEST_API_KEY")
 
 
 @pytest.fixture(autouse=True)
@@ -36,6 +36,54 @@ def test_default_host_is_loopback(
     monkeypatch.chdir(tmp_path)
     settings = load_settings(env_file=None)
     assert settings.host == "127.0.0.1"
+
+
+def test_default_port_is_8000(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    settings = load_settings(env_file=None)
+    assert settings.port == 8000
+
+
+def test_temporary_env_file_sets_port(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    env_file = tmp_path / ".env"
+    env_file.write_text("FRAMENEST_PORT=9001\n", encoding="utf-8")
+    settings = load_settings(env_file=env_file)
+    assert settings.port == 9001
+
+
+def test_process_environment_overrides_temporary_env_file_port(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    env_file = tmp_path / ".env"
+    env_file.write_text("FRAMENEST_PORT=9001\n", encoding="utf-8")
+    monkeypatch.setenv("FRAMENEST_PORT", "9002")
+    settings = load_settings(env_file=env_file)
+    assert settings.port == 9002
+
+
+def test_invalid_port_produces_sanitized_validation_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    invalid_port = "70000"
+    secret_value = "must-not-appear-in-error-output"
+    monkeypatch.setenv("FRAMENEST_PORT", invalid_port)
+    monkeypatch.setenv("FRAMENEST_API_KEY", secret_value)
+    with pytest.raises(ValidationError) as exc_info:
+        load_settings(env_file=None)
+    error_text = str(exc_info.value)
+    assert invalid_port not in error_text
+    assert secret_value not in error_text
 
 
 def test_temporary_env_file_overrides_default(

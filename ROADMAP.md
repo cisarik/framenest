@@ -53,7 +53,7 @@ Accepted so far:
 - Python settings library: `pydantic-settings` through [ADR-0007](docs/adr/0007-settings-library.md).
 - Initial ASGI runtime: Uvicorn through [ADR-0008](docs/adr/0008-asgi-runtime.md).
 
-The initial scaffold decision gate is complete. A Poetry package scaffold, centralized configuration boundary, FastAPI application factory, typed health endpoint, and contract tests now exist. Uvicorn runtime installation and startup wiring remain unauthorized until a separate bounded task.
+The initial scaffold decision gate is complete. A Poetry package scaffold, centralized configuration boundary, FastAPI application factory, typed health endpoint, contract tests, Uvicorn runtime dependency, startup wiring, and a runnable loopback-only server command now exist.
 
 Broader architecture decisions still open include local database/query strategy, sidecar manifest format and versioning, server/domain boundaries beyond the current skeleton, initial authentication boundary, media-tool distribution strategy, and Fedora deployment details.
 
@@ -91,14 +91,15 @@ Implemented so far:
 - Centralized `pydantic-settings` configuration boundary with loopback-safe default host
 - FastAPI application factory with typed `GET /health`
 - In-process API contract tests and import-boundary tests
+- Uvicorn runtime dependency and startup wiring
+- Runnable loopback-only server process verified by tests and command output
+- Runtime health smoke verification
 
 Still required for phase exit:
 
-- Uvicorn runtime dependency and startup wiring
 - Structured logging
 - SQLite development catalog
 - Migration mechanism
-- Runnable loopback-only server process verified by tests and command output
 
 Key deliverables: loopback-only local development server skeleton, health endpoint, configuration boundary, structured logging, SQLite development catalog, migration mechanism, and tests.
 
@@ -106,7 +107,7 @@ Entry conditions: server/API/database/repository-layout ADRs accepted.
 
 Exit evidence: local tests and command output showing loopback-only behavior and basic health/config/database boundaries.
 
-Boundaries: server-first implementation priority MUST NOT make the desktop product server-dependent. A runnable server process does not yet exist.
+Boundaries: server-first implementation priority MUST NOT make the desktop product server-dependent.
 
 ## Phase 5 — Local Catalog and Library Scanning
 

@@ -6,7 +6,7 @@ FrameNest is a local-first, privacy-conscious, cross-platform library for video 
 
 FrameNest is in an early foundation, pre-alpha stage.
 
-A minimal Poetry package scaffold exists at the repository root with centralized settings, a FastAPI application factory, a typed `GET /health` endpoint, and in-process contract tests. There is no functional user application, runnable server process, database, gallery, catalog, downloader, desktop shell, installer, deployment, or supported release yet.
+A minimal Poetry package scaffold exists at the repository root with centralized settings, a FastAPI application factory, a typed `GET /health` endpoint, in-process contract tests, and a loopback-first Uvicorn development server. There is no functional user application, database, gallery, catalog, downloader, desktop shell, installer, deployment, or supported release yet.
 
 Supported runtime: CPython `>=3.13,<3.14`. Local development uses a uv-managed CPython 3.13.14 interpreter with Poetry as the dependency, environment, and lockfile manager. The initial `poetry.lock` was generated with Poetry 2.1.4. The local virtual environment lives in `.venv/` and is not committed.
 
@@ -20,6 +20,20 @@ env POETRY_VIRTUALENVS_IN_PROJECT=true poetry env use "$UV_MANAGED_PYTHON"
 env POETRY_VIRTUALENVS_IN_PROJECT=true poetry install
 env POETRY_VIRTUALENVS_IN_PROJECT=true poetry run pytest
 ```
+
+## Local Server
+
+Start the loopback-first development server:
+
+```text
+poetry run framenest-server
+```
+
+Default URL: `http://127.0.0.1:8000`. Health path: `/health`.
+
+Override bind address with `FRAMENEST_HOST` and `FRAMENEST_PORT`. Default binding is loopback-only (`127.0.0.1`). Setting `FRAMENEST_HOST=0.0.0.0` is an explicit exposure override and is not the recommended default.
+
+Reload, deployment, systemd, and Tailscale behavior are not provided yet.
 
 ## Product Vision
 
@@ -52,7 +66,7 @@ Accepted implementation foundations so far:
 - Poetry ([ADR-0002](docs/adr/0002-python-environment-and-dependency-manager.md))
 - `pydantic-settings` ([ADR-0007](docs/adr/0007-settings-library.md))
 - FastAPI ([ADR-0003](docs/adr/0003-initial-server-api-framework.md))
-- Uvicorn as the initial ASGI runtime ([ADR-0008](docs/adr/0008-asgi-runtime.md)); not yet installed or wired
+- Uvicorn as the initial ASGI runtime ([ADR-0008](docs/adr/0008-asgi-runtime.md)), installed and wired for loopback-first local development
 
 Exact frontend framework, packaging choices, IPC design, data schema, deployment model, production update mechanisms, and many server operational details remain subject to later documented decisions.
 
@@ -123,7 +137,6 @@ The current stage does not provide:
 - Embedded libVLC.
 - AI-generated covers.
 - Public internet exposure.
-- A runnable server process or runtime start command.
 - A functional gallery, catalog, database, or downloader.
 - Production deployment.
 

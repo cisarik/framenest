@@ -4,7 +4,7 @@
 
 FrameNest is in foundation-stage pre-alpha development. This document defines normative requirements for future implementation.
 
-A minimal Poetry package foundation exists with centralized configuration, a FastAPI application factory, a typed health endpoint, and tests. There is no functional user application, runnable server process, database, gallery, catalog, or deployment yet. Unresolved architecture choices remain subject to future architecture decision records.
+A minimal Poetry package foundation exists with centralized configuration, a FastAPI application factory, a typed health endpoint, a loopback-first Uvicorn runtime dependency and startup command, and tests. There is no functional user application, database, gallery, catalog, deployment, systemd integration, trusted-proxy configuration, or Tailscale integration yet. Unresolved architecture choices remain subject to future architecture decision records.
 
 This specification translates approved direction from [PRODUCT.md](PRODUCT.md), [README.md](README.md), [AGENTS.md](AGENTS.md), and [SECURITY.md](SECURITY.md) into requirements. It does not select frameworks, schemas, protocols, or packaging tools.
 

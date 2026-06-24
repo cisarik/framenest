@@ -15,7 +15,7 @@ from pydantic import SecretStr
 from framenest.adapters.api.application import create_app
 from framenest.configuration import FrameNestSettings, load_settings
 
-FRAMENEST_ENV_VARS = ("FRAMENEST_HOST", "FRAMENEST_API_KEY")
+FRAMENEST_ENV_VARS = ("FRAMENEST_HOST", "FRAMENEST_PORT", "FRAMENEST_API_KEY")
 REPRESENTATIVE_SECRET = "contract-test-api-key-secret"
 
 
