@@ -65,7 +65,22 @@ Explicitly upgrade the configured database to the packaged Alembic head:
 poetry run framenest-db migrate
 ```
 
-Normal `poetry run framenest-server` startup does not apply migrations. The initial packaged revision is `0001` and creates no media catalog, library, device, location, gallery, sidecar, user, or authentication schema.
+Normal `poetry run framenest-server` startup does not apply migrations. Migration remains explicit through `framenest-db`. Revision `0002` adds the initial `devices` table only; there is no library, media, gallery, sidecar, user, or authentication schema yet.
+
+## Device Catalog CLI
+
+The `framenest-catalog` command is a development/operator boundary for local device registry operations. It does not migrate automatically and is not the final desktop UX. Only device registry commands exist today.
+
+After migrating the database:
+
+```text
+poetry run framenest-db migrate
+poetry run framenest-catalog device register --display-name "My MacBook"
+poetry run framenest-catalog device list
+poetry run framenest-catalog device get --id "<device-id>"
+```
+
+Each non-help invocation emits one compact JSON object to `stdout` on success or `stderr` on error.
 
 ## Structured Logging
 

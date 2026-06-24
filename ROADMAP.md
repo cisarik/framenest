@@ -116,6 +116,7 @@ Implemented so far:
 - Persistence strategy accepted through [ADR-0010](docs/adr/0010-initial-persistence-foundation.md)
 - Minimal SQLAlchemy Core/Alembic persistence foundation with `FRAMENEST_DATABASE_PATH`, packaged revisions `0001` and `0002`, explicit `framenest-db status`, and explicit `framenest-db migrate`
 - Initial local device registry core with pure-domain `Device`, application repository port, SQLAlchemy Core adapter, and `devices` table through revision `0002`
+- Development operator catalog CLI (`framenest-catalog`) for device register, get, and list operations
 
 Still required for phase exit:
 
