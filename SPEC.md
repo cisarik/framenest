@@ -4,7 +4,7 @@
 
 FrameNest is in foundation-stage pre-alpha development. This document defines normative requirements for future implementation.
 
-A minimal Poetry package foundation exists with centralized configuration, a FastAPI application factory, a typed health endpoint, a loopback-first Uvicorn runtime dependency and startup command, a minimal SQLAlchemy Core/Alembic SQLite migration foundation, and tests. There is no functional user application, media catalog schema, gallery, deployment, systemd integration, trusted-proxy configuration, or Tailscale integration yet. Unresolved architecture choices remain subject to future architecture decision records.
+A minimal Poetry package foundation exists with centralized configuration, a FastAPI application factory, a typed health endpoint, a loopback-first Uvicorn runtime dependency and startup command, a minimal SQLAlchemy Core/Alembic SQLite migration foundation, pure domain identity primitives, and tests. There is no functional user application, media catalog schema, gallery, deployment, systemd integration, trusted-proxy configuration, or Tailscale integration yet. Unresolved architecture choices remain subject to future architecture decision records.
 
 This specification translates approved direction from [PRODUCT.md](PRODUCT.md), [README.md](README.md), [AGENTS.md](AGENTS.md), and [SECURITY.md](SECURITY.md) into requirements. It does not select frameworks, schemas, protocols, or packaging tools.
 
@@ -82,9 +82,19 @@ An availability state describes whether a device, library, storage volume, or ph
 
 FrameNest MUST define stable identities for logical media, physical locations, devices, libraries, storage volumes, and series where applicable.
 
+FrameNest entity identities MUST initially use application-owned RFC 9562 UUID version 4 values as accepted by [ADR-0011](docs/adr/0011-stable-domain-identities.md).
+
+FrameNest MUST represent identity categories with category-specific domain types rather than interchangeable raw UUID aliases.
+
+The canonical external identity representation MUST be lowercase hyphenated UUID text.
+
+FrameNest identity strings MUST be treated as opaque values. They MUST NOT be used to infer entity type, creation time, filesystem location, database row position, source platform, content hash, or semantic ordering.
+
 Filesystem paths alone MUST NOT serve as globally stable media identity.
 
-The exact identity format is unresolved. This document does not choose UUID, ULID, hash-only identity, database-specific keys, or another format.
+Database row IDs, SQLite row order, filesystem paths, filenames, source-platform IDs, content hashes, and device-local counters MUST NOT serve as FrameNest entity identity.
+
+The final database encoding, catalog schema, sidecar schema, synchronization representation, hashing, deduplication, and identity reconciliation rules remain unresolved.
 
 ## 6. Logical Media and Physical Locations
 
@@ -538,7 +548,7 @@ Success MUST NOT be claimed without evidence.
 
 Deferred decisions include frontend framework, frontend workspace tooling, committed configuration file format, exact configuration schema, operating-system secret-store implementation, manifest format, schema, IPC, authentication above Tailscale, synchronization protocol, FFmpeg distribution, yt-dlp packaging/update strategy, player invocation, thumbnail formats and sizes, full-text search, packaging/signing/update mechanisms, telemetry, and license.
 
-The supported Python minor version is recorded in [ADR-0001](docs/adr/0001-supported-python-version.md). Poetry dependency and environment management is recorded in [ADR-0002](docs/adr/0002-python-environment-and-dependency-manager.md). The initial server API framework is recorded in [ADR-0003](docs/adr/0003-initial-server-api-framework.md). Repository layout and Poetry package mode are recorded in [ADR-0004](docs/adr/0004-repository-layout.md). Configuration strategy is recorded in [ADR-0005](docs/adr/0005-configuration-strategy.md). The concrete settings library is recorded in [ADR-0007](docs/adr/0007-settings-library.md). The initial ASGI runtime is recorded in [ADR-0008](docs/adr/0008-asgi-runtime.md). The initial SQLite persistence and migration foundation is recorded in [ADR-0010](docs/adr/0010-initial-persistence-foundation.md). Media catalog schema, stable identity format, sidecar manifest format, full-text search design, final production database path policy, WAL and checkpoint details, backup and restore, and remote aggregate database design remain unresolved. Exact dependency versions, 3.13 patch pinning, Poetry virtual-environment location, Uvicorn version and extras, startup interface, process model, worker count, reload policy, trusted proxy configuration, structured logging, systemd integration, background jobs, authentication, and API versioning remain implementation concerns governed by those ADRs and later authorized tasks.
+The supported Python minor version is recorded in [ADR-0001](docs/adr/0001-supported-python-version.md). Poetry dependency and environment management is recorded in [ADR-0002](docs/adr/0002-python-environment-and-dependency-manager.md). The initial server API framework is recorded in [ADR-0003](docs/adr/0003-initial-server-api-framework.md). Repository layout and Poetry package mode are recorded in [ADR-0004](docs/adr/0004-repository-layout.md). Configuration strategy is recorded in [ADR-0005](docs/adr/0005-configuration-strategy.md). The concrete settings library is recorded in [ADR-0007](docs/adr/0007-settings-library.md). The initial ASGI runtime is recorded in [ADR-0008](docs/adr/0008-asgi-runtime.md). The initial SQLite persistence and migration foundation is recorded in [ADR-0010](docs/adr/0010-initial-persistence-foundation.md). The stable entity identity format is recorded in [ADR-0011](docs/adr/0011-stable-domain-identities.md). Media catalog schema, identity database encoding, sidecar manifest format, full-text search design, final production database path policy, WAL and checkpoint details, backup and restore, and remote aggregate database design remain unresolved. Exact dependency versions, 3.13 patch pinning, Poetry virtual-environment location, Uvicorn version and extras, startup interface, process model, worker count, reload policy, trusted proxy configuration, structured logging, systemd integration, background jobs, authentication, and API versioning remain implementation concerns governed by those ADRs and later authorized tasks.
 
 None of these may be silently selected during implementation.
 

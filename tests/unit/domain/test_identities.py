@@ -1,0 +1,164 @@
+"""Contract tests for stable pure-domain identity values."""
+
+from __future__ import annotations
+
+import uuid
+from typing import Any
+
+import pytest
+
+from framenest.domain import (
+    DeviceId,
+    FrameNestIdentityError,
+    LibraryId,
+    MediaId,
+    MediaLocationId,
+    SeriesId,
+    StorageVolumeId,
+)
+
+IDENTITY_TYPES = (
+    MediaId,
+    MediaLocationId,
+    DeviceId,
+    LibraryId,
+    StorageVolumeId,
+    SeriesId,
+)
+
+CANONICAL_UUID4_TEXT = "12345678-1234-4234-9234-123456789abc"
+SECOND_CANONICAL_UUID4_TEXT = "abcdefab-cdef-4abc-8def-abcdefabcdef"
+UNSUPPORTED_VARIANT_UUID_TEXT = "12345678-1234-4234-1234-123456789abc"
+UUIDV1_TEXT = "a8098c1a-f86e-11da-bd1a-00112444be1e"
+EXPECTED_ERROR_MESSAGE = "Invalid FrameNest identity."
+
+
+@pytest.mark.parametrize("identity_type", IDENTITY_TYPES)
+def test_new_identity_is_uuid4_with_canonical_roundtrip(identity_type: type[MediaId]) -> None:
+    identity = identity_type.new()
+    other_identity = identity_type.new()
+
+    assert isinstance(identity, identity_type)
+    assert identity.value.version == 4
+    assert identity.value.variant == uuid.RFC_4122
+    assert other_identity != identity
+    assert identity.to_string() == str(identity.value)
+    assert identity.to_string() == identity.to_string().lower()
+    assert len(identity.to_string()) == 36
+    assert identity.to_string()[8] == "-"
+    assert identity.to_string()[13] == "-"
+    assert identity.to_string()[18] == "-"
+    assert identity.to_string()[23] == "-"
+    assert str(identity) == identity.to_string()
+    assert identity_type.from_string(identity.to_string()) == identity
+
+
+@pytest.mark.parametrize("identity_type", IDENTITY_TYPES)
+def test_same_category_identity_equality_hashing_and_collections(
+    identity_type: type[MediaId],
+) -> None:
+    first = identity_type.from_string(CANONICAL_UUID4_TEXT)
+    same = identity_type.from_string(CANONICAL_UUID4_TEXT)
+    second = identity_type.from_string(SECOND_CANONICAL_UUID4_TEXT)
+
+    assert same == first
+    assert second != first
+    assert hash(same) == hash(first)
+    assert {first, same, second} == {first, second}
+    assert {first: "found"}[same] == "found"
+
+
+@pytest.mark.parametrize("identity_type", IDENTITY_TYPES)
+def test_identity_objects_are_immutable(identity_type: type[MediaId]) -> None:
+    identity = identity_type.from_string(CANONICAL_UUID4_TEXT)
+
+    with pytest.raises((AttributeError, TypeError)):
+        identity.value = uuid.uuid4()  # type: ignore[misc]
+    with pytest.raises((AttributeError, TypeError)):
+        identity.extra = "not allowed"  # type: ignore[attr-defined]
+
+
+@pytest.mark.parametrize("identity_type", IDENTITY_TYPES)
+def test_repr_is_safe_concise_and_debuggable(identity_type: type[MediaId]) -> None:
+    identity = identity_type.from_string(CANONICAL_UUID4_TEXT)
+    representation = repr(identity)
+
+    assert representation == f"{identity_type.__name__}('{CANONICAL_UUID4_TEXT}')"
+    assert "/Users/" not in representation
+    assert "sqlite" not in representation.lower()
+    assert "catalog" not in representation.lower()
+
+
+def test_cross_category_identities_remain_distinct_with_same_uuid_text() -> None:
+    media_id = MediaId.from_string(CANONICAL_UUID4_TEXT)
+    other_categories = {
+        MediaLocationId.from_string(CANONICAL_UUID4_TEXT),
+        DeviceId.from_string(CANONICAL_UUID4_TEXT),
+        LibraryId.from_string(CANONICAL_UUID4_TEXT),
+        StorageVolumeId.from_string(CANONICAL_UUID4_TEXT),
+        SeriesId.from_string(CANONICAL_UUID4_TEXT),
+    }
+
+    assert all(media_id != other for other in other_categories)
+    assert len({media_id, *other_categories}) == 6
+
+
+@pytest.mark.parametrize(
+    "rejected",
+    [
+        "12345678-1234-4234-9234-123456789ABC",
+        "12345678123442349234123456789abc",
+        "{12345678-1234-4234-9234-123456789abc}",
+        "urn:uuid:12345678-1234-4234-9234-123456789abc",
+        " 12345678-1234-4234-9234-123456789abc",
+        "12345678-1234-4234-9234-123456789abc ",
+        "",
+        "not-a-uuid",
+        "12345678-1234-4234-9234-123456789ab",
+        UUIDV1_TEXT,
+        str(uuid.uuid3(uuid.NAMESPACE_DNS, "framenest.example")),
+        str(uuid.uuid5(uuid.NAMESPACE_DNS, "framenest.example")),
+    ],
+)
+def test_from_string_rejects_non_canonical_or_non_v4_input(rejected: str) -> None:
+    with pytest.raises(FrameNestIdentityError) as exc_info:
+        MediaId.from_string(rejected)
+
+    message = str(exc_info.value)
+    assert message == EXPECTED_ERROR_MESSAGE
+    if rejected:
+        assert rejected not in message
+
+
+@pytest.mark.parametrize("rejected", [None, 123, uuid.uuid4(), b"12345678-1234-4234-9234-123456789abc"])
+def test_from_string_rejects_non_string_input(rejected: Any) -> None:
+    with pytest.raises(FrameNestIdentityError) as exc_info:
+        MediaId.from_string(rejected)  # type: ignore[arg-type]
+
+    assert str(exc_info.value) == EXPECTED_ERROR_MESSAGE
+
+
+def test_from_string_rejects_unsupported_uuid_variant() -> None:
+    rejected = UNSUPPORTED_VARIANT_UUID_TEXT
+
+    with pytest.raises(FrameNestIdentityError) as exc_info:
+        MediaId.from_string(rejected)
+
+    message = str(exc_info.value)
+    assert message == EXPECTED_ERROR_MESSAGE
+    assert rejected not in message
+
+
+def test_validation_error_is_sanitized_and_framenest_owned() -> None:
+    rejected = "/Users/private/catalog.sqlite3/not-a-uuid"
+
+    with pytest.raises(FrameNestIdentityError) as exc_info:
+        MediaId.from_string(rejected)
+
+    message = str(exc_info.value)
+    assert message == EXPECTED_ERROR_MESSAGE
+    assert rejected not in message
+    assert "/Users/" not in message
+    assert "badly formed hexadecimal UUID string" not in message
+    assert "ValueError" not in message
+    assert exc_info.value.__cause__ is None

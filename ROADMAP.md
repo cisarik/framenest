@@ -54,12 +54,15 @@ Accepted so far:
 - Initial ASGI runtime: Uvicorn through [ADR-0008](docs/adr/0008-asgi-runtime.md).
 - Initial structured logging approach: standard-library `logging` with a FrameNest-owned JSON formatter and redaction boundary through [ADR-0009](docs/adr/0009-structured-logging-approach.md); implementation complete.
 - Initial SQLite persistence and migration foundation: synchronous SQLAlchemy Core with Alembic through [ADR-0010](docs/adr/0010-initial-persistence-foundation.md); minimal explicit migration implementation complete.
+- Stable domain identities: application-owned UUIDv4 values with category-specific pure-domain types through [ADR-0011](docs/adr/0011-stable-domain-identities.md); minimal identity primitives implemented.
 
 The initial scaffold decision gate is complete. A Poetry package scaffold, centralized configuration boundary, FastAPI application factory, typed health endpoint, contract tests, Uvicorn runtime dependency, startup wiring, and a runnable loopback-only server command now exist.
 
 Broader architecture decisions still open include sidecar manifest format and versioning, server/domain boundaries beyond the current skeleton, initial authentication boundary, media-tool distribution strategy, and Fedora deployment details.
 
 Persistence strategy is accepted through [ADR-0010](docs/adr/0010-initial-persistence-foundation.md). The minimal SQLAlchemy/Alembic migration foundation is implemented. The actual media catalog schema remains unimplemented.
+
+Stable identity strategy is accepted through [ADR-0011](docs/adr/0011-stable-domain-identities.md). Pure domain identity primitives exist, but no logical media, physical location, device, library, storage volume, or series entities exist beyond those identity value objects.
 
 Key deliverables: remaining broader architecture ADRs and evidence as needed before later implementation phases.
 
@@ -75,7 +78,17 @@ Status: planned.
 
 Goal: define and test the core domain model and durable metadata behavior.
 
-Key deliverables: stable identities, logical media, physical locations, devices, libraries, storage volumes, series, canonical tags, sidecar contracts, and exact roundtrip tests.
+Implemented so far:
+
+- Stable identity format accepted through [ADR-0011](docs/adr/0011-stable-domain-identities.md)
+- Immutable pure-domain identity primitives for logical media, physical locations, devices, libraries, storage volumes, and series
+
+Still required for phase exit:
+
+- Logical media, physical location, device, library, storage volume, and series entities beyond identity values
+- Canonical tags
+- Sidecar contracts
+- Exact roundtrip tests for durable metadata behavior
 
 Entry conditions: relevant ADRs accepted.
 

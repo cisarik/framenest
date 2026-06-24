@@ -6,7 +6,7 @@ FrameNest is a local-first, privacy-conscious, cross-platform library for video 
 
 FrameNest is in an early foundation, pre-alpha stage.
 
-A minimal Poetry package scaffold exists at the repository root with centralized settings, a FastAPI application factory, a typed `GET /health` endpoint, in-process contract tests, and a loopback-first Uvicorn development server. There is no functional user application, media catalog schema, gallery, downloader, desktop shell, installer, deployment, or supported release yet.
+A minimal Poetry package scaffold exists at the repository root with centralized settings, a FastAPI application factory, a typed `GET /health` endpoint, in-process contract tests, a loopback-first Uvicorn development server, and pure-domain identity primitives. There is no functional user application, media catalog schema, gallery, downloader, desktop shell, installer, deployment, or supported release yet.
 
 The repository also contains the first persistence foundation: a centralized SQLite database path setting, synchronous SQLAlchemy Core engine helpers, packaged Alembic resources, and explicit database commands. This is not a media catalog schema and does not provide library scanning or gallery data yet.
 
@@ -108,8 +108,9 @@ Accepted implementation foundations so far:
 - FastAPI ([ADR-0003](docs/adr/0003-initial-server-api-framework.md))
 - Uvicorn as the initial ASGI runtime ([ADR-0008](docs/adr/0008-asgi-runtime.md)), installed and wired for loopback-first local development
 - SQLAlchemy Core and Alembic for the initial SQLite migration foundation ([ADR-0010](docs/adr/0010-initial-persistence-foundation.md)), installed and wired behind explicit database commands
+- Application-owned UUIDv4 stable domain identities with category-specific pure-domain types ([ADR-0011](docs/adr/0011-stable-domain-identities.md))
 
-Exact frontend framework, packaging choices, IPC design, data schema, deployment model, production update mechanisms, and many server operational details remain subject to later documented decisions.
+Exact frontend framework, packaging choices, IPC design, data schema, identity database encoding, deployment model, production update mechanisms, and many server operational details remain subject to later documented decisions.
 
 ## Security and Privacy Principles
 
@@ -169,6 +170,7 @@ Current foundation files:
 - [`docs/adr/0008-asgi-runtime.md`](docs/adr/0008-asgi-runtime.md) records the accepted Uvicorn ASGI runtime decision.
 - [`docs/adr/0009-structured-logging-approach.md`](docs/adr/0009-structured-logging-approach.md) records the accepted structured logging decision.
 - [`docs/adr/0010-initial-persistence-foundation.md`](docs/adr/0010-initial-persistence-foundation.md) records the accepted SQLAlchemy Core and Alembic SQLite persistence foundation decision.
+- [`docs/adr/0011-stable-domain-identities.md`](docs/adr/0011-stable-domain-identities.md) records the accepted stable domain identity decision.
 
 ## Non-Goals for the Current Stage
 
