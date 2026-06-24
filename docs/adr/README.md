@@ -21,10 +21,6 @@ Evidence packages such as [ARCHITECTURE_FOUNDATION_EVIDENCE.md](../ARCHITECTURE_
 
 An accepted ADR may only be changed by a later ADR that supersedes it. Editing an accepted ADR in place without a superseding ADR is not permitted.
 
-## Open Decision Evidence
-
-None at this time. Temporary decision evidence **MUST** be listed here while a decision remains open and **MUST** be removed in the same bounded task that accepts the consuming ADR.
-
 ## Index
 
 | ADR | Title | Status | Decision date | Link |
