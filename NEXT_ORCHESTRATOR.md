@@ -1,88 +1,165 @@
 # Next Orchestrator Handoff
 
-## Purpose
+## 1. Purpose and authority
 
-This file transfers session state to a fresh Orchestrator chat after scaffold-session closeout. It does not grant modification authority and does not replace permanent repository documents.
+This file restores orchestration state for a fresh Orchestrator session. It is not an executable task. Permanent documentation, current code, tests, Git history, and accepted ADRs remain authoritative.
 
-## Repository state
+The fresh Orchestrator must independently verify public `main` and must not treat this file as task authority.
+
+**Current ORCHESTRATOR session: CLOSED.**
+
+## 2. Repository identity and expected state
 
 - Repository: `https://github.com/cisarik/framenest.git`
-- Local path: `/Users/agile/framenest`
+- Local path used by Worker: `/Users/agile/framenest`
 - Branch: `main`
-- Scaffold commit before this closeout: `09909b64924a0ef35f19be78f1fff871bfe0d00e`
-- Final handoff commit: resolve from public `main` after push
+- Pre-handoff public HEAD: `e43001eba2daafed27db6a3d304279cd61c04db4`
+- Latest verified test baseline: **94 passed**, zero warnings
+- Resolve the final handoff commit from public `main` after push; do not assume this file contains the post-handoff SHA.
 
-## Completed work
+## 3. Role and communication rules
 
-- Minimal Poetry package scaffold with `pyproject.toml`, `poetry.lock`, `src/framenest/`, and `tests/unit/`
-- One passing import and src-layout test
-- uv-managed CPython 3.13.14 provisioning on Apple Silicon macOS
-- Homebrew `uv` upgraded to 0.11.24
-- Poetry 2.1.4 in-project `.venv` at `/Users/agile/framenest/.venv`
-- [ADR-0007](docs/adr/0007-settings-library.md) accepted: `pydantic-settings` as concrete settings adapter
-- Compact communication protocol and English Worker report rules recorded
+- Michal is the COOPERATOR
+- The ChatGPT orchestration chat is the ORCHESTRATOR
+- The repository execution role is WORKER
+- Analytic Programming is provider- and model-neutral
+- Orchestrator ↔ Cooperator communication is Slovak
+- Worker prompts and reports are English
+- Worker reports begin with: `### Report for ORCHESTRATOR_CHAT`
+- Issue one bounded authoritative task at a time
+- User-facing Worker prompts use: `Toto pošli WORKEROVI ako jeden prompt:`
 
-## Toolchain evidence
+## 4. Current product direction
 
-- uv: 0.11.24 (Homebrew)
-- uv-managed interpreter: CPython 3.13.14 (`cpython-3.13.14-macos-aarch64-none`)
-- Poetry: 2.1.4
-- pytest: 9.1.1 (dev dependency only)
-- Runtime dependencies: none
+Essential FrameNest invariants:
 
-## Current tests
+- local-first
+- privacy-conscious
+- cross-platform
+- premium gallery and acquisition are flagship capabilities
+- one logical media item may have multiple physical locations
+- portable sidecars plus local indexes
+- optional server aggregation must not replace desktop autonomy
+- external VLC is the initial full-player path
+- Tailscale is the remote-access direction
+- Fedora KDE on an Intel NUC is a later deployment target
 
-- `tests/unit/test_package_import.py` — 1 passing test
+See [PRODUCT.md](PRODUCT.md) and [SPEC.md](SPEC.md) for normative detail.
 
-## What does not exist yet
+## 5. Implemented technical foundation
 
-- No configuration implementation
-- No `pydantic-settings` installed
-- No FastAPI application or health endpoint
-- No server process
-- No database
-- No deployment
+Current verified implementation:
 
-## Language and communication rules
+- centralized typed configuration with loopback-safe defaults
+- FastAPI application factory and typed `GET /health`
+- Uvicorn runtime with explicit safety settings and console entrypoint `framenest-server`
+- FrameNest-owned structured JSON logging with centralized redaction
+- disabled Uvicorn access logging
+- strict direct-process JSON output contract
+- clean direct-process SIGINT and SIGTERM shutdown without application traceback
+- documented application-versus-launcher output boundary
+- import-boundary, configuration, API, runtime, logging, process-output, and cleanup tests
 
-- Orchestrator ↔ Cooperator: Slovak
-- Worker prompts: English
-- Worker reports: English, compact evidence-dense format
-- Czech must not be used
+Current test count at handoff base HEAD: **94 passed**, zero warnings.
 
-## Exact next strategy
+## 6. Accepted decisions
 
-The new Orchestrator must:
+| ADR | Decision | Implementation state |
+|---|---|---|
+| [0001](docs/adr/0001-supported-python-version.md) | CPython 3.13 | active |
+| [0002](docs/adr/0002-python-environment-and-dependency-manager.md) | Poetry | active |
+| [0003](docs/adr/0003-initial-server-api-framework.md) | FastAPI adapter | active |
+| [0004](docs/adr/0004-repository-layout.md) | hybrid staged src-layout | active |
+| [0005](docs/adr/0005-configuration-strategy.md) | layered configuration | active |
+| [0006](docs/adr/0006-macos-python-interpreter-provider.md) | `uv` on macOS | active |
+| [0007](docs/adr/0007-settings-library.md) | `pydantic-settings` | active |
+| [0008](docs/adr/0008-asgi-runtime.md) | Uvicorn | active |
+| [0009](docs/adr/0009-structured-logging-approach.md) | stdlib structured logging | implemented |
+| [0010](docs/adr/0010-initial-persistence-foundation.md) | SQLAlchemy Core + Alembic | accepted, not implemented |
 
-1. Independently verify public `main` HEAD.
-2. Start a fresh Worker session.
-3. Issue one bounded test-first configuration task using `pydantic-settings`.
+No database dependency exists in `pyproject.toml` or `poetry.lock`.
 
-That task should remain separate from FastAPI and should include:
+## 7. Latest completed work
 
-- adding and locking `pydantic-settings` through Poetry;
-- centralized settings boundary outside the domain layer;
-- safe `127.0.0.1` default host;
-- environment-variable override;
-- local ignored `.env` behavior;
-- deterministic ADR-0005 precedence;
-- `SecretStr` or equivalent secret-aware types;
-- sanitized validation errors, including `hide_input_in_errors=True` where applicable;
-- tests proving precedence and secret non-disclosure;
-- no FastAPI, server startup, database, deployment, or secret-store integration.
+Recent meaningful sequence:
 
-A compact bootstrap gate inside the implementation task is sufficient unless repository or environment uncertainty requires a separate bootstrap-only task.
+- structured logging foundation per ADR-0009
+- server shutdown and output correction with direct-process contract tests
+- universal AP Worker handoff transport clarification
+- provider-neutral WORKER role in AP and bootstrap documents
+- transient database-stack research with no committed evidence artifact
+- ADR-0010 acceptance for the initial persistence foundation
 
-## Deferred work
+## 8. Persistence strategy
 
-- FastAPI application factory and health endpoint
-- Database and query architecture
-- Fedora deployment, systemd, SELinux, firewalld, Tailscale
-- Committed non-secret configuration file format
-- OS secret stores
+Accepted constraints from [ADR-0010](docs/adr/0010-initial-persistence-foundation.md):
 
-## Closure
+- synchronous SQLAlchemy 2.x Core
+- Alembic for schema migrations
+- `sqlite+pysqlite` as the SQLite dialect
+- FrameNest-owned repository and transaction boundaries
+- no SQLAlchemy ORM mapped entities
+- no SQLModel
+- no async SQLite access initially
+- no silent migration during normal server startup
+- explicit upgrade-only migrations initially
+- server should eventually detect incompatible schema and refuse safely
+- WAL is deferred pending macOS and Fedora evidence
+- the database is a rebuildable local index or cache, not the durable synchronization protocol
 
-The old Orchestrator session stops after this handoff is verified against the public commit.
+## 9. Exact next orchestration strategy
 
-A new Orchestrator must bootstrap from [BOOT_ORCHESTRATOR.md](BOOT_ORCHESTRATOR.md), read this file, verify current `HEAD`, and issue the bounded configuration task.
+The fresh Orchestrator should:
+
+1. verify the final public `main` and both handoff files
+2. inspect ADR-0010, the current settings boundary, package layout, tests, and dependencies
+3. issue one bounded test-first implementation task for the minimal persistence foundation
+4. keep media-domain tables completely out of that task
+5. require dependency addition through Poetry
+6. require exact import boundaries and no ORM or async leakage
+7. require an explicit migration command and schema-status boundary
+8. require temporary-directory database tests
+9. require no automatic migration during normal server startup
+10. independently verify the resulting public commit
+
+Shape the final implementation prompt from current repository truth rather than treating this handoff as task authority.
+
+## 10. First implementation acceptance boundary
+
+The next implementation may prove only:
+
+- database path configuration
+- SQLAlchemy engine or connection creation
+- foreign keys on each connection
+- bounded busy handling
+- explicit transaction commit and rollback
+- Alembic environment and revision `0001`
+- empty-to-head migration
+- current and head schema inspection
+- deterministic reopen
+- migration failure behavior
+- explicit migrate and status command or equivalent boundary
+- installed-package migration resource discovery
+- no HTTP dependency
+- no media schema
+
+## 11. Known risks and deferred decisions
+
+- `greenlet` or other native-wheel portability must be checked on supported platforms
+- Fedora validation remains future work
+- WAL mode and checkpoint policy remain undecided
+- default database path and exact busy timeout remain implementation decisions
+- backup, restore, and corruption recovery are deferred
+- sidecar schema and durable identity model are unresolved
+- Alembic autogenerate is non-authoritative
+- SQLAlchemy Core expressions must not leak out of infrastructure
+- a database row must not become canonical durable metadata
+
+## 12. AP lifecycle state
+
+- the outgoing Worker session is closed
+- the outgoing Orchestrator session is closed
+- the next Worker should be a completely fresh session
+- a fresh Orchestrator must read [BOOT_ORCHESTRATOR.md](BOOT_ORCHESTRATOR.md), [AP_ORCHESTRATOR.md](AP_ORCHESTRATOR.md), and this file
+- repository handoffs are read directly from the repository and normally not pasted manually
+- neither NEXT file grants task or Git authority
