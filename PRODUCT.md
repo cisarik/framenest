@@ -18,7 +18,7 @@ Downloading, cataloging, gallery presentation, metadata, storage awareness, tran
 
 FrameNest is currently in foundation-stage, pre-alpha development.
 
-There is no functional application, server, package, installer, or supported release yet. This document defines approved product direction; it does not claim implementation.
+A minimal Poetry package and runnable loopback health server now exist. There is no functional media application, catalog, gallery, database, downloader, desktop shell, server aggregator, installer, deployment, or supported release yet. This document defines approved product direction; it does not claim full product implementation.
 
 ## 3. Product Vision
 
