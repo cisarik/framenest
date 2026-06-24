@@ -243,6 +243,40 @@ def test_main_delegates_to_run_server(
     run_server_mock.assert_called_once_with()
 
 
+def test_main_catches_keyboard_interrupt_without_propagation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from framenest.server import main
+
+    run_server_mock = MagicMock(side_effect=KeyboardInterrupt)
+    monkeypatch.setattr("framenest.server.run_server", run_server_mock)
+    main()
+    run_server_mock.assert_called_once_with()
+
+
+def test_main_does_not_swallow_system_exit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from framenest.server import main
+
+    run_server_mock = MagicMock(side_effect=SystemExit(3))
+    monkeypatch.setattr("framenest.server.run_server", run_server_mock)
+    with pytest.raises(SystemExit) as exc_info:
+        main()
+    assert exc_info.value.code == 3
+
+
+def test_main_does_not_swallow_unexpected_exception(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from framenest.server import main
+
+    run_server_mock = MagicMock(side_effect=RuntimeError("startup failure"))
+    monkeypatch.setattr("framenest.server.run_server", run_server_mock)
+    with pytest.raises(RuntimeError, match="startup failure"):
+        main()
+
+
 def test_production_uvicorn_imports_are_confined_to_server_module() -> None:
     repository_root = Path(__file__).resolve().parents[2]
     violations: list[str] = []

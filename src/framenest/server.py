@@ -35,7 +35,10 @@ def run_server(
 
 
 def main() -> None:
-    run_server()
+    try:
+        run_server()
+    except KeyboardInterrupt:
+        return
 
 
 if __name__ == "__main__":

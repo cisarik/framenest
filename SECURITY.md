@@ -47,7 +47,9 @@ Do not keep using an exposed credential while waiting for repository cleanup.
 
 Logs, support bundles, crash reports, diagnostics, and screenshots must be reviewed and sanitized before they are shared.
 
-FrameNest now implements a structured logging foundation with centralized redaction before JSON serialization. The formatter does not automatically serialize settings objects, request objects, private paths, media filenames, URLs, headers, or arbitrary object representations. Secrets must still never be passed intentionally as ordinary log messages. Uvicorn HTTP access logging is initially disabled. JSON logs remain diagnostic output and require review before sharing. Logging redaction is defense in depth, not permission to log sensitive data.
+FrameNest now implements a structured logging foundation with centralized redaction before JSON serialization for FrameNest-owned log records. The formatter does not automatically serialize settings objects, request objects, private paths, media filenames, URLs, headers, or arbitrary object representations. Secrets must still never be passed intentionally as ordinary log messages. Uvicorn HTTP access logging is initially disabled. JSON logs remain diagnostic output and require review before sharing. Logging redaction is defense in depth, not permission to log sensitive data.
+
+Launcher, interpreter, shell, supervisor, and future service-manager diagnostics are separate output sources outside the FrameNest logging graph. Captured combined `stderr` from a wrapped command must not automatically be treated as entirely application-generated. External diagnostics must still be reviewed and sanitized before sharing.
 
 Avoid exposing:
 
