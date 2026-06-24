@@ -6,7 +6,20 @@ FrameNest is a local-first, privacy-conscious, cross-platform library for video 
 
 FrameNest is in an early foundation, pre-alpha stage.
 
-There is no functional application, server, package, installer, or supported release yet. This repository currently establishes only the initial safety and documentation foundation.
+A minimal Python package and test scaffold exists at the repository root. There is no functional application, server, installer, or supported release yet. The current scaffold provides only importable package metadata, Poetry-managed development tooling, and a single package-import test.
+
+Supported runtime: CPython `>=3.13,<3.14`. Local development uses a uv-managed CPython 3.13.14 interpreter with Poetry as the dependency, environment, and lockfile manager. The initial `poetry.lock` was generated with Poetry 2.1.4. The local virtual environment lives in `.venv/` and is not committed.
+
+## Development Setup
+
+From the repository root on Apple Silicon macOS:
+
+```fish
+set UV_MANAGED_PYTHON (uv python find --managed-python --no-config --no-project 3.13.14)
+env POETRY_VIRTUALENVS_IN_PROJECT=true poetry env use "$UV_MANAGED_PYTHON"
+env POETRY_VIRTUALENVS_IN_PROJECT=true poetry install
+env POETRY_VIRTUALENVS_IN_PROJECT=true poetry run pytest
+```
 
 ## Product Vision
 
@@ -99,7 +112,9 @@ The current stage does not provide:
 - Embedded libVLC.
 - AI-generated covers.
 - Public internet exposure.
-- A complete application scaffold.
+- A functional server or API.
+- FastAPI implementation.
+- Production deployment.
 
 ## License
 
