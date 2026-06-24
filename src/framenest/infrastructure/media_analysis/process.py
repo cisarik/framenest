@@ -6,7 +6,7 @@ import subprocess
 import threading
 import time
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import IO, Protocol
 
 EXECUTABLE_NOT_FOUND_MESSAGE = "External tool is not available."
@@ -17,6 +17,8 @@ PROCESS_FAILED_MESSAGE = "External tool execution failed."
 _READ_CHUNK_SIZE = 8192
 _JOIN_TIMEOUT_SECONDS = 5.0
 _POLL_INTERVAL_SECONDS = 0.01
+_STDOUT_READER_THREAD_NAME = "framenest-media-analysis-stdout-reader"
+_STDERR_READER_THREAD_NAME = "framenest-media-analysis-stderr-reader"
 
 
 class ProcessExecutionError(RuntimeError):
@@ -47,6 +49,16 @@ class ProcessRunner(Protocol):
         """Execute one argv-based process without a shell."""
 
 
+@dataclass(slots=True)
+class _ReaderState:
+    """Bounded completion state for one pipe reader thread."""
+
+    retained: bytes = b""
+    error: BaseException | None = None
+    overflow: bool = False
+    completed: threading.Event = field(default_factory=threading.Event)
+
+
 def _close_pipe(pipe: IO[bytes] | None) -> None:
     if pipe is None:
         return
@@ -70,41 +82,41 @@ def _read_stdout_bounded(
     pipe: IO[bytes],
     *,
     max_bytes: int,
-    overflow_event: threading.Event,
-    reader_error: list[BaseException | None],
-    retained: list[bytes],
+    state: _ReaderState,
+    wake_event: threading.Event,
 ) -> None:
     buffer = bytearray()
-    overflow = False
+    discard_mode = False
     try:
         while True:
             chunk = pipe.read(_READ_CHUNK_SIZE)
             if not chunk:
                 break
-            if overflow:
+            if discard_mode:
                 continue
             next_length = len(buffer) + len(chunk)
             if next_length <= max_bytes:
                 buffer.extend(chunk)
                 continue
-            overflow = True
-            overflow_event.set()
+            discard_mode = True
+            state.overflow = True
+            wake_event.set()
             allowed = (max_bytes + _READ_CHUNK_SIZE) - len(buffer)
             if allowed > 0:
                 buffer.extend(chunk[:allowed])
     except Exception as exc:
-        reader_error[0] = exc
+        state.error = exc
     finally:
         _close_pipe(pipe)
-        retained.append(bytes(buffer[:max_bytes]) if len(buffer) > max_bytes else bytes(buffer))
+        state.retained = bytes(buffer[:max_bytes]) if len(buffer) > max_bytes else bytes(buffer)
+        state.completed.set()
 
 
 def _read_stderr_bounded(
     pipe: IO[bytes],
     *,
     max_bytes: int,
-    reader_error: list[BaseException | None],
-    retained: list[bytes],
+    state: _ReaderState,
 ) -> None:
     buffer = bytearray()
     try:
@@ -115,25 +127,62 @@ def _read_stderr_bounded(
             if len(buffer) < max_bytes:
                 buffer.extend(chunk[: max_bytes - len(buffer)])
     except Exception as exc:
-        reader_error[0] = exc
+        state.error = exc
     finally:
         _close_pipe(pipe)
-        retained.append(bytes(buffer))
+        state.retained = bytes(buffer)
+        state.completed.set()
 
 
-def _join_reader_threads(*threads: threading.Thread) -> None:
+def _await_reader_threads(*threads: threading.Thread) -> None:
     deadline = time.monotonic() + _JOIN_TIMEOUT_SECONDS
     for thread in threads:
         remaining = deadline - time.monotonic()
-        if remaining <= 0:
-            thread.join(timeout=0)
-            continue
-        thread.join(timeout=remaining)
+        if remaining > 0:
+            thread.join(timeout=remaining)
+    if any(thread.is_alive() for thread in threads):
+        raise ProcessExecutionError(PROCESS_FAILED_MESSAGE)
 
 
-def _reader_failure(reader_error: BaseException | None) -> None:
-    if reader_error is not None:
-        raise ProcessExecutionError(PROCESS_FAILED_MESSAGE) from None
+def _raise_reader_error(state: _ReaderState) -> None:
+    if state.error is not None:
+        raise ProcessExecutionError(PROCESS_FAILED_MESSAGE)
+
+
+def _raise_stdout_overflow(state: _ReaderState) -> None:
+    if state.overflow:
+        raise ProcessExecutionError(PROCESS_OUTPUT_LIMIT_MESSAGE)
+
+
+def _finalize_readers(
+    *,
+    stdout_thread: threading.Thread,
+    stderr_thread: threading.Thread,
+    stdout_state: _ReaderState,
+    stderr_state: _ReaderState,
+) -> None:
+    _await_reader_threads(stdout_thread, stderr_thread)
+    _raise_reader_error(stderr_state)
+    _raise_reader_error(stdout_state)
+    _raise_stdout_overflow(stdout_state)
+
+
+def _handle_stdout_overflow(
+    process: subprocess.Popen[bytes],
+    *,
+    stdout_thread: threading.Thread,
+    stderr_thread: threading.Thread,
+    stdout_state: _ReaderState,
+    stderr_state: _ReaderState,
+) -> None:
+    _terminate_process(process)
+    _finalize_readers(
+        stdout_thread=stdout_thread,
+        stderr_thread=stderr_thread,
+        stdout_state=stdout_state,
+        stderr_state=stderr_state,
+    )
+    raise ProcessExecutionError(PROCESS_OUTPUT_LIMIT_MESSAGE)
 
 
 class SubprocessRunner:
@@ -167,21 +216,19 @@ class SubprocessRunner:
             _terminate_process(process)
             raise ProcessExecutionError(PROCESS_FAILED_MESSAGE)
 
-        overflow_event = threading.Event()
-        stdout_error: list[BaseException | None] = [None]
-        stderr_error: list[BaseException | None] = [None]
-        stdout_retained: list[bytes] = []
-        stderr_retained: list[bytes] = []
+        stdout_wake = threading.Event()
+        stdout_state = _ReaderState()
+        stderr_state = _ReaderState()
 
         stdout_thread = threading.Thread(
             target=_read_stdout_bounded,
             args=(process.stdout,),
             kwargs={
                 "max_bytes": stdout_max_bytes,
-                "overflow_event": overflow_event,
-                "reader_error": stdout_error,
-                "retained": stdout_retained,
+                "state": stdout_state,
+                "wake_event": stdout_wake,
             },
+            name=_STDOUT_READER_THREAD_NAME,
             daemon=True,
         )
         stderr_thread = threading.Thread(
@@ -189,9 +236,9 @@ class SubprocessRunner:
             args=(process.stderr,),
             kwargs={
                 "max_bytes": stderr_max_bytes,
-                "reader_error": stderr_error,
-                "retained": stderr_retained,
+                "state": stderr_state,
             },
+            name=_STDERR_READER_THREAD_NAME,
             daemon=True,
         )
         stdout_thread.start()
@@ -200,38 +247,51 @@ class SubprocessRunner:
         deadline = time.monotonic() + timeout_seconds
         try:
             while True:
-                if overflow_event.is_set():
-                    _terminate_process(process)
-                    _join_reader_threads(stdout_thread, stderr_thread)
-                    _reader_failure(stdout_error[0])
-                    _reader_failure(stderr_error[0])
-                    raise ProcessExecutionError(PROCESS_OUTPUT_LIMIT_MESSAGE)
+                if stdout_state.overflow or stdout_wake.is_set():
+                    _handle_stdout_overflow(
+                        process,
+                        stdout_thread=stdout_thread,
+                        stderr_thread=stderr_thread,
+                        stdout_state=stdout_state,
+                        stderr_state=stderr_state,
+                    )
 
                 returncode = process.poll()
                 if returncode is not None:
-                    _join_reader_threads(stdout_thread, stderr_thread)
-                    _reader_failure(stdout_error[0])
-                    _reader_failure(stderr_error[0])
-                    stdout = stdout_retained[0] if stdout_retained else b""
-                    if len(stdout) > stdout_max_bytes:
-                        raise ProcessExecutionError(PROCESS_OUTPUT_LIMIT_MESSAGE)
+                    _finalize_readers(
+                        stdout_thread=stdout_thread,
+                        stderr_thread=stderr_thread,
+                        stdout_state=stdout_state,
+                        stderr_state=stderr_state,
+                    )
                     return ProcessRunResult(
                         returncode=returncode,
-                        stdout=stdout,
-                        stderr=stderr_retained[0] if stderr_retained else b"",
+                        stdout=stdout_state.retained,
+                        stderr=stderr_state.retained,
                     )
 
                 if time.monotonic() >= deadline:
                     _terminate_process(process)
-                    _join_reader_threads(stdout_thread, stderr_thread)
-                    _reader_failure(stdout_error[0])
-                    _reader_failure(stderr_error[0])
+                    _finalize_readers(
+                        stdout_thread=stdout_thread,
+                        stderr_thread=stderr_thread,
+                        stdout_state=stdout_state,
+                        stderr_state=stderr_state,
+                    )
                     raise ProcessExecutionError(PROCESS_TIMEOUT_MESSAGE)
 
-                time.sleep(_POLL_INTERVAL_SECONDS)
+                stdout_wake.wait(timeout=_POLL_INTERVAL_SECONDS)
         except ProcessExecutionError:
             raise
         except Exception:
             _terminate_process(process)
-            _join_reader_threads(stdout_thread, stderr_thread)
+            try:
+                _finalize_readers(
+                    stdout_thread=stdout_thread,
+                    stderr_thread=stderr_thread,
+                    stdout_state=stdout_state,
+                    stderr_state=stderr_state,
+                )
+            except ProcessExecutionError:
+                pass
             raise ProcessExecutionError(PROCESS_FAILED_MESSAGE) from None
