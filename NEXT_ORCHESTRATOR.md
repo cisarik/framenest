@@ -1,165 +1,354 @@
 # Next Orchestrator Handoff
 
-## 1. Purpose and authority
+## 1. Role restoration
 
-This file restores orchestration state for a fresh Orchestrator session. It is not an executable task. Permanent documentation, current code, tests, Git history, and accepted ADRs remain authoritative.
+Michal is the COOPERATOR and strategic owner. The fresh ChatGPT chat is the ORCHESTRATOR. Repository execution agents are WORKER.
 
-The fresh Orchestrator must independently verify public `main` and must not treat this file as task authority.
+The ORCHESTRATOR communicates with Michal in Slovak and uses feminine grammatical gender. Worker prompts and reports are English. Worker reports must begin exactly with:
 
-**Current ORCHESTRATOR session: CLOSED.**
+`### Report for ORCHESTRATOR_CHAT`
 
-## 2. Repository identity and expected state
+The ORCHESTRATOR independently verifies public commits and raw file content. Issue one bounded task at a time. Analytic Programming is provider- and model-neutral. The repository, accepted ADRs, tests, and Git history are the source of truth.
+
+This file restores orchestration state only. It is not an executable task and grants no implementation or Git authority.
+
+**Current outgoing ORCHESTRATOR session: CLOSED.**
+
+## 2. Repository restoration
 
 - Repository: `https://github.com/cisarik/framenest.git`
-- Local path used by Worker: `/Users/agile/framenest`
+- Local path used by the closing Worker: `/Users/agile/framenest`
 - Branch: `main`
-- Pre-handoff public HEAD: `e43001eba2daafed27db6a3d304279cd61c04db4`
-- Latest verified test baseline: **94 passed**, zero warnings
-- Resolve the final handoff commit from public `main` after push; do not assume this file contains the post-handoff SHA.
+- Pre-handoff public HEAD: `c4a80b40f89f67e0aadc66d02536cbd6626acef3`
+- Pre-handoff subject: `feat: add library scan preview`
+- Pre-handoff parent: `0c5795baedfcacaf1334e6bb5e4e62f682888ab4`
 
-## 3. Role and communication rules
+The fresh Orchestrator must resolve the final handoff commit from public `main` after the closeout push. Do not assume this file contains the post-handoff SHA.
 
-- Michal is the COOPERATOR
-- The ChatGPT orchestration chat is the ORCHESTRATOR
-- The repository execution role is WORKER
-- Analytic Programming is provider- and model-neutral
-- Orchestrator ↔ Cooperator communication is Slovak
-- Worker prompts and reports are English
-- Worker reports begin with: `### Report for ORCHESTRATOR_CHAT`
-- Issue one bounded authoritative task at a time
-- User-facing Worker prompts use: `Toto pošli WORKEROVI ako jeden prompt:`
+Required reading before authorizing work:
 
-## 4. Current product direction
+1. [BOOT_ORCHESTRATOR.md](BOOT_ORCHESTRATOR.md)
+2. [AP.md](AP.md)
+3. [AP_ORCHESTRATOR.md](AP_ORCHESTRATOR.md)
+4. [NEXT_ORCHESTRATOR.md](NEXT_ORCHESTRATOR.md)
+5. [AGENTS.md](AGENTS.md)
+6. [BOOT_WORKER.md](BOOT_WORKER.md)
+7. [AP_WORKER.md](AP_WORKER.md)
+8. [NEXT_WORKER.md](NEXT_WORKER.md)
+9. [PRODUCT.md](PRODUCT.md), [SPEC.md](SPEC.md), [ROADMAP.md](ROADMAP.md), [SECURITY.md](SECURITY.md), [README.md](README.md)
+10. [docs/adr/README.md](docs/adr/README.md) and ADR-0001 through ADR-0014
+11. task-relevant source and tests
+12. recent public Git history from the persistence foundation through the final handoff commit
 
-Essential FrameNest invariants:
+## 3. Verified project state
 
-- local-first
-- privacy-conscious
+### Directly committed public facts
+
+The repository implements:
+
+- centralized typed settings with loopback-safe defaults
+- FastAPI application factory and typed `GET /health`
+- Uvicorn loopback-first runtime through `framenest-server`
+- FrameNest-owned structured JSON logging with centralized redaction
+- synchronous SQLAlchemy 2.x Core SQLite persistence with Alembic
+- explicit `framenest-db status` and `framenest-db migrate` commands
+- packaged migrations `0001` (foundation), `0002` (`devices`), `0003` (`libraries`)
+- stable UUIDv4 domain identities
+- pure-domain `Device` and `Library` entities with `LibraryRoot` locators
+- application `DeviceRepository` and `LibraryRepository` ports with SQLAlchemy Core adapters
+- development catalog CLI for device and library registry
+- ADR-0014 bounded read-only library scan preview
+- application scan values, `LibraryScanner` port, `PreviewLibraryScan`, and `LocalLibraryScanner`
+- `framenest-catalog library scan-preview` with deterministic JSON output and sanitized errors
+
+There is no migration `0004`, no media table, no storage-volume table, no FFmpeg/ffprobe integration, no AI provider, and no media persistence from scanning.
+
+### Closing-Worker-observed runtime evidence
+
+At pre-handoff HEAD `c4a80b40f89f67e0aadc66d02536cbd6626acef3`:
+
+- CPython `3.13.14` in project `.venv/`
+- Poetry `2.1.4`
+- `poetry check --lock`: passed
+- `poetry run pytest --collect-only -q`: **487 tests collected**
+- `poetry run pytest -q`: **487 passed**
+- `poetry run pytest -q -W error`: **487 passed**
+- zero observed pytest warnings
+
+The fresh Orchestrator and Worker must reverify these values from the final public commit.
+
+### Recent public commit sequence
+
+Meaningful sequence through scan preview:
+
+- `4a2a167` — SQLite persistence foundation
+- `bf82ad4` / `dcb9f68` — stable domain identities
+- `07dbd94` — device registry core
+- `a872265` — device catalog CLI
+- `8d800e8` — library registry core
+- `b90b680` — library catalog CLI
+- `c4a80b4` — library scan preview and ADR-0014
+
+## 4. Product invariants
+
+Preserve the established FrameNest direction:
+
+- local-first and privacy-conscious
 - cross-platform
+- multiple independently registered libraries with stable identities
+- one logical medium may have multiple physical locations
+- portable sidecars plus rebuildable local indexes
 - premium gallery and acquisition are flagship capabilities
-- one logical media item may have multiple physical locations
-- portable sidecars plus local indexes
 - optional server aggregation must not replace desktop autonomy
-- external VLC is the initial full-player path
-- Tailscale is the remote-access direction
+- external VLC is the initial full-player path; future `MediaPlayerBackend` remains a product direction
+- MEME collection for GIFs and short videos is a product direction
+- local inline looping previews for GIFs and short clips are a product direction
+- Tailscale only for remote features unless explicitly superseded
 - Fedora KDE on an Intel NUC is a later deployment target
+- API keys for remotely consumed AI features must eventually remain server-side, not in ordinary client installations
 
 See [PRODUCT.md](PRODUCT.md) and [SPEC.md](SPEC.md) for normative detail.
 
-## 5. Implemented technical foundation
+## 5. Newly clarified COOPERATOR AI intent
 
-Current verified implementation:
+**Strategic intent only — not accepted architecture and not implemented.**
 
-- centralized typed configuration with loopback-safe defaults
-- FastAPI application factory and typed `GET /health`
-- Uvicorn runtime with explicit safety settings and console entrypoint `framenest-server`
-- FrameNest-owned structured JSON logging with centralized redaction
-- disabled Uvicorn access logging
-- strict direct-process JSON output contract
-- clean direct-process SIGINT and SIGTERM shutdown without application traceback
-- documented application-versus-launcher output boundary
-- import-boundary, configuration, API, runtime, logging, process-output, and cleanup tests
+### Test corpus
 
-Current test count at handoff base HEAD: **94 passed**, zero warnings.
+The Cooperator states that the current local test corpus lives at:
 
-## 6. Accepted decisions
+`/Users/agile/Video`
 
-| ADR | Decision | Implementation state |
-|---|---|---|
-| [0001](docs/adr/0001-supported-python-version.md) | CPython 3.13 | active |
-| [0002](docs/adr/0002-python-environment-and-dependency-manager.md) | Poetry | active |
-| [0003](docs/adr/0003-initial-server-api-framework.md) | FastAPI adapter | active |
-| [0004](docs/adr/0004-repository-layout.md) | hybrid staged src-layout | active |
-| [0005](docs/adr/0005-configuration-strategy.md) | layered configuration | active |
-| [0006](docs/adr/0006-macos-python-interpreter-provider.md) | `uv` on macOS | active |
-| [0007](docs/adr/0007-settings-library.md) | `pydantic-settings` | active |
-| [0008](docs/adr/0008-asgi-runtime.md) | Uvicorn | active |
-| [0009](docs/adr/0009-structured-logging-approach.md) | stdlib structured logging | implemented |
-| [0010](docs/adr/0010-initial-persistence-foundation.md) | SQLAlchemy Core + Alembic | accepted, not implemented |
+The corpus consists of MP4 and GIF meme media. Representative filenames include:
 
-No database dependency exists in `pyproject.toml` or `poetry.lock`.
+- `HAaXdF3XMAAeahd.mp4`
+- `G_MCaLEXcAE7EHb.mp4`
+- `decart-realtime-1763826467496.mp4`
+- readable names such as `haha.mp4`, `moonufo.mp4`, and `screaming.mp4`
 
-## 7. Latest completed work
+### Desired future behavior
 
-Recent meaningful sequence:
+When eventually authorized:
 
-- structured logging foundation per ADR-0009
-- server shutdown and output correction with direct-process contract tests
-- universal AP Worker handoff transport clarification
-- provider-neutral WORKER role in AP and bootstrap documents
-- transient database-stack research with no committed evidence artifact
-- ADR-0010 acceptance for the initial persistence foundation
+- detect suspicious or non-informative filenames
+- extract approximately three representative visual frames from videos and GIFs
+- include technical metadata in the analysis payload
+- send only an explicitly approved analysis payload to an optional cloud VLM
+- obtain structured suggestions for:
+  - concise title
+  - description
+  - English canonical tags
+  - collection or category
+  - safe suggested filename preserving extension
+  - confidence
+  - observed evidence
+  - uncertainties
+- classify this test corpus as appropriate for a canonical `Meme` tag or collection when supported by evidence
+- never invent people, places, dates, or events
+- never automatically rename, move, categorize, or tag without explicit user confirmation
+- preserve the original file until an authorized confirmed operation exists
+- support MP4 and GIF first without assuming every source has three distinct decodable frames
+- prefer uploading representative frames and metadata rather than complete private videos for the first cloud prototype
 
-## 8. Persistence strategy
+None of this is implemented. No provider, frame extractor, suggestion schema, or confirmation workflow exists in the repository.
 
-Accepted constraints from [ADR-0010](docs/adr/0010-initial-persistence-foundation.md):
+## 6. Current provider research to reverify
 
-- synchronous SQLAlchemy 2.x Core
-- Alembic for schema migrations
-- `sqlite+pysqlite` as the SQLite dialect
-- FrameNest-owned repository and transaction boundaries
-- no SQLAlchemy ORM mapped entities
-- no SQLModel
-- no async SQLite access initially
-- no silent migration during normal server startup
-- explicit upgrade-only migrations initially
-- server should eventually detect incompatible schema and refuse safely
-- WAL is deferred pending macOS and Fedora evidence
-- the database is a rebuildable local index or cache, not the durable synchronization protocol
+**Time-sensitive non-authoritative research dated 2026-06-24.**
 
-## 9. Exact next orchestration strategy
+The next Orchestrator must reverify official primary sources before authorizing integration. No provider is accepted yet. No free quota is guaranteed permanently.
 
-The fresh Orchestrator should:
+### NVIDIA NIM
 
-1. verify the final public `main` and both handoff files
-2. inspect ADR-0010, the current settings boundary, package layout, tests, and dependencies
-3. issue one bounded test-first implementation task for the minimal persistence foundation
-4. keep media-domain tables completely out of that task
-5. require dependency addition through Poetry
-6. require exact import boundaries and no ORM or async leakage
-7. require an explicit migration command and schema-status boundary
-8. require temporary-directory database tests
-9. require no automatic migration during normal server startup
-10. independently verify the resulting public commit
+Candidate model:
 
-Shape the final implementation prompt from current repository truth rather than treating this handoff as task authority.
+`nvidia/nemotron-3-nano-omni-30b-a3b-reasoning`
 
-## 10. First implementation acceptance boundary
+Current official pages indicate:
 
-The next implementation may prove only:
+- image, video, audio, and text understanding
+- a hosted free endpoint
+- free NVIDIA Developer Program access for prototyping
+- OpenAI-compatible hosted base URL: `https://integrate.api.nvidia.com/v1`
+- trial or development terms rather than a guaranteed unrestricted production service
 
-- database path configuration
-- SQLAlchemy engine or connection creation
-- foreign keys on each connection
-- bounded busy handling
-- explicit transaction commit and rollback
-- Alembic environment and revision `0001`
-- empty-to-head migration
-- current and head schema inspection
-- deterministic reopen
-- migration failure behavior
-- explicit migrate and status command or equivalent boundary
-- installed-package migration resource discovery
-- no HTTP dependency
-- no media schema
+Official references:
 
-## 11. Known risks and deferred decisions
+- `https://build.nvidia.com/nvidia/nemotron-3-nano-omni-30b-a3b-reasoning`
+- `https://docs.api.nvidia.com/nim/docs/product`
+- `https://docs.api.nvidia.com/nim/docs/api-quickstart`
 
-- `greenlet` or other native-wheel portability must be checked on supported platforms
-- Fedora validation remains future work
-- WAL mode and checkpoint policy remain undecided
-- default database path and exact busy timeout remain implementation decisions
-- backup, restore, and corruption recovery are deferred
-- sidecar schema and durable identity model are unresolved
-- Alembic autogenerate is non-authoritative
-- SQLAlchemy Core expressions must not leak out of infrastructure
-- a database row must not become canonical durable metadata
+Also consider, without accepting:
 
-## 12. AP lifecycle state
+`nvidia/nemotron-nano-12b-v2-vl`
 
-- the outgoing Worker session is closed
-- the outgoing Orchestrator session is closed
-- the next Worker should be a completely fresh session
-- a fresh Orchestrator must read [BOOT_ORCHESTRATOR.md](BOOT_ORCHESTRATOR.md), [AP_ORCHESTRATOR.md](AP_ORCHESTRATOR.md), and this file
-- repository handoffs are read directly from the repository and normally not pasted manually
-- neither NEXT file grants task or Git authority
+Direct NVIDIA NIM is currently the preferred first no-cost prototype candidate.
+
+### Vercel AI Gateway
+
+Current official evidence indicates:
+
+- OpenAI-compatible API
+- image inputs
+- model routing and usage tracking
+- pay-as-you-go pricing
+- some unpaid accounts currently receive recurring small gateway credits
+- vision-capable NVIDIA model listing: `nvidia/nemotron-nano-12b-v2-vl`
+
+Official references:
+
+- `https://vercel.com/docs/ai-gateway`
+- `https://vercel.com/docs/ai-gateway/openai-compat/chat-completions`
+- `https://vercel.com/docs/ai-gateway/pricing`
+- `https://vercel.com/ai-gateway/models/nemotron-nano-12b-v2-vl`
+
+Vercel AI Gateway is a useful alternate adapter and may use the Cooperator's existing credits.
+
+### Research guardrails
+
+- provider and model selection must stay outside domain and application policy
+- a fake deterministic provider is required for tests
+- network tests must not be part of the default test suite
+- no API key may be committed, logged, returned, or stored in the catalog database
+
+## 7. Recommended orchestration sequence
+
+Strategy for the fresh Orchestrator to reassess — not an executable task.
+
+### Stage A — local analysis-preparation boundary
+
+Potential ADR for:
+
+- `ffprobe` metadata extraction
+- `ffmpeg` deterministic frame extraction
+- approximately three representative distinct frames
+- MP4 and GIF handling
+- temporary artifact lifecycle and cleanup
+- no network
+- no catalog mutation
+- explicit external-tool detection and version evidence
+- deterministic tests with tiny media fixtures
+
+This is likely the first new Worker task after repository verification.
+
+### Stage B — provider-neutral AI suggestion boundary
+
+Define:
+
+- application request and result types
+- provider protocol
+- structured suggestion schema
+- title, description, English tags, category, safe filename, confidence, evidence, uncertainties
+- fake provider for tests
+- no network in default tests
+- no automatic file action
+
+### Stage C — NVIDIA NIM prototype adapter
+
+Implement only with explicit opt-in:
+
+- secret from environment or future secret store
+- three-frame multimodal request
+- strict structured response validation
+- timeouts and bounded retry policy
+- sanitized errors
+- no secrets or private absolute paths in logs
+- manually invoked smoke test excluded from normal tests
+
+### Stage D — Vercel AI Gateway adapter or fallback
+
+Only after provider-neutral behavior exists.
+
+### Stage E — review and confirmation workflow
+
+Only after suggestion quality is proven:
+
+- show original name and preview evidence
+- show proposed title, tags, and filename
+- explicit accept, edit, or reject
+- no automatic rename
+- eventual audit-safe file operation boundary
+
+### Stage F — persistent media and location catalog
+
+Do not prematurely combine this with cloud-provider integration.
+
+The fresh Orchestrator must choose the smallest safe next bounded step after public verification.
+
+## 8. AI and privacy guardrails
+
+Record for future tasks:
+
+- cloud analysis is optional; local scan and gallery must remain functional without AI or internet
+- representative frames may contain private imagery
+- payloads require explicit user action
+- absolute local paths must never be transmitted
+- only relative identifiers and metadata required by the prompt should be sent
+- avoid whole-video upload initially
+- no biometric or person-identification claim
+- no automatic person naming
+- no secret in source, database, logs, reports, tests, or subprocess arguments where avoidable
+- API responses must be validated as untrusted external data
+- provider output is suggestion evidence, not catalog truth
+- user confirmation is mandatory before mutation
+
+## 9. Explicitly unresolved decisions
+
+Do not treat these as decided:
+
+- exact frame-position algorithm
+- treatment of media with fewer than three distinct frames
+- ffmpeg and ffprobe installation and version policy across macOS, Fedora, and Windows
+- frame dimensions and image format
+- temporary storage versus in-memory frames
+- frame cleanup policy
+- provider selection and model
+- structured-output compatibility with chosen models
+- free quota, rate limits, and retention terms
+- retry and timeout policy
+- prompt versioning
+- tag vocabulary and synonym policy beyond canonical English and intended `Meme`
+- filename normalization rules
+- whether suggestions are persisted before confirmation
+- cloud-data retention and provider privacy terms
+- media and physical-location schema
+- relationship between AI suggestions, sidecars, and durable catalog metadata
+
+## 10. Session and context strategy
+
+- one fresh Worker bootstrap per coherent Worker session
+- subsequent tasks use short continuation prompts
+- do not close solely because automatic compaction occurred
+- close when context pressure, coherence loss, usage limits, milestone boundaries, or domain shifts make continuation unsafe
+- update [NEXT_WORKER.md](NEXT_WORKER.md) only at Worker-session closeout
+- update [NEXT_ORCHESTRATOR.md](NEXT_ORCHESTRATOR.md) only at Orchestrator-session closeout
+- verify every closing handoff commit publicly
+- do not manually copy repository handoffs into new Worker sessions; the fresh Worker reads handoffs from the repository
+
+User-facing Worker prompts may use: `Toto pošli WORKEROVI ako jeden prompt:`
+
+## 11. First response expected from fresh Orchestrator
+
+The fresh Orchestrator must:
+
+1. read and independently verify public repository state
+2. resolve the final handoff commit
+3. verify both NEXT files against public raw content
+4. summarize implemented state and test evidence
+5. reverify current official NVIDIA and Vercel facts from primary sources
+6. identify any contradiction or stale claim
+7. propose the smallest safe next task
+8. provide one authoritative fresh-WORKER prompt only after verification
+9. not implement code in ORCHESTRATOR chat
+10. not ask the Cooperator to paste repository files that already exist in the repository
+
+## 12. Handoff lifecycle
+
+- classification: non-authoritative Orchestrator-session handoff
+- intended consumer: one fresh future ORCHESTRATOR session
+- discoverability: repository root and Orchestrator bootstrap reading order
+- retention: replace only at a future explicitly authorized Orchestrator closeout
+- supersession and cleanup owner: explicitly authorized closing Worker
+- Git history is the archive; the active tree must contain only the latest handoff
+
+**Current outgoing ORCHESTRATOR session: CLOSED.**
