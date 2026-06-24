@@ -43,16 +43,32 @@ from framenest.infrastructure.ai.transport import (
 _SECRET = "test-nvidia-secret-value"
 _SENSITIVE_PATH = "/sensitive-example/private-media.mp4"
 _VALID_PNG = PNG_SIGNATURE + b"png"
+_OTHER_VALID_PNG = PNG_SIGNATURE + b"other-png"
+_THIRD_VALID_PNG = PNG_SIGNATURE + b"third-png"
+_REQUEST_ID = "req_123-abc"
+_STATUS_URL = f"https://integrate.api.nvidia.com/v1/status/{_REQUEST_ID}"
 
 
 class _FakeTransport:
-    def __init__(self, *, status_code: int = 200, body: bytes | None = None, error: Exception | None = None) -> None:
-        self.status_code = status_code
-        self.body = body
-        self.error = error
+    def __init__(
+        self,
+        *,
+        status_code: int = 200,
+        body: bytes | None = None,
+        error: Exception | None = None,
+        get_responses: tuple[HttpsJsonResponse | Exception, ...] = (),
+    ) -> None:
+        self.post_response = HttpsJsonResponse(
+            status_code=status_code,
+            body=body if body is not None else b"",
+        )
+        self.post_error = error
+        self.get_responses = list(get_responses)
         self.last_url: str | None = None
         self.last_headers: dict[str, str] | None = None
         self.last_body: bytes | None = None
+        self.post_calls: list[tuple[str, dict[str, str], bytes]] = []
+        self.get_calls: list[tuple[str, dict[str, str]]] = []
 
     def post_json(
         self,
@@ -65,13 +81,28 @@ class _FakeTransport:
         self.last_url = url
         self.last_headers = headers
         self.last_body = body
-        if self.error is not None:
-            raise self.error
-        assert self.body is not None
-        return HttpsJsonResponse(status_code=self.status_code, body=self.body)
+        self.post_calls.append((url, dict(headers), body))
+        if self.post_error is not None:
+            raise self.post_error
+        return self.post_response
+
+    def get_json(
+        self,
+        url: str,
+        *,
+        headers: dict[str, str],
+    ) -> HttpsJsonResponse:
+        self.get_calls.append((url, dict(headers)))
+        assert self.get_responses
+        response = self.get_responses.pop(0)
+        if isinstance(response, Exception):
+            raise response
+        return response
 
 
-def _sample_request() -> MediaSuggestionRequest:
+def _sample_request(
+    frame_payloads: tuple[bytes, ...] = (_VALID_PNG,),
+) -> MediaSuggestionRequest:
     return MediaSuggestionRequest(
         basename="clip.mp4",
         candidate_kind=LibraryScanCandidateKind.VIDEO,
@@ -83,8 +114,9 @@ def _sample_request() -> MediaSuggestionRequest:
             container_formats=("mp4",),
             has_audio=False,
         ),
-        representative_frames=(
-            build_representative_frame(timestamp_ms=0, payload=_VALID_PNG),
+        representative_frames=tuple(
+            build_representative_frame(timestamp_ms=index * 500, payload=payload)
+            for index, payload in enumerate(frame_payloads)
         ),
         prompt_version=PROMPT_VERSION,
     )
@@ -114,19 +146,163 @@ def _valid_suggestion_json() -> str:
 
 
 def test_build_request_uses_exact_endpoint_and_data_urls() -> None:
-    request = _sample_request()
+    request = _sample_request((_VALID_PNG, _OTHER_VALID_PNG, _THIRD_VALID_PNG))
     body = build_nvidia_request_body(request, model_id=DEFAULT_MODEL_ID)
-    encoded = base64.b64encode(_VALID_PNG).decode("ascii")
+    encoded_frames = [
+        base64.b64encode(payload).decode("ascii")
+        for payload in (_VALID_PNG, _OTHER_VALID_PNG, _THIRD_VALID_PNG)
+    ]
     assert body["model"] == DEFAULT_MODEL_ID
     assert body["stream"] is False
     assert body["temperature"] == 0.2
-    assert body["chat_template_kwargs"] == {"enable_thinking": False}
-    content = body["messages"][0]["content"]
+    assert len(body["messages"]) == 2
+    assert body["messages"][0] == {"role": "system", "content": "/no_think"}
+    assert isinstance(body["messages"][0]["content"], str)
+    assert body["messages"][1]["role"] == "user"
+    assert "chat_template_kwargs" not in body
+    assert "response_format" not in body
+    content = body["messages"][1]["content"]
     assert content[0]["type"] == "text"
-    assert _SENSITIVE_PATH not in json.dumps(body)
+    body_json = json.dumps(body)
+    assert _SENSITIVE_PATH not in body_json
+    assert _SECRET not in body_json
+    assert "Authorization" not in body_json
+    assert "Bearer" not in body_json
     image_parts = [part for part in content if part["type"] == "image_url"]
-    assert len(image_parts) == 1
-    assert image_parts[0]["image_url"]["url"] == f"data:image/png;base64,{encoded}"
+    assert len(image_parts) == 3
+    assert [
+        part["image_url"]["url"] for part in image_parts
+    ] == [f"data:image/png;base64,{encoded}" for encoded in encoded_frames]
+
+
+def test_provider_uses_immediate_200_without_status_polling() -> None:
+    transport = _FakeTransport(body=_provider_response_payload(_valid_suggestion_json()))
+    provider = NvidiaNimMediaSuggestionProvider(NvidiaApiCredential(_SECRET), transport)
+    suggestion = provider.suggest(_sample_request())
+    assert suggestion.title == "Evening clip"
+    assert len(transport.post_calls) == 1
+    assert transport.get_calls == []
+
+
+def test_provider_polls_pending_202_without_resending_frames() -> None:
+    transport = _FakeTransport(
+        status_code=202,
+        body=json.dumps({"requestId": _REQUEST_ID}, separators=(",", ":")).encode("utf-8"),
+        get_responses=(
+            HttpsJsonResponse(status_code=202, body=b"{}"),
+            HttpsJsonResponse(status_code=200, body=_provider_response_payload(_valid_suggestion_json())),
+        ),
+    )
+    provider = NvidiaNimMediaSuggestionProvider(
+        NvidiaApiCredential(_SECRET),
+        transport,
+        monotonic_clock=iter((0.0, 0.0, 0.5, 0.5)).__next__,
+        sleep=lambda _seconds: None,
+    )
+    suggestion = provider.suggest(_sample_request((_VALID_PNG, _OTHER_VALID_PNG)))
+    assert suggestion.suggested_filename == "evening-clip.mp4"
+    assert len(transport.post_calls) == 1
+    assert len(transport.get_calls) == 2
+    assert transport.get_calls == [
+        (_STATUS_URL, {"Authorization": f"Bearer {_SECRET}"}),
+        (_STATUS_URL, {"Authorization": f"Bearer {_SECRET}"}),
+    ]
+    assert _REQUEST_ID not in str(suggestion)
+    assert all(_SECRET not in url for url, _headers in transport.get_calls)
+    assert all(b"data:image/png" not in json.dumps(call).encode("utf-8") for call in transport.get_calls)
+
+
+@pytest.mark.parametrize(
+    "pending_payload",
+    [
+        {},
+        {"requestId": 123},
+        {"requestId": ""},
+        {"requestId": "a" * 129},
+        {"requestId": "../unsafe"},
+        {"requestId": _REQUEST_ID, "extra": "value"},
+    ],
+)
+def test_provider_rejects_invalid_pending_envelopes_without_leaking_id(
+    pending_payload: dict[str, object],
+) -> None:
+    transport = _FakeTransport(
+        status_code=202,
+        body=json.dumps(pending_payload, separators=(",", ":")).encode("utf-8"),
+    )
+    provider = NvidiaNimMediaSuggestionProvider(NvidiaApiCredential(_SECRET), transport)
+    with pytest.raises(MediaSuggestionProviderInvalidResponseError) as exc_info:
+        provider.suggest(_sample_request())
+    assert str(exc_info.value) == "Media suggestion provider response was invalid."
+    assert _REQUEST_ID not in str(exc_info.value)
+    assert transport.get_calls == []
+
+
+def test_provider_times_out_pending_status_without_leaking_request_id() -> None:
+    transport = _FakeTransport(
+        status_code=202,
+        body=json.dumps({"requestId": _REQUEST_ID}, separators=(",", ":")).encode("utf-8"),
+        get_responses=(
+            HttpsJsonResponse(status_code=202, body=b"{}"),
+            HttpsJsonResponse(status_code=202, body=b"{}"),
+        ),
+    )
+    provider = NvidiaNimMediaSuggestionProvider(
+        NvidiaApiCredential(_SECRET),
+        transport,
+        pending_timeout_seconds=0.5,
+        monotonic_clock=iter((0.0, 0.0, 0.6)).__next__,
+        sleep=lambda _seconds: None,
+    )
+    with pytest.raises(MediaSuggestionProviderUnavailableError) as exc_info:
+        provider.suggest(_sample_request())
+    assert str(exc_info.value) == "Media suggestion provider is not available."
+    assert _REQUEST_ID not in str(exc_info.value)
+    assert len(transport.post_calls) == 1
+    assert len(transport.get_calls) == 1
+
+
+@pytest.mark.parametrize(
+    ("get_response", "expected"),
+    [
+        (
+            HttpsTransportError(TRANSPORT_AUTH_REJECTED_MESSAGE),
+            MediaSuggestionProviderAuthError,
+        ),
+        (
+            HttpsTransportError(TRANSPORT_RATE_LIMITED_MESSAGE),
+            MediaSuggestionProviderRateLimitedError,
+        ),
+        (
+            HttpsTransportError(TRANSPORT_UNAVAILABLE_MESSAGE),
+            MediaSuggestionProviderUnavailableError,
+        ),
+        (
+            HttpsJsonResponse(status_code=200, body=b"not-json"),
+            MediaSuggestionProviderFailedError,
+        ),
+    ],
+)
+def test_provider_maps_pending_poll_failures(
+    get_response: HttpsJsonResponse | Exception,
+    expected: type[Exception],
+) -> None:
+    transport = _FakeTransport(
+        status_code=202,
+        body=json.dumps({"requestId": _REQUEST_ID}, separators=(",", ":")).encode("utf-8"),
+        get_responses=(get_response,),
+    )
+    provider = NvidiaNimMediaSuggestionProvider(
+        NvidiaApiCredential(_SECRET),
+        transport,
+        monotonic_clock=iter((0.0, 0.0)).__next__,
+        sleep=lambda _seconds: None,
+    )
+    with pytest.raises(expected) as exc_info:
+        provider.suggest(_sample_request())
+    assert _SECRET not in str(exc_info.value)
+    assert _REQUEST_ID not in str(exc_info.value)
+    assert "not-json" not in str(exc_info.value)
 
 
 def test_provider_sends_authorization_without_exposing_secret() -> None:

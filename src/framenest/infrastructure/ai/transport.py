@@ -56,6 +56,22 @@ class HttpsJsonTransport:
             headers=dict(headers),
             method="POST",
         )
+        return self._execute(request)
+
+    def get_json(
+        self,
+        url: str,
+        *,
+        headers: Mapping[str, str],
+    ) -> HttpsJsonResponse:
+        request = urllib.request.Request(
+            url,
+            headers=dict(headers),
+            method="GET",
+        )
+        return self._execute(request)
+
+    def _execute(self, request: urllib.request.Request) -> HttpsJsonResponse:
         try:
             with urllib.request.urlopen(
                 request,
