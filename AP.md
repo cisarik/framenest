@@ -16,6 +16,10 @@ The ORCHESTRATOR is the coordination layer. The Orchestrator preserves project c
 
 The WORKER is the protocol role that executes one bounded authoritative task, validates the result, and returns evidence. The Worker inspects before modifying, maintains task boundaries, runs permitted checks, reports evidence honestly, stops when required evidence is missing, and MUST NOT decide product strategy independently. WORKER is not a product, model, provider, IDE, CLI, or hosted service.
 
+ORCHESTRATOR is a persistent abstract protocol role, not a product, model, provider, chat, IDE, CLI, or hosted service. An **Orchestrator implementation** is the concrete system currently fulfilling that role. An **Orchestrator instance** is one concrete initialized execution entity temporarily assigned to the ORCHESTRATOR role. An **Orchestrator session** is that instance's bounded lifecycle and conversational context.
+
+An Orchestrator execution client, implementation, model, and model provider are separate identity layers. The ORCHESTRATOR role persists across instance rotation. Context-window pressure belongs to the current Orchestrator instance and Orchestrator session, not to the persistent ORCHESTRATOR role. Use phrasing such as `a fresh Orchestrator instance assigned to the ORCHESTRATOR role`; do not use `a fresh ORCHESTRATOR` when referring to a concrete model, chat, or execution instance.
+
 ## 3. Worker Role Portability and Capability Model
 
 WORKER is a protocol role, not a product or provider.

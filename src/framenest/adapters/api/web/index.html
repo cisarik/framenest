@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="dark">
+    <title>FrameNest</title>
+    <link rel="stylesheet" href="/assets/styles.css">
+    <script src="/assets/app.js" defer></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to main content</a>
+    <header class="app-header" aria-label="FrameNest application header">
+      <div class="brand" aria-label="FrameNest">
+        <span class="brand-mark" aria-hidden="true">FN</span>
+        <span class="brand-name">FrameNest</span>
+      </div>
+      <div class="stage-pill">Pre-alpha foundation</div>
+    </header>
+
+    <main id="main" class="app-shell">
+      <section class="intro-panel" aria-labelledby="intro-title">
+        <div class="intro-copy">
+          <p class="eyebrow">Local application server</p>
+          <h1 id="intro-title">FrameNest is running locally.</h1>
+          <p class="lede">
+            This pre-alpha web shell is served by the real FrameNest FastAPI
+            process. It confirms the local application foundation without
+            presenting gallery, library browsing, downloads, AI analysis, or
+            Settings as finished features.
+          </p>
+        </div>
+        <div class="status-card" aria-live="polite" aria-atomic="true">
+          <div class="status-card__label">Server status</div>
+          <div id="server-status" class="status status--loading">
+            <span class="status__dot" aria-hidden="true"></span>
+            <span id="server-status-text">Checking local health endpoint...</span>
+          </div>
+          <p id="server-status-detail" class="status-detail">
+            Waiting for the same-origin health response.
+          </p>
+        </div>
+      </section>
+
+      <section class="foundation-grid" aria-labelledby="foundation-title">
+        <div class="section-heading">
+          <p class="eyebrow">Current surface</p>
+          <h2 id="foundation-title">Foundation boundaries</h2>
+        </div>
+        <div class="boundary-list" aria-label="FrameNest foundation status">
+          <article class="boundary-card boundary-card--active">
+            <h3>Local web shell</h3>
+            <p>Packaged HTML, CSS, and JavaScript served from the Python package.</p>
+            <span class="boundary-state">Active</span>
+          </article>
+          <article class="boundary-card">
+            <h3>Gallery</h3>
+            <p>Future premium library browsing. No media data is shown in this shell.</p>
+            <span class="boundary-state boundary-state--future">Future</span>
+          </article>
+          <article class="boundary-card">
+            <h3>Libraries</h3>
+            <p>Future local library management beyond current operator commands.</p>
+            <span class="boundary-state boundary-state--future">Future</span>
+          </article>
+          <article class="boundary-card">
+            <h3>Downloads</h3>
+            <p>Future acquisition workflows with explicit progress and confirmation.</p>
+            <span class="boundary-state boundary-state--future">Future</span>
+          </article>
+          <article class="boundary-card">
+            <h3>Settings</h3>
+            <p>Future application preferences and provider configuration boundaries.</p>
+            <span class="boundary-state boundary-state--future">Future</span>
+          </article>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>

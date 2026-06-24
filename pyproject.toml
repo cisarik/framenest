@@ -18,6 +18,9 @@ packages = [
 ]
 include = [
     { path = "src/framenest/infrastructure/persistence/alembic_environment/script.py.mako", format = ["sdist", "wheel"] },
+    { path = "src/framenest/adapters/api/web/index.html", format = ["sdist", "wheel"] },
+    { path = "src/framenest/adapters/api/web/styles.css", format = ["sdist", "wheel"] },
+    { path = "src/framenest/adapters/api/web/app.js", format = ["sdist", "wheel"] },
 ]
 
 [tool.poetry.group.dev.dependencies]

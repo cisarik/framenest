@@ -41,3 +41,4 @@ An accepted ADR may only be changed by a later ADR that supersedes it. Editing a
 | 0014 | Safe Read-Only Library Scan Preview | Accepted | 2026-06-24 | [0014-safe-library-scan-preview.md](0014-safe-library-scan-preview.md) |
 | 0015 | Deterministic Local Media Analysis Preparation | Accepted | 2026-06-24 | [0015-deterministic-local-media-analysis-preparation.md](0015-deterministic-local-media-analysis-preparation.md) |
 | 0016 | Provider-Neutral Media Suggestions and NVIDIA NIM Prototype | Accepted | 2026-06-24 | [0016-provider-neutral-media-suggestions-and-nvidia-nim-prototype.md](0016-provider-neutral-media-suggestions-and-nvidia-nim-prototype.md) |
+| 0017 | Initial Local Web Application Delivery | Accepted | 2026-06-24 | [0017-initial-local-web-application-delivery.md](0017-initial-local-web-application-delivery.md) |

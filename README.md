@@ -6,9 +6,9 @@ FrameNest is a local-first, privacy-conscious, cross-platform library for video 
 
 FrameNest is in an early foundation, pre-alpha stage.
 
-A minimal Poetry package scaffold exists at the repository root with centralized settings, a FastAPI application factory, a typed `GET /health` endpoint, in-process contract tests, a loopback-first Uvicorn development server, and pure-domain identity primitives. There is no functional user application, media catalog schema, gallery, downloader, desktop shell, installer, deployment, or supported release yet.
+A minimal Poetry package scaffold exists at the repository root with centralized settings, a FastAPI application factory, a typed `GET /health` endpoint, in-process contract tests, a loopback-first Uvicorn development server, a packaged pre-alpha local web shell at `GET /`, and pure-domain identity primitives. There is no functional media application, media catalog schema, gallery, downloader, desktop shell, installer, deployment, or supported release yet.
 
-The repository also contains the first persistence foundation: a centralized SQLite database path setting, synchronous SQLAlchemy Core engine helpers, packaged Alembic resources, and explicit database commands. This is not a media catalog schema and does not provide library scanning or gallery data yet.
+The repository also contains the first persistence and registry foundation: a centralized SQLite database path setting, synchronous SQLAlchemy Core engine helpers, packaged Alembic resources, explicit database commands, local device and library registry tables, and read-only library scan and media-analysis preview commands. This is not a media catalog schema and does not provide persistent media records or gallery data yet.
 
 Supported runtime: CPython `>=3.13,<3.14`. Local development uses a uv-managed CPython 3.13.14 interpreter with Poetry as the dependency, environment, and lockfile manager. The initial `poetry.lock` was generated with Poetry 2.1.4. The local virtual environment lives in `.venv/` and is not committed.
 
@@ -31,7 +31,9 @@ Start the loopback-first development server:
 poetry run framenest-server
 ```
 
-Default URL: `http://127.0.0.1:8000`. Health path: `/health`.
+Default application URL: `http://127.0.0.1:8000`. Health path: `/health`.
+
+The default URL serves the initial packaged pre-alpha FrameNest web shell. It is enough to confirm that the real local application server is running and that browser code can reach the same-origin health endpoint. Gallery, library browsing, downloads, AI analysis, Settings, playback, and persistent media catalog behavior remain future work.
 
 FrameNest-owned runtime logs are compact JSON lines written to `stderr` by the direct application process. The installed console entrypoint `.venv/bin/framenest-server` is the strict application-process boundary used by machine-readable output contract tests. Ordinary interactive termination with Ctrl+C or SIGTERM through that direct entrypoint must not emit an unstructured traceback.
 
@@ -65,7 +67,7 @@ Explicitly upgrade the configured database to the packaged Alembic head:
 poetry run framenest-db migrate
 ```
 
-Normal `poetry run framenest-server` startup does not apply migrations. Migration remains explicit through `framenest-db`. Revision `0002` adds the initial `devices` table only; there is no library, media, gallery, sidecar, user, or authentication schema yet.
+Normal `poetry run framenest-server` startup does not apply migrations. Migration remains explicit through `framenest-db`. Revisions through `0003` add the initial `devices` and `libraries` tables only; there is no media, gallery, sidecar, user, or authentication schema yet.
 
 ## Device Catalog CLI
 
@@ -160,8 +162,9 @@ Accepted implementation foundations so far:
 - Uvicorn as the initial ASGI runtime ([ADR-0008](docs/adr/0008-asgi-runtime.md)), installed and wired for loopback-first local development
 - SQLAlchemy Core and Alembic for the initial SQLite migration foundation ([ADR-0010](docs/adr/0010-initial-persistence-foundation.md)), installed and wired behind explicit database commands
 - Application-owned UUIDv4 stable domain identities with category-specific pure-domain types ([ADR-0011](docs/adr/0011-stable-domain-identities.md))
+- Packaged vanilla local web application delivery through the existing FastAPI process ([ADR-0017](docs/adr/0017-initial-local-web-application-delivery.md))
 
-Exact frontend framework, packaging choices, IPC design, data schema, identity database encoding, deployment model, production update mechanisms, and many server operational details remain subject to later documented decisions.
+Exact future frontend framework or compiled toolchain, desktop/Tauri packaging choices, IPC design, data schema, identity database encoding, deployment model, production update mechanisms, and many server operational details remain subject to later documented decisions.
 
 ## Security and Privacy Principles
 
@@ -222,6 +225,12 @@ Current foundation files:
 - [`docs/adr/0009-structured-logging-approach.md`](docs/adr/0009-structured-logging-approach.md) records the accepted structured logging decision.
 - [`docs/adr/0010-initial-persistence-foundation.md`](docs/adr/0010-initial-persistence-foundation.md) records the accepted SQLAlchemy Core and Alembic SQLite persistence foundation decision.
 - [`docs/adr/0011-stable-domain-identities.md`](docs/adr/0011-stable-domain-identities.md) records the accepted stable domain identity decision.
+- [`docs/adr/0012-initial-device-registry.md`](docs/adr/0012-initial-device-registry.md) records the accepted initial device registry decision.
+- [`docs/adr/0013-initial-library-registry.md`](docs/adr/0013-initial-library-registry.md) records the accepted initial library registry decision.
+- [`docs/adr/0014-safe-library-scan-preview.md`](docs/adr/0014-safe-library-scan-preview.md) records the accepted read-only library scan preview decision.
+- [`docs/adr/0015-deterministic-local-media-analysis-preparation.md`](docs/adr/0015-deterministic-local-media-analysis-preparation.md) records the accepted local media-analysis preparation decision.
+- [`docs/adr/0016-provider-neutral-media-suggestions-and-nvidia-nim-prototype.md`](docs/adr/0016-provider-neutral-media-suggestions-and-nvidia-nim-prototype.md) records the accepted provider-neutral media suggestion preview decision.
+- [`docs/adr/0017-initial-local-web-application-delivery.md`](docs/adr/0017-initial-local-web-application-delivery.md) records the accepted packaged local web shell delivery decision.
 
 ## Non-Goals for the Current Stage
 
@@ -233,7 +242,7 @@ The current stage does not provide:
 - Embedded libVLC.
 - AI-generated covers.
 - Public internet exposure.
-- A functional gallery, media catalog schema, library scanner, or downloader.
+- A functional gallery, media catalog schema, persistent media scanner, or downloader.
 - Production deployment.
 
 ## License
