@@ -35,8 +35,17 @@ from framenest.infrastructure.ai.constants import (
     REQUEST_TIMEOUT_SECONDS,
     TEMPERATURE,
     MAX_TOKENS,
+    TOP_K,
 )
 from framenest.infrastructure.ai.credentials import NvidiaApiCredential
+from framenest.infrastructure.ai.image_derivative import (
+    FrameNestImageDerivativeError,
+    PillowVlmImageDerivativeEncoder,
+    VLM_JPEG_AGGREGATE_MAX_BYTES,
+    VLM_JPEG_MAX_FRAMES,
+    VlmImageDerivative,
+    VlmImageDerivativeEncoder,
+)
 from framenest.infrastructure.ai.prompts import MEDIA_SUGGESTION_PROMPT
 from framenest.infrastructure.ai.transport import (
     HttpsJsonTransport,
@@ -64,6 +73,16 @@ _ALLOWED_SUGGESTION_KEYS = frozenset(
         "uncertainties",
     }
 )
+
+
+def _format_timestamp_ms(timestamp_ms: int) -> str:
+    hours = timestamp_ms // 3_600_000
+    remainder = timestamp_ms % 3_600_000
+    minutes = remainder // 60_000
+    remainder %= 60_000
+    seconds = remainder // 1000
+    millis = remainder % 1000
+    return f"{hours:02d}:{minutes:02d}:{seconds:02d}.{millis:03d}"
 
 
 class JsonTransport(Protocol):
@@ -107,8 +126,37 @@ def _metadata_summary(request: MediaSuggestionRequest) -> str:
     )
 
 
-def build_nvidia_request_body(request: MediaSuggestionRequest, *, model_id: str) -> dict[str, Any]:
+def _frame_labels(request: MediaSuggestionRequest) -> str:
+    total = len(request.representative_frames)
+    lines: list[str] = []
+    for index, frame in enumerate(request.representative_frames, start=1):
+        lines.append(f"Representative frame {index} of {total}")
+        lines.append(f"Timestamp: {_format_timestamp_ms(frame.timestamp_ms)}")
+    return "\n".join(lines)
+
+
+def _derive_vlm_images(
+    request: MediaSuggestionRequest,
+    image_encoder: VlmImageDerivativeEncoder,
+) -> tuple[VlmImageDerivative, ...]:
+    if len(request.representative_frames) > VLM_JPEG_MAX_FRAMES:
+        raise FrameNestImageDerivativeError("VLM image derivative failed.")
+    derivatives = tuple(image_encoder.encode_frame(frame) for frame in request.representative_frames)
+    aggregate_size = sum(derivative.byte_size for derivative in derivatives)
+    if aggregate_size > VLM_JPEG_AGGREGATE_MAX_BYTES:
+        raise FrameNestImageDerivativeError("VLM image derivative failed.")
+    return derivatives
+
+
+def build_nvidia_request_body(
+    request: MediaSuggestionRequest,
+    *,
+    model_id: str,
+    image_encoder: VlmImageDerivativeEncoder | None = None,
+) -> dict[str, Any]:
     """Build the NVIDIA chat-completions request body for one suggestion request."""
+    resolved_encoder = image_encoder or PillowVlmImageDerivativeEncoder()
+    derivatives = _derive_vlm_images(request, resolved_encoder)
     content: list[dict[str, Any]] = [
         {
             "type": "text",
@@ -118,27 +166,29 @@ def build_nvidia_request_body(request: MediaSuggestionRequest, *, model_id: str)
                     f"Filename basename: {request.basename}",
                     f"Candidate kind: {request.candidate_kind.value}",
                     _metadata_summary(request),
+                    _frame_labels(request),
                 ]
             ),
         }
     ]
-    for frame in request.representative_frames:
-        encoded = base64.b64encode(frame.payload).decode("ascii")
+    for derivative in derivatives:
+        encoded = base64.b64encode(derivative.payload).decode("ascii")
         content.append(
             {
                 "type": "image_url",
-                "image_url": {"url": f"data:image/png;base64,{encoded}"},
+                "image_url": {"url": f"data:{derivative.mime_type};base64,{encoded}"},
             }
         )
     return {
         "model": model_id,
         "messages": [
-            {"role": "system", "content": "/no_think"},
             {"role": "user", "content": content},
         ],
         "stream": False,
         "temperature": TEMPERATURE,
+        "top_k": TOP_K,
         "max_tokens": MAX_TOKENS,
+        "chat_template_kwargs": {"enable_thinking": False},
     }
 
 
@@ -174,10 +224,7 @@ def parse_suggestion_content_text(text: str) -> dict[str, Any]:
     if fence_match:
         candidate = fence_match.group("body").strip()
     else:
-        if not candidate.startswith("{") or not candidate.endswith("}"):
-            raise MediaSuggestionProviderInvalidResponseError(
-                SUGGESTION_PROVIDER_INVALID_RESPONSE_MESSAGE
-            )
+        candidate = _extract_single_json_object(candidate)
     try:
         parsed = json.loads(candidate)
     except json.JSONDecodeError:
@@ -193,6 +240,28 @@ def parse_suggestion_content_text(text: str) -> dict[str, Any]:
             SUGGESTION_PROVIDER_INVALID_RESPONSE_MESSAGE
         )
     return parsed
+
+
+def _extract_single_json_object(candidate: str) -> str:
+    if candidate.startswith("{") and candidate.endswith("}"):
+        return candidate
+    start = candidate.find("{")
+    end = candidate.rfind("}")
+    if start < 0 or end <= start:
+        raise MediaSuggestionProviderInvalidResponseError(
+            SUGGESTION_PROVIDER_INVALID_RESPONSE_MESSAGE
+        )
+    prefix = candidate[:start].strip()
+    suffix = candidate[end + 1 :].strip()
+    if "{" in candidate[start + 1 : end] or "}" in candidate[start + 1 : end]:
+        raise MediaSuggestionProviderInvalidResponseError(
+            SUGGESTION_PROVIDER_INVALID_RESPONSE_MESSAGE
+        )
+    if len(prefix) > 120 or len(suffix) > 120:
+        raise MediaSuggestionProviderInvalidResponseError(
+            SUGGESTION_PROVIDER_INVALID_RESPONSE_MESSAGE
+        )
+    return candidate[start : end + 1]
 
 
 def build_media_suggestion(
@@ -307,6 +376,7 @@ class NvidiaNimMediaSuggestionProvider:
         *,
         model_id: str = DEFAULT_MODEL_ID,
         provider_id: str = DEFAULT_PROVIDER_ID,
+        image_encoder: VlmImageDerivativeEncoder | None = None,
         pending_poll_interval_seconds: float = _PENDING_POLL_INTERVAL_SECONDS,
         pending_timeout_seconds: float = _PENDING_TIMEOUT_SECONDS,
         monotonic_clock: Callable[[], float] = time.monotonic,
@@ -319,6 +389,7 @@ class NvidiaNimMediaSuggestionProvider:
         )
         self._model_id = model_id
         self._provider_id = provider_id
+        self._image_encoder = image_encoder or PillowVlmImageDerivativeEncoder()
         self._pending_poll_interval_seconds = pending_poll_interval_seconds
         self._pending_timeout_seconds = pending_timeout_seconds
         self._monotonic_clock = monotonic_clock
@@ -326,8 +397,17 @@ class NvidiaNimMediaSuggestionProvider:
 
     def suggest(self, request: MediaSuggestionRequest) -> MediaSuggestion:
         required_extension = _extension_from_basename(request.basename)
-        body_dict = build_nvidia_request_body(request, model_id=self._model_id)
-        body = json.dumps(body_dict, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+        try:
+            body_dict = build_nvidia_request_body(
+                request,
+                model_id=self._model_id,
+                image_encoder=self._image_encoder,
+            )
+            body = json.dumps(body_dict, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+        except FrameNestImageDerivativeError:
+            raise MediaSuggestionProviderInvalidResponseError(
+                SUGGESTION_PROVIDER_INVALID_RESPONSE_MESSAGE
+            ) from None
         headers = {
             "Authorization": self._credential.authorization_header(),
             "Content-Type": "application/json",

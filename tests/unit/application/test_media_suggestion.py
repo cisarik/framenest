@@ -34,6 +34,7 @@ from framenest.domain import DeviceId, Library, LibraryId, LibraryPathFlavor, Li
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
 APPLICATION_SUGGESTION = REPOSITORY_ROOT / "src" / "framenest" / "application" / "media_suggestion.py"
+MEDIA_ANALYSIS_API = REPOSITORY_ROOT / "src" / "framenest" / "adapters" / "api" / "media_analysis_api.py"
 _VALID_PNG = PNG_SIGNATURE + b"png"
 
 
@@ -134,6 +135,11 @@ def test_request_uses_basename_without_absolute_path() -> None:
     request = build_suggestion_request(prepared)
     assert request.basename == "sample.mp4"
     assert "/" not in request.basename
+    assert request.prompt_version == "framenest-media-suggestion-v2"
+
+
+def test_prompt_version_is_v2() -> None:
+    assert PROMPT_VERSION == "framenest-media-suggestion-v2"
 
 
 def test_hidden_segments_rejected_for_suggestion_paths() -> None:
@@ -242,3 +248,34 @@ def test_application_suggestion_module_imports_no_infrastructure() -> None:
         if module.startswith("framenest.infrastructure"):
             violations.append(module)
     assert violations == []
+
+
+def test_pillow_imports_are_confined_outside_application_and_domain() -> None:
+    source_roots = [
+        REPOSITORY_ROOT / "src" / "framenest" / "application",
+        REPOSITORY_ROOT / "src" / "framenest" / "domain",
+    ]
+    violations: list[str] = []
+    for path in source_roots:
+        for source_file in sorted(path.rglob("*.py")):
+            tree = ast.parse(source_file.read_text(encoding="utf-8"), filename=str(source_file))
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Import):
+                    modules = [alias.name for alias in node.names]
+                elif isinstance(node, ast.ImportFrom):
+                    modules = [node.module or ""]
+                else:
+                    continue
+                if any(module == "PIL" or module.startswith("PIL.") for module in modules):
+                    violations.append(str(source_file.relative_to(REPOSITORY_ROOT)))
+    assert violations == []
+
+
+def test_media_analysis_api_remains_png_for_local_preview() -> None:
+    source = MEDIA_ANALYSIS_API.read_text(encoding="utf-8")
+
+    assert "payload_base64" in source
+    assert "mime_type=frame.mime_type" in source
+    assert "image/jpeg" not in source
+    assert "Pillow" not in source
+    assert "PIL" not in source

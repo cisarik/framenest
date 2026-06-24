@@ -26,7 +26,7 @@ if TYPE_CHECKING:
     from framenest.application.ports.media_analysis import LocalMediaAnalysisPreparer
     from framenest.application.ports.media_suggestion import MediaSuggestionProvider
 
-PROMPT_VERSION = "framenest-media-suggestion-v1"
+PROMPT_VERSION = "framenest-media-suggestion-v2"
 
 INVALID_SUGGESTION_REQUEST_MESSAGE = "Invalid media suggestion request."
 INVALID_SUGGESTION_MESSAGE = "Invalid media suggestion."
