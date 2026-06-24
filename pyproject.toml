@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "A local-first library for organizing video and animated media."
 readme = "README.md"
 requires-python = ">=3.13,<3.14"
-dependencies = []
+dependencies = ["pydantic-settings (>=2.14.2,<3.0.0)"]
 
 [tool.poetry]
 package-mode = true
