@@ -166,6 +166,90 @@ def test_javascript_loads_library_list_without_auto_scanning(client: TestClient)
     assert "handlePreviewClick(library, card);" in script
 
 
+def test_browser_does_not_run_analysis_on_initialization_or_candidate_render(
+    client: TestClient,
+) -> None:
+    script = client.get("/assets/app.js").text
+    assert "media-analysis-preview" in script
+    assert "checkHealth();" in script
+    assert "loadLibraries();" in script
+    assert "handleInspectClick" in script
+    assert script.index("media-analysis-preview") > script.index("function handleInspectClick")
+    assert "renderScanResult(card, payload);" in script
+    render_scan_block = script[
+        script.index("function renderScanResult") : script.index("async function handleInspectClick")
+    ]
+    assert "media-analysis-preview" not in render_scan_block
+
+
+def test_browser_analysis_is_explicit_and_disables_conflicting_actions(
+    client: TestClient,
+) -> None:
+    html = client.get("/").text
+    script = client.get("/assets/app.js").text
+
+    assert "Inspect locally" in html or "Inspect locally" in script
+    assert "addEventListener(\"click\"" in script
+    assert "handleInspectClick(payload.library_id, candidate" in script
+    assert "setInspectActionsDisabled(true)" in script
+    assert "setInspectActionsDisabled(false)" in script
+    assert "analysisRequestToken" in script
+
+
+def test_browser_analysis_states_are_distinct_and_truthful(client: TestClient) -> None:
+    html = client.get("/").text
+    script = client.get("/assets/app.js").text
+    combined = html + script
+
+    assert "Local preview" in combined
+    assert "Preparing local metadata and representative frames" in combined
+    assert "Local media analysis is not available" in combined
+    assert "Invalid media relative path" in combined
+    assert "Local analysis results are ephemeral" in combined
+    assert "No media catalog record was created" in combined
+    assert "No AI provider was contacted" in combined
+    assert "No cloud transmission occurred" in combined
+
+
+def test_browser_decodes_base64_to_png_blob_and_revokes_object_urls(
+    client: TestClient,
+) -> None:
+    script = client.get("/assets/app.js").text
+
+    assert "atob(" in script
+    assert "Uint8Array" in script
+    assert 'new Blob([bytes], { type: "image/png" })' in script
+    assert "URL.createObjectURL" in script
+    assert "URL.revokeObjectURL" in script
+    assert "beforeunload" in script
+    assert "payload_base64" in script
+
+
+def test_browser_does_not_store_frame_payloads_or_add_external_runtime_urls(
+    client: TestClient,
+) -> None:
+    script = client.get("/assets/app.js").text
+    html = client.get("/").text
+
+    assert "localStorage" not in script
+    assert "sessionStorage" not in script
+    assert "indexedDB" not in script
+    assert "data:image" not in script
+    assert "http://" not in html + script
+    assert "https://" not in html + script
+
+
+def test_browser_presents_no_ai_controls_or_fake_cancel(client: TestClient) -> None:
+    html = client.get("/").text
+    script = client.get("/assets/app.js").text
+    combined = html + script
+
+    assert "Cancel analysis" not in combined
+    assert "Provider selection" not in combined
+    assert "Model selection" not in combined
+    assert ">Analyze<" not in combined
+
+
 def test_javascript_uses_safe_dom_text_apis_for_repository_values(client: TestClient) -> None:
     script = client.get("/assets/app.js").text
     assert ".textContent" in script

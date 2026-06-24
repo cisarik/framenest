@@ -11,7 +11,12 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse, Response
 from pydantic import BaseModel
 
+from framenest.adapters.api.media_analysis_api import (
+    MediaAnalysisApiDependencies,
+    create_media_analysis_api_router,
+)
 from framenest.application.library_scan import PreviewLibraryScan
+from framenest.application.media_analysis import PrepareLocalMediaAnalysis
 from framenest.adapters.api.library_api import (
     LibraryApiDependencies,
     create_library_api_router,
@@ -19,6 +24,7 @@ from framenest.adapters.api.library_api import (
 import framenest.adapters.api.web as web_resources
 from framenest.configuration import FrameNestSettings, load_settings
 from framenest.infrastructure.filesystem.library_scanner import LocalLibraryScanner
+from framenest.infrastructure.media_analysis import LocalMediaAnalysisAdapter
 from framenest.infrastructure.persistence.engine import create_sqlite_engine, dispose_engine
 from framenest.infrastructure.persistence.library_repository import SqliteLibraryRepository
 
@@ -43,17 +49,30 @@ def _read_web_resource(resource_name: str) -> bytes:
 def create_app(
     settings: FrameNestSettings | None = None,
     library_api_dependencies: LibraryApiDependencies | None = None,
+    media_analysis_api_dependencies: MediaAnalysisApiDependencies | None = None,
 ) -> FastAPI:
     resolved_settings = settings if settings is not None else load_settings()
     owned_engine = None
-    if library_api_dependencies is None:
+    owned_library_repository = None
+    if library_api_dependencies is None or media_analysis_api_dependencies is None:
         owned_engine = create_sqlite_engine(resolved_settings.database_path)
-        library_repository = SqliteLibraryRepository(owned_engine)
+        owned_library_repository = SqliteLibraryRepository(owned_engine)
+    if library_api_dependencies is None:
+        assert owned_library_repository is not None
         library_api_dependencies = LibraryApiDependencies(
-            repository=library_repository,
+            repository=owned_library_repository,
             scan_preview=PreviewLibraryScan(
-                library_repository,
+                owned_library_repository,
                 LocalLibraryScanner(),
+            ),
+            catalog_available=resolved_settings.database_path.exists,
+        )
+    if media_analysis_api_dependencies is None:
+        assert owned_library_repository is not None
+        media_analysis_api_dependencies = MediaAnalysisApiDependencies(
+            prepare_preview=PrepareLocalMediaAnalysis(
+                owned_library_repository,
+                LocalMediaAnalysisAdapter(),
             ),
             catalog_available=resolved_settings.database_path.exists,
         )
@@ -69,6 +88,7 @@ def create_app(
     app = FastAPI(lifespan=lifespan)
     app.state.settings = resolved_settings
     app.include_router(create_library_api_router(library_api_dependencies))
+    app.include_router(create_media_analysis_api_router(media_analysis_api_dependencies))
 
     @app.get("/", response_class=HTMLResponse)
     def root() -> HTMLResponse:

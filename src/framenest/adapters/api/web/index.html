@@ -26,8 +26,9 @@
           <p class="lede">
             This pre-alpha web shell is served by the real FrameNest FastAPI
             process. It confirms the local application foundation and can show
-            registered libraries, while gallery persistence, downloads, AI
-            analysis, playback, and Settings remain future work.
+            registered libraries, scan candidates, and explicit local media
+            inspection, while gallery persistence, downloads, AI analysis,
+            playback, and Settings remain future work.
           </p>
         </div>
         <div class="status-card" aria-live="polite" aria-atomic="true">
@@ -49,7 +50,8 @@
           <p class="section-copy">
             Library registration remains CLI-only in this pre-alpha slice. The
             browser can list registered libraries and run an explicit read-only
-            scan preview without creating media records.
+            scan preview, then inspect one returned candidate locally without
+            creating media records.
           </p>
         </div>
         <div id="library-state-loading" class="library-state" role="status">
@@ -79,6 +81,24 @@
           <p class="scan-status">Scan preview has not been requested.</p>
           <dl class="scan-summary" hidden></dl>
           <div class="scan-candidates" hidden></div>
+          <div class="local-preview" hidden>
+            <div class="local-preview__header">
+              <div>
+                <h4>Local preview</h4>
+                <p class="local-preview-path"></p>
+              </div>
+              <span class="local-preview-kind"></span>
+            </div>
+            <p class="local-preview-status">Local preview has not been requested.</p>
+            <dl class="analysis-metadata" hidden></dl>
+            <div class="analysis-warnings" hidden></div>
+            <div class="representative-frames" hidden></div>
+            <p class="ephemeral-note">
+              Scan results are ephemeral. Local analysis results are ephemeral.
+              No media catalog record was created. No AI provider was contacted.
+              No cloud transmission occurred.
+            </p>
+          </div>
         </article>
       </template>
 
@@ -100,7 +120,7 @@
           </article>
           <article class="boundary-card boundary-card--active">
             <h3>Libraries</h3>
-            <p>Read-only registered library list and explicit scan preview.</p>
+            <p>Read-only registered library list, explicit scan preview, and explicit local inspection.</p>
             <span class="boundary-state">Active preview</span>
           </article>
           <article class="boundary-card">

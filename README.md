@@ -33,16 +33,17 @@ poetry run framenest-server
 
 Default application URL: `http://127.0.0.1:8000`. Health path: `/health`.
 
-The default URL serves the packaged pre-alpha FrameNest web shell. It can confirm that the real local application server is running, load the same-origin health endpoint, list registered libraries from the local catalog, and run an explicit read-only library scan preview. Library registration remains available through the catalog CLI in this slice. Gallery persistence, downloads, AI analysis, Settings, playback, and persistent media catalog behavior remain future work.
+The default URL serves the packaged pre-alpha FrameNest web shell. It can confirm that the real local application server is running, load the same-origin health endpoint, list registered libraries from the local catalog, run an explicit read-only library scan preview, and explicitly inspect one returned candidate locally for bounded technical metadata and representative PNG frames. Library registration remains available through the catalog CLI in this slice. Gallery persistence, downloads, AI analysis, Settings, playback, and persistent media catalog behavior remain future work.
 
 Read-only browser API paths currently include:
 
 ```text
 GET /api/libraries
 POST /api/libraries/{library_id}/scan-preview
+POST /api/libraries/{library_id}/media-analysis-preview
 ```
 
-These API paths do not run migrations automatically and do not expose library root paths or persistent media records.
+These API paths do not run migrations automatically and do not expose library root paths or persistent media records. The media-analysis preview endpoint is explicit, same-origin, read-only, local-only, stateless, provider-free, and non-persistent. It returns inline base64 PNG frames only for the lifetime of the response/displayed browser preview and sets `Cache-Control: no-store`.
 
 FrameNest-owned runtime logs are compact JSON lines written to `stderr` by the direct application process. The installed console entrypoint `.venv/bin/framenest-server` is the strict application-process boundary used by machine-readable output contract tests. Ordinary interactive termination with Ctrl+C or SIGTERM through that direct entrypoint must not emit an unstructured traceback.
 
@@ -172,6 +173,7 @@ Accepted implementation foundations so far:
 - SQLAlchemy Core and Alembic for the initial SQLite migration foundation ([ADR-0010](docs/adr/0010-initial-persistence-foundation.md)), installed and wired behind explicit database commands
 - Application-owned UUIDv4 stable domain identities with category-specific pure-domain types ([ADR-0011](docs/adr/0011-stable-domain-identities.md))
 - Packaged vanilla local web application delivery through the existing FastAPI process ([ADR-0017](docs/adr/0017-initial-local-web-application-delivery.md))
+- Same-origin local media-analysis preview API with inline bounded base64 PNG frames ([ADR-0018](docs/adr/0018-local-media-analysis-preview-api.md))
 
 Exact future frontend framework or compiled toolchain, desktop/Tauri packaging choices, IPC design, data schema, identity database encoding, deployment model, production update mechanisms, and many server operational details remain subject to later documented decisions.
 
@@ -240,6 +242,7 @@ Current foundation files:
 - [`docs/adr/0015-deterministic-local-media-analysis-preparation.md`](docs/adr/0015-deterministic-local-media-analysis-preparation.md) records the accepted local media-analysis preparation decision.
 - [`docs/adr/0016-provider-neutral-media-suggestions-and-nvidia-nim-prototype.md`](docs/adr/0016-provider-neutral-media-suggestions-and-nvidia-nim-prototype.md) records the accepted provider-neutral media suggestion preview decision.
 - [`docs/adr/0017-initial-local-web-application-delivery.md`](docs/adr/0017-initial-local-web-application-delivery.md) records the accepted packaged local web shell delivery decision.
+- [`docs/adr/0018-local-media-analysis-preview-api.md`](docs/adr/0018-local-media-analysis-preview-api.md) records the accepted same-origin local media-analysis preview API decision.
 
 ## Non-Goals for the Current Stage
 
