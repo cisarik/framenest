@@ -49,10 +49,13 @@ Accepted so far:
 - Initial server API framework: FastAPI through [ADR-0003](docs/adr/0003-initial-server-api-framework.md).
 - Hybrid staged repository layout through [ADR-0004](docs/adr/0004-repository-layout.md).
 - Configuration strategy: layered configuration with explicit precedence through [ADR-0005](docs/adr/0005-configuration-strategy.md).
+- macOS Python interpreter provider: `uv` for CPython 3.13.14 on Apple Silicon macOS through [ADR-0006](docs/adr/0006-macos-python-interpreter-provider.md).
+- Python settings library: `pydantic-settings` through [ADR-0007](docs/adr/0007-settings-library.md).
+- Initial ASGI runtime: Uvicorn through [ADR-0008](docs/adr/0008-asgi-runtime.md).
 
-The initial scaffold decision gate is complete. The next bounded task may begin the first test-first Python server scaffold on macOS. Scaffolding is now eligible but not automatically authorized.
+The initial scaffold decision gate is complete. A Poetry package scaffold, centralized configuration boundary, FastAPI application factory, typed health endpoint, and contract tests now exist. Uvicorn runtime installation and startup wiring remain unauthorized until a separate bounded task.
 
-Broader architecture decisions still open include local database/query strategy, sidecar manifest format and versioning, server/domain boundaries, initial authentication boundary, media-tool distribution strategy, macOS development runtime details, and Fedora deployment details.
+Broader architecture decisions still open include local database/query strategy, sidecar manifest format and versioning, server/domain boundaries beyond the current skeleton, initial authentication boundary, media-tool distribution strategy, and Fedora deployment details.
 
 Key deliverables: remaining broader architecture ADRs and evidence as needed before later implementation phases.
 
@@ -78,9 +81,24 @@ Boundaries: no gallery, downloader, playback, or server aggregation beyond what 
 
 ## Phase 4 — Server-First Development Skeleton on macOS
 
-Status: planned.
+Status: partially started.
 
 Goal: create the first local development server skeleton on macOS.
+
+Implemented so far:
+
+- Poetry package scaffold
+- Centralized `pydantic-settings` configuration boundary with loopback-safe default host
+- FastAPI application factory with typed `GET /health`
+- In-process API contract tests and import-boundary tests
+
+Still required for phase exit:
+
+- Uvicorn runtime dependency and startup wiring
+- Structured logging
+- SQLite development catalog
+- Migration mechanism
+- Runnable loopback-only server process verified by tests and command output
 
 Key deliverables: loopback-only local development server skeleton, health endpoint, configuration boundary, structured logging, SQLite development catalog, migration mechanism, and tests.
 
@@ -88,7 +106,7 @@ Entry conditions: server/API/database/repository-layout ADRs accepted.
 
 Exit evidence: local tests and command output showing loopback-only behavior and basic health/config/database boundaries.
 
-Boundaries: server-first implementation priority MUST NOT make the desktop product server-dependent.
+Boundaries: server-first implementation priority MUST NOT make the desktop product server-dependent. A runnable server process does not yet exist.
 
 ## Phase 5 — Local Catalog and Library Scanning
 

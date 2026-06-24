@@ -6,7 +6,7 @@ FrameNest is a local-first, privacy-conscious, cross-platform library for video 
 
 FrameNest is in an early foundation, pre-alpha stage.
 
-A minimal Python package and test scaffold exists at the repository root. There is no functional application, server, installer, or supported release yet. The current scaffold provides only importable package metadata, Poetry-managed development tooling, and a single package-import test.
+A minimal Poetry package scaffold exists at the repository root with centralized settings, a FastAPI application factory, a typed `GET /health` endpoint, and in-process contract tests. There is no functional user application, runnable server process, database, gallery, catalog, downloader, desktop shell, installer, deployment, or supported release yet.
 
 Supported runtime: CPython `>=3.13,<3.14`. Local development uses a uv-managed CPython 3.13.14 interpreter with Poetry as the dependency, environment, and lockfile manager. The initial `poetry.lock` was generated with Poetry 2.1.4. The local virtual environment lives in `.venv/` and is not committed.
 
@@ -46,7 +46,15 @@ The current conceptual direction is:
 - External VLC first for playback, with embedded libVLC considered later.
 - Remote access through Tailscale-only networking rather than public internet exposure.
 
-Exact frameworks, packaging choices, IPC design, API framework, data schema, deployment model, and production update mechanisms are still subject to documented architectural decisions. No final frontend framework has been selected.
+Accepted implementation foundations so far:
+
+- CPython 3.13 ([ADR-0001](docs/adr/0001-supported-python-version.md))
+- Poetry ([ADR-0002](docs/adr/0002-python-environment-and-dependency-manager.md))
+- `pydantic-settings` ([ADR-0007](docs/adr/0007-settings-library.md))
+- FastAPI ([ADR-0003](docs/adr/0003-initial-server-api-framework.md))
+- Uvicorn as the initial ASGI runtime ([ADR-0008](docs/adr/0008-asgi-runtime.md)); not yet installed or wired
+
+Exact frontend framework, packaging choices, IPC design, data schema, deployment model, production update mechanisms, and many server operational details remain subject to later documented decisions.
 
 ## Security and Privacy Principles
 
@@ -101,6 +109,9 @@ Current foundation files:
 - [`docs/adr/0003-initial-server-api-framework.md`](docs/adr/0003-initial-server-api-framework.md) records the accepted FastAPI initial server API framework decision.
 - [`docs/adr/0004-repository-layout.md`](docs/adr/0004-repository-layout.md) records the accepted hybrid staged monorepo repository layout decision.
 - [`docs/adr/0005-configuration-strategy.md`](docs/adr/0005-configuration-strategy.md) records the accepted layered configuration strategy decision.
+- [`docs/adr/0006-macos-python-interpreter-provider.md`](docs/adr/0006-macos-python-interpreter-provider.md) records the accepted macOS interpreter provider decision.
+- [`docs/adr/0007-settings-library.md`](docs/adr/0007-settings-library.md) records the accepted `pydantic-settings` decision.
+- [`docs/adr/0008-asgi-runtime.md`](docs/adr/0008-asgi-runtime.md) records the accepted Uvicorn ASGI runtime decision.
 
 ## Non-Goals for the Current Stage
 
@@ -112,8 +123,8 @@ The current stage does not provide:
 - Embedded libVLC.
 - AI-generated covers.
 - Public internet exposure.
-- A functional server or API.
-- FastAPI implementation.
+- A runnable server process or runtime start command.
+- A functional gallery, catalog, database, or downloader.
 - Production deployment.
 
 ## License

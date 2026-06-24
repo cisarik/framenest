@@ -23,15 +23,7 @@ An accepted ADR may only be changed by a later ADR that supersedes it. Editing a
 
 ## Open Decision Evidence
 
-The following temporary, non-authoritative evidence supports an architecture decision that is not yet accepted. It is listed here for discoverability while the decision remains open.
-
-| Evidence | Consumer | Status |
-|---|---|---|
-| [ASGI Runtime Evidence](../ASGI_RUNTIME_EVIDENCE.md) | Future Accepted ADR selecting the FrameNest ASGI runtime | Temporary committed decision evidence |
-
-This evidence file and its inbound link in this section MUST be removed in the same bounded task that accepts the ADR, after material conclusions and relevant primary-source references are transferred into that ADR. Git history remains the archive.
-
-Accepted ADRs in the index below are authoritative. Open decision evidence is not.
+None at this time. Temporary decision evidence **MUST** be listed here while a decision remains open and **MUST** be removed in the same bounded task that accepts the consuming ADR.
 
 ## Index
 
@@ -44,3 +36,4 @@ Accepted ADRs in the index below are authoritative. Open decision evidence is no
 | 0005 | Configuration Strategy | Accepted | 2026-06-23 | [0005-configuration-strategy.md](0005-configuration-strategy.md) |
 | 0006 | macOS Python Interpreter Provider | Accepted | 2026-06-23 | [0006-macos-python-interpreter-provider.md](0006-macos-python-interpreter-provider.md) |
 | 0007 | Python Settings Library | Accepted | 2026-06-24 | [0007-settings-library.md](0007-settings-library.md) |
+| 0008 | Initial ASGI Runtime | Accepted | 2026-06-24 | [0008-asgi-runtime.md](0008-asgi-runtime.md) |

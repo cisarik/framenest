@@ -4,7 +4,7 @@
 
 FrameNest is in foundation-stage pre-alpha development. This document defines normative requirements for future implementation.
 
-No application, server, frontend, package configuration, or tests are implemented yet. Unresolved architecture choices remain subject to future architecture decision records.
+A minimal Poetry package foundation exists with centralized configuration, a FastAPI application factory, a typed health endpoint, and tests. There is no functional user application, runnable server process, database, gallery, catalog, or deployment yet. Unresolved architecture choices remain subject to future architecture decision records.
 
 This specification translates approved direction from [PRODUCT.md](PRODUCT.md), [README.md](README.md), [AGENTS.md](AGENTS.md), and [SECURITY.md](SECURITY.md) into requirements. It does not select frameworks, schemas, protocols, or packaging tools.
 
@@ -534,9 +534,9 @@ Success MUST NOT be claimed without evidence.
 
 ## 31. Explicitly Deferred Decisions
 
-Deferred decisions include frontend framework, frontend workspace tooling, concrete Python settings library, committed configuration file format, exact configuration schema, operating-system secret-store implementation, ORM/query strategy, manifest format, schema, IPC, authentication above Tailscale, synchronization protocol, FFmpeg distribution, yt-dlp packaging/update strategy, player invocation, thumbnail formats and sizes, full-text search, packaging/signing/update mechanisms, telemetry, and license.
+Deferred decisions include frontend framework, frontend workspace tooling, committed configuration file format, exact configuration schema, operating-system secret-store implementation, ORM/query strategy, manifest format, schema, IPC, authentication above Tailscale, synchronization protocol, FFmpeg distribution, yt-dlp packaging/update strategy, player invocation, thumbnail formats and sizes, full-text search, packaging/signing/update mechanisms, telemetry, and license.
 
-The supported Python minor version is recorded in [ADR-0001](docs/adr/0001-supported-python-version.md). Poetry dependency and environment management is recorded in [ADR-0002](docs/adr/0002-python-environment-and-dependency-manager.md). The initial server API framework is recorded in [ADR-0003](docs/adr/0003-initial-server-api-framework.md). Repository layout and Poetry package mode are recorded in [ADR-0004](docs/adr/0004-repository-layout.md). Configuration strategy is recorded in [ADR-0005](docs/adr/0005-configuration-strategy.md). Exact dependency versions, 3.13 patch pinning, Poetry virtual-environment location, ASGI process runner, background jobs, authentication, and API versioning remain implementation concerns governed by those ADRs and later authorized tasks.
+The supported Python minor version is recorded in [ADR-0001](docs/adr/0001-supported-python-version.md). Poetry dependency and environment management is recorded in [ADR-0002](docs/adr/0002-python-environment-and-dependency-manager.md). The initial server API framework is recorded in [ADR-0003](docs/adr/0003-initial-server-api-framework.md). Repository layout and Poetry package mode are recorded in [ADR-0004](docs/adr/0004-repository-layout.md). Configuration strategy is recorded in [ADR-0005](docs/adr/0005-configuration-strategy.md). The concrete settings library is recorded in [ADR-0007](docs/adr/0007-settings-library.md). The initial ASGI runtime is recorded in [ADR-0008](docs/adr/0008-asgi-runtime.md). Exact dependency versions, 3.13 patch pinning, Poetry virtual-environment location, Uvicorn version and extras, startup interface, process model, worker count, reload policy, trusted proxy configuration, structured logging, systemd integration, background jobs, authentication, and API versioning remain implementation concerns governed by those ADRs and later authorized tasks.
 
 None of these may be silently selected during implementation.
 
