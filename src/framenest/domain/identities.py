@@ -19,6 +19,12 @@ class _UuidIdentity:
 
     _value: uuid.UUID
 
+    def __post_init__(self) -> None:
+        if not isinstance(self._value, uuid.UUID):
+            raise FrameNestIdentityError(INVALID_IDENTITY_MESSAGE)
+        if self._value.variant != uuid.RFC_4122 or self._value.version != 4:
+            raise FrameNestIdentityError(INVALID_IDENTITY_MESSAGE)
+
     @classmethod
     def new(cls) -> Self:
         """Generate a new application-owned UUIDv4 identity."""

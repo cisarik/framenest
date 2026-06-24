@@ -30,6 +30,10 @@ CANONICAL_UUID4_TEXT = "12345678-1234-4234-9234-123456789abc"
 SECOND_CANONICAL_UUID4_TEXT = "abcdefab-cdef-4abc-8def-abcdefabcdef"
 UNSUPPORTED_VARIANT_UUID_TEXT = "12345678-1234-4234-1234-123456789abc"
 UUIDV1_TEXT = "a8098c1a-f86e-11da-bd1a-00112444be1e"
+UUIDV1 = uuid.UUID(UUIDV1_TEXT)
+UUIDV3 = uuid.uuid3(uuid.NAMESPACE_DNS, "framenest.example")
+UUIDV5 = uuid.uuid5(uuid.NAMESPACE_DNS, "framenest.example")
+NON_RFC_VARIANT_UUID = uuid.UUID(UNSUPPORTED_VARIANT_UUID_TEXT)
 EXPECTED_ERROR_MESSAGE = "Invalid FrameNest identity."
 
 
@@ -66,6 +70,62 @@ def test_same_category_identity_equality_hashing_and_collections(
     assert hash(same) == hash(first)
     assert {first, same, second} == {first, second}
     assert {first: "found"}[same] == "found"
+
+
+@pytest.mark.parametrize("identity_type", IDENTITY_TYPES)
+def test_direct_constructor_accepts_valid_uuid4(identity_type: type[MediaId]) -> None:
+    value = uuid.uuid4()
+
+    identity = identity_type(value)
+
+    assert isinstance(identity, identity_type)
+    assert identity.value is value
+    assert identity.to_string() == str(value)
+    assert identity_type(value) == identity
+    assert hash(identity_type(value)) == hash(identity)
+
+
+@pytest.mark.parametrize("identity_type", IDENTITY_TYPES)
+@pytest.mark.parametrize("rejected", [UUIDV1, UUIDV3, UUIDV5, NON_RFC_VARIANT_UUID])
+def test_direct_constructor_rejects_invalid_uuid_values(
+    identity_type: type[MediaId],
+    rejected: uuid.UUID,
+) -> None:
+    with pytest.raises(FrameNestIdentityError) as exc_info:
+        identity_type(rejected)
+
+    message = str(exc_info.value)
+    assert message == EXPECTED_ERROR_MESSAGE
+    assert str(rejected) not in message
+    assert exc_info.value.__cause__ is None
+
+
+@pytest.mark.parametrize("identity_type", IDENTITY_TYPES)
+@pytest.mark.parametrize(
+    "rejected",
+    [
+        CANONICAL_UUID4_TEXT,
+        "not-a-uuid",
+        None,
+        123,
+        b"12345678-1234-4234-9234-123456789abc",
+        MediaId.from_string(CANONICAL_UUID4_TEXT),
+    ],
+)
+def test_direct_constructor_rejects_invalid_runtime_types(
+    identity_type: type[MediaId],
+    rejected: Any,
+) -> None:
+    with pytest.raises(FrameNestIdentityError) as exc_info:
+        identity_type(rejected)  # type: ignore[arg-type]
+
+    message = str(exc_info.value)
+    assert message == EXPECTED_ERROR_MESSAGE
+    if isinstance(rejected, str):
+        assert rejected not in message
+    assert "UUID" not in message
+    assert "TypeError" not in message
+    assert exc_info.value.__cause__ is None
 
 
 @pytest.mark.parametrize("identity_type", IDENTITY_TYPES)
