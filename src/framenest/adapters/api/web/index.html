@@ -25,9 +25,9 @@
           <h1 id="intro-title">FrameNest is running locally.</h1>
           <p class="lede">
             This pre-alpha web shell is served by the real FrameNest FastAPI
-            process. It confirms the local application foundation without
-            presenting gallery, library browsing, downloads, AI analysis, or
-            Settings as finished features.
+            process. It confirms the local application foundation and can show
+            registered libraries, while gallery persistence, downloads, AI
+            analysis, playback, and Settings remain future work.
           </p>
         </div>
         <div class="status-card" aria-live="polite" aria-atomic="true">
@@ -41,6 +41,46 @@
           </p>
         </div>
       </section>
+
+      <section id="library-browser" class="library-browser" aria-labelledby="libraries-title">
+        <div class="section-heading">
+          <p class="eyebrow">Read-only preview</p>
+          <h2 id="libraries-title">Registered libraries</h2>
+          <p class="section-copy">
+            Library registration remains CLI-only in this pre-alpha slice. The
+            browser can list registered libraries and run an explicit read-only
+            scan preview without creating media records.
+          </p>
+        </div>
+        <div id="library-state-loading" class="library-state" role="status">
+          Loading registered libraries...
+        </div>
+        <div id="library-state-empty" class="library-state" hidden>
+          No registered libraries were found. Use the catalog CLI to register a library first.
+        </div>
+        <div id="library-state-unavailable" class="library-state library-state--warning" hidden>
+          The local catalog is not available. Run the explicit database migration command before browsing libraries.
+        </div>
+        <div id="library-state-error" class="library-state library-state--warning" hidden>
+          Libraries could not be loaded from the local catalog.
+        </div>
+        <div id="library-list" class="library-list" aria-live="polite"></div>
+      </section>
+
+      <template id="library-card-template">
+        <article class="library-card">
+          <div class="library-card__header">
+            <div>
+              <h3 class="library-name"></h3>
+              <p class="library-meta"></p>
+            </div>
+            <button class="preview-button" type="button">Preview media</button>
+          </div>
+          <p class="scan-status">Scan preview has not been requested.</p>
+          <dl class="scan-summary" hidden></dl>
+          <div class="scan-candidates" hidden></div>
+        </article>
+      </template>
 
       <section class="foundation-grid" aria-labelledby="foundation-title">
         <div class="section-heading">
@@ -58,9 +98,14 @@
             <p>Future premium library browsing. No media data is shown in this shell.</p>
             <span class="boundary-state boundary-state--future">Future</span>
           </article>
-          <article class="boundary-card">
+          <article class="boundary-card boundary-card--active">
             <h3>Libraries</h3>
-            <p>Future local library management beyond current operator commands.</p>
+            <p>Read-only registered library list and explicit scan preview.</p>
+            <span class="boundary-state">Active preview</span>
+          </article>
+          <article class="boundary-card">
+            <h3>Playback</h3>
+            <p>Future full playback and inline preview surfaces.</p>
             <span class="boundary-state boundary-state--future">Future</span>
           </article>
           <article class="boundary-card">
@@ -71,6 +116,11 @@
           <article class="boundary-card">
             <h3>Settings</h3>
             <p>Future application preferences and provider configuration boundaries.</p>
+            <span class="boundary-state boundary-state--future">Future</span>
+          </article>
+          <article class="boundary-card">
+            <h3>AI</h3>
+            <p>Future explicit on-demand assistance with clear cloud boundaries.</p>
             <span class="boundary-state boundary-state--future">Future</span>
           </article>
         </div>

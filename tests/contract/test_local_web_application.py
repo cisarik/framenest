@@ -145,6 +145,35 @@ def test_browser_application_uses_same_origin_health_with_distinct_status_states
     assert "setErrorState" in script
 
 
+def test_web_shell_contains_real_library_browser_states(client: TestClient) -> None:
+    html = client.get("/").text
+    assert "library-browser" in html
+    assert "Registered libraries" in html
+    assert "Loading registered libraries" in html
+    assert "CLI-only" in html
+    assert "Preview media" in html
+    assert "scan-preview" not in html
+
+
+def test_javascript_loads_library_list_without_auto_scanning(client: TestClient) -> None:
+    script = client.get("/assets/app.js").text
+    assert 'const LIBRARIES_ENDPOINT = "/api/libraries";' in script
+    assert "fetch(LIBRARIES_ENDPOINT" in script
+    assert "loadLibraries();" in script
+    assert "scan-preview" in script
+    assert "addEventListener(\"click\"" in script
+    assert "function handlePreviewClick" in script
+    assert "handlePreviewClick(library, card);" in script
+
+
+def test_javascript_uses_safe_dom_text_apis_for_repository_values(client: TestClient) -> None:
+    script = client.get("/assets/app.js").text
+    assert ".textContent" in script
+    assert "createTextNode" in script
+    assert "innerHTML" not in script
+    assert "insertAdjacentHTML" not in script
+
+
 @pytest.mark.parametrize("path", ["/", "/assets/styles.css", "/assets/app.js"])
 def test_application_surfaces_do_not_contain_external_runtime_urls_or_sensitive_values(
     client: TestClient,

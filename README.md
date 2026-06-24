@@ -33,7 +33,16 @@ poetry run framenest-server
 
 Default application URL: `http://127.0.0.1:8000`. Health path: `/health`.
 
-The default URL serves the initial packaged pre-alpha FrameNest web shell. It is enough to confirm that the real local application server is running and that browser code can reach the same-origin health endpoint. Gallery, library browsing, downloads, AI analysis, Settings, playback, and persistent media catalog behavior remain future work.
+The default URL serves the packaged pre-alpha FrameNest web shell. It can confirm that the real local application server is running, load the same-origin health endpoint, list registered libraries from the local catalog, and run an explicit read-only library scan preview. Library registration remains available through the catalog CLI in this slice. Gallery persistence, downloads, AI analysis, Settings, playback, and persistent media catalog behavior remain future work.
+
+Read-only browser API paths currently include:
+
+```text
+GET /api/libraries
+POST /api/libraries/{library_id}/scan-preview
+```
+
+These API paths do not run migrations automatically and do not expose library root paths or persistent media records.
 
 FrameNest-owned runtime logs are compact JSON lines written to `stderr` by the direct application process. The installed console entrypoint `.venv/bin/framenest-server` is the strict application-process boundary used by machine-readable output contract tests. Ordinary interactive termination with Ctrl+C or SIGTERM through that direct entrypoint must not emit an unstructured traceback.
 
