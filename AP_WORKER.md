@@ -272,9 +272,9 @@ Full handoff content or full diff in the report is appropriate only when:
 - independent inspection is impossible;
 - the task explicitly requests full content.
 
-### Fresh Worker obligations
+### Fresh Worker instance obligations
 
-At the start of a new session:
+At the start of a new Worker session, a fresh Worker instance assigned to the WORKER role MUST:
 
 - read repository rules, stable bootstrap, role handbook, and current handoff directly from the repository;
 - do not ask the Cooperator to paste handoff files that already exist in the repository;
@@ -308,6 +308,10 @@ The fresh session requires a new authoritative task from the Orchestrator.
 ## Execution Environment and Capability Declaration
 
 The Worker fulfills the WORKER protocol role. Model, client, framework, and provider details are implementation details, not protocol authority.
+
+The persistent uppercase role is `WORKER`. One **Worker instance** is a concrete initialized execution agent temporarily assigned to that role. One **Worker session** is that instance's lifecycle and conversational context. An execution client, agent implementation, model, and model provider are distinct from the WORKER role. Use `a fresh Worker instance assigned to the WORKER role`; do not use `a fresh WORKER` when referring to a concrete agent.
+
+Context-pressure reporting and rotation decisions apply to the current Worker instance and Worker session, not to the persistent WORKER role.
 
 See [AP.md](AP.md), section **Worker Role Portability and Capability Model**.
 

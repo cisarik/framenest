@@ -278,7 +278,7 @@ The Orchestrator MUST NOT treat the handoff as current task authority for the ne
 
 ### Next-task creation
 
-After handoff verification, the Orchestrator creates one new authoritative concrete task for the fresh Worker.
+After handoff verification, the Orchestrator creates one new authoritative concrete task for a fresh Worker instance assigned to the WORKER role.
 
 That task is the only source of modification, validation, and Git authority for the new session.
 
@@ -290,9 +290,9 @@ In the normal workflow:
 
 1. the closing Worker commits and pushes the handoff;
 2. the Orchestrator verifies the public commit;
-3. the Cooperator opens a fresh Worker session in the same repository;
+3. the Cooperator initializes a fresh Worker instance assigned to the WORKER role in the same repository;
 4. the Cooperator sends only the new authoritative task prompt;
-5. the fresh Worker reads bootstrap, handbook, and handoff directly from the repository.
+5. that Worker instance reads bootstrap, handbook, and handoff directly from the repository.
 
 The Cooperator does not normally reconstruct or manually copy committed handoff files.
 
@@ -331,7 +331,7 @@ The Orchestrator MUST distinguish committed handoff state from local-only handof
 - Provide one new authoritative concrete task prompt to the Cooperator.
 - Ensure the prompt defines goal, working directory, expected state, boundaries, Git authority, validation, acceptance criteria, stopping conditions, and report format.
 - Include an integrated read-only bootstrap gate when repository identity or cleanliness must be verified first.
-- Instruct the fresh Worker to read repository rules, stable bootstrap, role handbook, and current handoff directly from the repository.
+- Instruct the fresh Worker instance to read repository rules, stable bootstrap, role handbook, and current handoff directly from the repository.
 - Do not ask the Cooperator to manually copy committed handoff files unless the exceptional fallback applies.
 
 ## Worker Portability and Capability-Aware Task Shaping

@@ -22,7 +22,13 @@ WORKER is a protocol role, not a product or provider.
 
 A **Worker implementation** is the concrete system currently fulfilling the WORKER role. It may be an IDE-integrated execution agent, a command-line agent, a local or remote coding agent, a general execution agent, a multi-agent system exposed through one accountable Worker endpoint, or, where a project permits it, a human executor following the same task contract.
 
-Use `WORKER` in normative rules. Use `Worker implementation` only when discussing environment-specific capabilities.
+A **Worker instance** is one concrete initialized execution-agent instance temporarily assigned to the WORKER role. A **Worker session** is the lifecycle and conversational context of one Worker instance from bootstrap or continuation through intentional closeout.
+
+An **execution client** is the host tool or environment running the agent. An **agent implementation** is the concrete agent system fulfilling capabilities. A **model** is the language model used for generation. A **model provider** is the organization or service hosting that model. Cursor Agent, Codex agent, Hermes, OpenClaw, or another coding agent may be an execution client or agent implementation; they are not the WORKER role itself.
+
+Use `WORKER` in normative rules for the persistent protocol role. Use `Worker instance` or `Worker session` when referring to one concrete agent lifecycle. Use `Worker implementation` only when discussing environment-specific capabilities. Use `a fresh Worker instance assigned to the WORKER role` when opening a new concrete agent. Do not use `a fresh WORKER` for that meaning.
+
+Context-pressure heuristics apply to the current Worker instance and Worker session, not to the persistent WORKER protocol role.
 
 A **Worker capability profile** describes what the active Worker implementation can do in the current session. Capabilities may include repository and filesystem access, shell or command execution, Git access, network or web access, package-manager access, test execution, multimodal inspection, visible context telemetry, context capacity, and internal sub-agent delegation.
 
@@ -415,8 +421,9 @@ Duplicating a committed handoff in the report without need is context waste and 
 - does not invent the next task;
 - reports and stops.
 
-**Fresh Worker**
+**Fresh Worker instance**
 
+- is a new concrete execution agent assigned to the WORKER role;
 - reads the handoff itself;
 - treats it as state evidence only;
 - verifies it against current repository truth;
@@ -432,7 +439,7 @@ Repository files, tests, commits, ADRs, and handoff documents are the durable so
 
 Automatic context compaction or summarization MAY help continuity, but it MUST NOT replace an explicit handoff when a session is ending or when durable state has changed.
 
-Visible context percentages are heuristics relative to the active Worker implementation. Different implementations measure and display context differently, so percentage thresholds are guidance rather than universal guarantees or fixed token budgets.
+Visible context percentages are heuristics relative to the active Worker instance and its Worker implementation. Different implementations measure and display context differently, so percentage thresholds are guidance rather than universal guarantees or fixed token budgets. Context pressure belongs to the current Worker instance and Worker session, not to the persistent WORKER protocol role.
 
 At approximately 80% of the active implementation's reported context usage, a role SHOULD avoid starting a large new task and SHOULD plan a checkpoint instead.
 
