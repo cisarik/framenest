@@ -2,151 +2,211 @@
 
 ## 1. Purpose and authority
 
-This file transfers current repository state to a fresh Worker session. It is not a task. It grants no modification authority, dependency authority, command authority, or Git authority. Every new Worker still requires one separate authoritative Orchestrator prompt.
+This file is a non-authoritative Worker-session handoff. It is not a task, does not grant modification authority, and does not grant dependency, command, architecture, or Git authority.
 
-The fresh Worker reads this file directly from the repository. The Cooperator normally does not paste its contents manually.
+A fresh Worker must receive a separate authoritative Orchestrator prompt before doing any work. The fresh Worker reads this file directly from the repository during bootstrap; the Cooperator normally does not paste it manually.
 
-**Current WORKER session: CLOSED.**
+Current WORKER session: CLOSED.
 
 ## 2. Repository identity
 
 - Repository: `https://github.com/cisarik/framenest.git`
-- Local path: `/Users/agile/framenest`
+- Local path used by the closing Worker: `/Users/agile/framenest`
 - Branch: `main`
-- Handoff base HEAD: `e43001eba2daafed27db6a3d304279cd61c04db4`
-- The fresh Worker MUST independently resolve local `HEAD`, `origin/main`, and remote `main`; do not assume this file contains the final post-handoff commit SHA.
+- Pre-handoff public HEAD: `dcb9f68b155e3b96cb715c3cf6eef0ae7e0f7f5d`
+- Pre-handoff subject: `fix: enforce identity construction invariants`
+- Pre-handoff parent: `bf82ad445dc29a437779f5b8c75859176a32d6f6`
+
+A fresh Worker must independently resolve final post-handoff local `HEAD`, local `origin/main`, and remote `main`. Do not infer the final post-handoff SHA from this file.
 
 ## 3. Toolchain and dependency state
 
-- CPython 3.13.14 in `.venv/`
-- Poetry 2.1.4
-- `uv` 0.11.24 observed as the Apple Silicon macOS interpreter provider ([ADR-0006](docs/adr/0006-macos-python-interpreter-provider.md))
-- Poetry remains dependency, environment, and lockfile authority
+- Runtime target: CPython `>=3.13,<3.14`
+- Observed project environment: CPython `3.13.14` in `.venv/`
+- Observed Poetry version: `2.1.4`
+- Poetry remains the dependency, environment, and lockfile authority.
+- `uv` remains the accepted Apple Silicon macOS CPython interpreter provider through [ADR-0006](docs/adr/0006-macos-python-interpreter-provider.md), while Poetry remains authoritative for the project environment.
 
-Runtime dependencies (`pyproject.toml`, locked in `poetry.lock`):
+Direct runtime dependency constraints in `pyproject.toml`:
 
-- `pydantic-settings` `2.14.2`
-- `fastapi` `0.138.0`
-- `uvicorn` `0.49.0`
+- `pydantic-settings (>=2.14.2,<3.0.0)`
+- `fastapi (>=0.138.0,<0.139.0)`
+- `uvicorn (>=0.49.0,<0.50.0)`
+- `sqlalchemy (>=2.0.51,<2.1.0)`
+- `alembic (>=1.18.4,<1.19.0)`
 
-Development dependencies (`pyproject.toml`, locked in `poetry.lock`):
+Direct development dependency constraints:
 
-- `pytest` `9.1.1`
-- `httpx2` `2.4.0`
+- `pytest = ^9.1.1`
+- `httpx2 = ^2.4.0`
 
-SQLAlchemy and Alembic are accepted through [ADR-0010](docs/adr/0010-initial-persistence-foundation.md) but are not installed. No ORM, SQLModel, or async SQLite dependency exists.
+Relevant locked versions observed at closeout:
+
+- `alembic 1.18.4`
+- `fastapi 0.138.0`
+- `greenlet 3.5.2`
+- `httpx2 2.4.0`
+- `mako 1.3.12`
+- `pydantic 2.13.4`
+- `pydantic-settings 2.14.2`
+- `pytest 9.1.1`
+- `sqlalchemy 2.0.51`
+- `starlette 1.3.1`
+- `uvicorn 0.49.0`
+
+SQLAlchemy and Alembic are installed and active for the persistence foundation. SQLAlchemy ORM mapped entities, SQLModel, `aiosqlite`, async SQLAlchemy engines, and async SQLAlchemy sessions are not accepted or implemented for the initial foundation.
 
 ## 4. Current implemented foundation
 
-- Root Poetry package using `src/framenest/`
-- Centralized `pydantic-settings` configuration in `src/framenest/configuration.py`
-- `FRAMENEST_HOST`, `FRAMENEST_PORT`, and safe loopback defaults
-- FastAPI application factory in `src/framenest/adapters/api/application.py`
-- Typed `GET /health` endpoint
-- Plain Uvicorn runtime in `src/framenest/server.py`
-- Runnable console entrypoint: `framenest-server`
-- Explicit single-worker, no-reload, no-proxy-trust runtime configuration
-- FrameNest-owned structured logging boundary in `src/framenest/structured_logging.py`
-- Deterministic JSON formatter, centralized redaction, and safe formatter fallback
-- Explicit Uvicorn `log_config` integration
-- Uvicorn access logging disabled (`access_log=False`)
-- Strict direct-process JSON output contract in `tests/contract/test_server_process_output.py`
-- Clean direct-process SIGINT and SIGTERM shutdown without application traceback
-- Documented application-versus-launcher output boundary in [README.md](README.md) and [SECURITY.md](SECURITY.md)
-- Unit, contract, live-loopback, import-boundary, redaction, process-output, and cleanup tests
+The repository currently implements:
 
-## 5. Current tests
+- a root Poetry package with `src/framenest/`
+- centralized `pydantic-settings` configuration in `src/framenest/configuration.py`
+- loopback-safe defaults through `FRAMENEST_HOST` and `FRAMENEST_PORT`
+- a temporary development database path setting through `FRAMENEST_DATABASE_PATH`
+- a FastAPI application factory in `src/framenest/adapters/api/application.py`
+- typed `GET /health`
+- a loopback-first Uvicorn runtime in `src/framenest/server.py`
+- console script `poetry run framenest-server`
+- single-worker, no-reload, no-proxy-trust runtime defaults
+- FrameNest-owned structured JSON logging and redaction in `src/framenest/structured_logging.py`
+- explicit Uvicorn `log_config` integration
+- Uvicorn access logging disabled
+- process-output and shutdown contracts for the direct FrameNest server process
+- a synchronous SQLAlchemy Core SQLite persistence boundary in `src/framenest/infrastructure/persistence/`
+- `sqlite+pysqlite` engine creation with explicit foreign-key enablement
+- bounded busy handling and explicit transaction helper behavior
+- deterministic engine disposal boundary
+- sanitized FrameNest-owned persistence and migration error types
+- packaged Alembic migration resources
+- initial Alembic revision `0001` with no product schema
+- explicit database commands `poetry run framenest-db status` and `poetry run framenest-db migrate`
+- deterministic machine-readable database command output
+- no automatic migration during normal server startup
+- pure-domain identity primitives in `src/framenest/domain/identities.py`
 
-At handoff base HEAD:
+The initial persistence foundation creates only Alembic version tracking. It does not create a media catalog, gallery data, library registration, device table, location table, sidecar table, user table, authentication table, or any product schema.
 
-- cache-free suite: **94 passed** with **zero warnings**
-- warnings-as-errors suite: **94 passed**
+## 5. Stable identity foundation
 
-The fresh Worker MUST rerun the baseline during its bootstrap gate.
+[ADR-0011](docs/adr/0011-stable-domain-identities.md) is Accepted and implemented only within its stated boundary.
 
-## 6. Accepted architecture
+Implemented identity types:
 
-Essential accepted ADRs:
+- `MediaId`
+- `MediaLocationId`
+- `DeviceId`
+- `LibraryId`
+- `StorageVolumeId`
+- `SeriesId`
+
+Current identity behavior:
+
+- application-owned RFC 9562 UUID version 4 values
+- generation through Python standard-library `uuid.uuid4()`
+- canonical external text as lowercase hyphenated UUID strings
+- strict parsing that rejects non-canonical forms instead of normalizing them
+- immutable frozen and slotted value objects
+- runtime category separation between identity classes
+- runtime type, UUID variant, and UUIDv4 enforcement on every normal constructor path
+- FrameNest-owned sanitized validation errors
+- no FastAPI, Pydantic, SQLAlchemy, Alembic, Uvicorn, settings, filesystem, persistence, or network imports in the domain identity module
+
+Identity strings are opaque. They must not be used to infer entity type, creation time, filesystem location, database row position, source platform, content hash, or semantic ordering.
+
+## 6. Test evidence at closeout
+
+Observed by the closing Worker before replacing this handoff:
+
+- `poetry run pytest --collect-only -q`: `249 tests collected`
+- `poetry run pytest -q`: `249 passed`
+- `poetry run pytest -q -W error`: `249 passed`
+
+The closeout validation after replacing this file also passed the full suite and warnings-as-errors suite. A fresh Worker must still rerun its own bootstrap baseline from the final public commit it receives.
+
+## 7. Accepted architecture package
+
+Accepted ADRs currently recorded:
 
 - [ADR-0001](docs/adr/0001-supported-python-version.md): CPython 3.13
 - [ADR-0002](docs/adr/0002-python-environment-and-dependency-manager.md): Poetry
-- [ADR-0003](docs/adr/0003-initial-server-api-framework.md): FastAPI as API adapter; domain independent
-- [ADR-0004](docs/adr/0004-repository-layout.md): hybrid staged src-layout monorepo
-- [ADR-0005](docs/adr/0005-configuration-strategy.md): layered configuration and secret redaction
-- [ADR-0006](docs/adr/0006-macos-python-interpreter-provider.md): `uv` as macOS CPython provider
-- [ADR-0007](docs/adr/0007-settings-library.md): `pydantic-settings` as concrete settings adapter
-- [ADR-0008](docs/adr/0008-asgi-runtime.md): Uvicorn as loopback-first ASGI runtime
-- [ADR-0009](docs/adr/0009-structured-logging-approach.md): stdlib logging with FrameNest JSON formatter and redaction boundary
-- [ADR-0010](docs/adr/0010-initial-persistence-foundation.md): synchronous SQLAlchemy 2.x Core + Alembic for SQLite; FrameNest-owned repository boundaries; no ORM, SQLModel, or async SQLite initially
+- [ADR-0003](docs/adr/0003-initial-server-api-framework.md): FastAPI as an API adapter; domain independent
+- [ADR-0004](docs/adr/0004-repository-layout.md): hybrid staged `src/` layout
+- [ADR-0005](docs/adr/0005-configuration-strategy.md): layered configuration strategy
+- [ADR-0006](docs/adr/0006-macos-python-interpreter-provider.md): `uv` as macOS CPython interpreter provider
+- [ADR-0007](docs/adr/0007-settings-library.md): `pydantic-settings` as settings adapter
+- [ADR-0008](docs/adr/0008-asgi-runtime.md): Uvicorn as initial loopback-first ASGI runtime
+- [ADR-0009](docs/adr/0009-structured-logging-approach.md): standard-library logging with FrameNest JSON formatter and centralized redaction boundary
+- [ADR-0010](docs/adr/0010-initial-persistence-foundation.md): synchronous SQLAlchemy 2.x Core with Alembic for SQLite migrations; no ORM, SQLModel, or async SQLite access initially
+- [ADR-0011](docs/adr/0011-stable-domain-identities.md): application-owned UUIDv4 stable domain identities with category-specific pure-domain types
 
-## 7. Resolved logging-output finding
+Accepted ADRs are normative until superseded by later accepted ADRs. Evidence packages and handoff files do not supersede ADRs.
 
-Verified current state:
+## 8. Boundaries and unimplemented areas
 
-- direct console-script and module execution produce only FrameNest JSON application records on `stderr`
-- ordinary SIGINT no longer emits an application traceback
-- SIGTERM remains a normal signal exit
-- Poetry may emit its own launcher diagnostics outside the FrameNest logging graph
-- launcher output is not part of the FrameNest structured-log contract
-- the issue is resolved and covered by process-level contract tests
+Still not implemented:
 
-## 8. Persistence decision and current absence
-
-- [ADR-0010](docs/adr/0010-initial-persistence-foundation.md) accepts synchronous SQLAlchemy 2.x Core + Alembic
-- the standard-library `sqlite3` driver remains the underlying SQLite access path through `sqlite+pysqlite`
-- repositories and transactions must remain FrameNest-owned
-- SQLAlchemy ORM mapped entities, SQLModel, async SQLite, and silent startup migrations are not accepted initially
-- migrations are explicit and initially upgrade-only
-- WAL remains deferred pending macOS and Fedora evidence
-- no persistence package, engine, database path setting, Alembic environment, revision, CLI, database file, or migration dependency exists yet
-
-## 9. Next implementation boundary
-
-Non-authoritative context only:
-
-- the next bounded implementation should create only the minimal persistence foundation defined by ADR-0010
-- it must not create the media catalog
-- no media, library, device, series, tag, location, cover, or sidecar tables
-- a separate authoritative Orchestrator prompt is mandatory
-
-## 10. What still does not exist
-
-- Media-domain identity model
-- Media catalog schema
-- Durable sidecar schema
-- Library scanning
-- Acquisition or downloader
-- Gallery
-- Desktop shell
-- Catalog synchronization
-- Server aggregation
-- Authentication
-- Deployment
-- systemd
+- actual media catalog schema
+- migration revision `0002`
+- media catalog repository API
+- domain entities beyond the six identity value types
+- logical media, physical location, device, library, storage volume, or series behavior beyond identities
+- canonical tags
+- sidecar manifest format
+- scanner
+- downloader or acquisition adapter
+- cover pipeline
+- gallery
+- desktop shell
+- playback implementation
+- sync
+- server aggregation
+- authentication or authorization
+- Fedora deployment
+- systemd integration
 - Tailscale integration
-- Fedora validation
-- Database backup, restore, corruption recovery, and rebuild commands
+- backup, restore, corruption recovery, and rebuild commands
+- final WAL policy
+- final production database path
 
-## 11. Fresh Worker reading order
+Do not treat the empty `0001` Alembic revision as a media catalog.
+
+## 9. Non-authoritative next direction
+
+The next Orchestrator must independently choose the next bounded task. Likely project pressure is toward an initial local catalog schema and a FrameNest-owned repository boundary, but this handoff does not authorize that work.
+
+No Worker may implement catalog schema, migration `0002`, repository interfaces, entities, or scanning from this file alone. A separate authoritative Orchestrator prompt is mandatory, and any unresolved strategic or architectural choice must be handled through the approved protocol.
+
+## 10. Fresh Worker reading order
 
 1. [AGENTS.md](AGENTS.md)
 2. [BOOT_WORKER.md](BOOT_WORKER.md)
 3. [AP_WORKER.md](AP_WORKER.md)
 4. [NEXT_WORKER.md](NEXT_WORKER.md)
-5. [ROADMAP.md](ROADMAP.md)
+5. [PRODUCT.md](PRODUCT.md)
 6. [SPEC.md](SPEC.md)
-7. [ADR-0010](docs/adr/0010-initial-persistence-foundation.md)
-8. Other ADRs relevant to the task
-9. Current source and tests relevant to the task
-10. The separate authoritative Orchestrator prompt
+7. [ROADMAP.md](ROADMAP.md)
+8. [ADR-0010](docs/adr/0010-initial-persistence-foundation.md)
+9. [ADR-0011](docs/adr/0011-stable-domain-identities.md)
+10. Other task-relevant ADRs
+11. Task-relevant source and tests
+12. The separate authoritative Orchestrator prompt
 
-## 12. Language and report protocol
+## 11. Language and report protocol
 
-- Worker prompts: English
-- Worker reports: English
-- reports begin exactly with: `### Report for ORCHESTRATOR_CHAT`
-- reports use the compact evidence-dense format from [AP_WORKER.md](AP_WORKER.md)
+- Orchestrator communication with the Cooperator is Slovak.
+- Worker prompts are English.
+- Worker reports are English.
+- Worker reports must begin exactly with `### Report for ORCHESTRATOR_CHAT`.
+- Worker reports should be compact, evidence-dense, and honest about deviations and residual risk.
+- Repository documentation and code remain professional English unless a task explicitly says otherwise.
 
-## Authority
+## 12. Artifact lifecycle
 
-This handoff grants no modification or Git authority.
+- Classification: non-authoritative Worker-session handoff
+- Consumer: future Worker sessions during bootstrap
+- Discoverability: repository root and Worker bootstrap reading order
+- Retention: replace only at a future explicitly authorized Worker-session closeout
+- Supersession: the next committed `NEXT_WORKER.md` replacement supersedes this file as session state, while Git history remains the archive
+
+Current WORKER session: CLOSED.
