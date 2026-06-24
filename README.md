@@ -99,6 +99,14 @@ Library registration requires an already registered owning device and a database
 
 `library scan-preview` requires the same migrated database and an already registered library. The preview is read-only, writes no media records, skips nested symlinks and dot-prefixed entries, classifies candidates by extension only, and may return relative candidate paths. This remains a development/operator boundary, not the final desktop UX.
 
+`library analyze-preview` requires the same migrated database, an already registered library, and one explicit relative MP4 or GIF candidate path. The command is read-only, uses optional local `ffprobe` and `ffmpeg` executables when present, returns bounded technical metadata plus at most three exact-distinct representative PNG frames in memory only, writes no media records, leaves no extracted frame files on disk, and performs no provider or network calls. This remains a development/operator boundary, not the final desktop UX.
+
+```text
+poetry run framenest-catalog library analyze-preview \
+  --id "<library-id>" \
+  --path "relative/path.mp4"
+```
+
 ## Structured Logging
 
 The direct FrameNest server process emits one compact JSON object per application-owned log line to `stderr`.

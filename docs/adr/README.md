@@ -39,3 +39,4 @@ An accepted ADR may only be changed by a later ADR that supersedes it. Editing a
 | 0012 | Initial Device Registry and Repository Boundary | Accepted | 2026-06-24 | [0012-initial-device-registry.md](0012-initial-device-registry.md) |
 | 0013 | Initial Library Registry and Device-Local Root Locators | Accepted | 2026-06-24 | [0013-initial-library-registry.md](0013-initial-library-registry.md) |
 | 0014 | Safe Read-Only Library Scan Preview | Accepted | 2026-06-24 | [0014-safe-library-scan-preview.md](0014-safe-library-scan-preview.md) |
+| 0015 | Deterministic Local Media Analysis Preparation | Accepted | 2026-06-24 | [0015-deterministic-local-media-analysis-preparation.md](0015-deterministic-local-media-analysis-preparation.md) |

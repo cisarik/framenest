@@ -1,0 +1,119 @@
+"""ffmpeg representative-frame extraction for local media analysis preparation."""
+
+from __future__ import annotations
+
+from framenest.application.media_analysis import (
+    AGGREGATE_PNG_PAYLOAD_MAX_BYTES,
+    FFMPEG_FRAME_TIMEOUT_SECONDS,
+    INVALID_REPRESENTATIVE_FRAME_MESSAGE,
+    MAX_OUTPUT_DIMENSION,
+    PNG_PAYLOAD_MAX_BYTES,
+    REQUESTED_FRAME_COUNT,
+    SUBPROCESS_STDERR_MAX_BYTES,
+    FrameNestMediaAnalysisError,
+    RepresentativeFrame,
+    build_representative_frame,
+    compute_target_timestamps_ms,
+    deduplicate_representative_frames,
+)
+from framenest.infrastructure.media_analysis.process import (
+    PROCESS_FAILED_MESSAGE,
+    ProcessExecutionError,
+    ProcessRunner,
+)
+from framenest.infrastructure.media_analysis.tools import sanitize_retained_stderr
+
+FRAME_EXTRACTION_FAILED_MESSAGE = "Representative frame extraction failed."
+INDIVIDUAL_FRAME_FAILED_WARNING = "Representative frame extraction failed for one target."
+
+_SCALE_FILTER = (
+    f"scale='min({MAX_OUTPUT_DIMENSION},iw)':"
+    f"'min({MAX_OUTPUT_DIMENSION},ih)':"
+    "force_original_aspect_ratio=decrease,format=rgb24"
+)
+
+
+def format_timestamp_ms(timestamp_ms: int) -> str:
+    """Return a deterministic ffmpeg timestamp for integer milliseconds."""
+    hours = timestamp_ms // 3_600_000
+    remainder = timestamp_ms % 3_600_000
+    minutes = remainder // 60_000
+    remainder = remainder % 60_000
+    seconds = remainder // 1000
+    millis = remainder % 1000
+    return f"{hours:02d}:{minutes:02d}:{seconds:02d}.{millis:03d}"
+
+
+def build_ffmpeg_frame_argv(*, media_path: str, timestamp_ms: int) -> list[str]:
+    """Return the deterministic ffmpeg argv for one representative frame."""
+    return [
+        "-nostdin",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-i",
+        media_path,
+        "-ss",
+        format_timestamp_ms(timestamp_ms),
+        "-map",
+        "0:v:0",
+        "-frames:v",
+        "1",
+        "-an",
+        "-vf",
+        _SCALE_FILTER,
+        "-f",
+        "image2pipe",
+        "-vcodec",
+        "png",
+        "pipe:1",
+    ]
+
+
+def extract_representative_frames(
+    runner: ProcessRunner,
+    *,
+    ffmpeg_executable: str,
+    media_path: str,
+    duration_ms: int | None,
+) -> tuple[tuple[RepresentativeFrame, ...], tuple[str, ...]]:
+    """Extract bounded representative PNG frames for one local media file."""
+    targets = compute_target_timestamps_ms(duration_ms)
+    frames: list[RepresentativeFrame] = []
+    warnings: list[str] = []
+    aggregate_size = 0
+
+    for target_ms in targets:
+        try:
+            result = runner.run(
+                executable=ffmpeg_executable,
+                argv=build_ffmpeg_frame_argv(media_path=media_path, timestamp_ms=target_ms),
+                timeout_seconds=FFMPEG_FRAME_TIMEOUT_SECONDS,
+                stdout_max_bytes=PNG_PAYLOAD_MAX_BYTES,
+                stderr_max_bytes=SUBPROCESS_STDERR_MAX_BYTES,
+            )
+        except ProcessExecutionError:
+            warnings.append(INDIVIDUAL_FRAME_FAILED_WARNING)
+            continue
+        if result.returncode != 0:
+            if sanitize_retained_stderr(result.stderr):
+                warnings.append(INDIVIDUAL_FRAME_FAILED_WARNING)
+            else:
+                warnings.append(INDIVIDUAL_FRAME_FAILED_WARNING)
+            continue
+        try:
+            frame = build_representative_frame(timestamp_ms=target_ms, payload=result.stdout)
+        except FrameNestMediaAnalysisError:
+            warnings.append(INDIVIDUAL_FRAME_FAILED_WARNING)
+            continue
+        if aggregate_size + frame.byte_size > AGGREGATE_PNG_PAYLOAD_MAX_BYTES:
+            raise FrameNestMediaAnalysisError(INVALID_REPRESENTATIVE_FRAME_MESSAGE)
+        aggregate_size += frame.byte_size
+        frames.append(frame)
+
+    unique_frames = deduplicate_representative_frames(tuple(frames))
+    if not unique_frames:
+        raise FrameNestMediaAnalysisError(FRAME_EXTRACTION_FAILED_MESSAGE)
+    if len(unique_frames) > REQUESTED_FRAME_COUNT:
+        raise FrameNestMediaAnalysisError(INVALID_REPRESENTATIVE_FRAME_MESSAGE)
+    return unique_frames, tuple(warnings)

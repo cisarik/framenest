@@ -24,6 +24,15 @@ from framenest.application.library_scan import (
     PreviewLibraryScan,
     default_scan_limits,
 )
+from framenest.application.media_analysis import (
+    FrameNestMediaAnalysisError,
+    MediaAnalysisFailedError,
+    MediaAnalysisNotFoundError,
+    MediaAnalysisUnavailableError,
+    MediaRelativePath,
+    PreparedAnalysisResult,
+    PrepareLocalMediaAnalysis,
+)
 from framenest.application.ports.library_repository import (
     FrameNestLibraryRepositoryError,
     LibraryAlreadyExistsError,
@@ -43,6 +52,7 @@ from framenest.domain import (
     LibraryRoot,
 )
 from framenest.infrastructure.filesystem.library_scanner import LocalLibraryScanner
+from framenest.infrastructure.media_analysis import LocalMediaAnalysisAdapter
 from framenest.infrastructure.persistence.device_repository import SqliteDeviceRepository
 from framenest.infrastructure.persistence.engine import create_sqlite_engine, dispose_engine
 from framenest.infrastructure.persistence.errors import FrameNestPersistenceError
@@ -67,6 +77,8 @@ COMMAND_FAILED_CODE = "FRAMENEST_CATALOG_COMMAND_FAILED"
 COMMAND_FAILED_MESSAGE = "Catalog command failed."
 SCAN_UNAVAILABLE_CODE = "FRAMENEST_LIBRARY_SCAN_UNAVAILABLE"
 SCAN_UNAVAILABLE_MESSAGE = "Library scan preview is not available."
+ANALYSIS_UNAVAILABLE_CODE = "FRAMENEST_LIBRARY_ANALYSIS_UNAVAILABLE"
+ANALYSIS_UNAVAILABLE_MESSAGE = "Local media analysis preparation is not available."
 
 
 class _UsageError(Exception):
@@ -102,6 +114,10 @@ class _NotReadyError(Exception):
 
 
 class _ScanUnavailableError(Exception):
+    pass
+
+
+class _AnalysisUnavailableError(Exception):
     pass
 
 
@@ -184,6 +200,13 @@ def main(argv: Sequence[str] | None = None) -> int:
             message=SCAN_UNAVAILABLE_MESSAGE,
         )
         return 6
+    except _AnalysisUnavailableError:
+        _write_error(
+            operation=operation,
+            error_code=ANALYSIS_UNAVAILABLE_CODE,
+            message=ANALYSIS_UNAVAILABLE_MESSAGE,
+        )
+        return 6
     except (
         FrameNestPersistenceError,
         FrameNestDeviceRepositoryError,
@@ -235,6 +258,9 @@ def _build_parser() -> argparse.ArgumentParser:
         default=default_scan_limits().max_candidates,
         dest="max_candidates",
     )
+    library_analyze_preview = library_commands.add_parser("analyze-preview")
+    library_analyze_preview.add_argument("--id", required=True, dest="library_id")
+    library_analyze_preview.add_argument("--path", required=True, dest="relative_path")
 
     return parser
 
@@ -300,6 +326,10 @@ def _dispatch_library(args: argparse.Namespace, settings: FrameNestSettings) -> 
         library_id = _parse_library_id(args.library_id)
         limits = _parse_scan_limits(args.max_entries, args.max_candidates)
         return _with_scan_preview(settings, library_id, limits)
+    if args.operation == "analyze-preview":
+        library_id = _parse_library_id(args.library_id)
+        relative_path = _parse_media_relative_path(args.relative_path)
+        return _with_analyze_preview(settings, library_id, relative_path)
     raise _UsageError(INVALID_INPUT_MESSAGE)
 
 
@@ -410,6 +440,13 @@ def _list_libraries(repository: LibraryRepository) -> dict[str, Any]:
     return {"libraries": [_library_payload(library) for library in libraries]}
 
 
+def _parse_media_relative_path(value: str) -> MediaRelativePath:
+    try:
+        return MediaRelativePath(value)
+    except FrameNestMediaAnalysisError:
+        raise _InvalidInputError() from None
+
+
 def _parse_scan_limits(max_entries: object, max_candidates: object) -> LibraryScanLimits:
     try:
         return LibraryScanLimits(max_entries=max_entries, max_candidates=max_candidates)
@@ -478,6 +515,76 @@ def _with_scan_preview(
     try:
         repository = SqliteLibraryRepository(engine)
         return _scan_preview(repository, library_id, limits)
+    finally:
+        dispose_engine(engine)
+
+
+def _analyze_preview(
+    repository: LibraryRepository,
+    library_id: LibraryId,
+    relative_path: MediaRelativePath,
+) -> dict[str, Any]:
+    service = PrepareLocalMediaAnalysis(repository, LocalMediaAnalysisAdapter())
+    try:
+        prepared = service.execute(library_id, relative_path)
+    except MediaAnalysisNotFoundError:
+        raise _LibraryNotFoundError() from None
+    except MediaAnalysisUnavailableError:
+        raise _AnalysisUnavailableError() from None
+    except MediaAnalysisFailedError:
+        raise
+    return _analyze_preview_payload(library_id, prepared)
+
+
+def _analyze_preview_payload(
+    library_id: LibraryId,
+    prepared: PreparedAnalysisResult,
+) -> dict[str, Any]:
+    metadata = prepared.technical_metadata
+    return {
+        "library_id": library_id.to_string(),
+        "relative_path": prepared.relative_path.value,
+        "candidate_kind": prepared.candidate_kind.value,
+        "technical_metadata": {
+            "duration_ms": metadata.duration_ms,
+            "width": metadata.width,
+            "height": metadata.height,
+            "video_codec": metadata.video_codec,
+            "container_formats": list(metadata.container_formats),
+            "has_audio": metadata.has_audio,
+        },
+        "requested_frame_count": prepared.requested_frame_count,
+        "produced_frame_count": len(prepared.representative_frames),
+        "representative_frames": [
+            {
+                "ordinal": index,
+                "timestamp_ms": frame.timestamp_ms,
+                "mime_type": frame.mime_type,
+                "byte_size": frame.byte_size,
+                "sha256": frame.sha256,
+            }
+            for index, frame in enumerate(prepared.representative_frames, start=1)
+        ],
+        "warnings": list(prepared.warnings),
+        "tools": {
+            "ffprobe": prepared.ffprobe_version,
+            "ffmpeg": prepared.ffmpeg_version,
+        },
+    }
+
+
+def _with_analyze_preview(
+    settings: FrameNestSettings,
+    library_id: LibraryId,
+    relative_path: MediaRelativePath,
+) -> dict[str, Any]:
+    status = inspect_database_migration_status(settings)
+    if status.state != "at_head":
+        raise _NotReadyError()
+    engine = create_sqlite_engine(settings.database_path)
+    try:
+        repository = SqliteLibraryRepository(engine)
+        return _analyze_preview(repository, library_id, relative_path)
     finally:
         dispose_engine(engine)
 

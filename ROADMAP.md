@@ -145,7 +145,8 @@ Goal: register and scan local libraries safely.
 Implemented within this phase:
 
 - library registration through the development catalog CLI;
-- safe read-only library scan preview through `framenest-catalog library scan-preview` per [ADR-0014](docs/adr/0014-safe-library-scan-preview.md).
+- safe read-only library scan preview through `framenest-catalog library scan-preview` per [ADR-0014](docs/adr/0014-safe-library-scan-preview.md);
+- deterministic read-only local media-analysis preparation through `framenest-catalog library analyze-preview` per [ADR-0015](docs/adr/0015-deterministic-local-media-analysis-preparation.md).
 
 Still unimplemented within this phase:
 
