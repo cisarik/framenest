@@ -240,3 +240,96 @@ A separate bootstrap-only task is optional. For low- or medium-risk continuation
 Require a separate bootstrap-only task when repository identity, working-tree cleanliness, environment state, or security sensitivity is uncertain.
 
 At session close, update the relevant NEXT handoff and stop.
+
+## Worker Handoff Orchestration
+
+Worker handoff is a deliberate rotation mechanism. It is governed by the three-layer model in [AP.md](AP.md), section **Worker Session Handoff Transport and Authority**.
+
+### Handoff design
+
+Before authorizing handoff production, the Orchestrator MUST decide:
+
+- which repository-local handoff path the closing Worker may write or replace;
+- what current state, evidence, risks, and likely next boundary the handoff must contain;
+- what the handoff must not claim as authority;
+- whether the handoff requires commit and push for independent verification.
+
+The Orchestrator owns handoff content design. The closing Worker materializes it; the closing Worker does not invent the next task.
+
+### Explicit handoff-authoring authority
+
+Handoff production requires a separate bounded task that names:
+
+- the exact authorized handoff path;
+- allowed Git operations;
+- validation expectations;
+- report format;
+- stopping conditions after closeout.
+
+Without this task, the Worker MUST NOT write or replace a handoff file.
+
+### Public commit verification
+
+After handoff closeout, the Orchestrator SHOULD independently inspect the public commit SHA, file tree, diff, and raw handoff content when a public remote is available.
+
+The Orchestrator MUST NOT treat the handoff as complete until verification succeeds or an exceptional fallback is documented.
+
+The Orchestrator MUST NOT treat the handoff as current task authority for the next session.
+
+### Next-task creation
+
+After handoff verification, the Orchestrator creates one new authoritative concrete task for the fresh Worker.
+
+That task is the only source of modification, validation, and Git authority for the new session.
+
+The task MAY reference stable bootstrap and the committed handoff instead of repeating them.
+
+### Normal no-manual-copy workflow
+
+In the normal workflow:
+
+1. the closing Worker commits and pushes the handoff;
+2. the Orchestrator verifies the public commit;
+3. the Cooperator opens a fresh Worker session in the same repository;
+4. the Cooperator sends only the new authoritative task prompt;
+5. the fresh Worker reads bootstrap, handbook, and handoff directly from the repository.
+
+The Cooperator does not normally reconstruct or manually copy committed handoff files.
+
+### Exceptional manual-transfer fallback
+
+Manual transfer of handoff content is exceptional. Use it only when:
+
+- the Worker cannot access the repository;
+- push failed and shared verification is blocked;
+- the remote is unavailable or private to the Orchestrator;
+- independent inspection is otherwise impossible.
+
+The Orchestrator decides whether manual transfer is necessary and what form it takes.
+
+### Report-content expectations
+
+When the handoff is publicly committed and independently inspectable, the Orchestrator SHOULD expect a compact closing report that summarizes the handoff rather than reproduces the entire file.
+
+The Orchestrator inspects the exact committed file and diff.
+
+Require full handoff content or full diff in the report only when state is local-only, push failed, the remote is unavailable, independent inspection is impossible, or the task explicitly requests full content.
+
+The Orchestrator MUST distinguish committed handoff state from local-only handoff state in the report review.
+
+### Closing checklist
+
+- Decide rotation is required.
+- Issue one bounded handoff-authoring task with exact path and Git authority.
+- Review the closing Worker report for summary, changed path, validation, commit SHA, push state, and final status.
+- Independently verify the committed handoff when possible.
+- Stop the closing Worker session after acceptance.
+- Do not treat handoff recommendations as the next authoritative task.
+
+### Opening checklist
+
+- Provide one new authoritative concrete task prompt to the Cooperator.
+- Ensure the prompt defines goal, working directory, expected state, boundaries, Git authority, validation, acceptance criteria, stopping conditions, and report format.
+- Include an integrated read-only bootstrap gate when repository identity or cleanliness must be verified first.
+- Instruct the fresh Worker to read repository rules, stable bootstrap, role handbook, and current handoff directly from the repository.
+- Do not ask the Cooperator to manually copy committed handoff files unless the exceptional fallback applies.

@@ -244,7 +244,124 @@ Next-session handoff files SHOULD describe session state but MUST NOT redefine p
 
 The set of handoff files is project-specific and SHOULD be documented in repository rules.
 
-## 28. Session Rotation and Context Pressure
+## 28. Worker Session Handoff Transport and Authority
+
+Worker rotation relies on three distinct session inputs. Each has a different authority, lifecycle, and transport rule. They MUST NOT be conflated.
+
+### Three distinct Worker-session inputs
+
+**Stable bootstrap**
+
+A stable bootstrap document:
+
+- defines role, repository, safety, language, and protocol rules;
+- is read once near the beginning of a fresh Worker session;
+- is not rewritten for ordinary progress;
+- contains no current concrete task;
+- grants no modification or Git authority.
+
+**Repository-local next-session handoff**
+
+A Worker handoff document:
+
+- is an operational lifecycle artifact stored in the repository;
+- describes the current implemented state, evidence, unresolved risks, and likely next boundary;
+- is written or replaced by the closing Worker only under an explicit Orchestrator task;
+- is designed and scoped by the Orchestrator;
+- grants no task, modification, dependency, or Git authority;
+- may describe a proposed next step only as non-authoritative context;
+- is read directly from the repository by the fresh Worker;
+- normally does not need to be manually copied by the Cooperator;
+- MUST be independently verified by the fresh Worker against the current repository and refs;
+- is replaced at the next intentional Worker close rather than growing as a chronological log.
+
+**Authoritative Worker task**
+
+A concrete Orchestrator task:
+
+- is the only source of current task authority;
+- may reference stable bootstrap and handoff documents instead of repeating them;
+- MUST still define task-specific goal, working directory, expected state, boundaries, Git authority, validation, acceptance criteria, stopping conditions, and report format;
+- may include an integrated read-only bootstrap gate;
+- is the prompt the Cooperator sends to the fresh Worker session.
+
+Wording such as "You are a fresh Worker session" describes the conversational context and restoration requirement. It does not replace the handoff and does not itself grant unlisted permissions.
+
+### End-to-end Worker rotation flow
+
+**Closing sequence**
+
+1. The Orchestrator decides that rotation is required.
+2. The Orchestrator issues one bounded handoff-authoring task.
+3. The closing Worker writes or replaces the repository handoff.
+4. The closing Worker validates it and performs only authorized Git writes.
+5. The closing Worker reports a compact summary, exact changed path, validation, commit SHA, push state, and final repository status.
+6. The Orchestrator independently verifies the committed handoff when possible.
+7. The closing Worker session stops.
+
+**Opening sequence**
+
+1. The Cooperator opens a new Worker conversation in the same repository or workspace.
+2. The Orchestrator provides one new authoritative concrete task prompt.
+3. The fresh Worker reads repository rules, stable bootstrap, role handbook, and current handoff directly from the repository.
+4. The fresh Worker independently resolves repository identity, current refs, cleanliness, and task preconditions.
+5. The fresh Worker stops if the integrated bootstrap gate fails.
+6. The fresh Worker executes only the concrete authoritative task.
+
+The Cooperator normally transfers only the new Orchestrator task prompt, not copies of repository files. The Cooperator reports when the Worker cannot access the repository or referenced files.
+
+### Report-content rule for handoff closeout
+
+When the handoff is publicly committed and independently inspectable, the closing Worker report SHOULD normally summarize it rather than reproduce the entire file.
+
+The Orchestrator SHOULD inspect the exact committed file and diff.
+
+Full handoff content or full diff is appropriate only when:
+
+- state is local-only;
+- push failed;
+- the remote is unavailable or private to the Orchestrator;
+- independent inspection is impossible;
+- the task explicitly requests full content.
+
+A report MUST clearly distinguish committed handoff state from local-only handoff state.
+
+Duplicating a committed handoff in the report without need is context waste and risks inconsistent parallel copies.
+
+### Role responsibilities in Worker rotation
+
+**Cooperator**
+
+- opens the fresh Worker session;
+- sends the new authoritative prompt supplied by the Orchestrator;
+- does not normally reconstruct or manually copy repository handoff files;
+- reports when the Worker cannot access the repository or referenced files.
+
+**Orchestrator**
+
+- owns handoff task design and required content;
+- authorizes the closing Worker to materialize the handoff;
+- verifies the committed handoff;
+- creates the next authoritative task prompt;
+- decides whether an exceptional manual handoff transfer is necessary;
+- MUST NOT treat the handoff as current task authority.
+
+**Closing Worker**
+
+- writes only the explicitly authorized handoff path;
+- does not invent the next task;
+- reports and stops.
+
+**Fresh Worker**
+
+- reads the handoff itself;
+- treats it as state evidence only;
+- verifies it against current repository truth;
+- follows only the new Orchestrator task.
+
+This section integrates with the source-of-truth model in section 4, handoff lifecycle in section 27, session rotation in section 29, compact communication in section 35, operational lifecycle artifacts in section 36, and the minimal loops in sections 32 and 33.
+
+## 29. Session Rotation and Context Pressure
 
 Conversational context is temporary. It MUST NOT be treated as the sole project memory.
 
@@ -278,17 +395,17 @@ The closing session MUST stop after the handoff report.
 
 A new session MUST independently verify the current repository HEAD and public committed state.
 
-## 29. Stopping Conditions
+## 30. Stopping Conditions
 
 The Worker MUST stop when required identity checks fail, authorized files differ from expectations, secrets would be exposed, required evidence is missing, authentication fails in an unsafe way, or completion would require out-of-scope changes.
 
 The Orchestrator MUST stop or reframe when the next step requires Cooperator approval.
 
-## 30. Anti-Patterns
+## 31. Anti-Patterns
 
-Anti-patterns include silent scope expansion, implementation before inspection, treating reports as proof, conflating public commits with local changes, inventing decisions, hiding failures, broad filesystem inspection, unnecessary package installation, Git writes without permission, orphaned committed evidence, unnecessary research-file creation, stale evidence references, and retaining consumed temporary evidence without explicit continuing-value justification.
+Anti-patterns include silent scope expansion, implementation before inspection, treating reports as proof, conflating public commits with local changes, inventing decisions, hiding failures, broad filesystem inspection, unnecessary package installation, Git writes without permission, orphaned committed evidence, unnecessary research-file creation, stale evidence references, retaining consumed temporary evidence without explicit continuing-value justification, treating a next-session handoff file as a task, asking the Cooperator to manually copy committed handoff files without need, embedding the complete committed handoff into every report, starting a fresh Worker without repository-state verification, and allowing the closing Worker to invent the next task.
 
-## 31. Minimal Orchestrator Loop
+## 32. Minimal Orchestrator Loop
 
 1. Understand Cooperator intent.
 2. Inspect source-of-truth evidence.
@@ -299,7 +416,7 @@ Anti-patterns include silent scope expansion, implementation before inspection, 
 7. Verify public commits when available.
 8. Decide to accept, correct, continue, pause, or close.
 
-## 32. Minimal Worker Loop
+## 33. Minimal Worker Loop
 
 1. Read the complete task.
 2. Verify working directory, repository identity, and preconditions.
@@ -310,7 +427,7 @@ Anti-patterns include silent scope expansion, implementation before inspection, 
 7. Perform authorized Git operations only when explicitly allowed.
 8. Report evidence, artifact lifecycle state, deviations, risks, and final state.
 
-## 33. Example Task Lifecycle
+## 34. Example Task Lifecycle
 
 The Cooperator asks for a capability.
 
@@ -326,7 +443,7 @@ The Worker implements only the authorized change, validates it, reports the resu
 
 The Orchestrator verifies the public commit before authorizing the next step.
 
-## 34. Compact Communication Mode
+## 35. Compact Communication Mode
 
 Repositories MAY use a compact communication mode to reduce prompt and report verbosity without weakening authority, safety, or evidence requirements.
 
@@ -391,7 +508,7 @@ A separate bootstrap-only task SHOULD still be used when:
 
 The Worker MUST stop before modification if the integrated bootstrap gate fails.
 
-## 35. Artifact Lifecycle and Repository Hygiene
+## 36. Artifact Lifecycle and Repository Hygiene
 
 Repository hygiene requires every committed documentation or evidence artifact to have a defined lifecycle. Artifact lifecycle rules apply proportionally and MUST NOT create bureaucracy heavier than the artifact itself.
 

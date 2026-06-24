@@ -245,3 +245,62 @@ A separate bootstrap-only task is optional.
 When the current task includes a short read-only bootstrap gate, the Worker MUST complete it before modification and MUST stop if it fails.
 
 Use a separate bootstrap-only task when repository identity, cleanliness, environment state, or security sensitivity is uncertain.
+
+## Worker Handoff Production and Consumption
+
+Worker handoff follows the three-layer model in [AP.md](AP.md), section **Worker Session Handoff Transport and Authority**. Stable bootstrap, repository handoff, and authoritative task have different obligations.
+
+### Closing Worker obligations
+
+When explicitly authorized to produce a handoff:
+
+- write or replace only the exact handoff path named in the task;
+- describe current implemented state, evidence, unresolved risks, and likely next boundary as designed by the Orchestrator;
+- do not invent the next task or grant authority through the handoff;
+- validate the handoff and perform only authorized Git writes;
+- report a compact summary with exact changed path, validation, commit SHA, push state, and final repository status;
+- clearly distinguish committed handoff state from local-only handoff state;
+- stop after closeout without beginning another task.
+
+When the handoff is publicly committed and independently inspectable, summarize it in the report rather than reproducing the entire file unless the task or an exceptional condition requires full content.
+
+Full handoff content or full diff in the report is appropriate only when:
+
+- state is local-only;
+- push failed;
+- the remote is unavailable or private to the Orchestrator;
+- independent inspection is impossible;
+- the task explicitly requests full content.
+
+### Fresh Worker obligations
+
+At the start of a new session:
+
+- read repository rules, stable bootstrap, role handbook, and current handoff directly from the repository;
+- do not ask the Cooperator to paste handoff files that already exist in the repository;
+- treat the handoff as state evidence only, not task authority;
+- independently verify repository identity, current refs, cleanliness, and task preconditions;
+- stop before modification if the integrated bootstrap gate fails;
+- execute only the concrete authoritative Orchestrator task.
+
+Wording such as "You are a fresh Worker session" describes conversational context. It does not replace reading the handoff and does not grant unlisted permissions.
+
+Proposed next steps described in the handoff are non-authoritative context. Follow only the new Orchestrator task.
+
+### Report summarization versus full-content fallback
+
+Committed and pushed handoff state SHOULD be reported compactly because the Orchestrator can inspect the public commit directly.
+
+Duplicating a committed handoff in the report without need wastes context and risks inconsistent parallel copies.
+
+When push fails or shared inspection is impossible, include enough file content or diff in the report for the Orchestrator to review local-only state.
+
+Always state whether the handoff is committed, pushed, and publicly verifiable or local-only.
+
+### Stopping after closeout
+
+The closing Worker MUST stop after the handoff report.
+
+The closing Worker MUST NOT begin implementation work for the next session.
+
+The fresh session requires a new authoritative task from the Orchestrator.
