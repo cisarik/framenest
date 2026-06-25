@@ -19,12 +19,22 @@ from framenest.adapters.api.media_import_api import (
     MediaImportApiDependencies,
     create_media_import_api_router,
 )
+from framenest.adapters.api.media_metadata_api import (
+    MediaMetadataApiDependencies,
+    create_media_metadata_api_router,
+)
 from framenest.adapters.api.media_suggestion_api import (
     MediaSuggestionApiDependencies,
     create_media_suggestion_api_router,
 )
 from framenest.application.library_scan import PreviewLibraryScan
 from framenest.application.media_import import ImportMediaFromScanCandidate
+from framenest.application.media_metadata import (
+    CreateCanonicalTag,
+    GetMediaMetadata,
+    ListCanonicalTags,
+    SaveMediaMetadata,
+)
 from framenest.application.media_analysis import PrepareLocalMediaAnalysis
 from framenest.application.media_suggestion import PreviewMediaSuggestion
 from framenest.adapters.api.library_api import (
@@ -40,6 +50,9 @@ from framenest.infrastructure.media_analysis import LocalMediaAnalysisAdapter
 from framenest.infrastructure.persistence.engine import create_sqlite_engine, dispose_engine
 from framenest.infrastructure.persistence.library_repository import SqliteLibraryRepository
 from framenest.infrastructure.persistence.media_repository import SqliteMediaRepository
+from framenest.infrastructure.persistence.media_metadata_repository import (
+    SqliteMediaMetadataRepository,
+)
 
 
 class HealthResponse(BaseModel):
@@ -63,6 +76,7 @@ def create_app(
     settings: FrameNestSettings | None = None,
     library_api_dependencies: LibraryApiDependencies | None = None,
     media_import_api_dependencies: MediaImportApiDependencies | None = None,
+    media_metadata_api_dependencies: MediaMetadataApiDependencies | None = None,
     media_analysis_api_dependencies: MediaAnalysisApiDependencies | None = None,
     media_suggestion_api_dependencies: MediaSuggestionApiDependencies | None = None,
 ) -> FastAPI:
@@ -70,15 +84,18 @@ def create_app(
     owned_engine = None
     owned_library_repository = None
     owned_media_repository = None
+    owned_media_metadata_repository = None
     if (
         library_api_dependencies is None
         or media_import_api_dependencies is None
+        or media_metadata_api_dependencies is None
         or media_analysis_api_dependencies is None
         or media_suggestion_api_dependencies is None
     ):
         owned_engine = create_sqlite_engine(resolved_settings.database_path)
         owned_library_repository = SqliteLibraryRepository(owned_engine)
         owned_media_repository = SqliteMediaRepository(owned_engine)
+        owned_media_metadata_repository = SqliteMediaMetadataRepository(owned_engine)
     if library_api_dependencies is None:
         assert owned_library_repository is not None
         library_api_dependencies = LibraryApiDependencies(
@@ -98,6 +115,15 @@ def create_app(
                 owned_media_repository,
                 LocalLibraryScanner(),
             ),
+            catalog_available=resolved_settings.database_path.exists,
+        )
+    if media_metadata_api_dependencies is None:
+        assert owned_media_metadata_repository is not None
+        media_metadata_api_dependencies = MediaMetadataApiDependencies(
+            create_tag=CreateCanonicalTag(owned_media_metadata_repository),
+            list_tags=ListCanonicalTags(owned_media_metadata_repository),
+            get_metadata=GetMediaMetadata(owned_media_metadata_repository),
+            save_metadata=SaveMediaMetadata(owned_media_metadata_repository),
             catalog_available=resolved_settings.database_path.exists,
         )
     if media_analysis_api_dependencies is None:
@@ -136,6 +162,7 @@ def create_app(
     app.state.settings = resolved_settings
     app.include_router(create_library_api_router(library_api_dependencies))
     app.include_router(create_media_import_api_router(media_import_api_dependencies))
+    app.include_router(create_media_metadata_api_router(media_metadata_api_dependencies))
     app.include_router(create_media_analysis_api_router(media_analysis_api_dependencies))
     app.include_router(create_media_suggestion_api_router(media_suggestion_api_dependencies))
 

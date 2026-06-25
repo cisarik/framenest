@@ -27,6 +27,14 @@ from framenest.domain.media import (
     MediaLocationAvailability,
     MediaRelativePath,
 )
+from framenest.domain.media_metadata import (
+    CanonicalTag,
+    CanonicalTagDisplayName,
+    CanonicalTagKey,
+    FrameNestMediaMetadataError,
+    MediaDisplayTitle,
+    MediaMetadata,
+)
 
 __all__ = [
     "Device",
@@ -37,6 +45,7 @@ __all__ = [
     "FrameNestLibraryRootError",
     "FrameNestMediaError",
     "FrameNestMediaLocationError",
+    "FrameNestMediaMetadataError",
     "FrameNestMediaRelativePathError",
     "Library",
     "LibraryId",
@@ -49,6 +58,11 @@ __all__ = [
     "MediaLocationAvailability",
     "MediaLocationId",
     "MediaRelativePath",
+    "CanonicalTag",
+    "CanonicalTagDisplayName",
+    "CanonicalTagKey",
+    "MediaDisplayTitle",
+    "MediaMetadata",
     "SeriesId",
     "StorageVolumeId",
 ]

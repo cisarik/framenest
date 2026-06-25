@@ -12,8 +12,9 @@ The roadmap distinguishes completed foundation, immediate next work, planned pha
 
 The minimum logical-media and physical-location persistence foundation and
 explicit idempotent import from selected scan candidates now exist on MacBook.
-The next implementation priority is canonical tags and title/tag metadata. It
-is not Tauri scaffolding and not NUC deployment.
+The persistent display-title and canonical-tag core now exists. The next
+implementation priority remains manual metadata detail rather than Tauri
+scaffolding or NUC deployment.
 
 The near-term convergence sequence is:
 
@@ -88,12 +89,13 @@ Accepted so far:
 - Cover Studio and AI cover candidate direction through [ADR-0024](docs/adr/0024-cover-studio-and-ai-cover-candidates.md); not implemented.
 - Minimum persistent media catalog foundation through [ADR-0025](docs/adr/0025-minimum-persistent-media-catalog-foundation.md); implementation complete for logical media and physical locations only.
 - Explicit idempotent scan-candidate import through [ADR-0026](docs/adr/0026-explicit-idempotent-scan-candidate-import.md); implementation complete for one selected scan candidate at a time.
+- Persistent display-title and canonical-tag core through [ADR-0027](docs/adr/0027-persistent-display-title-and-canonical-tags.md); implementation complete for API-level title/tag persistence.
 
 The initial scaffold decision gate is complete. A Poetry package scaffold, centralized configuration boundary, FastAPI application factory, typed health endpoint, contract tests, Uvicorn runtime dependency, startup wiring, and a runnable loopback-only server command now exist.
 
 Broader architecture decisions still open include sidecar manifest format and versioning, metadata/tag/search schema, cover and thumbnail cache implementation details, desktop sidecar IPC, initial authentication boundary, media-tool distribution strategy, and Fedora deployment details.
 
-Persistence strategy is accepted through [ADR-0010](docs/adr/0010-initial-persistence-foundation.md). The minimal SQLAlchemy/Alembic migration foundation is implemented. The minimum logical-media and physical-location catalog schema is implemented through revision `0004`.
+Persistence strategy is accepted through [ADR-0010](docs/adr/0010-initial-persistence-foundation.md). The minimal SQLAlchemy/Alembic migration foundation is implemented. The current local catalog schema is implemented through revision `0005`.
 
 Stable identity strategy is accepted through [ADR-0011](docs/adr/0011-stable-domain-identities.md). Pure domain identity primitives exist, and minimal logical media, physical location, device, and library entities exist. Storage volume and series entities remain future work beyond identity values.
 
@@ -122,7 +124,6 @@ Implemented so far:
 Still required for phase exit:
 
 - Storage volume and series entities beyond identity values
-- Canonical tags
 - Search-ready title/tag data
 - Sidecar contracts
 - Exact roundtrip tests for durable metadata behavior
@@ -155,17 +156,18 @@ Implemented so far:
 - Same-origin explicit AI capability and media-suggestion preview API
 - Structured logging foundation per [ADR-0009](docs/adr/0009-structured-logging-approach.md)
 - Persistence strategy accepted through [ADR-0010](docs/adr/0010-initial-persistence-foundation.md)
-- Minimal SQLAlchemy Core/Alembic persistence foundation with `FRAMENEST_DATABASE_PATH`, packaged revisions `0001` through `0004`, explicit `framenest-db status`, and explicit `framenest-db migrate`
+- Minimal SQLAlchemy Core/Alembic persistence foundation with `FRAMENEST_DATABASE_PATH`, packaged revisions `0001` through `0005`, explicit `framenest-db status`, and explicit `framenest-db migrate`
 - Initial local device registry core with pure-domain `Device`, application repository port, SQLAlchemy Core adapter, and `devices` table through revision `0002`
 - Initial local library registry core with pure-domain `Library`, `LibraryRoot`, application repository port, SQLAlchemy Core adapter, and `libraries` table through revision `0003`
 - Minimum persistent media catalog foundation with pure-domain logical media and physical locations, application repository port, SQLAlchemy Core adapter, and `logical_media` plus `physical_media_locations` tables through revision `0004`
+- Persistent display-title and canonical-tag core with pure-domain metadata values, application repository port, SQLAlchemy Core adapter, and `canonical_tags`, `media_metadata`, plus `media_canonical_tags` tables through revision `0005`
 - Development operator catalog CLI (`framenest-catalog`) for device register, get, and list operations
 - Library catalog CLI commands for local library register, get, and list with lexical root-path preparation
 - Explicit idempotent scan-candidate import through same-origin API and packaged browser action
 
 Still required for phase exit:
 
-- Local catalog behavior that supports canonical title/tag metadata for imported media
+- Manual metadata detail and search-ready catalog behavior on top of persistent title/tag data
 
 The next bounded implementation step should build on imported media records without adding gallery, cover, or filesystem mutation scope prematurely.
 
@@ -192,11 +194,12 @@ Implemented within this phase:
 - packaged browser library listing, scan preview, explicit scan-candidate import, local media-analysis preview, capability discovery, and editable non-persistent AI suggestion review.
 - minimum logical-media and physical-location persistence through revision `0004`.
 - explicit idempotent import from selected scan candidates through [ADR-0026](docs/adr/0026-explicit-idempotent-scan-candidate-import.md).
+- persistent display-title and canonical content tags through [ADR-0027](docs/adr/0027-persistent-display-title-and-canonical-tags.md).
 
 Still unimplemented within this phase:
 
-- persistent user-editable metadata collection;
-- canonical tags and title/tag search;
+- browser metadata editor and manual metadata detail;
+- title search and multi-tag AND filtering;
 - availability tracking;
 - storage capacity reporting;
 - rebuildable local index persistence;

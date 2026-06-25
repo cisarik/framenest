@@ -1,0 +1,192 @@
+"""Unit tests for persistent media metadata application use cases."""
+
+from __future__ import annotations
+
+import ast
+from pathlib import Path
+
+import pytest
+
+from framenest.application.media_metadata import (
+    CreateCanonicalTag,
+    GetMediaMetadata,
+    ListCanonicalTags,
+    SaveMediaMetadata,
+)
+from framenest.application.ports.media_metadata_repository import (
+    CanonicalTagCreateResult,
+    CanonicalTagDefinitionConflictError,
+    CanonicalTagNotFoundError,
+    MediaMetadataMediaNotFoundError,
+    MediaMetadataSaveResult,
+    MediaMetadataSnapshot,
+)
+from framenest.domain import MediaId
+from framenest.domain.media_metadata import (
+    CanonicalTag,
+    CanonicalTagDisplayName,
+    CanonicalTagKey,
+    MediaDisplayTitle,
+)
+
+REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
+APPLICATION_MODULE = REPOSITORY_ROOT / "src" / "framenest" / "application" / "media_metadata.py"
+MEDIA_ID = MediaId.from_string("12345678-1234-4234-9234-123456789abc")
+
+
+def _tag(key: str, display_name: str = "Tag") -> CanonicalTag:
+    return CanonicalTag(
+        key=CanonicalTagKey(key),
+        display_name=CanonicalTagDisplayName(display_name),
+        created_at_ms=10,
+        updated_at_ms=10,
+    )
+
+
+class _FakeRepository:
+    def __init__(self) -> None:
+        self.tags: dict[CanonicalTagKey, CanonicalTag] = {}
+        self.snapshot = MediaMetadataSnapshot(
+            media_id=MEDIA_ID,
+            persisted=False,
+            display_title=None,
+            tag_keys=(),
+            created_at_ms=None,
+            updated_at_ms=None,
+        )
+        self.save_calls: list[tuple[MediaId, MediaDisplayTitle | None, tuple[CanonicalTagKey, ...], int]] = []
+
+    def create_canonical_tag(
+        self,
+        key: CanonicalTagKey,
+        display_name: CanonicalTagDisplayName,
+        now_ms: int,
+    ) -> CanonicalTagCreateResult:
+        if key in self.tags:
+            existing = self.tags[key]
+            if existing.display_name != display_name:
+                raise CanonicalTagDefinitionConflictError()
+            return CanonicalTagCreateResult(status="already_exists", tag=existing)
+        tag = CanonicalTag(key=key, display_name=display_name, created_at_ms=now_ms, updated_at_ms=now_ms)
+        self.tags[key] = tag
+        return CanonicalTagCreateResult(status="created", tag=tag)
+
+    def list_canonical_tags(self) -> tuple[CanonicalTag, ...]:
+        return tuple(sorted(self.tags.values(), key=lambda tag: (tag.display_name.value, tag.key.value)))
+
+    def get_canonical_tag(self, key: CanonicalTagKey) -> CanonicalTag | None:
+        return self.tags.get(key)
+
+    def get_media_metadata(self, media_id: MediaId) -> MediaMetadataSnapshot:
+        if media_id != MEDIA_ID:
+            raise MediaMetadataMediaNotFoundError()
+        return self.snapshot
+
+    def save_media_metadata(
+        self,
+        media_id: MediaId,
+        display_title: MediaDisplayTitle | None,
+        tag_keys: tuple[CanonicalTagKey, ...],
+        now_ms: int,
+    ) -> MediaMetadataSaveResult:
+        if media_id != MEDIA_ID:
+            raise MediaMetadataMediaNotFoundError()
+        for key in tag_keys:
+            if key not in self.tags:
+                raise CanonicalTagNotFoundError()
+        self.save_calls.append((media_id, display_title, tag_keys, now_ms))
+        status = "created" if not self.snapshot.persisted else "updated"
+        if (
+            self.snapshot.persisted
+            and self.snapshot.display_title == display_title
+            and self.snapshot.tag_keys == tag_keys
+        ):
+            status = "unchanged"
+        created_at_ms = self.snapshot.created_at_ms if self.snapshot.created_at_ms is not None else now_ms
+        updated_at_ms = self.snapshot.updated_at_ms if status == "unchanged" else now_ms
+        self.snapshot = MediaMetadataSnapshot(
+            media_id=media_id,
+            persisted=True,
+            display_title=display_title,
+            tag_keys=tag_keys,
+            created_at_ms=created_at_ms,
+            updated_at_ms=updated_at_ms,
+        )
+        return MediaMetadataSaveResult(status=status, metadata=self.snapshot)
+
+
+def test_create_and_list_canonical_tags_with_deterministic_clock() -> None:
+    repository = _FakeRepository()
+    create = CreateCanonicalTag(repository, clock_ms=lambda: 123)
+
+    first = create.execute("mathematics", "Math")
+    repeat = create.execute("mathematics", "Math")
+    repository.create_canonical_tag(CanonicalTagKey("compression"), CanonicalTagDisplayName("Compression"), 125)
+
+    assert first.status == "created"
+    assert first.tag.created_at_ms == 123
+    assert repeat.status == "already_exists"
+    assert [tag.key.value for tag in ListCanonicalTags(repository).execute().tags] == [
+        "compression",
+        "mathematics",
+    ]
+
+
+def test_get_unsaved_metadata_and_save_statuses() -> None:
+    repository = _FakeRepository()
+    repository.tags[CanonicalTagKey("mathematics")] = _tag("mathematics", "Math")
+    get = GetMediaMetadata(repository)
+    save = SaveMediaMetadata(repository, clock_ms=lambda: 500)
+
+    unsaved = get.execute(MEDIA_ID.to_string())
+    created = save.execute(MEDIA_ID.to_string(), "Reinventing Entropy", ["mathematics"])
+    unchanged = save.execute(MEDIA_ID.to_string(), "Reinventing Entropy", ["mathematics"])
+    cleared = save.execute(MEDIA_ID.to_string(), None, [])
+
+    assert unsaved.persisted is False
+    assert unsaved.display_title is None
+    assert unsaved.tags == ()
+    assert created.status == "created"
+    assert created.metadata.display_title == "Reinventing Entropy"
+    assert [tag.key.value for tag in created.metadata.tags] == ["mathematics"]
+    assert unchanged.status == "unchanged"
+    assert unchanged.metadata.updated_at_ms == created.metadata.updated_at_ms
+    assert cleared.status == "updated"
+    assert cleared.metadata.display_title is None
+    assert cleared.metadata.tags == ()
+
+
+def test_save_rejects_missing_media_missing_tag_and_duplicate_keys() -> None:
+    repository = _FakeRepository()
+    save = SaveMediaMetadata(repository, clock_ms=lambda: 1)
+
+    with pytest.raises(MediaMetadataMediaNotFoundError):
+        save.execute(MediaId.new().to_string(), None, [])
+    with pytest.raises(CanonicalTagNotFoundError):
+        save.execute(MEDIA_ID.to_string(), None, ["missing"])
+    repository.tags[CanonicalTagKey("mathematics")] = _tag("mathematics", "Math")
+    with pytest.raises(ValueError):
+        save.execute(MEDIA_ID.to_string(), None, ["mathematics", "mathematics"])
+
+
+def test_media_metadata_application_imports_no_framework_infrastructure_or_media_tools() -> None:
+    tree = ast.parse(APPLICATION_MODULE.read_text(encoding="utf-8"), filename=str(APPLICATION_MODULE))
+    violations: list[str] = []
+    forbidden_roots = {
+        "fastapi",
+        "sqlalchemy",
+        "framenest.infrastructure",
+        "framenest.adapters",
+        "framenest.infrastructure.media_analysis",
+        "framenest.infrastructure.ai",
+    }
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            module = node.names[0].name
+        elif isinstance(node, ast.ImportFrom):
+            module = node.module or ""
+        else:
+            continue
+        if any(module.startswith(root) for root in forbidden_roots):
+            violations.append(module)
+    assert violations == []
