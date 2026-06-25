@@ -239,15 +239,104 @@ def test_browser_does_not_store_frame_payloads_or_add_external_runtime_urls(
     assert "https://" not in html + script
 
 
-def test_browser_presents_no_ai_controls_or_fake_cancel(client: TestClient) -> None:
+def test_browser_loads_ai_capability_without_invoking_analysis(client: TestClient) -> None:
+    script = client.get("/assets/app.js").text
+
+    assert 'const AI_CAPABILITY_ENDPOINT = "/api/ai/media-suggestion-capability";' in script
+    assert "loadAiCapability();" in script
+    assert "fetch(AI_CAPABILITY_ENDPOINT" in script
+    assert "media-suggestion-preview" in script
+    assert script.index("media-suggestion-preview") > script.index("async function handleAnalyzeClick")
+    assert "checkHealth();" in script
+    assert "loadLibraries();" in script
+
+
+def test_browser_presents_ai_capability_states_from_api(client: TestClient) -> None:
     html = client.get("/").text
     script = client.get("/assets/app.js").text
     combined = html + script
 
+    assert "AI unavailable" in combined
+    assert "Cloud AI available" in combined
+    assert "provider_id" in script
+    assert "model_id" in script
+    assert "prompt_version" in script
+    assert "execution" in script
+    assert "Configure the server-side NVIDIA credential before starting FrameNest." in combined
+
+
+def test_browser_analyze_is_explicit_confirmed_and_cloud_disclosed(client: TestClient) -> None:
+    html = client.get("/").text
+    script = client.get("/assets/app.js").text
+    combined = html + script
+
+    assert "Analyze" in combined
+    assert "derived JPEG frames" in combined
+    assert "full video is not uploaded" in combined
+    assert "confirm_cloud_upload" in script
+    assert ".ai-confirmation-checkbox" in script
+    assert "elements.analyzeButton.disabled = !elements.checkbox.checked" in script
+    assert "Preparing frames and requesting an editable suggestion" in combined
     assert "Cancel analysis" not in combined
     assert "Provider selection" not in combined
     assert "Model selection" not in combined
-    assert ">Analyze<" not in combined
+    assert "progress" not in script.lower()
+
+
+def test_browser_analyze_appears_only_after_successful_local_inspection(
+    client: TestClient,
+) -> None:
+    script = client.get("/assets/app.js").text
+
+    assert "renderAiPanelUnavailable" in script
+    assert "renderAnalysisSuccess(card, payload)" in script
+    assert "renderAiPanelReady(card, payload)" in script
+    success_block = script[script.index("function renderAnalysisSuccess") : script.index("function renderScanResult")]
+    assert "renderAiPanelReady(card, payload)" in success_block
+    assert "resetAiReview(card)" in script
+    assert "analysisRequestToken" in script
+    assert "suggestionRequestToken" in script
+
+
+def test_browser_editable_review_form_and_tag_controls(client: TestClient) -> None:
+    html = client.get("/").text
+    script = client.get("/assets/app.js").text
+    combined = html + script
+
+    assert "AI suggestion review" in combined
+    assert "review-title-input" in combined
+    assert "review-description-input" in combined
+    assert "review-collection-input" in combined
+    assert "review-filename-input" in combined
+    assert "review-tag-input" in combined
+    assert "Add tag" in combined
+    assert "removeTag" in script
+    assert "Duplicate tags are not allowed." in script
+    assert "confidence" in script
+    assert "evidence" in script
+    assert "uncertainties" in script
+    assert "provider_id" in script
+    assert "model_id" in script
+    assert "prompt_version" in script
+
+
+def test_browser_accept_and_reject_are_session_only_without_mutation_api(
+    client: TestClient,
+) -> None:
+    html = client.get("/").text
+    script = client.get("/assets/app.js").text
+    combined = html + script
+
+    assert "Accept draft for this session" in combined
+    assert "Reject draft" in combined
+    assert "Draft accepted for this review session. No file or catalog change was applied." in combined
+    assert "Draft rejected. No changes were applied." in combined
+    assert "markReviewEdited" in script
+    assert "fetch(" in script
+    assert "rename" not in script.lower()
+    assert "save" not in script.lower()
+    assert "apply" not in script.lower()
+    assert "commit" not in script.lower()
 
 
 def test_javascript_uses_safe_dom_text_apis_for_repository_values(client: TestClient) -> None:
@@ -269,3 +358,18 @@ def test_application_surfaces_do_not_contain_external_runtime_urls_or_sensitive_
     assert "https://" not in body
     for fragment in FORBIDDEN_RESPONSE_FRAGMENTS:
         assert fragment not in body
+
+
+def test_browser_review_uses_no_persistence_or_hidden_complete_suggestion(
+    client: TestClient,
+) -> None:
+    script = client.get("/assets/app.js").text
+
+    assert "localStorage" not in script
+    assert "sessionStorage" not in script
+    assert "indexedDB" not in script
+    assert "location.search" not in script
+    assert "complete suggestion" not in script.lower()
+    assert "console.log" not in script
+    assert "payload_base64" in script
+    assert "data:image" not in script

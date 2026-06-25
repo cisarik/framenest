@@ -18,7 +18,9 @@ Downloading, cataloging, gallery presentation, metadata, storage awareness, tran
 
 FrameNest is currently in foundation-stage, pre-alpha development.
 
-A minimal Poetry package and runnable loopback health server now exist. There is no functional media application, catalog, gallery, database, downloader, desktop shell, server aggregator, installer, deployment, or supported release yet. This document defines approved product direction; it does not claim full product implementation.
+A minimal Poetry package, runnable loopback FastAPI server, packaged local web shell, explicit SQLite migration foundation, local device and library registries, read-only library scan preview, local media-analysis preview, provider-neutral NVIDIA suggestion prototype, bounded JPEG VLM transport, and explicit editable browser AI suggestion review now exist. The browser review is pre-alpha, opt-in, non-persistent, and does not apply catalog or filesystem changes.
+
+There is still no completed media application, persistent media catalog, premium gallery, downloader, desktop shell, GUI Settings, automatic AI workflow, media mutation workflow, server aggregator, installer, deployment, or supported release. Development remains MacBook-first; later Intel NUC/Fedora work is still an optional aggregation and server phase, not a replacement for local desktop operation. This document defines approved product direction; it does not claim full product implementation.
 
 ## 3. Product Vision
 
@@ -221,7 +223,7 @@ Cloud operations are opt-in, and users should understand what is sent before it 
 
 Provider keys should remain on the server where possible. Ordinary clients should not receive provider secrets.
 
-Suspicious filenames may be manually analyzed, but AI suggestions require confirmation.
+Suspicious filenames may be manually analyzed, but AI suggestions require confirmation. Current pre-alpha AI suggestion review is editable, session-only, and not catalog truth.
 
 FrameNest must not automatically rename media or upload frames without user intent and confirmation.
 

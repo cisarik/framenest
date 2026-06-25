@@ -6,9 +6,9 @@ FrameNest is a local-first, privacy-conscious, cross-platform library for video 
 
 FrameNest is in an early foundation, pre-alpha stage.
 
-A minimal Poetry package scaffold exists at the repository root with centralized settings, a FastAPI application factory, a typed `GET /health` endpoint, in-process contract tests, a loopback-first Uvicorn development server, a packaged pre-alpha local web shell at `GET /`, and pure-domain identity primitives. There is no functional media application, media catalog schema, gallery, downloader, desktop shell, installer, deployment, or supported release yet.
+A minimal Poetry package scaffold exists at the repository root with centralized settings, a FastAPI application factory, a typed `GET /health` endpoint, in-process contract tests, a loopback-first Uvicorn development server, a packaged pre-alpha local web shell at `GET /`, and pure-domain identity primitives. There is no completed media application, media catalog schema, gallery, downloader, desktop shell, installer, deployment, or supported release yet.
 
-The repository also contains the first persistence and registry foundation: a centralized SQLite database path setting, synchronous SQLAlchemy Core engine helpers, packaged Alembic resources, explicit database commands, local device and library registry tables, and read-only library scan and media-analysis preview commands. This is not a media catalog schema and does not provide persistent media records or gallery data yet.
+The repository also contains the first persistence, registry, local media-analysis, and AI suggestion-review foundation: a centralized SQLite database path setting, synchronous SQLAlchemy Core engine helpers, packaged Alembic resources, explicit database commands, local device and library registry tables, read-only library scan and media-analysis preview commands, a provider-neutral NVIDIA NIM suggestion prototype, and an explicit non-persistent editable browser review for validated AI suggestions. This is not a media catalog schema and does not provide persistent media records or gallery data yet.
 
 Supported runtime: CPython `>=3.13,<3.14`. Local development uses a uv-managed CPython 3.13.14 interpreter with Poetry as the dependency, environment, and lockfile manager. The initial `poetry.lock` was generated with Poetry 2.1.4. The local virtual environment lives in `.venv/` and is not committed.
 
@@ -33,7 +33,7 @@ poetry run framenest-server
 
 Default application URL: `http://127.0.0.1:8000`. Health path: `/health`.
 
-The default URL serves the packaged pre-alpha FrameNest web shell. It can confirm that the real local application server is running, load the same-origin health endpoint, list registered libraries from the local catalog, run an explicit read-only library scan preview, and explicitly inspect one returned candidate locally for bounded technical metadata and representative PNG frames. Library registration remains available through the catalog CLI in this slice. Gallery persistence, downloads, AI analysis, Settings, playback, and persistent media catalog behavior remain future work.
+The default URL serves the packaged pre-alpha FrameNest web shell. It can confirm that the real local application server is running, load the same-origin health endpoint, list registered libraries from the local catalog, run an explicit read-only library scan preview, explicitly inspect one returned candidate locally for bounded technical metadata and representative PNG frames, and, when the server-side NVIDIA credential is configured, request one editable AI suggestion review after explicit cloud-upload confirmation. Library registration remains available through the catalog CLI in this slice. Gallery persistence, downloads, Settings, playback, provider selection, GUI credential entry, and persistent media catalog behavior remain future work.
 
 Read-only browser API paths currently include:
 
@@ -41,9 +41,13 @@ Read-only browser API paths currently include:
 GET /api/libraries
 POST /api/libraries/{library_id}/scan-preview
 POST /api/libraries/{library_id}/media-analysis-preview
+GET /api/ai/media-suggestion-capability
+POST /api/libraries/{library_id}/media-suggestion-preview
 ```
 
 These API paths do not run migrations automatically and do not expose library root paths or persistent media records. The media-analysis preview endpoint is explicit, same-origin, read-only, local-only, stateless, provider-free, and non-persistent. It returns inline base64 PNG frames only for the lifetime of the response/displayed browser preview and sets `Cache-Control: no-store`.
+
+The AI capability endpoint is same-origin, sanitized, and does not contact the provider. During this pre-alpha development slice the server composition boundary may read `NVIDIA_API_KEY` from the process environment. The browser never receives that value, credential state, key prefix, Authorization header, raw provider response, prompt payload, image payloads, absolute media path, or database path. When configured, the AI suggestion preview endpoint requires `confirm_cloud_upload: true`, reuses local read-only media preparation, sends at most three derived JPEG frames plus bounded metadata to NVIDIA NIM through the server, returns one validated editable suggestion, and performs no filesystem, catalog, or database mutation. Accepting or rejecting the browser draft is session-only. Future GUI Settings and a secret-store adapter are expected to replace the temporary process-environment credential source.
 
 FrameNest-owned runtime logs are compact JSON lines written to `stderr` by the direct application process. The installed console entrypoint `.venv/bin/framenest-server` is the strict application-process boundary used by machine-readable output contract tests. Ordinary interactive termination with Ctrl+C or SIGTERM through that direct entrypoint must not emit an unstructured traceback.
 

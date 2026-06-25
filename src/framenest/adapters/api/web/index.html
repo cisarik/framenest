@@ -41,6 +41,16 @@
             Waiting for the same-origin health response.
           </p>
         </div>
+        <div class="status-card ai-status-card" aria-live="polite" aria-atomic="true">
+          <div class="status-card__label">AI capability</div>
+          <div id="ai-status" class="status status--loading">
+            <span class="status__dot" aria-hidden="true"></span>
+            <span id="ai-status-text">Checking AI capability...</span>
+          </div>
+          <p id="ai-status-detail" class="status-detail">
+            Capability discovery is same-origin and does not contact a provider.
+          </p>
+        </div>
       </section>
 
       <section id="library-browser" class="library-browser" aria-labelledby="libraries-title">
@@ -99,6 +109,47 @@
               No cloud transmission occurred.
             </p>
           </div>
+          <div class="ai-panel" hidden>
+            <div class="ai-panel__header">
+              <div>
+                <h4>AI suggestion review</h4>
+                <p class="ai-capability">AI unavailable</p>
+              </div>
+              <span class="ai-execution">cloud</span>
+            </div>
+            <dl class="ai-metadata">
+              <div>
+                <dt>Provider</dt>
+                <dd class="ai-provider"></dd>
+              </div>
+              <div>
+                <dt>Model</dt>
+                <dd class="ai-model"></dd>
+              </div>
+              <div>
+                <dt>Prompt</dt>
+                <dd class="ai-prompt"></dd>
+              </div>
+            </dl>
+            <p class="ai-disclosure">
+              This cloud-based Analyze action sends up to three derived JPEG frames
+              and bounded metadata to the configured provider. The full video is
+              not uploaded. Nothing is persisted or applied automatically.
+            </p>
+            <label class="ai-confirmation">
+              <input class="ai-confirmation-checkbox" type="checkbox">
+              <span>I confirm this request may send bounded derived frames and metadata to the cloud provider.</span>
+            </label>
+            <button class="analyze-button" type="button" disabled>Analyze</button>
+            <p class="ai-status-message" role="status"></p>
+            <p class="accepted-message-template" hidden>
+              Draft accepted for this review session. No file or catalog change was applied.
+            </p>
+            <p class="rejected-message-template" hidden>
+              Draft rejected. No changes were applied.
+            </p>
+            <div class="ai-review" hidden></div>
+          </div>
         </article>
       </template>
 
@@ -140,8 +191,8 @@
           </article>
           <article class="boundary-card">
             <h3>AI</h3>
-            <p>Future explicit on-demand assistance with clear cloud boundaries.</p>
-            <span class="boundary-state boundary-state--future">Future</span>
+            <p>Explicit on-demand editable suggestion preview with clear cloud confirmation.</p>
+            <span class="boundary-state">Active preview</span>
           </article>
         </div>
       </section>
