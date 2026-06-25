@@ -1,25 +1,32 @@
 # Next Worker Handoff
 
-## Authority And Startup
+## Authority
 
 This file is a non-authoritative Worker-session handoff. It restores current
-context only. It is not a task and grants no implementation, command,
-filesystem, network, provider, secret, migration, dependency, or Git authority.
+context only. It is not a concrete task and grants no modification, command,
+Git, migration, dependency, secret, network, provider, private-data,
+filesystem, deployment, or implementation authority.
 
-The persistent protocol role is WORKER. A Worker instance/session is one
-temporary execution-agent lifecycle assigned to that persistent role. Do not
-describe a fresh Worker instance as a new persistent role.
+Only a future authoritative ORCHESTRATOR prompt may grant a concrete task.
+
+`WORKER` is the persistent protocol role. A Worker instance/session is one
+temporary concrete execution lifecycle assigned to that role. Do not describe a
+fresh Worker instance as a new persistent role.
+
+## Repository Identity
 
 Repository: `https://github.com/cisarik/framenest.git`
 
-Working directory: `/Users/agile/framenest`
+Normal working directory: `/Users/agile/framenest`
 
 Branch: `main`
 
-A fresh Worker instance must verify the public closeout commit that replaced
-this file, then follow only the future authoritative Orchestrator task.
+A future Worker must verify the repository, working directory, and branch from
+current Git state rather than trusting this handoff blindly.
 
-Mandatory early reading for a fresh Worker instance:
+## Fresh Worker Startup Reading Order
+
+A fresh Worker instance must read at minimum:
 
 1. `AGENTS.md`
 2. `BOOT_WORKER.md`
@@ -32,12 +39,13 @@ Mandatory early reading for a fresh Worker instance:
 9. `ROADMAP.md`
 10. `README.md`
 11. `docs/adr/README.md`
-12. the future authoritative Orchestrator task prompt
+12. task-relevant accepted ADRs
+13. the future authoritative ORCHESTRATOR task prompt
 
-Repository code, tests, accepted ADRs, Git history, and the future authoritative
-task override stale handoff claims.
+Repository code, tests, accepted ADRs, public Git evidence, and the future
+authoritative task override stale handoff claims.
 
-## Current Implemented State Through Cycle 060
+## Current Implemented State Through Cycle 062
 
 FrameNest is a foundation-stage, pre-alpha, local-first library for video and
 animated media.
@@ -45,135 +53,211 @@ animated media.
 Implemented foundations include:
 
 - CPython 3.13 and Poetry package foundation;
-- centralized typed settings with loopback-safe server defaults;
-- FastAPI application factory and typed unchanged `GET /health`;
-- loopback-first Uvicorn runtime through `framenest-server`;
+- centralized typed settings;
+- loopback-first FastAPI application factory and Uvicorn runtime through
+  `framenest-server`;
+- typed unchanged `GET /health`;
+- packaged vanilla HTML/CSS/JavaScript local web shell;
 - FrameNest-owned structured JSON logging and redaction boundary;
-- synchronous SQLAlchemy Core SQLite persistence with Alembic revisions through
-  `0003`;
+- synchronous SQLAlchemy Core SQLite persistence with explicit Alembic
+  migrations through revision `0004`;
 - explicit `framenest-db status` and `framenest-db migrate`;
-- pure-domain identity primitives;
-- pure-domain `Device`, `Library`, and device-local `LibraryRoot`;
-- application repository ports and SQLAlchemy Core adapters for device and
-  library registries;
-- development catalog CLI for device/library registration and preview commands;
+- no automatic server migration;
+- stable pure-domain identity primitives;
+- local device and library registries with application repository ports and
+  SQLAlchemy Core adapters;
 - deterministic read-only library scan preview;
 - deterministic read-only local media-analysis preview;
 - provider-neutral AI suggestion boundary;
 - NVIDIA NIM prototype with JPEG VLM image input;
-- one successful documented non-thinking live provider validation from Cycle
-  059;
-- packaged vanilla HTML/CSS/JavaScript local web shell;
-- same-origin registered-library listing, scan-preview, and media-analysis
-  preview APIs;
 - sanitized AI capability API;
 - explicit cloud confirmation for AI suggestion preview;
-- editable non-persistent AI suggestion review in the browser.
+- editable non-persistent AI suggestion review in the browser;
+- minimum persistent media catalog foundation.
 
-Not implemented:
+The minimum persistent media catalog foundation includes:
 
-- no persistent media catalog;
-- no gallery persistence;
-- no logical media or physical-location persistence;
-- no storage-volume registry;
-- no durable cover or thumbnail pipeline;
-- no desktop shell;
-- no Tauri scaffold;
-- no NUC deployment;
-- no server aggregation;
-- no streaming or transfer implementation;
-- no GUI Settings or secret-store adapter.
+- persistent logical media;
+- persistent physical locations;
+- stable logical media identities;
+- stable physical media-location identities;
+- media kinds `video` and `animated_image`;
+- availability states `available`, `offline`, `missing`, `unverified`, and
+  `archived`;
+- normalized slash-separated library-relative paths;
+- physical filename derived from the final path component;
+- no duplicated filename column;
+- no duplicated `device_id` on physical media-location records;
+- one logical media item with zero or more physical locations;
+- uniqueness for each exact `(library_id, relative_path)` location;
+- restrictive foreign keys to logical media and libraries;
+- no destructive cascading deletion;
+- application `MediaRepository` port;
+- SQLAlchemy Core adapter;
+- Alembic migration `0004`.
 
-## Latest Worker-Observed Validation
+## Explicitly Unimplemented State
 
-The following is Worker-observed evidence from Cycle 060. A fresh Worker must
-rerun whatever validation its future authoritative task requires.
+The following remain unimplemented:
 
-- Final collection: `723` tests collected.
-- Full result: `720 passed`, `3 skipped`.
-- Full `-W error`: `720 passed`, `3 skipped`.
-- Targeted Cycle 060 suite: `55 passed`.
-- `poetry check --lock`: passed.
-- `poetry run python -m compileall -q src tests`: passed.
-- `poetry build`: passed.
-- Wheel inspection: passed for new API module, updated app composition, updated
-  web assets, and credential loader.
-- Fake-dependency smoke: passed for capability, confirmation gate, success,
-  sanitized body, and unconfigured provider.
-- No live provider call occurred in Cycle 060.
-- No browser visual inspection occurred in Cycle 060.
+- explicit persistent import from scan candidates;
+- user-editable persistent title, description, collection, and suggested
+  filename;
+- canonical tags;
+- title/tag search;
+- manual metadata detail;
+- persistent AI drafts;
+- covers and thumbnails;
+- persistent premium gallery;
+- catalog API exposure for persistent media records;
+- normal catalog CLI media commands;
+- automatic duplicate detection;
+- content hashes and perceptual hashes;
+- file mutation workflows;
+- Tauri desktop shell;
+- NUC deployment;
+- server aggregation;
+- streaming;
+- transfer;
+- GUI Settings and final secret-store integration.
+
+## Relevant Accepted Architecture
+
+ADR-0021 accepts Tauri v2 as the future desktop shell. It is not implemented and
+is not the immediate next task.
+
+ADR-0022 accepts selective media placement, one logical medium with several
+locations, desktop-owned local catalogs, and later optional server aggregation.
+NUC deployment, streaming, synchronization, and transfer remain future work.
+
+ADR-0023 accepts a manual-first metadata workspace and separate AI drafts.
+Opening detail must not call AI, save catalog metadata, or mutate files.
+Manual metadata, AI drafts, catalog save, and filesystem rename are distinct
+future boundaries.
+
+ADR-0024 accepts a manual Cover Studio and optional AI-generated cover
+candidates. Cover candidates do not become active without explicit human
+acceptance. Cover persistence and derived thumbnails remain future work.
+
+ADR-0025 accepts the minimum persistent logical-media and physical-location
+catalog foundation in migration `0004`.
+
+Tauri and NUC work are not the immediate next task.
+
+## Cycle 062 Commit Evidence
+
+Cycle 062 commit: `32794797d2d5c2dcd2c3d4982cd5a23ad0fc9d5e`
+
+Parent: `c8bda2139a2d931c57620f0564bff17976d6cfd6`
+
+Subject: `feat: add persistent media catalog foundation`
+
+The commit introduced ADR-0025, the logical media and physical-location domain
+model, the `MediaRepository` port, the SQLAlchemy Core adapter, migration
+`0004`, migration tests, repository contract tests, domain tests, and bounded
+documentation updates.
+
+This handoff does not hardcode its own future closeout commit SHA. A future
+Worker must discover and verify the commit containing this handoff.
+
+## Worker-Observed Validation Evidence
+
+Initial untouched baseline before Cycle 062 edits:
+
+- `723 tests collected`;
+- `720 passed`;
+- `3 skipped`;
+- warning-as-error run: `720 passed`, `3 skipped`.
+
+Final Cycle 062 validation:
+
+- migration-focused subset: `36 passed`;
+- targeted domain/repository subset: `176 passed`;
+- `790 tests collected`;
+- full suite: `787 passed`, `3 skipped`;
+- warning-as-error run: `787 passed`, `3 skipped`;
+- Poetry lock check passed;
+- compileall passed;
+- package build passed;
+- wheel inspection passed;
+- empty database to `0004` passed;
+- populated `0003` to `0004` passed with device/library rows preserved;
+- `0004` to `0003` passed with only media-catalog objects removed;
+- Markdown links passed;
+- final worktree was clean;
+- no live provider call;
+- no private-media access;
+- no user-database migration.
+
+A future Worker must rerun whatever validation its own authoritative task
+requires.
 
 ## Sanitized Live NVIDIA Evidence
 
 Preserved sanitized Cycle 059 evidence only:
 
-- one explicit NVIDIA call;
+- one explicit authorized NVIDIA call;
 - HTTP `200`;
 - no polling;
-- final content was non-empty;
-- reasoning content was absent;
+- final content non-empty;
+- reasoning content absent;
 - strict parsing succeeded;
-- usage was `1316` prompt tokens, `400` completion tokens, and `1716` total
-  tokens;
-- no mutation occurred.
+- `1316` prompt tokens;
+- `400` completion tokens;
+- `1716` total tokens;
+- no mutation.
 
-Do not include raw provider content in prompts, reports, docs, or logs.
+Do not include raw provider content in prompts, reports, docs, or logs. One
+successful call does not guarantee future provider behavior. No provider call
+occurred in Cycle 062.
 
-## Accepted Architecture Direction
+## Strongest Next Implementation Recommendation
 
-ADR-0021 accepts Tauri v2 as the future desktop shell. The shell will display
-the existing HTML/CSS/JavaScript UI in a native WebView, supervise a packaged
-Python/FastAPI sidecar, use a single-instance lifecycle, provide tray or macOS
-menu-bar behavior, and initially expose `Gallery`, `Settings`, and `Quit`.
+The strongest next bounded implementation candidate is explicit idempotent
+import from selected scan candidates.
 
-Implementation remains MacBook-first, while cross-platform architecture
-boundaries remain required. Browser mode remains development and diagnostic
-mode, not the normal end-user desktop UX.
+This is a recommendation, not task authority. A future Orchestrator must inspect
+and resolve at least:
 
-ADR-0022 accepts selective media placement and optional server aggregation. Each
-desktop owns a complete local catalog for local operation. The NUC comes later
-as an optional archive/aggregator, remote streaming/download source, transfer
-receiver, later centralized AI-provider boundary, and future backup participant.
+- scan candidate identity and current fields;
+- explicit user selection boundary;
+- mapping from scan candidate to logical media and physical location;
+- whether one import operation creates both records atomically;
+- idempotency key;
+- duplicate `(library_id, relative_path)` handling;
+- behavior when a location already exists;
+- behavior when a logical media item already exists;
+- transaction boundaries;
+- partial failure behavior;
+- no automatic import during scan;
+- no filesystem mutation;
+- no title/tag/cover scope unless separately authorized;
+- API/CLI/UI exposure boundary;
+- tests and migration implications;
+- whether a new ADR is required before implementation.
 
-FrameNest models one logical media item with zero or more physical locations.
-The gallery should show logical media cards rather than duplicate physical-file
-cards. Remote-only cards should remain visible through metadata, covers,
-availability summaries, and derived thumbnails without downloading full media.
-
-Search direction includes title search and multi-tag filtering. Multiple
-selected tags default to AND/intersection semantics.
-
-The priority MEME scenario is a NUC-hosted `Meme` archive where another desktop
-can browse, search, stream, or explicitly download GIF and short MP4 media
-without storing all bytes locally.
-
-`Download + Copy to Clipboard` is accepted as a future native desktop capability
-for GIF and short MP4 workflows, with verified download and fallback behavior.
-
-## Non-Authoritative Next Recommendation
-
-The strongest next implementation candidate is the minimum persistent local
-media catalog on MacBook.
-
-A fresh Orchestrator must inspect current domain, identity, persistence,
-migration, tag, cover, and scan boundaries before authorizing it.
-
-Likely required concepts include:
-
-- logical media;
-- physical media locations;
-- canonical tags;
-- catalog persistence;
-- idempotent import from explicit scan results;
-- search-ready title/tag data;
-- no file mutation;
-- migration `0004` only after a dedicated accepted decision.
-
-This handoff does not pre-authorize schema details.
-
-Tauri scaffolding and NUC implementation are not the immediate next
-implementation task.
+This handoff does not pre-authorize the solution. Do not propose Tauri or NUC as
+the next task.
 
 ## Session State
 
-Current Worker instance session: CLOSED.
+Current concrete Worker session: `CLOSED`.
+
+The Worker that produced Cycle 062 must not receive another task. A future task
+requires a fresh Worker instance assigned to the `WORKER` role. FrameNest
+remains on its current single-Worker workflow. No future task is granted by
+this handoff.
+
+## Artifact Lifecycle
+
+Classification: replaceable Worker-session handoff.
+
+Consumers: future ORCHESTRATOR and future Worker instance.
+
+Authority: contextual and non-authoritative.
+
+Retention: until replaced by a future explicitly authorized Worker closeout.
+
+Update owner: a Worker acting under explicit ORCHESTRATOR closeout authority.
+
+Cleanup: replacement rather than accumulation; Git history remains the archive.
