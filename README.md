@@ -159,13 +159,15 @@ The current approved product direction includes:
 
 The current conceptual direction is:
 
-- A shared web-first UI that can later be hosted by a desktop shell.
-- A Tauri desktop shell for local desktop operation.
+- A shared HTML/CSS/JavaScript UI that can run in browser development mode and later in a native system WebView.
+- Tauri v2 as the accepted future desktop shell for normal local desktop operation.
 - Python for domain, filesystem, downloader, metadata, server, and media-processing capabilities.
 - PWA or browser access where appropriate.
 - Local desktop catalogs plus an optional server aggregator.
 - External VLC first for playback, with embedded libVLC considered later.
 - Remote access through Tailscale-only networking rather than public internet exposure.
+
+The accepted desktop and distributed-media direction is documentation only at this stage. No Tauri scaffold, installer, NUC deployment, persistent media catalog, transfer implementation, or server aggregation exists yet.
 
 Accepted implementation foundations so far:
 
@@ -179,8 +181,11 @@ Accepted implementation foundations so far:
 - Packaged vanilla local web application delivery through the existing FastAPI process ([ADR-0017](docs/adr/0017-initial-local-web-application-delivery.md))
 - Same-origin local media-analysis preview API with inline bounded base64 PNG frames ([ADR-0018](docs/adr/0018-local-media-analysis-preview-api.md))
 - VLM transport JPEG derivatives and NVIDIA documented instruct mode for the suggestion prototype ([ADR-0019](docs/adr/0019-vlm-image-derivatives-and-nvidia-instruct-mode.md))
+- Explicit on-demand editable AI suggestion review ([ADR-0020](docs/adr/0020-on-demand-ai-suggestion-review.md))
+- Tauri v2 desktop shell direction ([ADR-0021](docs/adr/0021-tauri-desktop-shell.md))
+- Selective media placement and optional server aggregation direction ([ADR-0022](docs/adr/0022-selective-media-placement-and-server-aggregation.md))
 
-Exact future frontend framework or compiled toolchain, desktop/Tauri packaging choices, IPC design, data schema, identity database encoding, deployment model, production update mechanisms, and many server operational details remain subject to later documented decisions.
+Exact future frontend framework or compiled toolchain, desktop/Tauri packaging choices, IPC design, sidecar bundling, data schema, identity database encoding, deployment model, production update mechanisms, and many server operational details remain subject to later documented decisions.
 
 ## Security and Privacy Principles
 
@@ -220,6 +225,9 @@ Current foundation files:
 - [`PRODUCT.md`](PRODUCT.md) defines the approved product vision, users, outcomes, experience principles, capabilities, and non-goals.
 - [`SPEC.md`](SPEC.md) defines the initial normative product and system requirements.
 - [`ROADMAP.md`](ROADMAP.md) defines the staged evidence-based development roadmap.
+- [`DESKTOP.md`](DESKTOP.md) records accepted desktop shell architecture and UX direction.
+- [`SERVER.md`](SERVER.md) records accepted optional server and NUC aggregation direction.
+- [`GALLERY.md`](GALLERY.md) records accepted gallery product and UX direction.
 - [`AGENTS.md`](AGENTS.md) defines FrameNest-specific agent operating rules.
 - [`AP.md`](AP.md) defines the general Analytic Programming protocol.
 - [`AP_ORCHESTRATOR.md`](AP_ORCHESTRATOR.md) defines the Orchestrator operating handbook.
@@ -249,6 +257,9 @@ Current foundation files:
 - [`docs/adr/0017-initial-local-web-application-delivery.md`](docs/adr/0017-initial-local-web-application-delivery.md) records the accepted packaged local web shell delivery decision.
 - [`docs/adr/0018-local-media-analysis-preview-api.md`](docs/adr/0018-local-media-analysis-preview-api.md) records the accepted same-origin local media-analysis preview API decision.
 - [`docs/adr/0019-vlm-image-derivatives-and-nvidia-instruct-mode.md`](docs/adr/0019-vlm-image-derivatives-and-nvidia-instruct-mode.md) records the accepted VLM JPEG derivative and NVIDIA instruct-mode decision.
+- [`docs/adr/0020-on-demand-ai-suggestion-review.md`](docs/adr/0020-on-demand-ai-suggestion-review.md) records the accepted on-demand editable AI suggestion review decision.
+- [`docs/adr/0021-tauri-desktop-shell.md`](docs/adr/0021-tauri-desktop-shell.md) records the accepted Tauri v2 desktop shell direction.
+- [`docs/adr/0022-selective-media-placement-and-server-aggregation.md`](docs/adr/0022-selective-media-placement-and-server-aggregation.md) records the accepted selective placement and optional server aggregation direction.
 
 ## Non-Goals for the Current Stage
 

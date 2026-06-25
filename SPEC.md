@@ -78,6 +78,8 @@ A transfer is a copy, move, or related operation between locations.
 
 An availability state describes whether a device, library, storage volume, or physical location is currently reachable and usable.
 
+A desktop shell is the native application boundary that hosts the FrameNest UI, supervises the local backend, and provides narrowly scoped native capabilities.
+
 ## 5. Stable Identity Requirements
 
 FrameNest MUST define stable identities for logical media, physical locations, devices, libraries, storage volumes, and series where applicable.
@@ -236,9 +238,13 @@ Search and filtering MUST be supported.
 
 Filters SHOULD include libraries, devices, platforms, canonical tags, media type, series, and availability.
 
+Multiple selected canonical tags MUST default to AND/intersection semantics. OR behavior MAY be added later only as an explicit advanced mode.
+
 Card and series views SHOULD be supported.
 
 Remote availability, transfer state, and download state SHOULD be visible.
+
+Remote-only logical media SHOULD remain visible through metadata, covers, derived thumbnails, and availability summaries when those lightweight records are available without full media bytes.
 
 Inline preview for short media SHOULD be supported separately from full playback.
 
@@ -259,6 +265,8 @@ Inline looping preview SHOULD be supported.
 Copy to Clipboard MAY be supported where platform capabilities permit.
 
 Download and Download + Copy actions MAY be supported for remote media.
+
+`Download + Copy to Clipboard` MUST verify any downloaded representation before placing it on the native clipboard and MUST provide fallback behavior when the platform or target application does not support direct paste.
 
 Heuristic classification MAY be used, but users MUST be able to override it.
 
@@ -308,6 +316,12 @@ The server MAY support streaming, download, transfers, device state, centralized
 
 The desktop MUST remain useful when the server is offline.
 
+The server MUST NOT be required for local desktop gallery, metadata, search, or local playback where the required data and media are available locally.
+
+Metadata, covers, availability state, and lightweight derived thumbnails MAY synchronize independently of full media bytes.
+
+FrameNest MUST NOT automatically replicate all media bytes to every device.
+
 Server aggregate state and local authoritative state need explicit conflict rules later.
 
 The synchronization protocol remains unresolved.
@@ -340,6 +354,8 @@ Transfers MUST verify destination size, integrity, and readability where feasibl
 
 Source deletion MUST occur only after successful validation.
 
+Full media transfer MUST be explicit or governed by a later accepted automation rule.
+
 Operations SHOULD provide previews, progress, cancellation, transaction or audit state, final-copy protection, and clear partial-failure recovery.
 
 This document does not choose a checksum algorithm.
@@ -349,6 +365,8 @@ This document does not choose a checksum algorithm.
 Search and filtering SHOULD include canonical tags, platform, library, device, availability, duration, size, archive-added date, source date, media type, series, MEME classification, and local/remote state.
 
 The search engine remains unresolved.
+
+Title/name search SHOULD be supported by the first persistent gallery-capable catalog. Multiple selected tags MUST use AND semantics by default.
 
 ## 22. AI and Privacy
 
@@ -427,6 +445,46 @@ Broader macOS, Linux, and Windows portability remains required.
 Browser/PWA access remains conceptual direction.
 
 Platform adapters MUST isolate OS-specific behavior.
+
+### Desktop Shell Requirements
+
+FrameNest MUST become a desktop application for normal end-user use. Browser mode MAY remain for development, diagnostics, and controlled operator workflows, but it MUST NOT be the required normal end-user experience.
+
+Tauri v2 is the accepted future desktop shell per [ADR-0021](docs/adr/0021-tauri-desktop-shell.md).
+
+The desktop shell MUST display the FrameNest UI in a native system WebView and MUST supervise the Python/FastAPI backend as a sidecar rather than duplicating domain or catalog logic.
+
+The sidecar backend MUST bind only to loopback by default.
+
+The desktop shell MUST enforce a single-instance lifecycle.
+
+The desktop shell SHOULD provide a tray or macOS menu-bar presence with initial `Gallery`, `Settings`, and `Quit` actions.
+
+Closing the main window SHOULD hide the window rather than terminate the application. `Quit` MUST stop the supervised backend cleanly.
+
+Native capabilities MUST be least-privilege and allowlisted. The WebView MUST NOT receive unrestricted filesystem, shell, process, or arbitrary-command access.
+
+Native file selection, directory selection, save/export destinations, file-manager reveal, VLC opening, notifications, and clipboard operations MAY be exposed only through explicit scoped capabilities.
+
+MacBook-first implementation is accepted, but platform-specific behavior MUST remain isolated so later Windows and Linux validation remains possible.
+
+### Distributed Media Requirements
+
+Selective media placement and server aggregation direction is recorded in [ADR-0022](docs/adr/0022-selective-media-placement-and-server-aggregation.md).
+
+The optional Intel NUC server MAY act as archive, aggregator, remote streaming/download source, transfer receiver, later centralized AI-provider boundary, and future backup participant.
+
+The NUC MUST NOT replace local desktop catalogs or make local clients unusable thin clients.
+
+Remote-only media cards SHOULD be visible from metadata and covers without requiring full media download.
+
+Future remote access MUST follow the Tailscale-only direction unless explicitly superseded.
+
+### Progress Requirements
+
+Determinate operations SHOULD show real transferred bytes, total bytes, percentage, speed, ETA, and verification/finalization state when available.
+
+Indeterminate operations MAY use restrained animation, shimmer, masked text, pulse, or fade effects, but MUST NOT show fabricated percentages, invented backend stages, or false cancellation.
 
 ### Supported Python Runtime
 

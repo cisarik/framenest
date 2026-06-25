@@ -45,3 +45,5 @@ An accepted ADR may only be changed by a later ADR that supersedes it. Editing a
 | 0018 | Local Media Analysis Preview API | Accepted | 2026-06-24 | [0018-local-media-analysis-preview-api.md](0018-local-media-analysis-preview-api.md) |
 | 0019 | VLM Image Derivatives and NVIDIA Instruct Mode | Accepted | 2026-06-24 | [0019-vlm-image-derivatives-and-nvidia-instruct-mode.md](0019-vlm-image-derivatives-and-nvidia-instruct-mode.md) |
 | 0020 | On-Demand AI Suggestion Review | Accepted | 2026-06-25 | [0020-on-demand-ai-suggestion-review.md](0020-on-demand-ai-suggestion-review.md) |
+| 0021 | Tauri Desktop Shell | Accepted | 2026-06-25 | [0021-tauri-desktop-shell.md](0021-tauri-desktop-shell.md) |
+| 0022 | Selective Media Placement and Server Aggregation | Accepted | 2026-06-25 | [0022-selective-media-placement-and-server-aggregation.md](0022-selective-media-placement-and-server-aggregation.md) |

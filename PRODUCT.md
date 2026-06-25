@@ -20,13 +20,15 @@ FrameNest is currently in foundation-stage, pre-alpha development.
 
 A minimal Poetry package, runnable loopback FastAPI server, packaged local web shell, explicit SQLite migration foundation, local device and library registries, read-only library scan preview, local media-analysis preview, provider-neutral NVIDIA suggestion prototype, bounded JPEG VLM transport, and explicit editable browser AI suggestion review now exist. The browser review is pre-alpha, opt-in, non-persistent, and does not apply catalog or filesystem changes.
 
-There is still no completed media application, persistent media catalog, premium gallery, downloader, desktop shell, GUI Settings, automatic AI workflow, media mutation workflow, server aggregator, installer, deployment, or supported release. Development remains MacBook-first; later Intel NUC/Fedora work is still an optional aggregation and server phase, not a replacement for local desktop operation. This document defines approved product direction; it does not claim full product implementation.
+There is still no completed media application, persistent media catalog, premium gallery, downloader, desktop shell, GUI Settings, automatic AI workflow, media mutation workflow, server aggregator, installer, deployment, or supported release. Tauri v2 is accepted as the future desktop shell, but no Tauri scaffold exists yet. Development remains MacBook-first; later Intel NUC/Fedora work is still an optional aggregation and server phase, not a replacement for local desktop operation. This document defines approved product direction; it does not claim full product implementation.
 
 ## 3. Product Vision
 
 The long-term goal is to provide a personal media library that can acquire media, organize it, present it through a premium gallery, preserve local ownership, and support multiple devices and storage locations.
 
 FrameNest should allow users to keep useful media under their own control, understand where each copy exists, and access the collection through local desktop catalogs. An optional server aggregator may later coordinate global views, remote access, transfers, and centralized provider integrations.
+
+The normal user experience should be a native desktop application rather than a manually opened external browser. Browser mode remains useful for development and diagnostics.
 
 Privacy-aware AI assistance may be added later for tasks such as metadata suggestions, suspicious filename analysis, tagging support, and cover generation, but such features must remain optional and user-controlled.
 
@@ -44,6 +46,8 @@ FrameNest should help users organize media with canonical metadata, tags, series
 
 FrameNest should provide a visually premium gallery as a flagship capability. The gallery should make large personal media libraries fast, attractive, searchable, and understandable.
 
+The gallery should support title search, removable filter chips, and multiple selected canonical tags with default AND/intersection semantics.
+
 ### Local-First Ownership
 
 FrameNest should keep local desktop operation useful without requiring a server, cloud account, or public backend.
@@ -56,9 +60,13 @@ FrameNest should represent media across multiple devices, libraries, disks, and 
 
 FrameNest should support careful movement, copying, and remote playback of media with clear status, verified destinations, and explicit confirmation before destructive actions.
 
+Determinate operations such as downloads and transfers should eventually show real bytes, percentages, speed, ETA, and verification/finalization state when available. Indeterminate operations may use restrained premium animation but must not invent percentages or backend stages.
+
 ### Optional Server Aggregation
 
 FrameNest may use an optional server to aggregate catalogs, coordinate transfers, provide remote streaming, run remote downloads, centralize AI provider access, and support future backup functionality.
+
+The optional server may support global gallery visibility for remote-only media through metadata, covers, availability summaries, and derived thumbnails without requiring automatic full media-byte replication.
 
 ### Privacy-Aware AI Assistance
 
@@ -121,6 +129,8 @@ Local clients must not become unusable thin clients.
 
 Durable metadata should remain portable where feasible.
 
+The normal desktop experience must not require Chrome, Brave, Firefox, Safari, or another external browser.
+
 ## 9. Server Role
 
 The optional Intel NUC server is an aggregator, not a replacement for local desktop catalogs.
@@ -137,6 +147,8 @@ The server may later support:
 
 Server functionality must not make local desktop use dependent on server availability.
 
+A priority future scenario is a NUC-hosted `Meme` archive where a desktop can browse and search remote-only GIF and short MP4 media through synchronized metadata and covers, then explicitly stream or download selected media.
+
 ## 10. Logical Media and Physical Locations
 
 FrameNest should distinguish logical media from physical locations.
@@ -144,6 +156,8 @@ FrameNest should distinguish logical media from physical locations.
 One logical media item may have zero or more series relationships and may exist in multiple physical locations. Those locations may be on different devices, libraries, or storage volumes.
 
 One gallery item should normally represent the logical media item rather than displaying every duplicate independently. The user should still be able to inspect where each physical copy exists.
+
+FrameNest should use selective media placement. It must not automatically replicate all media bytes to every device.
 
 ## 11. Library and Storage Experience
 
@@ -159,14 +173,18 @@ The gallery should be visually premium, dark, responsive, cover-driven, fast, an
 
 The gallery should be able to reduce motion and visual effects on weaker devices.
 
+Remote-only media cards should remain visually useful through metadata, cover identity/provenance, derived thumbnails, and visible location/availability badges. Rendering a card should not require downloading the full video.
+
 Important gallery concepts include:
 
 - Media cards.
 - Series cards.
 - Cover editing.
 - Device and availability indicators.
+- Remote-only cards.
 - Inline short-media previews.
-- Filtering and search.
+- Title search.
+- Multi-tag AND filtering.
 - Lazy loading and virtualization.
 
 This document does not select a frontend framework.
@@ -215,6 +233,8 @@ Playback direction includes local file playback, remote stream playback, inline 
 
 Embedded libVLC is future roadmap scope, not an early-stage implemented capability.
 
+For GIF and short MP4 social-response workflows, FrameNest should later support `Download + Copy to Clipboard` through native desktop capabilities with clear fallback behavior when direct paste is unsupported.
+
 ## 17. Privacy and AI Assistance
 
 AI features are optional.
@@ -248,6 +268,8 @@ Interactions should be fast, status should be clear, and complexity should appea
 The interface should support accessibility and reduced-motion preferences.
 
 FrameNest should avoid outdated generic desktop-widget appearance and avoid visual effects that damage responsiveness.
+
+The future desktop shell should provide single-instance behavior, a tray or macOS menu-bar presence, close-to-tray behavior, and initial `Gallery`, `Settings`, and `Quit` menu items.
 
 ## 20. Early Product Non-Goals
 
@@ -303,4 +325,12 @@ Agent and protocol behavior are defined in [AGENTS.md](AGENTS.md) and [AP.md](AP
 
 [ROADMAP.md](ROADMAP.md) defines the staged, evidence-based development plan.
 
-This document defines product direction. `SPEC.md` defines normative requirements. `ROADMAP.md` defines staged development. Architecture ADRs will record accepted architecture decisions later.
+This document defines product direction. `SPEC.md` defines normative requirements. `ROADMAP.md` defines staged development. Architecture ADRs record accepted architecture decisions.
+
+Permanent architecture and UX references:
+
+- [DESKTOP.md](DESKTOP.md) records accepted desktop shell direction.
+- [SERVER.md](SERVER.md) records accepted optional server and NUC aggregation direction.
+- [GALLERY.md](GALLERY.md) records accepted gallery product and UX direction.
+- [ADR-0021](docs/adr/0021-tauri-desktop-shell.md) records the accepted Tauri desktop shell decision.
+- [ADR-0022](docs/adr/0022-selective-media-placement-and-server-aggregation.md) records selective placement and server aggregation decisions.

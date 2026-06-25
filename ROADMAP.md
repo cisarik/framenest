@@ -8,6 +8,25 @@ Each phase should begin only when its entry conditions are satisfied and should 
 
 The roadmap distinguishes completed foundation, immediate next work, planned phases, long-term scope, and explicitly deferred work.
 
+## Near-Term MacBook MVP Convergence
+
+The next implementation priority is the minimum persistent local media catalog
+on MacBook. It is not Tauri scaffolding and not NUC deployment.
+
+The near-term convergence sequence is:
+
+1. persistent local media catalog;
+2. logical media and physical-location model;
+3. canonical tags and title/tag search;
+4. cover and derived-thumbnail pipeline;
+5. premium local gallery;
+6. macOS Tauri desktop shell;
+7. native VLC, file, clipboard, and download/export capabilities;
+8. only afterward Fedora NUC deployment, aggregation, streaming, and transfer.
+
+This sequence preserves broader cross-platform goals while keeping the immediate
+critical path focused on a polished and functional macOS MVP.
+
 ## Phase 0 — Repository and Protocol Foundation
 
 Status: completed before this task.
@@ -55,10 +74,16 @@ Accepted so far:
 - Initial structured logging approach: standard-library `logging` with a FrameNest-owned JSON formatter and redaction boundary through [ADR-0009](docs/adr/0009-structured-logging-approach.md); implementation complete.
 - Initial SQLite persistence and migration foundation: synchronous SQLAlchemy Core with Alembic through [ADR-0010](docs/adr/0010-initial-persistence-foundation.md); minimal explicit migration implementation complete.
 - Stable domain identities: application-owned UUIDv4 values with category-specific pure-domain types through [ADR-0011](docs/adr/0011-stable-domain-identities.md); minimal identity primitives implemented.
+- Local web application delivery through packaged vanilla HTML/CSS/JavaScript assets through [ADR-0017](docs/adr/0017-initial-local-web-application-delivery.md); implementation complete.
+- Local media-analysis preview API through [ADR-0018](docs/adr/0018-local-media-analysis-preview-api.md); implementation complete.
+- VLM JPEG derivatives and NVIDIA instruct mode through [ADR-0019](docs/adr/0019-vlm-image-derivatives-and-nvidia-instruct-mode.md); implementation complete for the prototype boundary.
+- On-demand editable AI suggestion review through [ADR-0020](docs/adr/0020-on-demand-ai-suggestion-review.md); implementation complete as a non-persistent pre-alpha review.
+- Tauri desktop shell direction through [ADR-0021](docs/adr/0021-tauri-desktop-shell.md); not implemented.
+- Selective media placement and optional server aggregation direction through [ADR-0022](docs/adr/0022-selective-media-placement-and-server-aggregation.md); not implemented.
 
 The initial scaffold decision gate is complete. A Poetry package scaffold, centralized configuration boundary, FastAPI application factory, typed health endpoint, contract tests, Uvicorn runtime dependency, startup wiring, and a runnable loopback-only server command now exist.
 
-Broader architecture decisions still open include sidecar manifest format and versioning, server/domain boundaries beyond the current skeleton, initial authentication boundary, media-tool distribution strategy, and Fedora deployment details.
+Broader architecture decisions still open include sidecar manifest format and versioning, persistent media catalog schema, cover and thumbnail cache design, desktop sidecar IPC, initial authentication boundary, media-tool distribution strategy, and Fedora deployment details.
 
 Persistence strategy is accepted through [ADR-0010](docs/adr/0010-initial-persistence-foundation.md). The minimal SQLAlchemy/Alembic migration foundation is implemented. The actual media catalog schema remains unimplemented.
 
@@ -68,7 +93,7 @@ Key deliverables: remaining broader architecture ADRs and evidence as needed bef
 
 Entry conditions: [SPEC.md](SPEC.md) and this roadmap are accepted.
 
-Exit evidence: broader architecture package completed without silently selecting unresolved options beyond the initial scaffold gate.
+Exit evidence: broader architecture package completed without silently selecting unresolved options beyond accepted ADRs.
 
 Boundaries: Phase 2 remains `in progress` until the broader architecture package is completed. Application code is not implemented by this decision gate alone.
 
@@ -89,6 +114,7 @@ Still required for phase exit:
 
 - Logical media, physical location, storage volume, and series entities beyond identity values
 - Canonical tags
+- Search-ready title/tag data
 - Sidecar contracts
 - Exact roundtrip tests for durable metadata behavior
 
@@ -113,6 +139,11 @@ Implemented so far:
 - Uvicorn runtime dependency and startup wiring
 - Runnable loopback-only server process verified by tests and command output
 - Runtime health smoke verification
+- Packaged local web shell at `GET /` with same-origin assets
+- Read-only registered-library listing API
+- Same-origin scan-preview API
+- Same-origin local media-analysis preview API
+- Same-origin explicit AI capability and media-suggestion preview API
 - Structured logging foundation per [ADR-0009](docs/adr/0009-structured-logging-approach.md)
 - Persistence strategy accepted through [ADR-0010](docs/adr/0010-initial-persistence-foundation.md)
 - Minimal SQLAlchemy Core/Alembic persistence foundation with `FRAMENEST_DATABASE_PATH`, packaged revisions `0001` through `0003`, explicit `framenest-db status`, and explicit `framenest-db migrate`
@@ -124,9 +155,9 @@ Implemented so far:
 Still required for phase exit:
 
 - Actual media catalog schema and repository boundaries beyond device and library registries
-- Local catalog behavior that supports the first library-scanning tasks
+- Local catalog behavior that supports persistent media records from explicit user-approved import
 
-The next bounded implementation step should build on the persistence foundation without treating the empty `0001` migration as a media catalog.
+The next bounded implementation step should build on the persistence foundation without treating the existing migration foundation as a media catalog.
 
 Key deliverables: loopback-only local development server skeleton, health endpoint, configuration boundary, structured logging, SQLite development catalog, migration mechanism, and tests.
 
@@ -147,24 +178,28 @@ Implemented within this phase:
 - library registration through the development catalog CLI;
 - safe read-only library scan preview through `framenest-catalog library scan-preview` per [ADR-0014](docs/adr/0014-safe-library-scan-preview.md);
 - deterministic read-only local media-analysis preparation through `framenest-catalog library analyze-preview` per [ADR-0015](docs/adr/0015-deterministic-local-media-analysis-preparation.md);
-- explicit opt-in NVIDIA NIM media suggestion preview through `framenest-catalog library suggest-preview` per [ADR-0016](docs/adr/0016-provider-neutral-media-suggestions-and-nvidia-nim-prototype.md).
+- explicit opt-in NVIDIA NIM media suggestion preview through `framenest-catalog library suggest-preview` per [ADR-0016](docs/adr/0016-provider-neutral-media-suggestions-and-nvidia-nim-prototype.md);
+- packaged browser library listing, scan preview, local media-analysis preview, capability discovery, and editable non-persistent AI suggestion review.
 
 Still unimplemented within this phase:
 
 - persistent metadata collection;
 - media catalog tables;
+- logical media and physical-location persistence;
+- canonical tags and title/tag search;
+- idempotent import from explicit scan results;
 - availability tracking;
 - storage capacity reporting;
 - rebuildable local index persistence;
 - sidecars and rebuild behavior.
 
-Key deliverables: library registration, safe scanning, metadata collection, availability tracking, storage capacity reporting, rebuildable local index, and tests.
+Key deliverables: library registration, safe scanning, persistent metadata collection, logical media and physical locations, canonical tags, title/tag search, availability tracking, storage capacity reporting, rebuildable local index, and tests.
 
 Entry conditions: domain and local database foundations exist.
 
 Exit evidence: deterministic fixtures and filesystem tests showing non-destructive scanning and rebuildable index behavior.
 
-Boundaries: no destructive organization by default.
+Boundaries: no destructive organization by default; no file mutation is required for the minimum persistent catalog.
 
 ## Phase 6 — Naming, Tagging, and Portable Metadata
 
@@ -214,7 +249,7 @@ Status: planned.
 
 Goal: build the first real scalable local gallery.
 
-Key deliverables: cover-driven gallery, search, filtering, series views, storage/device state, short-media preview, accessibility support, reduced motion, reduced transparency, and lower-resource modes.
+Key deliverables: cover-driven gallery, logical-item cards, local and remote-only card states, title search, multi-tag AND filtering, removable active filters, series views, storage/device state, short-media preview, accessibility support, reduced motion, reduced transparency, and lower-resource modes.
 
 Entry conditions: domain, metadata, covers, and local catalog are testable.
 
@@ -238,13 +273,13 @@ Boundaries: embedded libVLC remains deferred.
 
 ## Phase 11 — Intel NUC Fedora Deployment
 
-Status: planned after the server foundation works on macOS.
+Status: planned after the MacBook MVP has a persistent local catalog, premium local gallery, and desktop shell direction ready for deployment packaging.
 
 Goal: deploy and harden the server foundation on Fedora KDE Intel NUC.
 
 Key deliverables: Fedora KDE installation notes, updates, hardware/storage inspection, hardening, SELinux/firewalld policy, service user, systemd hardening, and backup/recovery documentation.
 
-Entry conditions: macOS server foundation is working and tested.
+Entry conditions: macOS local catalog, gallery, and desktop foundations are working and tested; server aggregation decisions are ready.
 
 Exit evidence: documented deployment checks and verified service behavior on the NUC.
 
@@ -270,13 +305,13 @@ Status: planned.
 
 Goal: aggregate media and locations across devices.
 
-Key deliverables: device synchronization, global locations, offline state, conflict handling, and Android/PWA global view direction.
+Key deliverables: device synchronization, global logical media visibility, remote-only cards backed by metadata/covers, global locations, offline state, conflict handling, and Android/PWA global view direction.
 
 Entry conditions: local catalogs, server aggregator, and synchronization decisions are ready.
 
 Exit evidence: tests proving known locations, offline state, and conflict behavior.
 
-Boundaries: automatic global synchronization remains deferred until explicitly designed.
+Boundaries: automatic full-media replication is not the default; automatic global synchronization remains deferred until explicitly designed.
 
 ## Phase 14 — Streaming, Download, and Transfer
 
@@ -284,7 +319,7 @@ Status: planned.
 
 Goal: support safe remote media operations.
 
-Key deliverables: direct play first, copy/move operations, verification, deduplication safeguards, remote download, progress, cancellation, and partial-failure recovery.
+Key deliverables: direct play first, explicit stream/download/archive actions, copy/move operations, verification, deduplication safeguards, remote download, `Download + Copy to Clipboard` through native desktop capability, truthful progress, cancellation, and partial-failure recovery.
 
 Entry conditions: remote access, authorization, and transfer model are accepted.
 
