@@ -184,6 +184,8 @@ Accepted implementation foundations so far:
 - Explicit on-demand editable AI suggestion review ([ADR-0020](docs/adr/0020-on-demand-ai-suggestion-review.md))
 - Tauri v2 desktop shell direction ([ADR-0021](docs/adr/0021-tauri-desktop-shell.md))
 - Selective media placement and optional server aggregation direction ([ADR-0022](docs/adr/0022-selective-media-placement-and-server-aggregation.md))
+- Manual-first metadata and multi-model AI draft workspace direction ([ADR-0023](docs/adr/0023-manual-first-metadata-and-multi-model-ai-drafts.md), [AI_WORKSPACE.md](AI_WORKSPACE.md))
+- Manual Cover Studio and AI cover candidate direction ([ADR-0024](docs/adr/0024-cover-studio-and-ai-cover-candidates.md), [COVER_PIPELINE.md](COVER_PIPELINE.md))
 
 Exact future frontend framework or compiled toolchain, desktop/Tauri packaging choices, IPC design, sidecar bundling, data schema, identity database encoding, deployment model, production update mechanisms, and many server operational details remain subject to later documented decisions.
 
@@ -228,6 +230,8 @@ Current foundation files:
 - [`DESKTOP.md`](DESKTOP.md) records accepted desktop shell architecture and UX direction.
 - [`SERVER.md`](SERVER.md) records accepted optional server and NUC aggregation direction.
 - [`GALLERY.md`](GALLERY.md) records accepted gallery product and UX direction.
+- [`AI_WORKSPACE.md`](AI_WORKSPACE.md) records accepted manual-first metadata and multi-model AI workspace direction.
+- [`COVER_PIPELINE.md`](COVER_PIPELINE.md) records accepted Cover Studio and cover candidate direction.
 - [`AGENTS.md`](AGENTS.md) defines FrameNest-specific agent operating rules.
 - [`AP.md`](AP.md) defines the general Analytic Programming protocol.
 - [`AP_ORCHESTRATOR.md`](AP_ORCHESTRATOR.md) defines the Orchestrator operating handbook.
@@ -260,6 +264,8 @@ Current foundation files:
 - [`docs/adr/0020-on-demand-ai-suggestion-review.md`](docs/adr/0020-on-demand-ai-suggestion-review.md) records the accepted on-demand editable AI suggestion review decision.
 - [`docs/adr/0021-tauri-desktop-shell.md`](docs/adr/0021-tauri-desktop-shell.md) records the accepted Tauri v2 desktop shell direction.
 - [`docs/adr/0022-selective-media-placement-and-server-aggregation.md`](docs/adr/0022-selective-media-placement-and-server-aggregation.md) records the accepted selective placement and optional server aggregation direction.
+- [`docs/adr/0023-manual-first-metadata-and-multi-model-ai-drafts.md`](docs/adr/0023-manual-first-metadata-and-multi-model-ai-drafts.md) records the accepted manual-first metadata and multi-model AI draft decision.
+- [`docs/adr/0024-cover-studio-and-ai-cover-candidates.md`](docs/adr/0024-cover-studio-and-ai-cover-candidates.md) records the accepted Cover Studio and AI cover candidate decision.
 
 ## Non-Goals for the Current Stage
 

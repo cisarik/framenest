@@ -66,6 +66,9 @@ A source platform is structured metadata describing where media originated and i
 
 A cover is a user-visible representative image for standalone media, an episode, or a series.
 
+A cover candidate is a proposed cover source or generated image that has not
+yet replaced the accepted cover.
+
 A derived thumbnail is a reproducible cache artifact derived from a durable source.
 
 A sidecar manifest is portable durable metadata stored near media where feasible.
@@ -225,6 +228,19 @@ AI-generated covers are future scope.
 An existing approved cover MUST NOT be overwritten without confirmation.
 
 Cover provenance SHOULD be retained.
+
+The manual cover workflow MUST require explicit acceptance such as `Set as
+cover`.
+
+A created or generated cover candidate MUST NOT become active automatically.
+
+Only explicit human acceptance MAY activate a cover candidate and replace the
+previous accepted cover.
+
+Cover timestamp MUST NOT change normal playback start.
+
+Ordinary Play MUST start at `00:00`; seeking to a cover timestamp is a separate
+explicit action if offered later.
 
 Final image formats and thumbnail sizes remain unresolved.
 
@@ -393,6 +409,35 @@ FrameNest MUST NOT automatically rename media.
 FrameNest MUST NOT perform unsolicited cloud frame upload.
 
 Prompts MUST NOT include unrelated paths, cookies, keys, or logs.
+
+Opening a media detail view MUST NOT trigger an AI call, catalog save, or
+filesystem mutation.
+
+FrameNest MUST distinguish persisted catalog values, unsaved `Current` manual
+working state, physical filename, library-relative path, AI draft, promoted
+draft values, accepted current-page values, durable catalog save, suggested
+filename, and future explicit physical rename operation.
+
+Changing display title MUST NOT rename a file. Editing suggested filename MUST
+NOT rename a file. Catalog save MUST NOT implicitly rename, move, delete, tag,
+or reorganize media files.
+
+`Use this draft` or an equivalent promotion action MUST copy selected AI draft
+values into `Current`; it MUST NOT save to the catalog or mutate the filesystem.
+
+AI drafts MUST NOT be automatically promoted, saved, tagged, renamed, or
+assigned to a collection.
+
+Canonical-tag editing SHOULD provide searchable local suggestions, keyboard and
+mouse navigation, rounded removable chips, an explicit `×` control, visible
+hover/focus/selected/AI-suggested/invalid states, case-insensitive duplicate
+prevention, optional controlled new-tag creation, and immediate local filtering
+without progress UI for trivial local filtering.
+
+Capability-aware model filtering SHOULD use provider-neutral concepts such as
+`vision_input`, `video_input`, `structured_text_output`, `image_generation`,
+`image_editing`, `reference_image`, `local_execution`, and `cloud_execution`.
+Browsing or highlighting models MUST NOT invoke a provider.
 
 ## 23. Secrets
 
@@ -606,7 +651,7 @@ Success MUST NOT be claimed without evidence.
 
 Deferred decisions include frontend framework, frontend workspace tooling, committed configuration file format, exact configuration schema, operating-system secret-store implementation, manifest format, schema, IPC, authentication above Tailscale, synchronization protocol, FFmpeg distribution, yt-dlp packaging/update strategy, player invocation, thumbnail formats and sizes, full-text search, packaging/signing/update mechanisms, telemetry, and license.
 
-The supported Python minor version is recorded in [ADR-0001](docs/adr/0001-supported-python-version.md). Poetry dependency and environment management is recorded in [ADR-0002](docs/adr/0002-python-environment-and-dependency-manager.md). The initial server API framework is recorded in [ADR-0003](docs/adr/0003-initial-server-api-framework.md). Repository layout and Poetry package mode are recorded in [ADR-0004](docs/adr/0004-repository-layout.md). Configuration strategy is recorded in [ADR-0005](docs/adr/0005-configuration-strategy.md). The concrete settings library is recorded in [ADR-0007](docs/adr/0007-settings-library.md). The initial ASGI runtime is recorded in [ADR-0008](docs/adr/0008-asgi-runtime.md). The initial SQLite persistence and migration foundation is recorded in [ADR-0010](docs/adr/0010-initial-persistence-foundation.md). The stable entity identity format is recorded in [ADR-0011](docs/adr/0011-stable-domain-identities.md). Media catalog schema, identity database encoding, sidecar manifest format, full-text search design, final production database path policy, WAL and checkpoint details, backup and restore, and remote aggregate database design remain unresolved. Exact dependency versions, 3.13 patch pinning, Poetry virtual-environment location, Uvicorn version and extras, startup interface, process model, worker count, reload policy, trusted proxy configuration, structured logging, systemd integration, background jobs, authentication, and API versioning remain implementation concerns governed by those ADRs and later authorized tasks.
+The supported Python minor version is recorded in [ADR-0001](docs/adr/0001-supported-python-version.md). Poetry dependency and environment management is recorded in [ADR-0002](docs/adr/0002-python-environment-and-dependency-manager.md). The initial server API framework is recorded in [ADR-0003](docs/adr/0003-initial-server-api-framework.md). Repository layout and Poetry package mode are recorded in [ADR-0004](docs/adr/0004-repository-layout.md). Configuration strategy is recorded in [ADR-0005](docs/adr/0005-configuration-strategy.md). The concrete settings library is recorded in [ADR-0007](docs/adr/0007-settings-library.md). The initial ASGI runtime is recorded in [ADR-0008](docs/adr/0008-asgi-runtime.md). The initial SQLite persistence and migration foundation is recorded in [ADR-0010](docs/adr/0010-initial-persistence-foundation.md). The stable entity identity format is recorded in [ADR-0011](docs/adr/0011-stable-domain-identities.md). Manual-first metadata and multi-model AI drafts are recorded in [ADR-0023](docs/adr/0023-manual-first-metadata-and-multi-model-ai-drafts.md). Cover Studio and AI cover candidates are recorded in [ADR-0024](docs/adr/0024-cover-studio-and-ai-cover-candidates.md). Media catalog schema, identity database encoding, sidecar manifest format, full-text search design, final production database path policy, WAL and checkpoint details, backup and restore, and remote aggregate database design remain unresolved. Exact dependency versions, 3.13 patch pinning, Poetry virtual-environment location, Uvicorn version and extras, startup interface, process model, worker count, reload policy, trusted proxy configuration, structured logging, systemd integration, background jobs, authentication, and API versioning remain implementation concerns governed by those ADRs and later authorized tasks.
 
 None of these may be silently selected during implementation.
 

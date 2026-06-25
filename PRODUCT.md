@@ -72,6 +72,13 @@ The optional server may support global gallery visibility for remote-only media 
 
 FrameNest may later provide AI-assisted metadata, cover, and organization workflows. These workflows must be optional, understandable, and confirmation-based.
 
+AI assistance does not own metadata. Manual display-title, description,
+collection, canonical-tag, and suggested-filename editing must remain complete
+without AI, without internet, and after the user rejects all AI drafts. Future
+multi-model AI drafts are comparison aids that may be promoted into the manual
+`Current` working state only by explicit action; promotion is not a catalog save
+and does not mutate files.
+
 ## 5. Target Users and Use Cases
 
 Target users include:
@@ -221,7 +228,11 @@ Reinventing Entropy - Compression is Intelligence [Math] [Compression] [YouTube]
 
 FrameNest should support timeline frame selection, importing a cover from disk, series and episode covers, durable original covers, and reproducible derived thumbnails.
 
-Future AI-generated covers are roadmap scope and must require user confirmation before replacing covers.
+Manual cover selection comes before AI cover generation. Future Cover Studio
+should let the user select a source frame and explicitly set it as cover while
+retaining an exact cover timestamp. Future AI-generated covers are roadmap
+scope, must create reviewable cover candidates, and must require explicit human
+acceptance before replacing covers.
 
 The product should preserve enough information to regenerate derived thumbnails while retaining user-approved original cover choices.
 
@@ -332,5 +343,9 @@ Permanent architecture and UX references:
 - [DESKTOP.md](DESKTOP.md) records accepted desktop shell direction.
 - [SERVER.md](SERVER.md) records accepted optional server and NUC aggregation direction.
 - [GALLERY.md](GALLERY.md) records accepted gallery product and UX direction.
+- [AI_WORKSPACE.md](AI_WORKSPACE.md) records accepted manual-first metadata and multi-model AI workspace direction.
+- [COVER_PIPELINE.md](COVER_PIPELINE.md) records accepted Cover Studio and cover candidate direction.
 - [ADR-0021](docs/adr/0021-tauri-desktop-shell.md) records the accepted Tauri desktop shell decision.
 - [ADR-0022](docs/adr/0022-selective-media-placement-and-server-aggregation.md) records selective placement and server aggregation decisions.
+- [ADR-0023](docs/adr/0023-manual-first-metadata-and-multi-model-ai-drafts.md) records manual-first metadata and multi-model AI draft decisions.
+- [ADR-0024](docs/adr/0024-cover-studio-and-ai-cover-candidates.md) records Cover Studio and AI cover candidate decisions.

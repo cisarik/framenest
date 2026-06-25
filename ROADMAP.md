@@ -16,13 +16,15 @@ on MacBook. It is not Tauri scaffolding and not NUC deployment.
 The near-term convergence sequence is:
 
 1. persistent local media catalog;
-2. logical media and physical-location model;
-3. canonical tags and title/tag search;
-4. cover and derived-thumbnail pipeline;
-5. premium local gallery;
-6. macOS Tauri desktop shell;
-7. native VLC, file, clipboard, and download/export capabilities;
-8. only afterward Fedora NUC deployment, aggregation, streaming, and transfer.
+2. logical media and physical locations;
+3. canonical tags and search;
+4. explicit import from selected scan results;
+5. manual metadata detail;
+6. manual Cover Studio and thumbnails;
+7. persistent premium gallery;
+8. multi-model AI workspace;
+9. optional AI cover experiments;
+10. later Tauri and NUC work.
 
 This sequence preserves broader cross-platform goals while keeping the immediate
 critical path focused on a polished and functional macOS MVP.
@@ -80,10 +82,12 @@ Accepted so far:
 - On-demand editable AI suggestion review through [ADR-0020](docs/adr/0020-on-demand-ai-suggestion-review.md); implementation complete as a non-persistent pre-alpha review.
 - Tauri desktop shell direction through [ADR-0021](docs/adr/0021-tauri-desktop-shell.md); not implemented.
 - Selective media placement and optional server aggregation direction through [ADR-0022](docs/adr/0022-selective-media-placement-and-server-aggregation.md); not implemented.
+- Manual-first metadata and multi-model AI draft direction through [ADR-0023](docs/adr/0023-manual-first-metadata-and-multi-model-ai-drafts.md); not implemented beyond the existing non-persistent ADR-0020 review slice.
+- Cover Studio and AI cover candidate direction through [ADR-0024](docs/adr/0024-cover-studio-and-ai-cover-candidates.md); not implemented.
 
 The initial scaffold decision gate is complete. A Poetry package scaffold, centralized configuration boundary, FastAPI application factory, typed health endpoint, contract tests, Uvicorn runtime dependency, startup wiring, and a runnable loopback-only server command now exist.
 
-Broader architecture decisions still open include sidecar manifest format and versioning, persistent media catalog schema, cover and thumbnail cache design, desktop sidecar IPC, initial authentication boundary, media-tool distribution strategy, and Fedora deployment details.
+Broader architecture decisions still open include sidecar manifest format and versioning, persistent media catalog schema, cover and thumbnail cache implementation details, desktop sidecar IPC, initial authentication boundary, media-tool distribution strategy, and Fedora deployment details.
 
 Persistence strategy is accepted through [ADR-0010](docs/adr/0010-initial-persistence-foundation.md). The minimal SQLAlchemy/Alembic migration foundation is implemented. The actual media catalog schema remains unimplemented.
 
@@ -333,13 +337,13 @@ Status: long-term planned.
 
 Goal: add optional user-controlled AI assistance.
 
-Key deliverables: naming/tagging assistance, suspicious filename analysis, representative-frame selection, provider adapters, privacy modes, and confirmation workflows.
+Key deliverables: manual-first metadata workspace, multi-model AI draft comparison, naming/tagging assistance, suspicious filename analysis, representative-frame selection, provider adapters, privacy modes, and confirmation workflows.
 
-Entry conditions: provider-adapter decisions, secret storage decisions, and privacy UX are accepted.
+Entry conditions: persistent catalog and manual metadata detail exist; provider-adapter decisions, secret storage decisions, and privacy UX are accepted.
 
 Exit evidence: tests and reviews showing no unsolicited cloud upload and no provider secrets in ordinary clients.
 
-Boundaries: suggestions require confirmation and AI remains optional.
+Boundaries: suggestions require confirmation, draft promotion is not persistence, and AI remains optional.
 
 ## Phase 16 — AI-Generated Covers
 
@@ -347,13 +351,13 @@ Status: long-term planned.
 
 Goal: add optional generated cover workflows.
 
-Key deliverables: generated cover proposals, provenance, confirmation, replacement safeguards, and rollback information.
+Key deliverables: generated cover candidates, provenance, confirmation, replacement safeguards, and rollback information.
 
-Entry conditions: cover pipeline and AI provider boundaries are mature.
+Entry conditions: manual Cover Studio, cover candidates, and AI provider boundaries are mature.
 
 Exit evidence: user-confirmed cover generation flow with provenance and no automatic replacement.
 
-Boundaries: no generated cover replaces an approved cover without confirmation.
+Boundaries: no generated cover candidate replaces an approved cover without explicit human acceptance.
 
 ## Phase 17 — Backup and Encrypted Cloud Restore
 

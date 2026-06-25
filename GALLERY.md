@@ -14,7 +14,10 @@ Retention: remains while the gallery product subsystem exists.
 
 Inbound links: [README.md](README.md), [PRODUCT.md](PRODUCT.md),
 [SPEC.md](SPEC.md), [ROADMAP.md](ROADMAP.md), [ADR-0022](docs/adr/0022-selective-media-placement-and-server-aggregation.md),
-and [ADR-0021](docs/adr/0021-tauri-desktop-shell.md).
+[ADR-0021](docs/adr/0021-tauri-desktop-shell.md),
+[AI_WORKSPACE.md](AI_WORKSPACE.md), [COVER_PIPELINE.md](COVER_PIPELINE.md),
+[ADR-0023](docs/adr/0023-manual-first-metadata-and-multi-model-ai-drafts.md),
+and [ADR-0024](docs/adr/0024-cover-studio-and-ai-cover-candidates.md).
 
 Cleanup/update owner: future explicitly authorized Worker under an Orchestrator
 task. Git history remains the archive.
@@ -28,6 +31,28 @@ derived thumbnails, search, or real gallery.
 
 The gallery should feel like a media product, not a generic administrative
 dashboard.
+
+## Media Detail And Metadata Workspace
+
+The future media detail view is manual-first. Opening detail must not trigger an
+AI call, save catalog metadata, or mutate the filesystem. When no durable
+display title exists, the initial display title may be derived from the real
+physical filename, but the display title, physical filename,
+library-relative path, suggested filename, catalog save, and future physical
+rename operation are separate concepts.
+
+The future Metadata workspace should expose a fixed editable `Current` working
+state plus optional separate AI drafts as described in
+[AI_WORKSPACE.md](AI_WORKSPACE.md) and
+[ADR-0023](docs/adr/0023-manual-first-metadata-and-multi-model-ai-drafts.md).
+AI draft comparison is future architecture. The current repository implements
+only the pre-alpha non-persistent browser AI suggestion review.
+
+Canonical tag editing should feel like a premium local interaction: searchable
+suggestions, keyboard and mouse navigation, rounded removable chips, an
+explicit `×` control, visible hover/focus/selected/AI-suggested/invalid states,
+case-insensitive duplicate prevention, and immediate local filtering without
+progress UI for trivial local search.
 
 ## Visual And Interaction Direction
 
@@ -78,6 +103,15 @@ JPEG thumbnails. The full video must not be downloaded merely to render a card.
 Normal `Play` is conceptually separate from cover timestamp selection. A cover
 timestamp may represent a useful image; playback should still start at the
 normal beginning unless the user chooses another playback action.
+
+The future Cover Studio is manual-first: the user scrubs a timeline, sees the
+exact current timestamp, previews the selected source frame, and explicitly
+uses `Set as cover`. Cover candidates may later include a selected source frame,
+the currently accepted cover, an imported image, or an AI-generated image. A
+candidate is not active merely because it was created or generated; explicit
+human acceptance is required. These rules are recorded in
+[COVER_PIPELINE.md](COVER_PIPELINE.md) and
+[ADR-0024](docs/adr/0024-cover-studio-and-ai-cover-candidates.md).
 
 ## MEME Collection Experience
 
