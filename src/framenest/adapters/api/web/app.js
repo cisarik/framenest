@@ -3,6 +3,7 @@
 const HEALTH_ENDPOINT = "/health";
 const LIBRARIES_ENDPOINT = "/api/libraries";
 const AI_CAPABILITY_ENDPOINT = "/api/ai/media-suggestion-capability";
+const MEDIA_IMPORTS_ENDPOINT = "media-imports";
 const MAX_REVIEW_TEXT = {
   title: 120,
   description: 600,
@@ -445,7 +446,17 @@ function renderScanResult(card, payload) {
       inspect.addEventListener("click", () => {
         handleInspectClick(payload.library_id, candidate, card);
       });
-      row.append(path, kind, detail, inspect);
+      const importButton = document.createElement("button");
+      importButton.className = "import-button";
+      importButton.type = "button";
+      importButton.textContent = "Import";
+      const importStatus = document.createElement("span");
+      importStatus.className = "import-status";
+      importStatus.textContent = "Not imported";
+      importButton.addEventListener("click", () => {
+        handleImportClick(payload.library_id, candidate, importButton, importStatus);
+      });
+      row.append(path, kind, detail, importButton, inspect, importStatus);
       candidates.appendChild(row);
     });
   }
@@ -453,6 +464,51 @@ function renderScanResult(card, payload) {
   summaryList.hidden = false;
   candidates.hidden = false;
   status.textContent = "Read-only scan preview complete. Candidates are not persisted catalog media.";
+}
+
+async function handleImportClick(libraryId, candidate, button, status) {
+  button.disabled = true;
+  status.textContent = "Importing selected candidate...";
+  try {
+    const response = await fetch(`${LIBRARIES_ENDPOINT}/${libraryId}/${MEDIA_IMPORTS_ENDPOINT}`, {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ relative_path: candidate.relative_path }),
+      cache: "no-store",
+    });
+    const payload = await response.json();
+    if (response.ok) {
+      button.disabled = true;
+      const imported = payload.status === "already_imported" ? "Already imported" : "Imported";
+      status.textContent = `${imported}: ${payload.location.relative_path}`;
+      return;
+    }
+    const code = payload.error ? payload.error.code : "";
+    if (code === "MEDIA_IMPORT_CANDIDATE_UNAVAILABLE") {
+      status.textContent = "Candidate was not found in the current scan.";
+      return;
+    }
+    if (code === "LIBRARY_UNAVAILABLE") {
+      status.textContent = "Library is not available for import.";
+      return;
+    }
+    if (code === "CATALOG_UNAVAILABLE") {
+      status.textContent = "Catalog is not available for import.";
+      return;
+    }
+    status.textContent = "Import failed with a sanitized local error.";
+  } catch {
+    status.textContent = "Import failed before the local response could be read.";
+  } finally {
+    if (status.textContent.startsWith("Imported") || status.textContent.startsWith("Already")) {
+      button.disabled = true;
+    } else {
+      button.disabled = false;
+    }
+  }
 }
 
 async function handleInspectClick(libraryId, candidate, card) {

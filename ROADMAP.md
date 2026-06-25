@@ -10,9 +10,10 @@ The roadmap distinguishes completed foundation, immediate next work, planned pha
 
 ## Near-Term MacBook MVP Convergence
 
-The minimum logical-media and physical-location persistence foundation now
-exists on MacBook. The next implementation priority is explicit import from
-selected scan candidates. It is not Tauri scaffolding and not NUC deployment.
+The minimum logical-media and physical-location persistence foundation and
+explicit idempotent import from selected scan candidates now exist on MacBook.
+The next implementation priority is canonical tags and title/tag metadata. It
+is not Tauri scaffolding and not NUC deployment.
 
 The near-term convergence sequence is:
 
@@ -86,6 +87,7 @@ Accepted so far:
 - Manual-first metadata and multi-model AI draft direction through [ADR-0023](docs/adr/0023-manual-first-metadata-and-multi-model-ai-drafts.md); not implemented beyond the existing non-persistent ADR-0020 review slice.
 - Cover Studio and AI cover candidate direction through [ADR-0024](docs/adr/0024-cover-studio-and-ai-cover-candidates.md); not implemented.
 - Minimum persistent media catalog foundation through [ADR-0025](docs/adr/0025-minimum-persistent-media-catalog-foundation.md); implementation complete for logical media and physical locations only.
+- Explicit idempotent scan-candidate import through [ADR-0026](docs/adr/0026-explicit-idempotent-scan-candidate-import.md); implementation complete for one selected scan candidate at a time.
 
 The initial scaffold decision gate is complete. A Poetry package scaffold, centralized configuration boundary, FastAPI application factory, typed health endpoint, contract tests, Uvicorn runtime dependency, startup wiring, and a runnable loopback-only server command now exist.
 
@@ -159,12 +161,13 @@ Implemented so far:
 - Minimum persistent media catalog foundation with pure-domain logical media and physical locations, application repository port, SQLAlchemy Core adapter, and `logical_media` plus `physical_media_locations` tables through revision `0004`
 - Development operator catalog CLI (`framenest-catalog`) for device register, get, and list operations
 - Library catalog CLI commands for local library register, get, and list with lexical root-path preparation
+- Explicit idempotent scan-candidate import through same-origin API and packaged browser action
 
 Still required for phase exit:
 
-- Local catalog behavior that supports persistent media records from explicit user-approved import
+- Local catalog behavior that supports canonical title/tag metadata for imported media
 
-The next bounded implementation step should build on the persistence foundation without treating the existing migration foundation as a media catalog.
+The next bounded implementation step should build on imported media records without adding gallery, cover, or filesystem mutation scope prematurely.
 
 Key deliverables: loopback-only local development server skeleton, health endpoint, configuration boundary, structured logging, SQLite development catalog, migration mechanism, and tests.
 
@@ -186,12 +189,12 @@ Implemented within this phase:
 - safe read-only library scan preview through `framenest-catalog library scan-preview` per [ADR-0014](docs/adr/0014-safe-library-scan-preview.md);
 - deterministic read-only local media-analysis preparation through `framenest-catalog library analyze-preview` per [ADR-0015](docs/adr/0015-deterministic-local-media-analysis-preparation.md);
 - explicit opt-in NVIDIA NIM media suggestion preview through `framenest-catalog library suggest-preview` per [ADR-0016](docs/adr/0016-provider-neutral-media-suggestions-and-nvidia-nim-prototype.md);
-- packaged browser library listing, scan preview, local media-analysis preview, capability discovery, and editable non-persistent AI suggestion review.
+- packaged browser library listing, scan preview, explicit scan-candidate import, local media-analysis preview, capability discovery, and editable non-persistent AI suggestion review.
 - minimum logical-media and physical-location persistence through revision `0004`.
+- explicit idempotent import from selected scan candidates through [ADR-0026](docs/adr/0026-explicit-idempotent-scan-candidate-import.md).
 
 Still unimplemented within this phase:
 
-- explicit idempotent import from selected scan candidates;
 - persistent user-editable metadata collection;
 - canonical tags and title/tag search;
 - availability tracking;

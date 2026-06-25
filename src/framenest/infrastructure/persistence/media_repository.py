@@ -149,6 +149,28 @@ class SqliteMediaRepository:
         except SQLAlchemyError as exc:
             raise FrameNestMediaRepositoryError(_REPOSITORY_FAILURE_MESSAGE) from exc
 
+    def add_media_with_location(self, media: LogicalMedia, location: MediaLocation) -> None:
+        if location.media_id != media.id:
+            raise MediaLocationReferenceNotFoundError()
+
+        def operation(connection: Connection) -> None:
+            _insert_media(connection, media)
+            _insert_location(connection, location)
+
+        try:
+            run_in_transaction(self._engine, operation)
+        except (
+            MediaAlreadyExistsError,
+            MediaLocationAlreadyExistsError,
+            MediaLocationNotUniqueError,
+            MediaLocationReferenceNotFoundError,
+        ):
+            raise
+        except IntegrityError as exc:
+            raise FrameNestMediaRepositoryError(_REPOSITORY_FAILURE_MESSAGE) from exc
+        except SQLAlchemyError as exc:
+            raise FrameNestMediaRepositoryError(_REPOSITORY_FAILURE_MESSAGE) from exc
+
     def get_location(self, location_id: MediaLocationId) -> MediaLocation | None:
         def operation(connection: Connection) -> MediaLocation | None:
             row = (
@@ -222,6 +244,48 @@ def _media_exists(connection: Connection, media_id_text: str) -> bool:
             select(logical_media.c.id).where(logical_media.c.id == media_id_text)
         ).first()
         is not None
+    )
+
+
+def _insert_media(connection: Connection, media: LogicalMedia) -> None:
+    media_id_text = media.id.to_string()
+    if _media_exists(connection, media_id_text):
+        raise MediaAlreadyExistsError()
+    connection.execute(
+        insert(logical_media).values(
+            id=media_id_text,
+            media_kind=media.kind.value,
+            created_at_ms=media.created_at_ms,
+            updated_at_ms=media.updated_at_ms,
+        )
+    )
+
+
+def _insert_location(connection: Connection, location: MediaLocation) -> None:
+    location_id_text = location.id.to_string()
+    media_id_text = location.media_id.to_string()
+    library_id_text = location.library_id.to_string()
+    relative_path = location.relative_path.value
+    if not _media_exists(connection, media_id_text):
+        raise MediaLocationReferenceNotFoundError()
+    if not _library_exists(connection, library_id_text):
+        raise MediaLocationReferenceNotFoundError()
+    if _location_exists(connection, location_id_text):
+        raise MediaLocationAlreadyExistsError()
+    if _library_path_exists(connection, library_id_text, relative_path):
+        raise MediaLocationNotUniqueError()
+    connection.execute(
+        insert(physical_media_locations).values(
+            id=location_id_text,
+            media_id=media_id_text,
+            library_id=library_id_text,
+            relative_path=relative_path,
+            availability=location.availability.value,
+            observed_size_bytes=location.observed_size_bytes,
+            observed_mtime_ns=location.observed_mtime_ns,
+            created_at_ms=location.created_at_ms,
+            updated_at_ms=location.updated_at_ms,
+        )
     )
 
 

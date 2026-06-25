@@ -15,11 +15,16 @@ from framenest.adapters.api.media_analysis_api import (
     MediaAnalysisApiDependencies,
     create_media_analysis_api_router,
 )
+from framenest.adapters.api.media_import_api import (
+    MediaImportApiDependencies,
+    create_media_import_api_router,
+)
 from framenest.adapters.api.media_suggestion_api import (
     MediaSuggestionApiDependencies,
     create_media_suggestion_api_router,
 )
 from framenest.application.library_scan import PreviewLibraryScan
+from framenest.application.media_import import ImportMediaFromScanCandidate
 from framenest.application.media_analysis import PrepareLocalMediaAnalysis
 from framenest.application.media_suggestion import PreviewMediaSuggestion
 from framenest.adapters.api.library_api import (
@@ -34,6 +39,7 @@ from framenest.infrastructure.filesystem.library_scanner import LocalLibraryScan
 from framenest.infrastructure.media_analysis import LocalMediaAnalysisAdapter
 from framenest.infrastructure.persistence.engine import create_sqlite_engine, dispose_engine
 from framenest.infrastructure.persistence.library_repository import SqliteLibraryRepository
+from framenest.infrastructure.persistence.media_repository import SqliteMediaRepository
 
 
 class HealthResponse(BaseModel):
@@ -56,25 +62,40 @@ def _read_web_resource(resource_name: str) -> bytes:
 def create_app(
     settings: FrameNestSettings | None = None,
     library_api_dependencies: LibraryApiDependencies | None = None,
+    media_import_api_dependencies: MediaImportApiDependencies | None = None,
     media_analysis_api_dependencies: MediaAnalysisApiDependencies | None = None,
     media_suggestion_api_dependencies: MediaSuggestionApiDependencies | None = None,
 ) -> FastAPI:
     resolved_settings = settings if settings is not None else load_settings()
     owned_engine = None
     owned_library_repository = None
+    owned_media_repository = None
     if (
         library_api_dependencies is None
+        or media_import_api_dependencies is None
         or media_analysis_api_dependencies is None
         or media_suggestion_api_dependencies is None
     ):
         owned_engine = create_sqlite_engine(resolved_settings.database_path)
         owned_library_repository = SqliteLibraryRepository(owned_engine)
+        owned_media_repository = SqliteMediaRepository(owned_engine)
     if library_api_dependencies is None:
         assert owned_library_repository is not None
         library_api_dependencies = LibraryApiDependencies(
             repository=owned_library_repository,
             scan_preview=PreviewLibraryScan(
                 owned_library_repository,
+                LocalLibraryScanner(),
+            ),
+            catalog_available=resolved_settings.database_path.exists,
+        )
+    if media_import_api_dependencies is None:
+        assert owned_library_repository is not None
+        assert owned_media_repository is not None
+        media_import_api_dependencies = MediaImportApiDependencies(
+            import_media=ImportMediaFromScanCandidate(
+                owned_library_repository,
+                owned_media_repository,
                 LocalLibraryScanner(),
             ),
             catalog_available=resolved_settings.database_path.exists,
@@ -114,6 +135,7 @@ def create_app(
     app = FastAPI(lifespan=lifespan)
     app.state.settings = resolved_settings
     app.include_router(create_library_api_router(library_api_dependencies))
+    app.include_router(create_media_import_api_router(media_import_api_dependencies))
     app.include_router(create_media_analysis_api_router(media_analysis_api_dependencies))
     app.include_router(create_media_suggestion_api_router(media_suggestion_api_dependencies))
 

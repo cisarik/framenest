@@ -206,9 +206,27 @@ def test_browser_analysis_states_are_distinct_and_truthful(client: TestClient) -
     assert "Local media analysis is not available" in combined
     assert "Invalid media relative path" in combined
     assert "Local analysis results are ephemeral" in combined
-    assert "No media catalog record was created" in combined
+    assert "Local analysis and AI review do not create media catalog records" in combined
     assert "No AI provider was contacted" in combined
     assert "No cloud transmission occurred" in combined
+
+
+def test_browser_scan_import_is_explicit_and_same_origin(client: TestClient) -> None:
+    html = client.get("/").text
+    script = client.get("/assets/app.js").text
+    combined = html + script
+
+    assert "explicitly import" in html
+    assert 'const MEDIA_IMPORTS_ENDPOINT = "media-imports";' in script
+    assert "handleImportClick(payload.library_id, candidate" in script
+    assert "Importing selected candidate" in script
+    assert "Already imported" in script
+    assert "Candidate was not found in the current scan." in script
+    assert "payload.status === \"already_imported\"" in script
+    assert "body: JSON.stringify({ relative_path: candidate.relative_path })" in script
+    assert "Import" in combined
+    assert "document.querySelectorAll(\".import-button\")" not in script
+    assert "importRequestToken" not in script
 
 
 def test_browser_decodes_base64_to_png_blob_and_revokes_object_urls(

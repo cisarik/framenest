@@ -56,11 +56,17 @@ def _repositories(tmp_path: Path):
     )
 
 
-def _register_library(device_repository, library_repository, *, path: str = "/media/main") -> Library:
+def _register_library(
+    device_repository,
+    library_repository,
+    *,
+    path: str = "/media/main",
+    library_id: LibraryId | None = None,
+) -> Library:
     device = Device(id=DeviceId.new(), display_name=f"Device {path}")
     device_repository.add(device)
     library = Library(
-        id=LibraryId.new(),
+        id=library_id or LibraryId.new(),
         device_id=device.id,
         display_name=f"Library {path}",
         root=LibraryRoot(flavor=LibraryPathFlavor.POSIX, path=path),
@@ -183,12 +189,84 @@ def test_create_get_and_lookup_physical_location(tmp_path: Path) -> None:
         engine.dispose()
 
 
+def test_create_media_with_location_is_atomic(tmp_path: Path) -> None:
+    repository, library_repository, device_repository, engine = _repositories(tmp_path)
+    library = _register_library(device_repository, library_repository)
+    media = _logical_media(media_id=MediaId.from_string(CANONICAL_MEDIA_ID))
+    location = _location(
+        location_id=MediaLocationId.from_string(CANONICAL_LOCATION_ID),
+        media_id=media.id,
+        library_id=library.id,
+        relative_path="clips/a.mp4",
+    )
+    try:
+        repository.add_media_with_location(media, location)
+
+        assert repository.get_media(media.id) == media
+        assert repository.get_location(location.id) == location
+    finally:
+        engine.dispose()
+
+
+def test_create_media_with_location_rolls_back_when_location_reference_fails(
+    tmp_path: Path,
+) -> None:
+    repository, _, _, engine = _repositories(tmp_path)
+    media = _logical_media(media_id=MediaId.from_string(CANONICAL_MEDIA_ID))
+    location = _location(
+        location_id=MediaLocationId.from_string(CANONICAL_LOCATION_ID),
+        media_id=media.id,
+        library_id=LibraryId.new(),
+        relative_path="clips/a.mp4",
+    )
+    try:
+        with pytest.raises(MediaLocationReferenceNotFoundError):
+            repository.add_media_with_location(media, location)
+
+        assert repository.get_media(media.id) is None
+        assert repository.get_location(location.id) is None
+    finally:
+        engine.dispose()
+
+
+def test_create_media_with_location_rejects_mismatched_media_reference(
+    tmp_path: Path,
+) -> None:
+    repository, library_repository, device_repository, engine = _repositories(tmp_path)
+    library = _register_library(device_repository, library_repository)
+    media = _logical_media(media_id=MediaId.from_string(CANONICAL_MEDIA_ID))
+    location = _location(
+        location_id=MediaLocationId.from_string(CANONICAL_LOCATION_ID),
+        media_id=MediaId.from_string(SECOND_MEDIA_ID),
+        library_id=library.id,
+        relative_path="clips/a.mp4",
+    )
+    try:
+        with pytest.raises(MediaLocationReferenceNotFoundError):
+            repository.add_media_with_location(media, location)
+
+        assert repository.get_media(media.id) is None
+        assert repository.get_location(location.id) is None
+    finally:
+        engine.dispose()
+
+
 def test_multiple_locations_for_one_logical_media_and_deterministic_order(
     tmp_path: Path,
 ) -> None:
     repository, library_repository, device_repository, engine = _repositories(tmp_path)
-    first_library = _register_library(device_repository, library_repository, path="/media/first")
-    second_library = _register_library(device_repository, library_repository, path="/media/second")
+    first_library = _register_library(
+        device_repository,
+        library_repository,
+        path="/media/first",
+        library_id=LibraryId.from_string(CANONICAL_MEDIA_ID),
+    )
+    second_library = _register_library(
+        device_repository,
+        library_repository,
+        path="/media/second",
+        library_id=LibraryId.from_string(SECOND_MEDIA_ID),
+    )
     media = _logical_media()
     first = _location(
         location_id=MediaLocationId.from_string(CANONICAL_LOCATION_ID),

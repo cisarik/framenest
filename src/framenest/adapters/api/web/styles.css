@@ -297,7 +297,8 @@ h2 {
 }
 
 .preview-button,
-.inspect-button {
+.inspect-button,
+.import-button {
   flex: 0 0 auto;
   border: 1px solid rgba(66, 214, 183, 0.52);
   border-radius: 6px;
@@ -311,7 +312,8 @@ h2 {
 }
 
 .preview-button:disabled,
-.inspect-button:disabled {
+.inspect-button:disabled,
+.import-button:disabled {
   border-color: rgba(185, 192, 200, 0.28);
   color: var(--text-soft);
   cursor: wait;
@@ -356,7 +358,7 @@ h2 {
 
 .candidate-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto auto;
+  grid-template-columns: minmax(0, 1fr) auto auto auto auto minmax(130px, 0.55fr);
   gap: 10px;
   align-items: center;
   border: 1px solid var(--line);
@@ -365,7 +367,8 @@ h2 {
   padding: 12px;
 }
 
-.inspect-button {
+.inspect-button,
+.import-button {
   min-width: 118px;
 }
 
@@ -381,6 +384,13 @@ h2 {
   color: var(--text-muted);
   font-size: 0.78rem;
   font-weight: 760;
+}
+
+.import-status {
+  color: var(--text-muted);
+  font-size: 0.82rem;
+  font-weight: 700;
+  line-height: 1.35;
 }
 
 .local-preview {
@@ -808,7 +818,8 @@ h2 {
   }
 
   .preview-button,
-  .inspect-button {
+  .inspect-button,
+  .import-button {
     width: 100%;
   }
 

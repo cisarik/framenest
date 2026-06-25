@@ -43,6 +43,9 @@ class MediaRepository(Protocol):
     def add_location(self, location: MediaLocation) -> None:
         """Persist one valid physical media location."""
 
+    def add_media_with_location(self, media: LogicalMedia, location: MediaLocation) -> None:
+        """Persist one logical media item and one physical location atomically."""
+
     def get_location(self, location_id: MediaLocationId) -> MediaLocation | None:
         """Return one physical media location by identity, or None when absent."""
 

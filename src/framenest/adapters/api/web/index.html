@@ -27,7 +27,8 @@
             This pre-alpha web shell is served by the real FrameNest FastAPI
             process. It confirms the local application foundation and can show
             registered libraries, scan candidates, and explicit local media
-            inspection, while gallery persistence, downloads, AI analysis,
+            inspection. Selected scan candidates can now be imported into the
+            persistent media catalog, while metadata editing, downloads,
             playback, and Settings remain future work.
           </p>
         </div>
@@ -55,13 +56,13 @@
 
       <section id="library-browser" class="library-browser" aria-labelledby="libraries-title">
         <div class="section-heading">
-          <p class="eyebrow">Read-only preview</p>
+          <p class="eyebrow">Local catalog</p>
           <h2 id="libraries-title">Registered libraries</h2>
           <p class="section-copy">
             Library registration remains CLI-only in this pre-alpha slice. The
             browser can list registered libraries and run an explicit read-only
-            scan preview, then inspect one returned candidate locally without
-            creating media records.
+            scan preview, then explicitly import or inspect one returned
+            candidate without mutating media files.
           </p>
         </div>
         <div id="library-state-loading" class="library-state" role="status">
@@ -105,8 +106,8 @@
             <div class="representative-frames" hidden></div>
             <p class="ephemeral-note">
               Scan results are ephemeral. Local analysis results are ephemeral.
-              No media catalog record was created. No AI provider was contacted.
-              No cloud transmission occurred.
+              Local analysis and AI review do not create media catalog records.
+              No AI provider was contacted. No cloud transmission occurred.
             </p>
           </div>
           <div class="ai-panel" hidden>
@@ -166,13 +167,13 @@
           </article>
           <article class="boundary-card">
             <h3>Gallery</h3>
-            <p>Future premium library browsing. No media data is shown in this shell.</p>
+            <p>Future premium library browsing. Imported catalog media is not shown as gallery data yet.</p>
             <span class="boundary-state boundary-state--future">Future</span>
           </article>
           <article class="boundary-card boundary-card--active">
             <h3>Libraries</h3>
-            <p>Read-only registered library list, explicit scan preview, and explicit local inspection.</p>
-            <span class="boundary-state">Active preview</span>
+            <p>Registered library list, explicit scan preview, explicit candidate import, and explicit local inspection.</p>
+            <span class="boundary-state">Active foundation</span>
           </article>
           <article class="boundary-card">
             <h3>Playback</h3>
