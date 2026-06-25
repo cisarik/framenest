@@ -49,3 +49,4 @@ An accepted ADR may only be changed by a later ADR that supersedes it. Editing a
 | 0022 | Selective Media Placement and Server Aggregation | Accepted | 2026-06-25 | [0022-selective-media-placement-and-server-aggregation.md](0022-selective-media-placement-and-server-aggregation.md) |
 | 0023 | Manual-First Metadata and Multi-Model AI Drafts | Accepted | 2026-06-25 | [0023-manual-first-metadata-and-multi-model-ai-drafts.md](0023-manual-first-metadata-and-multi-model-ai-drafts.md) |
 | 0024 | Cover Studio and AI Cover Candidates | Accepted | 2026-06-25 | [0024-cover-studio-and-ai-cover-candidates.md](0024-cover-studio-and-ai-cover-candidates.md) |
+| 0025 | Minimum Persistent Media Catalog Foundation | Accepted | 2026-06-25 | [0025-minimum-persistent-media-catalog-foundation.md](0025-minimum-persistent-media-catalog-foundation.md) |

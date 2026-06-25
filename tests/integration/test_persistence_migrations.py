@@ -44,7 +44,7 @@ def _table_names(database_path: Path) -> set[str]:
     return {row[0] for row in rows}
 
 
-def test_nonexistent_database_status_is_uninitialized_without_file_creation(
+def test_nonexistent_database_status_reports_current_head_without_file_creation(
     tmp_path: Path,
 ) -> None:
     from framenest.infrastructure.persistence.migrations import (
@@ -56,12 +56,12 @@ def test_nonexistent_database_status_is_uninitialized_without_file_creation(
 
     assert status.state == "uninitialized"
     assert status.current_revision is None
-    assert status.head_revision == "0003"
+    assert status.head_revision == "0004"
     assert not database_path.exists()
     assert not database_path.parent.exists()
 
 
-def test_empty_database_upgrades_to_head_revision_0003(tmp_path: Path) -> None:
+def test_empty_database_upgrades_to_current_head_revision_0004(tmp_path: Path) -> None:
     from framenest.infrastructure.persistence.migrations import (
         inspect_database_migration_status,
         upgrade_database_to_head,
@@ -73,8 +73,8 @@ def test_empty_database_upgrades_to_head_revision_0003(tmp_path: Path) -> None:
     inspected_status = inspect_database_migration_status(settings)
 
     assert migration_status.state == "at_head"
-    assert migration_status.current_revision == "0003"
-    assert migration_status.head_revision == "0003"
+    assert migration_status.current_revision == "0004"
+    assert migration_status.head_revision == "0004"
     assert inspected_status == migration_status
     assert settings.database_path.exists()
 
@@ -92,7 +92,7 @@ def test_repeated_migration_at_head_is_safe_and_stable(tmp_path: Path) -> None:
 
     assert first == second == reopened
     assert reopened.state == "at_head"
-    assert reopened.current_revision == reopened.head_revision == "0003"
+    assert reopened.current_revision == reopened.head_revision == "0004"
 
 
 def test_migration_status_is_stable_after_engine_close_and_reopen(tmp_path: Path) -> None:
@@ -105,7 +105,7 @@ def test_migration_status_is_stable_after_engine_close_and_reopen(tmp_path: Path
     upgrade_database_to_head(settings)
 
     assert inspect_database_migration_status(settings).state == "at_head"
-    assert inspect_database_migration_status(settings).current_revision == "0003"
+    assert inspect_database_migration_status(settings).current_revision == "0004"
 
 
 def test_initial_revision_creates_only_alembic_version_tracking(tmp_path: Path) -> None:

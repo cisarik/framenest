@@ -17,6 +17,16 @@ from framenest.domain.libraries import (
     LibraryPathFlavor,
     LibraryRoot,
 )
+from framenest.domain.media import (
+    FrameNestMediaError,
+    FrameNestMediaLocationError,
+    FrameNestMediaRelativePathError,
+    LogicalMedia,
+    MediaKind,
+    MediaLocation,
+    MediaLocationAvailability,
+    MediaRelativePath,
+)
 
 __all__ = [
     "Device",
@@ -25,12 +35,20 @@ __all__ = [
     "FrameNestIdentityError",
     "FrameNestLibraryError",
     "FrameNestLibraryRootError",
+    "FrameNestMediaError",
+    "FrameNestMediaLocationError",
+    "FrameNestMediaRelativePathError",
     "Library",
     "LibraryId",
     "LibraryPathFlavor",
     "LibraryRoot",
+    "LogicalMedia",
     "MediaId",
+    "MediaKind",
+    "MediaLocation",
+    "MediaLocationAvailability",
     "MediaLocationId",
+    "MediaRelativePath",
     "SeriesId",
     "StorageVolumeId",
 ]

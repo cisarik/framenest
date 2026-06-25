@@ -163,6 +163,24 @@ def test_cross_category_identities_remain_distinct_with_same_uuid_text() -> None
     assert len({media_id, *other_categories}) == 6
 
 
+def test_logical_media_id_generation_and_roundtrip() -> None:
+    media_id = MediaId.new()
+
+    restored = MediaId.from_string(media_id.to_string())
+
+    assert restored == media_id
+    assert restored.value.version == 4
+
+
+def test_physical_location_id_generation_and_roundtrip() -> None:
+    location_id = MediaLocationId.new()
+
+    restored = MediaLocationId.from_string(location_id.to_string())
+
+    assert restored == location_id
+    assert restored.value.version == 4
+
+
 @pytest.mark.parametrize(
     "rejected",
     [

@@ -10,17 +10,18 @@ The roadmap distinguishes completed foundation, immediate next work, planned pha
 
 ## Near-Term MacBook MVP Convergence
 
-The next implementation priority is the minimum persistent local media catalog
-on MacBook. It is not Tauri scaffolding and not NUC deployment.
+The minimum logical-media and physical-location persistence foundation now
+exists on MacBook. The next implementation priority is explicit import from
+selected scan candidates. It is not Tauri scaffolding and not NUC deployment.
 
 The near-term convergence sequence is:
 
-1. persistent local media catalog;
+1. persistent local media catalog foundation;
 2. logical media and physical locations;
-3. canonical tags and search;
-4. explicit import from selected scan results;
+3. explicit idempotent import from selected scan candidates;
+4. canonical tags and title/tag metadata;
 5. manual metadata detail;
-6. manual Cover Studio and thumbnails;
+6. Cover Studio and derivatives;
 7. persistent premium gallery;
 8. multi-model AI workspace;
 9. optional AI cover experiments;
@@ -84,14 +85,15 @@ Accepted so far:
 - Selective media placement and optional server aggregation direction through [ADR-0022](docs/adr/0022-selective-media-placement-and-server-aggregation.md); not implemented.
 - Manual-first metadata and multi-model AI draft direction through [ADR-0023](docs/adr/0023-manual-first-metadata-and-multi-model-ai-drafts.md); not implemented beyond the existing non-persistent ADR-0020 review slice.
 - Cover Studio and AI cover candidate direction through [ADR-0024](docs/adr/0024-cover-studio-and-ai-cover-candidates.md); not implemented.
+- Minimum persistent media catalog foundation through [ADR-0025](docs/adr/0025-minimum-persistent-media-catalog-foundation.md); implementation complete for logical media and physical locations only.
 
 The initial scaffold decision gate is complete. A Poetry package scaffold, centralized configuration boundary, FastAPI application factory, typed health endpoint, contract tests, Uvicorn runtime dependency, startup wiring, and a runnable loopback-only server command now exist.
 
-Broader architecture decisions still open include sidecar manifest format and versioning, persistent media catalog schema, cover and thumbnail cache implementation details, desktop sidecar IPC, initial authentication boundary, media-tool distribution strategy, and Fedora deployment details.
+Broader architecture decisions still open include sidecar manifest format and versioning, metadata/tag/search schema, cover and thumbnail cache implementation details, desktop sidecar IPC, initial authentication boundary, media-tool distribution strategy, and Fedora deployment details.
 
-Persistence strategy is accepted through [ADR-0010](docs/adr/0010-initial-persistence-foundation.md). The minimal SQLAlchemy/Alembic migration foundation is implemented. The actual media catalog schema remains unimplemented.
+Persistence strategy is accepted through [ADR-0010](docs/adr/0010-initial-persistence-foundation.md). The minimal SQLAlchemy/Alembic migration foundation is implemented. The minimum logical-media and physical-location catalog schema is implemented through revision `0004`.
 
-Stable identity strategy is accepted through [ADR-0011](docs/adr/0011-stable-domain-identities.md). Pure domain identity primitives exist, but no logical media, physical location, device, library, storage volume, or series entities exist beyond those identity value objects.
+Stable identity strategy is accepted through [ADR-0011](docs/adr/0011-stable-domain-identities.md). Pure domain identity primitives exist, and minimal logical media, physical location, device, and library entities exist. Storage volume and series entities remain future work beyond identity values.
 
 Key deliverables: remaining broader architecture ADRs and evidence as needed before later implementation phases.
 
@@ -113,10 +115,11 @@ Implemented so far:
 - Immutable pure-domain identity primitives for logical media, physical locations, devices, libraries, storage volumes, and series
 - Minimal pure-domain `Device` entity and local device registry core accepted through [ADR-0012](docs/adr/0012-initial-device-registry.md)
 - Minimal pure-domain `Library`, `LibraryRoot`, and device-local root-locator model with local library registry core accepted through [ADR-0013](docs/adr/0013-initial-library-registry.md)
+- Minimal pure-domain `LogicalMedia`, `MediaLocation`, relative-path, media-kind, and availability-state model accepted through [ADR-0025](docs/adr/0025-minimum-persistent-media-catalog-foundation.md)
 
 Still required for phase exit:
 
-- Logical media, physical location, storage volume, and series entities beyond identity values
+- Storage volume and series entities beyond identity values
 - Canonical tags
 - Search-ready title/tag data
 - Sidecar contracts
@@ -150,15 +153,15 @@ Implemented so far:
 - Same-origin explicit AI capability and media-suggestion preview API
 - Structured logging foundation per [ADR-0009](docs/adr/0009-structured-logging-approach.md)
 - Persistence strategy accepted through [ADR-0010](docs/adr/0010-initial-persistence-foundation.md)
-- Minimal SQLAlchemy Core/Alembic persistence foundation with `FRAMENEST_DATABASE_PATH`, packaged revisions `0001` through `0003`, explicit `framenest-db status`, and explicit `framenest-db migrate`
+- Minimal SQLAlchemy Core/Alembic persistence foundation with `FRAMENEST_DATABASE_PATH`, packaged revisions `0001` through `0004`, explicit `framenest-db status`, and explicit `framenest-db migrate`
 - Initial local device registry core with pure-domain `Device`, application repository port, SQLAlchemy Core adapter, and `devices` table through revision `0002`
 - Initial local library registry core with pure-domain `Library`, `LibraryRoot`, application repository port, SQLAlchemy Core adapter, and `libraries` table through revision `0003`
+- Minimum persistent media catalog foundation with pure-domain logical media and physical locations, application repository port, SQLAlchemy Core adapter, and `logical_media` plus `physical_media_locations` tables through revision `0004`
 - Development operator catalog CLI (`framenest-catalog`) for device register, get, and list operations
 - Library catalog CLI commands for local library register, get, and list with lexical root-path preparation
 
 Still required for phase exit:
 
-- Actual media catalog schema and repository boundaries beyond device and library registries
 - Local catalog behavior that supports persistent media records from explicit user-approved import
 
 The next bounded implementation step should build on the persistence foundation without treating the existing migration foundation as a media catalog.
@@ -184,14 +187,13 @@ Implemented within this phase:
 - deterministic read-only local media-analysis preparation through `framenest-catalog library analyze-preview` per [ADR-0015](docs/adr/0015-deterministic-local-media-analysis-preparation.md);
 - explicit opt-in NVIDIA NIM media suggestion preview through `framenest-catalog library suggest-preview` per [ADR-0016](docs/adr/0016-provider-neutral-media-suggestions-and-nvidia-nim-prototype.md);
 - packaged browser library listing, scan preview, local media-analysis preview, capability discovery, and editable non-persistent AI suggestion review.
+- minimum logical-media and physical-location persistence through revision `0004`.
 
 Still unimplemented within this phase:
 
-- persistent metadata collection;
-- media catalog tables;
-- logical media and physical-location persistence;
+- explicit idempotent import from selected scan candidates;
+- persistent user-editable metadata collection;
 - canonical tags and title/tag search;
-- idempotent import from explicit scan results;
 - availability tracking;
 - storage capacity reporting;
 - rebuildable local index persistence;

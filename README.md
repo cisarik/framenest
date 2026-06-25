@@ -6,9 +6,9 @@ FrameNest is a local-first, privacy-conscious, cross-platform library for video 
 
 FrameNest is in an early foundation, pre-alpha stage.
 
-A minimal Poetry package scaffold exists at the repository root with centralized settings, a FastAPI application factory, a typed `GET /health` endpoint, in-process contract tests, a loopback-first Uvicorn development server, a packaged pre-alpha local web shell at `GET /`, and pure-domain identity primitives. There is no completed media application, media catalog schema, gallery, downloader, desktop shell, installer, deployment, or supported release yet.
+A minimal Poetry package scaffold exists at the repository root with centralized settings, a FastAPI application factory, a typed `GET /health` endpoint, in-process contract tests, a loopback-first Uvicorn development server, a packaged pre-alpha local web shell at `GET /`, and pure-domain identity primitives. There is no completed media application, gallery, downloader, desktop shell, installer, deployment, or supported release yet.
 
-The repository also contains the first persistence, registry, local media-analysis, and AI suggestion-review foundation: a centralized SQLite database path setting, synchronous SQLAlchemy Core engine helpers, packaged Alembic resources, explicit database commands, local device and library registry tables, read-only library scan and media-analysis preview commands, a provider-neutral NVIDIA NIM suggestion prototype, and an explicit non-persistent editable browser review for validated AI suggestions. This is not a media catalog schema and does not provide persistent media records or gallery data yet.
+The repository also contains the first persistence, registry, media catalog, local media-analysis, and AI suggestion-review foundation: a centralized SQLite database path setting, synchronous SQLAlchemy Core engine helpers, packaged Alembic resources, explicit database commands, local device and library registry tables, persistent logical-media and physical-location tables through migration `0004`, read-only library scan and media-analysis preview commands, a provider-neutral NVIDIA NIM suggestion prototype, and an explicit non-persistent editable browser review for validated AI suggestions. The media catalog foundation is not yet exposed through the browser or normal catalog CLI, and it does not provide persistent scan import, editable metadata, tags, covers, thumbnails, or gallery data yet.
 
 Supported runtime: CPython `>=3.13,<3.14`. Local development uses a uv-managed CPython 3.13.14 interpreter with Poetry as the dependency, environment, and lockfile manager. The initial `poetry.lock` was generated with Poetry 2.1.4. The local virtual environment lives in `.venv/` and is not committed.
 
@@ -33,7 +33,7 @@ poetry run framenest-server
 
 Default application URL: `http://127.0.0.1:8000`. Health path: `/health`.
 
-The default URL serves the packaged pre-alpha FrameNest web shell. It can confirm that the real local application server is running, load the same-origin health endpoint, list registered libraries from the local catalog, run an explicit read-only library scan preview, explicitly inspect one returned candidate locally for bounded technical metadata and representative PNG frames, and, when the server-side NVIDIA credential is configured, request one editable AI suggestion review after explicit cloud-upload confirmation. Library registration remains available through the catalog CLI in this slice. Gallery persistence, downloads, Settings, playback, provider selection, GUI credential entry, and persistent media catalog behavior remain future work.
+The default URL serves the packaged pre-alpha FrameNest web shell. It can confirm that the real local application server is running, load the same-origin health endpoint, list registered libraries from the local catalog, run an explicit read-only library scan preview, explicitly inspect one returned candidate locally for bounded technical metadata and representative PNG frames, and, when the server-side NVIDIA credential is configured, request one editable AI suggestion review after explicit cloud-upload confirmation. Library registration remains available through the catalog CLI in this slice. Browser exposure of persistent media catalog records, gallery persistence, downloads, Settings, playback, provider selection, GUI credential entry, and metadata editing remain future work.
 
 Read-only browser API paths currently include:
 
@@ -81,7 +81,7 @@ Explicitly upgrade the configured database to the packaged Alembic head:
 poetry run framenest-db migrate
 ```
 
-Normal `poetry run framenest-server` startup does not apply migrations. Migration remains explicit through `framenest-db`. Revisions through `0003` add the initial `devices` and `libraries` tables only; there is no media, gallery, sidecar, user, or authentication schema yet.
+Normal `poetry run framenest-server` startup does not apply migrations. Migration remains explicit through `framenest-db`. Revisions through `0004` add the initial `devices`, `libraries`, `logical_media`, and `physical_media_locations` tables. The media catalog foundation is not exposed through the browser or normal catalog CLI yet, and there is still no persistent scan import, user-editable metadata, tags, covers, thumbnails, gallery, sidecar, user, or authentication schema.
 
 ## Device Catalog CLI
 
@@ -167,7 +167,7 @@ The current conceptual direction is:
 - External VLC first for playback, with embedded libVLC considered later.
 - Remote access through Tailscale-only networking rather than public internet exposure.
 
-The accepted desktop and distributed-media direction is documentation only at this stage. No Tauri scaffold, installer, NUC deployment, persistent media catalog, transfer implementation, or server aggregation exists yet.
+The accepted desktop and distributed-media direction is documentation only at this stage. No Tauri scaffold, installer, NUC deployment, persistent gallery, transfer implementation, or server aggregation exists yet.
 
 Accepted implementation foundations so far:
 
@@ -186,6 +186,7 @@ Accepted implementation foundations so far:
 - Selective media placement and optional server aggregation direction ([ADR-0022](docs/adr/0022-selective-media-placement-and-server-aggregation.md))
 - Manual-first metadata and multi-model AI draft workspace direction ([ADR-0023](docs/adr/0023-manual-first-metadata-and-multi-model-ai-drafts.md), [AI_WORKSPACE.md](AI_WORKSPACE.md))
 - Manual Cover Studio and AI cover candidate direction ([ADR-0024](docs/adr/0024-cover-studio-and-ai-cover-candidates.md), [COVER_PIPELINE.md](COVER_PIPELINE.md))
+- Minimum persistent media catalog foundation ([ADR-0025](docs/adr/0025-minimum-persistent-media-catalog-foundation.md))
 
 Exact future frontend framework or compiled toolchain, desktop/Tauri packaging choices, IPC design, sidecar bundling, data schema, identity database encoding, deployment model, production update mechanisms, and many server operational details remain subject to later documented decisions.
 
@@ -277,7 +278,7 @@ The current stage does not provide:
 - Embedded libVLC.
 - AI-generated covers.
 - Public internet exposure.
-- A functional gallery, media catalog schema, persistent media scanner, or downloader.
+- A functional gallery, persistent scan import, metadata editor, tags, covers, thumbnails, persistent media scanner, or downloader.
 - Production deployment.
 
 ## License
