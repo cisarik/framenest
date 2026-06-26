@@ -14,10 +14,10 @@ The minimum logical-media and physical-location persistence foundation and
 explicit idempotent import from selected scan candidates now exist on MacBook.
 The persistent display-title and canonical-tag core now exists, and imported
 media can now be reached through a catalog browser with display-title search,
-canonical-tag AND filters, and a manual `Current` metadata workspace for title, description,
-and ordered tag assignment. The next implementation priority remains metadata
-detail expansion, most likely descriptions or adjacent manual fields, rather
-than Tauri scaffolding or NUC deployment.
+canonical-tag AND filters, and a manual `Current` metadata workspace for title,
+optional plain-text description, and ordered tag assignment. Broader manual
+metadata detail remains incomplete; collection and suggested filename
+remain future decisions not yet authorized by a subsequent slice.
 
 The near-term convergence sequence is:
 

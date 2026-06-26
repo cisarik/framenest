@@ -225,11 +225,31 @@ function metadataEndpoint(mediaId) {
   return `${MEDIA_METADATA_ENDPOINT_PREFIX}/${mediaId}/metadata`;
 }
 
+function unicodeCodePointLength(value) {
+  return [...value].length;
+}
+
 function hasControlCharacter(value) {
   return [...value].some((character) => {
     const codePoint = character.codePointAt(0);
     return (codePoint >= 0 && codePoint <= 31) || codePoint === 127;
   });
+}
+
+function hasForbiddenDescriptionControlChar(value) {
+  for (const character of value) {
+    const codePoint = character.codePointAt(0);
+    if (codePoint === 0x0a) {
+      continue;
+    }
+    if (
+      codePoint <= 0x1f ||
+      (codePoint >= 0x7f && codePoint <= 0x9f)
+    ) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function semanticArraysEqual(left, right) {
@@ -241,10 +261,10 @@ function semanticArraysEqual(left, right) {
 
 function normalizedDescriptionState() {
   const rawDescription = document.querySelector("#metadata-description-input").value;
-  if (hasControlCharacter(rawDescription.replace(/\n/g, ""))) {
+  if (hasForbiddenDescriptionControlChar(rawDescription)) {
     return { error: "Description must not contain NUL, tab, carriage return, or control characters." };
   }
-  if (rawDescription.length > MAX_METADATA_DESCRIPTION_CODE_POINTS) {
+  if (unicodeCodePointLength(rawDescription) > MAX_METADATA_DESCRIPTION_CODE_POINTS) {
     return { error: `Description must be ${MAX_METADATA_DESCRIPTION_CODE_POINTS} characters or fewer.` };
   }
   const trimmed = rawDescription.trim();
@@ -1007,7 +1027,7 @@ function renderMetadataTagSuggestions() {
 function updateDescriptionCount() {
   const input = document.querySelector("#metadata-description-input");
   const count = document.querySelector("#metadata-description-count");
-  const length = input ? input.value.length : 0;
+  const length = input ? unicodeCodePointLength(input.value) : 0;
   count.textContent = `${length} / ${MAX_METADATA_DESCRIPTION_CODE_POINTS}`;
 }
 

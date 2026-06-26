@@ -137,6 +137,21 @@ def test_description_preserves_accepted_content() -> None:
     assert MediaDescription(value).value == value
 
 
+def test_description_supplementary_plane_boundary() -> None:
+    emoji = "\U0001f3ac"
+    assert MediaDescription(emoji * 10_000).value == emoji * 10_000
+    with pytest.raises(FrameNestMediaMetadataError):
+        MediaDescription(emoji * 10_001)
+
+
+def test_description_rejects_c1_control_characters() -> None:
+    with pytest.raises(FrameNestMediaMetadataError):
+        MediaDescription("text\u0085more")
+    with pytest.raises(FrameNestMediaMetadataError):
+        MediaDescription("text\u009fmore")
+    assert MediaDescription("text\nmore").value == "text\nmore"
+
+
 def test_canonical_tag_validates_types_and_timestamps() -> None:
     tag = CanonicalTag(
         key=CanonicalTagKey("mathematics"),

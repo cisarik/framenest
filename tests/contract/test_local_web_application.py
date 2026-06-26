@@ -198,6 +198,58 @@ def test_web_shell_contains_manual_current_metadata_workspace(client: TestClient
         assert state in html
 
 
+def test_browser_defines_unicode_code_point_length_helper(client: TestClient) -> None:
+    script = client.get("/assets/app.js").text
+    assert "function unicodeCodePointLength" in script
+    assert "[...value].length" in script or "Array.from(value).length" in script
+
+
+def test_browser_description_uses_code_point_length_instead_of_utf16(client: TestClient) -> None:
+    script = client.get("/assets/app.js").text
+    assert "unicodeCodePointLength(rawDescription) > MAX_METADATA_DESCRIPTION_CODE_POINTS" in script
+    assert "rawDescription.length > MAX_METADATA_DESCRIPTION_CODE_POINTS" not in script
+
+
+def test_browser_description_counter_uses_code_point_length(client: TestClient) -> None:
+    script = client.get("/assets/app.js").text
+    assert "unicodeCodePointLength(descriptionInput.value)" in script or "unicodeCodePointLength(input.value)" in script
+    assert "input.value.length" not in script or (
+        "input.value.length" in script and "unicodeCodePointLength" in script
+    )
+    counter_block = script[script.index("function updateDescriptionCount") : script.index("function renderMetadataWorkspace")]
+    assert "unicodeCodePointLength" in counter_block
+
+
+def test_browser_description_textarea_has_no_maxlength(client: TestClient) -> None:
+    html = client.get("/").text
+    assert "maxlength=\"10000\"" not in html
+    assert "metadata-description-input" in html
+    assert "textarea" in html
+
+
+def test_browser_description_rejects_c1_controls_and_allows_line_feed(client: TestClient) -> None:
+    script = client.get("/assets/app.js").text
+    assert "codePoint <= 0x1f" in script or "0x1f" in script
+    assert "0x7f" in script or "127" in script
+    assert "0x9f" in script
+    assert "codePoint === 0x0a" in script
+    assert "continue" in script
+    assert "rawDescription.length >" not in script or "unicodeCodePointLength" in script
+
+
+def test_browser_description_is_never_rendered_as_inner_html(client: TestClient) -> None:
+    script = client.get("/assets/app.js").text
+    assert "innerHTML" not in script
+    assert "insertAdjacentHTML" not in script
+
+
+def test_browser_description_workspace_includes_dirty_state_for_description(client: TestClient) -> None:
+    script = client.get("/assets/app.js").text
+    assert "normalized.description !== metadataWorkspace.baseline.description" in script
+    assert "description: null" in script
+    assert "description: \"\"" in script
+
+
 def test_catalog_cards_have_explicit_metadata_edit_action(client: TestClient) -> None:
     script = client.get("/assets/app.js").text
 

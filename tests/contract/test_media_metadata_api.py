@@ -243,6 +243,8 @@ def test_title_clear_missing_media_missing_tag_and_missing_catalog(tmp_path: Pat
         {"display_title": None, "description": None, "tag_keys": [f"tag-{index}" for index in range(33)]},
         {"display_title": None, "description": " Leading space", "tag_keys": []},
         {"display_title": None, "description": "\x00null byte", "tag_keys": []},
+        {"display_title": None, "description": "\U0001f3ac" * 10_001, "tag_keys": []},
+        {"display_title": None, "description": "bad\u0085c1", "tag_keys": []},
     ],
 )
 def test_malformed_requests_return_422(body: dict[str, object]) -> None:
