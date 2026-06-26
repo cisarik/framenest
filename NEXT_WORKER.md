@@ -1,6 +1,6 @@
 # Next Worker Handoff
 
-## 1. Title and authority
+## 1. Title And Authority
 
 This file is a non-authoritative repository-native Worker handoff. It restores
 context for a future fresh Worker instance only.
@@ -13,23 +13,24 @@ Only one future authoritative ORCHESTRATOR prompt may grant a concrete task.
 Boot files, AP methodology documents, ADRs, roadmap documents, and handoff files
 do not independently authorize implementation.
 
-## 2. Role and instance model
+## 2. Role And Lifecycle Model
 
-`WORKER` is the persistent protocol role in FrameNest's repository protocol.
-A concrete Worker instance is one execution agent assigned to that role for a
+`WORKER` is the persistent protocol role in FrameNest's repository protocol. A
+concrete Worker instance is one execution agent assigned to that role for a
 bounded lifecycle. A Worker session is that instance's active continuity of
 context and responsibility. The execution client, agent implementation, model,
 and provider may vary between sessions and do not change the protocol role.
 
 Context pressure and automatic compaction can make one concrete session less
-reliable over time. This handoff closes the current concrete Worker session
-after Cycle 065. After this closeout commit, this concrete Worker instance is
-permanently closed and must never receive another task.
+reliable over time. This handoff closes the currently active concrete Worker
+session after Cycle 069. After the Cycle 069 closeout commit and push, this
+concrete Worker instance is permanently closed and must never receive another
+task.
 
 No active Worker instance exists after this closeout. A future Worker must be a
 fresh instance newly assigned to the persistent `WORKER` role.
 
-## 3. Repository identity
+## 3. Repository Identity
 
 Repository URL: `https://github.com/cisarik/framenest.git`
 
@@ -37,43 +38,47 @@ Normal working directory: `/Users/agile/framenest`
 
 Normal branch: `main`
 
-Current public HEAD before this closeout commit:
-`a13134551cfefee330afa14dcbbece3bcb1c46f5`
+Public implementation HEAD before the Cycle 069 closeout commit:
+`74fc43b24eae976d47dfeab5685f50d6aa1c0ef6`
 
-Subject before this closeout commit:
-`feat: add persistent title and canonical tags`
+Subject before the Cycle 069 closeout commit:
+`feat: add manual metadata workspace`
 
-A future Worker must verify the repository root, remote URL, branch, cleanliness,
-local HEAD, tracking branch, and public remote state before acting. Do not trust
-the recorded SHAs blindly, and do not invent this closeout commit SHA from this
-document.
+Parent of that implementation HEAD:
+`b55dc3e400afae30ba73f00f255f953cf022fb10`
 
-## 4. Fresh Worker startup reading order
+A future Worker must verify the repository root, remote URL, branch,
+cleanliness, local HEAD, tracking branch, and public remote state before
+acting. Do not trust recorded SHAs blindly, and do not invent the Cycle 069
+closeout commit SHA from this document. Discover it from Git.
+
+## 4. Future Fresh Worker Startup
 
 A future fresh Worker must read at least:
 
-1. `AGENTS.md`
-2. `BOOT_WORKER.md`
-3. `AP_WORKER.md`
-4. `NEXT_WORKER.md`
-5. `AP.md`
-6. `AP_ORCHESTRATOR.md`
-7. `PRODUCT.md`
-8. `SPEC.md`
-9. `ROADMAP.md`
-10. `README.md`
-11. `AI_WORKSPACE.md`
-12. `GALLERY.md`
-13. `COVER_PIPELINE.md`
-14. `docs/adr/README.md`
-15. task-relevant accepted ADRs
-16. task-relevant implementation and tests
-17. the future authoritative ORCHESTRATOR prompt
+1. [AGENTS.md](AGENTS.md)
+2. [BOOT_WORKER.md](BOOT_WORKER.md)
+3. [AP_WORKER.md](AP_WORKER.md)
+4. [NEXT_WORKER.md](NEXT_WORKER.md)
+5. [AP.md](AP.md)
+6. [AP_ORCHESTRATOR.md](AP_ORCHESTRATOR.md)
+7. [PRODUCT.md](PRODUCT.md)
+8. [SPEC.md](SPEC.md)
+9. [ROADMAP.md](ROADMAP.md)
+10. [README.md](README.md)
+11. [AI_WORKSPACE.md](AI_WORKSPACE.md)
+12. [GALLERY.md](GALLERY.md)
+13. [COVER_PIPELINE.md](COVER_PIPELINE.md)
+14. [SECURITY.md](SECURITY.md)
+15. [docs/adr/README.md](docs/adr/README.md)
+16. task-relevant accepted ADRs
+17. task-relevant implementation and tests
+18. the future authoritative ORCHESTRATOR prompt
 
 Repository implementation, tests, accepted ADRs, public Git evidence, and the
 future authoritative prompt override stale handoff statements.
 
-## 5. Current implemented state through Cycle 065
+## 5. Implemented Foundation Through Cycle 068
 
 FrameNest is a foundation-stage, pre-alpha, local-first library for video and
 animated media.
@@ -100,335 +105,252 @@ The public repository currently includes:
 - minimum logical-media and physical-location catalog;
 - explicit idempotent scan-candidate import;
 - persistent display-title metadata;
-- persistent canonical tags;
-- ordered media-to-tag assignments;
+- persistent canonical tags and ordered media-to-tag assignments;
 - sparse media metadata rows;
+- searchable catalog read/query boundary;
+- packaged catalog browser UI;
+- manual metadata workspace for display-title and canonical-tag review/editing;
 - application ports, use cases, SQLAlchemy Core repositories, migrations, and
   same-origin API boundaries for the implemented catalog slices.
 
-Do not describe import, display title, canonical tags, or migration `0005` as
-unimplemented.
+Do not describe import, display title, canonical tags, catalog search, manual
+title editing, manual tag editing, or migration `0005` as unimplemented.
 
-## 6. Cycle 063 implementation
+## 6. Cycle 067: Searchable Catalog Browser
 
 Public commit:
-`cfd4a01524045bce0a05059bafc230c36182ea0e`
+`b55dc3e400afae30ba73f00f255f953cf022fb10`
 
 Parent:
-`cd4071cd391ca3c33238679813e1dd39c785ef83`
+`0ff83f8e16cd95de89a8e32dab0240b09cd2092b`
 
 Subject:
-`feat: add explicit scan candidate import`
+`feat: add searchable media catalog`
 
-Cycle 063 added ADR-0026 and an end-to-end explicit scan-candidate import
-vertical slice.
+Public changed-path count: 20.
+
+Cycle 067 added [ADR-0028](docs/adr/0028-catalog-read-model-and-search-semantics.md)
+and a dedicated catalog query/read vertical slice.
 
 Accepted public behavior:
 
-- scan preview remains read-only;
-- import is explicit and user-triggered;
-- request uses one library-relative path;
-- the server revalidates the selected path through a fresh bounded scan;
-- client-provided kind and size are not trusted;
-- scan `video` maps to persistent `video`;
-- scan `gif` maps to persistent `animated_image`;
-- one logical media row and one physical-location row are inserted atomically;
-- exact `(library_id, relative_path)` is the idempotency key;
-- repeated import returns the existing logical media and location identities;
-- no filesystem mutation occurs;
-- no migration beyond `0004` was required for import;
-- exact API endpoint: `POST /api/libraries/{library_id}/media-imports`.
+- dedicated application catalog query/read boundary;
+- `GET /api/media` same-origin API endpoint;
+- literal display-title search;
+- SQLite `NOCASE` limitation is accepted for the initial implementation;
+- repeated canonical-tag filters use AND semantics;
+- deterministic newest-first ordering with stable media-ID tie-breaker;
+- total count is computed before pagination;
+- deterministic tag and location order;
+- one logical result is returned even when media has multiple locations;
+- packaged catalog UI lists imported media;
+- catalog refresh occurs after successful explicit import;
+- no migration or dependency change was required.
 
-Cycle 063 changed 20 public paths, including ADR-0026, import application/API
-code, browser import controls, media repository updates, and tests.
+Worker-observed runtime evidence from Cycle 067, not rerun during Cycle 069:
 
-## 7. Cycle 064 private-corpus evidence
+- baseline full suite: `867 passed, 3 skipped`;
+- focused final tests: `61 passed`;
+- full final suite: `898 passed, 3 skipped`;
+- warning-as-error suite: `898 passed, 3 skipped`;
+- build, compile, lock, wheel, and diff checks passed.
 
-Classification: Worker-observed private runtime evidence.
-
-Cycle 064 produced no repository commit and did not change the repository. It
-was a read-only private-corpus smoke validation using `dicaprio_bravo.gif`, one
-deterministic MP4 candidate, a disposable catalog, and the real FastAPI
-application/import boundary.
-
-Sanitized observed result:
-
-- first MP4 import returned `created`, kind `video`;
-- first GIF import returned `created`, kind `animated_image`;
-- repeated imports returned `already_imported`;
-- media and location identities were stable across repeat imports;
-- the disposable catalog contained exactly two logical media rows;
-- the disposable catalog contained exactly two physical-location rows;
-- zero duplicate rows were observed;
-- selected source-file SHA-256, size, and mtime were unchanged;
-- the top-level directory-entry snapshot was unchanged;
-- no sidecars or derivatives were created;
-- no provider, AI, ffmpeg, ffprobe, secret, or user-catalog access occurred;
-- temporary resources were cleaned up completely;
-- repository state was unchanged.
-
-Do not expose the selected MP4 filename, private hashes, directory listings,
-database identifiers, other private filenames, raw frames, private metadata, or
-media contents. The existence of `/Users/agile/Video` grants no future access.
-Any future private-media access requires exact task-specific authority. Any
-cloud or provider transmission requires separate explicit authorization.
-
-## 8. Cycle 065 implementation
+## 7. Cycle 068: Manual Metadata Workspace
 
 Public commit:
-`a13134551cfefee330afa14dcbbece3bcb1c46f5`
+`74fc43b24eae976d47dfeab5685f50d6aa1c0ef6`
 
 Parent:
-`cfd4a01524045bce0a05059bafc230c36182ea0e`
+`b55dc3e400afae30ba73f00f255f953cf022fb10`
 
 Subject:
-`feat: add persistent title and canonical tags`
+`feat: add manual metadata workspace`
 
-Cycle 065 added ADR-0027 and the persistent display-title and canonical-tag
-core through migration `0005`. The public diff changed 28 paths.
+Public changed-path count: 11.
 
-### Display title
+Cycle 068 changed documentation, packaged web assets, contract tests, and one
+integration test only. It made no backend, schema, API, migration, or dependency
+change.
 
-- display title is optional persisted catalog metadata;
-- display title is separate from filename and library-relative path;
-- saving or clearing a title does not imply rename or filesystem mutation;
-- title absence is valid;
-- metadata is stored as a sparse row, so imported media need not have metadata.
+Accepted public behavior:
 
-### Canonical tags
+- explicit `Edit metadata` action;
+- one selected medium is addressed by media ID;
+- manual `Current` metadata state is shown;
+- sparse metadata is accepted;
+- title can be edited or cleared;
+- fallback display title is not persisted implicitly;
+- canonical tag search is available;
+- a maximum of 32 assigned tags is enforced;
+- duplicate tag assignment is prevented;
+- ordered removable tag chips are shown;
+- earlier/later controls reorder assigned tags;
+- explicit tag creation is available;
+- creation statuses include `created`, `already_exists`, and `conflict`;
+- workspace distinguishes clean and dirty state;
+- discard confirmation protects unsaved changes;
+- `beforeunload` protection is dirty-only;
+- save statuses include `created`, `updated`, and `unchanged`;
+- missing-tag, missing-medium, catalog-unavailable, validation, and generic
+  errors are surfaced;
+- unsaved edits are preserved where safe;
+- active catalog refreshes after successful save;
+- no AI invocation occurs;
+- no filesystem mutation occurs.
 
-- canonical tag identity is a stable English lowercase slug key;
-- display name is separate presentation text;
-- no UUID tag identity is introduced;
-- tag creation is explicit;
-- same key with the same display name is idempotent;
-- same key with a different display name is a conflict;
-- metadata save cannot implicitly create tags;
-- tag deletion and rename are not implemented yet.
+Worker-observed runtime evidence from Cycle 068, not rerun during Cycle 069:
 
-### Media metadata
+- baseline full suite: `898 passed, 3 skipped`;
+- test-first expected failure: `6 failed, 35 passed`;
+- focused final tests: `41 passed`;
+- full final suite: `905 passed, 3 skipped`;
+- warning-as-error suite: `905 passed, 3 skipped`;
+- Node syntax check passed;
+- build, compile, lock, wheel, and diff checks passed;
+- `dist/` was removed.
 
-- one logical medium may have zero to 32 ordered canonical tags;
-- order is persisted as zero-based positions;
-- saving metadata atomically replaces the full ordered assignment set;
-- an empty tag list removes assignments;
-- an exact semantically identical save returns `unchanged`;
-- unchanged saves preserve `updated_at_ms`;
-- save statuses are `created`, `updated`, and `unchanged`;
-- first save and replacement save are atomic;
-- rollback preserves the previous complete state.
+## 8. ADR And Migration Horizon
 
-### API
+Highest accepted ADR before the Cycle 069 closeout commit:
+[ADR-0028](docs/adr/0028-catalog-read-model-and-search-semantics.md).
 
-Exact endpoints:
+Current migration head before the Cycle 069 closeout commit: `0005`.
 
-- `POST /api/canonical-tags`
-- `GET /api/canonical-tags`
-- `GET /api/media/{media_id}/metadata`
-- `PUT /api/media/{media_id}/metadata`
+Accepted architecture through Cycle 068 includes:
 
-### Migration
+- [ADR-0023](docs/adr/0023-manual-first-metadata-and-multi-model-ai-drafts.md)
+  for AI suggestion confidence and action semantics;
+- [ADR-0024](docs/adr/0024-cover-studio-and-ai-cover-candidates.md)
+  for the provider-neutral AI suggestion workspace;
+- [ADR-0025](docs/adr/0025-minimum-persistent-media-catalog-foundation.md)
+  for the minimum persistent catalog foundation;
+- [ADR-0026](docs/adr/0026-explicit-idempotent-scan-candidate-import.md)
+  for explicit idempotent scan-candidate import;
+- [ADR-0027](docs/adr/0027-persistent-display-title-and-canonical-tags.md)
+  for persistent display-title and canonical-tag metadata;
+- [ADR-0028](docs/adr/0028-catalog-read-model-and-search-semantics.md)
+  for the searchable media catalog browser.
 
-Migration head is `0005`.
+A future Worker must inspect [docs/adr/README.md](docs/adr/README.md) and the
+task-relevant ADRs directly before making architectural claims.
 
-Revision `0005` adds:
+## 9. Explicitly Unimplemented State
 
-- `canonical_tags`;
-- `media_metadata`;
-- `media_canonical_tags`.
+The repository still does not contain a completed end-user desktop application,
+storage-volume registration, browser metadata editor beyond the current manual
+title/tag workspace, multi-tag filtering beyond repeated canonical-tag AND
+filtering, descriptions, collections, suggested filenames, covers, thumbnails,
+persistent premium gallery, deployment, systemd unit, or Tailscale integration.
 
-Existing device, library, logical-media, and physical-location data survives
-upgrade. No metadata rows are automatically backfilled. Downgrade removes only
-the metadata/tag schema introduced by `0005`.
+The server must remain loopback-first by default. Backend services must not
+replace local desktop functionality. Remote access direction remains
+Tailscale-only unless explicitly superseded by an accepted decision. Provider
+secrets must not be distributed to ordinary client installations.
 
-## 9. Accepted ADR state
+## 10. Product Invariants
 
-The ADR index extends through ADR-0027.
+FrameNest remains local-first, privacy-conscious, and cross-platform in product
+direction. The premium gallery remains a flagship product invariant.
 
-Selected accepted decisions near the current horizon:
+The current AI suggestion workspace is non-persistent. Provider-backed analysis
+requires explicit confirmation and must respect the provider, secret, and
+private-media boundaries recorded in product and architecture documents.
 
-- ADR-0021: Tauri v2 is accepted as the future desktop shell. It is not
-  implemented.
-- ADR-0022: selective media placement and later optional server aggregation are
-  accepted future architecture. NUC aggregation is not implemented.
-- ADR-0023: manual-first metadata workspace and separate AI drafts are accepted.
-  Manual `Current` metadata and AI drafts must remain distinct.
-- ADR-0024: Cover Studio and candidate-based cover workflow are accepted future
-  architecture. Cover persistence and thumbnail generation are not implemented.
-- ADR-0025: minimum persistent logical-media and physical-location catalog.
-- ADR-0026: explicit idempotent import from selected scan candidates.
-- ADR-0027: persistent display title and canonical tags.
+## 11. Private Corpus Boundary
 
-Accepted future architecture is not the same as implemented functionality.
+Private corpus path: `/Users/agile/Video`.
 
-## 10. Explicitly unimplemented state
+The private corpus contains MP4 test material and `dicaprio_bravo.gif`. Its
+existence grants no task authority.
 
-Major remaining work includes:
+Cycle 064 evidence remains Worker-observed private runtime evidence only. No
+private corpus access occurred in Cycles 067, 068, or 069.
 
-- title search;
-- canonical-tag filtering;
-- multi-tag AND filtering;
-- catalog media-list/read-model endpoint suitable for gallery;
-- browser metadata workspace;
-- premium tag-chip editor;
-- description;
-- collection;
-- suggested filename;
-- source-platform structured field;
-- browser persistence of metadata;
-- persistent AI drafts;
-- manual Cover Studio implementation;
-- exact cover timestamp persistence;
-- thumbnail generation and persistence;
-- premium persistent gallery;
-- filesystem rename, move, and delete workflows;
-- native OS tag synchronization;
-- duplicate, content-hash, and perceptual-hash workflows;
-- Tauri desktop shell;
-- native tray/menu-bar;
-- native clipboard, download, export, and VLC capabilities;
-- NUC aggregation;
-- remote streaming and transfer;
-- GUI Settings and final secret-store integration;
-- supported release, installer, deployment, and systemd/Tailscale production
-  setup.
+Future private-media access requires exact task-specific authorization. Any
+cloud or provider transmission of private media requires separate explicit
+authorization.
 
-Do not claim that no catalog, no import, no title, or no tags exist.
+Do not expose private filenames other than the already authorized
+`dicaprio_bravo.gif` name. Do not expose private hashes, database identifiers,
+directory listings, raw frames, metadata extracts, or media contents.
 
-## 11. Manual-first product invariants
+## 12. Known Limitations And Risks
 
-- AI is optional and explicit.
-- Manual metadata is primary.
-- AI drafts must remain separate from `Current`.
-- AI never silently overwrites catalog truth.
-- Catalog save is distinct from filesystem rename.
-- Cover timestamp never changes normal playback start.
-- Canonical tags use stable English identities.
-- No provider call is automatic.
-- No catalog or filesystem mutation is automatic.
+Recorded handoff statements may become stale. Public committed repository state,
+tests, accepted ADRs, and future authoritative prompts are stronger evidence
+than this file.
 
-## 12. Security and privacy boundaries
+Catalog search currently accepts SQLite `NOCASE` behavior. It should not be
+described as full Unicode case folding or locale-aware search.
 
-FrameNest remains loopback-first and local-first. Server startup does not run
-migrations automatically.
+Manual metadata editing currently covers display title and canonical tags. Tag
+rename/delete, description editing, collections, covers, thumbnails, and
+suggested filename persistence remain outside the implemented surface.
 
-Security and privacy boundaries:
+## 13. Non-Authoritative Next Direction
 
-- no credential exposure to the browser;
-- no credentials in the catalog database;
-- no implicit private-media authority;
-- no cloud upload without explicit confirmation;
-- no filename, path, SQL, database path, secret, or provider leakage through
-  errors;
-- deterministic temporary fixtures should be preferred before private smoke;
-- task-specific authority is required for secrets, provider calls, real catalog
-  migration, private-media access, or media mutation.
+Likely future work should stay bounded to one approved vertical slice at a time
+and should be authorized by a future ORCHESTRATOR prompt. Candidate directions
+must be checked against [ROADMAP.md](ROADMAP.md), [SPEC.md](SPEC.md), accepted
+ADRs, and current repository state before action.
 
-## 13. Validation evidence
+This handoff does not choose the next task.
 
-### Publicly committed evidence
+## 14. Validation Evidence Classification
 
-Relevant public commits:
+Cycle 067 and Cycle 068 validation evidence in this file is historical
+Worker-observed evidence from those cycles. It was not rerun during Cycle 069.
 
-- `e2983920c2c5aeac101dc9e51efcacc801de106a`:
-  `docs: close persistent catalog worker session`; previous concrete Worker
-  session closeout.
-- `cd4071cd391ca3c33238679813e1dd39c785ef83`: `handout`; canonical
-  Orchestrator handoff that initialized the current coordination phase.
-- `cfd4a01524045bce0a05059bafc230c36182ea0e`:
-  `feat: add explicit scan candidate import`; Cycle 063.
-- `a13134551cfefee330afa14dcbbece3bcb1c46f5`:
-  `feat: add persistent title and canonical tags`; Cycle 065.
+Cycle 069 is a documentation-only closeout. The authorized validation surface is
+limited to handoff replacement checks, diff checks, link checks, secret-pattern
+checks, Git state checks, and public push verification.
 
-Public repository evidence includes ADR-0026, ADR-0027, migrations through
-`0005`, media import implementation and tests, media metadata implementation and
-tests, API composition, and documentation updates. A future Worker or
-Orchestrator must verify public state independently.
+Do not infer from Cycle 069 that implementation tests, full pytest, build,
+package, migration, browser, or runtime checks were rerun.
 
-### Worker-observed runtime evidence
+## 15. Cycle 069 Closeout
 
-Cycle 065 baseline before implementation:
+Cycle 069 replaces this handoff file after Cycles 067 and 068. It records the
+current repository state, lifecycle closure, private corpus boundary, and future
+fresh Worker startup requirements.
 
-- `812 tests collected`;
-- `809 passed`, `3 skipped`.
+Cycle 069 is authorized to modify exactly [NEXT_WORKER.md](NEXT_WORKER.md), then
+commit once with subject `docs: close catalog workspace worker session`, push to
+`origin main`, and report.
 
-Cycle 065 final validation:
+Cycle 069 is not authorized to modify [NEXT_ORCHESTRATOR.md](NEXT_ORCHESTRATOR.md),
+implementation files, tests, ADRs, product documents, migrations, dependencies,
+or generated artifacts.
 
-- `870 tests collected`;
-- full suite: `867 passed`, `3 skipped`;
-- warning-as-error suite: `867 passed`, `3 skipped`;
-- Poetry lock check passed;
-- compileall passed;
-- package build passed;
-- wheel inspection passed;
-- Markdown local links: `681` checked;
-- `dist/` removed;
-- no private-media, provider, secret, or user-catalog access.
+## 16. Final Lifecycle Declaration
 
-These are Worker-observed command results from the closed concrete session, not
-independent future verification.
+Persistent role: `WORKER` continues.
 
-## 14. Known risks and cautions
+Concrete Worker instance: permanently closed after the successful Cycle 069
+closeout commit and push.
 
-- The current browser UI does not expose persistent metadata editing yet.
-- Persistent metadata APIs exist but are not integrated into a user-facing
-  metadata workspace.
-- Search and filtering are absent.
-- The current gallery remains a pre-alpha development shell rather than the
-  target premium gallery.
-- Provider/model availability is time-sensitive.
-- Private corpus access remains separately authorized.
-- Migration `0005` must never be applied to a real user database without
-  explicit future authority.
-- No future Worker should treat this handoff as task authorization.
+Worker session: `CLOSED`.
 
-## 15. Strongest next product direction
+Active Worker instance: none.
 
-Non-authoritative recommendation only: the strongest next direction is a bounded
-read/search vertical slice built on the new metadata foundation, most likely:
+Future Worker: fresh instance required.
 
-- catalog media-list/read-model API;
-- title search;
-- canonical-tag filtering;
-- multi-tag AND semantics;
-- deterministic pagination and order;
-- tests and an ADR when needed.
+Future task authority: none.
 
-Reasoning: import, title, and tags now persist. The next convergence point is
-retrieving and filtering persistent media, which creates the foundation for the
-manual metadata workspace and premium gallery. This should likely precede
-Tauri, NUC, Cover Studio, or AI draft persistence.
+[NEXT_ORCHESTRATOR.md](NEXT_ORCHESTRATOR.md): unchanged by Cycle 069.
 
-This is not a task. The future ORCHESTRATOR must independently inspect current
-code and product strategy before issuing any concrete task.
+## 17. Future Worker First Response Checklist
 
-## 16. Worker lifecycle declaration
+A future Worker should begin by verifying:
 
-Persistent role: `WORKER`
+- repository root and remote URL;
+- current branch and cleanliness;
+- local HEAD, `origin/main`, and public remote `main`;
+- whether the Cycle 069 closeout commit is now the public head;
+- migration head and accepted ADR index;
+- task-specific authority from the future ORCHESTRATOR prompt;
+- no reliance on private corpus state unless expressly authorized.
 
-Concrete Worker instance that wrote this handoff: permanently closed after this
-closeout commit.
-
-Worker session: `CLOSED`
-
-Active Worker after this commit: none.
-
-Future Worker: must be a fresh instance.
-
-Future task authority: none from this handoff.
-
-Current handoff: context only.
-
-`NEXT_ORCHESTRATOR.md`: not modified by this task.
-
-## 17. Fresh Worker first-response obligations
-
-A future fresh Worker must:
-
-- verify repository root, remote, branch, cleanliness, and public HEAD;
-- read the required documents;
-- identify the current authoritative ORCHESTRATOR prompt;
-- compare prompt scope against repository state;
-- stop on missing authority or contradictions;
-- never start from the recommendation alone;
-- never revive this closed concrete Worker session.
+If the future prompt conflicts with repository sources, identify the exact
+conflict and escalate through the Orchestrator rather than silently expanding
+scope.
