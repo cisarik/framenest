@@ -3,10 +3,14 @@
 const HEALTH_ENDPOINT = "/health";
 const LIBRARIES_ENDPOINT = "/api/libraries";
 const MEDIA_CATALOG_ENDPOINT = "/api/media";
+const MEDIA_METADATA_ENDPOINT_PREFIX = "/api/media";
 const CANONICAL_TAGS_ENDPOINT = "/api/canonical-tags";
 const AI_CAPABILITY_ENDPOINT = "/api/ai/media-suggestion-capability";
 const MEDIA_IMPORTS_ENDPOINT = "media-imports";
 const CATALOG_PAGE_SIZE = 24;
+const MAX_METADATA_TITLE_CODE_POINTS = 240;
+const MAX_METADATA_TAGS = 32;
+const TAG_KEY_PATTERN = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/;
 const MAX_REVIEW_TEXT = {
   title: 120,
   description: 600,
@@ -19,12 +23,27 @@ let analysisRequestToken = 0;
 let suggestionRequestToken = 0;
 let previewObjectUrls = [];
 let catalogRequestToken = 0;
+let metadataRequestToken = 0;
+let canonicalTagDefinitions = [];
+let canonicalTagsLoaded = false;
+let metadataBeforeUnloadAttached = false;
 let catalogState = {
   q: "",
   tagKeys: [],
   limit: CATALOG_PAGE_SIZE,
   offset: 0,
   total: 0,
+};
+let metadataWorkspace = {
+  openMediaId: null,
+  openItem: null,
+  loading: false,
+  saving: false,
+  unavailable: false,
+  notFound: false,
+  statusOverride: null,
+  baseline: { displayTitle: null, tagKeys: [] },
+  current: { displayTitle: "", tagKeys: [] },
 };
 let aiCapability = {
   available: false,
@@ -61,6 +80,34 @@ const catalogResults = document.querySelector("#catalog-results");
 const catalogPrevButton = document.querySelector("#catalog-prev-button");
 const catalogNextButton = document.querySelector("#catalog-next-button");
 const catalogPageSummary = document.querySelector("#catalog-page-summary");
+const metadataWorkspaceElement = document.querySelector("#metadata-workspace");
+const metadataWorkspaceTitle = document.querySelector("#metadata-workspace-title");
+const metadataWorkspaceContext = document.querySelector("#metadata-workspace-context");
+const metadataCloseButton = document.querySelector("#metadata-close-button");
+const metadataTitleInput = document.querySelector("#metadata-title-input");
+const metadataTitleFallback = document.querySelector("#metadata-title-fallback");
+const metadataValidationMessage = document.querySelector("#metadata-validation-message");
+const metadataTagSearchInput = document.querySelector("#metadata-tag-search-input");
+const metadataTagSuggestions = document.querySelector("#metadata-tag-suggestions");
+const metadataSelectedTags = document.querySelector("#metadata-selected-tags");
+const metadataSelectedCount = document.querySelector("#metadata-selected-count");
+const metadataCreateTagForm = document.querySelector("#metadata-create-tag-form");
+const metadataCreateKeyInput = document.querySelector("#metadata-create-key-input");
+const metadataCreateNameInput = document.querySelector("#metadata-create-name-input");
+const metadataCreateStatus = document.querySelector("#metadata-create-status");
+const metadataSaveButton = document.querySelector("#metadata-save-button");
+const metadataDiscardButton = document.querySelector("#metadata-discard-button");
+const metadataStateNodes = {
+  loading: document.querySelector("#metadata-state-loading"),
+  ready: document.querySelector("#metadata-state-ready"),
+  dirty: document.querySelector("#metadata-state-dirty"),
+  saving: document.querySelector("#metadata-state-saving"),
+  saved: document.querySelector("#metadata-state-saved"),
+  unavailable: document.querySelector("#metadata-state-unavailable"),
+  notFound: document.querySelector("#metadata-state-not-found"),
+  validation: document.querySelector("#metadata-state-validation"),
+  error: document.querySelector("#metadata-state-error"),
+};
 
 function setStatusClass(className) {
   statusContainer.classList.remove("status--loading", "status--healthy", "status--error");
@@ -171,6 +218,78 @@ function showCatalogState(state) {
 
 function appendText(parent, value) {
   parent.appendChild(document.createTextNode(String(value)));
+}
+
+function metadataEndpoint(mediaId) {
+  return `${MEDIA_METADATA_ENDPOINT_PREFIX}/${mediaId}/metadata`;
+}
+
+function hasControlCharacter(value) {
+  return [...value].some((character) => {
+    const codePoint = character.codePointAt(0);
+    return (codePoint >= 0 && codePoint <= 31) || codePoint === 127;
+  });
+}
+
+function semanticArraysEqual(left, right) {
+  if (left.length !== right.length) {
+    return false;
+  }
+  return left.every((value, index) => value === right[index]);
+}
+
+function normalizedMetadataFormState() {
+  const rawTitle = metadataTitleInput.value;
+  if (hasControlCharacter(rawTitle)) {
+    return { error: "Display title must not contain NUL or control characters." };
+  }
+  if (rawTitle.length > MAX_METADATA_TITLE_CODE_POINTS) {
+    return { error: "Display title must be 240 characters or fewer." };
+  }
+  if (rawTitle.trim() === "") {
+    return { displayTitle: null, tagKeys: [...metadataWorkspace.current.tagKeys] };
+  }
+  if (rawTitle.trim() !== rawTitle) {
+    return { error: "Non-empty display titles must not start or end with whitespace." };
+  }
+  return { displayTitle: rawTitle, tagKeys: [...metadataWorkspace.current.tagKeys] };
+}
+
+function metadataIsDirty() {
+  const normalized = normalizedMetadataFormState();
+  if (normalized.error) {
+    return true;
+  }
+  return normalized.displayTitle !== metadataWorkspace.baseline.displayTitle
+    || !semanticArraysEqual(normalized.tagKeys, metadataWorkspace.baseline.tagKeys);
+}
+
+function selectedTagDefinition(key) {
+  return canonicalTagDefinitions.find((tag) => tag.key === key) || null;
+}
+
+function metadataDirtyForBeforeUnload() {
+  return metadataWorkspace.openMediaId !== null && metadataIsDirty();
+}
+
+function metadataBeforeUnloadHandler(event) {
+  if (!metadataDirtyForBeforeUnload()) {
+    return;
+  }
+  event.preventDefault();
+  event.returnValue = "";
+}
+
+function syncMetadataBeforeUnloadProtection() {
+  const shouldAttach = metadataDirtyForBeforeUnload();
+  if (shouldAttach && !metadataBeforeUnloadAttached) {
+    window.addEventListener("beforeunload", metadataBeforeUnloadHandler);
+    metadataBeforeUnloadAttached = true;
+  }
+  if (!shouldAttach && metadataBeforeUnloadAttached) {
+    window.removeEventListener("beforeunload", metadataBeforeUnloadHandler);
+    metadataBeforeUnloadAttached = false;
+  }
 }
 
 function formatSize(sizeBytes) {
@@ -556,6 +675,9 @@ function setCatalogPagination(page) {
 function renderCatalogCard(item) {
   const card = document.createElement("article");
   card.className = "catalog-card";
+  if (metadataWorkspace.openMediaId === item.media_id) {
+    card.classList.add("catalog-card--selected");
+  }
   const header = document.createElement("div");
   header.className = "catalog-card__header";
   const titleGroup = document.createElement("div");
@@ -606,7 +728,15 @@ function renderCatalogCard(item) {
     row.append(path, availability);
     locations.appendChild(row);
   });
-  card.append(header, facts, tags, locations);
+  const actions = document.createElement("div");
+  actions.className = "catalog-card__actions";
+  const button = document.createElement("button");
+  button.className = "catalog-edit-button";
+  button.type = "button";
+  button.textContent = "Edit metadata";
+  button.addEventListener("click", () => handleOpenMetadataWorkspace(item));
+  actions.appendChild(button);
+  card.append(header, facts, tags, locations, actions);
   return card;
 }
 
@@ -651,6 +781,8 @@ function renderActiveCatalogFilters(tagKeys) {
 }
 
 function renderCatalogTagFilters(tags) {
+  canonicalTagDefinitions = tags;
+  canonicalTagsLoaded = true;
   catalogTagFilters.replaceChildren();
   if (tags.length === 0) {
     catalogTagsState.textContent = "No canonical tag definitions exist yet.";
@@ -674,6 +806,9 @@ function renderCatalogTagFilters(tags) {
     });
     catalogTagFilters.appendChild(button);
   });
+  if (metadataWorkspace.openMediaId !== null) {
+    renderMetadataWorkspace();
+  }
 }
 
 async function loadCatalogTags() {
@@ -686,11 +821,450 @@ async function loadCatalogTags() {
     const payload = await response.json();
     if (!response.ok) {
       catalogTagsState.textContent = "Canonical tag filters are unavailable.";
-      return;
+      return false;
     }
     renderCatalogTagFilters(payload.tags || []);
+    return true;
   } catch {
     catalogTagsState.textContent = "Canonical tag filters could not be loaded.";
+    return false;
+  }
+}
+
+async function ensureCanonicalTags() {
+  if (canonicalTagsLoaded) {
+    return true;
+  }
+  return loadCatalogTags();
+}
+
+function setMetadataState(state) {
+  Object.entries(metadataStateNodes).forEach(([key, node]) => {
+    node.hidden = key !== state;
+  });
+}
+
+function setMetadataStatus(state, message) {
+  setMetadataState(state);
+  metadataWorkspace.statusOverride = state;
+  if (message && metadataStateNodes[state]) {
+    metadataStateNodes[state].textContent = message;
+  }
+}
+
+function describeCatalogItem(item) {
+  const label = item.display_title || deriveCatalogFallbackTitle(item);
+  const location = item.locations && item.locations.length > 0
+    ? item.locations[0].relative_path
+    : "No known relative location";
+  return `${label}; ${formatCatalogKind(item.media_kind)}; ${location}; media ID ${item.media_id}`;
+}
+
+function confirmDiscardDirtyMetadata() {
+  if (!metadataDirtyForBeforeUnload()) {
+    return true;
+  }
+  return confirm("Discard unsaved metadata changes?");
+}
+
+function updateMetadataControls() {
+  const normalized = normalizedMetadataFormState();
+  const validation = normalized.error || "";
+  const dirty = metadataIsDirty();
+  metadataValidationMessage.textContent = validation;
+  if (validation) {
+    metadataStateNodes.validation.textContent = validation;
+  } else if (metadataWorkspace.statusOverride !== "validation") {
+    metadataStateNodes.validation.textContent = "Metadata validation failed.";
+  }
+  metadataSaveButton.disabled = metadataWorkspace.loading || metadataWorkspace.saving || !dirty || Boolean(validation);
+  metadataDiscardButton.disabled = metadataWorkspace.loading || metadataWorkspace.saving || !dirty;
+  syncMetadataBeforeUnloadProtection();
+  if (metadataWorkspace.loading) {
+    setMetadataState("loading");
+  } else if (metadataWorkspace.saving) {
+    setMetadataState("saving");
+  } else if (metadataWorkspace.unavailable) {
+    setMetadataState("unavailable");
+  } else if (metadataWorkspace.notFound) {
+    setMetadataState("notFound");
+  } else if (validation) {
+    setMetadataState("validation");
+  } else if (metadataWorkspace.statusOverride === "validation") {
+    setMetadataState("validation");
+  } else if (metadataWorkspace.statusOverride === "error") {
+    setMetadataState("error");
+  } else if (dirty) {
+    setMetadataState("dirty");
+  } else if (metadataWorkspace.statusOverride === "saved") {
+    setMetadataState("saved");
+  } else {
+    setMetadataState("ready");
+  }
+}
+
+function renderSelectedMetadataTags() {
+  metadataSelectedTags.replaceChildren();
+  metadataSelectedCount.textContent = `${metadataWorkspace.current.tagKeys.length} of ${MAX_METADATA_TAGS} selected.`;
+  if (metadataWorkspace.current.tagKeys.length === 0) {
+    const empty = document.createElement("p");
+    empty.className = "metadata-note";
+    empty.textContent = "No canonical tags selected.";
+    metadataSelectedTags.appendChild(empty);
+    return;
+  }
+  metadataWorkspace.current.tagKeys.forEach((key, index) => {
+    const definition = selectedTagDefinition(key);
+    const chip = document.createElement("span");
+    chip.className = "metadata-tag-chip";
+    const label = document.createElement("span");
+    label.textContent = definition ? definition.display_name : key;
+    const stableKey = document.createElement("span");
+    stableKey.className = "metadata-tag-key";
+    stableKey.textContent = key;
+    const earlier = document.createElement("button");
+    earlier.type = "button";
+    earlier.textContent = "Earlier";
+    earlier.setAttribute("aria-label", `Move earlier ${definition ? definition.display_name : key}`);
+    earlier.disabled = index === 0;
+    earlier.addEventListener("click", () => moveSelectedMetadataTag(index, -1));
+    const later = document.createElement("button");
+    later.type = "button";
+    later.textContent = "Later";
+    later.setAttribute("aria-label", `Move later ${definition ? definition.display_name : key}`);
+    later.disabled = index === metadataWorkspace.current.tagKeys.length - 1;
+    later.addEventListener("click", () => moveSelectedMetadataTag(index, 1));
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.textContent = "Remove";
+    remove.setAttribute("aria-label", `Remove tag ${definition ? definition.display_name : key}`);
+    remove.addEventListener("click", () => removeSelectedMetadataTag(key));
+    chip.append(label, stableKey, earlier, later, remove);
+    metadataSelectedTags.appendChild(chip);
+  });
+}
+
+function renderMetadataTagSuggestions() {
+  metadataTagSuggestions.replaceChildren();
+  const query = metadataTagSearchInput.value.trim().toLowerCase();
+  const matches = canonicalTagDefinitions.filter((tag) => {
+    if (!query) {
+      return true;
+    }
+    return tag.key.toLowerCase().includes(query) || tag.display_name.toLowerCase().includes(query);
+  });
+  if (matches.length === 0) {
+    const empty = document.createElement("p");
+    empty.className = "metadata-note";
+    empty.textContent = "No matching canonical tags.";
+    metadataTagSuggestions.appendChild(empty);
+    return;
+  }
+  matches.forEach((tag) => {
+    const selected = metadataWorkspace.current.tagKeys.includes(tag.key);
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "metadata-tag-suggestion";
+    button.textContent = selected ? `${tag.display_name} selected` : `${tag.display_name} (${tag.key})`;
+    button.setAttribute("aria-disabled", selected ? "true" : "false");
+    button.disabled = selected || metadataWorkspace.current.tagKeys.length >= MAX_METADATA_TAGS;
+    button.addEventListener("click", () => selectMetadataTag(tag.key));
+    metadataTagSuggestions.appendChild(button);
+  });
+}
+
+function renderMetadataWorkspace() {
+  if (metadataWorkspace.openMediaId === null) {
+    metadataWorkspaceElement.hidden = true;
+    syncMetadataBeforeUnloadProtection();
+    return;
+  }
+  metadataWorkspaceElement.hidden = false;
+  metadataWorkspaceContext.textContent = metadataWorkspace.openItem
+    ? describeCatalogItem(metadataWorkspace.openItem)
+    : `Media ID ${metadataWorkspace.openMediaId}`;
+  metadataTitleInput.value = metadataWorkspace.current.displayTitle || "";
+  metadataTitleFallback.textContent = metadataWorkspace.baseline.displayTitle === null && metadataWorkspace.openItem
+    ? `Catalog fallback label: ${deriveCatalogFallbackTitle(metadataWorkspace.openItem)}. This is presentation-only and is not persisted as title truth.`
+    : "Display title is persisted catalog metadata and remains separate from the physical filename.";
+  renderSelectedMetadataTags();
+  renderMetadataTagSuggestions();
+  updateMetadataControls();
+}
+
+function applyMetadataPayloadToWorkspace(payload) {
+  const tagKeys = (payload.tags || []).map((tag) => tag.key);
+  metadataWorkspace.baseline = {
+    displayTitle: payload.display_title === null ? null : payload.display_title,
+    tagKeys,
+  };
+  metadataWorkspace.current = {
+    displayTitle: payload.display_title === null ? "" : payload.display_title,
+    tagKeys: [...tagKeys],
+  };
+}
+
+async function handleOpenMetadataWorkspace(item) {
+  if (!confirmDiscardDirtyMetadata()) {
+    return;
+  }
+  const token = metadataRequestToken + 1;
+  metadataRequestToken = token;
+  metadataWorkspace = {
+    openMediaId: item.media_id,
+    openItem: item,
+    loading: true,
+    saving: false,
+    unavailable: false,
+    notFound: false,
+    statusOverride: null,
+    baseline: { displayTitle: null, tagKeys: [] },
+    current: { displayTitle: "", tagKeys: [] },
+  };
+  metadataCreateStatus.textContent = "";
+  renderMetadataWorkspace();
+  metadataWorkspaceTitle.focus();
+  const tagsReady = await ensureCanonicalTags();
+  if (token !== metadataRequestToken) {
+    return;
+  }
+  if (!tagsReady) {
+    metadataWorkspace.loading = false;
+    metadataWorkspace.unavailable = true;
+    setMetadataStatus("unavailable", "Canonical tag definitions are unavailable.");
+    updateMetadataControls();
+    return;
+  }
+  try {
+    const mediaId = item.media_id;
+    const response = await fetch(metadataEndpoint(mediaId), {
+      headers: { Accept: "application/json" },
+      cache: "no-store",
+    });
+    const payload = await response.json();
+    if (token !== metadataRequestToken) {
+      return;
+    }
+    metadataWorkspace.loading = false;
+    if (!response.ok) {
+      const code = payload.error ? payload.error.code : "";
+      if (code === "MEDIA_NOT_FOUND") {
+        metadataWorkspace.notFound = true;
+        setMetadataStatus("notFound", "The selected medium is no longer available.");
+        loadCatalog();
+      } else if (code === "CATALOG_UNAVAILABLE") {
+        metadataWorkspace.unavailable = true;
+        setMetadataStatus("unavailable", "The local catalog is not available.");
+      } else {
+        setMetadataStatus("error", "Metadata could not be loaded from the local catalog.");
+      }
+      updateMetadataControls();
+      return;
+    }
+    applyMetadataPayloadToWorkspace(payload);
+    renderMetadataWorkspace();
+    metadataTitleInput.focus();
+  } catch {
+    if (token === metadataRequestToken) {
+      metadataWorkspace.loading = false;
+      setMetadataStatus("error", "Metadata could not be loaded from the local catalog.");
+      updateMetadataControls();
+    }
+  }
+}
+
+function selectMetadataTag(key) {
+  if (metadataWorkspace.current.tagKeys.includes(key)) {
+    return;
+  }
+  if (metadataWorkspace.current.tagKeys.length >= MAX_METADATA_TAGS) {
+    setMetadataStatus("validation", "A medium can have at most 32 canonical tags.");
+    updateMetadataControls();
+    return;
+  }
+  metadataWorkspace.current.tagKeys = [...metadataWorkspace.current.tagKeys, key];
+  metadataWorkspace.statusOverride = null;
+  renderMetadataWorkspace();
+}
+
+function moveSelectedMetadataTag(index, direction) {
+  const nextIndex = index + direction;
+  if (nextIndex < 0 || nextIndex >= metadataWorkspace.current.tagKeys.length) {
+    return;
+  }
+  const keys = [...metadataWorkspace.current.tagKeys];
+  const current = keys[index];
+  keys[index] = keys[nextIndex];
+  keys[nextIndex] = current;
+  metadataWorkspace.current.tagKeys = keys;
+  metadataWorkspace.statusOverride = null;
+  renderMetadataWorkspace();
+}
+
+function removeSelectedMetadataTag(key) {
+  metadataWorkspace.current.tagKeys = metadataWorkspace.current.tagKeys.filter((tagKey) => tagKey !== key);
+  metadataWorkspace.statusOverride = null;
+  renderMetadataWorkspace();
+}
+
+function resetMetadataWorkspaceAfterDiscard() {
+  metadataWorkspace.current = {
+    displayTitle: metadataWorkspace.baseline.displayTitle || "",
+    tagKeys: [...metadataWorkspace.baseline.tagKeys],
+  };
+  metadataWorkspace.statusOverride = null;
+  metadataCreateStatus.textContent = "";
+  renderMetadataWorkspace();
+}
+
+function handleDiscardMetadataChanges() {
+  resetMetadataWorkspaceAfterDiscard();
+}
+
+function closeMetadataWorkspace() {
+  if (!confirmDiscardDirtyMetadata()) {
+    return;
+  }
+  metadataRequestToken += 1;
+  metadataWorkspace = {
+    openMediaId: null,
+    openItem: null,
+    loading: false,
+    saving: false,
+    unavailable: false,
+    notFound: false,
+    statusOverride: null,
+    baseline: { displayTitle: null, tagKeys: [] },
+    current: { displayTitle: "", tagKeys: [] },
+  };
+  metadataWorkspaceElement.hidden = true;
+  syncMetadataBeforeUnloadProtection();
+  loadCatalog();
+}
+
+function createTagValidationError(key, displayName) {
+  if (!TAG_KEY_PATTERN.test(key)) {
+    return "Canonical key must be a lowercase English slug.";
+  }
+  if (key.length > 64) {
+    return "Canonical key must be 64 characters or fewer.";
+  }
+  if (!displayName.trim() || displayName.trim().length > 80 || hasControlCharacter(displayName)) {
+    return "Display name must be 1 to 80 characters and contain no control characters.";
+  }
+  return "";
+}
+
+async function handleCreateAndSelectTag(event) {
+  event.preventDefault();
+  const key = metadataCreateKeyInput.value;
+  const displayName = metadataCreateNameInput.value;
+  const validation = createTagValidationError(key, displayName);
+  if (validation) {
+    metadataCreateStatus.textContent = validation;
+    return;
+  }
+  metadataCreateStatus.textContent = "Creating canonical tag definition...";
+  try {
+    const response = await fetch(CANONICAL_TAGS_ENDPOINT, {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ key, display_name: displayName }),
+      cache: "no-store",
+    });
+    const payload = await response.json();
+    if (response.ok) {
+      await loadCatalogTags();
+      if (!metadataWorkspace.current.tagKeys.includes(payload.tag.key)
+        && metadataWorkspace.current.tagKeys.length < MAX_METADATA_TAGS) {
+        metadataWorkspace.current.tagKeys = [...metadataWorkspace.current.tagKeys, payload.tag.key];
+      }
+      metadataCreateKeyInput.value = "";
+      metadataCreateNameInput.value = "";
+      metadataCreateStatus.textContent = payload.status === "already_exists"
+        ? "Canonical tag already existed with the same definition and is selected."
+        : "Canonical tag created and selected.";
+      renderMetadataWorkspace();
+      return;
+    }
+    const code = payload.error ? payload.error.code : "";
+    if (code === "CANONICAL_TAG_DEFINITION_CONFLICT") {
+      metadataCreateStatus.textContent = "This key already exists with a different display name.";
+      await loadCatalogTags();
+      return;
+    }
+    if (code === "CATALOG_UNAVAILABLE") {
+      metadataCreateStatus.textContent = "The local catalog is not available. Unsaved metadata is preserved.";
+      return;
+    }
+    metadataCreateStatus.textContent = "Canonical tag could not be created.";
+  } catch {
+    metadataCreateStatus.textContent = "Canonical tag could not be created.";
+  }
+}
+
+async function handleSaveMetadata() {
+  const normalized = normalizedMetadataFormState();
+  if (normalized.error || metadataWorkspace.openMediaId === null) {
+    updateMetadataControls();
+    return;
+  }
+  metadataWorkspace.saving = true;
+  metadataWorkspace.unavailable = false;
+  metadataWorkspace.notFound = false;
+  setMetadataStatus("saving", "Saving metadata...");
+  updateMetadataControls();
+  try {
+    const mediaId = metadataWorkspace.openMediaId;
+    const response = await fetch(metadataEndpoint(mediaId), {
+      method: "PUT",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ display_title: normalized.displayTitle, tag_keys: normalized.tagKeys }),
+      cache: "no-store",
+    });
+    const payload = await response.json();
+    metadataWorkspace.saving = false;
+    if (response.ok) {
+      applyMetadataPayloadToWorkspace(payload.metadata);
+      setMetadataStatus(
+        "saved",
+        payload.status === "created"
+          ? "Metadata saved as a new catalog metadata row."
+          : payload.status === "updated"
+            ? "Metadata updated."
+            : payload.status === "unchanged"
+              ? "No metadata changes were required."
+              : "Metadata saved.",
+      );
+      renderMetadataWorkspace();
+      await loadCatalog();
+      return;
+    }
+    const code = payload.error ? payload.error.code : "";
+    if (code === "CANONICAL_TAG_NOT_FOUND") {
+      await loadCatalogTags();
+      setMetadataStatus("validation", "One selected canonical tag is no longer available. Resolve the selection before retrying.");
+    } else if (code === "MEDIA_NOT_FOUND") {
+      metadataWorkspace.notFound = true;
+      setMetadataStatus("notFound", "The selected medium is no longer available.");
+      await loadCatalog();
+    } else if (code === "CATALOG_UNAVAILABLE") {
+      metadataWorkspace.unavailable = true;
+      setMetadataStatus("unavailable", "The local catalog is not available. Unsaved metadata is preserved.");
+    } else {
+      setMetadataStatus("error", "Metadata save failed with a sanitized local error.");
+    }
+    updateMetadataControls();
+  } catch {
+    metadataWorkspace.saving = false;
+    setMetadataStatus("error", "Metadata save failed with a sanitized local error.");
+    updateMetadataControls();
   }
 }
 
@@ -1211,6 +1785,14 @@ catalogSearchForm.addEventListener("submit", (event) => {
 });
 
 catalogClearButton.addEventListener("click", () => {
+  if (!confirmDiscardDirtyMetadata()) {
+    return;
+  }
+  if (metadataWorkspace.openMediaId !== null) {
+    metadataWorkspace.openMediaId = null;
+    metadataWorkspaceElement.hidden = true;
+    syncMetadataBeforeUnloadProtection();
+  }
   catalogState.q = "";
   catalogState.tagKeys = [];
   catalogState.offset = 0;
@@ -1232,10 +1814,22 @@ catalogNextButton.addEventListener("click", () => {
   loadCatalog();
 });
 
+metadataTitleInput.addEventListener("input", () => {
+  metadataWorkspace.current.displayTitle = metadataTitleInput.value;
+  metadataWorkspace.statusOverride = null;
+  updateMetadataControls();
+});
+
+metadataTagSearchInput.addEventListener("input", renderMetadataTagSuggestions);
+metadataSaveButton.addEventListener("click", handleSaveMetadata);
+metadataDiscardButton.addEventListener("click", handleDiscardMetadataChanges);
+metadataCloseButton.addEventListener("click", closeMetadataWorkspace);
+metadataCreateTagForm.addEventListener("submit", handleCreateAndSelectTag);
+
 renderActiveCatalogFilters(catalogState.tagKeys);
 checkHealth();
 loadAiCapability();
 loadCatalogTags();
 loadCatalog();
 loadLibraries();
-window.addEventListener("beforeunload", revokePreviewObjectUrls);
+window.addEventListener("pagehide", revokePreviewObjectUrls);

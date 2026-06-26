@@ -36,19 +36,24 @@ dashboard.
 
 ## Media Detail And Metadata Workspace
 
-The future media detail view is manual-first. Opening detail must not trigger an
-AI call, save catalog metadata, or mutate the filesystem. When no durable
-display title exists, the initial display title may be derived from the real
-physical filename, but the display title, physical filename,
+The media detail direction is manual-first. The current packaged Catalog
+browser includes a bounded inline manual `Current` metadata workspace for one
+selected imported medium. Opening the workspace loads existing title/tag
+metadata and canonical tag definitions; it must not trigger an AI call, save
+catalog metadata, or mutate the filesystem. When no durable display title
+exists, the browser may show a fallback label derived from the first
+deterministic relative location, but the display title, physical filename,
 library-relative path, suggested filename, catalog save, and future physical
-rename operation are separate concepts.
+rename operation remain separate concepts.
 
-The future Metadata workspace should expose a fixed editable `Current` working
-state plus optional separate AI drafts as described in
+The current `Current` workspace edits display title and ordered canonical tags
+only. Future Metadata workspace work should expand the fixed editable
+`Current` working state and add optional separate AI drafts as described in
 [AI_WORKSPACE.md](AI_WORKSPACE.md) and
 [ADR-0023](docs/adr/0023-manual-first-metadata-and-multi-model-ai-drafts.md).
-AI draft comparison is future architecture. The current repository implements
-only the pre-alpha non-persistent browser AI suggestion review.
+AI draft comparison is future architecture. The current repository also
+implements the pre-alpha non-persistent browser AI suggestion review, which is
+separate from catalog `Current` saves.
 
 Canonical tag editing should feel like a premium local interaction: searchable
 suggestions, keyboard and mouse navigation, rounded removable chips, an
@@ -128,11 +133,13 @@ availability and offer explicit stream or download actions.
 ## Search And Filtering
 
 The gallery must eventually support title/name search and canonical tag
-filtering. The current packaged browser has a read-only catalog slice that
-searches persisted display titles and filters repeated canonical tags with
-AND/intersection semantics. Multiple selected tags default to AND/intersection
-semantics. For example, selected tags `Meme`, `Reaction`, and `Money` normally
-return items containing all three tags.
+filtering. The current packaged browser has a catalog slice that searches
+persisted display titles, filters repeated canonical tags with
+AND/intersection semantics, and lets the user manually edit the current
+display title and ordered canonical-tag assignment for one selected imported
+medium. Multiple selected tags default to AND/intersection semantics. For
+example, selected tags `Meme`, `Reaction`, and `Money` normally return items
+containing all three tags.
 
 The UI should use filter chips and removable active filters. Filters should
 include:

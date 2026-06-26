@@ -28,11 +28,18 @@ AI suggestion review per
 session-only, provider-confirmed for cloud execution, and does not save catalog
 metadata or mutate files.
 
-The full manual-first Metadata workspace, `Current` tab, multi-model AI draft
-comparison, inline model picker, durable metadata save, persistent draft
-storage, and premium canonical-tag editor are future architecture accepted by
+The packaged browser now implements a bounded manual `Current` metadata
+workspace for one selected imported medium. It can load sparse or persisted
+metadata, edit or clear the display title, search existing canonical tags
+locally, assign up to 32 ordered canonical tags, explicitly create a canonical
+tag definition, save through the existing metadata API, discard unsaved
+changes, and refresh the active Catalog view after a successful save. This
+current slice covers display title and canonical tags only.
+
+The full multi-model AI draft comparison, inline model picker, persistent draft
+storage, descriptions, collections, suggested filename editing, and premium
+media detail workspace remain future architecture accepted by
 [ADR-0023](docs/adr/0023-manual-first-metadata-and-multi-model-ai-drafts.md).
-They are not currently implemented.
 
 ## Workspace Purpose
 
@@ -71,8 +78,11 @@ explicit separate workflow.
 
 ## `Current`
 
-`Current` is the primary editable manual working copy. It is available before
-any AI run, remains editable after AI, and is not closable like an AI draft.
+`Current` is the primary editable manual working copy. In the current browser
+slice, `Current` covers display title and ordered canonical tags for one
+selected imported medium. In later detail slices it should expand to additional
+manual metadata fields. It is available before any AI run, remains editable
+after AI, and is not closable like an AI draft.
 
 `Current` must never be silently overwritten. Values enter `Current` through
 manual editing or explicit promotion from an AI draft. `Current` remains

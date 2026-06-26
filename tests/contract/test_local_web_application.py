@@ -168,6 +168,124 @@ def test_web_shell_contains_reachable_catalog_browser_states(client: TestClient)
     assert "Next" in html
 
 
+def test_web_shell_contains_manual_current_metadata_workspace(client: TestClient) -> None:
+    html = client.get("/").text
+
+    assert "metadata-workspace" in html
+    assert "Current metadata" in html
+    assert "Display title" in html
+    assert "Search canonical tags" in html
+    assert "metadata-tag-suggestions" in html
+    assert "metadata-selected-tags" in html
+    assert "Canonical key" in html
+    assert "Display name" in html
+    assert "Create and select" in html
+    assert "Save metadata" in html
+    assert "Discard changes" in html
+    assert "Close metadata workspace" in html
+    assert "Saving catalog metadata does not rename or move files." in html
+    for state in (
+        "metadata-state-loading",
+        "metadata-state-ready",
+        "metadata-state-dirty",
+        "metadata-state-saving",
+        "metadata-state-saved",
+        "metadata-state-unavailable",
+        "metadata-state-not-found",
+        "metadata-state-validation",
+        "metadata-state-error",
+    ):
+        assert state in html
+
+
+def test_catalog_cards_have_explicit_metadata_edit_action(client: TestClient) -> None:
+    script = client.get("/assets/app.js").text
+
+    assert "Edit metadata" in script
+    assert "handleOpenMetadataWorkspace(item" in script
+    assert "button.addEventListener(\"click\", () => handleOpenMetadataWorkspace(item));" in script
+    assert "card.addEventListener(\"click\"" not in script
+
+
+def test_javascript_metadata_workspace_uses_existing_same_origin_endpoints(
+    client: TestClient,
+) -> None:
+    script = client.get("/assets/app.js").text
+
+    assert 'const MEDIA_METADATA_ENDPOINT_PREFIX = "/api/media";' in script
+    assert "metadataEndpoint(mediaId)" in script
+    assert 'fetch(metadataEndpoint(mediaId)' in script
+    assert 'method: "PUT"' in script
+    assert 'body: JSON.stringify({ display_title: normalized.displayTitle, tag_keys: normalized.tagKeys })' in script
+    assert 'fetch(CANONICAL_TAGS_ENDPOINT, {' in script
+    assert 'method: "POST"' in script
+    assert "handleCreateAndSelectTag" in script
+    assert "CANONICAL_TAG_DEFINITION_CONFLICT" in script
+    assert "CANONICAL_TAG_NOT_FOUND" in script
+    assert "MEDIA_NOT_FOUND" in script
+    assert "CATALOG_UNAVAILABLE" in script
+
+
+def test_javascript_metadata_workspace_tracks_sparse_baseline_dirty_and_discard(
+    client: TestClient,
+) -> None:
+    script = client.get("/assets/app.js").text
+
+    assert "metadataWorkspace.baseline" in script
+    assert "metadataWorkspace.current" in script
+    assert "payload.display_title === null" in script
+    assert "metadataTitleInput.value = metadataWorkspace.current.displayTitle || \"\";" in script
+    assert "deriveCatalogFallbackTitle(item)" in script
+    assert "function normalizedMetadataFormState" in script
+    assert "displayTitle: null" in script
+    assert "rawTitle.trim() !== rawTitle" in script
+    assert "hasControlCharacter(rawTitle)" in script
+    assert "metadataSaveButton.disabled = metadataWorkspace.loading || metadataWorkspace.saving || !dirty || Boolean(validation);" in script
+    assert "metadataDiscardButton.disabled = metadataWorkspace.loading || metadataWorkspace.saving || !dirty;" in script
+    assert "confirm(\"Discard unsaved metadata changes?\")" in script
+    assert "handleDiscardMetadataChanges" in script
+    assert "metadataBeforeUnloadHandler" in script
+    assert "beforeunload" in script
+
+
+def test_javascript_metadata_workspace_tag_selection_ordering_and_limits(
+    client: TestClient,
+) -> None:
+    script = client.get("/assets/app.js").text
+
+    assert "const MAX_METADATA_TAGS = 32;" in script
+    assert "function renderMetadataTagSuggestions" in script
+    assert "function selectMetadataTag" in script
+    assert "metadataWorkspace.current.tagKeys.includes(tag.key)" in script
+    assert "metadataWorkspace.current.tagKeys.length >= MAX_METADATA_TAGS" in script
+    assert "function moveSelectedMetadataTag" in script
+    assert "moveSelectedMetadataTag(index, -1)" in script
+    assert "moveSelectedMetadataTag(index, 1)" in script
+    assert "function removeSelectedMetadataTag" in script
+    assert "Move earlier" in script
+    assert "Move later" in script
+    assert "Remove tag" in script
+    assert "tag_keys: normalized.tagKeys" in script
+    assert ".sort(" not in script[script.index("function renderSelectedMetadataTags") : script.index("function renderMetadataTagSuggestions")]
+
+
+def test_javascript_metadata_save_refreshes_catalog_and_preserves_filters(
+    client: TestClient,
+) -> None:
+    script = client.get("/assets/app.js").text
+
+    assert "async function handleSaveMetadata" in script
+    save_block = script[script.index("async function handleSaveMetadata") : script.index("async function handleInspectClick")]
+    assert "created" in save_block
+    assert "updated" in save_block
+    assert "unchanged" in save_block
+    assert "metadataWorkspace.openMediaId" in save_block
+    assert "await loadCatalog();" in save_block
+    assert "catalogState.q" not in save_block
+    assert "catalogState.tagKeys" not in save_block
+    assert "catalogState.offset = 0" not in save_block
+
+
 def test_javascript_loads_library_list_without_auto_scanning(client: TestClient) -> None:
     script = client.get("/assets/app.js").text
     assert 'const LIBRARIES_ENDPOINT = "/api/libraries";' in script
@@ -405,8 +523,9 @@ def test_browser_accept_and_reject_are_session_only_without_mutation_api(
     assert "markReviewEdited" in script
     assert "fetch(" in script
     assert "rename" not in script.lower()
-    assert "save" not in script.lower()
-    assert "apply" not in script.lower()
+    review_block = script[script.index("function renderEditableReview") : script.index("function suggestionErrorMessage")]
+    assert "save" not in review_block.lower()
+    assert "apply" not in review_block.lower()
     assert "commit" not in script.lower()
 
 

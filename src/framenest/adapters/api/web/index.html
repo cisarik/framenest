@@ -60,8 +60,9 @@
           <h2 id="catalog-title">Imported media</h2>
           <p class="section-copy">
             Search display titles and filter imported catalog media by canonical
-            tags. Multiple selected tags use AND semantics. This is a read-only
-            browser over imported records, not the final premium gallery.
+            tags. Multiple selected tags use AND semantics. Imported media can
+            be opened for manual Current title and tag editing. This is still a
+            pre-alpha catalog browser, not the final premium gallery.
           </p>
         </div>
         <form id="catalog-search-form" class="catalog-toolbar" role="search">
@@ -103,6 +104,79 @@
           <p id="catalog-page-summary" role="status">No catalog page loaded.</p>
           <button id="catalog-next-button" type="button">Next</button>
         </div>
+        <section id="metadata-workspace" class="metadata-workspace" aria-labelledby="metadata-workspace-title" hidden>
+          <div class="metadata-workspace__header">
+            <div>
+              <p class="eyebrow">Manual Current</p>
+              <h3 id="metadata-workspace-title" tabindex="-1">Current metadata</h3>
+              <p id="metadata-workspace-context" class="metadata-context">
+                No imported medium is selected.
+              </p>
+            </div>
+            <button id="metadata-close-button" type="button">Close metadata workspace</button>
+          </div>
+
+          <div class="metadata-state-strip" aria-live="polite" aria-atomic="true">
+            <p id="metadata-state-loading" class="metadata-state">Loading metadata workspace...</p>
+            <p id="metadata-state-ready" class="metadata-state" hidden>Metadata workspace is clean.</p>
+            <p id="metadata-state-dirty" class="metadata-state metadata-state--dirty" hidden>Unsaved metadata changes.</p>
+            <p id="metadata-state-saving" class="metadata-state" hidden>Saving metadata...</p>
+            <p id="metadata-state-saved" class="metadata-state metadata-state--saved" hidden>Metadata saved.</p>
+            <p id="metadata-state-unavailable" class="metadata-state metadata-state--warning" hidden>The local catalog is not available.</p>
+            <p id="metadata-state-not-found" class="metadata-state metadata-state--warning" hidden>The selected medium is no longer available.</p>
+            <p id="metadata-state-validation" class="metadata-state metadata-state--warning" hidden>Metadata validation failed.</p>
+            <p id="metadata-state-error" class="metadata-state metadata-state--warning" hidden>Metadata workspace failed with a sanitized local error.</p>
+          </div>
+
+          <div class="metadata-workspace__body">
+            <div class="metadata-form-panel">
+              <label class="metadata-field" for="metadata-title-input">
+                <span>Display title</span>
+                <input id="metadata-title-input" type="text" maxlength="240" autocomplete="off">
+              </label>
+              <p id="metadata-title-fallback" class="metadata-note">
+                No persisted title is present. The catalog fallback label is presentation-only.
+              </p>
+              <p class="metadata-note">
+                Saving catalog metadata does not rename or move files.
+              </p>
+              <p id="metadata-validation-message" class="metadata-validation" role="status"></p>
+            </div>
+
+            <div class="metadata-tags-panel">
+              <label class="metadata-field" for="metadata-tag-search-input">
+                <span>Search canonical tags</span>
+                <input id="metadata-tag-search-input" type="search" autocomplete="off">
+              </label>
+              <div id="metadata-tag-suggestions" class="metadata-tag-suggestions" aria-live="polite"></div>
+              <div class="metadata-selected-heading">
+                <h4>Selected canonical tags</h4>
+                <p id="metadata-selected-count">0 of 32 selected.</p>
+              </div>
+              <div id="metadata-selected-tags" class="metadata-selected-tags" aria-live="polite"></div>
+            </div>
+
+            <form id="metadata-create-tag-form" class="metadata-create-tag-form">
+              <div class="metadata-create-grid">
+                <label class="metadata-field" for="metadata-create-key-input">
+                  <span>Canonical key</span>
+                  <input id="metadata-create-key-input" type="text" autocomplete="off" maxlength="64">
+                </label>
+                <label class="metadata-field" for="metadata-create-name-input">
+                  <span>Display name</span>
+                  <input id="metadata-create-name-input" type="text" autocomplete="off" maxlength="80">
+                </label>
+              </div>
+              <button id="metadata-create-select-button" type="submit">Create and select</button>
+              <p id="metadata-create-status" class="metadata-create-status" role="status"></p>
+            </form>
+          </div>
+
+          <div class="metadata-actions">
+            <button id="metadata-save-button" type="button" disabled>Save metadata</button>
+            <button id="metadata-discard-button" type="button" disabled>Discard changes</button>
+          </div>
+        </section>
       </section>
 
       <section id="library-browser" class="library-browser" aria-labelledby="libraries-title">

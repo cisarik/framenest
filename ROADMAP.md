@@ -13,9 +13,11 @@ The roadmap distinguishes completed foundation, immediate next work, planned pha
 The minimum logical-media and physical-location persistence foundation and
 explicit idempotent import from selected scan candidates now exist on MacBook.
 The persistent display-title and canonical-tag core now exists, and imported
-media can now be reached through a read-only catalog browser with display-title
-search and canonical-tag AND filters. The next implementation priority remains
-manual metadata detail rather than Tauri scaffolding or NUC deployment.
+media can now be reached through a catalog browser with display-title search,
+canonical-tag AND filters, and a manual `Current` metadata workspace for title
+and ordered tag assignment. The next implementation priority remains metadata
+detail expansion, most likely descriptions or adjacent manual fields, rather
+than Tauri scaffolding or NUC deployment.
 
 The near-term convergence sequence is:
 
@@ -23,8 +25,8 @@ The near-term convergence sequence is:
 2. logical media and physical locations;
 3. explicit idempotent import from selected scan candidates;
 4. canonical tags and title/tag metadata;
-5. searchable read-only catalog browser;
-6. manual metadata detail;
+5. searchable catalog browser;
+6. manual title/tag metadata detail;
 7. Cover Studio and derivatives;
 8. persistent premium gallery;
 9. multi-model AI workspace;
@@ -127,7 +129,8 @@ Implemented so far:
 Still required for phase exit:
 
 - Storage volume and series entities beyond identity values
-- Manual metadata detail and durable metadata roundtrip behavior beyond the current read-only catalog browser
+- Manual metadata detail beyond display title and ordered canonical tags
+- Durable metadata roundtrip behavior beyond the current SQLite/API/browser title-tag slice
 - Sidecar contracts
 - Exact roundtrip tests for durable metadata behavior
 
@@ -171,7 +174,7 @@ Implemented so far:
 
 Still required for phase exit:
 
-- Manual metadata detail on top of persistent title/tag data and the read-only catalog browser
+- Manual metadata detail beyond persistent title/tag data and the current catalog browser
 
 The next bounded implementation step should build on imported media records without adding gallery, cover, or filesystem mutation scope prematurely.
 
@@ -200,10 +203,11 @@ Implemented within this phase:
 - explicit idempotent import from selected scan candidates through [ADR-0026](docs/adr/0026-explicit-idempotent-scan-candidate-import.md).
 - persistent display-title and canonical content tags through [ADR-0027](docs/adr/0027-persistent-display-title-and-canonical-tags.md).
 - read-only catalog retrieval, display-title search, canonical-tag AND filters, deterministic ordering, and bounded offset pagination through [ADR-0028](docs/adr/0028-catalog-read-model-and-search-semantics.md).
+- browser manual `Current` metadata workspace for one selected imported medium, including persistent display-title edit/clear, canonical-tag search, selected-tag removal and reordering, explicit canonical-tag creation, dirty/discard protection, and catalog refresh after successful save.
 
 Still unimplemented within this phase:
 
-- browser metadata editor and manual metadata detail;
+- browser metadata fields beyond display title and ordered canonical tags;
 - availability tracking;
 - storage capacity reporting;
 - rebuildable local index persistence;
