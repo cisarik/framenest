@@ -29,7 +29,7 @@ The near-term convergence sequence is:
 3. explicit idempotent import from selected scan candidates;
 4. canonical tags and title/tag metadata;
 5. searchable catalog browser;
-6. manual title/tag metadata detail;
+6. manual title/description/tag metadata detail;
 7. Cover Studio and derivatives;
 8. persistent premium gallery;
 9. multi-model AI workspace;
@@ -133,8 +133,8 @@ Implemented so far:
 Still required for phase exit:
 
 - Storage volume and series entities beyond identity values
-- Manual metadata detail beyond display title and ordered canonical tags
-- Durable metadata roundtrip behavior beyond the current SQLite/API/browser title-tag slice
+- Manual metadata detail beyond display title, plain-text description, and ordered canonical tags
+- Durable metadata roundtrip behavior beyond the current SQLite/API/browser title/description/tag slice
 - Sidecar contracts
 - Exact roundtrip tests for durable metadata behavior
 
@@ -179,7 +179,7 @@ Implemented so far:
 
 Still required for phase exit:
 
-- Manual metadata detail beyond persistent title/tag data and the current catalog browser
+- Manual metadata detail beyond persistent title, description, and tag data and the current catalog browser
 
 The next bounded implementation step should build on imported media records without adding gallery, cover, or filesystem mutation scope prematurely.
 
@@ -208,7 +208,7 @@ Implemented within this phase:
 - explicit idempotent import from selected scan candidates through [ADR-0026](docs/adr/0026-explicit-idempotent-scan-candidate-import.md).
 - persistent display-title and canonical content tags through [ADR-0027](docs/adr/0027-persistent-display-title-and-canonical-tags.md).
 - read-only catalog retrieval, display-title search, canonical-tag AND filters, deterministic ordering, and bounded offset pagination through [ADR-0028](docs/adr/0028-catalog-read-model-and-search-semantics.md).
-- browser manual `Current` metadata workspace for one selected imported medium, including persistent display-title edit/clear, canonical-tag search, selected-tag removal and reordering, explicit canonical-tag creation, dirty/discard protection, and catalog refresh after successful save.
+- browser manual `Current` metadata workspace for one selected imported medium, including persistent display-title edit/clear, optional plain-text description edit/clear, canonical-tag search, selected-tag removal and reordering, explicit canonical-tag creation, dirty/discard protection covering title, description, and tag changes, and catalog refresh after successful save.
 - automatic built-in `Processed` workflow collection entered by the first durable tag save, cleared when all tags are removed, with a virtual `All media` Catalog scope and an optional `Processed` Catalog scope in the packaged browser.
 
 Still unimplemented within this phase:
