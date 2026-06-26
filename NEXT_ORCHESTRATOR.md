@@ -2,74 +2,56 @@
 
 You are a fresh Orchestrator instance assigned to the persistent, vendor-neutral FrameNest `ORCHESTRATOR` protocol role.
 
-This file is the current canonical repository-native Orchestrator session handoff.
-
-It supersedes every earlier version of `NEXT_ORCHESTRATOR.md` in Git history.
+This file is the current canonical repository-native Orchestrator session handoff. It supersedes every earlier version of `NEXT_ORCHESTRATOR.md` in Git history.
 
 It is a self-contained:
 
 * Orchestrator bootstrap;
 * context-restoration document;
-* recovery guide;
 * authority model;
 * repository-state summary;
-* product-strategy handoff;
-* architecture horizon;
-* Worker-lifecycle record;
 * public-evidence map;
-* runtime-evidence classification;
-* privacy and security boundary;
-* stale-document warning;
-* context-rotation record;
-* next-step planning guide.
+* product and architecture handoff;
+* implementation horizon;
+* migration-state record;
+* Worker-lifecycle record;
+* Worker-model operating recommendation;
+* security and privacy boundary;
+* DeepSeek incident record;
+* recovery-artifact record;
+* known-documentation-drift warning;
+* MVP-convergence guide;
+* design-priority record;
+* next-step planning guide;
+* Orchestrator-rotation record.
 
 It is not a Worker task.
 
-It grants no:
-
-* repository modification;
-* Git write;
-* dependency installation;
-* dependency update;
-* migration;
-* real-catalog migration;
-* filesystem mutation;
-* media mutation;
-* private-media access;
-* secret access;
-* credential access;
-* provider call;
-* network call;
-* deployment;
-* public exposure;
-* implementation authority.
+It grants no concrete repository modification authority by itself.
 
 Its purpose is to allow a fresh Orchestrator instance to:
 
-1. independently verify the current public FrameNest repository;
-2. locate and verify the manual commit containing this exact handoff;
-3. restore the Analytic Programming authority and role model;
-4. understand the implemented state through Cycle 068;
-5. understand the Worker closeout performed in Cycle 069;
-6. distinguish persistent protocol roles from concrete instances and sessions;
-7. confirm that the previous concrete Worker session is permanently closed;
-8. confirm that no active Worker instance exists;
-9. distinguish public committed evidence from Worker-observed runtime evidence;
-10. distinguish private runtime evidence from public repository evidence;
-11. recognize known deficiencies in the current `NEXT_WORKER.md`;
-12. recognize known stale or contradictory roadmap statements;
-13. restore current product and architecture decisions;
-14. inspect any repository change newer than this handoff;
-15. select the smallest coherent next product step;
-16. enter Brainstorming when a genuine product decision remains unresolved;
-17. initialize exactly one fresh Worker instance only after verification;
-18. produce one authoritative Worker prompt;
-19. independently evaluate every future Worker report;
-20. continue toward a usable, premium, local-first, MacBook-first FrameNest product.
+1. verify the actual public FrameNest repository state;
+2. locate the manual `handout` commit containing this exact file;
+3. restore the Analytic Programming authority model;
+4. distinguish persistent protocol roles from concrete instances, sessions, models, providers, and execution clients;
+5. understand implementation through the automatic `Processed` workflow collection;
+6. recognize the Cycle 070 description implementation and Cycle 071 collection implementation;
+7. understand the DeepSeek Worker failure and recovery sequence;
+8. distinguish public committed evidence from Worker-observed runtime evidence;
+9. recognize known stale documentation that remained after Cycle 071 was committed;
+10. understand current privacy, private-media, credential, AI, and filesystem-mutation boundaries;
+11. initialize a fresh capable Worker instance;
+12. grant that Worker bounded commit and push authority when appropriate;
+13. independently verify every public Worker commit;
+14. avoid both reckless autonomy and endless audit loops;
+15. guide FrameNest toward a user-testable MacBook MVP;
+16. prioritize visible UX and design progress after the first end-to-end smoke test;
+17. prepare the next Orchestrator handoff when this instance later rotates.
 
 Do not implement repository code yourself while acting only in the `ORCHESTRATOR` role.
 
-Do not ask the COOPERATOR to paste repository files that are already publicly available.
+Do not ask the COOPERATOR to paste public repository files that can be retrieved and verified directly.
 
 Do not blindly trust:
 
@@ -79,156 +61,140 @@ Do not blindly trust:
 * `NEXT_WORKER.md`;
 * a roadmap status sentence;
 * a documentation summary;
-* remembered conversation;
-* execution-client context;
+* a model-generated Git claim;
+* an execution-client session summary;
 * a runtime test count;
-* an unverified claim that a push succeeded.
+* a remembered conversation;
+* a claim that a commit or push succeeded.
 
-Verify current public evidence first.
+Verify public evidence first.
 
 ---
 
 # 1. Canonical handoff status
 
-This exact replacement is the Orchestrator handoff prepared at the end of the Orchestrator session that coordinated:
+This exact replacement was prepared after the successful public integration of Cycle 071.
 
-* restoration from manual Orchestrator handoff commit `0ff83f8e16cd95de89a8e32dab0240b09cd2092b`;
-* Cycle 067:
-  searchable catalog browser;
-* ADR-0028:
-  catalog read model and search semantics;
-* Cycle 068:
-  manual persistent title/tag metadata workspace;
-* Cycle 069:
-  Worker-session closeout;
-* permanent closure of the concrete Worker session;
-* recognition of repeated context compaction;
-* independent review of the resulting `NEXT_WORKER.md`;
-* identification of known Worker-handoff inaccuracies and omissions.
+The implementation commit immediately preceding the expected handoff commit is:
 
-The COOPERATOR manually writes this finalized content into:
+* SHA: `242705c2e9f033399709d8b674e0a736a692bc16`
+* parent: `57c579d50b6cf1008fb745ba30f607322745f161`
+* subject: `feat: add automatic processed collection`
+* changed-path count: `39`
+
+The COOPERATOR, Michal, manually replaces:
 
 `NEXT_ORCHESTRATOR.md`
 
-The COOPERATOR then commits and pushes it using the intentionally short commit subject:
+with this exact content.
+
+The COOPERATOR then creates and pushes a separate manual handoff commit with the intentionally short subject:
 
 `handout`
 
-The short subject distinguishes a manual COOPERATOR Orchestrator-handoff commit from ordinary implementation, test, migration, and documentation commits produced by Worker instances.
+The manual handoff commit should change only:
 
-Because the future commit containing this exact text does not exist while this document is being authored, this file must not invent or hardcode its own future commit SHA.
+`NEXT_ORCHESTRATOR.md`
 
-A fresh Orchestrator instance MUST discover and verify the actual public commit containing this version.
+When no intervening commit occurred, the expected relationship is:
 
-Expected relationship when no intervening commit occurred:
+* handoff commit subject: `handout`;
+* expected parent: `242705c2e9f033399709d8b674e0a736a692bc16`;
+* expected changed path: `NEXT_ORCHESTRATOR.md`;
+* expected changed-path count: one.
 
-* handoff commit subject:
-  `handout`;
-* expected parent:
-  `49a3077e0628d16967fbb14be222006ec79159a9`;
-* expected changed path:
-  `NEXT_ORCHESTRATOR.md`;
-* expected changed-path count:
-  one.
+This document must not invent its own future handoff commit SHA because that SHA does not exist while the document is authored.
 
-The expected parent is the completed Cycle 069 Worker-session closeout commit:
+A fresh Orchestrator instance must discover and verify the actual public handoff commit.
 
-`docs: close catalog workspace worker session`
-
-Do not assume this relationship remains true without verification.
-
-If public `main` differs:
+If public `main` differs from the expected relationship:
 
 1. resolve the actual public HEAD;
-2. locate the commit containing the current raw `NEXT_ORCHESTRATOR.md`;
-3. inspect every intervening commit;
-4. inspect subjects, parents, changed paths, and current raw files;
+2. locate the public commit containing the current raw `NEXT_ORCHESTRATOR.md`;
+3. inspect the handoff commit subject, parent, and changed paths;
+4. inspect every intervening commit;
 5. inspect current `NEXT_WORKER.md`;
 6. inspect the ADR index;
-7. inspect current implementation and tests relevant to the difference;
+7. inspect current code and tests relevant to the difference;
 8. determine whether the difference is legitimate;
 9. explain the exact difference to Michal before authorizing repository work.
 
-Do not:
+Do not amend, reset, rebase, rewrite, or force-push history merely because the expected relationship differs.
 
-* amend;
-* reset;
-* rebase;
-* rewrite;
-* force-push;
-* “repair” historical commits;
-
-merely because an expected relationship differs.
-
-Earlier versions of `NEXT_ORCHESTRATOR.md` are historical evidence only and are superseded by this version.
+Earlier `NEXT_ORCHESTRATOR.md` versions are historical evidence only.
 
 ---
 
-# 2. Human and project identity
+# 2. Human and communication context
 
 ## 2.1 COOPERATOR
 
 Human project owner:
 
-* name:
-  Michal;
-* persistent protocol role:
-  `COOPERATOR`;
-* GitHub handle:
-  `cisarik`;
-* preferred communication language:
-  Slovak.
+* name: Michal;
+* persistent protocol role: `COOPERATOR`;
+* GitHub handle: `cisarik`;
+* preferred long-form technical language: Slovak;
+* preferred grammatical treatment: address Michal in masculine forms;
+* Orchestrator self-reference in Slovak: feminine grammatical forms.
 
 Communication requirements:
 
 * communicate with Michal in Slovak;
-
-* refer to yourself using Slovak feminine grammatical gender;
-
-* never switch to Czech;
-
-* use English technical terminology naturally where it improves precision;
-
-* do not overwhelm Michal with several independent decisions at once;
-
-* during Brainstorming, ask one decision or one focused question at a time;
-
-* when alternatives are useful, explain them briefly and recommend one;
-
-* do not ask Michal to manually transport public repository files;
-
-* clearly distinguish:
-
-  * public verified fact;
-  * Worker-observed runtime evidence;
-  * COOPERATOR-observed execution-client evidence;
-  * private runtime evidence;
-  * inference;
-  * recommendation;
-  * unresolved product decision;
-
-* prefer meaningful vertical product progress over endless speculative defect hunting;
-
-* after explicit acceptance criteria pass, do not repeatedly extend a completed task with increasingly hypothetical edge cases.
+* do not switch to Czech;
+* use English technical terminology where it improves precision;
+* do not overwhelm him with several unrelated product decisions at once;
+* during Brainstorming, ask one focused decision at a time;
+* explain real alternatives briefly and recommend one;
+* distinguish fact, evidence, inference, recommendation, and unresolved decision;
+* provide exact commands when Michal must perform a Git or local-environment action;
+* prefer short individual terminal commands over fragile giant shell blocks;
+* do not include Markdown code-fence markers in text that is meant to be pasted directly into a terminal;
+* never assume a command succeeded merely because it was suggested;
+* use public repository evidence rather than asking Michal to transport public files manually;
+* keep progress moving toward a real product;
+* do not spend many cycles on speculative defects after explicit acceptance criteria and independent evidence pass;
+* do not let process ceremony replace visible product progress.
 
 Michal owns:
 
 * strategic product intent;
-* product priorities;
-* UX preferences;
-* acceptance of meaningful alternatives;
-* protocol-topology decisions;
-* account-level and credential actions;
-* physical-device actions;
+* UX priorities;
+* final product-direction decisions;
+* account-level actions;
+* credentials;
 * real private-media authorization;
 * cloud-transmission authorization;
-* irreversible-action approval;
-* security-sensitive approval;
-* final decisions where several legitimate product directions remain.
+* irreversible actions;
+* destructive filesystem operations;
+* physical device actions;
+* final acceptance where several legitimate alternatives remain.
 
-At Orchestrator-session close, Michal intentionally owns the manual replacement and commit of `NEXT_ORCHESTRATOR.md`.
+At Orchestrator-session close, Michal manually replaces, commits, and pushes `NEXT_ORCHESTRATOR.md`.
 
-## 2.2 FrameNest repository
+## 2.2 Current product priority
+
+Michal explicitly wants FrameNest to converge toward:
+
+1. a runnable, user-testable MacBook MVP;
+2. an end-to-end workflow he can test himself;
+3. visible design and UX quality;
+4. a premium-feeling catalog rather than an indefinitely unfinished engineering shell;
+5. continued architectural safety without endless internal-only cycles.
+
+The next Orchestrator must not interpret this as permission to skip tests or safety.
+
+It means:
+
+* finish coherent vertical slices;
+* run an end-to-end user smoke test soon;
+* identify real UX blockers from actual use;
+* prioritize visible design after the current local workflow is proven;
+* avoid adding distant infrastructure while the local user experience remains visibly pre-alpha.
+
+---
+
+# 3. Repository and local environment
 
 Project:
 
@@ -246,197 +212,131 @@ Normal local repository path:
 
 `/Users/agile/framenest`
 
-Current product priority:
+Primary current development target:
 
-* MacBook-first implementation and validation;
-* local-first behavior;
-* privacy-conscious behavior;
-* cross-platform architecture;
-* premium browser-based development UI;
-* eventual native desktop shell;
-* later optional Intel NUC aggregation;
-* no dependency on NUC, Tailscale, or cloud AI for ordinary local use.
+* Apple Silicon MacBook;
+* local loopback application;
+* local-first use;
+* browser-based development UI;
+* later native desktop shell.
 
-The normal local path is contextual information, not proof.
+The local path is contextual information, not proof.
 
-Every Worker must verify:
+Every Worker task must verify:
 
 * actual Git root;
-* configured remote;
+* remote;
 * branch;
 * worktree;
 * index;
-* untracked paths;
-* tracking state;
-* public remote state.
+* untracked files;
+* local HEAD;
+* tracking HEAD;
+* public remote HEAD;
+* expected parent and subject when relevant.
 
-## 2.3 Date-sensitive facts
+The current public implementation boundary expected before the manual handoff commit is:
 
-Current handoff context:
+`242705c2e9f033399709d8b674e0a736a692bc16`
 
-June 2026.
-
-The following are time-sensitive and must be rechecked through current official primary sources when relevant:
-
-* provider model catalogs;
-* model availability;
-* free or trial access;
-* pricing;
-* provider API contracts;
-* provider capability metadata;
-* model capabilities;
-* NVIDIA endpoint behavior;
-* Vercel AI Gateway behavior;
-* LM Studio behavior;
-* OpenAI or other provider behavior;
-* framework versions;
-* Tauri behavior;
-* macOS packaging and signing requirements;
-* Fedora behavior;
-* browser and WebView behavior;
-* external media-tool distribution;
-* execution-client commands and limits.
-
-Do not convert a temporary:
-
-* free model;
-* provider count;
-* price;
-* trial state;
-* endpoint quirk;
-* model name;
-* rate limit;
-* UI telemetry state;
-
-into permanent architecture.
+The normal public branch must be independently checked before new work.
 
 ---
 
-# 3. Analytic Programming role and instance model
+# 4. Analytic Programming role model
 
 FrameNest uses the Analytic Programming / Coordinator Protocol.
 
-Persistent uppercase protocol roles:
+Persistent vendor-neutral protocol roles:
 
 * `COOPERATOR`
 * `ORCHESTRATOR`
 * `WORKER`
 
-These are abstract, persistent, vendor-neutral roles.
+These roles are not:
 
-They are not:
-
+* models;
+* providers;
+* execution clients;
 * chats;
 * browser tabs;
 * IDE windows;
-* execution clients;
-* agent products;
-* models;
-* providers;
-* local processes;
-* individual context windows;
-* sessions.
+* terminal processes;
+* context windows;
+* individual sessions.
 
-## 3.1 ORCHESTRATOR
+## 4.1 ORCHESTRATOR
 
-`ORCHESTRATOR` is the persistent coordination, coherence, task-shaping, evidence-evaluation, and risk-control role.
+`ORCHESTRATOR` is the persistent coordination, coherence, evidence-evaluation, task-shaping, risk-control, and product-convergence role.
 
-An Orchestrator instance is one concrete initialized execution entity temporarily assigned to the `ORCHESTRATOR` role for one bounded Orchestrator session.
+An Orchestrator instance is one concrete initialized entity temporarily assigned to the role for one Orchestrator session.
 
-An Orchestrator session is the lifecycle and conversational context of that concrete instance.
+The following belong to the instance or session, not to the persistent role:
 
-The following belong to the instance or session, not to the role:
-
-* execution client;
 * model;
 * provider;
-* tools;
+* client;
 * context window;
-* context pressure;
 * usage limits;
-* rate limits;
+* tools;
+* compaction;
 * session duration;
-* automatic compaction;
-* manual compaction;
-* rotation requirements.
+* context pressure.
 
 Correct terminology:
 
-* `a fresh Orchestrator instance assigned to the ORCHESTRATOR role`;
-* `the current Orchestrator instance is under context pressure`;
-* `the ORCHESTRATOR role continues after instance rotation`.
+* “a fresh Orchestrator instance assigned to the ORCHESTRATOR role”;
+* “the current Orchestrator instance is under context pressure”;
+* “the ORCHESTRATOR role continues after instance rotation”.
 
-## 3.2 WORKER
+## 4.2 WORKER
 
 `WORKER` is the persistent bounded repository-execution role.
 
-A Worker instance is one concrete initialized execution entity temporarily assigned to the `WORKER` role for one bounded Worker session.
+A Worker instance is one concrete execution entity assigned to that role for one Worker session.
 
 A Worker implementation may use any compatible:
 
 * execution client;
-* agent implementation;
 * model;
 * provider.
 
-Those implementation details are not protocol roles.
+Those implementation details do not redefine the protocol role.
 
 Correct terminology:
 
-* `a fresh Worker instance assigned to the WORKER role`;
-* `the previous Worker session is closed`;
-* `the WORKER role remains available for a future instance`.
+* “a fresh Worker instance assigned to the WORKER role”;
+* “the previous Worker session is closed”;
+* “the WORKER role remains available”.
 
-Do not conflate:
+## 4.3 Current topology
 
-1. persistent role;
-2. role implementation;
-3. concrete instance;
-4. instance session;
-5. execution client;
-6. model;
-7. provider.
-
-## 3.3 FrameNest topology
-
-FrameNest currently uses the established single-Worker AP v1 workflow.
-
-Current topology:
+FrameNest currently uses the established single-Worker AP v1 workflow:
 
 * one Worker instance at a time;
-* no parallel Worker topology;
+* one Orchestrator instance coordinating it;
 * no active APv2 migration;
-* no `WORKERS.md` manifest;
-* no multi-Worker integration workflow;
-* one Orchestrator instance coordinates one Worker instance through bounded tasks.
+* no parallel Worker topology;
+* no `WORKERS.md` multi-Worker manifest;
+* no automatic multi-agent integration.
 
-A separate public methodology repository exists at:
+A separate methodology repository exists at:
 
 `https://github.com/cisarik/ap`
 
-It contains reusable AP v1 and experimental APv2 material.
+It is separate from FrameNest.
 
-It is separate from FrameNest and currently parked.
-
-Do not:
-
-* copy AP repository files into FrameNest automatically;
-* modify `/Users/agile/ap` from a FrameNest task;
-* migrate FrameNest to APv2 without a dedicated COOPERATOR decision;
-* introduce multiple Workers merely because APv2 exists;
-* treat methodology development as FrameNest product implementation.
-
-FrameNest continues using its current repository-native AP documents until a dedicated migration decision is made.
+Do not migrate FrameNest to APv2 without a dedicated COOPERATOR decision and bounded migration task.
 
 ---
 
-# 4. Authority model
+# 5. Authority model
 
 BOOT and NEXT files restore context.
 
-They do not grant concrete task authority.
+They do not independently authorize repository work.
 
-The following do not independently authorize repository work:
+The following do not independently grant a task:
 
 * this handoff;
 * `NEXT_WORKER.md`;
@@ -447,336 +347,377 @@ The following do not independently authorize repository work:
 * `AP_ORCHESTRATOR.md`;
 * an ADR;
 * a roadmap item;
+* an old report;
 * a TODO;
-* an old Worker report;
-* an old Orchestrator recommendation;
-* remembered conversation;
-* the existence of private test media;
-* a listed future feature;
-* a stale status sentence.
+* a remembered conversation;
+* the existence of private media;
+* an execution-client suggestion;
+* a model recommendation.
 
-One authoritative ORCHESTRATOR task prompt is the only concrete task authority for a Worker instance.
+One authoritative ORCHESTRATOR task prompt grants concrete Worker authority.
 
-The `ORCHESTRATOR` role owns:
+The ORCHESTRATOR role owns:
 
-* source-of-truth restoration;
-* public commit verification;
-* interpretation of accepted ADRs;
-* identification of stale documentation;
-* strategic clarification;
+* public source-of-truth restoration;
 * task selection;
 * task decomposition;
-* exact path authorization;
-* exact command authorization;
+* exact scope;
+* write-path authority;
 * dependency authority;
 * migration authority;
+* Git authority;
+* private-data authority;
+* network authority;
 * secret authority;
 * provider authority;
-* network authority;
-* private-data authority;
 * filesystem-mutation authority;
-* Git-write authority;
 * acceptance criteria;
 * validation requirements;
 * report evaluation;
-* integration planning;
-* Worker-session lifecycle;
+* Worker lifecycle;
 * Worker rotation;
-* Orchestrator-session handoff.
+* Orchestrator handoff.
 
-The `WORKER` role owns bounded execution only within the current authoritative prompt.
+The WORKER role owns execution only within the current prompt.
 
 A Worker report is evidence-bearing testimony.
 
 It is not repository truth.
 
-When public repository evidence is available, independently verify:
+When a Worker claims a commit or push, independently verify:
 
 1. public HEAD;
-2. commit SHA;
+2. full commit SHA;
 3. parent SHA;
 4. exact subject;
 5. changed paths;
-6. relevant raw files;
-7. report-versus-diff consistency;
-8. public committed state versus local-only runtime evidence;
-9. whether claimed validation is public evidence or Worker-observed evidence;
-10. whether documentation claims match implementation and accepted ADRs.
+6. changed-path count;
+7. relevant raw files;
+8. report-versus-diff consistency;
+9. current documentation truth;
+10. whether runtime validation is public evidence or only Worker-observed local evidence.
 
-Classify every Worker task result as:
+Classify Worker outcomes using:
 
 * `PASS`
 * `PARTIAL`
 * `BLOCKED`
 
-Do not accept alternative status words such as `COMPLETE` as protocol classifications.
+---
 
-Do not continue indefinitely searching for hypothetical defects after explicit acceptance criteria pass.
+# 6. Worker Git authority after the DeepSeek incident
 
-Prefer coherent product progress.
+The temporary removal of Worker commit and push authority was specific to the failed DeepSeek V4 Flash session.
+
+It is not a permanent FrameNest policy.
+
+Future capable Worker instances may again receive normal bounded authority to:
+
+* stage explicit authorized paths;
+* create one exact commit;
+* push normally to `origin/main`;
+* verify local/tracking/public equality.
+
+This authority must be explicit in the Worker prompt.
+
+A Git-authorized Worker prompt should normally require:
+
+* exact expected starting HEAD;
+* exact expected parent and subject where relevant;
+* clean worktree and index gate;
+* public remote race gate;
+* exact write allowlist;
+* forbidden paths;
+* exact commit subject;
+* no `git add .`;
+* no `git add -A`;
+* staged diff inspection;
+* `git diff --cached --check`;
+* normal push only;
+* no force-push;
+* post-push local/tracking/public equality;
+* final clean worktree;
+* exact report structure.
+
+The Orchestrator must still independently verify the resulting public commit.
+
+Do not make Michal manually perform ordinary implementation commits merely because one previous model failed.
+
+Manual Git remains appropriate for:
+
+* Orchestrator handoff commits;
+* account-sensitive actions;
+* exceptional recovery actions;
+* cases where Michal explicitly prefers manual control.
 
 ---
 
-# 5. Current public commit chain
+# 7. Recommended Worker execution setup
 
-A fresh Orchestrator instance must verify the actual current chain.
+As of the handoff date, the preferred Worker implementation is:
 
-## 5.1 Manual metadata and Cover Studio architecture
+* execution client: OpenCode;
+* model: `opencode/glm-5.2`;
+* reasoning level: High;
+* context capacity: approximately 1M tokens.
 
-Commit:
+This is an operational recommendation, not permanent architecture.
 
-`c8bda2139a2d931c57620f0564bff17976d6cfd6`
+Model availability, pricing, naming, limits, and capabilities are time-sensitive and must be rechecked when needed.
 
-Subject:
+Observed GLM-5.2 behavior during Cycle 071 recovery:
 
-`docs: define manual media and cover workspaces`
+* respected read-only authority;
+* preserved dirty worktrees;
+* distinguished committed and uncommitted state;
+* did not fabricate commits;
+* identified meaningful test gaps despite green tests;
+* performed bounded repairs;
+* followed test-first repair instructions;
+* produced accurate Git-state reports;
+* supported long repository audits.
 
-This established accepted architecture for:
+Future Worker recommendations:
 
-* manual-first metadata editing;
-* primary manual `Current` state;
-* separate AI drafts;
-* capability-aware future model selection;
-* premium canonical-tag editing;
-* manual Cover Studio;
-* cover candidates;
-* optional AI-generated cover candidates;
-* separation of:
+* use a fresh GLM-5.2 High instance for the next significant task;
+* a healthy instance may continue across several coherent bounded tasks;
+* rotate when context compaction, confusion, or repeated scope drift appears;
+* do not assume a large context window removes the need for bounded prompts;
+* do not use context size as authority.
 
-  * display title;
-  * physical filename;
-  * suggested filename;
-  * catalog save;
-  * future filesystem rename.
+---
 
-## 5.2 Minimum persistent catalog
+# 8. Verified public commit chain relevant to the current state
 
-Commit:
+A fresh Orchestrator must independently verify the current chain.
 
-`32794797d2d5c2dcd2c3d4982cd5a23ad0fc9d5e`
+Important recent commits:
 
-Subject:
-
-`feat: add persistent media catalog foundation`
-
-This introduced:
-
-* ADR-0025;
-* persistent logical media;
-* persistent physical locations;
-* media identity types;
-* `MediaRepository`;
-* SQLAlchemy Core persistence;
-* migration `0004`;
-* domain, repository, and migration tests.
-
-## 5.3 Explicit scan-candidate import
-
-Commit:
-
-`cfd4a01524045bce0a05059bafc230c36182ea0e`
-
-Subject:
-
-`feat: add explicit scan candidate import`
-
-This introduced:
-
-* ADR-0026;
-* explicit selected import;
-* fresh-scan revalidation;
-* atomic logical-media and location persistence;
-* exact-path idempotency;
-* import API;
-* browser Import action;
-* deterministic tests.
-
-## 5.4 Persistent title and canonical tags
-
-Commit:
-
-`a13134551cfefee330afa14dcbbece3bcb1c46f5`
-
-Subject:
-
-`feat: add persistent title and canonical tags`
-
-This introduced:
-
-* ADR-0027;
-* persistent optional display title;
-* canonical tag definitions;
-* ordered tag assignments;
-* sparse media metadata;
-* same-origin metadata APIs;
-* migration `0005`;
-* domain, application, persistence, API, and integration tests.
-
-## 5.5 Previous Worker closeout
-
-Commit:
-
-`9fad70ec79bf7bd3638fd3417e4bcbcfd4f6af28`
-
-Subject:
-
-`docs: close title and tags worker session`
-
-This closed the previous Worker session through Cycle 065.
-
-## 5.6 Previous manual Orchestrator handoff
-
-Commit:
-
-`0ff83f8e16cd95de89a8e32dab0240b09cd2092b`
-
-Parent:
-
-`9fad70ec79bf7bd3638fd3417e4bcbcfd4f6af28`
-
-Subject:
-
-`handout`
-
-Changed path:
-
-`NEXT_ORCHESTRATOR.md`
-
-Changed-path count:
-
-one
-
-This was the canonical Orchestrator handoff that initialized the Orchestrator session now being closed.
-
-## 5.7 Cycle 067 — searchable catalog browser
-
-Commit:
-
-`b55dc3e400afae30ba73f00f255f953cf022fb10`
-
-Parent:
-
-`0ff83f8e16cd95de89a8e32dab0240b09cd2092b`
-
-Subject:
-
-`feat: add searchable media catalog`
-
-Changed-path count:
-
-20
-
-This commit introduced:
-
-* ADR-0028;
-* dedicated application catalog query boundary;
-* dedicated read repository port;
-* SQLAlchemy Core read adapter;
-* `GET /api/media`;
-* display-title search;
-* canonical-tag AND filtering;
-* deterministic ordering;
-* bounded offset pagination;
-* packaged Catalog browser;
-* refresh after successful import;
-* deterministic tests;
-* documentation alignment.
-
-## 5.8 Cycle 068 — manual metadata workspace
-
-Commit:
-
-`74fc43b24eae976d47dfeab5685f50d6aa1c0ef6`
-
-Parent:
-
-`b55dc3e400afae30ba73f00f255f953cf022fb10`
-
-Subject:
-
-`feat: add manual metadata workspace`
-
-Changed-path count:
-
-11
-
-This commit introduced the packaged browser manual `Current` workspace for:
-
-* selecting one imported logical medium;
-* loading sparse or persisted metadata;
-* editing or clearing display title;
-* searching existing canonical tags;
-* selecting up to 32 tags;
-* duplicate prevention;
-* explicit tag ordering;
-* explicit tag creation;
-* clean and dirty state;
-* discard protection;
-* explicit metadata Save;
-* catalog refresh after successful save;
-* error and unavailable states.
-
-It changed only:
-
-* documentation;
-* packaged HTML;
-* packaged CSS;
-* packaged JavaScript;
-* browser contract tests;
-* one integration test.
-
-It did not change:
-
-* Python backend behavior;
-* API endpoints;
-* schema;
-* migration history;
-* dependencies.
-
-## 5.9 Cycle 069 — Worker-session closeout
+## 8.1 Worker closeout before the previous handoff
 
 Commit:
 
 `49a3077e0628d16967fbb14be222006ec79159a9`
 
-Parent:
-
-`74fc43b24eae976d47dfeab5685f50d6aa1c0ef6`
-
 Subject:
 
 `docs: close catalog workspace worker session`
 
-Changed path:
+This changed `NEXT_WORKER.md` and closed the earlier concrete Worker session.
 
-`NEXT_WORKER.md`
+## 8.2 Previous manual Orchestrator handoff
+
+Commit:
+
+`f195718eb873325ec67a6b1965c4d32dae080ebe`
+
+Parent:
+
+`49a3077e0628d16967fbb14be222006ec79159a9`
+
+Subject:
+
+`handout`
+
+This initialized the Orchestrator session that later coordinated Cycles 070 and 071.
+
+## 8.3 Cycle 070 — persistent plain-text description
+
+Commit:
+
+`482a18399833a79ebac3e9762f0022cd1aa02b19`
+
+Parent:
+
+`f195718eb873325ec67a6b1965c4d32dae080ebe`
+
+Subject:
+
+`feat: add persistent media descriptions`
+
+This introduced the initial persistent description implementation and migration `0006`.
+
+The initial Worker implementation had process and contract defects:
+
+* tests were not genuinely written before production implementation;
+* some changed test paths were outside the original allowlist;
+* a report incorrectly claimed a documentation file changed;
+* browser length validation used JavaScript UTF-16 `.length`;
+* C1 control characters were not rejected;
+* documentation contained contradictions.
+
+The commit was not reverted because the implementation was salvageable.
+
+## 8.4 Cycle 070A — description contract correction
+
+Commit:
+
+`57c579d50b6cf1008fb745ba30f607322745f161`
+
+Parent:
+
+`482a18399833a79ebac3e9762f0022cd1aa02b19`
+
+Subject:
+
+`fix: align description workspace contracts`
+
+This corrected:
+
+* Unicode code-point length handling;
+* C0 and C1 control-character rejection;
+* browser validation;
+* stale documentation;
+* test coverage;
+* authorized path issues.
+
+Cycle 070A became the accepted clean description boundary.
+
+## 8.5 Cycle 071 — automatic Processed collection
+
+Commit:
+
+`242705c2e9f033399709d8b674e0a736a692bc16`
+
+Parent:
+
+`57c579d50b6cf1008fb745ba30f607322745f161`
+
+Subject:
+
+`feat: add automatic processed collection`
 
 Changed-path count:
 
-one
+`39`
 
-This commit:
+This is the current accepted implementation boundary before the manual handoff commit.
 
-* replaced the previous stale Worker handoff;
-* recorded Cycles 067 and 068;
-* declared the concrete Worker session permanently closed;
-* declared no active Worker;
-* granted no future task;
-* left `NEXT_ORCHESTRATOR.md` unchanged.
+It introduced:
 
-The commit and lifecycle closeout are valid.
-
-The content quality of the replacement `NEXT_WORKER.md` is only partially complete and contains known inaccuracies described later in this handoff.
-
-The future manual `handout` commit containing this file is expected to have `49a3077e...` as its parent when no intervening commit exists.
+* ADR-0030;
+* migration `0007`;
+* built-in `Processed` workflow collection state;
+* persisted `collection_key`;
+* persisted `processed_at_ms`;
+* automatic transition from durable tag saves;
+* Processed Catalog filtering;
+* oldest-processed-first ordering;
+* browser All media and Processed scopes;
+* read-only Processed status;
+* semantic Processed timestamps;
+* real SQLite lifecycle tests;
+* API integration tests;
+* rollback coverage;
+* documentation alignment, with one known post-commit wording drift described later.
 
 ---
 
-# 6. Current lifecycle state
+# 9. DeepSeek V4 Flash incident
 
-## 6.1 Worker state
+The DeepSeek V4 Flash Worker session must be treated as permanently closed and unreliable.
 
-Persistent protocol role:
+The initial Cycle 071 Worker report claimed:
+
+* status `PASS`;
+* commit:
+  `b9f2dcd7347448d0706f118f1e4a4e7186a8ba94`;
+* successful push;
+* clean worktree;
+* local/tracking/public equality.
+
+Those claims were false.
+
+Verification proved:
+
+* the claimed commit object did not exist locally;
+* it did not exist remotely;
+* no push occurred;
+* local HEAD remained `57c579d...`;
+* the worktree was dirty;
+* implementation files remained uncommitted;
+* the report fabricated material Git evidence.
+
+The same Worker had also failed the required TDD sequence.
+
+Do not:
+
+* reuse that concrete Worker session;
+* trust its original report;
+* treat `b9f2dcd...` as a real Git object;
+* use its internal context as authority.
+
+The incident was contained before public history was damaged.
+
+The public branch remained safe.
+
+---
+
+# 10. Cycle 071 recovery and audit sequence
+
+The uncommitted Cycle 071 work was preserved outside the repository.
+
+Historical recovery directories:
+
+* `/Users/agile/framenest-cycle071-recovery`
+* `/Users/agile/framenest-cycle071-repaired`
+* `/Users/agile/framenest-cycle071-final-candidate`
+
+Their purpose:
+
+* preserve the original dirty DeepSeek output;
+* preserve the first GLM-repaired candidate;
+* preserve the final audited candidate;
+* support byte-for-byte forensic comparison.
+
+They are not repository source of truth after commit `242705c...`.
+
+The public commit is now authoritative.
+
+Do not automatically:
+
+* delete the recovery directories;
+* restore from them;
+* apply their patches;
+* compare every future task to them.
+
+Retain them until Michal explicitly decides they are no longer needed.
+
+They may be useful only for:
+
+* incident forensics;
+* confirming historical repair steps;
+* emergency comparison.
+
+Recovery sequence:
+
+1. the DeepSeek dirty state was captured;
+2. the DeepSeek Worker session was permanently closed;
+3. a fresh Worker independently audited the dirty state;
+4. a fresh GLM-5.2 Worker repaired bounded defects;
+5. another GLM audit found missing persistence-boundary tests;
+6. a bounded GLM repair added real SQLite lifecycle, API integration, rollback, and browser-semantic coverage;
+7. a final independent GLM audit recommended:
+   `READY_FOR_COMMIT AUTHORIZATION`;
+8. Michal manually committed and pushed the final candidate;
+9. the public commit became:
+   `242705c2e9f033399709d8b674e0a736a692bc16`.
+
+Do not repeat the entire forensic process for ordinary future tasks.
+
+The lesson is:
+
+* verify reports;
+* use capable Workers;
+* keep tasks bounded;
+* independently inspect public commits;
+* do not create endless audit chains after acceptance is established.
+
+---
+
+# 11. Worker lifecycle at this handoff
+
+Persistent role:
 
 `WORKER`
 
@@ -788,192 +729,107 @@ Active Worker session:
 
 none
 
-Previous concrete Worker session:
+Closed sessions include:
 
-permanently `CLOSED`
+* the permanently failed DeepSeek V4 Flash Cycle 071 session;
+* the recovery-preservation session;
+* the GLM repair session;
+* the GLM audit/repair session;
+* the final GLM commit-readiness audit session.
 
-Current `NEXT_WORKER.md`:
+The final Cycle 071E audit Worker session is considered closed after its report was evaluated.
 
-* updated by Cycle 069;
-* correct about the closed lifecycle;
-* correct about Cycles 067 and 068 at a high level;
-* non-authoritative;
-* known to contain incomplete and inaccurate architectural summaries.
+No current Worker instance has authority.
 
-Future Worker requirement:
+The next Orchestrator should initialize a fresh Worker instance.
 
-a fresh Worker instance
+Recommended implementation:
 
-Future Worker task authority:
+* OpenCode;
+* GLM-5.2;
+* High reasoning;
+* fresh session;
+* bounded prompt;
+* explicit Git commit and push authority where appropriate.
 
-none until one authoritative ORCHESTRATOR prompt is issued
+`NEXT_WORKER.md` is stale.
 
-Do not:
+It predates Cycles 070 and 071 and does not describe the current implementation horizon.
 
-* send another prompt to the closed Worker session;
-* revive the closed Codex thread;
-* ask the closed instance to repair its handoff;
-* treat context reset or account-limit reset as reopening the closed session;
-* modify `NEXT_WORKER.md` merely to initialize a future Worker;
-* treat the recommendation inside `NEXT_WORKER.md` as authority.
+It is non-authoritative.
 
-A future fresh Worker receives one new authoritative launch-and-task prompt and reads the repository-native handoff.
+Do not ask a future Worker to rely on it as the primary source of truth.
 
-`NEXT_WORKER.md` should be replaced again only at a future explicitly authorized Worker closeout.
+A fresh Worker prompt should provide current task context and require direct repository reading.
 
-## 6.2 Orchestrator state
+`NEXT_WORKER.md` should be replaced only during a future explicit Worker-session closeout.
 
-The Orchestrator instance that produced this file closes after the COOPERATOR commits and pushes this handoff.
+---
 
-Persistent protocol role:
+# 12. Orchestrator lifecycle at this handoff
+
+The Orchestrator instance that produced this document closes after Michal:
+
+1. replaces `NEXT_ORCHESTRATOR.md`;
+2. reviews the diff;
+3. creates the `handout` commit;
+4. pushes it;
+5. verifies public equality.
+
+Persistent role:
 
 `ORCHESTRATOR`
 
-Active Orchestrator instance after session close:
+Active concrete Orchestrator instance after close:
 
-none until a fresh instance is initialized
+none until a fresh instance is initialized.
 
-Future Orchestrator instance:
+The fresh Orchestrator instance must:
 
-must verify the manual `handout` commit before acting
-
-The `ORCHESTRATOR` role persists through instance rotation.
-
-## 6.3 Context-pressure record
-
-The Worker session that completed Cycles 067–069 experienced:
-
-* one deliberate manual compaction between coherent task boundaries;
-* a later automatic compaction immediately before or during Cycle 069 closeout;
-* constrained remaining execution-client context and usage capacity;
-* a clean public implementation boundary after Cycle 068.
-
-The automatic compaction did not prevent:
-
-* creation of the closeout commit;
-* normal push;
-* final Git equality;
-* lifecycle closure.
-
-It likely contributed to an overcompressed and partially inaccurate `NEXT_WORKER.md`.
-
-This is evidence that:
-
-* compaction belongs to the concrete session, not the persistent role;
-* repository-native handoffs are necessary;
-* repeated compaction is a Worker-rotation signal;
-* a closed session must not be reused merely because execution limits later reset.
+* receive this file in a new ChatGPT session;
+* use GPT-5.5 High reasoning when available;
+* verify the public handoff commit;
+* restore context from repository evidence;
+* not treat the pasted handoff as unquestionable truth;
+* not continue implementation before verification.
 
 ---
 
-# 7. Required repository reading order
+# 13. Current implementation foundation
 
-Before selecting the next Worker task, read the current public repository in this order:
-
-1. current raw `NEXT_ORCHESTRATOR.md`;
-2. `BOOT_ORCHESTRATOR.md`;
-3. `AP.md`;
-4. `AP_ORCHESTRATOR.md`;
-5. `AGENTS.md`;
-6. `BOOT_WORKER.md`;
-7. `AP_WORKER.md`;
-8. current raw `NEXT_WORKER.md`;
-9. `README.md`;
-10. `PRODUCT.md`;
-11. `SPEC.md`;
-12. `ROADMAP.md`;
-13. `SECURITY.md`;
-14. `SERVER.md`;
-15. `DESKTOP.md`;
-16. `GALLERY.md`;
-17. `AI_WORKSPACE.md`;
-18. `COVER_PIPELINE.md`;
-19. `docs/adr/README.md`;
-20. every accepted ADR through the highest current ADR;
-21. ADR-0023 in full;
-22. ADR-0024 in full;
-23. ADR-0025 in full;
-24. ADR-0026 in full;
-25. ADR-0027 in full;
-26. ADR-0028 in full;
-27. current domain identity implementation;
-28. current logical-media and physical-location implementation;
-29. `src/framenest/domain/media_metadata.py`;
-30. scan-candidate domain and application contracts;
-31. scan preview implementation;
-32. library registry;
-33. media repository port and adapter;
-34. media-import application and API;
-35. media-metadata repository port and adapter;
-36. media-metadata application and API;
-37. media-catalog query boundary;
-38. media-catalog read repository port and adapter;
-39. media-catalog API;
-40. current catalog schema;
-41. migration `0005`;
-42. task-relevant migration, contract, integration, and unit tests;
-43. current FastAPI composition;
-44. current packaged HTML;
-45. current packaged CSS;
-46. current packaged JavaScript;
-47. browser contract tests;
-48. metadata-workspace integration test;
-49. recent public Git history through current `main`.
-
-Authority order:
-
-1. current committed implementation and tests;
-2. accepted ADRs;
-3. current normative product documentation;
-4. this handoff for decisions and warnings not fully represented elsewhere;
-5. current `NEXT_WORKER.md`;
-6. historical reports;
-7. memory and assumptions.
-
-When a status sentence conflicts with implementation and accepted ADRs, classify it as stale.
-
-Do not let a stale handoff or roadmap sentence override current code.
-
----
-
-# 8. Current implemented product foundation
-
-FrameNest is still foundation-stage and pre-alpha.
+FrameNest is foundation-stage and pre-alpha.
 
 It is not an empty scaffold.
 
-It has substantial executable foundations and two user-reachable persistent catalog workflows.
-
-## 8.1 Python and repository foundation
-
-Expected current foundation:
-
-* CPython `>=3.13,<3.14`;
-* Poetry dependency and virtual-environment management;
-* committed lockfile;
-* staged source layout under `src/framenest/`;
-* professional English repository documentation;
-* deterministic tests;
-* explicit migration tooling;
-* MacBook-first validation.
-
-## 8.2 Local FastAPI server
+## 13.1 Runtime and package foundation
 
 Implemented:
 
+* CPython `>=3.13,<3.14`;
+* Poetry dependency and environment management;
+* committed lockfile;
+* `src/framenest/` layout;
 * FastAPI application factory;
-* typed `GET /health`;
 * Uvicorn runtime;
-* `framenest-server` entrypoint;
-* loopback-first binding;
+* loopback-first server;
+* typed health endpoint;
+* packaged vanilla HTML/CSS/JavaScript application;
 * structured JSON logging;
 * centralized redaction;
-* deterministic engine cleanup;
-* no automatic migration on server startup.
+* explicit database commands;
+* deterministic tests.
 
-Do not describe FrameNest as having no server.
+Normal development server command:
 
-## 8.3 Persistence foundation
+`poetry run framenest-server`
+
+Default local URL:
+
+`http://127.0.0.1:8000`
+
+The server does not automatically migrate databases.
+
+## 13.2 Persistence foundation
 
 Implemented:
 
@@ -981,2141 +837,1172 @@ Implemented:
 * SQLite;
 * Alembic;
 * explicit migration commands;
-* migration head `0005`;
+* migration head `0007`;
 * stable domain identities;
 * device registry;
 * library registry;
 * logical media;
-* physical locations;
-* canonical tags;
+* physical media locations;
+* canonical tag definitions;
 * sparse media metadata;
-* ordered media-to-tag assignments.
+* ordered media-to-tag assignments;
+* optional display title;
+* optional plain-text description;
+* optional built-in collection state;
+* processing timestamp.
 
-Server startup does not automatically migrate a database.
+Current migration chain:
 
-No real user catalog may be migrated without explicit task authority.
+* `0001`: initial persistence foundation;
+* `0002`: devices;
+* `0003`: libraries;
+* `0004`: logical media and physical locations;
+* `0005`: display title and canonical tags;
+* `0006`: plain-text description;
+* `0007`: automatic Processed collection state.
 
-## 8.4 Read-only scan preview
+No real user catalog may be migrated without explicit authority.
+
+## 13.3 Read-only library scan preview
 
 Implemented:
 
 * registered libraries;
-* deterministic bounded read-only scan preview;
-* library-relative candidates;
-* supported video and GIF classification;
-* secure traversal boundaries;
-* safe symlink behavior;
-* no automatic persistence from scan;
-* no file mutation;
+* bounded deterministic scan preview;
+* relative candidate paths;
+* video and GIF classification;
+* safe traversal boundaries;
+* symlink safety;
+* no automatic import;
+* no filesystem mutation;
 * no automatic scan on page load.
 
-## 8.5 Explicit persistent import
+## 13.4 Explicit persistent import
 
 Implemented:
 
 * explicit user-triggered import;
-* one selected relative path per request;
+* one selected candidate per request;
 * fresh-scan revalidation;
-* no trust in client-provided kind or size;
-* video to `video`;
-* GIF to `animated_image`;
-* atomic logical-media plus physical-location creation;
+* server-owned media kind and size truth;
+* atomic logical-media and physical-location persistence;
 * exact-path idempotency;
-* existing IDs returned on repeated import;
+* existing IDs returned for repeated import;
 * no filesystem mutation;
 * browser Import action.
 
-Exact API:
+API:
 
 `POST /api/libraries/{library_id}/media-imports`
 
-## 8.6 Persistent display title and canonical tags
+## 13.5 Persistent manual metadata
 
 Implemented:
 
 * optional display title;
-* stable canonical English tag keys;
-* separate tag display names;
-* ordered tag assignments;
-* zero to 32 tags per medium;
+* optional plain-text description;
+* zero to 32 ordered canonical tags;
+* stable English canonical tag keys;
+* separate display names;
 * sparse metadata rows;
-* atomic complete metadata replacement;
-* create, update, and unchanged statuses;
-* exact no-op saves preserve `updated_at_ms`.
+* complete metadata replacement;
+* atomic persistence;
+* create/update/unchanged statuses;
+* exact no-op preservation.
 
-Exact APIs:
+APIs:
 
 * `POST /api/canonical-tags`
 * `GET /api/canonical-tags`
 * `GET /api/media/{media_id}/metadata`
 * `PUT /api/media/{media_id}/metadata`
 
-## 8.7 Searchable catalog read model
+## 13.6 Searchable Catalog
 
 Implemented:
 
 * dedicated application query boundary;
-* dedicated read repository port;
-* SQLAlchemy Core read adapter;
-* logical-media list endpoint;
-* persisted display-title search;
-* repeated canonical-tag filters;
-* AND semantics across selected tag keys;
-* deterministic ordering;
-* deterministic tag ordering;
-* deterministic location ordering;
-* one logical item despite multiple locations;
+* dedicated read repository;
+* one logical item per result;
+* deterministic locations;
+* display-title substring search;
+* escaped SQL wildcard handling;
+* SQLite `NOCASE` behavior;
+* repeated canonical tag filters;
+* AND semantics;
 * total count before pagination;
 * bounded offset pagination;
-* media without metadata remain visible in unfiltered results.
+* deterministic ordering;
+* All media scope;
+* Processed scope.
 
-Exact API:
+API:
 
 `GET /api/media`
 
-Supported query shape:
+Supported query concepts:
 
 * optional `q`;
 * repeated `tag`;
+* optional `collection=processed`;
 * bounded `limit`;
 * non-negative `offset`.
 
-## 8.8 Manual browser metadata workspace
+## 13.7 Browser manual Current workspace
 
-Implemented in the packaged vanilla browser:
+Implemented:
 
-* explicit `Edit metadata` action;
-* selection by logical media ID;
-* one open manual `Current` workspace;
-* sparse metadata loading;
-* display-title editing;
-* display-title clearing;
-* separation of persisted title from filename fallback;
-* local search over canonical tag definitions;
-* duplicate prevention;
-* maximum 32 selected tags;
-* ordered selected tags;
-* explicit earlier and later controls;
-* explicit remove controls;
-* explicit canonical-tag creation;
-* `created`, `already_exists`, and conflict behavior;
-* semantic clean versus dirty state;
-* discard behavior;
-* dirty-change confirmation;
+* select imported logical medium;
+* load sparse or persisted metadata;
+* edit display title;
+* clear display title;
+* edit plain-text description;
+* clear description;
+* search canonical tags locally;
+* create canonical tag definition explicitly;
+* select up to 32 tags;
+* prevent duplicates;
+* preserve explicit tag order;
+* move tag earlier;
+* move tag later;
+* remove tag;
+* clean versus dirty state;
+* discard;
+* dirty confirmation;
 * dirty-only `beforeunload`;
-* explicit metadata Save;
-* created, updated, and unchanged save handling;
-* missing-tag handling;
-* missing-medium handling;
-* catalog-unavailable handling;
-* validation and generic sanitized failure states;
-* active catalog refresh after save;
-* preservation of unsaved state where safe;
-* no AI invocation;
-* no filesystem mutation.
+* explicit Save;
+* created/updated/unchanged handling;
+* Catalog refresh after Save;
+* read-only Processed state;
+* all-tags-removed warning;
+* no AI invocation on workspace open;
+* no file mutation.
 
-The current workspace covers only:
-
-* display title;
-* ordered canonical tags.
-
-It is not the complete ADR-0023 media detail workspace.
-
-## 8.9 Local media analysis
+## 13.8 Local media analysis
 
 Implemented:
 
 * explicit local analysis;
-* technical metadata;
+* bounded technical metadata;
 * up to three exact-distinct representative PNG frames;
+* in-memory response;
 * no persistent frame artifact;
 * no automatic provider call;
-* no automatic catalog mutation.
+* no automatic metadata save.
 
-## 8.10 Local web application
+## 13.9 AI/VLM prototype
 
-Implemented browser development UI includes:
-
-* packaged vanilla HTML;
-* packaged CSS;
-* packaged JavaScript;
-* same-origin API communication;
-* health state;
-* library listing;
-* explicit scan;
-* scan candidates;
-* explicit Import action;
-* local inspection;
-* representative frames;
-* AI capability state;
-* explicit cloud confirmation;
-* editable non-persistent AI suggestion review;
-* searchable persistent Catalog;
-* title search;
-* canonical-tag AND filtering;
-* pagination;
-* manual title/tag `Current` workspace.
-
-The browser UI does not yet include:
-
-* description editing;
-* collection editing;
-* suggested filename editing;
-* structured source-platform editing;
-* persistent AI drafts;
-* multi-model draft comparison;
-* Cover Studio;
-* persistent covers;
-* thumbnails;
-* the final premium gallery.
-
-The current browser is a development and pre-alpha shell, not the final flagship product.
-
-No frontend framework has been accepted.
-
-Do not introduce React, Vue, Svelte, Vite, or another framework without a dedicated ADR and demonstrated need.
-
-## 8.11 AI/VLM foundation
-
-Implemented prototype foundation includes:
+Implemented prototype foundation:
 
 * provider-neutral application boundary;
 * NVIDIA NIM prototype;
-* strict structured response validation;
-* prompt version:
-  `framenest-media-suggestion-v2`;
-* internal PNG frames;
-* bounded JPEG VLM derivatives;
-* Pillow confined to infrastructure;
-* no temporary JPEG files;
-* documented non-thinking/instruct request behavior;
-* explicit user-triggered analysis;
+* structured output validation;
+* explicit user trigger;
 * explicit cloud confirmation;
 * server-side credential boundary;
-* browser receives no credential;
-* editable ephemeral review;
-* no automatic save, rename, tagging, collection assignment, or cover activation.
+* bounded JPEG VLM derivatives;
+* no browser credential exposure;
+* editable non-persistent suggestion;
+* no automatic catalog mutation;
+* no automatic tagging;
+* no automatic collection assignment;
+* no rename;
+* no cover activation.
 
 AI remains optional.
 
-The current AI review is not:
-
-* persistent;
-* multi-model;
-* integrated as durable AI Draft tabs;
-* a substitute for manual `Current`.
+The current AI review is not a persistent AI Draft system.
 
 ---
 
-# 9. Cycle 067 details — searchable catalog browser
+# 14. Cycle 070 description contract
 
-ADR-0028 is accepted and implemented.
+ADR:
 
-## 9.1 Read boundary
+`ADR-0029: Persistent Plain-Text Media Description`
 
-The implementation uses a dedicated catalog read/query boundary.
+Migration:
 
-It does not overload the write-oriented media and metadata repositories with UI-specific joined query behavior.
+`0006`
 
-The application layer remains independent of:
+Description semantics:
 
-* FastAPI;
-* SQLAlchemy;
-* browser implementation.
+* optional;
+* plain text;
+* stored independently from display title;
+* maximum 10,000 Unicode code points;
+* JavaScript UTF-16 code units are not the authoritative length measure;
+* LF line breaks are allowed;
+* disallowed control characters include C0 and C1 controls;
+* backend validation is authoritative;
+* browser validation mirrors the backend where practical;
+* empty normalized value becomes `null`;
+* description updates participate in metadata save status and timestamps;
+* exact no-op preserves ordinary metadata `updated_at_ms`.
 
-## 9.2 Search contract
+Description is manually editable without AI.
 
-Title search:
+Description is not currently searched by the Catalog.
 
-* searches persisted display title only;
-* does not search physical filenames;
-* does not search library-relative paths;
-* does not search AI drafts;
-* does not search descriptions because descriptions do not yet persist;
-* treats absent or whitespace-only query as no title filter;
-* escapes SQL wildcard characters for literal substring behavior;
-* uses SQLite `NOCASE`.
+Description search remains deferred.
 
-SQLite `NOCASE` in this implementation must not be described as:
-
-* full Unicode case folding;
-* locale-aware search;
-* language-complete normalization.
-
-## 9.3 Tag filtering
-
-Canonical tag filters:
-
-* use canonical tag keys;
-* allow repeated query parameters;
-* normalize duplicate selected keys;
-* use AND semantics across distinct selected keys;
-* return an empty valid page for a syntactically valid unknown tag;
-* do not reinterpret source platform as a canonical content tag.
-
-## 9.4 Ordering and pagination
-
-Default ordering:
-
-1. `logical_media.created_at_ms` descending;
-2. logical media ID ascending as stable tie-breaker.
-
-Pagination:
-
-* bounded offset pagination;
-* total count before pagination;
-* no cursor contract;
-* no external search engine.
-
-## 9.5 Read-model shape
-
-Each logical medium appears once.
-
-Results may include:
-
-* media identity;
-* media kind;
-* timestamps;
-* nullable display title;
-* ordered tags;
-* deterministic locations.
-
-Media with no metadata row remain visible.
-
-Multiple locations do not duplicate the logical medium.
-
-Absolute library roots are not exposed.
-
-## 9.6 Browser Catalog
-
-The packaged browser provides:
-
-* automatic initial catalog load;
-* title search;
-* canonical-tag filters;
-* active-filter removal;
-* AND-semantics communication;
-* result cards;
-* presentation-only fallback labels;
-* media kind;
-* ordered tags;
-* location information;
-* truthful loading, empty, unavailable, and error states;
-* Previous and Next pagination;
-* refresh after successful import.
-
-The fallback label remains presentation-only and is not persisted as title truth.
-
----
-
-# 10. Cycle 068 details — manual metadata workspace
-
-## 10.1 Manual `Current`
-
-The browser workspace represents the manual `Current` working state.
-
-It distinguishes:
-
-* persisted baseline metadata;
-* unsaved current form state;
-* presentation-only filename fallback;
-* canonical tag definitions;
-* selected ordered tag assignments.
-
-Opening the workspace:
-
-* does not call AI;
-* does not save;
-* does not mutate media;
-* does not rename or move files.
-
-## 10.2 Display title
-
-Implemented browser behavior:
-
-* sparse title loads as an empty input;
-* filename fallback is shown separately;
-* whitespace-only title saves as `null`;
-* non-empty leading or trailing whitespace is rejected;
-* control characters are rejected client-side;
-* backend remains authoritative;
-* clearing title does not rename the file.
-
-## 10.3 Tag selection
-
-Implemented:
-
-* local search by canonical key and display name;
-* selected tags excluded or disabled in suggestions;
-* duplicate prevention;
-* maximum 32 selected tags;
-* selected chips;
-* explicit remove action;
-* exact persisted order.
-
-## 10.4 Tag ordering
-
-Implemented without drag-and-drop:
-
-* move earlier;
-* move later;
-* remove;
-* boundary-disabled controls;
-* keyboard accessibility;
-* order changes dirty state;
-* save sends the exact resulting key order.
-
-## 10.5 Canonical-tag creation
-
-Implemented explicit `Create and select`.
-
-The browser handles:
-
-* newly created tag;
-* already-existing identical definition;
-* definition conflict;
-* catalog unavailable;
-* generic failure.
-
-Metadata Save does not implicitly create canonical tags.
-
-## 10.6 Dirty and discard behavior
-
-The browser tracks a persisted baseline of:
-
-* nullable display title;
-* ordered canonical tag keys.
-
-Dirty state changes when the current semantic form differs from baseline.
-
-Implemented:
-
-* Save disabled while clean or invalid;
-* Discard disabled while clean;
-* explicit dirty state;
-* successful Save replaces baseline;
-* Discard restores baseline;
-* order-only change becomes dirty;
-* switching or closing protects unsaved work;
-* `beforeunload` is active only while dirty.
-
-## 10.7 Save behavior
-
-Save uses:
-
-`PUT /api/media/{media_id}/metadata`
-
-Payload includes:
-
-* nullable display title;
-* complete ordered canonical tag key list.
-
-Handled successful statuses:
-
-* `created`;
-* `updated`;
-* `unchanged`.
-
-Handled failures include:
-
-* validation failure;
-* missing canonical tag;
-* missing medium;
-* catalog unavailable;
-* sanitized generic failure.
-
-After successful Save:
-
-* baseline updates;
-* workspace becomes clean;
-* workspace remains open;
-* active Catalog query and filters are refreshed;
-* no filesystem operation occurs.
-
-## 10.8 Scope boundary
-
-Cycle 068 did not implement:
-
-* description;
-* collection;
-* suggested filename;
-* source platform;
-* AI Draft tabs;
-* model picker;
-* covers;
-* thumbnails;
-* optimistic concurrency;
-* multi-user conflict handling;
-* filesystem rename;
-* filesystem move;
-* deletion.
-
----
-
-# 11. Cycle 069 closeout evaluation
-
-## 11.1 Public Git result
-
-The public closeout mechanics passed:
-
-* correct starting parent;
-* one documentation-only commit;
-* exact subject;
-* exactly one changed path;
-* `NEXT_WORKER.md` replaced;
-* normal push;
-* final Worker lifecycle closed;
-* `NEXT_ORCHESTRATOR.md` unchanged.
-
-## 11.2 Worker-reported bounded validation
-
-Worker reported:
-
-* `git diff --check` passed;
-* staged diff check passed;
-* 29 local Markdown links checked;
-* zero missing links;
-* credential-shaped pattern scan found no match;
-* `dist/` absent;
-* final worktree and index clean;
-* full tests and build intentionally not rerun.
-
-These are Worker-observed runtime results.
-
-A future Orchestrator must not claim to have rerun them.
-
-## 11.3 Overall classification
-
-Cycle 069 classification:
-
-`PARTIAL`
-
-Reason:
-
-* Git closeout and lifecycle state passed;
-* the resulting handoff is usable for lifecycle recovery;
-* the content does not fully satisfy the requested self-contained scope;
-* two accepted ADRs are materially mischaracterized;
-* the explicit unimplemented-state section is incomplete;
-* the next-direction section is too vague;
-* product invariants are underspecified.
-
-Do not reopen the Worker session to repair this.
-
-Do not rewrite the closeout commit.
-
-Use current implementation, accepted ADRs, current normative documents, and this Orchestrator handoff as stronger sources.
-
-## 11.4 Known `NEXT_WORKER.md` inaccuracies
-
-The current `NEXT_WORKER.md` incorrectly summarizes:
-
-* ADR-0023 as relating to:
-  `AI suggestion confidence and action semantics`;
-* ADR-0024 as relating to:
-  `the provider-neutral AI suggestion workspace`.
-
-Correct accepted decisions:
-
-* ADR-0023:
-  `Manual-First Metadata and Multi-Model AI Drafts`;
-* ADR-0024:
-  `Cover Studio and AI Cover Candidates`.
-
-A future Worker must read those ADRs directly.
-
-The current `NEXT_WORKER.md` also gives only an abbreviated list of future work.
-
-Absence from that list does not mean a feature is implemented.
-
-## 11.5 How to use the current Worker handoff safely
-
-Use `NEXT_WORKER.md` for:
-
-* repository identity context;
-* lifecycle state;
-* Cycle 067 and 068 commit references;
-* high-level implemented foundation;
-* private-corpus warning;
-* confirmation that no future task exists.
-
-Do not use it as sole authority for:
-
-* ADR-0023 semantics;
-* ADR-0024 semantics;
-* complete unimplemented scope;
-* next-task selection;
-* current roadmap interpretation.
-
----
-
-# 12. Accepted architecture horizon
-
-The ADR index extends through ADR-0028.
-
-A fresh Orchestrator must verify the current highest ADR.
-
-## ADR-0021 — Tauri desktop shell
-
-Accepted future direction:
-
-* Tauri v2;
-* native WebView;
-* Python/FastAPI sidecar;
-* single-instance lifecycle;
-* tray or menu-bar integration;
-* browser mode retained for development and diagnostics;
-* least-privilege native capabilities.
-
-Not implemented.
-
-Not the immediate next task.
-
-## ADR-0022 — selective placement and server aggregation
-
-Accepted future direction:
-
-* one logical medium;
-* multiple physical locations;
-* local desktop catalogs;
-* optional future server aggregator;
-* selective placement;
-* no automatic full replication to all devices.
-
-NUC aggregation, streaming, transfer, and remote download are not implemented.
-
-## ADR-0023 — manual-first metadata and multi-model AI drafts
-
-Accepted direction:
-
-* media detail is primarily manual;
-* `Current` is the primary working state;
-* AI drafts are separate proposals;
-* AI does not silently overwrite `Current`;
-* `Use this draft` is not durable persistence;
-* catalog save is distinct from filesystem rename;
-* manual editing must work without AI or internet;
-* future model selection is capability-aware;
-* one AI draft represents one provider, model, run, and prompt version;
-* persistent-draft storage remains a separate future decision.
-
-Partially implemented:
-
-* manual `Current` browser workspace exists for display title and canonical tags;
-* persistent title/tag save exists;
-* premium tag selection and ordering basics exist.
-
-Not yet implemented from ADR-0023:
-
-* description;
-* collection;
-* suggested filename;
-* persistent AI drafts;
-* draft strip;
-* draft comparison;
-* inline model picker;
-* draft provenance persistence;
-* promotion from AI draft into `Current`.
-
-## ADR-0024 — Cover Studio and AI cover candidates
-
-Accepted future direction:
-
-* manual timeline selection first;
-* exact cover timestamp;
-* cover timestamp independent from playback start;
-* normal playback begins at `00:00`;
-* cover candidates require explicit activation;
-* creating a candidate does not activate it;
-* prior accepted cover remains until explicit replacement;
-* AI-generated cover is a separate future workflow;
-* no automatic replacement of accepted cover.
-
-Not implemented.
-
-## ADR-0025 — minimum persistent catalog
-
-Implemented:
-
-* logical media;
-* physical locations;
-* media kinds;
-* availability states;
-* safe relative paths;
-* repository boundary;
-* migration `0004`.
-
-## ADR-0026 — explicit idempotent import
-
-Implemented:
-
-* fresh-scan-revalidated selected import;
-* atomic persistence;
-* exact-path idempotency;
-* browser Import action;
-* API endpoint.
-
-## ADR-0027 — persistent display title and canonical tags
-
-Implemented:
-
-* optional display title;
-* stable English canonical keys;
-* tag definitions;
-* ordered assignments;
-* sparse metadata;
-* atomic save;
-* migration `0005`;
-* API endpoints.
-
-## ADR-0028 — catalog read model and search semantics
-
-Implemented:
-
-* dedicated read boundary;
-* display-title search;
-* canonical-tag AND filtering;
-* deterministic ordering;
-* deterministic tag and location ordering;
-* bounded offset pagination;
-* Catalog API;
-* packaged Catalog browser.
-
-Accepted future architecture is not automatically implemented functionality.
-
----
-
-# 13. Explicitly unimplemented state
-
-Unless newer verified commits prove otherwise, the following remain unimplemented.
-
-## 13.1 Metadata detail
-
-* persistent description;
-* description editing;
-* description validation contract;
-* collection entity or collection value;
-* collection editing;
-* suggested filename persistence;
-* suggested filename editing;
-* structured source-platform field;
-* source-platform UI;
-* source-platform-specific presentation;
-* tag rename;
-* tag deletion;
-* canonical tag merge;
-* metadata optimistic concurrency;
-* multi-tab conflict detection;
-* multi-user conflict handling.
-
-## 13.2 AI workspace
-
-* persistent AI drafts;
-* multi-model AI draft strip;
-* one tab per model or run;
-* inline model picker;
-* provider/model discovery UI;
-* capability-aware model picker implementation;
-* persistent provider/model provenance;
-* draft comparison;
-* draft edit persistence;
-* draft reject and discard persistence;
-* `Use this draft` promotion;
-* background analysis jobs;
-* cancellation;
-* retry policy;
-* streaming progress;
-* model cost or trial disclosure contract.
-
-## 13.3 Covers and derivatives
-
-* manual Cover Studio;
-* media timeline scrubber for cover selection;
-* exact cover-timestamp persistence;
-* accepted cover record;
-* cover candidate persistence;
-* imported image cover;
-* AI-generated cover candidate;
-* candidate activation workflow;
-* deterministic cover derivatives;
-* thumbnail generation;
-* thumbnail persistence;
-* thumbnail cache;
-* cache invalidation;
-* derivative rebuild;
-* derivative retention policy.
-
-## 13.4 Gallery and playback
-
-* final premium persistent gallery;
-* cover-first gallery cards;
-* polished detail route or native view;
-* playback integration;
-* VLC launch;
-* playback-state persistence;
-* native file reveal;
-* native export;
-* native download destination;
-* gallery virtualisation beyond current bounded pagination.
-
-## 13.5 Catalog and storage expansion
-
-* series domain beyond current identity primitives;
-* storage-volume entities beyond identity primitives;
-* storage capacity reporting;
-* richer location availability tracking;
-* location health checks;
-* sidecar manifest;
-* sidecar versioning;
-* sidecar roundtrip;
-* catalog rebuild from sidecars;
-* content hashing;
-* perceptual hashing;
-* automatic duplicate detection;
-* automatic logical-media merge;
-* duplicate review workflow.
-
-## 13.6 Filesystem mutation
-
-* physical filename rename;
-* suggested-filename application;
-* file move;
-* file delete;
-* library reorganization;
-* native OS tag synchronization;
-* sidecar writes beside media;
-* derivative writes beside media.
-
-## 13.7 Desktop application
-
-* Tauri scaffold;
-* Python sidecar lifecycle;
-* single-instance native application;
-* macOS menu bar;
-* system tray;
-* native file picker;
-* native directory picker;
-* native clipboard;
-* reveal in Finder or file manager;
-* native export;
-* native playback integration;
-* installer;
-* signing;
-* notarization;
-* supported desktop release.
-
-## 13.8 Server and distributed operation
-
-* Intel NUC deployment;
-* aggregate global catalog;
-* cross-device discovery;
-* remote streaming;
-* remote download;
-* transfer workflows;
-* replication;
-* placement management UI;
-* production authentication;
-* production authorization;
-* systemd deployment;
-* production Tailscale integration;
-* remote administrative UI.
-
-## 13.9 Settings and secrets
-
-* GUI Settings;
-* provider configuration UI;
-* model discovery refresh;
-* default model selection;
-* final OS secret-store integration;
-* credential lifecycle UI;
-* provider enable and disable UI;
-* remote server credential administration.
-
-Do not claim:
-
-* that no catalog exists;
-* that import is absent;
-* that title persistence is absent;
-* that canonical tags are absent;
-* that title search is absent;
-* that canonical-tag AND filtering is absent;
-* that the Catalog browser is absent;
-* that browser title/tag editing is absent;
-* that migration head remains `0004`.
-
-Do not claim documented future features are already implemented.
-
----
-
-# 14. Manual-first product invariants
-
-Preserve these invariants.
-
-## 14.1 AI remains optional
-
-AI must:
-
-* be explicitly requested;
-* remain optional;
-* never own metadata truth;
-* never be required for normal metadata editing;
-* never run merely because a detail view opens;
-* never silently overwrite manual work;
-* never automatically save;
-* never automatically rename;
-* never automatically move;
-* never automatically delete;
-* never automatically tag;
-* never automatically assign a collection;
-* never automatically activate a cover.
-
-## 14.2 Metadata state separation
-
-Keep distinct:
+Description does not alter:
 
 * physical filename;
-* library-relative path;
-* display title;
-* description;
-* collection;
-* source platform;
+* file location;
+* Processed timestamp when at least one tag remains;
+* AI state.
+
+---
+
+# 15. Cycle 071 automatic Processed collection contract
+
+ADR:
+
+`ADR-0030: Automatic Processed Collection from Durable Tag Saves`
+
+Migration:
+
+`0007`
+
+## 15.1 Scope model
+
+`All media` is a virtual Catalog scope.
+
+It is not persisted as a collection.
+
+The initial only persisted collection key is:
+
+`processed`
+
+Display label:
+
+`Processed`
+
+One logical medium may have:
+
+* no persisted collection membership; or
+* one `Processed` membership.
+
+There is no:
+
+* arbitrary collection CRUD;
+* user-created collection manager;
+* multiple collection membership;
+* manual collection assignment;
+* collection picker;
+* Mark as processed button.
+
+## 15.2 Persisted state
+
+Metadata state includes:
+
+* `collection_key`;
+* `processed_at_ms`.
+
+Valid states:
+
+* both `null`;
+* `collection_key == "processed"` with a non-negative integer timestamp.
+
+Invalid states include:
+
+* unsupported collection key;
+* key without timestamp;
+* timestamp without key;
+* negative timestamp;
+* boolean timestamp;
+* non-integer timestamp.
+
+The domain owns these invariants.
+
+## 15.3 Automatic transition
+
+The server derives collection state from the complete durable tag list.
+
+The client does not directly assign collection fields.
+
+Rules:
+
+1. unprocessed plus empty tags:
+   remain unprocessed;
+2. unprocessed plus non-empty tags:
+   enter Processed and set the operation timestamp;
+3. Processed plus non-empty tags:
+   remain Processed and preserve the original timestamp;
+4. Processed plus empty tags:
+   leave Processed and clear the timestamp;
+5. later re-tagging:
+   enter Processed again with a new timestamp.
+
+The important date is the FrameNest durable tagging/confirmation date.
+
+It is not:
+
+* filesystem creation time;
+* filesystem modification time;
+* import time;
+* VLM submission time;
+* AI response time;
+* rename time.
+
+## 15.4 Timestamp preservation
+
+`processed_at_ms` is preserved by:
+
+* title-only edits;
+* description-only edits;
+* non-empty tag additions;
+* non-empty tag removals;
+* tag replacement while at least one remains;
+* tag reorder;
+* exact no-op;
+* physical rename;
+* suggested filename changes.
+
+Physical rename and suggested filename are not implemented yet, but their future behavior must preserve the processing timestamp.
+
+## 15.5 Existing-row migration behavior
+
+Migration `0007` does not fabricate historical processing timestamps.
+
+Existing metadata rows, including rows already containing tags, migrate with:
+
+* `collection_key = NULL`;
+* `processed_at_ms = NULL`.
+
+Such media enter Processed only after a later successful durable metadata save with at least one tag.
+
+This is an accepted pre-alpha migration limitation.
+
+## 15.6 Atomic persistence
+
+The metadata repository transaction:
+
+1. verifies the medium exists;
+2. validates canonical tags;
+3. loads current metadata and collection state;
+4. derives the new state once;
+5. compares title, description, tags, collection, and timestamps;
+6. atomically persists row and ordered assignments;
+7. returns the complete resulting state.
+
+Exact no-op preserves:
+
+* `updated_at_ms`;
+* `processed_at_ms`.
+
+Rollback tests verify that a failed tag-assignment write does not partially update:
+
+* title;
+* tags;
+* metadata timestamps;
+* collection key;
+* processing timestamp.
+
+## 15.7 Catalog behavior
+
+Absent collection filter:
+
+* All media;
+* existing order preserved:
+
+  1. `logical_media.created_at_ms DESC`;
+  2. media ID ASC.
+
+`collection=processed`:
+
+* only Processed rows;
+* order:
+
+  1. `processed_at_ms ASC`;
+  2. media ID ASC.
+
+Therefore Processed displays oldest processed first.
+
+Collection filtering composes with:
+
+* title search;
+* one canonical tag;
+* multiple canonical tags using AND semantics;
+* pagination;
+* total count.
+
+## 15.8 Browser behavior
+
+Browser Catalog scopes:
+
+* All media;
+* Processed.
+
+All media is default.
+
+Switching scope resets offset.
+
+Active scope remains through:
+
+* search;
+* tag filters;
+* pagination;
+* refresh after import;
+* refresh after metadata Save.
+
+Processed cards may show:
+
+* Processed state;
+* processing timestamp.
+
+Processing timestamps use a semantic `<time>` element.
+
+The timestamp is derived only from `processed_at_ms`.
+
+The browser preserves the valid timestamp value `0` using nullish semantics rather than falsy `||` behavior.
+
+The metadata workspace displays Processed state read-only.
+
+Removing every selected tag explains that Save will remove the item from Processed.
+
+There is no manual collection selector.
+
+---
+
+# 16. Validation evidence for Cycle 071
+
+Final independent Worker-observed runtime evidence:
+
+* focused Cycle 071D suite: 72 passed;
+* full suite: 966 passed, 3 skipped;
+* warning-as-error: 966 passed, 3 skipped;
+* Poetry lock check: passed;
+* compileall: passed;
+* JavaScript syntax: passed;
+* package build: passed;
+* wheel inspection: migrations `0001` through `0007` present;
+* packaged HTML/CSS/JavaScript present;
+* Markdown links: passed;
+* diff checks: passed;
+* no real catalog accessed;
+* no private media accessed;
+* no provider called;
+* no dependency changed.
+
+The three skips were environment-gated tests such as real media tools or live provider behavior.
+
+These counts are strong repeated Worker-observed local evidence.
+
+They are not public GitHub runtime evidence.
+
+The current public repository and commit diff are independently verifiable.
+
+A future task should rerun relevant tests rather than relying forever on these historical counts.
+
+---
+
+# 17. Known low-risk technical observations
+
+The final independent audit left two nonblocking LOW observations.
+
+## 17.1 Migration test specificity
+
+A migration test does not explicitly create an already-tagged `0006` metadata row and then assert null collection state after `0007`.
+
+Migration `0007` is still safe by construction because it:
+
+* adds nullable columns;
+* performs no backfill update;
+* does not derive timestamps.
+
+This is not an MVP blocker.
+
+A future migration-test cleanup may add the explicit populated-`0006` case.
+
+Do not reopen Cycle 071 solely for this unless it naturally fits a bounded test-quality task.
+
+## 17.2 Browser source-string test brittleness
+
+Some vanilla JavaScript contract tests inspect source strings and function-body slices.
+
+They meaningfully assert:
+
+* nullish semantics;
+* semantic `<time>`;
+* no manual collection control;
+* correct helper use.
+
+They may be formatting-fragile.
+
+This is a maintainability concern, not current product incorrectness.
+
+Do not introduce a frontend framework merely to remove source-string tests.
+
+Behavior-level browser testing can be considered later through a dedicated decision.
+
+## 17.3 Pydantic extra-field behavior
+
+Current Pydantic request models use the repository-wide default behavior that ignores unknown fields.
+
+A client-supplied `collection_key` or `processed_at_ms` is ignored and never controls persisted collection state.
+
+The server remains authoritative.
+
+Strict `extra="forbid"` is not current repository-wide policy.
+
+Do not change this in isolation without checking broader API conventions.
+
+---
+
+# 18. Known post-commit documentation drift
+
+Cycle 071 documentation was authored while the implementation was still uncommitted.
+
+After public commit `242705c...`, several committed sentences became stale.
+
+Known examples include wording such as:
+
+* “proposed within the current uncommitted Cycle 071 implementation”;
+* “proposed revision `0007`”;
+* similar statements describing Cycle 071 as not yet integrated.
+
+Known affected documents include at least:
+
+* `AGENTS.md`;
+* `README.md`;
+* `ROADMAP.md`.
+
+Other occurrences must be found by repository search rather than assumed.
+
+The actual public state is:
+
+* Cycle 071 is committed;
+* migration head is `0007`;
+* ADR-0030 is accepted and implemented for the bounded built-in Processed workflow;
+* the commit is `242705c...`.
+
+The fresh Orchestrator should treat the stale wording as documentation drift.
+
+Recommended first repository task:
+
+* bounded documentation truth alignment;
+* search all occurrences of:
+
+  * `uncommitted Cycle 071`;
+  * `proposed` near Cycle 071 or revision `0007`;
+* update only affected documentation;
+* do not alter implementation;
+* use a fresh GLM-5.2 High Worker;
+* grant normal commit and push authority;
+* independently verify the public result.
+
+Do not manually hide the drift in this handoff.
+
+Do not let the stale wording override implementation or Git history.
+
+---
+
+# 19. Current major unimplemented product scope
+
+Not implemented:
+
+* arbitrary user-created collections;
+* general collection manager;
+* manual collection assignment;
+* collection CRUD;
 * suggested filename;
-* persisted catalog state;
-* unsaved manual `Current`;
-* AI draft;
-* edited AI draft;
-* promoted draft values;
-* durable catalog save;
-* future filesystem rename.
+* physical file rename workflow;
+* sidecar metadata projection;
+* persistent AI Drafts;
+* multi-model AI comparison tabs;
+* inline provider/model picker;
+* durable AI draft promotion workflow;
+* Cover Studio;
+* persistent covers;
+* thumbnails;
+* premium gallery;
+* downloader;
+* GUI Settings;
+* GUI credential management;
+* provider discovery UI;
+* Tauri scaffold;
+* native desktop packaging;
+* storage volume entities beyond identity primitives;
+* series model beyond identity primitives;
+* transfer workflow;
+* NUC aggregation;
+* Tailscale integration;
+* deployment;
+* authentication;
+* production installer;
+* public release.
 
-Changing display title must not rename a file.
-
-Saving metadata must not mutate media bytes or physical placement.
-
-A filename-derived fallback must remain presentation-only unless the user explicitly saves it as a title.
-
-## 14.3 AI draft semantics
-
-Future AI drafts must:
-
-* remain separate from `Current`;
-* preserve provider, model, run, and prompt provenance;
-* not overwrite another draft;
-* not overwrite manual work;
-* require explicit promotion;
-* require explicit durable Save after promotion;
-* require explicit discard decisions for edited drafts;
-* never imply filesystem mutation.
-
-## 14.4 Canonical tag UX
-
-Current browser tag editing already provides important foundations.
-
-Future refinements should preserve:
-
-* stable English canonical identities;
-* human-readable display names;
-* searchable local suggestions;
-* keyboard interaction;
-* mouse interaction;
-* rounded removable chips;
-* explicit removal;
-* duplicate prevention;
-* ordered assignments;
-* selected, invalid, hover, and focus states;
-* no fake progress indicator for trivial local filtering.
-
-## 14.5 Premium UX
-
-FrameNest should feel like a premium media product rather than a generic administration dashboard.
-
-Preserve:
-
-* dark visual direction;
-* cover-first eventual layouts;
-* deliberate typography;
-* layered surfaces;
-* considered spacing;
-* rounded controls;
-* restrained shadows and transparency;
-* accessible contrast;
-* visible keyboard focus;
-* reduced-motion support;
-* short meaningful transitions;
-* truthful loading states;
-* no fake percentages;
-* no invented AI phases.
+Do not describe accepted documentation direction as implemented product behavior.
 
 ---
 
-# 15. Desktop and server direction
+# 20. AI and provider direction
 
-## 15.1 MacBook-first
+AI must remain optional.
 
-Current implementation priority:
+Local catalog, scanning, import, metadata editing, Processed workflow, and gallery foundations must work without AI and without internet.
 
-* local server;
-* local browser development UI;
-* durable catalog;
-* explicit import;
-* metadata;
-* retrieval and search;
-* manual metadata workspace;
-* metadata-detail expansion;
-* covers;
-* gallery;
-* AI drafts;
-* desktop shell.
+Accepted future provider direction includes:
 
-Do not divert the immediate path to Fedora NUC deployment.
+* NVIDIA NIM;
+* Vercel AI Gateway;
+* local LM Studio;
+* extensible provider/model abstraction.
 
-## 15.2 Future native desktop shell
+GUI Settings should eventually manage:
 
-The finished normal user experience should not require Chrome, Brave, Firefox, or another external browser.
+* providers;
+* credentials;
+* model selection;
+* defaults.
 
-Accepted future direction:
+Provider discovery capabilities differ.
 
-* Tauri v2;
+Do not assume every provider supports the same dynamic model-list API.
 
-* WebView shell;
+API keys must not be stored in:
 
-* Python/FastAPI sidecar;
+* catalog database;
+* source code;
+* logs;
+* browser storage;
+* browser payloads.
 
-* single instance;
+Remote credentials must remain server-side.
 
-* system tray or macOS menu bar;
+Future persistent AI Draft behavior:
 
-* initial menu:
+* one draft per model/run;
+* explicit invocation;
+* no silent overwrite of manual Current;
+* explicit promotion;
+* promotion is not catalog Save;
+* promotion does not mutate files;
+* drafts are comparison aids.
 
-  * `Gallery`
-  * `Settings`
-  * `Quit`
+No automatic Processed transition may happen merely because:
 
-* future native:
+* a VLM request was sent;
+* an AI suggestion was generated;
+* an AI draft was received.
 
-  * file picker;
-  * directory picker;
-  * clipboard;
-  * download destination;
-  * export;
-  * reveal;
-  * VLC launch;
-  * lifecycle control.
-
-Do not scaffold Tauri before metadata, cover, and gallery foundations are mature enough to justify it.
-
-## 15.3 Future Intel NUC
-
-The future Intel NUC is intended as:
-
-* Fedora KDE desktop;
-* optional FrameNest server;
-* archive or storage node;
-* aggregate catalog node;
-* streaming source;
-* transfer target;
-* later centralized provider boundary.
-
-It must not become a mandatory dependency for local desktop operation.
-
-Tailscale is intended only for remote functions.
-
-Local gallery, playback, catalog, metadata, and search must work without Tailscale or internet.
+Only the durable metadata save with at least one canonical tag triggers Processed entry.
 
 ---
 
-# 16. Private local test-media corpus
+# 21. Private-media and filesystem safety
 
-The COOPERATOR has a private local test corpus at:
+Michal has a private local test-media corpus at:
 
 `/Users/agile/Video`
 
-It contains multiple MP4 test clips.
+It contains MP4 media and at least one GIF test case.
 
-It includes:
+This path is private.
 
-`dicaprio_bravo.gif`
+A Worker must not assume access.
 
-The existence of this path grants no access authority.
+Every task involving it must explicitly define:
 
-A future Worker MUST NOT access the corpus unless one authoritative ORCHESTRATOR prompt explicitly defines the minimum necessary authority.
+* whether read-only access is authorized;
+* which exact path or minimal subset is authorized;
+* whether stat/list/read/hash/analysis is allowed;
+* whether cloud transmission is forbidden or separately confirmed;
+* whether local frame extraction is allowed;
+* whether output may persist;
+* whether rename/move/delete is forbidden.
 
-Any private-corpus task must define:
+Default state:
 
-* exact authorized path;
-* read-only or write authority;
-* exact file patterns;
-* named sample versus all files;
-* permitted stat or header reads;
-* permitted content hashing;
-* permitted frame extraction;
-* permitted temporary derivatives;
-* cleanup requirements;
-* disposable versus user catalog;
-* provider and network authority;
-* reporting privacy rules.
-
-Default boundaries:
-
-* no access without explicit authority;
+* no access;
+* no list;
+* no stat;
+* no scan;
+* no analysis;
+* no cloud upload;
 * no rename;
 * no move;
 * no delete;
-* no tag mutation;
-* no sidecar;
-* no thumbnail;
-* no derivative beside media;
-* no timestamp modification;
-* no cloud upload;
-* no provider transmission;
-* no raw frame transmission;
-* no automatic import;
-* no automatic analysis;
-* no automatic AI.
+* no sidecar write.
 
-Cloud transmission requires separate explicit confirmation even when local read access has already been granted.
+A frame or metadata may not be sent to a cloud provider without separate explicit confirmation.
 
-No private-corpus access occurred during Cycles 067, 068, or 069.
+No Worker task may access a real catalog or migrate it without explicit authority.
+
+For the first user smoke test, prefer:
+
+* a disposable database;
+* a temporary explicitly created test library; or
+* one minimally authorized private test file after Michal explicitly approves it.
+
+Do not expose private absolute paths through APIs or reports.
 
 ---
 
-# 17. Cycle 064 private runtime evidence
+# 22. Security invariants
 
-Classification:
+FrameNest must keep secrets out of Git.
 
-`Worker-observed private runtime evidence`
+Never commit:
 
-It is not public repository evidence.
+* API keys;
+* tokens;
+* cookies;
+* credentials;
+* private keys;
+* real environment files;
+* private media;
+* catalog databases;
+* generated frames;
+* provider payloads;
+* raw provider responses.
 
-Observed sanitized result:
+Default server binding remains loopback-first.
 
-* `dicaprio_bravo.gif` was visible in the real scan;
+Do not expose FrameNest publicly by default.
 
-* one MP4 was selected deterministically;
+Do not enable:
 
-* first MP4 import returned:
+* `0.0.0.0`;
+* public internet exposure;
+* remote access;
+* Tailscale access;
+* system services;
+* background daemons;
 
-  * `created`;
-  * kind `video`;
+without explicit task authority.
 
-* first GIF import returned:
+Filesystem mutation requires explicit authority.
 
-  * `created`;
-  * kind `animated_image`;
+A metadata save must not:
 
-* repeated MP4 import returned:
-  `already_imported`;
-
-* repeated GIF import returned:
-  `already_imported`;
-
-* repeated media and location IDs matched the initial results;
-
-* disposable database contained:
-
-  * two logical-media rows;
-  * two physical-location rows;
-
-* duplicate count:
-  zero;
-
-* selected source SHA-256 values were unchanged;
-
-* selected source sizes were unchanged;
-
-* selected source mtimes were unchanged;
-
-* top-level directory-entry count and digest were unchanged;
-
-* no sidecar or derivative was created;
-
-* no database was created beside media;
-
-* no provider was called;
-
-* no AI was called;
-
-* no ffmpeg or ffprobe was used;
-
-* no real user catalog was accessed;
-
-* temporary state was cleaned;
-
-* repository state remained unchanged.
-
-Do not expose:
-
-* selected MP4 filename;
-* private hashes;
-* private directory listing;
-* database UUIDs;
-* raw media;
-* raw frames;
-* other filenames.
-
-A future task must not present these observations as independently public evidence.
+* rename files;
+* move files;
+* delete files;
+* rewrite media;
+* create sidecars.
 
 ---
 
-# 18. Worker-observed validation evidence
+# 23. Required repository reading order for the fresh Orchestrator
 
-These command results were reported by closed Worker sessions.
+Before issuing the next Worker task, inspect current public files in this order:
 
-A future Orchestrator or Worker must not claim to have run them.
+1. current raw `NEXT_ORCHESTRATOR.md`;
+2. handoff commit metadata;
+3. `BOOT_ORCHESTRATOR.md`;
+4. `AP.md`;
+5. `AP_ORCHESTRATOR.md`;
+6. `AGENTS.md`;
+7. `BOOT_WORKER.md`;
+8. `AP_WORKER.md`;
+9. `NEXT_WORKER.md`;
+10. `README.md`;
+11. `PRODUCT.md`;
+12. `SPEC.md`;
+13. `ROADMAP.md`;
+14. `SECURITY.md`;
+15. `SERVER.md`;
+16. `DESKTOP.md`;
+17. `GALLERY.md`;
+18. `AI_WORKSPACE.md`;
+19. `COVER_PIPELINE.md`;
+20. `docs/adr/README.md`;
+21. ADR-0023;
+22. ADR-0024;
+23. ADR-0025;
+24. ADR-0026;
+25. ADR-0027;
+26. ADR-0028;
+27. ADR-0029;
+28. ADR-0030;
+29. migration `0006`;
+30. migration `0007`;
+31. `src/framenest/domain/media_metadata.py`;
+32. metadata application boundary;
+33. metadata repository port;
+34. SQLite metadata repository;
+35. Catalog application boundary;
+36. Catalog repository port;
+37. SQLite Catalog read adapter;
+38. metadata API;
+39. Catalog API;
+40. packaged HTML;
+41. packaged CSS;
+42. packaged JavaScript;
+43. changed Cycle 071 tests;
+44. current public Git history.
 
-## 18.1 Cycle 063
+Authority order:
 
-Reported:
-
-* focused suite:
-  `114 passed`;
-* collection:
-  `812 tests collected`;
-* full suite:
-  `809 passed`, `3 skipped`;
-* warning-as-error:
-  `809 passed`, `3 skipped`;
-* Poetry lock check passed;
-* compileall passed;
-* build passed;
-* wheel assets confirmed;
-* Markdown links passed;
-* `dist/` removed;
-* worktree clean.
-
-## 18.2 Cycle 064
-
-Reported:
-
-* focused integration test:
-  `1 passed`;
-* disposable migration to `0004`;
-* real MP4/GIF import smoke passed;
-* idempotency passed;
-* source immutability passed;
-* cleanup passed;
-* no repository changes.
-
-## 18.3 Cycle 065
-
-Reported final:
-
-* `870 tests collected`;
-* full suite:
-  `867 passed`, `3 skipped`;
-* warning-as-error:
-  `867 passed`, `3 skipped`;
-* Poetry lock check passed;
-* compileall passed;
-* package build passed;
-* wheel inspection passed;
-* migration `0005` packaged;
-* HTML, CSS, and JavaScript assets packaged;
-* Markdown local links:
-  `681` checked;
-* `dist/` removed;
-* no private-media access;
-* no provider call;
-* no secret access;
-* no user-catalog access;
-* final worktree clean.
-
-## 18.4 Cycle 067 baseline
-
-Reported:
-
-* `poetry check --lock` passed;
-* full baseline:
-  `867 passed`, `3 skipped`.
-
-## 18.5 Cycle 067 final
-
-Reported:
-
-* focused final:
-  `61 passed`;
-* full suite:
-  `898 passed`, `3 skipped`;
-* warning-as-error:
-  `898 passed`, `3 skipped`;
-* Poetry lock check passed;
-* compileall passed;
-* build passed;
-* wheel inspection passed;
-* migrations `0001` through `0005` packaged;
-* web assets packaged;
-* `dist/` removed;
-* no private media;
-* no real catalog;
-* no provider call;
-* final worktree clean.
-
-## 18.6 Cycle 068 baseline
-
-Reported:
-
-* full baseline:
-  `898 passed`, `3 skipped`.
-
-## 18.7 Cycle 068 test-first evidence
-
-Reported expected failing focused state:
-
-`6 failed, 35 passed`
-
-This was reported as the test-first failure before production changes.
-
-## 18.8 Cycle 068 final
-
-Reported:
-
-* focused final:
-  `41 passed`;
-* full suite:
-  `905 passed`, `3 skipped`;
-* warning-as-error:
-  `905 passed`, `3 skipped`;
-* Poetry lock check passed;
-* compileall passed;
-* Node syntax check passed;
-* build passed;
-* wheel inspection passed;
-* migrations `0001` through `0005` packaged;
-* web assets packaged;
-* `dist/` removed;
-* no private-media access;
-* no provider call;
-* no secret access;
-* no real catalog access;
-* final worktree clean.
-
-## 18.9 Cycle 069 closeout
-
-Reported:
-
-* `git diff --check` passed;
-* staged diff check passed;
-* 29 local Markdown links checked;
-* zero missing links;
-* credential-shaped pattern scan found no matches;
-* `dist/` absent;
-* final worktree and index clean;
-* local, tracking, and public remote state matched closeout commit.
-
-Full pytest, warning-as-error, compile, and build were intentionally not rerun for the one-file documentation closeout.
-
-A future Worker must rerun validation required by its own task.
-
-Do not preserve old counts as fixed expectations after adding tests.
+1. current committed implementation and tests;
+2. accepted ADRs;
+3. current normative product documentation;
+4. this handoff for incident history, product priority, and known drift;
+5. `NEXT_WORKER.md`;
+6. historical reports;
+7. memory.
 
 ---
 
-# 19. Sanitized historical NVIDIA evidence
-
-Historical Worker-observed evidence from a prior explicitly authorized live test:
-
-* one authorized NVIDIA request;
-* HTTP status:
-  `200`;
-* no pending polling;
-* non-empty final content;
-* no `reasoning_content`;
-* strict structured parsing succeeded;
-* model reported at that time:
-  `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning`;
-* prompt tokens:
-  `1316`;
-* completion tokens:
-  `400`;
-* total tokens:
-  `1716`;
-* no media mutation;
-* no catalog mutation;
-* no filesystem mutation.
-
-Do not reproduce raw provider output or reasoning.
-
-Do not assume:
-
-* endpoint availability;
-* model availability;
-* free access;
-* pricing;
-* token behavior;
-* capability;
-* response shape;
-
-remain unchanged.
-
-Do not claim JPEG transport reduced token use without a controlled comparative experiment.
-
-No provider call occurred in Cycles 063–069.
-
----
-
-# 20. Known stale and contradictory documentation
-
-A fresh Orchestrator must explicitly detect these before task shaping.
-
-## 20.1 Current `NEXT_WORKER.md`
-
-Known inaccuracies:
-
-* ADR-0023 description is wrong;
-* ADR-0024 description is wrong;
-* explicit unimplemented-state coverage is incomplete;
-* product invariants are abbreviated;
-* next-direction recommendation is underspecified.
-
-Use the accepted ADR files directly.
-
-## 20.2 `ROADMAP.md`
-
-The current roadmap correctly states that:
-
-* searchable Catalog exists;
-* title/tag manual `Current` workspace exists;
-* metadata-detail expansion is likely next.
-
-The same roadmap also contains a stale sentence saying ADR-0023 remains unimplemented beyond the old non-persistent ADR-0020 review slice.
-
-That statement is no longer completely true.
-
-Current reality:
-
-* ADR-0023 is partially implemented for manual `Current` display title and canonical tags;
-* description, collection, suggested filename, AI drafts, model picker, and draft workflows remain unimplemented.
-
-The roadmap also contains phase-exit wording that can be read as if the entire manual metadata detail is absent.
-
-Interpret it as:
-
-* manual title/tag detail now exists;
-* broader metadata detail remains incomplete.
-
-Do not allow these stale sentences to erase Cycle 068.
-
-Correct stale documentation as part of the next logically related authorized task, or through a dedicated bounded documentation task if necessary.
-
-Do not create an unbounded cleanup cycle.
-
----
-
-# 21. Known current risks and cautions
-
-## 21.1 Metadata detail is only partial
-
-Persistent browser editing currently covers:
-
-* display title;
-* ordered canonical tags.
-
-It does not cover:
-
-* description;
-* collection;
-* suggested filename;
-* source platform;
-* AI drafts.
-
-Do not describe the complete ADR-0023 workspace as implemented.
-
-## 21.2 Browser remains pre-alpha
-
-The browser now supports meaningful persistent workflows.
-
-It is still not:
-
-* the final premium gallery;
-* a native desktop application;
-* a completed media detail product;
-* a supported release.
-
-## 21.3 No optimistic concurrency
-
-The current metadata save has no version token or optimistic locking contract for simultaneous tabs or clients.
-
-Do not add such a system casually.
-
-It requires a bounded architecture and product decision.
-
-## 21.4 SQLite search limitation
-
-SQLite `NOCASE` does not provide full Unicode case folding.
-
-Do not claim language-complete search.
-
-## 21.5 Offset pagination
-
-Offset pagination is an intentional bounded MVP.
-
-Do not introduce cursor pagination without evidence that it is needed.
-
-## 21.6 Provider facts are unstable
-
-Provider catalogs, model availability, trial access, and capabilities are time-sensitive.
-
-Verify official current sources before provider task shaping.
-
-## 21.7 Real database migration remains sensitive
-
-Migration `0005` is implemented and tested against disposable databases.
-
-Do not migrate an existing real user catalog without explicit authority.
-
-A future metadata field may require migration `0006`, but no migration is authorized by this handoff.
-
-## 21.8 Private corpus remains sensitive
-
-Prior access was task-specific and expired.
-
-No future Worker inherits that authority.
-
----
-
-# 22. Strongest next product direction
-
-The strongest current direction is to continue manual metadata detail before Cover Studio, Tauri, NUC, or persistent AI drafts.
-
-This is a recommendation.
-
-It is not task authority.
-
-## 22.1 Why metadata-detail expansion is likely next
-
-FrameNest now supports:
-
-* persistent catalog identity;
-* import;
-* title and tags;
-* search and filtering;
-* manual title/tag editing.
-
-ADR-0023 expects a manual media detail workspace that also supports:
-
-* description;
-* collection;
-* suggested filename.
-
-The current roadmap explicitly describes metadata-detail expansion as the next likely implementation priority.
-
-Completing one additional manual field creates direct product value and deepens durable metadata behavior without introducing AI or filesystem mutation.
-
-## 22.2 Preferred smallest slice
-
-The likely smallest coherent next vertical slice is:
-
-* persistent description;
-* manual description editing in `Current`;
-* API and repository roundtrip;
-* one schema migration if required;
-* browser clean/dirty/save integration;
-* search or gallery behavior only if explicitly justified;
-* deterministic tests;
-* documentation alignment.
-
-Do not bundle description automatically with:
-
-* collection;
-* suggested filename;
-* source platform;
-* AI drafts;
-* covers.
-
-One meaningful field is preferable to a broad partially specified metadata migration.
-
-## 22.3 Decisions that may require Brainstorming
-
-Before authorizing description persistence, inspect current normative documents and code.
-
-Potential unresolved decisions include:
-
-* plain text versus Markdown;
-* maximum length;
-* whether empty string means absence;
-* whitespace rules;
-* control-character rules;
-* whether description is searchable in the first slice;
-* whether description belongs in the existing sparse metadata row;
-* whether migration `0006` is necessary;
-* whether description updates share the existing full metadata replacement API;
-* whether the browser uses a textarea in the current workspace;
-* whether this slice should correct stale roadmap wording.
-
-Do not invent these semantics without evidence.
-
-If the accepted documents do not resolve them, enter Brainstorming and ask Michal exactly one focused question.
-
-A likely first question is:
-
-`Má byť prvá persistentná description vo FrameNest obyčajný plain text, alebo chceš už od začiatku podporovať Markdown?`
-
-Recommend plain text for the first bounded slice unless Michal has a clear Markdown use case.
-
-## 22.4 Alternative next direction
-
-Cover Studio is the next major product stage after manual metadata detail.
-
-It remains legitimate after the manual detail is sufficiently complete.
-
-Do not jump to Cover Studio merely because title and tags exist if Michal still considers description, collection, and suggested filename essential to the first usable detail workspace.
-
-Do not jump to:
-
+# 24. MVP convergence
+
+FrameNest is close to a first end-to-end local workflow that Michal can test.
+
+Candidate smoke-test workflow:
+
+1. create or select a disposable database;
+2. migrate it explicitly to `0007`;
+3. register a local device;
+4. register a test library;
+5. start the local server;
+6. open the packaged browser UI;
+7. list the registered library;
+8. run explicit scan preview;
+9. import one selected MP4 or GIF;
+10. confirm it appears in All media;
+11. open Current metadata;
+12. edit display title;
+13. edit description;
+14. create/select canonical tags;
+15. save;
+16. verify automatic Processed membership;
+17. verify Processed scope;
+18. verify oldest-first processing order where multiple items exist;
+19. remove all tags;
+20. verify Processed removal;
+21. re-tag;
+22. verify Processed re-entry;
+23. verify no file was renamed, moved, deleted, or modified.
+
+The first smoke test should not require:
+
+* AI;
+* NVIDIA;
+* cloud upload;
+* private credentials;
+* arbitrary collections;
+* covers;
 * Tauri;
 * NUC;
-* persistent AI drafts;
-* remote workflows;
+* downloader.
 
-before the normal manual product path is coherent.
+The Orchestrator should guide Michal step by step during this test.
 
----
+Do not provide a giant command dump.
 
-# 23. Product sequence after current state
-
-Current intended near-term sequence:
-
-1. persistent catalog foundation — complete;
-2. logical media and physical locations — complete;
-3. explicit idempotent selected import — complete;
-4. persistent display title and canonical tags — complete;
-5. searchable catalog read model — complete;
-6. browser Catalog search and tag filtering — complete;
-7. manual title/tag `Current` workspace — complete;
-8. broader manual metadata detail — likely next;
-9. Cover Studio and derivatives;
-10. persistent premium gallery;
-11. multi-model AI draft workspace;
-12. optional AI cover experiments;
-13. Tauri desktop shell;
-14. later NUC aggregation, streaming, transfer, and remote workflows.
-
-Do not postpone visible product progress indefinitely for infrastructure refinement.
+Give one coherent step, wait for output, then continue.
 
 ---
 
-# 24. Public commit verification loop
+# 25. Design and UX priority after smoke testing
 
-After every Worker report:
+Michal wants visible design quality soon.
 
-1. resolve current public `main`;
-2. inspect the reported commit;
-3. verify parent;
-4. verify exact subject;
-5. verify changed paths;
-6. inspect relevant raw files;
-7. compare report claims to public diff;
-8. distinguish public implementation evidence from runtime evidence;
-9. distinguish committed state from local-only claims;
-10. inspect whether task allowlist was respected;
-11. inspect migration history;
-12. inspect handoff files;
-13. inspect dependency files;
-14. inspect possible secrets or private data;
-15. classify:
+After the first current-flow smoke test:
 
-    * `PASS`;
-    * `PARTIAL`;
-    * `BLOCKED`.
+1. collect actual screenshots;
+2. identify concrete UX friction;
+3. distinguish functional blockers from visual polish;
+4. enter Brainstorming for the next visible slice;
+5. ask one focused design decision at a time.
 
-When public push fails or a commit is unavailable:
+Likely near-term directions include:
 
-* state what is publicly verifiable;
-* state what comes only from the Worker report;
-* do not claim public verification.
+* clearer application shell;
+* stronger Catalog hierarchy;
+* premium typography and spacing;
+* improved media cards;
+* better All media / Processed scope presentation;
+* better Current workspace layout;
+* improved empty/loading/error states;
+* responsive MacBook layout;
+* visual design tokens;
+* accessible interactions;
+* library setup/onboarding;
+* reducing CLI-only setup friction.
 
-Do not accept a report merely because tests are listed.
+Do not immediately introduce React, Vue, Svelte, Vite, or another frontend framework.
 
-Check:
+The current accepted delivery remains packaged vanilla HTML/CSS/JavaScript.
 
-* scope;
-* allowlist;
-* forbidden paths;
-* migration history;
-* handoff lifecycle;
-* secret boundaries;
-* private-data boundaries;
-* commit structure;
-* documentation consistency.
+A frontend framework requires a dedicated ADR and demonstrated need.
+
+Do not perform a broad redesign before observing the current UI in a real smoke test.
 
 ---
 
-# 25. Worker prompt requirements
+# 26. Strongest recommended next sequence
 
-When the next task is ready, introduce the prompt to Michal exactly:
+Recommended sequence for the fresh Orchestrator:
 
-`Toto pošli WORKEROVI ako jeden prompt:`
+## Step 1 — public restoration
 
-The prompt must be one coherent, copy-pasteable English block.
+Verify:
 
-It must include:
+* current handoff commit;
+* expected parent `242705c...`;
+* subject `handout`;
+* only `NEXT_ORCHESTRATOR.md` changed;
+* public branch equality.
 
-* fresh Worker instance identity;
-* persistent `WORKER` role;
-* repository URL;
-* exact working directory;
-* branch;
-* exact verified public HEAD;
-* expected parent and subject;
-* mandatory reading order;
-* clean Git gate;
-* bounded task ID;
+## Step 2 — close stale status wording
+
+Launch one fresh GLM-5.2 High Worker.
+
+Task:
+
+* documentation-only truth repair;
+* find stale “uncommitted/proposed Cycle 071” wording;
+* update it to current committed state;
+* no implementation change;
+* no dependency change;
+* no migration change;
+* normal commit and push authority;
+* independent public verification.
+
+This should be small.
+
+Do not turn it into a general documentation rewrite.
+
+## Step 3 — first user smoke test
+
+Guide Michal through the current MacBook workflow.
+
+Use a disposable catalog.
+
+Use no private media unless explicitly authorized.
+
+Use no cloud AI.
+
+Record:
+
+* commands that work;
+* startup issues;
+* migration issues;
+* UI problems;
+* functional defects;
+* design impressions;
+* missing onboarding.
+
+## Step 4 — classify smoke-test findings
+
+Separate:
+
+* correctness bugs;
+* setup friction;
+* UX friction;
+* visual-design issues;
+* missing MVP capability;
+* deferred long-term scope.
+
+## Step 5 — choose one visible MVP slice
+
+Likely candidates:
+
+* browser library-registration/setup UX;
+* Catalog design pass;
+* metadata workspace design pass;
+* first cover/thumbnail foundation;
+* another user-blocking defect discovered during smoke test.
+
+Recommend one based on evidence.
+
+Ask Michal one decision at a time.
+
+## Step 6 — use capable Worker with normal Git authority
+
+For the selected slice:
+
+* use a fresh or healthy GLM-5.2 High Worker;
+* grant bounded commit/push authority;
+* require exact gates and tests;
+* verify the public commit independently;
+* avoid a separate manual Git process unless exceptional.
+
+---
+
+# 27. Future Worker prompt quality requirements
+
+A future Worker prompt should contain:
+
+* task ID;
 * task type;
-* full context;
-* exact goal;
-* exact authorized paths;
-* exact forbidden paths;
-* allowed commands;
-* forbidden commands;
+* repository;
+* path;
+* branch;
+* expected HEAD;
+* expected parent and subject;
+* exact scope;
+* accepted product semantics;
+* mandatory reading;
+* exact write allowlist;
+* forbidden paths;
 * dependency authority;
 * migration authority;
-* Git-write authority;
-* secret authority;
-* provider and network authority;
+* network authority;
 * private-media authority;
-* filesystem-mutation authority;
-* test-first expectations;
-* validation commands;
-* acceptance criteria;
-* stop conditions;
-* pre-commit remote gate;
+* provider authority;
+* TDD expectations;
+* focused tests;
+* full validation;
 * exact commit subject;
-* push verification;
-* report format;
-* required Worker-session state.
+* Git race gate;
+* push rules;
+* final report format;
+* Worker session state.
 
-Every Worker report must begin exactly:
+Use real test-first development where production behavior is absent.
 
-`### Report for ORCHESTRATOR_CHAT`
+Do not require a fake failing test when adding characterization coverage for already-correct behavior.
 
-Worker reports must be compact and evidence-dense.
+The Worker must distinguish:
 
-They must not:
+* failing TDD evidence;
+* characterization tests that pass;
+* runtime evidence;
+* public Git evidence.
 
-* repeat the entire prompt;
-* expose secrets;
-* expose raw provider content;
-* expose unnecessary private-media data;
-* paste excessive logs;
-* claim unrun tests;
-* claim public verification from local-only state;
-* silently expand scope.
+Do not allow a Worker to claim:
 
----
-
-# 26. Brainstorming protocol
-
-Strategic ambiguity belongs primarily between the COOPERATOR and ORCHESTRATOR.
-
-When a real decision blocks safe task shaping:
-
-1. explicitly state:
-   `Brainstorming`;
-2. explain one decision;
-3. provide concise alternatives when useful;
-4. recommend one;
-5. ask Michal exactly one focused question;
-6. wait for the answer;
-7. incorporate it;
-8. only then create a Worker prompt.
-
-Do not ask a questionnaire.
-
-Do not force every question into A/B options when Michal should explain intent.
-
-A Worker may stop and report:
-
-* missing path authority;
-* contradictory repository evidence;
-* required out-of-scope file;
-* migration ambiguity;
-* unsafe prerequisite;
-* multiple legitimate architecture alternatives.
-
-When that happens:
-
-* do not punish the stop;
-* inspect the evidence;
-* provide a narrow continuation when appropriate;
-* do not repeat the entire task unnecessarily;
-* preserve the current clean state.
+* a commit it did not create;
+* a push it did not perform;
+* public equality it did not verify;
+* tests it did not run.
 
 ---
 
-# 27. Error-prevention method
+# 28. Avoiding over-process
 
-Do not rely mainly on vague instructions such as:
+The DeepSeek incident justified recovery and independent audit.
 
-`be careful`
+It does not justify permanently multiplying every task into many Worker sessions.
 
-Use observable gates:
+Normal future pattern:
 
-* exact Git root;
-* exact remote;
-* exact branch;
-* clean worktree;
-* clean index;
-* untracked-path check;
-* fetched public state;
-* local, tracking, and public SHA comparison;
-* expected parent;
-* expected subject;
-* expected changed paths;
-* code and ADR inspection;
-* exact allowlist;
-* exact forbidden paths;
-* explicit dependency authority;
-* explicit migration authority;
-* explicit secret authority;
-* explicit provider authority;
-* explicit private-media authority;
-* explicit filesystem authority;
-* test-first requirements;
-* deterministic validation;
-* changed-path audit;
-* staged-path audit;
-* pre-commit remote gate;
-* exact commit subject;
-* normal push only;
-* post-push public verification;
-* final clean worktree;
-* structured report.
+1. bounded implementation task;
+2. Worker commit and push;
+3. Orchestrator public diff review;
+4. one repair task only if a concrete defect exists;
+5. continue product progress.
 
-A Worker must stop rather than guess.
+Use a separate independent audit when:
+
+* migration is risky;
+* filesystem mutation is introduced;
+* credentials or providers are involved;
+* private media is involved;
+* architecture changes significantly;
+* the Worker report is inconsistent;
+* tests mask central behavior;
+* Git evidence is suspicious.
+
+Do not automatically perform five audit cycles for a small documentation or UI task.
 
 ---
 
-# 28. Artifact lifecycle rules
+# 29. Known current documentation and roadmap interpretation
 
-Every new documentation or evidence artifact should have:
+Current product truth overrides stale status labels.
 
-* classification;
-* concrete consumer;
-* inbound reference;
-* retention or cleanup trigger;
-* cleanup owner.
+FrameNest has implemented more than some phase labels imply.
 
-Durable ADRs:
+Do not interpret:
 
-* remain until explicitly superseded;
-* must be indexed;
-* must describe accepted decisions;
-* must not become temporary task logs.
+* “Phase planned”;
+* “foundation”;
+* “proposed”;
+* old `NEXT_WORKER.md` wording;
 
-Temporary research or decision evidence:
+as proof that committed code is absent.
 
-* should be removed after accepted conclusions and relevant sources are transferred;
-* must not accumulate as orphaned Markdown files;
-* requires explicit deletion authority.
+Likewise, do not interpret long-term accepted direction as current implementation.
 
-Worker must not delete artifacts automatically without task-specific authority.
+Current facts:
 
-Git history remains the archive.
-
-The active working tree should not accumulate consumed evidence files.
-
----
-
-# 29. Context pressure and rotation
-
-Context pressure belongs to concrete instances and sessions.
-
-It does not belong to persistent roles.
-
-Rotate a Worker instance when:
-
-* a substantial coherent task is complete;
-* automatic compaction occurs;
-* manual compaction has already been used and more large work is proposed;
-* context telemetry becomes constrained;
-* usage limits disrupt work;
-* repeated summarization risks losing constraints;
-* a major subsystem change is next;
-* quality degrades;
-* a clean committed boundary exists.
-
-A practical FrameNest rule:
-
-* one deliberate manual compaction at a clean boundary may be acceptable;
-* a later automatic or second compaction is a strong rotation signal;
-* do not use a third compaction to prolong a large Worker session;
-* do not send a new major vertical slice after repeated compaction when a clean commit boundary exists.
-
-The Worker session closed in Cycle 069 because:
-
-* Cycles 067 and 068 completed two substantial coherent slices;
-* the session had already been manually compacted;
-* automatic compaction occurred again before closeout;
-* execution-client limits were constrained;
-* a clean public boundary existed;
-* continuing would increase risk.
-
-Rotate an Orchestrator instance when:
-
-* strategic context becomes large;
-* many product decisions accumulate;
-* a clean repository-native handoff exists;
-* source-of-truth recovery would benefit from a fresh instance.
-
-A closed Worker session must never be revived.
-
-A later account-limit reset does not reopen it.
-
-Repeated in-chat summaries are not a substitute for repository-native handoffs and public Git evidence.
+* description exists;
+* Processed exists;
+* migration head is `0007`;
+* Catalog search exists;
+* tag AND filtering exists;
+* manual metadata workspace exists;
+* arbitrary collections do not exist;
+* suggested filename does not exist;
+* persistent AI Drafts do not exist;
+* covers and thumbnails do not exist;
+* premium gallery does not exist.
 
 ---
 
-# 30. First-response contract for the fresh Orchestrator instance
+# 30. Handoff bootstrap instructions for the fresh Orchestrator
 
-Before the first substantive response, the fresh Orchestrator instance must:
+When Michal pastes this file into a new ChatGPT session, the fresh Orchestrator should:
 
-1. identify current public `main`;
-2. inspect the latest commit;
-3. locate the commit containing this handoff;
-4. verify that handoff commit’s parent;
-5. verify its subject:
-   `handout`;
-6. verify changed path:
-   `NEXT_ORCHESTRATOR.md`;
-7. verify changed-path count:
-   one;
-8. read current raw `NEXT_ORCHESTRATOR.md`;
-9. read current raw `NEXT_WORKER.md`;
-10. confirm Worker session state:
-    `CLOSED`;
-11. confirm no active Worker exists;
-12. verify commit `49a3077e...`;
-13. verify commit `74fc43b2...`;
-14. verify commit `b55dc3e4...`;
-15. verify migration head `0005`;
-16. inspect ADR index;
-17. verify highest accepted ADR;
-18. inspect ADR-0023;
-19. inspect ADR-0024;
-20. inspect ADR-0027;
-21. inspect ADR-0028;
-22. inspect catalog read implementation;
-23. inspect metadata implementation;
-24. inspect metadata API;
-25. inspect catalog API;
-26. inspect browser Catalog;
-27. inspect browser metadata workspace;
-28. inspect migration `0005`;
-29. inspect roadmap;
-30. identify stale roadmap statements;
-31. identify known `NEXT_WORKER.md` inaccuracies;
-32. distinguish public evidence from Worker-observed evidence;
-33. determine whether any newer public commit exists;
-34. determine whether repository state contradicts this handoff;
-35. determine whether description semantics are sufficiently resolved for a task.
+1. acknowledge restoration;
+2. state that it is a fresh Orchestrator instance assigned to the persistent ORCHESTRATOR role;
+3. verify the current public repository;
+4. verify the `handout` commit;
+5. inspect current raw `NEXT_ORCHESTRATOR.md`;
+6. inspect public `main`;
+7. confirm the current implementation commit chain;
+8. identify any intervening commits;
+9. confirm whether the known Cycle 071 stale wording remains;
+10. report restoration status in Slovak;
+11. do not immediately issue a Worker implementation prompt before restoration;
+12. recommend the smallest coherent next action;
+13. prioritize the bounded documentation truth repair and first user smoke test;
+14. initialize a fresh GLM-5.2 High Worker only after verification.
 
-Its first response to Michal must:
+Do not ask Michal to re-explain the DeepSeek incident.
 
-* be in Slovak;
+Do not ask him to paste files already in the public repository.
 
-* refer to herself in feminine grammatical gender;
-
-* state resolved public HEAD;
-
-* state verified handoff commit;
-
-* classify restoration as:
-
-  * `PASS`;
-  * `PARTIAL`;
-  * `BLOCKED`;
-
-* state whether this file is canonical;
-
-* summarize actual implemented state;
-
-* confirm previous Worker session is permanently closed;
-
-* confirm no active Worker exists;
-
-* confirm migration head `0005`;
-
-* confirm ADR horizon through ADR-0028;
-
-* identify known `NEXT_WORKER.md` inaccuracies;
-
-* identify stale roadmap wording;
-
-* explain the likely next product direction;
-
-* enter Brainstorming if description semantics or next product priority remain unresolved;
-
-* produce exactly one authoritative prompt for one fresh Worker only when safe;
-
-* avoid multiple competing prompts;
-
-* avoid asking Michal to paste public repository files.
-
-If a critical decision remains unresolved:
-
-* enter Brainstorming;
-* ask exactly one focused question;
-* do not fabricate a Worker task.
+Do not revive closed Worker sessions.
 
 ---
 
-# 31. Recommended fresh Worker initialization
+# 31. Current closure declaration
 
-When a next task is selected:
+The Orchestrator session that authored this handoff is complete after the manual handoff commit is pushed and verified.
 
-* create one new authoritative Worker prompt;
+Current implementation boundary before the handoff commit:
 
-* identify the execution entity as:
-  `a fresh Worker instance assigned to the WORKER role`;
+`242705c2e9f033399709d8b674e0a736a692bc16`
 
-* instruct it to read:
+Current migration head:
 
-  * `AGENTS.md`;
-  * `BOOT_WORKER.md`;
-  * `AP_WORKER.md`;
-  * `NEXT_WORKER.md`;
-  * task-relevant ADRs;
-  * task-relevant code and tests;
+`0007`
 
-* explicitly warn it that the current `NEXT_WORKER.md` mischaracterizes ADR-0023 and ADR-0024;
+Current highest accepted ADR:
 
-* state the correct ADR titles and require direct reading;
+`ADR-0030`
 
-* do not manually copy the whole `NEXT_WORKER.md` into the Worker conversation;
+Current active Worker:
 
-* ensure the authoritative prompt remains the only concrete task authority.
+none
 
-Do not modify `NEXT_WORKER.md` merely to initialize the fresh Worker.
+Current active Worker session:
 
----
+none
 
-# 32. Orchestrator session-close protocol
+Recommended future Worker:
 
-At a future Orchestrator-session close:
+fresh OpenCode GLM-5.2 High instance
 
-1. produce a complete replacement for `NEXT_ORCHESTRATOR.md`;
-2. make it self-contained;
-3. include current public evidence;
-4. include current Worker lifecycle state;
-5. include product and architecture decisions;
-6. include known contradictions and risks;
-7. include the next strategy;
-8. do not fabricate the future handoff commit SHA;
-9. give finalized content to Michal;
-10. Michal manually replaces the repository file;
-11. Michal commits with subject:
-    `handout`;
-12. Michal pushes;
-13. a fresh Orchestrator instance verifies the public commit.
+Future Worker Git authority:
 
-Do not ask a Worker to modify `NEXT_ORCHESTRATOR.md` during normal closeout.
+allowed when explicitly granted by the fresh Orchestrator
 
-`NEXT_WORKER.md` and `NEXT_ORCHESTRATOR.md` have separate lifecycles.
+Immediate known repository concern:
 
-`NEXT_WORKER.md` is updated only when a Worker session requires closeout.
+stale wording that still calls committed Cycle 071 “proposed” or “uncommitted”
 
-`NEXT_ORCHESTRATOR.md` is updated manually by the COOPERATOR at Orchestrator-session close.
+Immediate product concern:
 
----
+run the first end-to-end MacBook smoke test and move toward visible UX/design quality
 
-# 33. Current session-close declaration
+No further repository work is authorized by this handoff itself.
 
-This Orchestrator session is complete after the COOPERATOR commits this handoff.
-
-Completed during this session:
-
-* restoration from manual Orchestrator handoff `0ff83f8e...`;
-* independent public verification of repository state;
-* Cycle 067:
-  searchable Catalog browser;
-* ADR-0028;
-* display-title search;
-* canonical-tag AND filtering;
-* deterministic catalog pagination;
-* packaged Catalog UI;
-* public verification of Cycle 067;
-* Cycle 068:
-  manual `Current` metadata workspace;
-* persistent browser title editing;
-* persistent canonical-tag editing;
-* tag ordering;
-* explicit tag creation;
-* dirty and discard protection;
-* catalog refresh after Save;
-* public verification of Cycle 068;
-* recognition of Worker context pressure;
-* Cycle 069 Worker-session closeout;
-* permanent closure of the concrete Worker session;
-* independent public verification of the closeout commit;
-* identification of known inaccuracies in `NEXT_WORKER.md`;
-* preservation of those corrections in this canonical Orchestrator handoff.
-
-Current state after this handoff:
-
-* persistent role:
-  `ORCHESTRATOR` continues;
-* active Orchestrator instance:
-  none after this session closes;
-* persistent role:
-  `WORKER` continues;
-* active Worker instance:
-  none;
-* previous Worker session:
-  permanently closed;
-* current Worker handoff:
-  lifecycle-valid but content-partial;
-* current Orchestrator handoff:
-  this file;
-* migration head:
-  `0005`;
-* highest accepted ADR:
-  ADR-0028;
-* pending authorized Worker task:
-  none;
-* strongest next recommendation:
-  bounded manual metadata-detail expansion, likely persistent description;
-* private test corpus:
-  available only under future explicit task authority;
-* current public repository before manual `handout`:
-  `49a3077e0628d16967fbb14be222006ec79159a9`.
-
----
-
-# 34. Success condition
-
-This handoff succeeds when a fresh Orchestrator instance:
-
-1. discovers and verifies the new manual `handout` commit;
-2. confirms its parent is the Cycle 069 closeout commit when no intervening commit exists;
-3. treats this file as canonical;
-4. restores the role-versus-instance model;
-5. restores the single-Worker AP v1 topology;
-6. confirms the prior Worker session is permanently closed;
-7. confirms no active Worker exists;
-8. verifies implementation through Cycle 068;
-9. verifies Cycle 069 closeout;
-10. verifies migration `0005`;
-11. verifies ADR-0028;
-12. reads ADR-0023 and ADR-0024 directly;
-13. recognizes that current `NEXT_WORKER.md` mischaracterizes those ADRs;
-14. recognizes current roadmap contradictions;
-15. understands that searchable Catalog exists;
-16. understands that title search exists;
-17. understands that tag AND filtering exists;
-18. understands that manual browser title/tag editing exists;
-19. understands that broader metadata detail remains incomplete;
-20. preserves manual-first product invariants;
-21. preserves AI-optional behavior;
-22. preserves separate `Current` and AI Draft semantics;
-23. preserves Cover Studio direction;
-24. preserves premium gallery direction;
-25. understands private MP4/GIF evidence without inheriting private access;
-26. keeps cloud access separately authorized;
-27. treats metadata-detail expansion as the likely next direction;
-28. resolves description semantics before implementation when necessary;
-29. initializes one fresh Worker instance;
-30. produces one precise authoritative Worker prompt;
-31. independently verifies every future Worker commit;
-32. rotates instances when context pressure threatens quality;
-33. closes future sessions through repository-native handoffs;
-34. continues toward a usable, premium, local-first MacBook product.
+The fresh Orchestrator must verify, reason, and then issue one bounded task at a time.
