@@ -31,10 +31,14 @@ from framenest.domain.media_metadata import (
     CanonicalTag,
     CanonicalTagDisplayName,
     CanonicalTagKey,
+    CollectionState,
+    derive_collection_state,
     FrameNestMediaMetadataError,
+    MediaCollectionKey,
     MediaDescription,
     MediaDisplayTitle,
     MediaMetadata,
+    PROCESSED_COLLECTION_KEY,
 )
 
 __all__ = [
@@ -62,9 +66,13 @@ __all__ = [
     "CanonicalTag",
     "CanonicalTagDisplayName",
     "CanonicalTagKey",
+    "CollectionState",
+    "derive_collection_state",
+    "MediaCollectionKey",
     "MediaDescription",
     "MediaDisplayTitle",
     "MediaMetadata",
+    "PROCESSED_COLLECTION_KEY",
     "SeriesId",
     "StorageVolumeId",
 ]

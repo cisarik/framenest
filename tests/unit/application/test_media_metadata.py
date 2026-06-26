@@ -28,6 +28,7 @@ from framenest.domain.media_metadata import (
     CanonicalTagKey,
     MediaDescription,
     MediaDisplayTitle,
+    derive_collection_state,
 )
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
@@ -52,6 +53,8 @@ class _FakeRepository:
             persisted=False,
             display_title=None,
             description=None,
+            collection_key=None,
+            processed_at_ms=None,
             tag_keys=(),
             created_at_ms=None,
             updated_at_ms=None,
@@ -108,11 +111,19 @@ class _FakeRepository:
             status = "unchanged"
         created_at_ms = self.snapshot.created_at_ms if self.snapshot.created_at_ms is not None else now_ms
         updated_at_ms = self.snapshot.updated_at_ms if status == "unchanged" else now_ms
+        collection_state = derive_collection_state(
+            self.snapshot.collection_key,
+            self.snapshot.processed_at_ms,
+            tag_keys,
+            now_ms,
+        )
         self.snapshot = MediaMetadataSnapshot(
             media_id=media_id,
             persisted=True,
             display_title=display_title,
             description=description,
+            collection_key=collection_state.collection_key,
+            processed_at_ms=collection_state.processed_at_ms,
             tag_keys=tag_keys,
             created_at_ms=created_at_ms,
             updated_at_ms=updated_at_ms,

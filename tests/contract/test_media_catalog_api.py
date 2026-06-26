@@ -19,6 +19,7 @@ from framenest.application.ports.media_catalog_repository import (
     MediaCatalogQuery,
 )
 from framenest.configuration import FrameNestSettings
+from framenest.domain.media_metadata import MediaCollectionKey
 
 MEDIA_ID = "12345678-1234-4234-9234-123456789abc"
 LOCATION_ID = "abcdefab-cdef-4abc-8def-abcdefabcdef"
@@ -39,10 +40,11 @@ class _FakeListMediaCatalog:
         tag_keys: list[str],
         limit: int,
         offset: int,
+        collection_key: MediaCollectionKey | None = None,
     ) -> MediaCatalogPage:
         if self.queries is None:
             self.queries = []
-        self.queries.append({"q": q, "tag_keys": tag_keys, "limit": limit, "offset": offset})
+        self.queries.append({"q": q, "tag_keys": tag_keys, "limit": limit, "offset": offset, "collection_key": collection_key})
         if self.error is not None:
             raise self.error
         return ListMediaCatalog(_FakeCatalogRepository()).execute(
@@ -50,6 +52,7 @@ class _FakeListMediaCatalog:
             tag_keys=tag_keys,
             limit=limit,
             offset=offset,
+            collection_key=collection_key,
         )
 
 
@@ -63,6 +66,8 @@ class _FakeCatalogRepository:
                     created_at_ms=10,
                     updated_at_ms=20,
                     display_title="Reinventing Entropy",
+                    collection_key=None,
+                    processed_at_ms=None,
                     tags=(CatalogMediaTag(key="mathematics", display_name="Math", position=0),),
                     locations=(
                         CatalogMediaLocation(
@@ -117,6 +122,8 @@ def test_successful_default_listing_exposes_complete_catalog_safe_fields() -> No
                 "created_at_ms": 10,
                 "updated_at_ms": 20,
                 "display_title": "Reinventing Entropy",
+                "collection_key": None,
+                "processed_at_ms": None,
                 "tags": [{"key": "mathematics", "display_name": "Math", "position": 0}],
                 "locations": [
                     {
@@ -162,6 +169,7 @@ def test_repeated_tags_title_query_combined_filters_and_pagination_metadata() ->
             "tag_keys": ["mathematics", "compression"],
             "limit": 1,
             "offset": 2,
+            "collection_key": None,
         }
     ]
 

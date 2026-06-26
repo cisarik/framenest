@@ -82,6 +82,8 @@ class MediaMetadataResponse(BaseModel):
     display_title: str | None
     description: str | None
     tags: list[CanonicalTagResponse]
+    collection_key: str | None
+    processed_at_ms: int | None
     created_at_ms: int | None
     updated_at_ms: int | None
 
@@ -305,6 +307,8 @@ def _metadata_response(metadata: object) -> MediaMetadataResponse:
         display_title=display_title,
         description=description,
         tags=[_tag_response(tag) for tag in tags],
+        collection_key=metadata.collection_key,
+        processed_at_ms=metadata.processed_at_ms,
         created_at_ms=metadata.created_at_ms,
         updated_at_ms=metadata.updated_at_ms,
     )

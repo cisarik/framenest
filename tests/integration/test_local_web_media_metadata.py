@@ -81,3 +81,84 @@ def test_local_web_persists_display_title_and_canonical_tags(tmp_path: Path) -> 
             assert connection.execute(text("SELECT COUNT(*) FROM physical_media_locations")).scalar_one() == 0
     finally:
         dispose_engine(engine)
+
+
+def test_local_web_metadata_api_exposes_processed_collection_lifecycle(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "processed-lifecycle.sqlite3"
+    settings = FrameNestSettings(database_path=database_path, _env_file=None)
+    upgrade_database_to_head(settings)
+    media_id = _insert_media(database_path)
+
+    with TestClient(create_app(settings=settings)) as client:
+        client.post("/api/canonical-tags", json={"key": "mathematics", "display_name": "Math"})
+        client.post("/api/canonical-tags", json={"key": "compression", "display_name": "Compression"})
+
+        first = client.put(
+            f"/api/media/{media_id}/metadata",
+            json={"display_title": "Reinventing Entropy", "description": None, "tag_keys": ["mathematics"]},
+        )
+        first_metadata = first.json()["metadata"]
+        assert first.status_code == 200
+        assert first_metadata["collection_key"] == "processed"
+        first_ts = first_metadata["processed_at_ms"]
+        assert first_ts is not None
+        assert isinstance(first_ts, int)
+        assert not isinstance(first_ts, bool)
+        assert first_ts >= 0
+
+        title_only = client.put(
+            f"/api/media/{media_id}/metadata",
+            json={"display_title": "Entropy", "description": None, "tag_keys": ["mathematics"]},
+        )
+        assert title_only.status_code == 200
+        assert title_only.json()["metadata"]["collection_key"] == "processed"
+        assert title_only.json()["metadata"]["processed_at_ms"] == first_ts
+
+        reorder = client.put(
+            f"/api/media/{media_id}/metadata",
+            json={
+                "display_title": "Entropy",
+                "description": None,
+                "tag_keys": ["compression", "mathematics"],
+            },
+        )
+        assert reorder.status_code == 200
+        assert reorder.json()["metadata"]["processed_at_ms"] == first_ts
+
+        cleared = client.put(
+            f"/api/media/{media_id}/metadata",
+            json={"display_title": "Entropy", "description": None, "tag_keys": []},
+        )
+        assert cleared.status_code == 200
+        assert cleared.json()["metadata"]["collection_key"] is None
+        assert cleared.json()["metadata"]["processed_at_ms"] is None
+
+        reentry = client.put(
+            f"/api/media/{media_id}/metadata",
+            json={"display_title": "Entropy", "description": None, "tag_keys": ["mathematics"]},
+        )
+        assert reentry.status_code == 200
+        assert reentry.json()["metadata"]["collection_key"] == "processed"
+        reentry_ts = reentry.json()["metadata"]["processed_at_ms"]
+        assert reentry_ts is not None
+        assert isinstance(reentry_ts, int)
+        assert reentry_ts >= first_ts
+
+        read_back = client.get(f"/api/media/{media_id}/metadata")
+        assert read_back.status_code == 200
+        assert read_back.json()["collection_key"] == "processed"
+        assert read_back.json()["processed_at_ms"] == reentry_ts
+
+        processed_catalog = client.get("/api/media", params={"collection": "processed"})
+        assert processed_catalog.status_code == 200
+        assert any(item["media_id"] == media_id.to_string() for item in processed_catalog.json()["items"])
+        processed_item = next(
+            item for item in processed_catalog.json()["items"] if item["media_id"] == media_id.to_string()
+        )
+        assert processed_item["collection_key"] == "processed"
+        assert processed_item["processed_at_ms"] == reentry_ts
+
+        unknown_collection = client.get("/api/media", params={"collection": "custom-collection"})
+        assert unknown_collection.status_code == 422

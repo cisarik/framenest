@@ -42,6 +42,16 @@ class SqliteMediaCatalogRepository:
             total = connection.execute(
                 select(func.count()).select_from(filtered)
             ).scalar_one()
+            if query.collection_key is not None:
+                order_columns = [
+                    filtered.c.processed_at_ms.asc(),
+                    filtered.c.id.asc(),
+                ]
+            else:
+                order_columns = [
+                    filtered.c.created_at_ms.desc(),
+                    filtered.c.id.asc(),
+                ]
             page_rows = list(
                 connection.execute(
                     select(
@@ -50,8 +60,10 @@ class SqliteMediaCatalogRepository:
                         filtered.c.created_at_ms,
                         filtered.c.updated_at_ms,
                         filtered.c.display_title,
+                        filtered.c.collection_key,
+                        filtered.c.processed_at_ms,
                     )
-                    .order_by(filtered.c.created_at_ms.desc(), filtered.c.id.asc())
+                    .order_by(*order_columns)
                     .limit(query.limit)
                     .offset(query.offset)
                 ).mappings()
@@ -68,6 +80,12 @@ class SqliteMediaCatalogRepository:
                     display_title=None
                     if row["display_title"] is None
                     else str(row["display_title"]),
+                    collection_key=None
+                    if row["collection_key"] is None
+                    else str(row["collection_key"]),
+                    processed_at_ms=None
+                    if row["processed_at_ms"] is None
+                    else int(row["processed_at_ms"]),
                     tags=tuple(tags_by_media[str(row["id"])]),
                     locations=tuple(locations_by_media[str(row["id"])]),
                 )
@@ -106,6 +124,8 @@ def _filtered_media_select(query: MediaCatalogQuery, tag_values: tuple[str, ...]
         logical_media.c.created_at_ms,
         logical_media.c.updated_at_ms,
         media_metadata.c.display_title,
+        media_metadata.c.collection_key,
+        media_metadata.c.processed_at_ms,
     ).select_from(joined)
     if query.q is not None:
         statement = statement.where(
@@ -113,6 +133,10 @@ def _filtered_media_select(query: MediaCatalogQuery, tag_values: tuple[str, ...]
                 _like_pattern(query.q),
                 escape=_LIKE_ESCAPE,
             )
+        )
+    if query.collection_key is not None:
+        statement = statement.where(
+            media_metadata.c.collection_key == query.collection_key.value
         )
     if tag_values:
         statement = (
@@ -123,6 +147,8 @@ def _filtered_media_select(query: MediaCatalogQuery, tag_values: tuple[str, ...]
                 logical_media.c.created_at_ms,
                 logical_media.c.updated_at_ms,
                 media_metadata.c.display_title,
+                media_metadata.c.collection_key,
+                media_metadata.c.processed_at_ms,
             )
             .having(func.count(distinct(media_canonical_tags.c.tag_key)) == len(tag_values))
         )

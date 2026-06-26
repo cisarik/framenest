@@ -198,9 +198,24 @@ media_metadata = Table(
     ),
     Column("display_title", Text(), nullable=True),
     Column("description", Text(), nullable=True),
+    Column("collection_key", Text(), nullable=True),
+    Column("processed_at_ms", Integer(), nullable=True),
     Column("created_at_ms", Integer(), nullable=False),
     Column("updated_at_ms", Integer(), nullable=False),
     CheckConstraint("length(media_id) = 36", name="ck_media_metadata_media_id_length"),
+    CheckConstraint(
+        "collection_key IS NULL OR collection_key = 'processed'",
+        name="ck_media_metadata_collection_key_valid",
+    ),
+    CheckConstraint(
+        "(collection_key IS NULL AND processed_at_ms IS NULL) "
+        "OR (collection_key = 'processed' AND processed_at_ms IS NOT NULL)",
+        name="ck_media_metadata_collection_paired",
+    ),
+    CheckConstraint(
+        "processed_at_ms IS NULL OR processed_at_ms >= 0",
+        name="ck_media_metadata_processed_at_ms_non_negative",
+    ),
     CheckConstraint(
         "display_title IS NULL OR (length(display_title) >= 1 AND length(display_title) <= 240)",
         name="ck_media_metadata_title_length",
@@ -220,6 +235,12 @@ media_metadata = Table(
     CheckConstraint(
         "updated_at_ms >= created_at_ms",
         name="ck_media_metadata_updated_not_before_created",
+    ),
+    Index(
+        "ix_media_metadata_collection",
+        "collection_key",
+        "processed_at_ms",
+        "media_id",
     ),
 )
 

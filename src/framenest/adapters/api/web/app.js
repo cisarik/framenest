@@ -12,6 +12,7 @@ const MAX_METADATA_TITLE_CODE_POINTS = 240;
 const MAX_METADATA_DESCRIPTION_CODE_POINTS = 10000;
 const MAX_METADATA_TAGS = 32;
 const TAG_KEY_PATTERN = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/;
+const PROCESSED_COLLECTION = "processed";
 const MAX_REVIEW_TEXT = {
   title: 120,
   description: 600,
@@ -31,6 +32,7 @@ let metadataBeforeUnloadAttached = false;
 let catalogState = {
   q: "",
   tagKeys: [],
+  collection: "",
   limit: CATALOG_PAGE_SIZE,
   offset: 0,
   total: 0,
@@ -43,8 +45,8 @@ let metadataWorkspace = {
   unavailable: false,
   notFound: false,
   statusOverride: null,
-  baseline: { displayTitle: null, description: null, tagKeys: [] },
-  current: { displayTitle: "", description: "", tagKeys: [] },
+  baseline: { displayTitle: null, description: null, tagKeys: [], collectionKey: null, processedAtMs: null },
+  current: { displayTitle: "", description: "", tagKeys: [], collectionKey: null, processedAtMs: null },
 };
 let aiCapability = {
   available: false,
@@ -492,6 +494,25 @@ function addMetadataValue(metadataList, label, value) {
   metadataList.appendChild(wrapper);
 }
 
+function buildProcessedTimeElement(processedAtMs) {
+  if (processedAtMs === null || processedAtMs === undefined) {
+    return null;
+  }
+  const numeric = Number(processedAtMs);
+  if (!Number.isFinite(numeric)) {
+    return null;
+  }
+  const date = new Date(numeric);
+  if (Number.isNaN(date.getTime())) {
+    return null;
+  }
+  const iso = date.toISOString();
+  const time = document.createElement("time");
+  time.datetime = iso;
+  time.textContent = iso;
+  return time;
+}
+
 function renderUnavailablePreview(card) {
   setLocalPreviewState(card, "unavailable", "Local media analysis is not available.");
 }
@@ -678,6 +699,9 @@ function buildCatalogQueryParams() {
   catalogState.tagKeys.forEach((key) => {
     params.append("tag", key);
   });
+  if (catalogState.collection) {
+    params.set("collection", catalogState.collection);
+  }
   params.set("limit", String(catalogState.limit));
   params.set("offset", String(catalogState.offset));
   return params;
@@ -749,6 +773,19 @@ function renderCatalogCard(item) {
   addMetadataValue(facts, "Locations", String(item.locations.length));
   addMetadataValue(facts, "Availability", summarizeAvailability(item.locations));
   addMetadataValue(facts, "Media ID", item.media_id);
+  if (item.collection_key) {
+    addMetadataValue(facts, "Collection", item.collection_key);
+    const processedTime = buildProcessedTimeElement(item.processed_at_ms);
+    if (processedTime !== null) {
+      const wrapper = document.createElement("div");
+      const term = document.createElement("dt");
+      const detail = document.createElement("dd");
+      term.textContent = "Processed since";
+      detail.appendChild(processedTime);
+      wrapper.append(term, detail);
+      facts.appendChild(wrapper);
+    }
+  }
 
   const tags = document.createElement("div");
   tags.className = "catalog-tags";
@@ -1048,6 +1085,27 @@ function renderMetadataWorkspace() {
   const descriptionInput = document.querySelector("#metadata-description-input");
   descriptionInput.value = metadataWorkspace.current.description || "";
   updateDescriptionCount();
+
+  const collectionStatus = document.querySelector("#metadata-collection-status");
+  const collectionMessage = document.querySelector("#metadata-collection-message");
+  if (metadataWorkspace.baseline.collectionKey) {
+    collectionStatus.hidden = false;
+    collectionMessage.replaceChildren();
+    collectionMessage.appendChild(document.createTextNode("In Processed collection since "));
+    const processedTime = buildProcessedTimeElement(metadataWorkspace.baseline.processedAtMs);
+    if (processedTime !== null) {
+      collectionMessage.appendChild(processedTime);
+    }
+    collectionMessage.appendChild(document.createTextNode("."));
+    if (metadataWorkspace.current.tagKeys.length === 0) {
+      collectionMessage.appendChild(
+        document.createTextNode(" All tags removed. Saving will remove this item from the Processed collection."),
+      );
+    }
+  } else {
+    collectionStatus.hidden = true;
+  }
+
   renderSelectedMetadataTags();
   renderMetadataTagSuggestions();
   updateMetadataControls();
@@ -1055,15 +1113,21 @@ function renderMetadataWorkspace() {
 
 function applyMetadataPayloadToWorkspace(payload) {
   const tagKeys = (payload.tags || []).map((tag) => tag.key);
+  const collectionKey = payload.collection_key ?? null;
+  const processedAtMs = payload.processed_at_ms ?? null;
   metadataWorkspace.baseline = {
     displayTitle: payload.display_title === null ? null : payload.display_title,
     description: payload.description === null ? null : payload.description,
     tagKeys,
+    collectionKey,
+    processedAtMs,
   };
   metadataWorkspace.current = {
     displayTitle: payload.display_title === null ? "" : payload.display_title,
     description: payload.description === null ? "" : payload.description,
     tagKeys: [...tagKeys],
+    collectionKey,
+    processedAtMs,
   };
 }
 
@@ -1081,8 +1145,8 @@ async function handleOpenMetadataWorkspace(item) {
     unavailable: false,
     notFound: false,
     statusOverride: null,
-    baseline: { displayTitle: null, description: null, tagKeys: [] },
-    current: { displayTitle: "", description: "", tagKeys: [] },
+    baseline: { displayTitle: null, description: null, tagKeys: [], collectionKey: null, processedAtMs: null },
+    current: { displayTitle: "", description: "", tagKeys: [], collectionKey: null, processedAtMs: null },
   };
   metadataCreateStatus.textContent = "";
   renderMetadataWorkspace();
@@ -1175,6 +1239,8 @@ function resetMetadataWorkspaceAfterDiscard() {
     displayTitle: metadataWorkspace.baseline.displayTitle || "",
     description: metadataWorkspace.baseline.description || "",
     tagKeys: [...metadataWorkspace.baseline.tagKeys],
+    collectionKey: metadataWorkspace.baseline.collectionKey,
+    processedAtMs: metadataWorkspace.baseline.processedAtMs,
   };
   metadataWorkspace.statusOverride = null;
   metadataCreateStatus.textContent = "";
@@ -1198,8 +1264,8 @@ function closeMetadataWorkspace() {
     unavailable: false,
     notFound: false,
     statusOverride: null,
-    baseline: { displayTitle: null, description: null, tagKeys: [] },
-    current: { displayTitle: "", description: "", tagKeys: [] },
+    baseline: { displayTitle: null, description: null, tagKeys: [], collectionKey: null, processedAtMs: null },
+    current: { displayTitle: "", description: "", tagKeys: [], collectionKey: null, processedAtMs: null },
   };
   metadataWorkspaceElement.hidden = true;
   syncMetadataBeforeUnloadProtection();
@@ -1840,6 +1906,38 @@ async function loadLibraries() {
     showLibraryState("error");
   }
 }
+
+function setCatalogScope(collection) {
+  catalogState.collection = collection;
+  catalogState.offset = 0;
+  const allButton = document.querySelector("#catalog-scope-all");
+  const processedButton = document.querySelector("#catalog-scope-processed");
+  if (allButton && processedButton) {
+    allButton.classList.toggle("scope-active", collection === "");
+    processedButton.classList.toggle("scope-active", collection === PROCESSED_COLLECTION);
+  }
+  loadCatalog();
+}
+
+document.querySelector("#catalog-scope-all").addEventListener("click", () => {
+  if (!confirmDiscardDirtyMetadata()) {
+    return;
+  }
+  if (metadataWorkspace.openMediaId !== null) {
+    closeMetadataWorkspace();
+  }
+  setCatalogScope("");
+});
+
+document.querySelector("#catalog-scope-processed").addEventListener("click", () => {
+  if (!confirmDiscardDirtyMetadata()) {
+    return;
+  }
+  if (metadataWorkspace.openMediaId !== null) {
+    closeMetadataWorkspace();
+  }
+  setCatalogScope(PROCESSED_COLLECTION);
+});
 
 catalogSearchForm.addEventListener("submit", (event) => {
   event.preventDefault();

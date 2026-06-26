@@ -9,6 +9,7 @@ import unicodedata
 from framenest.domain.identities import MediaId
 
 INVALID_MEDIA_METADATA_MESSAGE = "Invalid FrameNest media metadata."
+PROCESSED_COLLECTION_KEY = "processed"
 MAX_DISPLAY_TITLE_CODE_POINTS = 240
 MAX_TAG_KEY_CODE_POINTS = 64
 MAX_TAG_DISPLAY_NAME_CODE_POINTS = 80
@@ -122,6 +123,64 @@ def _has_forbidden_control_char(value: str) -> bool:
         if unicodedata.category(ch) == "Cc" and ch != "\n":
             return True
     return False
+
+
+@dataclass(frozen=True, slots=True)
+class MediaCollectionKey:
+    """Stable internal key for a built-in system collection."""
+
+    value: str
+
+    def __init__(self, value: object) -> None:
+        if not isinstance(value, str):
+            raise FrameNestMediaMetadataError(INVALID_MEDIA_METADATA_MESSAGE)
+        if value != PROCESSED_COLLECTION_KEY:
+            raise FrameNestMediaMetadataError(INVALID_MEDIA_METADATA_MESSAGE)
+        object.__setattr__(self, "value", value)
+
+    def __str__(self) -> str:
+        return self.value
+
+
+@dataclass(frozen=True, slots=True)
+class CollectionState:
+    """Derived collection membership state for one logical media item."""
+
+    collection_key: MediaCollectionKey | None
+    processed_at_ms: int | None
+
+    def __post_init__(self) -> None:
+        if self.collection_key is None and self.processed_at_ms is not None:
+            raise FrameNestMediaMetadataError(INVALID_MEDIA_METADATA_MESSAGE)
+        if self.collection_key is not None and self.processed_at_ms is None:
+            raise FrameNestMediaMetadataError(INVALID_MEDIA_METADATA_MESSAGE)
+        if self.collection_key is not None and not isinstance(self.collection_key, MediaCollectionKey):
+            raise FrameNestMediaMetadataError(INVALID_MEDIA_METADATA_MESSAGE)
+        if self.processed_at_ms is not None:
+            _validate_non_negative_int(self.processed_at_ms)
+
+
+def derive_collection_state(
+    current_collection_key: MediaCollectionKey | None,
+    current_processed_at_ms: int | None,
+    new_tag_keys: tuple[CanonicalTagKey, ...],
+    now_ms: int,
+) -> CollectionState:
+    """Derive the next collection state from current state and new tag list."""
+    has_tags = bool(new_tag_keys)
+    if current_collection_key is not None and has_tags:
+        return CollectionState(
+            collection_key=current_collection_key,
+            processed_at_ms=current_processed_at_ms,
+        )
+    if current_collection_key is None and has_tags:
+        return CollectionState(
+            collection_key=MediaCollectionKey(PROCESSED_COLLECTION_KEY),
+            processed_at_ms=now_ms,
+        )
+    if current_collection_key is not None and not has_tags:
+        return CollectionState(collection_key=None, processed_at_ms=None)
+    return CollectionState(collection_key=None, processed_at_ms=None)
 
 
 @dataclass(frozen=True, slots=True)

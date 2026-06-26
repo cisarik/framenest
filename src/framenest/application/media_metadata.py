@@ -47,6 +47,8 @@ class MediaMetadataView:
     display_title: str | None
     description: str | None
     tags: tuple[CanonicalTag, ...]
+    collection_key: str | None
+    processed_at_ms: int | None
     created_at_ms: int | None
     updated_at_ms: int | None
 
@@ -161,6 +163,8 @@ def _view_from_snapshot(
         display_title=None if snapshot.display_title is None else snapshot.display_title.value,
         description=None if snapshot.description is None else snapshot.description.value,
         tags=tuple(tags),
+        collection_key=None if snapshot.collection_key is None else snapshot.collection_key.value,
+        processed_at_ms=snapshot.processed_at_ms,
         created_at_ms=snapshot.created_at_ms,
         updated_at_ms=snapshot.updated_at_ms,
     )

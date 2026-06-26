@@ -10,6 +10,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from framenest.application.media_catalog import MediaCatalogValidationError
+from framenest.domain.media_metadata import MediaCollectionKey
 from framenest.application.ports.media_catalog_repository import (
     FrameNestMediaCatalogRepositoryError,
 )
@@ -52,6 +53,8 @@ class CatalogMediaResponse(BaseModel):
     created_at_ms: int
     updated_at_ms: int
     display_title: str | None
+    collection_key: str | None
+    processed_at_ms: int | None
     tags: list[CatalogTagResponse]
     locations: list[CatalogLocationResponse]
 
@@ -91,15 +94,27 @@ def create_media_catalog_api_router(dependencies: MediaCatalogApiDependencies) -
         tag: list[str] = Query(default=[]),
         limit: int = Query(default=24, ge=1, le=100),
         offset: int = Query(default=0, ge=0),
+        collection: str | None = None,
     ) -> MediaCatalogResponse | JSONResponse:
         if not dependencies.catalog_available():
             return _catalog_unavailable_response()
+        parsed_collection: MediaCollectionKey | None = None
+        if collection is not None:
+            try:
+                parsed_collection = MediaCollectionKey(collection)
+            except Exception:
+                return _error_response(
+                    422,
+                    MEDIA_CATALOG_INVALID_QUERY_CODE,
+                    MEDIA_CATALOG_INVALID_QUERY_MESSAGE,
+                )
         try:
             result = dependencies.list_media.execute(
                 q=q,
                 tag_keys=tag,
                 limit=limit,
                 offset=offset,
+                collection_key=parsed_collection,
             )
         except MediaCatalogValidationError:
             return _error_response(
@@ -150,6 +165,8 @@ def _media_response(item: object) -> CatalogMediaResponse:
         created_at_ms=item.created_at_ms,
         updated_at_ms=item.updated_at_ms,
         display_title=item.display_title,
+        collection_key=item.collection_key,
+        processed_at_ms=item.processed_at_ms,
         tags=[
             CatalogTagResponse(
                 key=tag.key,

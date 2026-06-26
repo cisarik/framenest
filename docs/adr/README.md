@@ -54,3 +54,4 @@ An accepted ADR may only be changed by a later ADR that supersedes it. Editing a
 | 0027 | Persistent Display Title and Canonical Tags | Accepted | 2026-06-25 | [0027-persistent-display-title-and-canonical-tags.md](0027-persistent-display-title-and-canonical-tags.md) |
 | 0028 | Catalog Read Model and Search Semantics | Accepted | 2026-06-26 | [0028-catalog-read-model-and-search-semantics.md](0028-catalog-read-model-and-search-semantics.md) |
 | 0029 | Persistent Plain-Text Media Description | Accepted | 2026-06-26 | [0029-persistent-plain-text-media-description.md](0029-persistent-plain-text-media-description.md) |
+| 0030 | Automatic Processed Collection from Durable Tag Saves | Accepted | 2026-06-26 | [0030-automatic-processed-collection.md](0030-automatic-processed-collection.md) |

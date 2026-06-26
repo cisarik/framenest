@@ -149,6 +149,7 @@ def _query(
         tag_keys=tuple(CanonicalTagKey(tag) for tag in tags),
         limit=limit,
         offset=offset,
+        collection_key=None,
     )
 
 
@@ -223,6 +224,7 @@ def test_tag_filtering_uses_and_semantics_and_duplicate_keys_do_not_change_resul
                 tag_keys=(CanonicalTagKey("compression"), CanonicalTagKey("compression")),
                 limit=24,
                 offset=0,
+                collection_key=None,
             )
         )
         unknown = repository.list_media(_query(tags=("unknown-tag",)))

@@ -46,9 +46,12 @@ deterministic relative location, but the display title, physical filename,
 library-relative path, suggested filename, catalog save, and future physical
 rename operation remain separate concepts.
 
-The current `Current` workspace edits display title and ordered canonical tags
-only. Future Metadata workspace work should expand the fixed editable
-`Current` working state and add optional separate AI drafts as described in
+The current `Current` workspace edits display title, optional plain-text
+description, and ordered canonical tags only, and shows the persisted
+`Processed` workflow collection state read-only. The `Processed` membership is
+derived automatically from durable tag saves, not chosen manually. Future
+Metadata workspace work should expand the fixed editable `Current` working state
+and add optional separate AI drafts as described in
 [AI_WORKSPACE.md](AI_WORKSPACE.md) and
 [ADR-0023](docs/adr/0023-manual-first-metadata-and-multi-model-ai-drafts.md).
 AI draft comparison is future architecture. The current repository also
@@ -152,7 +155,11 @@ include:
 - collection;
 - platform/source where available.
 
-A future advanced OR mode may exist, but AND is the default.
+The current packaged browser implements a virtual `All media` Catalog scope and
+an optional built-in `Processed` Catalog scope that restricts the page to media
+whose durable tag saves entered `Processed`. Arbitrary user-created collection
+filters remain future work. A future advanced OR mode may exist, but AND is the
+default.
 
 ## Preview And Playback
 

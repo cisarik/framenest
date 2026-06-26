@@ -30,16 +30,25 @@ metadata or mutate files.
 
 The packaged browser now implements a bounded manual `Current` metadata
 workspace for one selected imported medium. It can load sparse or persisted
-metadata, edit or clear the display title, search existing canonical tags
-locally, assign up to 32 ordered canonical tags, explicitly create a canonical
-tag definition, save through the existing metadata API, discard unsaved
-changes, and refresh the active Catalog view after a successful save. This
-current slice covers display title and canonical tags only.
+metadata, edit or clear the display title, edit or clear an optional plain-text
+description, search existing canonical tags locally, assign up to 32 ordered
+canonical tags, explicitly create a canonical tag definition, save through the
+existing metadata API, discard unsaved changes, and refresh the active Catalog
+view after a successful save. The save derives an automatic built-in `Processed`
+workflow collection from the durable tag list: the first save with at least one
+canonical tag enters `Processed` and records a `processed_at_ms` tagging
+timestamp, non-empty tag edits and title/description edits preserve it, and
+removing all tags clears `Processed` membership and the timestamp. The workspace
+shows the persisted `Processed` state read-only; no manual collection picker
+exists. This current slice covers display title, plain-text description, ordered
+canonical tags, and the automatic `Processed` collection state.
 
 The full multi-model AI draft comparison, inline model picker, persistent draft
-storage, descriptions, collections, suggested filename editing, and premium
-media detail workspace remain future architecture accepted by
-[ADR-0023](docs/adr/0023-manual-first-metadata-and-multi-model-ai-drafts.md).
+storage, arbitrary user-created collections, a general collection manager,
+suggested filename editing, and premium media detail workspace remain future
+architecture accepted by
+[ADR-0023](docs/adr/0023-manual-first-metadata-and-multi-model-ai-drafts.md) and
+[ADR-0030](docs/adr/0030-automatic-processed-collection.md).
 
 ## Workspace Purpose
 
@@ -79,10 +88,12 @@ explicit separate workflow.
 ## `Current`
 
 `Current` is the primary editable manual working copy. In the current browser
-slice, `Current` covers display title and ordered canonical tags for one
-selected imported medium. In later detail slices it should expand to additional
-manual metadata fields. It is available before any AI run, remains editable
-after AI, and is not closable like an AI draft.
+slice, `Current` covers display title, optional plain-text description, and
+ordered canonical tags for one selected imported medium, while the persisted
+`Processed` collection state is shown read-only and derived from the tag list.
+In later detail slices it should expand to additional manual metadata fields.
+It is available before any AI run, remains editable after AI, and is not
+closable like an AI draft.
 
 `Current` must never be silently overwritten. Values enter `Current` through
 manual editing or explicit promotion from an AI draft. `Current` remains

@@ -10,22 +10,19 @@ import pytest
 
 from framenest.adapters.api.application import create_app
 from framenest.adapters.api.media_metadata_api import MediaMetadataApiDependencies
+from framenest.application.media_metadata import MediaMetadataView, SaveMediaMetadataResult
 from framenest.application.ports.media_metadata_repository import (
     CanonicalTagCreateResult,
     CanonicalTagDefinitionConflictError,
     CanonicalTagNotFoundError,
     FrameNestMediaMetadataRepositoryError,
     MediaMetadataMediaNotFoundError,
-    MediaMetadataSaveResult,
-    MediaMetadataSnapshot,
 )
 from framenest.configuration import FrameNestSettings
-from framenest.domain import MediaId
 from framenest.domain.media_metadata import (
     CanonicalTag,
     CanonicalTagDisplayName,
     CanonicalTagKey,
-    MediaDescription,
 )
 
 MEDIA_ID = "12345678-1234-4234-9234-123456789abc"
@@ -71,18 +68,16 @@ class _FakeGetMetadata:
     def execute(self, media_id: str) -> object:
         if self.error is not None:
             raise self.error
-        return type(
-            "MetadataView",
-            (),
-            {
-                "persisted": self.persisted,
-                "display_title": "Reinventing Entropy" if self.persisted else None,
-                "description": "A plain text description." if self.persisted else None,
-                "tags": (_tag("mathematics", "Math"),) if self.persisted else (),
-                "created_at_ms": 10 if self.persisted else None,
-                "updated_at_ms": 20 if self.persisted else None,
-            },
-        )()
+        return MediaMetadataView(
+            persisted=self.persisted,
+            display_title="Reinventing Entropy" if self.persisted else None,
+            description="A plain text description." if self.persisted else None,
+            tags=(_tag("mathematics", "Math"),) if self.persisted else (),
+            collection_key="processed" if self.persisted else None,
+            processed_at_ms=15 if self.persisted else None,
+            created_at_ms=10 if self.persisted else None,
+            updated_at_ms=20 if self.persisted else None,
+        )
 
 
 @dataclass
@@ -99,19 +94,18 @@ class _FakeSaveMetadata:
         self.last_tag_keys = tag_keys
         if self.error is not None:
             raise self.error
-        snapshot = MediaMetadataSnapshot(
-            media_id=MediaId.from_string(media_id),
+        has_tags = len(tag_keys) > 0
+        metadata = MediaMetadataView(
             persisted=True,
-            display_title=None if display_title is None else __import__(
-                "framenest.domain.media_metadata",
-                fromlist=["MediaDisplayTitle"],
-            ).MediaDisplayTitle(display_title),
-            description=None if description is None else MediaDescription(description),
-            tag_keys=tuple(CanonicalTagKey(key) for key in tag_keys),
+            display_title=display_title,
+            description=description,
+            tags=tuple(_tag(key, key) for key in tag_keys),
+            collection_key="processed" if has_tags else None,
+            processed_at_ms=10 if has_tags else None,
             created_at_ms=10,
             updated_at_ms=10,
         )
-        return MediaMetadataSaveResult(status=self.status, metadata=snapshot)
+        return SaveMediaMetadataResult(status=self.status, metadata=metadata)
 
 
 def _client(
@@ -190,6 +184,8 @@ def test_metadata_get_unsaved_saved_and_save_statuses() -> None:
         "display_title": None,
         "description": None,
         "tags": [],
+        "collection_key": None,
+        "processed_at_ms": None,
         "created_at_ms": None,
         "updated_at_ms": None,
     }

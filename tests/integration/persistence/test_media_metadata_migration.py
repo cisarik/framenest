@@ -13,8 +13,8 @@ from framenest.configuration import FrameNestSettings
 PRODUCTION_VERSIONS_PACKAGE = (
     "framenest.infrastructure.persistence.alembic_environment.versions"
 )
-CURRENT_HEAD_REVISION = "0006"
-TARGET_PREVIOUS_REVISION = "0005"
+CURRENT_HEAD_REVISION = "0007"
+TARGET_PREVIOUS_REVISION = "0006"
 DEVICE_ID = "12345678-1234-4234-9234-123456789abc"
 LIBRARY_ID = "11111111-2222-4333-8444-555555555555"
 MEDIA_ID = "33333333-4444-4555-8666-777777777777"
@@ -143,8 +143,9 @@ def _insert_populated_0004_rows(database_path: Path) -> None:
         connection.close()
 
 
-def test_packaged_migration_resources_include_0006() -> None:
+def test_packaged_migration_resources_include_0007() -> None:
     versions = importlib.resources.files(PRODUCTION_VERSIONS_PACKAGE)
+    assert versions.joinpath("0007_automatic_processed_collection.py").is_file()
     assert versions.joinpath("0006_persistent_media_description.py").is_file()
     assert versions.joinpath("0005_media_metadata_and_canonical_tags.py").is_file()
 
@@ -155,13 +156,13 @@ def test_packaged_migration_resources_include_0006() -> None:
     assert revision.down_revision == TARGET_PREVIOUS_REVISION
 
 
-def test_empty_database_upgrades_to_current_head_revision_0006(tmp_path: Path) -> None:
+def test_empty_database_upgrades_to_current_head_revision_0007(tmp_path: Path) -> None:
     from framenest.infrastructure.persistence.migrations import (
         inspect_database_migration_status,
         upgrade_database_to_head,
     )
 
-    settings = _settings_for(tmp_path / "head-0006.sqlite3")
+    settings = _settings_for(tmp_path / "head-0007.sqlite3")
     status = upgrade_database_to_head(settings)
 
     assert status.state == "at_head"
@@ -190,6 +191,8 @@ def test_media_metadata_tables_have_required_schema_constraints_and_indexes(
         "media_id",
         "display_title",
         "description",
+        "collection_key",
+        "processed_at_ms",
         "created_at_ms",
         "updated_at_ms",
     }
@@ -207,6 +210,9 @@ def test_media_metadata_tables_have_required_schema_constraints_and_indexes(
     assert "ck_canonical_tags_key_slug" in tag_sql
     assert "ck_canonical_tags_display_name_length" in tag_sql
     assert "ck_canonical_tags_updated_not_before_created" in tag_sql
+    assert "ck_media_metadata_collection_key_valid" in metadata_sql
+    assert "ck_media_metadata_collection_paired" in metadata_sql
+    assert "ck_media_metadata_processed_at_ms_non_negative" in metadata_sql
     assert "ck_media_metadata_title_length" in metadata_sql
     assert "ck_media_metadata_description_length" in metadata_sql
     assert "ck_media_metadata_updated_not_before_created" in metadata_sql
@@ -225,6 +231,8 @@ def test_media_metadata_tables_have_required_schema_constraints_and_indexes(
     }
     indexes = _indexes(settings.database_path, "media_canonical_tags")
     assert any(row[2] == 1 and row[3] == "u" for row in indexes.values())
+    metadata_indexes = _indexes(settings.database_path, "media_metadata")
+    assert "ix_media_metadata_collection" in metadata_indexes
 
 
 def test_upgrade_from_populated_0004_preserves_rows_and_does_not_backfill_metadata(
@@ -298,7 +306,7 @@ def test_canonical_tag_metadata_and_ordered_assignments_round_trip(tmp_path: Pat
         connection.close()
 
 
-def test_downgrade_from_0006_to_0005_removes_description_column_metadata_tables_remain(
+def test_downgrade_from_0007_to_0006_removes_collection_columns_metadata_tables_remain(
     tmp_path: Path,
 ) -> None:
     from framenest.infrastructure.persistence.migrations import (
@@ -317,8 +325,8 @@ def test_downgrade_from_0006_to_0005_removes_description_column_metadata_tables_
             "VALUES ('mathematics', 'Math', 1, 1)"
         )
         connection.execute(
-            "INSERT INTO media_metadata (media_id, display_title, description, created_at_ms, updated_at_ms) "
-            "VALUES (?, 'Title', 'A description', 2, 2)",
+            "INSERT INTO media_metadata (media_id, display_title, description, collection_key, processed_at_ms, created_at_ms, updated_at_ms) "
+            "VALUES (?, 'Title', 'A description', 'processed', 100, 2, 2)",
             (MEDIA_ID,),
         )
         connection.execute(
@@ -349,7 +357,9 @@ def test_downgrade_from_0006_to_0005_removes_description_column_metadata_tables_
         _table_names(settings.database_path)
     )
     columns = _columns(settings.database_path, "media_metadata")
-    assert "description" not in columns
+    assert "collection_key" not in columns
+    assert "processed_at_ms" not in columns
+    assert "description" in columns
     assert "display_title" in columns
     connection = _connect(settings.database_path)
     try:
@@ -374,4 +384,5 @@ def test_downgrade_from_0006_to_0005_removes_description_column_metadata_tables_
         _table_names(settings.database_path)
     )
     columns_after = _columns(settings.database_path, "media_metadata")
-    assert "description" in columns_after
+    assert "collection_key" in columns_after
+    assert "processed_at_ms" in columns_after

@@ -278,3 +278,251 @@ def test_importing_media_does_not_create_metadata_rows(tmp_path: Path) -> None:
             assert connection.execute(text("SELECT COUNT(*) FROM canonical_tags")).scalar_one() == 0
     finally:
         engine.dispose()
+
+
+def _row(connection: sa.engine.Connection, media_id: MediaId) -> dict[str, object]:
+    return dict(
+        connection.execute(
+            text(
+                "SELECT display_title, description, collection_key, processed_at_ms, "
+                "created_at_ms, updated_at_ms FROM media_metadata WHERE media_id = :media_id"
+            ),
+            {"media_id": media_id.to_string()},
+        ).mappings().one()
+    )
+
+
+def _tag_rows(connection: sa.engine.Connection, media_id: MediaId) -> list[str]:
+    return [
+        row[0]
+        for row in connection.execute(
+            text(
+                "SELECT tag_key FROM media_canonical_tags WHERE media_id = :media_id "
+                "ORDER BY position"
+            ),
+            {"media_id": media_id.to_string()},
+        )
+    ]
+
+
+def test_processed_collection_lifecycle_through_real_sqlite_repository(
+    tmp_path: Path,
+) -> None:
+    repository, engine = _repository(tmp_path)
+    media_id = _insert_media(engine)
+    try:
+        repository.create_canonical_tag(CanonicalTagKey("mathematics"), CanonicalTagDisplayName("Math"), 1)
+        repository.create_canonical_tag(CanonicalTagKey("compression"), CanonicalTagDisplayName("Compression"), 1)
+
+        first = repository.save_media_metadata(
+            media_id,
+            MediaDisplayTitle("Reinventing Entropy"),
+            None,
+            (CanonicalTagKey("mathematics"), CanonicalTagKey("compression")),
+            now_ms=1000,
+        )
+        assert first.status == "created"
+        assert first.metadata.collection_key is not None
+        assert first.metadata.collection_key.value == "processed"
+        assert first.metadata.processed_at_ms == 1000
+        with engine.connect() as connection:
+            row = _row(connection, media_id)
+            assert row["collection_key"] == "processed"
+            assert row["processed_at_ms"] == 1000
+            assert _tag_rows(connection, media_id) == ["mathematics", "compression"]
+
+        # 8.2 exact no-op preserves everything
+        noop = repository.save_media_metadata(
+            media_id,
+            MediaDisplayTitle("Reinventing Entropy"),
+            None,
+            (CanonicalTagKey("mathematics"), CanonicalTagKey("compression")),
+            now_ms=2000,
+        )
+        assert noop.status == "unchanged"
+        assert noop.metadata.updated_at_ms == 1000
+        assert noop.metadata.processed_at_ms == 1000
+        with engine.connect() as connection:
+            row = _row(connection, media_id)
+            assert row["updated_at_ms"] == 1000
+            assert row["processed_at_ms"] == 1000
+
+        # 8.3 title-only update preserves processed_at_ms
+        title_update = repository.save_media_metadata(
+            media_id,
+            MediaDisplayTitle("Entropy"),
+            None,
+            (CanonicalTagKey("mathematics"), CanonicalTagKey("compression")),
+            now_ms=3000,
+        )
+        assert title_update.status == "updated"
+        assert title_update.metadata.updated_at_ms == 3000
+        assert title_update.metadata.processed_at_ms == 1000
+        with engine.connect() as connection:
+            row = _row(connection, media_id)
+            assert row["display_title"] == "Entropy"
+            assert row["processed_at_ms"] == 1000
+            assert row["updated_at_ms"] == 3000
+
+        # 8.4 description-only update preserves processed_at_ms
+        desc_update = repository.save_media_metadata(
+            media_id,
+            MediaDisplayTitle("Entropy"),
+            MediaDescription("A description."),
+            (CanonicalTagKey("mathematics"), CanonicalTagKey("compression")),
+            now_ms=4000,
+        )
+        assert desc_update.status == "updated"
+        assert desc_update.metadata.updated_at_ms == 4000
+        assert desc_update.metadata.processed_at_ms == 1000
+        with engine.connect() as connection:
+            row = _row(connection, media_id)
+            assert row["description"] == "A description."
+            assert row["processed_at_ms"] == 1000
+
+        # 8.5 reorder preserves processed_at_ms
+        reorder = repository.save_media_metadata(
+            media_id,
+            MediaDisplayTitle("Entropy"),
+            MediaDescription("A description."),
+            (CanonicalTagKey("compression"), CanonicalTagKey("mathematics")),
+            now_ms=5000,
+        )
+        assert reorder.status == "updated"
+        assert reorder.metadata.processed_at_ms == 1000
+        with engine.connect() as connection:
+            assert _tag_rows(connection, media_id) == ["compression", "mathematics"]
+            assert _row(connection, media_id)["processed_at_ms"] == 1000
+
+        # 8.5 replacement preserves processed_at_ms
+        replacement = repository.save_media_metadata(
+            media_id,
+            MediaDisplayTitle("Entropy"),
+            MediaDescription("A description."),
+            (CanonicalTagKey("compression"),),
+            now_ms=6000,
+        )
+        assert replacement.status == "updated"
+        assert replacement.metadata.processed_at_ms == 1000
+        with engine.connect() as connection:
+            assert _tag_rows(connection, media_id) == ["compression"]
+            assert _row(connection, media_id)["processed_at_ms"] == 1000
+
+        # 8.6 all-tag removal clears collection state
+        cleared = repository.save_media_metadata(
+            media_id,
+            MediaDisplayTitle("Entropy"),
+            MediaDescription("A description."),
+            (),
+            now_ms=7000,
+        )
+        assert cleared.status == "updated"
+        assert cleared.metadata.collection_key is None
+        assert cleared.metadata.processed_at_ms is None
+        with engine.connect() as connection:
+            row = _row(connection, media_id)
+            assert row["collection_key"] is None
+            assert row["processed_at_ms"] is None
+            assert _tag_rows(connection, media_id) == []
+            assert row["display_title"] == "Entropy"
+            assert row["description"] == "A description."
+
+        # 8.7 re-entry assigns new timestamp
+        reentry = repository.save_media_metadata(
+            media_id,
+            MediaDisplayTitle("Entropy"),
+            MediaDescription("A description."),
+            (CanonicalTagKey("mathematics"),),
+            now_ms=9000,
+        )
+        assert reentry.status == "updated"
+        assert reentry.metadata.collection_key is not None
+        assert reentry.metadata.processed_at_ms == 9000
+        assert reentry.metadata.processed_at_ms != 1000
+        with engine.connect() as connection:
+            row = _row(connection, media_id)
+            assert row["collection_key"] == "processed"
+            assert row["processed_at_ms"] == 9000
+            assert _tag_rows(connection, media_id) == ["mathematics"]
+
+        # GET roundtrip returns the same persisted state
+        loaded = repository.get_media_metadata(media_id)
+        assert loaded.persisted is True
+        assert loaded.collection_key is not None
+        assert loaded.collection_key.value == "processed"
+        assert loaded.processed_at_ms == 9000
+        assert loaded.tag_keys == (CanonicalTagKey("mathematics"),)
+    finally:
+        engine.dispose()
+
+
+def test_processed_collection_first_entry_with_processed_at_ms_zero(
+    tmp_path: Path,
+) -> None:
+    repository, engine = _repository(tmp_path)
+    media_id = _insert_media(engine)
+    try:
+        repository.create_canonical_tag(CanonicalTagKey("mathematics"), CanonicalTagDisplayName("Math"), 1)
+        result = repository.save_media_metadata(
+            media_id,
+            None,
+            None,
+            (CanonicalTagKey("mathematics"),),
+            now_ms=0,
+        )
+        assert result.metadata.collection_key is not None
+        assert result.metadata.collection_key.value == "processed"
+        assert result.metadata.processed_at_ms == 0
+        assert isinstance(result.metadata.processed_at_ms, int)
+        assert not isinstance(result.metadata.processed_at_ms, bool)
+        with engine.connect() as connection:
+            row = _row(connection, media_id)
+            assert row["collection_key"] == "processed"
+            assert row["processed_at_ms"] == 0
+    finally:
+        engine.dispose()
+
+
+def test_processed_collection_rollback_preserves_previous_collection_state(
+    tmp_path: Path,
+) -> None:
+    repository, engine = _repository(tmp_path)
+    media_id = _insert_media(engine)
+    try:
+        repository.create_canonical_tag(CanonicalTagKey("mathematics"), CanonicalTagDisplayName("Math"), 1)
+        repository.create_canonical_tag(CanonicalTagKey("compression"), CanonicalTagDisplayName("Compression"), 1)
+        repository.save_media_metadata(
+            media_id,
+            MediaDisplayTitle("Original"),
+            None,
+            (CanonicalTagKey("mathematics"),),
+            now_ms=1000,
+        )
+        with patch(
+            "framenest.infrastructure.persistence.media_metadata_repository._insert_assignments",
+            side_effect=FrameNestMediaMetadataRepositoryError("Media metadata operation failed."),
+        ):
+            with pytest.raises(FrameNestMediaMetadataRepositoryError):
+                repository.save_media_metadata(
+                    media_id,
+                    MediaDisplayTitle("Changed"),
+                    None,
+                    (CanonicalTagKey("compression"),),
+                    now_ms=2000,
+                )
+
+        preserved = repository.get_media_metadata(media_id)
+        assert preserved.display_title == MediaDisplayTitle("Original")
+        assert preserved.tag_keys == (CanonicalTagKey("mathematics"),)
+        assert preserved.collection_key is not None
+        assert preserved.collection_key.value == "processed"
+        assert preserved.processed_at_ms == 1000
+        assert preserved.updated_at_ms == 1000
+        with engine.connect() as connection:
+            row = _row(connection, media_id)
+            assert row["collection_key"] == "processed"
+            assert row["processed_at_ms"] == 1000
+            assert row["display_title"] == "Original"
+            assert _tag_rows(connection, media_id) == ["mathematics"]
+    finally:
+        engine.dispose()

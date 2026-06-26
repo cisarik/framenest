@@ -75,6 +75,10 @@
             <button id="catalog-clear-button" type="button">Clear</button>
           </div>
         </form>
+        <div class="catalog-scope" role="group" aria-label="Catalog scope">
+          <button id="catalog-scope-all" type="button" class="scope-active">All media</button>
+          <button id="catalog-scope-processed" type="button">Processed</button>
+        </div>
         <div class="catalog-filter-panel" aria-labelledby="catalog-filter-title">
           <div class="catalog-filter-heading">
             <h3 id="catalog-filter-title">Canonical tag filters</h3>
@@ -147,6 +151,10 @@
                 <textarea id="metadata-description-input" rows="5" autocomplete="off"></textarea>
               </label>
               <p id="metadata-description-count" class="metadata-note">0 / 10000</p>
+              <div id="metadata-collection-status" class="metadata-field" hidden>
+                <span>Processed status</span>
+                <p id="metadata-collection-message" class="metadata-note">Not assigned to the Processed collection.</p>
+              </div>
             </div>
 
             <div class="metadata-tags-panel">

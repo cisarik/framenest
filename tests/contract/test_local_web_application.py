@@ -602,6 +602,154 @@ def test_application_surfaces_do_not_contain_external_runtime_urls_or_sensitive_
         assert fragment not in body
 
 
+def test_browser_catalog_has_all_media_and_processed_scope_controls(client: TestClient) -> None:
+    html = client.get("/").text
+    script = client.get("/assets/app.js").text
+
+    assert "catalog-scope" in html
+    assert "All media" in html
+    assert "Processed" in html
+    assert "catalogScope" in script or "catalogState.collection" in script
+    assert "const PROCESSED_COLLECTION" in script
+
+
+def test_browser_catalog_scope_defaults_to_all_media_and_switching_is_well_formed(
+    client: TestClient,
+) -> None:
+    script = client.get("/assets/app.js").text
+
+    start = script.index("let catalogState = {")
+    end = script.index("};", start) + len("};")
+    catalog_state_literal = script[start:end]
+    assert "collection: \"\"" in catalog_state_literal or "collection: ''" in catalog_state_literal
+
+    assert "function setCatalogScope(collection)" in script
+    assert "catalogState.offset = 0" in script
+    assert "setCatalogScope(\"\")" in script or "setCatalogScope('')" in script
+    assert "setCatalogScope(PROCESSED_COLLECTION)" in script
+
+    build_start = script.index("function buildCatalogQueryParams()")
+    build_end = script.index("}", script.index("return params;", build_start)) + 1
+    build_body = script[build_start:build_end]
+    assert "if (catalogState.collection)" in build_body
+    assert "params.set(\"collection\", catalogState.collection)" in build_body
+
+
+def test_browser_metadata_workspace_shows_collection_state(client: TestClient) -> None:
+    html = client.get("/").text
+    script = client.get("/assets/app.js").text
+
+    assert "metadata-collection-status" in html
+    assert "Processed status" in html
+    assert "Processed collection" in script
+    assert "collectionKey" in script
+    assert "processedAtMs" in script
+    assert "payload.collection_key" in script
+    assert "payload.processed_at_ms" in script
+    assert "applyMetadataPayloadToWorkspace" in script
+
+
+def test_browser_metadata_workspace_no_manual_collection_picker_or_mark_button(client: TestClient) -> None:
+    html = client.get("/").text
+    script = client.get("/assets/app.js").text
+    combined = html + script
+
+    assert "Mark as processed" not in combined
+    assert "Select collection" not in combined
+    assert "Create collection" not in combined
+    assert "manual collection" not in combined.lower()
+
+
+def test_browser_metadata_discard_restores_persisted_collection_state(client: TestClient) -> None:
+    script = client.get("/assets/app.js").text
+
+    start = script.index("function resetMetadataWorkspaceAfterDiscard()")
+    end = script.index("\n}\n", start) + len("\n}\n")
+    reset_body = script[start:end]
+
+    assert "collectionKey: metadataWorkspace.baseline.collectionKey" in reset_body
+    assert "processedAtMs: metadataWorkspace.baseline.processedAtMs" in reset_body
+
+
+def test_browser_metadata_workspace_uses_nullish_coalescing_for_collection_state(
+    client: TestClient,
+) -> None:
+    script = client.get("/assets/app.js").text
+
+    start = script.index("function applyMetadataPayloadToWorkspace(payload)")
+    end = script.index("\n}\n", start) + len("\n}\n")
+    body = script[start:end]
+
+    assert "payload.collection_key ?? null" in body
+    assert "payload.processed_at_ms ?? null" in body
+    assert "payload.collection_key || null" not in body
+    assert "payload.processed_at_ms || null" not in body
+
+
+def test_browser_metadata_workspace_renders_processed_time_semantically(client: TestClient) -> None:
+    html = client.get("/").text
+    script = client.get("/assets/app.js").text
+
+    assert "metadata-collection-status" in html
+    assert "createElement(\"time\")" in script or 'createElement("time")' in script
+    assert "datetime" in script
+    assert ".toISOString()" in script
+
+    start = script.index("function renderMetadataWorkspace()")
+    end = script.index("\n}\n", start) + len("\n}\n")
+    workspace_body = script[start:end]
+    assert "buildProcessedTimeElement" in workspace_body
+    assert "processedAtMs" in workspace_body
+
+
+def test_browser_catalog_card_renders_processed_time_semantically(client: TestClient) -> None:
+    script = client.get("/assets/app.js").text
+
+    start = script.index("function renderCatalogCard(item)")
+    end = script.index("\n}\n", start) + len("\n}\n")
+    card_body = script[start:end]
+    assert "processed_at_ms" in card_body
+    assert "buildProcessedTimeElement" in card_body
+    assert "Processed since" in card_body
+
+
+def test_browser_processed_time_helper_is_reusable_and_safe(client: TestClient) -> None:
+    script = client.get("/assets/app.js").text
+
+    helper_markers = [
+        "function buildProcessedTimeElement",
+        "function renderProcessedTime",
+        "function createProcessedTime",
+    ]
+    assert any(marker in script for marker in helper_markers)
+    for marker in helper_markers:
+        if marker in script:
+            start = script.index(marker)
+            end = script.index("\n}\n", start) + len("\n}\n")
+            helper_body = script[start:end]
+            assert "innerHTML" not in helper_body
+            assert ".textContent" in helper_body or ".datetime" in helper_body
+            break
+
+
+def test_browser_processed_time_never_uses_filesystem_timestamps(client: TestClient) -> None:
+    script = client.get("/assets/app.js").text
+
+    processed_time_section = script
+    for marker in ("processedAtMs", "processed_at_ms"):
+        if marker in processed_time_section:
+            break
+    forbidden = (
+        "observed_mtime_ns",
+        "mtime",
+        "st_mtime",
+        "File.getModificationTime",
+        "lastModified",
+    )
+    for fragment in forbidden:
+        assert fragment not in script
+
+
 def test_browser_review_uses_no_persistence_or_hidden_complete_suggestion(
     client: TestClient,
 ) -> None:

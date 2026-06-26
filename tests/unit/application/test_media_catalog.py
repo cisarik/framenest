@@ -57,7 +57,7 @@ def _execute(
 def test_default_query_construction() -> None:
     result, query = _execute()
 
-    assert query == MediaCatalogQuery(q=None, tag_keys=(), limit=24, offset=0)
+    assert query == MediaCatalogQuery(q=None, tag_keys=(), limit=24, offset=0, collection_key=None)
     assert result.q is None
     assert result.tag_keys == ()
     assert result.limit == 24

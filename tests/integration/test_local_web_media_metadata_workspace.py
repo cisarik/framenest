@@ -100,6 +100,11 @@ def test_local_web_manual_metadata_workspace_api_roundtrip_and_file_safety(
             json={"display_title": None, "description": None, "tag_keys": []},
         )
         cleared_catalog = client.get("/api/media")
+        retagged = client.put(
+            f"/api/media/{media_id}/metadata",
+            json={"display_title": "Entropy Revisited", "description": None, "tag_keys": ["mathematics"]},
+        )
+        retagged_read_back = client.get(f"/api/media/{media_id}/metadata")
 
     assert sparse.status_code == 200
     assert sparse.json()["persisted"] is False
@@ -110,13 +115,22 @@ def test_local_web_manual_metadata_workspace_api_roundtrip_and_file_safety(
 
     assert created.status_code == 200
     assert created.json()["status"] == "created"
+    assert created.json()["metadata"]["collection_key"] == "processed"
+    created_ts = created.json()["metadata"]["processed_at_ms"]
+    assert created_ts is not None
+    assert isinstance(created_ts, int)
+    assert not isinstance(created_ts, bool)
     assert read_back.json()["display_title"] == "Reinventing Entropy"
+    assert read_back.json()["collection_key"] == "processed"
+    assert read_back.json()["processed_at_ms"] == created_ts
     assert read_back.json()["tags"] == [
         {"key": "mathematics", "display_name": "Math"},
         {"key": "compression", "display_name": "Compression"},
     ]
     assert catalog.status_code == 200
     assert catalog.json()["items"][0]["display_title"] == "Reinventing Entropy"
+    assert catalog.json()["items"][0]["collection_key"] == "processed"
+    assert catalog.json()["items"][0]["processed_at_ms"] == created_ts
     assert catalog.json()["items"][0]["tags"] == [
         {"key": "mathematics", "display_name": "Math", "position": 0},
         {"key": "compression", "display_name": "Compression", "position": 1},
@@ -124,12 +138,16 @@ def test_local_web_manual_metadata_workspace_api_roundtrip_and_file_safety(
 
     assert updated.status_code == 200
     assert updated.json()["status"] == "updated"
+    assert updated.json()["metadata"]["collection_key"] == "processed"
+    assert updated.json()["metadata"]["processed_at_ms"] == created_ts
     assert updated.json()["metadata"]["tags"] == [
         {"key": "compression", "display_name": "Compression"},
         {"key": "mathematics", "display_name": "Math"},
     ]
     assert updated_catalog.status_code == 200
     assert updated_catalog.json()["items"][0]["display_title"] == "Entropy Revisited"
+    assert updated_catalog.json()["items"][0]["collection_key"] == "processed"
+    assert updated_catalog.json()["items"][0]["processed_at_ms"] == created_ts
     assert updated_catalog.json()["items"][0]["tags"] == [
         {"key": "compression", "display_name": "Compression", "position": 0},
         {"key": "mathematics", "display_name": "Math", "position": 1},
@@ -137,13 +155,27 @@ def test_local_web_manual_metadata_workspace_api_roundtrip_and_file_safety(
 
     assert cleared.status_code == 200
     assert cleared.json()["status"] == "updated"
+    assert cleared.json()["metadata"]["collection_key"] is None
+    assert cleared.json()["metadata"]["processed_at_ms"] is None
     assert cleared.json()["metadata"]["display_title"] is None
     assert cleared.json()["metadata"]["tags"] == []
     assert unchanged.status_code == 200
     assert unchanged.json()["status"] == "unchanged"
     assert cleared_catalog.status_code == 200
     assert cleared_catalog.json()["items"][0]["display_title"] is None
+    assert cleared_catalog.json()["items"][0]["collection_key"] is None
+    assert cleared_catalog.json()["items"][0]["processed_at_ms"] is None
     assert cleared_catalog.json()["items"][0]["tags"] == []
+
+    assert retagged.status_code == 200
+    assert retagged.json()["metadata"]["collection_key"] == "processed"
+    retagged_ts = retagged.json()["metadata"]["processed_at_ms"]
+    assert retagged_ts is not None
+    assert isinstance(retagged_ts, int)
+    assert retagged_ts >= created_ts
+    assert retagged_read_back.status_code == 200
+    assert retagged_read_back.json()["collection_key"] == "processed"
+    assert retagged_read_back.json()["processed_at_ms"] == retagged_ts
 
     for response in (
         imported,
@@ -156,6 +188,8 @@ def test_local_web_manual_metadata_workspace_api_roundtrip_and_file_safety(
         cleared,
         unchanged,
         cleared_catalog,
+        retagged,
+        retagged_read_back,
     ):
         assert str(library_root) not in response.text
         assert str(database_path) not in response.text

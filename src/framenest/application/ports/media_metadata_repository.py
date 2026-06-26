@@ -10,6 +10,8 @@ from framenest.domain.media_metadata import (
     CanonicalTag,
     CanonicalTagDisplayName,
     CanonicalTagKey,
+    CollectionState,
+    MediaCollectionKey,
     MediaDescription,
     MediaDisplayTitle,
 )
@@ -48,6 +50,8 @@ class MediaMetadataSnapshot:
     display_title: MediaDisplayTitle | None
     description: MediaDescription | None
     tag_keys: tuple[CanonicalTagKey, ...]
+    collection_key: MediaCollectionKey | None
+    processed_at_ms: int | None
     created_at_ms: int | None
     updated_at_ms: int | None
 
@@ -88,4 +92,4 @@ class MediaMetadataRepository(Protocol):
         tag_keys: tuple[CanonicalTagKey, ...],
         now_ms: int,
     ) -> MediaMetadataSaveResult:
-        """Persist a complete metadata replacement atomically."""
+        """Persist a complete metadata replacement atomically, deriving collection state from tag list."""

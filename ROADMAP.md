@@ -15,9 +15,11 @@ explicit idempotent import from selected scan candidates now exist on MacBook.
 The persistent display-title and canonical-tag core now exists, and imported
 media can now be reached through a catalog browser with display-title search,
 canonical-tag AND filters, and a manual `Current` metadata workspace for title,
-optional plain-text description, and ordered tag assignment. Broader manual
-metadata detail remains incomplete; collection and suggested filename
-remain future decisions not yet authorized by a subsequent slice.
+optional plain-text description, and ordered tag assignment. An automatic
+built-in `Processed` workflow collection derived from durable tag saves is
+proposed within the current uncommitted Cycle 071 implementation; arbitrary
+user-created collections and suggested filename remain future decisions not yet
+authorized by a subsequent slice.
 
 The near-term convergence sequence is:
 
@@ -95,12 +97,13 @@ Accepted so far:
 - Explicit idempotent scan-candidate import through [ADR-0026](docs/adr/0026-explicit-idempotent-scan-candidate-import.md); implementation complete for one selected scan candidate at a time.
 - Persistent display-title and canonical-tag core through [ADR-0027](docs/adr/0027-persistent-display-title-and-canonical-tags.md); implementation complete for API-level title/tag persistence.
 - Catalog read model and search semantics through [ADR-0028](docs/adr/0028-catalog-read-model-and-search-semantics.md); implementation complete for read-only imported-media listing, display-title search, canonical-tag AND filters, deterministic ordering, and bounded offset pagination.
+- Automatic built-in `Processed` workflow collection from durable tag saves through [ADR-0030](docs/adr/0030-automatic-processed-collection.md); proposed within the current uncommitted Cycle 071 implementation with migration `0007`, one zero-or-one collection membership per medium, and no arbitrary collection CRUD or general collection manager.
 
 The initial scaffold decision gate is complete. A Poetry package scaffold, centralized configuration boundary, FastAPI application factory, typed health endpoint, contract tests, Uvicorn runtime dependency, startup wiring, and a runnable loopback-only server command now exist.
 
 Broader architecture decisions still open include sidecar manifest format and versioning, metadata/tag/search schema, cover and thumbnail cache implementation details, desktop sidecar IPC, initial authentication boundary, media-tool distribution strategy, and Fedora deployment details.
 
-Persistence strategy is accepted through [ADR-0010](docs/adr/0010-initial-persistence-foundation.md). The minimal SQLAlchemy/Alembic migration foundation is implemented. The current local catalog schema is implemented through revision `0005`.
+Persistence strategy is accepted through [ADR-0010](docs/adr/0010-initial-persistence-foundation.md). The minimal SQLAlchemy/Alembic migration foundation is implemented. The current local catalog schema is implemented through revision `0006`, with revision `0007` proposed within the current uncommitted Cycle 071 implementation for the automatic built-in `Processed` collection.
 
 Stable identity strategy is accepted through [ADR-0011](docs/adr/0011-stable-domain-identities.md). Pure domain identity primitives exist, and minimal logical media, physical location, device, and library entities exist. Storage volume and series entities remain future work beyond identity values.
 
@@ -162,11 +165,12 @@ Implemented so far:
 - Same-origin explicit AI capability and media-suggestion preview API
 - Structured logging foundation per [ADR-0009](docs/adr/0009-structured-logging-approach.md)
 - Persistence strategy accepted through [ADR-0010](docs/adr/0010-initial-persistence-foundation.md)
-- Minimal SQLAlchemy Core/Alembic persistence foundation with `FRAMENEST_DATABASE_PATH`, packaged revisions `0001` through `0005`, explicit `framenest-db status`, and explicit `framenest-db migrate`
+- Minimal SQLAlchemy Core/Alembic persistence foundation with `FRAMENEST_DATABASE_PATH`, packaged revisions `0001` through `0006` plus proposed revision `0007` within the current uncommitted Cycle 071 implementation, explicit `framenest-db status`, and explicit `framenest-db migrate`
 - Initial local device registry core with pure-domain `Device`, application repository port, SQLAlchemy Core adapter, and `devices` table through revision `0002`
 - Initial local library registry core with pure-domain `Library`, `LibraryRoot`, application repository port, SQLAlchemy Core adapter, and `libraries` table through revision `0003`
 - Minimum persistent media catalog foundation with pure-domain logical media and physical locations, application repository port, SQLAlchemy Core adapter, and `logical_media` plus `physical_media_locations` tables through revision `0004`
 - Persistent display-title and canonical-tag core with pure-domain metadata values, application repository port, SQLAlchemy Core adapter, and `canonical_tags`, `media_metadata`, plus `media_canonical_tags` tables through revision `0005`
+- Automatic built-in `Processed` workflow collection derived from durable tag saves with nullable `collection_key` and `processed_at_ms` columns proposed in revision `0007`
 - Read-only imported-media catalog browser with display-title search, repeated canonical-tag AND filters, deterministic ordering, and bounded offset pagination
 - Development operator catalog CLI (`framenest-catalog`) for device register, get, and list operations
 - Library catalog CLI commands for local library register, get, and list with lexical root-path preparation
@@ -204,10 +208,13 @@ Implemented within this phase:
 - persistent display-title and canonical content tags through [ADR-0027](docs/adr/0027-persistent-display-title-and-canonical-tags.md).
 - read-only catalog retrieval, display-title search, canonical-tag AND filters, deterministic ordering, and bounded offset pagination through [ADR-0028](docs/adr/0028-catalog-read-model-and-search-semantics.md).
 - browser manual `Current` metadata workspace for one selected imported medium, including persistent display-title edit/clear, canonical-tag search, selected-tag removal and reordering, explicit canonical-tag creation, dirty/discard protection, and catalog refresh after successful save.
+- automatic built-in `Processed` workflow collection entered by the first durable tag save, cleared when all tags are removed, with a virtual `All media` Catalog scope and an optional `Processed` Catalog scope in the packaged browser.
 
 Still unimplemented within this phase:
 
-- browser metadata fields beyond display title and ordered canonical tags;
+- arbitrary user-created collections and a general collection manager;
+- suggested filename editing and physical rename;
+- browser metadata fields beyond display title, plain-text description, and ordered canonical tags;
 - availability tracking;
 - storage capacity reporting;
 - rebuildable local index persistence;

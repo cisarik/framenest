@@ -119,7 +119,7 @@ def test_framenest_db_status_reports_uninitialized_without_creating_database(
         "operation": "status",
         "state": "uninitialized",
         "current_revision": None,
-        "head_revision": "0006",
+        "head_revision": "0007",
     }
     assert str(database_path) not in result.stdout
     assert not database_path.exists()
@@ -139,8 +139,8 @@ def test_framenest_db_migrate_upgrades_to_head_with_deterministic_output(
     assert _parse_single_json_line(migrate.stdout) == {
         "operation": "migrate",
         "state": "at_head",
-        "current_revision": "0006",
-        "head_revision": "0006",
+        "current_revision": "0007",
+        "head_revision": "0007",
     }
     assert status.returncode == 0
     assert _parse_single_json_line(status.stdout)["state"] == "at_head"

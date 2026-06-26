@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol
 
-from framenest.domain.media_metadata import CanonicalTagKey
+from framenest.domain.media_metadata import CanonicalTagKey, MediaCollectionKey
 
 
 class FrameNestMediaCatalogRepositoryError(RuntimeError):
@@ -20,6 +20,7 @@ class MediaCatalogQuery:
     tag_keys: tuple[CanonicalTagKey, ...]
     limit: int
     offset: int
+    collection_key: MediaCollectionKey | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -52,6 +53,8 @@ class CatalogMediaItem:
     created_at_ms: int
     updated_at_ms: int
     display_title: str | None
+    collection_key: str | None
+    processed_at_ms: int | None
     tags: tuple[CatalogMediaTag, ...]
     locations: tuple[CatalogMediaLocation, ...]
 

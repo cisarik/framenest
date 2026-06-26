@@ -9,10 +9,14 @@ from framenest.domain.media_metadata import (
     CanonicalTag,
     CanonicalTagDisplayName,
     CanonicalTagKey,
+    CollectionState,
     FrameNestMediaMetadataError,
+    MediaCollectionKey,
     MediaDescription,
     MediaDisplayTitle,
     MediaMetadata,
+    PROCESSED_COLLECTION_KEY,
+    derive_collection_state,
 )
 
 
@@ -239,3 +243,117 @@ def test_media_metadata_validates_media_id_title_and_timestamps() -> None:
             created_at_ms=2,
             updated_at_ms=1,
         )
+
+
+COLLECTION_KEY = CanonicalTagKey("mathematics")
+
+
+def test_collection_key_accepted() -> None:
+    key = MediaCollectionKey(PROCESSED_COLLECTION_KEY)
+    assert key.value == PROCESSED_COLLECTION_KEY
+
+
+def test_collection_key_unsupported_rejected() -> None:
+    with pytest.raises(FrameNestMediaMetadataError):
+        MediaCollectionKey("custom-collection")
+
+
+def test_collection_state_null_null_accepted() -> None:
+    state = CollectionState(collection_key=None, processed_at_ms=None)
+    assert state.collection_key is None
+    assert state.processed_at_ms is None
+
+
+def test_collection_state_processed_timestamp_accepted() -> None:
+    state = CollectionState(
+        collection_key=MediaCollectionKey(PROCESSED_COLLECTION_KEY),
+        processed_at_ms=500,
+    )
+    assert state.collection_key is not None
+    assert state.processed_at_ms == 500
+
+
+def test_collection_state_processed_null_timestamp_rejected() -> None:
+    with pytest.raises(FrameNestMediaMetadataError):
+        CollectionState(
+            collection_key=MediaCollectionKey(PROCESSED_COLLECTION_KEY),
+            processed_at_ms=None,
+        )
+
+
+def test_collection_state_null_key_with_timestamp_rejected() -> None:
+    with pytest.raises(FrameNestMediaMetadataError):
+        CollectionState(collection_key=None, processed_at_ms=500)
+
+
+def test_collection_state_negative_timestamp_rejected() -> None:
+    with pytest.raises(FrameNestMediaMetadataError):
+        CollectionState(
+            collection_key=MediaCollectionKey(PROCESSED_COLLECTION_KEY),
+            processed_at_ms=-1,
+        )
+
+
+def test_collection_state_bool_timestamp_rejected() -> None:
+    with pytest.raises(FrameNestMediaMetadataError):
+        CollectionState(
+            collection_key=MediaCollectionKey(PROCESSED_COLLECTION_KEY),
+            processed_at_ms=True,  # type: ignore[arg-type]
+        )
+
+
+def test_collection_state_unsupported_key_type_rejected() -> None:
+    with pytest.raises(FrameNestMediaMetadataError):
+        CollectionState(
+            collection_key="processed",  # type: ignore[arg-type]
+            processed_at_ms=500,
+        )
+
+
+def test_collection_state_non_int_timestamp_rejected() -> None:
+    with pytest.raises(FrameNestMediaMetadataError):
+        CollectionState(
+            collection_key=MediaCollectionKey(PROCESSED_COLLECTION_KEY),
+            processed_at_ms=500.5,  # type: ignore[arg-type]
+        )
+
+
+def test_derive_no_collection_empty_tags_stays_unprocessed() -> None:
+    result = derive_collection_state(None, None, (), 100)
+    assert result.collection_key is None
+    assert result.processed_at_ms is None
+
+
+def test_derive_no_collection_non_empty_tags_sets_timestamp() -> None:
+    result = derive_collection_state(None, None, (COLLECTION_KEY,), 200)
+    assert result.collection_key is not None
+    assert result.processed_at_ms == 200
+
+
+def test_derive_processed_non_empty_tags_preserves_timestamp() -> None:
+    result = derive_collection_state(
+        MediaCollectionKey(PROCESSED_COLLECTION_KEY), 150, (COLLECTION_KEY,), 300,
+    )
+    assert result.processed_at_ms == 150
+
+
+def test_derive_processed_changed_tags_preserves_timestamp() -> None:
+    other = CanonicalTagKey("compression")
+    result = derive_collection_state(
+        MediaCollectionKey(PROCESSED_COLLECTION_KEY), 150, (other,), 300,
+    )
+    assert result.collection_key is not None
+    assert result.processed_at_ms == 150
+
+
+def test_derive_processed_empty_tags_clears() -> None:
+    result = derive_collection_state(
+        MediaCollectionKey(PROCESSED_COLLECTION_KEY), 150, (), 400,
+    )
+    assert result.collection_key is None
+    assert result.processed_at_ms is None
+
+
+def test_derive_retagging_assigns_new_timestamp() -> None:
+    result = derive_collection_state(None, None, (COLLECTION_KEY,), 500)
+    assert result.processed_at_ms == 500

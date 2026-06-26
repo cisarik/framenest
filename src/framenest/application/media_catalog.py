@@ -10,7 +10,11 @@ from framenest.application.ports.media_catalog_repository import (
     MediaCatalogQuery,
     MediaCatalogRepository,
 )
-from framenest.domain.media_metadata import CanonicalTagKey, FrameNestMediaMetadataError
+from framenest.domain.media_metadata import (
+    CanonicalTagKey,
+    FrameNestMediaMetadataError,
+    MediaCollectionKey,
+)
 
 MEDIA_CATALOG_QUERY_INVALID_MESSAGE = "Invalid media catalog query."
 MAX_MEDIA_CATALOG_QUERY_CODE_POINTS = 240
@@ -35,12 +39,14 @@ class ListMediaCatalog:
         tag_keys: list[str] | tuple[str, ...] | None = None,
         limit: int = DEFAULT_MEDIA_CATALOG_LIMIT,
         offset: int = 0,
+        collection_key: MediaCollectionKey | None = None,
     ) -> MediaCatalogPage:
         query = MediaCatalogQuery(
             q=_normalize_title_query(q),
             tag_keys=_normalize_tag_keys(tag_keys or []),
             limit=_validate_limit(limit),
             offset=_validate_offset(offset),
+            collection_key=collection_key,
         )
         return self.repository.list_media(query)
 
