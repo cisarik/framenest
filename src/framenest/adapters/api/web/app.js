@@ -2,8 +2,11 @@
 
 const HEALTH_ENDPOINT = "/health";
 const LIBRARIES_ENDPOINT = "/api/libraries";
+const MEDIA_CATALOG_ENDPOINT = "/api/media";
+const CANONICAL_TAGS_ENDPOINT = "/api/canonical-tags";
 const AI_CAPABILITY_ENDPOINT = "/api/ai/media-suggestion-capability";
 const MEDIA_IMPORTS_ENDPOINT = "media-imports";
+const CATALOG_PAGE_SIZE = 24;
 const MAX_REVIEW_TEXT = {
   title: 120,
   description: 600,
@@ -15,6 +18,14 @@ const MAX_REVIEW_TEXT = {
 let analysisRequestToken = 0;
 let suggestionRequestToken = 0;
 let previewObjectUrls = [];
+let catalogRequestToken = 0;
+let catalogState = {
+  q: "",
+  tagKeys: [],
+  limit: CATALOG_PAGE_SIZE,
+  offset: 0,
+  total: 0,
+};
 let aiCapability = {
   available: false,
   provider_id: "",
@@ -36,6 +47,20 @@ const libraryStateEmpty = document.querySelector("#library-state-empty");
 const libraryStateUnavailable = document.querySelector("#library-state-unavailable");
 const libraryStateError = document.querySelector("#library-state-error");
 const libraryCardTemplate = document.querySelector("#library-card-template");
+const catalogSearchForm = document.querySelector("#catalog-search-form");
+const catalogSearchInput = document.querySelector("#catalog-search-input");
+const catalogClearButton = document.querySelector("#catalog-clear-button");
+const catalogTagFilters = document.querySelector("#catalog-tag-filters");
+const catalogActiveFilters = document.querySelector("#catalog-active-filters");
+const catalogTagsState = document.querySelector("#catalog-tags-state");
+const catalogStateLoading = document.querySelector("#catalog-state-loading");
+const catalogStateEmpty = document.querySelector("#catalog-state-empty");
+const catalogStateUnavailable = document.querySelector("#catalog-state-unavailable");
+const catalogStateError = document.querySelector("#catalog-state-error");
+const catalogResults = document.querySelector("#catalog-results");
+const catalogPrevButton = document.querySelector("#catalog-prev-button");
+const catalogNextButton = document.querySelector("#catalog-next-button");
+const catalogPageSummary = document.querySelector("#catalog-page-summary");
 
 function setStatusClass(className) {
   statusContainer.classList.remove("status--loading", "status--healthy", "status--error");
@@ -134,6 +159,14 @@ function showLibraryState(state) {
   libraryStateUnavailable.hidden = state !== "unavailable";
   libraryStateError.hidden = state !== "error";
   libraryList.hidden = state !== "success";
+}
+
+function showCatalogState(state) {
+  catalogStateLoading.hidden = state !== "loading";
+  catalogStateEmpty.hidden = state !== "empty";
+  catalogStateUnavailable.hidden = state !== "unavailable";
+  catalogStateError.hidden = state !== "error";
+  catalogResults.hidden = state !== "success";
 }
 
 function appendText(parent, value) {
@@ -466,6 +499,233 @@ function renderScanResult(card, payload) {
   status.textContent = "Read-only scan preview complete. Candidates are not persisted catalog media.";
 }
 
+function buildCatalogQueryParams() {
+  const params = new URLSearchParams();
+  const trimmed = catalogState.q.trim();
+  if (trimmed) {
+    params.set("q", trimmed);
+  }
+  catalogState.tagKeys.forEach((key) => {
+    params.append("tag", key);
+  });
+  params.set("limit", String(catalogState.limit));
+  params.set("offset", String(catalogState.offset));
+  return params;
+}
+
+function deriveCatalogFallbackTitle(item) {
+  if (!item.locations || item.locations.length === 0) {
+    return "Untitled media";
+  }
+  const firstPath = String(item.locations[0].relative_path || "");
+  const parts = firstPath.split("/");
+  return parts[parts.length - 1] || "Untitled media";
+}
+
+function formatCatalogKind(kind) {
+  if (kind === "animated_image") {
+    return "animated image";
+  }
+  return String(kind).replaceAll("_", " ");
+}
+
+function summarizeAvailability(locations) {
+  if (!locations || locations.length === 0) {
+    return "No known locations";
+  }
+  const counts = new Map();
+  locations.forEach((location) => {
+    const key = String(location.availability || "unknown");
+    counts.set(key, (counts.get(key) || 0) + 1);
+  });
+  return [...counts.entries()]
+    .map(([key, count]) => `${count} ${key}`)
+    .join(", ");
+}
+
+function setCatalogPagination(page) {
+  const start = page.total === 0 ? 0 : page.offset + 1;
+  const end = Math.min(page.offset + page.limit, page.total);
+  catalogPageSummary.textContent = page.total === 0
+    ? "No catalog results."
+    : `${start}-${end} of ${page.total}`;
+  catalogPrevButton.disabled = page.offset <= 0;
+  catalogNextButton.disabled = page.offset + page.limit >= page.total;
+}
+
+function renderCatalogCard(item) {
+  const card = document.createElement("article");
+  card.className = "catalog-card";
+  const header = document.createElement("div");
+  header.className = "catalog-card__header";
+  const titleGroup = document.createElement("div");
+  const title = document.createElement("h3");
+  title.textContent = item.display_title || deriveCatalogFallbackTitle(item);
+  const subtitle = document.createElement("p");
+  subtitle.textContent = item.display_title
+    ? "Persisted display title"
+    : "Fallback label from first deterministic relative location";
+  titleGroup.append(title, subtitle);
+  const kind = document.createElement("span");
+  kind.className = "catalog-kind";
+  kind.textContent = formatCatalogKind(item.media_kind);
+  header.append(titleGroup, kind);
+
+  const facts = document.createElement("dl");
+  facts.className = "catalog-facts";
+  addMetadataValue(facts, "Locations", String(item.locations.length));
+  addMetadataValue(facts, "Availability", summarizeAvailability(item.locations));
+  addMetadataValue(facts, "Media ID", item.media_id);
+
+  const tags = document.createElement("div");
+  tags.className = "catalog-tags";
+  if (item.tags.length === 0) {
+    const emptyTag = document.createElement("span");
+    emptyTag.className = "catalog-tag catalog-tag--empty";
+    emptyTag.textContent = "No canonical tags";
+    tags.appendChild(emptyTag);
+  } else {
+    item.tags.forEach((tag) => {
+      const chip = document.createElement("span");
+      chip.className = "catalog-tag";
+      chip.textContent = `${tag.display_name} (${tag.position})`;
+      tags.appendChild(chip);
+    });
+  }
+
+  const locations = document.createElement("ul");
+  locations.className = "catalog-locations";
+  item.locations.forEach((location) => {
+    const row = document.createElement("li");
+    const path = document.createElement("span");
+    path.className = "catalog-location-path";
+    path.textContent = location.relative_path;
+    const availability = document.createElement("span");
+    availability.className = "catalog-location-availability";
+    availability.textContent = location.availability;
+    row.append(path, availability);
+    locations.appendChild(row);
+  });
+  card.append(header, facts, tags, locations);
+  return card;
+}
+
+function renderCatalogSuccess(page) {
+  catalogResults.replaceChildren();
+  catalogState.total = page.total;
+  catalogState.offset = page.offset;
+  catalogSearchInput.value = page.q || catalogState.q;
+  renderActiveCatalogFilters(page.tag_keys || catalogState.tagKeys);
+  setCatalogPagination(page);
+  if (page.items.length === 0) {
+    showCatalogState("empty");
+    return;
+  }
+  page.items.forEach((item) => {
+    catalogResults.appendChild(renderCatalogCard(item));
+  });
+  showCatalogState("success");
+}
+
+function renderActiveCatalogFilters(tagKeys) {
+  catalogActiveFilters.replaceChildren();
+  if (tagKeys.length === 0) {
+    const empty = document.createElement("p");
+    empty.textContent = "No active canonical tag filters.";
+    catalogActiveFilters.appendChild(empty);
+    return;
+  }
+  tagKeys.forEach((key) => {
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "catalog-active-filter";
+    chip.textContent = `Remove ${key}`;
+    chip.addEventListener("click", () => {
+      catalogState.tagKeys = catalogState.tagKeys.filter((activeKey) => activeKey !== key);
+      catalogState.offset = 0;
+      renderActiveCatalogFilters(catalogState.tagKeys);
+      loadCatalog();
+    });
+    catalogActiveFilters.appendChild(chip);
+  });
+}
+
+function renderCatalogTagFilters(tags) {
+  catalogTagFilters.replaceChildren();
+  if (tags.length === 0) {
+    catalogTagsState.textContent = "No canonical tag definitions exist yet.";
+    return;
+  }
+  catalogTagsState.textContent = "Canonical tag filters loaded.";
+  tags.forEach((tag) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "catalog-filter-chip";
+    button.dataset.tagKey = tag.key;
+    button.textContent = tag.display_name;
+    button.addEventListener("click", () => {
+      if (catalogState.tagKeys.includes(tag.key)) {
+        return;
+      }
+      catalogState.tagKeys = [...catalogState.tagKeys, tag.key];
+      catalogState.offset = 0;
+      renderActiveCatalogFilters(catalogState.tagKeys);
+      loadCatalog();
+    });
+    catalogTagFilters.appendChild(button);
+  });
+}
+
+async function loadCatalogTags() {
+  catalogTagsState.textContent = "Loading canonical tag filters...";
+  try {
+    const response = await fetch(CANONICAL_TAGS_ENDPOINT, {
+      headers: { Accept: "application/json" },
+      cache: "no-store",
+    });
+    const payload = await response.json();
+    if (!response.ok) {
+      catalogTagsState.textContent = "Canonical tag filters are unavailable.";
+      return;
+    }
+    renderCatalogTagFilters(payload.tags || []);
+  } catch {
+    catalogTagsState.textContent = "Canonical tag filters could not be loaded.";
+  }
+}
+
+async function loadCatalog() {
+  const token = catalogRequestToken + 1;
+  catalogRequestToken = token;
+  showCatalogState("loading");
+  catalogPrevButton.disabled = true;
+  catalogNextButton.disabled = true;
+  catalogPageSummary.textContent = "Loading catalog page...";
+  try {
+    const params = buildCatalogQueryParams();
+    const response = await fetch(`${MEDIA_CATALOG_ENDPOINT}?${params.toString()}`, {
+      headers: { Accept: "application/json" },
+      cache: "no-store",
+    });
+    const payload = await response.json();
+    if (token !== catalogRequestToken) {
+      return;
+    }
+    if (!response.ok) {
+      const code = payload.error ? payload.error.code : "";
+      showCatalogState(code === "CATALOG_UNAVAILABLE" ? "unavailable" : "error");
+      catalogPageSummary.textContent = "Catalog page unavailable.";
+      return;
+    }
+    renderCatalogSuccess(payload);
+  } catch {
+    if (token === catalogRequestToken) {
+      showCatalogState("error");
+      catalogPageSummary.textContent = "Catalog page unavailable.";
+    }
+  }
+}
+
 async function handleImportClick(libraryId, candidate, button, status) {
   button.disabled = true;
   status.textContent = "Importing selected candidate...";
@@ -484,6 +744,7 @@ async function handleImportClick(libraryId, candidate, button, status) {
       button.disabled = true;
       const imported = payload.status === "already_imported" ? "Already imported" : "Imported";
       status.textContent = `${imported}: ${payload.location.relative_path}`;
+      await loadCatalog();
       return;
     }
     const code = payload.error ? payload.error.code : "";
@@ -942,7 +1203,39 @@ async function loadLibraries() {
   }
 }
 
+catalogSearchForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  catalogState.q = catalogSearchInput.value;
+  catalogState.offset = 0;
+  loadCatalog();
+});
+
+catalogClearButton.addEventListener("click", () => {
+  catalogState.q = "";
+  catalogState.tagKeys = [];
+  catalogState.offset = 0;
+  catalogSearchInput.value = "";
+  renderActiveCatalogFilters(catalogState.tagKeys);
+  loadCatalog();
+});
+
+catalogPrevButton.addEventListener("click", () => {
+  catalogState.offset = Math.max(0, catalogState.offset - catalogState.limit);
+  loadCatalog();
+});
+
+catalogNextButton.addEventListener("click", () => {
+  if (catalogState.offset + catalogState.limit >= catalogState.total) {
+    return;
+  }
+  catalogState.offset += catalogState.limit;
+  loadCatalog();
+});
+
+renderActiveCatalogFilters(catalogState.tagKeys);
 checkHealth();
 loadAiCapability();
+loadCatalogTags();
+loadCatalog();
 loadLibraries();
 window.addEventListener("beforeunload", revokePreviewObjectUrls);

@@ -54,6 +54,57 @@
         </div>
       </section>
 
+      <section id="catalog-browser" class="catalog-browser" aria-labelledby="catalog-title">
+        <div class="section-heading">
+          <p class="eyebrow">Catalog</p>
+          <h2 id="catalog-title">Imported media</h2>
+          <p class="section-copy">
+            Search display titles and filter imported catalog media by canonical
+            tags. Multiple selected tags use AND semantics. This is a read-only
+            browser over imported records, not the final premium gallery.
+          </p>
+        </div>
+        <form id="catalog-search-form" class="catalog-toolbar" role="search">
+          <label class="catalog-search-label" for="catalog-search-input">
+            <span>Search display titles</span>
+            <input id="catalog-search-input" type="search" name="q" autocomplete="off" maxlength="240">
+          </label>
+          <div class="catalog-actions">
+            <button id="catalog-search-button" type="submit">Search</button>
+            <button id="catalog-clear-button" type="button">Clear</button>
+          </div>
+        </form>
+        <div class="catalog-filter-panel" aria-labelledby="catalog-filter-title">
+          <div class="catalog-filter-heading">
+            <h3 id="catalog-filter-title">Canonical tag filters</h3>
+            <p>Multiple selected tags use AND semantics.</p>
+          </div>
+          <div id="catalog-active-filters" class="catalog-active-filters" aria-live="polite"></div>
+          <div id="catalog-tag-filters" class="catalog-tag-filters" aria-live="polite"></div>
+          <p id="catalog-tags-state" class="catalog-tags-state" role="status">
+            Loading canonical tag filters...
+          </p>
+        </div>
+        <div id="catalog-state-loading" class="library-state" role="status">
+          Loading catalog media...
+        </div>
+        <div id="catalog-state-empty" class="library-state" hidden>
+          No media matched this catalog query.
+        </div>
+        <div id="catalog-state-unavailable" class="library-state library-state--warning" hidden>
+          The local catalog is not available. Run the explicit database migration command before browsing media.
+        </div>
+        <div id="catalog-state-error" class="library-state library-state--warning" hidden>
+          Catalog media could not be loaded from the local catalog.
+        </div>
+        <div id="catalog-results" class="catalog-results" aria-live="polite"></div>
+        <div class="catalog-pagination" aria-label="Catalog pagination">
+          <button id="catalog-prev-button" type="button">Previous</button>
+          <p id="catalog-page-summary" role="status">No catalog page loaded.</p>
+          <button id="catalog-next-button" type="button">Next</button>
+        </div>
+      </section>
+
       <section id="library-browser" class="library-browser" aria-labelledby="libraries-title">
         <div class="section-heading">
           <p class="eyebrow">Local catalog</p>
@@ -165,9 +216,14 @@
             <p>Packaged HTML, CSS, and JavaScript served from the Python package.</p>
             <span class="boundary-state">Active</span>
           </article>
+          <article class="boundary-card boundary-card--active">
+            <h3>Catalog browser</h3>
+            <p>Read-only imported media listing with display-title search and canonical tag filters.</p>
+            <span class="boundary-state">Active foundation</span>
+          </article>
           <article class="boundary-card">
             <h3>Gallery</h3>
-            <p>Future premium library browsing. Imported catalog media is not shown as gallery data yet.</p>
+            <p>Future premium cover-driven library browsing remains separate from this read-only catalog slice.</p>
             <span class="boundary-state boundary-state--future">Future</span>
           </article>
           <article class="boundary-card boundary-card--active">

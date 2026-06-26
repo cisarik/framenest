@@ -12,9 +12,10 @@ The roadmap distinguishes completed foundation, immediate next work, planned pha
 
 The minimum logical-media and physical-location persistence foundation and
 explicit idempotent import from selected scan candidates now exist on MacBook.
-The persistent display-title and canonical-tag core now exists. The next
-implementation priority remains manual metadata detail rather than Tauri
-scaffolding or NUC deployment.
+The persistent display-title and canonical-tag core now exists, and imported
+media can now be reached through a read-only catalog browser with display-title
+search and canonical-tag AND filters. The next implementation priority remains
+manual metadata detail rather than Tauri scaffolding or NUC deployment.
 
 The near-term convergence sequence is:
 
@@ -22,12 +23,13 @@ The near-term convergence sequence is:
 2. logical media and physical locations;
 3. explicit idempotent import from selected scan candidates;
 4. canonical tags and title/tag metadata;
-5. manual metadata detail;
-6. Cover Studio and derivatives;
-7. persistent premium gallery;
-8. multi-model AI workspace;
-9. optional AI cover experiments;
-10. later Tauri and NUC work.
+5. searchable read-only catalog browser;
+6. manual metadata detail;
+7. Cover Studio and derivatives;
+8. persistent premium gallery;
+9. multi-model AI workspace;
+10. optional AI cover experiments;
+11. later Tauri and NUC work.
 
 This sequence preserves broader cross-platform goals while keeping the immediate
 critical path focused on a polished and functional macOS MVP.
@@ -90,6 +92,7 @@ Accepted so far:
 - Minimum persistent media catalog foundation through [ADR-0025](docs/adr/0025-minimum-persistent-media-catalog-foundation.md); implementation complete for logical media and physical locations only.
 - Explicit idempotent scan-candidate import through [ADR-0026](docs/adr/0026-explicit-idempotent-scan-candidate-import.md); implementation complete for one selected scan candidate at a time.
 - Persistent display-title and canonical-tag core through [ADR-0027](docs/adr/0027-persistent-display-title-and-canonical-tags.md); implementation complete for API-level title/tag persistence.
+- Catalog read model and search semantics through [ADR-0028](docs/adr/0028-catalog-read-model-and-search-semantics.md); implementation complete for read-only imported-media listing, display-title search, canonical-tag AND filters, deterministic ordering, and bounded offset pagination.
 
 The initial scaffold decision gate is complete. A Poetry package scaffold, centralized configuration boundary, FastAPI application factory, typed health endpoint, contract tests, Uvicorn runtime dependency, startup wiring, and a runnable loopback-only server command now exist.
 
@@ -124,7 +127,7 @@ Implemented so far:
 Still required for phase exit:
 
 - Storage volume and series entities beyond identity values
-- Search-ready title/tag data
+- Manual metadata detail and durable metadata roundtrip behavior beyond the current read-only catalog browser
 - Sidecar contracts
 - Exact roundtrip tests for durable metadata behavior
 
@@ -161,13 +164,14 @@ Implemented so far:
 - Initial local library registry core with pure-domain `Library`, `LibraryRoot`, application repository port, SQLAlchemy Core adapter, and `libraries` table through revision `0003`
 - Minimum persistent media catalog foundation with pure-domain logical media and physical locations, application repository port, SQLAlchemy Core adapter, and `logical_media` plus `physical_media_locations` tables through revision `0004`
 - Persistent display-title and canonical-tag core with pure-domain metadata values, application repository port, SQLAlchemy Core adapter, and `canonical_tags`, `media_metadata`, plus `media_canonical_tags` tables through revision `0005`
+- Read-only imported-media catalog browser with display-title search, repeated canonical-tag AND filters, deterministic ordering, and bounded offset pagination
 - Development operator catalog CLI (`framenest-catalog`) for device register, get, and list operations
 - Library catalog CLI commands for local library register, get, and list with lexical root-path preparation
 - Explicit idempotent scan-candidate import through same-origin API and packaged browser action
 
 Still required for phase exit:
 
-- Manual metadata detail and search-ready catalog behavior on top of persistent title/tag data
+- Manual metadata detail on top of persistent title/tag data and the read-only catalog browser
 
 The next bounded implementation step should build on imported media records without adding gallery, cover, or filesystem mutation scope prematurely.
 
@@ -195,11 +199,11 @@ Implemented within this phase:
 - minimum logical-media and physical-location persistence through revision `0004`.
 - explicit idempotent import from selected scan candidates through [ADR-0026](docs/adr/0026-explicit-idempotent-scan-candidate-import.md).
 - persistent display-title and canonical content tags through [ADR-0027](docs/adr/0027-persistent-display-title-and-canonical-tags.md).
+- read-only catalog retrieval, display-title search, canonical-tag AND filters, deterministic ordering, and bounded offset pagination through [ADR-0028](docs/adr/0028-catalog-read-model-and-search-semantics.md).
 
 Still unimplemented within this phase:
 
 - browser metadata editor and manual metadata detail;
-- title search and multi-tag AND filtering;
 - availability tracking;
 - storage capacity reporting;
 - rebuildable local index persistence;

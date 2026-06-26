@@ -8,7 +8,7 @@ FrameNest is in an early foundation, pre-alpha stage.
 
 A minimal Poetry package scaffold exists at the repository root with centralized settings, a FastAPI application factory, a typed `GET /health` endpoint, in-process contract tests, a loopback-first Uvicorn development server, a packaged pre-alpha local web shell at `GET /`, and pure-domain identity primitives. There is no completed media application, gallery, downloader, desktop shell, installer, deployment, or supported release yet.
 
-The repository also contains the first persistence, registry, media catalog, local media-analysis, and AI suggestion-review foundation: a centralized SQLite database path setting, synchronous SQLAlchemy Core engine helpers, packaged Alembic resources, explicit database commands, local device and library registry tables, persistent logical-media and physical-location tables, persistent display-title and canonical-tag tables through migration `0005`, read-only library scan and media-analysis preview commands, explicit idempotent scan-candidate import, a provider-neutral NVIDIA NIM suggestion prototype, and an explicit non-persistent editable browser review for validated AI suggestions. The media catalog foundation is now exposed for explicit scan-candidate import and same-origin title/tag API operations. It does not provide a browser metadata editor, title search, multi-tag filtering, descriptions, collections, suggested filenames, covers, thumbnails, or gallery data yet.
+The repository also contains the first persistence, registry, media catalog, local media-analysis, and AI suggestion-review foundation: a centralized SQLite database path setting, synchronous SQLAlchemy Core engine helpers, packaged Alembic resources, explicit database commands, local device and library registry tables, persistent logical-media and physical-location tables, persistent display-title and canonical-tag tables through migration `0005`, read-only library scan and media-analysis preview commands, explicit idempotent scan-candidate import, a read-only imported-media catalog browser with display-title search and canonical-tag AND filters, a provider-neutral NVIDIA NIM suggestion prototype, and an explicit non-persistent editable browser review for validated AI suggestions. The media catalog foundation is now exposed for explicit scan-candidate import, same-origin title/tag API operations, and same-origin catalog retrieval. It does not provide a browser metadata editor, descriptions, collections, suggested filenames, covers, thumbnails, or premium gallery data yet.
 
 Supported runtime: CPython `>=3.13,<3.14`. Local development uses a uv-managed CPython 3.13.14 interpreter with Poetry as the dependency, environment, and lockfile manager. The initial `poetry.lock` was generated with Poetry 2.1.4. The local virtual environment lives in `.venv/` and is not committed.
 
@@ -33,7 +33,7 @@ poetry run framenest-server
 
 Default application URL: `http://127.0.0.1:8000`. Health path: `/health`.
 
-The default URL serves the packaged pre-alpha FrameNest web shell. It can confirm that the real local application server is running, load the same-origin health endpoint, list registered libraries from the local catalog, run an explicit read-only library scan preview, import one selected scan candidate into the persistent media catalog, explicitly inspect one returned candidate locally for bounded technical metadata and representative PNG frames, and, when the server-side NVIDIA credential is configured, request one editable AI suggestion review after explicit cloud-upload confirmation. Same-origin APIs can create/list canonical tags and get/save media display-title/tag metadata, but no browser metadata editor is implemented yet. Library registration remains available through the catalog CLI in this slice. Gallery exposure of persistent media catalog records, downloads, Settings, playback, provider selection, GUI credential entry, search/filtering, and browser metadata editing remain future work.
+The default URL serves the packaged pre-alpha FrameNest web shell. It can confirm that the real local application server is running, load the same-origin health endpoint, list registered libraries from the local catalog, browse imported catalog media with persisted display-title search and repeated canonical-tag AND filters, run an explicit read-only library scan preview, import one selected scan candidate into the persistent media catalog, explicitly inspect one returned candidate locally for bounded technical metadata and representative PNG frames, and, when the server-side NVIDIA credential is configured, request one editable AI suggestion review after explicit cloud-upload confirmation. Same-origin APIs can create/list canonical tags, get/save media display-title/tag metadata, and retrieve a deterministic read-only media catalog page, but no browser metadata editor is implemented yet. Library registration remains available through the catalog CLI in this slice. Premium gallery exposure with covers, downloads, Settings, playback, provider selection, GUI credential entry, and browser metadata editing remain future work.
 
 Browser API paths currently include:
 
@@ -41,6 +41,7 @@ Browser API paths currently include:
 GET /api/libraries
 POST /api/libraries/{library_id}/scan-preview
 POST /api/libraries/{library_id}/media-imports
+GET /api/media
 POST /api/canonical-tags
 GET /api/canonical-tags
 GET /api/media/{media_id}/metadata
@@ -50,7 +51,7 @@ GET /api/ai/media-suggestion-capability
 POST /api/libraries/{library_id}/media-suggestion-preview
 ```
 
-These API paths do not run migrations automatically and do not expose library root paths. The scan-candidate import endpoint is explicit, same-origin, idempotent by exact `(library_id, relative_path)`, and creates only minimum logical-media and physical-location records. Canonical tag keys are stable English identifiers. Display titles are user-editable catalog metadata and remain separate from physical filenames and paths. Metadata saves do not rename, move, delete, retag, or otherwise mutate media files. The media-analysis preview endpoint is explicit, same-origin, read-only, local-only, stateless, provider-free, and non-persistent. It returns inline base64 PNG frames only for the lifetime of the response/displayed browser preview and sets `Cache-Control: no-store`.
+These API paths do not run migrations automatically and do not expose library root paths. The scan-candidate import endpoint is explicit, same-origin, idempotent by exact `(library_id, relative_path)`, and creates only minimum logical-media and physical-location records. `GET /api/media` is read-only, returns one deterministic logical-media page with total count, searches only persisted display titles using escaped SQLite `LIKE` with `NOCASE`, treats repeated canonical tag filters as AND constraints, and returns only catalog-safe library-relative location data. Canonical tag keys are stable English identifiers. Display titles are user-editable catalog metadata and remain separate from physical filenames and paths. Metadata saves do not rename, move, delete, retag, or otherwise mutate media files. The media-analysis preview endpoint is explicit, same-origin, read-only, local-only, stateless, provider-free, and non-persistent. It returns inline base64 PNG frames only for the lifetime of the response/displayed browser preview and sets `Cache-Control: no-store`.
 
 The AI capability endpoint is same-origin, sanitized, and does not contact the provider. During this pre-alpha development slice the server composition boundary may read `NVIDIA_API_KEY` from the process environment. The browser never receives that value, credential state, key prefix, Authorization header, raw provider response, prompt payload, image payloads, absolute media path, or database path. When configured, the AI suggestion preview endpoint requires `confirm_cloud_upload: true`, reuses local read-only media preparation, sends at most three derived JPEG frames plus bounded metadata to NVIDIA NIM through the server, returns one validated editable suggestion, and performs no filesystem, catalog, or database mutation. Accepting or rejecting the browser draft is session-only. Future GUI Settings and a secret-store adapter are expected to replace the temporary process-environment credential source.
 
@@ -86,7 +87,7 @@ Explicitly upgrade the configured database to the packaged Alembic head:
 poetry run framenest-db migrate
 ```
 
-Normal `poetry run framenest-server` startup does not apply migrations. Migration remains explicit through `framenest-db`. Revisions through `0005` add the initial `devices`, `libraries`, `logical_media`, `physical_media_locations`, `canonical_tags`, `media_metadata`, and `media_canonical_tags` tables. The media catalog foundation supports explicit idempotent import from selected scan candidates plus persistent display title and canonical content tags, but there is still no browser metadata editor, title search, multi-tag filtering, descriptions, collections, suggested filenames, covers, thumbnails, gallery, sidecar, user, or authentication schema.
+Normal `poetry run framenest-server` startup does not apply migrations. Migration remains explicit through `framenest-db`. Revisions through `0005` add the initial `devices`, `libraries`, `logical_media`, `physical_media_locations`, `canonical_tags`, `media_metadata`, and `media_canonical_tags` tables. The media catalog foundation supports explicit idempotent import from selected scan candidates, persistent display title and canonical content tags, and read-only catalog retrieval with display-title search plus canonical-tag AND filtering, but there is still no browser metadata editor, descriptions, collections, suggested filenames, covers, thumbnails, gallery, sidecar, user, or authentication schema.
 
 ## Device Catalog CLI
 
@@ -194,6 +195,7 @@ Accepted implementation foundations so far:
 - Minimum persistent media catalog foundation ([ADR-0025](docs/adr/0025-minimum-persistent-media-catalog-foundation.md))
 - Explicit idempotent scan-candidate import ([ADR-0026](docs/adr/0026-explicit-idempotent-scan-candidate-import.md))
 - Persistent display title and canonical tags ([ADR-0027](docs/adr/0027-persistent-display-title-and-canonical-tags.md))
+- Catalog read model and search semantics ([ADR-0028](docs/adr/0028-catalog-read-model-and-search-semantics.md))
 
 Exact future frontend framework or compiled toolchain, desktop/Tauri packaging choices, IPC design, sidecar bundling, data schema, identity database encoding, deployment model, production update mechanisms, and many server operational details remain subject to later documented decisions.
 
@@ -288,7 +290,7 @@ The current stage does not provide:
 - Embedded libVLC.
 - AI-generated covers.
 - Public internet exposure.
-- A functional gallery, browser metadata editor, title search, multi-tag filtering, descriptions, collections, suggested filenames, covers, thumbnails, persistent media scanner, or downloader.
+- A functional premium gallery, browser metadata editor, descriptions, collections, suggested filenames, covers, thumbnails, persistent media scanner, or downloader.
 - Production deployment.
 
 ## License

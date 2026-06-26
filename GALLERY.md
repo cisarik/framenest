@@ -26,8 +26,10 @@ task. Git history remains the archive.
 
 The gallery is a flagship FrameNest capability. It should be premium, dark,
 cover-first, fast, and useful for large personal collections. The current
-repository does not yet implement the persistent media catalog, cover pipeline,
-derived thumbnails, search, or real gallery.
+repository implements a minimum persistent media catalog and a read-only
+imported-media catalog browser with display-title search and canonical-tag AND
+filters. It does not yet implement the cover pipeline, derived thumbnails, or
+real premium gallery.
 
 The gallery should feel like a media product, not a generic administrative
 dashboard.
@@ -126,9 +128,11 @@ availability and offer explicit stream or download actions.
 ## Search And Filtering
 
 The gallery must eventually support title/name search and canonical tag
-filtering. Multiple selected tags default to AND/intersection semantics. For
-example, selected tags `Meme`, `Reaction`, and `Money` normally return items
-containing all three tags.
+filtering. The current packaged browser has a read-only catalog slice that
+searches persisted display titles and filters repeated canonical tags with
+AND/intersection semantics. Multiple selected tags default to AND/intersection
+semantics. For example, selected tags `Meme`, `Reaction`, and `Money` normally
+return items containing all three tags.
 
 The UI should use filter chips and removable active filters. Filters should
 include:

@@ -155,6 +155,19 @@ def test_web_shell_contains_real_library_browser_states(client: TestClient) -> N
     assert "scan-preview" not in html
 
 
+def test_web_shell_contains_reachable_catalog_browser_states(client: TestClient) -> None:
+    html = client.get("/").text
+    assert "catalog-browser" in html
+    assert "Catalog" in html
+    assert "Search display titles" in html
+    assert "Canonical tag filters" in html
+    assert "Multiple selected tags use AND semantics" in html
+    assert "Loading catalog media" in html
+    assert "No media matched this catalog query" in html
+    assert "Previous" in html
+    assert "Next" in html
+
+
 def test_javascript_loads_library_list_without_auto_scanning(client: TestClient) -> None:
     script = client.get("/assets/app.js").text
     assert 'const LIBRARIES_ENDPOINT = "/api/libraries";' in script
@@ -164,6 +177,22 @@ def test_javascript_loads_library_list_without_auto_scanning(client: TestClient)
     assert "addEventListener(\"click\"" in script
     assert "function handlePreviewClick" in script
     assert "handlePreviewClick(library, card);" in script
+
+
+def test_javascript_loads_catalog_without_auto_scan_analysis_or_ai(client: TestClient) -> None:
+    script = client.get("/assets/app.js").text
+    assert 'const MEDIA_CATALOG_ENDPOINT = "/api/media";' in script
+    assert 'const CANONICAL_TAGS_ENDPOINT = "/api/canonical-tags";' in script
+    assert "loadCatalog();" in script
+    assert "loadCatalogTags();" in script
+    assert "function buildCatalogQueryParams" in script
+    assert "fetch(`${MEDIA_CATALOG_ENDPOINT}" in script
+    catalog_block = script[
+        script.index("async function loadCatalog") : script.index("async function handleImportClick")
+    ]
+    assert "scan-preview" not in catalog_block
+    assert "media-analysis-preview" not in catalog_block
+    assert "media-suggestion-preview" not in catalog_block
 
 
 def test_browser_does_not_run_analysis_on_initialization_or_candidate_render(
@@ -227,6 +256,30 @@ def test_browser_scan_import_is_explicit_and_same_origin(client: TestClient) -> 
     assert "Import" in combined
     assert "document.querySelectorAll(\".import-button\")" not in script
     assert "importRequestToken" not in script
+
+
+def test_successful_import_refreshes_catalog_without_mutating_import_behavior(
+    client: TestClient,
+) -> None:
+    script = client.get("/assets/app.js").text
+
+    assert "await loadCatalog();" in script
+    import_block = script[script.index("async function handleImportClick") : script.index("async function handleInspectClick")]
+    assert "await loadCatalog();" in import_block
+    assert "payload.status === \"already_imported\"" in import_block
+    assert "body: JSON.stringify({ relative_path: candidate.relative_path })" in import_block
+
+
+def test_catalog_rendering_uses_safe_dom_text_apis_and_no_inline_html(client: TestClient) -> None:
+    script = client.get("/assets/app.js").text
+
+    assert "renderCatalogSuccess" in script
+    assert "renderCatalogCard" in script
+    assert "deriveCatalogFallbackTitle" in script
+    assert "textContent" in script
+    assert "appendText" in script
+    assert "innerHTML" not in script
+    assert "insertAdjacentHTML" not in script
 
 
 def test_browser_decodes_base64_to_png_blob_and_revokes_object_urls(
