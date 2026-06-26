@@ -13,6 +13,7 @@ MAX_DISPLAY_TITLE_CODE_POINTS = 240
 MAX_TAG_KEY_CODE_POINTS = 64
 MAX_TAG_DISPLAY_NAME_CODE_POINTS = 80
 MAX_MEDIA_TAGS = 32
+MAX_DESCRIPTION_CODE_POINTS = 10_000
 
 _TAG_KEY_PATTERN = re.compile(r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$")
 
@@ -94,6 +95,36 @@ class MediaDisplayTitle:
 
 
 @dataclass(frozen=True, slots=True)
+class MediaDescription:
+    """Plain-text description for a logical media item."""
+
+    value: str
+
+    def __init__(self, value: object) -> None:
+        if not isinstance(value, str):
+            raise FrameNestMediaMetadataError(INVALID_MEDIA_METADATA_MESSAGE)
+        if not value:
+            raise FrameNestMediaMetadataError(INVALID_MEDIA_METADATA_MESSAGE)
+        if value.strip() != value:
+            raise FrameNestMediaMetadataError(INVALID_MEDIA_METADATA_MESSAGE)
+        if len(value) > MAX_DESCRIPTION_CODE_POINTS:
+            raise FrameNestMediaMetadataError(INVALID_MEDIA_METADATA_MESSAGE)
+        if _has_forbidden_control_char(value):
+            raise FrameNestMediaMetadataError(INVALID_MEDIA_METADATA_MESSAGE)
+        object.__setattr__(self, "value", value)
+
+    def __str__(self) -> str:
+        return self.value
+
+
+def _has_forbidden_control_char(value: str) -> bool:
+    for ch in value:
+        if unicodedata.category(ch) == "Cc" and ch != "\n":
+            return True
+    return False
+
+
+@dataclass(frozen=True, slots=True)
 class CanonicalTag:
     """One canonical content/organization tag definition."""
 
@@ -119,6 +150,7 @@ class MediaMetadata:
 
     media_id: MediaId
     display_title: MediaDisplayTitle | None
+    description: MediaDescription | None
     tag_keys: tuple[CanonicalTagKey, ...]
     created_at_ms: int
     updated_at_ms: int
@@ -129,6 +161,11 @@ class MediaMetadata:
         if self.display_title is not None and not isinstance(
             self.display_title,
             MediaDisplayTitle,
+        ):
+            raise FrameNestMediaMetadataError(INVALID_MEDIA_METADATA_MESSAGE)
+        if self.description is not None and not isinstance(
+            self.description,
+            MediaDescription,
         ):
             raise FrameNestMediaMetadataError(INVALID_MEDIA_METADATA_MESSAGE)
         if not isinstance(self.tag_keys, tuple) or any(

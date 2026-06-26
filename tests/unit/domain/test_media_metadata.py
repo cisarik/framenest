@@ -10,6 +10,7 @@ from framenest.domain.media_metadata import (
     CanonicalTagDisplayName,
     CanonicalTagKey,
     FrameNestMediaMetadataError,
+    MediaDescription,
     MediaDisplayTitle,
     MediaMetadata,
 )
@@ -70,6 +71,72 @@ def test_display_title_validation_and_maximum() -> None:
             MediaDisplayTitle(value)
 
 
+def test_description_none_accepted() -> None:
+    assert MediaDescription("A valid description.").value == "A valid description."
+
+
+def test_description_empty_stripped_at_boundary() -> None:
+    with pytest.raises(FrameNestMediaMetadataError):
+        MediaDescription("")
+
+
+def test_description_whitespace_only_rejected() -> None:
+    with pytest.raises(FrameNestMediaMetadataError):
+        MediaDescription("   ")
+    with pytest.raises(FrameNestMediaMetadataError):
+        MediaDescription("\n\t\n")
+
+
+def test_description_accepts_unicode() -> None:
+    assert MediaDescription("Unicode description Žánr émoji 🎬").value == "Unicode description Žánr émoji 🎬"
+
+
+def test_description_accepts_multiline() -> None:
+    value = "First line.\nSecond line.\nThird line."
+    assert MediaDescription(value).value == value
+
+
+def test_description_maximum_code_points() -> None:
+    assert MediaDescription("é" * 10_000).value == "é" * 10_000
+    with pytest.raises(FrameNestMediaMetadataError):
+        MediaDescription("é" * 10_001)
+
+
+def test_description_rejects_leading_whitespace() -> None:
+    with pytest.raises(FrameNestMediaMetadataError):
+        MediaDescription(" leading space")
+
+
+def test_description_rejects_trailing_whitespace() -> None:
+    with pytest.raises(FrameNestMediaMetadataError):
+        MediaDescription("trailing space ")
+
+
+def test_description_rejects_carriage_return() -> None:
+    with pytest.raises(FrameNestMediaMetadataError):
+        MediaDescription("line1\rline2")
+
+
+def test_description_rejects_tab() -> None:
+    with pytest.raises(FrameNestMediaMetadataError):
+        MediaDescription("tab\tcharacter")
+
+
+def test_description_rejects_nul() -> None:
+    with pytest.raises(FrameNestMediaMetadataError):
+        MediaDescription("bad\x00char")
+
+
+def test_description_rejects_control_character() -> None:
+    with pytest.raises(FrameNestMediaMetadataError):
+        MediaDescription("bell\x07")
+
+
+def test_description_preserves_accepted_content() -> None:
+    value = "Hello, this is a description with internal  spaces and \nnewlines."
+    assert MediaDescription(value).value == value
+
+
 def test_canonical_tag_validates_types_and_timestamps() -> None:
     tag = CanonicalTag(
         key=CanonicalTagKey("mathematics"),
@@ -102,6 +169,7 @@ def test_media_metadata_rejects_duplicate_or_too_many_tag_keys() -> None:
     metadata = MediaMetadata(
         media_id=MEDIA_ID,
         display_title=None,
+        description=None,
         tag_keys=(first, second),
         created_at_ms=1,
         updated_at_ms=1,
@@ -112,6 +180,7 @@ def test_media_metadata_rejects_duplicate_or_too_many_tag_keys() -> None:
         MediaMetadata(
             media_id=MEDIA_ID,
             display_title=None,
+            description=None,
             tag_keys=(first, first),
             created_at_ms=1,
             updated_at_ms=1,
@@ -120,6 +189,7 @@ def test_media_metadata_rejects_duplicate_or_too_many_tag_keys() -> None:
         MediaMetadata(
             media_id=MEDIA_ID,
             display_title=None,
+            description=None,
             tag_keys=tuple(CanonicalTagKey(f"tag-{index}") for index in range(33)),
             created_at_ms=1,
             updated_at_ms=1,
@@ -131,6 +201,7 @@ def test_media_metadata_validates_media_id_title_and_timestamps() -> None:
         MediaMetadata(
             media_id="not-media-id",  # type: ignore[arg-type]
             display_title=None,
+            description=None,
             tag_keys=(),
             created_at_ms=1,
             updated_at_ms=1,
@@ -139,6 +210,7 @@ def test_media_metadata_validates_media_id_title_and_timestamps() -> None:
         MediaMetadata(
             media_id=MEDIA_ID,
             display_title="Title",  # type: ignore[arg-type]
+            description=None,
             tag_keys=(),
             created_at_ms=1,
             updated_at_ms=1,
@@ -147,6 +219,7 @@ def test_media_metadata_validates_media_id_title_and_timestamps() -> None:
         MediaMetadata(
             media_id=MEDIA_ID,
             display_title=None,
+            description=None,
             tag_keys=(),
             created_at_ms=2,
             updated_at_ms=1,

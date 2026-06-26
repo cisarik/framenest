@@ -25,6 +25,7 @@ from framenest.domain.media_metadata import (
     CanonicalTag,
     CanonicalTagDisplayName,
     CanonicalTagKey,
+    MediaDescription,
 )
 
 MEDIA_ID = "12345678-1234-4234-9234-123456789abc"
@@ -76,6 +77,7 @@ class _FakeGetMetadata:
             {
                 "persisted": self.persisted,
                 "display_title": "Reinventing Entropy" if self.persisted else None,
+                "description": "A plain text description." if self.persisted else None,
                 "tags": (_tag("mathematics", "Math"),) if self.persisted else (),
                 "created_at_ms": 10 if self.persisted else None,
                 "updated_at_ms": 20 if self.persisted else None,
@@ -88,10 +90,12 @@ class _FakeSaveMetadata:
     status: str = "created"
     error: Exception | None = None
     last_display_title: str | None = None
+    last_description: str | None = None
     last_tag_keys: list[str] | None = None
 
-    def execute(self, media_id: str, display_title: str | None, tag_keys: list[str]) -> object:
+    def execute(self, media_id: str, display_title: str | None, description: str | None, tag_keys: list[str]) -> object:
         self.last_display_title = display_title
+        self.last_description = description
         self.last_tag_keys = tag_keys
         if self.error is not None:
             raise self.error
@@ -102,6 +106,7 @@ class _FakeSaveMetadata:
                 "framenest.domain.media_metadata",
                 fromlist=["MediaDisplayTitle"],
             ).MediaDisplayTitle(display_title),
+            description=None if description is None else MediaDescription(description),
             tag_keys=tuple(CanonicalTagKey(key) for key in tag_keys),
             created_at_ms=10,
             updated_at_ms=10,
@@ -176,21 +181,24 @@ def test_metadata_get_unsaved_saved_and_save_statuses() -> None:
     updater = _FakeSaveMetadata(status="unchanged")
     saved_put = _client(save_metadata=updater).put(
         f"/api/media/{MEDIA_ID}/metadata",
-        json={"display_title": "Reinventing Entropy", "tag_keys": ["mathematics"]},
+        json={"display_title": "Reinventing Entropy", "description": "A plain text description.", "tag_keys": ["mathematics"]},
     )
 
     assert unsaved.status_code == 200
     assert unsaved.json() == {
         "persisted": False,
         "display_title": None,
+        "description": None,
         "tags": [],
         "created_at_ms": None,
         "updated_at_ms": None,
     }
     assert saved.json()["tags"] == [{"key": "mathematics", "display_name": "Math"}]
+    assert saved.json()["description"] == "A plain text description."
     assert saved_put.status_code == 200
     assert saved_put.json()["status"] == "unchanged"
     assert updater.last_display_title == "Reinventing Entropy"
+    assert updater.last_description == "A plain text description."
     assert updater.last_tag_keys == ["mathematics"]
 
 
@@ -198,14 +206,14 @@ def test_title_clear_missing_media_missing_tag_and_missing_catalog(tmp_path: Pat
     clearer = _FakeSaveMetadata(status="updated")
     clear = _client(save_metadata=clearer).put(
         f"/api/media/{MEDIA_ID}/metadata",
-        json={"display_title": None, "tag_keys": []},
+        json={"display_title": None, "description": None, "tag_keys": []},
     )
     missing_media = _client(get_metadata=_FakeGetMetadata(error=MediaMetadataMediaNotFoundError())).get(
         f"/api/media/{MEDIA_ID}/metadata"
     )
     missing_tag = _client(save_metadata=_FakeSaveMetadata(error=CanonicalTagNotFoundError())).put(
         f"/api/media/{MEDIA_ID}/metadata",
-        json={"display_title": None, "tag_keys": ["missing"]},
+        json={"display_title": None, "description": None, "tag_keys": ["missing"]},
     )
     database_path = tmp_path / "missing" / "catalog.sqlite3"
     missing_catalog = _client(catalog_available=False, database_path=database_path).get(
@@ -229,10 +237,12 @@ def test_title_clear_missing_media_missing_tag_and_missing_catalog(tmp_path: Pat
     [
         {"key": "Bad", "display_name": "Math"},
         {"key": "mathematics", "display_name": ""},
-        {"display_title": "", "tag_keys": []},
-        {"display_title": " Title", "tag_keys": []},
-        {"display_title": None, "tag_keys": ["mathematics", "mathematics"]},
-        {"display_title": None, "tag_keys": [f"tag-{index}" for index in range(33)]},
+        {"display_title": "", "description": None, "tag_keys": []},
+        {"display_title": " Title", "description": None, "tag_keys": []},
+        {"display_title": None, "description": None, "tag_keys": ["mathematics", "mathematics"]},
+        {"display_title": None, "description": None, "tag_keys": [f"tag-{index}" for index in range(33)]},
+        {"display_title": None, "description": " Leading space", "tag_keys": []},
+        {"display_title": None, "description": "\x00null byte", "tag_keys": []},
     ],
 )
 def test_malformed_requests_return_422(body: dict[str, object]) -> None:
@@ -250,7 +260,7 @@ def test_unexpected_failures_are_sanitized() -> None:
     ).post("/api/canonical-tags", json={"key": "mathematics", "display_name": "Math"})
     metadata_failure = _client(
         save_metadata=_FakeSaveMetadata(error=FrameNestMediaMetadataRepositoryError(UNDERLYING_EXCEPTION_TEXT))
-    ).put(f"/api/media/{MEDIA_ID}/metadata", json={"display_title": None, "tag_keys": []})
+    ).put(f"/api/media/{MEDIA_ID}/metadata", json={"display_title": None, "description": None, "tag_keys": []})
 
     assert tag_failure.status_code == 500
     assert tag_failure.json()["error"]["code"] == "CANONICAL_TAG_OPERATION_FAILED"

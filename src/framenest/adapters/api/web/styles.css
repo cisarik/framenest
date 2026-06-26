@@ -627,7 +627,8 @@ h2 {
   text-transform: uppercase;
 }
 
-.metadata-field input {
+.metadata-field input,
+.metadata-field textarea {
   width: 100%;
   border: 1px solid var(--line);
   border-radius: 6px;
@@ -638,6 +639,7 @@ h2 {
   line-height: 1.4;
   padding: 11px 12px;
   text-transform: none;
+  resize: vertical;
 }
 
 .metadata-tag-suggestions,

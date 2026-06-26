@@ -14,7 +14,7 @@ The minimum logical-media and physical-location persistence foundation and
 explicit idempotent import from selected scan candidates now exist on MacBook.
 The persistent display-title and canonical-tag core now exists, and imported
 media can now be reached through a catalog browser with display-title search,
-canonical-tag AND filters, and a manual `Current` metadata workspace for title
+canonical-tag AND filters, and a manual `Current` metadata workspace for title, description,
 and ordered tag assignment. The next implementation priority remains metadata
 detail expansion, most likely descriptions or adjacent manual fields, rather
 than Tauri scaffolding or NUC deployment.
@@ -89,7 +89,7 @@ Accepted so far:
 - On-demand editable AI suggestion review through [ADR-0020](docs/adr/0020-on-demand-ai-suggestion-review.md); implementation complete as a non-persistent pre-alpha review.
 - Tauri desktop shell direction through [ADR-0021](docs/adr/0021-tauri-desktop-shell.md); not implemented.
 - Selective media placement and optional server aggregation direction through [ADR-0022](docs/adr/0022-selective-media-placement-and-server-aggregation.md); not implemented.
-- Manual-first metadata and multi-model AI draft direction through [ADR-0023](docs/adr/0023-manual-first-metadata-and-multi-model-ai-drafts.md); not implemented beyond the existing non-persistent ADR-0020 review slice.
+- Manual-first metadata and multi-model AI draft direction through [ADR-0023](docs/adr/0023-manual-first-metadata-and-multi-model-ai-drafts.md); partially implemented for manual `Current` display title, plain-text description, and ordered canonical tags. Collection, suggested filename, persistent AI drafts, multi-model draft comparison, inline model picker, and draft promotion workflows remain unimplemented.
 - Cover Studio and AI cover candidate direction through [ADR-0024](docs/adr/0024-cover-studio-and-ai-cover-candidates.md); not implemented.
 - Minimum persistent media catalog foundation through [ADR-0025](docs/adr/0025-minimum-persistent-media-catalog-foundation.md); implementation complete for logical media and physical locations only.
 - Explicit idempotent scan-candidate import through [ADR-0026](docs/adr/0026-explicit-idempotent-scan-candidate-import.md); implementation complete for one selected scan candidate at a time.

@@ -32,6 +32,7 @@ from framenest.domain.media_metadata import (
     CanonicalTagDisplayName,
     CanonicalTagKey,
     FrameNestMediaMetadataError,
+    MediaDescription,
     MediaDisplayTitle,
     MediaMetadata,
 )
@@ -61,6 +62,7 @@ __all__ = [
     "CanonicalTag",
     "CanonicalTagDisplayName",
     "CanonicalTagKey",
+    "MediaDescription",
     "MediaDisplayTitle",
     "MediaMetadata",
     "SeriesId",

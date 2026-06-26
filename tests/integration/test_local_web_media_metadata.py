@@ -46,15 +46,15 @@ def test_local_web_persists_display_title_and_canonical_tags(tmp_path: Path) -> 
         unsaved = client.get(f"/api/media/{media_id}/metadata")
         created = client.put(
             f"/api/media/{media_id}/metadata",
-            json={"display_title": "Reinventing Entropy", "tag_keys": ["mathematics", "compression"]},
+            json={"display_title": "Reinventing Entropy", "description": None, "tag_keys": ["mathematics", "compression"]},
         )
         unchanged = client.put(
             f"/api/media/{media_id}/metadata",
-            json={"display_title": "Reinventing Entropy", "tag_keys": ["mathematics", "compression"]},
+            json={"display_title": "Reinventing Entropy", "description": None, "tag_keys": ["mathematics", "compression"]},
         )
         cleared = client.put(
             f"/api/media/{media_id}/metadata",
-            json={"display_title": None, "tag_keys": []},
+            json={"display_title": None, "description": None, "tag_keys": []},
         )
 
     assert math.status_code == 201

@@ -77,11 +77,11 @@ def test_local_web_catalog_search_tags_pagination_locations_and_read_only_get(
         assert meme.status_code == 201
         entropy_metadata = client.put(
             f"/api/media/{entropy_media_id}/metadata",
-            json={"display_title": "Reinventing Entropy", "tag_keys": ["mathematics", "compression"]},
+            json={"display_title": "Reinventing Entropy", "description": "A treatise on entropy", "tag_keys": ["mathematics", "compression"]},
         )
         reaction_metadata = client.put(
             f"/api/media/{reaction_media_id}/metadata",
-            json={"display_title": "Reaction Entropy", "tag_keys": ["meme"]},
+            json={"display_title": "Reaction Entropy", "description": None, "tag_keys": ["meme"]},
         )
         assert entropy_metadata.status_code == 200
         assert reaction_metadata.status_code == 200

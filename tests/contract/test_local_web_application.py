@@ -216,7 +216,7 @@ def test_javascript_metadata_workspace_uses_existing_same_origin_endpoints(
     assert "metadataEndpoint(mediaId)" in script
     assert 'fetch(metadataEndpoint(mediaId)' in script
     assert 'method: "PUT"' in script
-    assert 'body: JSON.stringify({ display_title: normalized.displayTitle, tag_keys: normalized.tagKeys })' in script
+    assert 'body: JSON.stringify({ display_title: normalized.displayTitle, description: normalized.description, tag_keys: normalized.tagKeys })' in script
     assert 'fetch(CANONICAL_TAGS_ENDPOINT, {' in script
     assert 'method: "POST"' in script
     assert "handleCreateAndSelectTag" in script

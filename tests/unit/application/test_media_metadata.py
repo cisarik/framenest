@@ -26,6 +26,7 @@ from framenest.domain.media_metadata import (
     CanonicalTag,
     CanonicalTagDisplayName,
     CanonicalTagKey,
+    MediaDescription,
     MediaDisplayTitle,
 )
 
@@ -50,11 +51,12 @@ class _FakeRepository:
             media_id=MEDIA_ID,
             persisted=False,
             display_title=None,
+            description=None,
             tag_keys=(),
             created_at_ms=None,
             updated_at_ms=None,
         )
-        self.save_calls: list[tuple[MediaId, MediaDisplayTitle | None, tuple[CanonicalTagKey, ...], int]] = []
+        self.save_calls: list[tuple[MediaId, MediaDisplayTitle | None, MediaDescription | None, tuple[CanonicalTagKey, ...], int]] = []
 
     def create_canonical_tag(
         self,
@@ -86,6 +88,7 @@ class _FakeRepository:
         self,
         media_id: MediaId,
         display_title: MediaDisplayTitle | None,
+        description: MediaDescription | None,
         tag_keys: tuple[CanonicalTagKey, ...],
         now_ms: int,
     ) -> MediaMetadataSaveResult:
@@ -94,11 +97,12 @@ class _FakeRepository:
         for key in tag_keys:
             if key not in self.tags:
                 raise CanonicalTagNotFoundError()
-        self.save_calls.append((media_id, display_title, tag_keys, now_ms))
+        self.save_calls.append((media_id, display_title, description, tag_keys, now_ms))
         status = "created" if not self.snapshot.persisted else "updated"
         if (
             self.snapshot.persisted
             and self.snapshot.display_title == display_title
+            and self.snapshot.description == description
             and self.snapshot.tag_keys == tag_keys
         ):
             status = "unchanged"
@@ -108,6 +112,7 @@ class _FakeRepository:
             media_id=media_id,
             persisted=True,
             display_title=display_title,
+            description=description,
             tag_keys=tag_keys,
             created_at_ms=created_at_ms,
             updated_at_ms=updated_at_ms,
@@ -139,9 +144,9 @@ def test_get_unsaved_metadata_and_save_statuses() -> None:
     save = SaveMediaMetadata(repository, clock_ms=lambda: 500)
 
     unsaved = get.execute(MEDIA_ID.to_string())
-    created = save.execute(MEDIA_ID.to_string(), "Reinventing Entropy", ["mathematics"])
-    unchanged = save.execute(MEDIA_ID.to_string(), "Reinventing Entropy", ["mathematics"])
-    cleared = save.execute(MEDIA_ID.to_string(), None, [])
+    created = save.execute(MEDIA_ID.to_string(), "Reinventing Entropy", "A description.", ["mathematics"])
+    unchanged = save.execute(MEDIA_ID.to_string(), "Reinventing Entropy", "A description.", ["mathematics"])
+    cleared = save.execute(MEDIA_ID.to_string(), None, None, [])
 
     assert unsaved.persisted is False
     assert unsaved.display_title is None
@@ -161,12 +166,61 @@ def test_save_rejects_missing_media_missing_tag_and_duplicate_keys() -> None:
     save = SaveMediaMetadata(repository, clock_ms=lambda: 1)
 
     with pytest.raises(MediaMetadataMediaNotFoundError):
-        save.execute(MediaId.new().to_string(), None, [])
+        save.execute(MediaId.new().to_string(), None, None, [])
     with pytest.raises(CanonicalTagNotFoundError):
-        save.execute(MEDIA_ID.to_string(), None, ["missing"])
+        save.execute(MEDIA_ID.to_string(), None, None, ["missing"])
     repository.tags[CanonicalTagKey("mathematics")] = _tag("mathematics", "Math")
     with pytest.raises(ValueError):
-        save.execute(MEDIA_ID.to_string(), None, ["mathematics", "mathematics"])
+        save.execute(MEDIA_ID.to_string(), None, None, ["mathematics", "mathematics"])
+
+
+def test_sparse_metadata_returns_description_none() -> None:
+    repository = _FakeRepository()
+    get = GetMediaMetadata(repository)
+    view = get.execute(MEDIA_ID.to_string())
+    assert view.description is None
+
+
+def test_description_only_update_returns_updated() -> None:
+    repository = _FakeRepository()
+    repository.tags[CanonicalTagKey("mathematics")] = _tag("mathematics", "Math")
+    save = SaveMediaMetadata(repository, clock_ms=lambda: 100)
+    created = save.execute(MEDIA_ID.to_string(), "Title", None, ["mathematics"])
+    assert created.status == "created"
+    updated = save.execute(MEDIA_ID.to_string(), "Title", "New description.", ["mathematics"])
+    assert updated.status == "updated"
+    assert updated.metadata.description == "New description."
+
+
+def test_clearing_description_returns_updated() -> None:
+    repository = _FakeRepository()
+    repository.tags[CanonicalTagKey("mathematics")] = _tag("mathematics", "Math")
+    save = SaveMediaMetadata(repository, clock_ms=lambda: 200)
+    created = save.execute(MEDIA_ID.to_string(), "Title", "Some description.", ["mathematics"])
+    assert created.status == "created"
+    cleared = save.execute(MEDIA_ID.to_string(), "Title", None, ["mathematics"])
+    assert cleared.status == "updated"
+    assert cleared.metadata.description is None
+
+
+def test_exact_noop_including_description_returns_unchanged() -> None:
+    repository = _FakeRepository()
+    repository.tags[CanonicalTagKey("mathematics")] = _tag("mathematics", "Math")
+    save = SaveMediaMetadata(repository, clock_ms=lambda: 300)
+    created = save.execute(MEDIA_ID.to_string(), "Title", "Desc.", ["mathematics"])
+    assert created.status == "created"
+    unchanged = save.execute(MEDIA_ID.to_string(), "Title", "Desc.", ["mathematics"])
+    assert unchanged.status == "unchanged"
+    assert unchanged.metadata.updated_at_ms == created.metadata.updated_at_ms
+
+
+def test_description_whitespace_only_normalized_to_none() -> None:
+    repository = _FakeRepository()
+    repository.tags[CanonicalTagKey("mathematics")] = _tag("mathematics", "Math")
+    save = SaveMediaMetadata(repository, clock_ms=lambda: 400)
+    save.execute(MEDIA_ID.to_string(), "Title", "  ", ["mathematics"])
+    spy = repository.save_calls[-1]
+    assert spy[2] is None
 
 
 def test_media_metadata_application_imports_no_framework_infrastructure_or_media_tools() -> None:

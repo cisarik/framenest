@@ -20,6 +20,7 @@ from framenest.domain.media_metadata import (
     CanonicalTagDisplayName,
     CanonicalTagKey,
     FrameNestMediaMetadataError,
+    MediaDescription,
     MediaDisplayTitle,
 )
 
@@ -79,6 +80,7 @@ class CanonicalTagListResponse(BaseModel):
 class MediaMetadataResponse(BaseModel):
     persisted: bool
     display_title: str | None
+    description: str | None
     tags: list[CanonicalTagResponse]
     created_at_ms: int | None
     updated_at_ms: int | None
@@ -86,6 +88,7 @@ class MediaMetadataResponse(BaseModel):
 
 class MediaMetadataSaveRequest(BaseModel):
     display_title: str | None
+    description: str | None
     tag_keys: list[str]
 
     @field_validator("display_title")
@@ -94,6 +97,17 @@ class MediaMetadataSaveRequest(BaseModel):
         if value is None:
             return None
         MediaDisplayTitle(value)
+        return value
+
+    @field_validator("description")
+    @classmethod
+    def validate_description(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        stripped = value.strip()
+        if not stripped:
+            return None
+        MediaDescription(value)
         return value
 
     @field_validator("tag_keys")
@@ -227,6 +241,7 @@ def create_media_metadata_api_router(dependencies: MediaMetadataApiDependencies)
             result = dependencies.save_metadata.execute(
                 str(media_id),
                 request.display_title,
+                request.description,
                 request.tag_keys,
             )
         except MediaMetadataMediaNotFoundError:
@@ -282,10 +297,13 @@ def _metadata_response(metadata: object) -> MediaMetadataResponse:
     display_title = metadata.display_title
     if display_title is not None and hasattr(display_title, "value"):
         display_title = display_title.value
+    raw_description = getattr(metadata, "description", None)
+    description = raw_description.value if raw_description is not None and hasattr(raw_description, "value") else raw_description
     tags = getattr(metadata, "tags", ())
     return MediaMetadataResponse(
         persisted=metadata.persisted,
         display_title=display_title,
+        description=description,
         tags=[_tag_response(tag) for tag in tags],
         created_at_ms=metadata.created_at_ms,
         updated_at_ms=metadata.updated_at_ms,

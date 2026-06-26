@@ -10,6 +10,7 @@ from framenest.domain.media_metadata import (
     CanonicalTag,
     CanonicalTagDisplayName,
     CanonicalTagKey,
+    MediaDescription,
     MediaDisplayTitle,
 )
 
@@ -45,6 +46,7 @@ class MediaMetadataSnapshot:
     media_id: MediaId
     persisted: bool
     display_title: MediaDisplayTitle | None
+    description: MediaDescription | None
     tag_keys: tuple[CanonicalTagKey, ...]
     created_at_ms: int | None
     updated_at_ms: int | None
@@ -82,6 +84,7 @@ class MediaMetadataRepository(Protocol):
         self,
         media_id: MediaId,
         display_title: MediaDisplayTitle | None,
+        description: MediaDescription | None,
         tag_keys: tuple[CanonicalTagKey, ...],
         now_ms: int,
     ) -> MediaMetadataSaveResult:

@@ -82,22 +82,22 @@ def test_local_web_manual_metadata_workspace_api_roundtrip_and_file_safety(
         )
         created = client.put(
             f"/api/media/{media_id}/metadata",
-            json={"display_title": "Reinventing Entropy", "tag_keys": ["mathematics", "compression"]},
+            json={"display_title": "Reinventing Entropy", "description": None, "tag_keys": ["mathematics", "compression"]},
         )
         read_back = client.get(f"/api/media/{media_id}/metadata")
         catalog = client.get("/api/media", params={"q": "entropy"})
         updated = client.put(
             f"/api/media/{media_id}/metadata",
-            json={"display_title": "Entropy Revisited", "tag_keys": ["compression", "mathematics"]},
+            json={"display_title": "Entropy Revisited", "description": None, "tag_keys": ["compression", "mathematics"]},
         )
         updated_catalog = client.get("/api/media", params=[("tag", "compression"), ("tag", "mathematics")])
         cleared = client.put(
             f"/api/media/{media_id}/metadata",
-            json={"display_title": None, "tag_keys": []},
+            json={"display_title": None, "description": None, "tag_keys": []},
         )
         unchanged = client.put(
             f"/api/media/{media_id}/metadata",
-            json={"display_title": None, "tag_keys": []},
+            json={"display_title": None, "description": None, "tag_keys": []},
         )
         cleared_catalog = client.get("/api/media")
 

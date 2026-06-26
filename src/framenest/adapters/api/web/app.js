@@ -9,6 +9,7 @@ const AI_CAPABILITY_ENDPOINT = "/api/ai/media-suggestion-capability";
 const MEDIA_IMPORTS_ENDPOINT = "media-imports";
 const CATALOG_PAGE_SIZE = 24;
 const MAX_METADATA_TITLE_CODE_POINTS = 240;
+const MAX_METADATA_DESCRIPTION_CODE_POINTS = 10000;
 const MAX_METADATA_TAGS = 32;
 const TAG_KEY_PATTERN = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/;
 const MAX_REVIEW_TEXT = {
@@ -42,8 +43,8 @@ let metadataWorkspace = {
   unavailable: false,
   notFound: false,
   statusOverride: null,
-  baseline: { displayTitle: null, tagKeys: [] },
-  current: { displayTitle: "", tagKeys: [] },
+  baseline: { displayTitle: null, description: null, tagKeys: [] },
+  current: { displayTitle: "", description: "", tagKeys: [] },
 };
 let aiCapability = {
   available: false,
@@ -238,6 +239,27 @@ function semanticArraysEqual(left, right) {
   return left.every((value, index) => value === right[index]);
 }
 
+function normalizedDescriptionState() {
+  const rawDescription = document.querySelector("#metadata-description-input").value;
+  if (hasControlCharacter(rawDescription.replace(/\n/g, ""))) {
+    return { error: "Description must not contain NUL, tab, carriage return, or control characters." };
+  }
+  if (rawDescription.length > MAX_METADATA_DESCRIPTION_CODE_POINTS) {
+    return { error: `Description must be ${MAX_METADATA_DESCRIPTION_CODE_POINTS} characters or fewer.` };
+  }
+  const trimmed = rawDescription.trim();
+  if (trimmed === "") {
+    return { description: null };
+  }
+  if (trimmed !== rawDescription) {
+    return { error: "Non-empty descriptions must not start or end with whitespace." };
+  }
+  if (/[\r\t]/.test(rawDescription)) {
+    return { error: "Description must not contain tab or carriage return characters." };
+  }
+  return { description: rawDescription };
+}
+
 function normalizedMetadataFormState() {
   const rawTitle = metadataTitleInput.value;
   if (hasControlCharacter(rawTitle)) {
@@ -247,12 +269,20 @@ function normalizedMetadataFormState() {
     return { error: "Display title must be 240 characters or fewer." };
   }
   if (rawTitle.trim() === "") {
-    return { displayTitle: null, tagKeys: [...metadataWorkspace.current.tagKeys] };
+    const desc = normalizedDescriptionState();
+    if (desc.error) {
+      return desc;
+    }
+    return { displayTitle: null, description: desc.description, tagKeys: [...metadataWorkspace.current.tagKeys] };
   }
   if (rawTitle.trim() !== rawTitle) {
     return { error: "Non-empty display titles must not start or end with whitespace." };
   }
-  return { displayTitle: rawTitle, tagKeys: [...metadataWorkspace.current.tagKeys] };
+  const desc = normalizedDescriptionState();
+  if (desc.error) {
+    return desc;
+  }
+  return { displayTitle: rawTitle, description: desc.description, tagKeys: [...metadataWorkspace.current.tagKeys] };
 }
 
 function metadataIsDirty() {
@@ -261,6 +291,7 @@ function metadataIsDirty() {
     return true;
   }
   return normalized.displayTitle !== metadataWorkspace.baseline.displayTitle
+    || normalized.description !== metadataWorkspace.baseline.description
     || !semanticArraysEqual(normalized.tagKeys, metadataWorkspace.baseline.tagKeys);
 }
 
@@ -973,6 +1004,13 @@ function renderMetadataTagSuggestions() {
   });
 }
 
+function updateDescriptionCount() {
+  const input = document.querySelector("#metadata-description-input");
+  const count = document.querySelector("#metadata-description-count");
+  const length = input ? input.value.length : 0;
+  count.textContent = `${length} / ${MAX_METADATA_DESCRIPTION_CODE_POINTS}`;
+}
+
 function renderMetadataWorkspace() {
   if (metadataWorkspace.openMediaId === null) {
     metadataWorkspaceElement.hidden = true;
@@ -987,6 +1025,9 @@ function renderMetadataWorkspace() {
   metadataTitleFallback.textContent = metadataWorkspace.baseline.displayTitle === null && metadataWorkspace.openItem
     ? `Catalog fallback label: ${deriveCatalogFallbackTitle(metadataWorkspace.openItem)}. This is presentation-only and is not persisted as title truth.`
     : "Display title is persisted catalog metadata and remains separate from the physical filename.";
+  const descriptionInput = document.querySelector("#metadata-description-input");
+  descriptionInput.value = metadataWorkspace.current.description || "";
+  updateDescriptionCount();
   renderSelectedMetadataTags();
   renderMetadataTagSuggestions();
   updateMetadataControls();
@@ -996,10 +1037,12 @@ function applyMetadataPayloadToWorkspace(payload) {
   const tagKeys = (payload.tags || []).map((tag) => tag.key);
   metadataWorkspace.baseline = {
     displayTitle: payload.display_title === null ? null : payload.display_title,
+    description: payload.description === null ? null : payload.description,
     tagKeys,
   };
   metadataWorkspace.current = {
     displayTitle: payload.display_title === null ? "" : payload.display_title,
+    description: payload.description === null ? "" : payload.description,
     tagKeys: [...tagKeys],
   };
 }
@@ -1018,8 +1061,8 @@ async function handleOpenMetadataWorkspace(item) {
     unavailable: false,
     notFound: false,
     statusOverride: null,
-    baseline: { displayTitle: null, tagKeys: [] },
-    current: { displayTitle: "", tagKeys: [] },
+    baseline: { displayTitle: null, description: null, tagKeys: [] },
+    current: { displayTitle: "", description: "", tagKeys: [] },
   };
   metadataCreateStatus.textContent = "";
   renderMetadataWorkspace();
@@ -1110,6 +1153,7 @@ function removeSelectedMetadataTag(key) {
 function resetMetadataWorkspaceAfterDiscard() {
   metadataWorkspace.current = {
     displayTitle: metadataWorkspace.baseline.displayTitle || "",
+    description: metadataWorkspace.baseline.description || "",
     tagKeys: [...metadataWorkspace.baseline.tagKeys],
   };
   metadataWorkspace.statusOverride = null;
@@ -1134,8 +1178,8 @@ function closeMetadataWorkspace() {
     unavailable: false,
     notFound: false,
     statusOverride: null,
-    baseline: { displayTitle: null, tagKeys: [] },
-    current: { displayTitle: "", tagKeys: [] },
+    baseline: { displayTitle: null, description: null, tagKeys: [] },
+    current: { displayTitle: "", description: "", tagKeys: [] },
   };
   metadataWorkspaceElement.hidden = true;
   syncMetadataBeforeUnloadProtection();
@@ -1225,7 +1269,7 @@ async function handleSaveMetadata() {
         Accept: "application/json",
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ display_title: normalized.displayTitle, tag_keys: normalized.tagKeys }),
+      body: JSON.stringify({ display_title: normalized.displayTitle, description: normalized.description, tag_keys: normalized.tagKeys }),
       cache: "no-store",
     });
     const payload = await response.json();
@@ -1821,6 +1865,13 @@ metadataTitleInput.addEventListener("input", () => {
 });
 
 metadataTagSearchInput.addEventListener("input", renderMetadataTagSuggestions);
+document.querySelector("#metadata-description-input").addEventListener("input", () => {
+  const input = document.querySelector("#metadata-description-input");
+  metadataWorkspace.current.description = input.value;
+  metadataWorkspace.statusOverride = null;
+  updateDescriptionCount();
+  updateMetadataControls();
+});
 metadataSaveButton.addEventListener("click", handleSaveMetadata);
 metadataDiscardButton.addEventListener("click", handleDiscardMetadataChanges);
 metadataCloseButton.addEventListener("click", closeMetadataWorkspace);

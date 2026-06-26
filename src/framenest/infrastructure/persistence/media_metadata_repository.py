@@ -21,6 +21,7 @@ from framenest.domain.media_metadata import (
     CanonicalTagDisplayName,
     CanonicalTagKey,
     FrameNestMediaMetadataError,
+    MediaDescription,
     MediaDisplayTitle,
 )
 from framenest.infrastructure.persistence.catalog_schema import (
@@ -126,6 +127,7 @@ class SqliteMediaMetadataRepository:
         self,
         media_id: MediaId,
         display_title: MediaDisplayTitle | None,
+        description: MediaDescription | None,
         tag_keys: tuple[CanonicalTagKey, ...],
         now_ms: int,
     ) -> MediaMetadataSaveResult:
@@ -142,6 +144,7 @@ class SqliteMediaMetadataRepository:
             if (
                 current.persisted
                 and current.display_title == display_title
+                and current.description == description
                 and current.tag_keys == tag_keys
             ):
                 return MediaMetadataSaveResult(status="unchanged", metadata=current)
@@ -154,6 +157,7 @@ class SqliteMediaMetadataRepository:
                     .where(media_metadata.c.media_id == media_id.to_string())
                     .values(
                         display_title=None if display_title is None else display_title.value,
+                        description=None if description is None else description.value,
                         updated_at_ms=now_ms,
                     )
                 )
@@ -164,6 +168,7 @@ class SqliteMediaMetadataRepository:
                     insert(media_metadata).values(
                         media_id=media_id.to_string(),
                         display_title=None if display_title is None else display_title.value,
+                        description=None if description is None else description.value,
                         created_at_ms=now_ms,
                         updated_at_ms=now_ms,
                     )
@@ -179,6 +184,7 @@ class SqliteMediaMetadataRepository:
                 media_id=media_id,
                 persisted=True,
                 display_title=display_title,
+                description=description,
                 tag_keys=tag_keys,
                 created_at_ms=created_at_ms,
                 updated_at_ms=now_ms,
@@ -232,6 +238,7 @@ def _load_metadata_snapshot(connection: Connection, media_id: MediaId) -> MediaM
             select(
                 media_metadata.c.media_id,
                 media_metadata.c.display_title,
+                media_metadata.c.description,
                 media_metadata.c.created_at_ms,
                 media_metadata.c.updated_at_ms,
             ).where(media_metadata.c.media_id == media_id.to_string())
@@ -244,6 +251,7 @@ def _load_metadata_snapshot(connection: Connection, media_id: MediaId) -> MediaM
             media_id=media_id,
             persisted=False,
             display_title=None,
+            description=None,
             tag_keys=(),
             created_at_ms=None,
             updated_at_ms=None,
@@ -258,10 +266,14 @@ def _load_metadata_snapshot(connection: Connection, media_id: MediaId) -> MediaM
         title = mapping["display_title"]
         if title is not None and not isinstance(title, str):
             raise FrameNestMediaMetadataRepositoryError(_REPOSITORY_FAILURE_MESSAGE)
+        raw_description = mapping["description"]
+        if raw_description is not None and not isinstance(raw_description, str):
+            raise FrameNestMediaMetadataRepositoryError(_REPOSITORY_FAILURE_MESSAGE)
         return MediaMetadataSnapshot(
             media_id=MediaId.from_string(mapping["media_id"]),
             persisted=True,
             display_title=None if title is None else MediaDisplayTitle(title),
+            description=None if raw_description is None else MediaDescription(raw_description),
             tag_keys=tuple(CanonicalTagKey(dict(row)["tag_key"]) for row in assignment_rows),
             created_at_ms=mapping["created_at_ms"],
             updated_at_ms=mapping["updated_at_ms"],

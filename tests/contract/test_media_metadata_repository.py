@@ -19,6 +19,7 @@ from framenest.domain.media import LogicalMedia, MediaKind
 from framenest.domain.media_metadata import (
     CanonicalTagDisplayName,
     CanonicalTagKey,
+    MediaDescription,
     MediaDisplayTitle,
 )
 from framenest.domain.identities import MediaId
@@ -139,22 +140,25 @@ def test_metadata_save_create_update_clear_empty_and_unchanged(tmp_path: Path) -
         created = repository.save_media_metadata(
             media_id,
             MediaDisplayTitle("Reinventing Entropy"),
+            None,
             (CanonicalTagKey("mathematics"), CanonicalTagKey("compression")),
             now_ms=20,
         )
         updated = repository.save_media_metadata(
             media_id,
             MediaDisplayTitle("Entropy"),
+            None,
             (CanonicalTagKey("compression"), CanonicalTagKey("mathematics")),
             now_ms=30,
         )
         unchanged = repository.save_media_metadata(
             media_id,
             MediaDisplayTitle("Entropy"),
+            None,
             (CanonicalTagKey("compression"), CanonicalTagKey("mathematics")),
             now_ms=40,
         )
-        cleared = repository.save_media_metadata(media_id, None, (), now_ms=50)
+        cleared = repository.save_media_metadata(media_id, None, None, (), now_ms=50)
 
         assert created.status == "created"
         assert updated.status == "updated"
@@ -177,10 +181,11 @@ def test_missing_tag_duplicate_keys_and_too_many_tags_fail_safely(tmp_path: Path
     try:
         repository.create_canonical_tag(CanonicalTagKey("mathematics"), CanonicalTagDisplayName("Math"), 1)
         with pytest.raises(CanonicalTagNotFoundError):
-            repository.save_media_metadata(media_id, None, (CanonicalTagKey("missing"),), now_ms=2)
+            repository.save_media_metadata(media_id, None, None, (CanonicalTagKey("missing"),), now_ms=2)
         with pytest.raises(ValueError):
             repository.save_media_metadata(
                 media_id,
+                None,
                 None,
                 (CanonicalTagKey("mathematics"), CanonicalTagKey("mathematics")),
                 now_ms=2,
@@ -188,6 +193,7 @@ def test_missing_tag_duplicate_keys_and_too_many_tags_fail_safely(tmp_path: Path
         with pytest.raises(ValueError):
             repository.save_media_metadata(
                 media_id,
+                None,
                 None,
                 tuple(CanonicalTagKey(f"tag-{index}") for index in range(33)),
                 now_ms=2,
@@ -205,6 +211,7 @@ def test_assignment_replacement_failure_rolls_back_previous_state(tmp_path: Path
         repository.save_media_metadata(
             media_id,
             MediaDisplayTitle("Original"),
+            None,
             (CanonicalTagKey("mathematics"),),
             now_ms=10,
         )
@@ -216,6 +223,7 @@ def test_assignment_replacement_failure_rolls_back_previous_state(tmp_path: Path
                 repository.save_media_metadata(
                     media_id,
                     MediaDisplayTitle("Changed"),
+                    None,
                     (CanonicalTagKey("compression"),),
                     now_ms=20,
                 )

@@ -197,12 +197,17 @@ media_metadata = Table(
         nullable=False,
     ),
     Column("display_title", Text(), nullable=True),
+    Column("description", Text(), nullable=True),
     Column("created_at_ms", Integer(), nullable=False),
     Column("updated_at_ms", Integer(), nullable=False),
     CheckConstraint("length(media_id) = 36", name="ck_media_metadata_media_id_length"),
     CheckConstraint(
         "display_title IS NULL OR (length(display_title) >= 1 AND length(display_title) <= 240)",
         name="ck_media_metadata_title_length",
+    ),
+    CheckConstraint(
+        "description IS NULL OR (length(description) >= 1 AND length(description) <= 10000)",
+        name="ck_media_metadata_description_length",
     ),
     CheckConstraint(
         "created_at_ms >= 0",

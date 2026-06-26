@@ -18,6 +18,7 @@ from framenest.domain.media_metadata import (
     CanonicalTag,
     CanonicalTagDisplayName,
     CanonicalTagKey,
+    MediaDescription,
     MediaDisplayTitle,
 )
 
@@ -44,6 +45,7 @@ class MediaMetadataView:
 
     persisted: bool
     display_title: str | None
+    description: str | None
     tags: tuple[CanonicalTag, ...]
     created_at_ms: int | None
     updated_at_ms: int | None
@@ -114,15 +116,18 @@ class SaveMediaMetadata:
         self,
         media_id: str,
         display_title: str | None,
+        description: str | None,
         tag_keys: list[str],
     ) -> SaveMediaMetadataResult:
         parsed_keys = tuple(CanonicalTagKey(key) for key in tag_keys)
         if len(parsed_keys) != len(set(parsed_keys)):
             raise ValueError(MEDIA_METADATA_OPERATION_FAILED_MESSAGE)
         parsed_title = None if display_title is None else MediaDisplayTitle(display_title)
+        parsed_description = _normalize_description(description)
         result = self._repository.save_media_metadata(
             MediaId.from_string(media_id),
             parsed_title,
+            parsed_description,
             parsed_keys,
             _call_clock_ms(self._clock_ms),
         )
@@ -130,6 +135,15 @@ class SaveMediaMetadata:
             status=result.status,
             metadata=_view_from_snapshot(self._repository, result.metadata),
         )
+
+
+def _normalize_description(value: str | None) -> MediaDescription | None:
+    if value is None:
+        return None
+    stripped = value.strip()
+    if not stripped:
+        return None
+    return MediaDescription(value)
 
 
 def _view_from_snapshot(
@@ -145,6 +159,7 @@ def _view_from_snapshot(
     return MediaMetadataView(
         persisted=snapshot.persisted,
         display_title=None if snapshot.display_title is None else snapshot.display_title.value,
+        description=None if snapshot.description is None else snapshot.description.value,
         tags=tuple(tags),
         created_at_ms=snapshot.created_at_ms,
         updated_at_ms=snapshot.updated_at_ms,
