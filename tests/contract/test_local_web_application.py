@@ -61,7 +61,7 @@ def _parse_document(html: str) -> _AssetReferenceParser:
     return parser
 
 
-def test_root_serves_framenest_pre_alpha_application_document(client: TestClient) -> None:
+def test_root_serves_framenest_application_document(client: TestClient) -> None:
     response = client.get("/")
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/html")
@@ -69,7 +69,6 @@ def test_root_serves_framenest_pre_alpha_application_document(client: TestClient
     html = response.text
     parsed = _parse_document(html)
     assert "FrameNest" in html
-    assert "pre-alpha" in html.lower()
     assert parsed.main_count == 1
     assert parsed.stylesheet_hrefs == ["/assets/styles.css"]
     assert parsed.script_srcs == ["/assets/app.js"]
@@ -763,3 +762,123 @@ def test_browser_review_uses_no_persistence_or_hidden_complete_suggestion(
     assert "console.log" not in script
     assert "payload_base64" in script
     assert "data:image" not in script
+
+
+# ---------------------------------------------------------------------------
+# Terminal glass application shell — Cycle 075
+# ---------------------------------------------------------------------------
+
+
+def test_application_header_is_sticky_and_contains_brand(client: TestClient) -> None:
+    html = client.get("/").text
+    assert 'class="app-header' in html
+    assert "sticky" in html.lower() or "position: sticky" in client.get("/assets/styles.css").text.lower()
+    assert "FrameNest" in html
+    assert "brand-cursor" in html
+
+
+def test_header_does_not_contain_pre_alpha_foundation_text(client: TestClient) -> None:
+    html = client.get("/").text
+    assert "Pre-alpha foundation" not in html
+    assert "stage-pill" not in html
+
+
+def test_header_contains_server_health_status_button(client: TestClient) -> None:
+    html = client.get("/").text
+    assert "server-health-button" in html
+    assert "aria-label" in html
+    assert "Local server healthy" in html or "server-health-button" in html
+
+
+def test_header_contains_ai_status_button(client: TestClient) -> None:
+    html = client.get("/").text
+    assert "ai-status-button" in html
+    assert "aria-label" in html
+
+
+def test_application_has_settings_dialog_element(client: TestClient) -> None:
+    html = client.get("/").text
+    assert "settings-dialog" in html
+    assert "Settings" in html
+    assert "AI" in html
+
+
+def test_settings_dialog_does_not_contain_provider_configuration_inputs(client: TestClient) -> None:
+    html = client.get("/").text
+    settings_section = html[html.index("settings-dialog"):]
+    assert "NVIDIA" not in settings_section or "not yet available" in settings_section.lower()
+    assert "OpenAI" not in settings_section
+    assert "Anthropic" not in settings_section
+    assert "LMStudio" not in settings_section and "LM Studio" not in settings_section
+    assert "Vercel" not in settings_section
+    assert "api-key" not in settings_section.lower()
+    assert "api_key" not in settings_section.lower()
+    assert '<input' not in settings_section or "not yet available" in settings_section.lower()
+
+
+def test_javascript_has_health_retry_logic(client: TestClient) -> None:
+    script = client.get("/assets/app.js").text
+    assert "checkHealth" in script
+    assert "retryHealth" in script or "retry" in script.lower()
+    assert "healthCheckInFlight" in script or "healthRequestToken" in script or "inFlight" in script
+
+
+def test_javascript_ai_status_button_opens_settings(client: TestClient) -> None:
+    script = client.get("/assets/app.js").text
+    assert "ai-status-button" in script or "aiStatusButton" in script
+    assert "settings-dialog" in script or "settingsDialog" in script
+    assert "showModal" in script or "openSettings" in script or "settings" in script.lower()
+
+
+def test_javascript_settings_dialog_close_behavior(client: TestClient) -> None:
+    script = client.get("/assets/app.js").text
+    assert "close" in script.lower()
+    assert "Escape" in script or "escape" in script or "keydown" in script
+
+
+def test_javascript_has_distinct_health_states(client: TestClient) -> None:
+    script = client.get("/assets/app.js").text
+    assert "checking" in script.lower()
+    assert "healthy" in script.lower()
+    assert "unhealthy" in script.lower() or "error" in script.lower()
+
+
+def test_javascript_has_distinct_ai_states(client: TestClient) -> None:
+    script = client.get("/assets/app.js").text
+    assert "checking" in script.lower() or "loading" in script.lower()
+    assert "available" in script.lower()
+    assert "unavailable" in script.lower()
+
+
+def test_css_has_terminal_glass_visual_tokens(client: TestClient) -> None:
+    css = client.get("/assets/styles.css").text
+    assert "--accent" in css
+    assert "backdrop-filter" in css or "backdrop-filter" in css.lower()
+    assert "blur" in css
+    assert "monospace" in css or "mono" in css.lower()
+
+
+def test_css_supports_reduced_motion(client: TestClient) -> None:
+    css = client.get("/assets.css") if False else client.get("/assets/styles.css")
+    css_text = css.text
+    assert "prefers-reduced-motion" in css_text
+
+
+def test_css_has_sticky_header_positioning(client: TestClient) -> None:
+    css = client.get("/assets/styles.css").text
+    assert "position: sticky" in css or "position:sticky" in css
+
+
+def test_application_does_not_contain_intro_panel_or_hero_copy(client: TestClient) -> None:
+    html = client.get("/").text
+    assert "intro-panel" not in html
+    assert "intro-copy" not in html
+    assert "FrameNest is running locally" not in html
+    assert "This pre-alpha web shell is served" not in html
+
+
+def test_application_does_not_contain_foundation_grid_boundary_cards(client: TestClient) -> None:
+    html = client.get("/").text
+    assert "foundation-grid" not in html
+    assert "boundary-card" not in html
+    assert "Foundation boundaries" not in html

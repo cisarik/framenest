@@ -63,6 +63,17 @@ const statusDetail = document.querySelector("#server-status-detail");
 const aiStatus = document.querySelector("#ai-status");
 const aiStatusText = document.querySelector("#ai-status-text");
 const aiStatusDetail = document.querySelector("#ai-status-detail");
+const serverHealthButton = document.querySelector("#server-health-button");
+const serverHealthButtonText = document.querySelector("#server-health-button-text");
+const aiStatusButton = document.querySelector("#ai-status-button");
+const aiStatusButtonText = document.querySelector("#ai-status-button-text");
+const settingsDialog = document.querySelector("#settings-dialog");
+const settingsCloseButton = document.querySelector("#settings-close-button");
+const settingsAiStatus = document.querySelector("#settings-ai-status");
+const settingsAiStatusText = document.querySelector("#settings-ai-status-text");
+const settingsAiProvider = document.querySelector("#settings-ai-provider");
+let healthCheckInFlight = false;
+let lastFocusedElementBeforeSettings = null;
 const libraryList = document.querySelector("#library-list");
 const libraryStateLoading = document.querySelector("#library-state-loading");
 const libraryStateEmpty = document.querySelector("#library-state-empty");
@@ -121,12 +132,14 @@ function setLoadingState() {
   setStatusClass("status--loading");
   statusText.textContent = "Checking local server...";
   statusDetail.textContent = "Waiting for the same-origin health response.";
+  setServerHealthButtonState("checking", "Checking");
 }
 
 function setHealthyState() {
   setStatusClass("status--healthy");
   statusText.textContent = "Local server healthy";
   statusDetail.textContent = "The FrameNest application process answered the health check.";
+  setServerHealthButtonState("healthy", "Healthy");
 }
 
 function setErrorState() {
@@ -134,9 +147,46 @@ function setErrorState() {
   statusText.textContent = "Health check unavailable";
   statusDetail.textContent =
     "The page loaded, but the local health endpoint did not return the expected response.";
+  setServerHealthButtonState("unhealthy", "Unhealthy");
+}
+
+function setServerHealthButtonState(state, label) {
+  if (!serverHealthButton) return;
+  serverHealthButton.classList.remove("status-button--checking", "status-button--healthy", "status-button--unhealthy");
+  serverHealthButton.classList.add("status-button--" + state);
+  if (serverHealthButtonText) serverHealthButtonText.textContent = label;
+  if (state === "healthy") {
+    serverHealthButton.setAttribute("aria-label", "Local server healthy");
+    serverHealthButton.title = "Local server healthy";
+  } else if (state === "unhealthy") {
+    serverHealthButton.setAttribute("aria-label", "Local server unhealthy or unreachable");
+    serverHealthButton.title = "Local server unhealthy or unreachable. Click to retry.";
+  } else {
+    serverHealthButton.setAttribute("aria-label", "Checking local server");
+    serverHealthButton.title = "Checking local server...";
+  }
+}
+
+function setAiStatusButtonState(state, label) {
+  if (!aiStatusButton) return;
+  aiStatusButton.classList.remove("status-button--checking", "status-button--healthy", "status-button--unhealthy");
+  aiStatusButton.classList.add("status-button--" + state);
+  if (aiStatusButtonText) aiStatusButtonText.textContent = label;
+  if (state === "healthy") {
+    aiStatusButton.setAttribute("aria-label", "AI available");
+    aiStatusButton.title = "AI available. Click to open settings.";
+  } else if (state === "unhealthy") {
+    aiStatusButton.setAttribute("aria-label", "AI unavailable");
+    aiStatusButton.title = "AI unavailable. Click to open settings.";
+  } else {
+    aiStatusButton.setAttribute("aria-label", "Checking AI status");
+    aiStatusButton.title = "Checking AI capability...";
+  }
 }
 
 async function checkHealth() {
+  if (healthCheckInFlight) return;
+  healthCheckInFlight = true;
   setLoadingState();
   try {
     const response = await fetch(HEALTH_ENDPOINT, {
@@ -155,12 +205,27 @@ async function checkHealth() {
     setErrorState();
   } catch {
     setErrorState();
+  } finally {
+    healthCheckInFlight = false;
   }
+}
+
+async function retryHealth() {
+  await checkHealth();
 }
 
 function setAiStatusClass(className) {
   aiStatus.classList.remove("status--loading", "status--healthy", "status--error");
   aiStatus.classList.add(className);
+}
+
+function updateSettingsAiStatus(state, text, providerInfo) {
+  if (!settingsAiStatus) return;
+  settingsAiStatus.classList.remove("is-available", "is-unavailable");
+  if (state === "available") settingsAiStatus.classList.add("is-available");
+  else if (state === "unavailable") settingsAiStatus.classList.add("is-unavailable");
+  if (settingsAiStatusText) settingsAiStatusText.textContent = text;
+  if (settingsAiProvider) settingsAiProvider.textContent = providerInfo || "";
 }
 
 function renderAiCapability(payload) {
@@ -177,17 +242,23 @@ function renderAiCapability(payload) {
     aiStatusText.textContent = "Cloud AI available";
     aiStatusDetail.textContent =
       `${aiCapability.provider_id} / ${aiCapability.model_id}; prompt ${aiCapability.prompt_version}; ${aiCapability.execution}.`;
+    setAiStatusButtonState("healthy", "Available");
+    updateSettingsAiStatus("available", "Available", `${aiCapability.provider_id} / ${aiCapability.model_id}`);
     return;
   }
   setAiStatusClass("status--error");
   aiStatusText.textContent = "AI unavailable";
   aiStatusDetail.textContent = "Configure the server-side NVIDIA credential before starting FrameNest.";
+  setAiStatusButtonState("unhealthy", "Unavailable");
+  updateSettingsAiStatus("unavailable", "Unavailable", "");
 }
 
 async function loadAiCapability() {
   setAiStatusClass("status--loading");
   aiStatusText.textContent = "Checking AI capability...";
   aiStatusDetail.textContent = "No provider request is made for capability discovery.";
+  setAiStatusButtonState("checking", "Checking");
+  updateSettingsAiStatus("checking", "Checking...", "");
   try {
     const response = await fetch(AI_CAPABILITY_ENDPOINT, {
       headers: { Accept: "application/json" },
@@ -1996,6 +2067,65 @@ metadataCloseButton.addEventListener("click", closeMetadataWorkspace);
 metadataCreateTagForm.addEventListener("submit", handleCreateAndSelectTag);
 
 renderActiveCatalogFilters(catalogState.tagKeys);
+
+function openSettingsDialog() {
+  if (!settingsDialog) return;
+  lastFocusedElementBeforeSettings = document.activeElement;
+  if (typeof settingsDialog.showModal === "function") {
+    settingsDialog.showModal();
+  } else {
+    settingsDialog.setAttribute("open", "");
+  }
+  settingsCloseButton.focus();
+}
+
+function closeSettingsDialog() {
+  if (!settingsDialog) return;
+  if (typeof settingsDialog.close === "function") {
+    settingsDialog.close();
+  } else {
+    settingsDialog.removeAttribute("open");
+  }
+  if (lastFocusedElementBeforeSettings) {
+    lastFocusedElementBeforeSettings.focus();
+    lastFocusedElementBeforeSettings = null;
+  } else {
+    aiStatusButton.focus();
+  }
+}
+
+if (serverHealthButton) {
+  serverHealthButton.addEventListener("click", () => {
+    retryHealth();
+  });
+}
+
+if (aiStatusButton) {
+  aiStatusButton.addEventListener("click", () => {
+    openSettingsDialog();
+  });
+}
+
+if (settingsCloseButton) {
+  settingsCloseButton.addEventListener("click", () => {
+    closeSettingsDialog();
+  });
+}
+
+if (settingsDialog) {
+  settingsDialog.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      closeSettingsDialog();
+    }
+  });
+  settingsDialog.addEventListener("click", (event) => {
+    if (event.target === settingsDialog) {
+      closeSettingsDialog();
+    }
+  });
+}
+
 checkHealth();
 loadAiCapability();
 loadCatalogTags();

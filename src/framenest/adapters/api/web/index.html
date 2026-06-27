@@ -13,57 +13,59 @@
     <header class="app-header" aria-label="FrameNest application header">
       <div class="brand" aria-label="FrameNest">
         <span class="brand-mark" aria-hidden="true">FN</span>
-        <span class="brand-name">FrameNest</span>
+        <span class="brand-name">FrameNest</span><span class="brand-cursor" aria-hidden="true"></span>
       </div>
-      <div class="stage-pill">Pre-alpha foundation</div>
+      <div class="header-status-group">
+        <button id="server-health-button" class="status-button status-button--checking" type="button" aria-label="Local server healthy" title="Checking local server...">
+          <span class="status-button__dot" aria-hidden="true"></span>
+          <span class="status-button__label">Server</span>
+          <span id="server-health-button-text" class="status-button__state">Checking</span>
+        </button>
+        <button id="ai-status-button" class="status-button status-button--checking" type="button" aria-label="AI status" title="Checking AI capability...">
+          <span class="status-button__dot" aria-hidden="true"></span>
+          <span class="status-button__label">AI</span>
+          <span id="ai-status-button-text" class="status-button__state">Checking</span>
+        </button>
+      </div>
     </header>
 
-    <main id="main" class="app-shell">
-      <section class="intro-panel" aria-labelledby="intro-title">
-        <div class="intro-copy">
-          <p class="eyebrow">Local application server</p>
-          <h1 id="intro-title">FrameNest is running locally.</h1>
-          <p class="lede">
-            This pre-alpha web shell is served by the real FrameNest FastAPI
-            process. It confirms the local application foundation and can show
-            registered libraries, scan candidates, and explicit local media
-            inspection. Selected scan candidates can now be imported into the
-            persistent media catalog, while metadata editing, downloads,
-            playback, and Settings remain future work.
-          </p>
-        </div>
-        <div class="status-card" aria-live="polite" aria-atomic="true">
-          <div class="status-card__label">Server status</div>
-          <div id="server-status" class="status status--loading">
-            <span class="status__dot" aria-hidden="true"></span>
-            <span id="server-status-text">Checking local health endpoint...</span>
-          </div>
-          <p id="server-status-detail" class="status-detail">
-            Waiting for the same-origin health response.
-          </p>
-        </div>
-        <div class="status-card ai-status-card" aria-live="polite" aria-atomic="true">
-          <div class="status-card__label">AI capability</div>
-          <div id="ai-status" class="status status--loading">
-            <span class="status__dot" aria-hidden="true"></span>
-            <span id="ai-status-text">Checking AI capability...</span>
-          </div>
-          <p id="ai-status-detail" class="status-detail">
-            Capability discovery is same-origin and does not contact a provider.
-          </p>
-        </div>
-      </section>
+    <div id="server-status" class="status status--loading" hidden aria-live="polite" aria-atomic="true">
+      <span class="status__dot" aria-hidden="true"></span>
+      <span id="server-status-text">Checking local health endpoint...</span>
+      <p id="server-status-detail" class="status-detail">Waiting for the same-origin health response.</p>
+    </div>
+    <div id="ai-status" class="status status--loading" hidden aria-live="polite" aria-atomic="true">
+      <span class="status__dot" aria-hidden="true"></span>
+      <span id="ai-status-text">Checking AI capability...</span>
+      <p id="ai-status-detail" class="status-detail">Capability discovery is same-origin and does not contact a provider.</p>
+    </div>
 
+    <dialog id="settings-dialog" class="settings-dialog" aria-label="Settings">
+      <div class="settings-dialog__header">
+        <h2 class="settings-dialog__title">Settings</h2>
+        <button id="settings-close-button" class="settings-dialog__close" type="button" aria-label="Close settings">Close</button>
+      </div>
+      <div class="settings-dialog__tabs">
+        <span class="settings-dialog__tab settings-dialog__tab--active">AI</span>
+      </div>
+      <div class="settings-dialog__body">
+        <div class="settings-dialog__section">
+          <h3 class="settings-dialog__section-title">AI capability</h3>
+          <div id="settings-ai-status" class="settings-ai-status">
+            <span class="status-button__dot" aria-hidden="true"></span>
+            <span id="settings-ai-status-text">Checking...</span>
+          </div>
+          <p id="settings-ai-provider" class="settings-ai-provider"></p>
+          <p class="settings-dialog__note">Provider configuration is not yet available in this version.</p>
+        </div>
+      </div>
+    </dialog>
+
+    <main id="main" class="app-shell">
       <section id="catalog-browser" class="catalog-browser" aria-labelledby="catalog-title">
         <div class="section-heading">
           <p class="eyebrow">Catalog</p>
           <h2 id="catalog-title">Imported media</h2>
-          <p class="section-copy">
-            Search display titles and filter imported catalog media by canonical
-            tags. Multiple selected tags use AND semantics. Imported media can
-            be opened for manual Current title and tag editing. This is still a
-            pre-alpha catalog browser, not the final premium gallery.
-          </p>
         </div>
         <form id="catalog-search-form" class="catalog-toolbar" role="search">
           <label class="catalog-search-label" for="catalog-search-input">
@@ -292,55 +294,6 @@
           </div>
         </article>
       </template>
-
-      <section class="foundation-grid" aria-labelledby="foundation-title">
-        <div class="section-heading">
-          <p class="eyebrow">Current surface</p>
-          <h2 id="foundation-title">Foundation boundaries</h2>
-        </div>
-        <div class="boundary-list" aria-label="FrameNest foundation status">
-          <article class="boundary-card boundary-card--active">
-            <h3>Local web shell</h3>
-            <p>Packaged HTML, CSS, and JavaScript served from the Python package.</p>
-            <span class="boundary-state">Active</span>
-          </article>
-          <article class="boundary-card boundary-card--active">
-            <h3>Catalog browser</h3>
-            <p>Read-only imported media listing with display-title search and canonical tag filters.</p>
-            <span class="boundary-state">Active foundation</span>
-          </article>
-          <article class="boundary-card">
-            <h3>Gallery</h3>
-            <p>Future premium cover-driven library browsing remains separate from this read-only catalog slice.</p>
-            <span class="boundary-state boundary-state--future">Future</span>
-          </article>
-          <article class="boundary-card boundary-card--active">
-            <h3>Libraries</h3>
-            <p>Registered library list, explicit scan preview, explicit candidate import, and explicit local inspection.</p>
-            <span class="boundary-state">Active foundation</span>
-          </article>
-          <article class="boundary-card">
-            <h3>Playback</h3>
-            <p>Future full playback and inline preview surfaces.</p>
-            <span class="boundary-state boundary-state--future">Future</span>
-          </article>
-          <article class="boundary-card">
-            <h3>Downloads</h3>
-            <p>Future acquisition workflows with explicit progress and confirmation.</p>
-            <span class="boundary-state boundary-state--future">Future</span>
-          </article>
-          <article class="boundary-card">
-            <h3>Settings</h3>
-            <p>Future application preferences and provider configuration boundaries.</p>
-            <span class="boundary-state boundary-state--future">Future</span>
-          </article>
-          <article class="boundary-card">
-            <h3>AI</h3>
-            <p>Explicit on-demand editable suggestion preview with clear cloud confirmation.</p>
-            <span class="boundary-state">Active preview</span>
-          </article>
-        </div>
-      </section>
     </main>
   </body>
 </html>
