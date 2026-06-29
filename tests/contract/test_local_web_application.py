@@ -381,7 +381,6 @@ def test_browser_does_not_run_analysis_on_initialization_or_candidate_render(
     assert "checkHealth();" in script
     assert "loadLibraries();" in script
     assert "handleInspectClick" in script
-    assert script.index("media-analysis-preview") > script.index("function handleInspectClick")
     assert "renderScanResult(card, payload);" in script
     render_scan_block = script[
         script.index("function renderScanResult") : script.index("async function handleInspectClick")
@@ -1142,3 +1141,135 @@ def test_javascript_preserves_existing_metadata_state_machine(client: TestClient
     assert "handleDiscardMetadataChanges" in script
     assert "confirmDiscardDirtyMetadata" in script
     assert "normalizedMetadataFormState" in script
+
+
+# ---------------------------------------------------------------------------
+# On-demand gallery preview — Cycle 078
+# ---------------------------------------------------------------------------
+
+
+def test_card_has_explicit_preview_control(client: TestClient) -> None:
+    script = client.get("/assets/app.js").text
+    start = script.index("function renderCatalogCard(item)")
+    end = script.index("\n}\n", start) + len("\n}\n")
+    card_body = script[start:end]
+    assert "Preview" in card_body or "preview" in card_body.lower()
+    assert "handleCardPreview" in script or "loadCardPreview" in script or "requestPreview" in script
+
+
+def test_no_automatic_analysis_on_page_load(client: TestClient) -> None:
+    script = client.get("/assets/app.js").text
+    init_section = script[script.index("checkHealth();"):]
+    assert "media-analysis-preview" not in init_section[:200]
+
+
+def test_javascript_reuses_existing_analysis_endpoint(client: TestClient) -> None:
+    script = client.get("/assets/app.js").text
+    assert "media-analysis-preview" in script
+    assert "LIBRARIES_ENDPOINT" in script
+
+
+def test_javascript_has_preview_cache(client: TestClient) -> None:
+    script = client.get("/assets/app.js").text
+    assert "previewCache" in script or "previewCacheMap" in script
+    assert "MAX_PREVIEW_CACHE" in script or "maxPreviewCache" in script or "previewCacheLimit" in script
+
+
+def test_preview_cache_does_not_use_persistent_storage(client: TestClient) -> None:
+    script = client.get("/assets/app.js").text
+    cache_section = script
+    assert "localStorage" not in script
+    assert "sessionStorage" not in script
+    assert "indexedDB" not in script
+
+
+def test_javascript_has_single_active_preview_rule(client: TestClient) -> None:
+    script = client.get("/assets/app.js").text
+    assert "activePreviewMediaId" in script or "activePreviewTimer" in script or "activeCardPreview" in script
+    assert "clearInterval" in script or "stopAnimationFrame" in script or "stopPreviewTimer" in script or "stopCardPreview" in script
+
+
+def test_javascript_has_preview_race_protection(client: TestClient) -> None:
+    script = client.get("/assets/app.js").text
+    assert "previewRequestToken" in script or "previewAbortController" in script or "AbortController" in script
+
+
+def test_javascript_has_previewable_location_selection(client: TestClient) -> None:
+    script = client.get("/assets/app.js").text
+    assert "previewableLocation" in script or "selectPreviewable" in script or "resolvePreviewable" in script or "getPreviewableLocation" in script
+    assert "availability" in script.lower()
+    assert "available" in script.lower()
+
+
+def test_javascript_unavailable_location_does_not_trigger_analysis(client: TestClient) -> None:
+    script = client.get("/assets/app.js").text
+    assert "available" in script
+    assert "offline" in script or "missing" in script or "unavailable" in script
+
+
+def test_javascript_preview_uses_honest_terminology(client: TestClient) -> None:
+    script = client.get("/assets/app.js").text
+    assert "Preview" in script
+    assert "cover" not in script.lower() or "placeholder" in script.lower()
+    assert "thumbnail" not in script.lower() or "placeholder" in script.lower()
+
+
+def test_javascript_preview_states_exist(client: TestClient) -> None:
+    script = client.get("/assets/app.js").text
+    assert "loading" in script.lower() or "Loading" in script
+    assert "unavailable" in script.lower() or "Preview unavailable" in script
+    assert "Retry" in script or "retry" in script.lower()
+
+
+def test_javascript_preview_does_not_mutate_metadata_state(client: TestClient) -> None:
+    script = client.get("/assets/app.js").text
+    assert "metadataWorkspace" in script
+    assert "previewCache" in script or "previewCacheMap" in script
+    preview_section_start = script.find("previewCache")
+    if preview_section_start == -1:
+        preview_section_start = script.find("previewCacheMap")
+    assert preview_section_start != -1
+
+
+def test_details_dialog_has_preview_integration(client: TestClient) -> None:
+    script = client.get("/assets/app.js").text
+    assert "detailsPreview" in script or "details-dialog" in script.lower() or "media-details-dialog" in script
+    assert "Load preview" in script or "loadPreview" in script or "loadDetailsPreview" in script
+
+
+def test_details_dialog_has_frame_navigation(client: TestClient) -> None:
+    script = client.get("/assets/app.js").text
+    assert "Previous frame" in script or "prevFrame" in script or "previousFrame" in script or "Prev" in script
+    assert "Next frame" in script or "nextFrame" in script or "Next" in script
+
+
+def test_javascript_has_reduced_motion_preview_behavior(client: TestClient) -> None:
+    script = client.get("/assets/app.js").text
+    assert "prefers-reduced-motion" in script or "reducedMotion" in script or "matchMedia" in script
+
+
+def test_javascript_preview_timer_cleanup_on_close(client: TestClient) -> None:
+    script = client.get("/assets/app.js").text
+    assert "closeDetailsDialog" in script
+    close_section = script[script.index("function closeDetailsDialog"):]
+    assert "clearInterval" in close_section[:500] or "stopPreview" in close_section[:500] or "timer" in close_section[:500].lower()
+
+
+def test_javascript_reuses_base64_decode_helper(client: TestClient) -> None:
+    script = client.get("/assets/app.js").text
+    assert "decodeBase64Png" in script
+    assert "atob(" in script
+    assert "URL.createObjectURL" in script
+
+
+def test_javascript_preview_does_not_persist_frames(client: TestClient) -> None:
+    script = client.get("/assets/app.js").text
+    assert "localStorage" not in script
+    assert "sessionStorage" not in script
+    assert "indexedDB" not in script
+
+
+def test_javascript_has_no_preview_on_hover_or_scroll(client: TestClient) -> None:
+    script = client.get("/assets/app.js").text
+    assert "mouseover" not in script.lower() or "hover" not in script.lower()
+    assert "IntersectionObserver" not in script

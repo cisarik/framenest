@@ -28,6 +28,17 @@ let catalogRequestToken = 0;
 let metadataRequestToken = 0;
 let canonicalTagDefinitions = [];
 let canonicalTagsLoaded = false;
+const MAX_PREVIEW_CACHE = 12;
+const PREVIEW_FRAME_INTERVAL_MS = 1200;
+let previewCacheMap = new Map();
+let previewRequestToken = 0;
+let activePreviewMediaId = null;
+let activePreviewTimer = null;
+let detailsPreviewTimer = null;
+let detailsPreviewFrameIndex = 0;
+let detailsPreviewFrames = null;
+let detailsPreviewActive = false;
+const prefersReducedMotion = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 let metadataBeforeUnloadAttached = false;
 let catalogState = {
   q: "",
@@ -501,6 +512,362 @@ function decodeBase64Png(payloadBase64) {
   return new Blob([bytes], { type: "image/png" });
 }
 
+function selectPreviewableLocation(item) {
+  if (!item.locations || item.locations.length === 0) return null;
+  for (const location of item.locations) {
+    if (location.availability === "available" && location.library_id && location.relative_path) {
+      return { libraryId: location.library_id, relativePath: location.relative_path };
+    }
+  }
+  return null;
+}
+
+function getCachedPreview(mediaId) {
+  if (previewCacheMap.has(mediaId)) {
+    const entry = previewCacheMap.get(mediaId);
+    previewCacheMap.delete(mediaId);
+    previewCacheMap.set(mediaId, entry);
+    return entry;
+  }
+  return null;
+}
+
+function setCachedPreview(mediaId, entry) {
+  if (previewCacheMap.has(mediaId)) {
+    previewCacheMap.delete(mediaId);
+  }
+  previewCacheMap.set(mediaId, entry);
+  while (previewCacheMap.size > MAX_PREVIEW_CACHE) {
+    const oldestKey = previewCacheMap.keys().next().value;
+    previewCacheMap.delete(oldestKey);
+  }
+}
+
+function stopCardPreviewTimer() {
+  if (activePreviewTimer) {
+    clearInterval(activePreviewTimer);
+    activePreviewTimer = null;
+  }
+  activePreviewMediaId = null;
+}
+
+function stopDetailsPreviewTimer() {
+  if (detailsPreviewTimer) {
+    clearInterval(detailsPreviewTimer);
+    detailsPreviewTimer = null;
+  }
+  detailsPreviewActive = false;
+}
+
+async function handleCardPreview(item, card, button) {
+  if (activePreviewMediaId === item.media_id) {
+    stopCardPreviewTimer();
+    renderCardPreviewState(card, item, "stopped");
+    return;
+  }
+  stopCardPreviewTimer();
+  const cached = getCachedPreview(item.media_id);
+  if (cached) {
+    if (cached.error) {
+      renderCardPreviewState(card, item, "error");
+      return;
+    }
+    renderCardPreviewFrames(card, item, cached);
+    startCardPreviewCycling(card, item, cached);
+    return;
+  }
+  const location = selectPreviewableLocation(item);
+  if (!location) {
+    renderCardPreviewState(card, item, "unavailable-location");
+    return;
+  }
+  const token = ++previewRequestToken;
+  button.disabled = true;
+  renderCardPreviewState(card, item, "loading");
+  try {
+    const response = await fetch(`${LIBRARIES_ENDPOINT}/${location.libraryId}/media-analysis-preview`, {
+      method: "POST",
+      headers: { Accept: "application/json", "Content-Type": "application/json" },
+      body: JSON.stringify({ relative_path: location.relativePath }),
+      cache: "no-store",
+    });
+    if (token !== previewRequestToken) return;
+    const payload = await response.json();
+    if (token !== previewRequestToken) return;
+    if (!response.ok) {
+      setCachedPreview(item.media_id, { error: true });
+      renderCardPreviewState(card, item, "error");
+      return;
+    }
+    const frames = (payload.representative_frames || []).map((frame) => ({
+      timestampMs: frame.timestamp_ms,
+      objectUrl: URL.createObjectURL(decodeBase64Png(frame.payload_base64)),
+    }));
+    const cacheEntry = { frames, technicalMetadata: payload.technical_metadata || null };
+    setCachedPreview(item.media_id, cacheEntry);
+    renderCardPreviewFrames(card, item, cacheEntry);
+    startCardPreviewCycling(card, item, cacheEntry);
+  } catch {
+    if (token === previewRequestToken) {
+      setCachedPreview(item.media_id, { error: true });
+      renderCardPreviewState(card, item, "error");
+    }
+  } finally {
+    if (token === previewRequestToken) {
+      button.disabled = false;
+    }
+  }
+}
+
+function renderCardPreviewState(card, item, state) {
+  const placeholder = card.querySelector(".media-placeholder");
+  if (!placeholder) return;
+  placeholder.replaceChildren();
+  placeholder.removeAttribute("data-preview-state");
+  if (state === "loading") {
+    placeholder.setAttribute("data-preview-state", "loading");
+    const text = document.createElement("span");
+    text.className = "media-placeholder__loading";
+    text.textContent = "Loading preview…";
+    placeholder.appendChild(text);
+  } else if (state === "error") {
+    placeholder.setAttribute("data-preview-state", "error");
+    const text = document.createElement("span");
+    text.className = "media-placeholder__error";
+    text.textContent = "Preview unavailable.";
+    placeholder.appendChild(text);
+    const retry = document.createElement("button");
+    retry.className = "media-placeholder__retry";
+    retry.type = "button";
+    retry.textContent = "Retry";
+    retry.setAttribute("aria-label", "Retry preview");
+    retry.addEventListener("click", () => {
+      previewCacheMap.delete(item.media_id);
+      handleCardPreview(item, card, card.querySelector(".catalog-card__preview-button"));
+    });
+    placeholder.appendChild(retry);
+  } else if (state === "unavailable-location") {
+    placeholder.setAttribute("data-preview-state", "unavailable");
+    const text = document.createElement("span");
+    text.className = "media-placeholder__error";
+    text.textContent = "No local preview available.";
+    placeholder.appendChild(text);
+  } else if (state === "stopped") {
+    placeholder.setAttribute("data-preview-state", "stopped");
+    const text = document.createElement("span");
+    text.className = "media-placeholder__stopped";
+    text.textContent = "Preview stopped.";
+    placeholder.appendChild(text);
+  }
+}
+
+function renderCardPreviewFrames(card, item, cacheEntry) {
+  const placeholder = card.querySelector(".media-placeholder");
+  if (!placeholder) return;
+  placeholder.replaceChildren();
+  placeholder.removeAttribute("data-preview-state");
+  if (!cacheEntry.frames || cacheEntry.frames.length === 0) {
+    placeholder.setAttribute("data-preview-state", "no-frames");
+    const text = document.createElement("span");
+    text.className = "media-placeholder__error";
+    text.textContent = "No preview frame available.";
+    placeholder.appendChild(text);
+    return;
+  }
+  placeholder.setAttribute("data-preview-state", "loaded");
+  const img = document.createElement("img");
+  img.className = "media-placeholder__preview-img";
+  img.src = cacheEntry.frames[0].objectUrl;
+  img.alt = `Local preview frame for ${item.display_title || deriveCatalogFallbackTitle(item)}`;
+  img.style.width = "100%";
+  img.style.height = "100%";
+  img.style.objectFit = "contain";
+  placeholder.appendChild(img);
+}
+
+function startCardPreviewCycling(card, item, cacheEntry) {
+  if (!cacheEntry.frames || cacheEntry.frames.length <= 1) return;
+  if (prefersReducedMotion) return;
+  stopCardPreviewTimer();
+  activePreviewMediaId = item.media_id;
+  let frameIndex = 0;
+  const img = card.querySelector(".media-placeholder__preview-img");
+  if (!img) return;
+  activePreviewTimer = setInterval(() => {
+    frameIndex = (frameIndex + 1) % cacheEntry.frames.length;
+    img.src = cacheEntry.frames[frameIndex].objectUrl;
+  }, PREVIEW_FRAME_INTERVAL_MS);
+  const button = card.querySelector(".catalog-card__preview-button");
+  if (button) {
+    button.setAttribute("aria-pressed", "true");
+  }
+}
+
+function loadDetailsPreview(item) {
+  stopDetailsPreviewTimer();
+  const cached = getCachedPreview(item.media_id);
+  if (cached && !cached.error) {
+    renderDetailsPreviewFrames(cached);
+    return;
+  }
+  if (cached && cached.error) {
+    renderDetailsPreviewError();
+    return;
+  }
+  const location = selectPreviewableLocation(item);
+  if (!location) {
+    renderDetailsPreviewError();
+    return;
+  }
+  const token = ++previewRequestToken;
+  const detailsLoadBtn = document.querySelector("#details-preview-load");
+  if (detailsLoadBtn) detailsLoadBtn.disabled = true;
+  const detailsPreviewContainer = document.querySelector("#details-preview-container");
+  if (detailsPreviewContainer) {
+    detailsPreviewContainer.replaceChildren();
+    const loading = document.createElement("p");
+    loading.className = "details-preview-loading";
+    loading.textContent = "Loading preview…";
+    detailsPreviewContainer.appendChild(loading);
+  }
+  (async () => {
+    try {
+      const response = await fetch(`${LIBRARIES_ENDPOINT}/${location.libraryId}/media-analysis-preview`, {
+        method: "POST",
+        headers: { Accept: "application/json", "Content-Type": "application/json" },
+        body: JSON.stringify({ relative_path: location.relativePath }),
+        cache: "no-store",
+      });
+      if (token !== previewRequestToken) return;
+      const payload = await response.json();
+      if (token !== previewRequestToken) return;
+      if (!response.ok) {
+        setCachedPreview(item.media_id, { error: true });
+        renderDetailsPreviewError();
+        return;
+      }
+      const frames = (payload.representative_frames || []).map((frame) => ({
+        timestampMs: frame.timestamp_ms,
+        objectUrl: URL.createObjectURL(decodeBase64Png(frame.payload_base64)),
+      }));
+      const cacheEntry = { frames, technicalMetadata: payload.technical_metadata || null };
+      setCachedPreview(item.media_id, cacheEntry);
+      renderDetailsPreviewFrames(cacheEntry);
+    } catch {
+      if (token === previewRequestToken) {
+        setCachedPreview(item.media_id, { error: true });
+        renderDetailsPreviewError();
+      }
+    } finally {
+      if (token === previewRequestToken && detailsLoadBtn) {
+        detailsLoadBtn.disabled = false;
+      }
+    }
+  })();
+}
+
+function renderDetailsPreviewFrames(cacheEntry) {
+  const container = document.querySelector("#details-preview-container");
+  if (!container) return;
+  container.replaceChildren();
+  if (!cacheEntry.frames || cacheEntry.frames.length === 0) {
+    const text = document.createElement("p");
+    text.className = "details-preview-error";
+    text.textContent = "No preview frame available.";
+    container.appendChild(text);
+    return;
+  }
+  detailsPreviewFrames = cacheEntry.frames;
+  detailsPreviewFrameIndex = 0;
+  const img = document.createElement("img");
+  img.className = "details-preview-img";
+  img.id = "details-preview-img";
+  img.src = cacheEntry.frames[0].objectUrl;
+  img.alt = "Local preview frame";
+  img.style.width = "100%";
+  img.style.borderRadius = "var(--radius-md)";
+  img.style.objectFit = "contain";
+  container.appendChild(img);
+  if (cacheEntry.frames.length > 1) {
+    const controls = document.createElement("div");
+    controls.className = "details-preview-controls";
+    const counter = document.createElement("span");
+    counter.id = "details-preview-counter";
+    counter.textContent = `1 / ${cacheEntry.frames.length}`;
+    controls.appendChild(counter);
+    const prevBtn = document.createElement("button");
+    prevBtn.type = "button";
+    prevBtn.textContent = "Prev";
+    prevBtn.setAttribute("aria-label", "Previous frame");
+    prevBtn.addEventListener("click", () => detailsPreviewNavigate(-1));
+    controls.appendChild(prevBtn);
+    const nextBtn = document.createElement("button");
+    nextBtn.type = "button";
+    nextBtn.textContent = "Next";
+    nextBtn.setAttribute("aria-label", "Next frame");
+    nextBtn.addEventListener("click", () => detailsPreviewNavigate(1));
+    controls.appendChild(nextBtn);
+    if (!prefersReducedMotion) {
+      const startStopBtn = document.createElement("button");
+      startStopBtn.id = "details-preview-start-stop";
+      startStopBtn.type = "button";
+      startStopBtn.textContent = "Start";
+      startStopBtn.setAttribute("aria-pressed", "false");
+      startStopBtn.addEventListener("click", () => {
+        if (detailsPreviewActive) {
+          stopDetailsPreviewTimer();
+          startStopBtn.textContent = "Start";
+          startStopBtn.setAttribute("aria-pressed", "false");
+        } else {
+          startDetailsPreviewCycling();
+          startStopBtn.textContent = "Stop";
+          startStopBtn.setAttribute("aria-pressed", "true");
+        }
+      });
+      controls.appendChild(startStopBtn);
+    }
+    container.appendChild(controls);
+  }
+}
+
+function detailsPreviewNavigate(direction) {
+  if (!detailsPreviewFrames || detailsPreviewFrames.length === 0) return;
+  detailsPreviewFrameIndex = (detailsPreviewFrameIndex + direction + detailsPreviewFrames.length) % detailsPreviewFrames.length;
+  const img = document.querySelector("#details-preview-img");
+  if (img) img.src = detailsPreviewFrames[detailsPreviewFrameIndex].objectUrl;
+  const counter = document.querySelector("#details-preview-counter");
+  if (counter) counter.textContent = `${detailsPreviewFrameIndex + 1} / ${detailsPreviewFrames.length}`;
+}
+
+function startDetailsPreviewCycling() {
+  if (!detailsPreviewFrames || detailsPreviewFrames.length <= 1) return;
+  stopDetailsPreviewTimer();
+  detailsPreviewActive = true;
+  detailsPreviewTimer = setInterval(() => {
+    detailsPreviewNavigate(1);
+  }, PREVIEW_FRAME_INTERVAL_MS);
+}
+
+function renderDetailsPreviewError() {
+  const container = document.querySelector("#details-preview-container");
+  if (!container) return;
+  container.replaceChildren();
+  const text = document.createElement("p");
+  text.className = "details-preview-error";
+  text.textContent = "Preview unavailable.";
+  container.appendChild(text);
+  const retry = document.createElement("button");
+  retry.type = "button";
+  retry.textContent = "Retry";
+  retry.addEventListener("click", () => {
+    if (detailsCurrentItem) {
+      previewCacheMap.delete(detailsCurrentItem.media_id);
+      loadDetailsPreview(detailsCurrentItem);
+    }
+  });
+  container.appendChild(retry);
+}
+
 function previewElements(card) {
   return {
     preview: card.querySelector(".local-preview"),
@@ -846,14 +1213,27 @@ function renderCatalogCard(item) {
   const placeholder = document.createElement("div");
   placeholder.className = "media-placeholder media-placeholder--" + item.media_kind;
   placeholder.setAttribute("aria-hidden", "true");
-  const glyph = document.createElement("span");
-  glyph.className = "media-placeholder__glyph";
-  glyph.textContent = item.media_kind === "video" ? "▶" : "◆";
-  placeholder.appendChild(glyph);
-  const placeholderLabel = document.createElement("span");
-  placeholderLabel.className = "media-placeholder__label";
-  placeholderLabel.textContent = item.media_kind === "video" ? "Video placeholder" : "Animated image placeholder";
-  placeholder.appendChild(placeholderLabel);
+  const cached = getCachedPreview(item.media_id);
+  if (cached && !cached.error && cached.frames && cached.frames.length > 0) {
+    placeholder.setAttribute("data-preview-state", "loaded");
+    const img = document.createElement("img");
+    img.className = "media-placeholder__preview-img";
+    img.src = cached.frames[0].objectUrl;
+    img.alt = `Local preview frame for ${item.display_title || deriveCatalogFallbackTitle(item)}`;
+    img.style.width = "100%";
+    img.style.height = "100%";
+    img.style.objectFit = "contain";
+    placeholder.appendChild(img);
+  } else {
+    const glyph = document.createElement("span");
+    glyph.className = "media-placeholder__glyph";
+    glyph.textContent = item.media_kind === "video" ? "▶" : "◆";
+    placeholder.appendChild(glyph);
+    const placeholderLabel = document.createElement("span");
+    placeholderLabel.className = "media-placeholder__label";
+    placeholderLabel.textContent = item.media_kind === "video" ? "Video placeholder" : "Animated image placeholder";
+    placeholder.appendChild(placeholderLabel);
+  }
 
   const body = document.createElement("div");
   body.className = "catalog-card__body";
@@ -905,6 +1285,13 @@ function renderCatalogCard(item) {
 
   const actions = document.createElement("div");
   actions.className = "catalog-card__actions";
+  const previewButton = document.createElement("button");
+  previewButton.className = "catalog-card__action catalog-card__preview-button";
+  previewButton.type = "button";
+  previewButton.textContent = "Preview";
+  previewButton.setAttribute("aria-label", `Preview ${item.display_title || deriveCatalogFallbackTitle(item)}`);
+  previewButton.setAttribute("aria-pressed", "false");
+  previewButton.addEventListener("click", () => handleCardPreview(item, card, previewButton));
   const detailsButton = document.createElement("button");
   detailsButton.className = "catalog-card__action";
   detailsButton.type = "button";
@@ -917,7 +1304,7 @@ function renderCatalogCard(item) {
   editButton.textContent = "Edit metadata";
   editButton.setAttribute("aria-label", `Edit metadata for ${item.display_title || deriveCatalogFallbackTitle(item)}`);
   editButton.addEventListener("click", () => handleOpenMetadataWorkspace(item, editButton));
-  actions.append(detailsButton, editButton);
+  actions.append(previewButton, detailsButton, editButton);
 
   card.append(placeholder, body, actions);
   return card;
@@ -1241,6 +1628,7 @@ function openDetailsDialog(item, openerElement) {
     if (!confirmDiscardDirtyMetadata()) return;
     closeMetadataWorkspace();
   }
+  stopCardPreviewTimer();
   detailsOpenerElement = openerElement || document.activeElement;
   detailsCurrentItem = item;
   detailsLoading.hidden = false;
@@ -1338,6 +1726,9 @@ async function populateDetailsDialog(item) {
 
 function closeDetailsDialog() {
   if (!detailsDialog) return;
+  stopDetailsPreviewTimer();
+  detailsPreviewFrames = null;
+  detailsPreviewFrameIndex = 0;
   if (typeof detailsDialog.close === "function") {
     detailsDialog.close();
   } else {
@@ -2473,6 +2864,15 @@ if (detailsEditButton) {
       const item = detailsCurrentItem;
       closeDetailsDialog();
       handleOpenMetadataWorkspace(item, null);
+    }
+  });
+}
+
+const detailsPreviewLoadBtn = document.querySelector("#details-preview-load");
+if (detailsPreviewLoadBtn) {
+  detailsPreviewLoadBtn.addEventListener("click", () => {
+    if (detailsCurrentItem) {
+      loadDetailsPreview(detailsCurrentItem);
     }
   });
 }
