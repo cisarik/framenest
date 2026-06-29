@@ -103,6 +103,25 @@ const metadataValidationMessage = document.querySelector("#metadata-validation-m
 const metadataTagSearchInput = document.querySelector("#metadata-tag-search-input");
 const metadataTagSuggestions = document.querySelector("#metadata-tag-suggestions");
 const metadataSelectedTags = document.querySelector("#metadata-selected-tags");
+const metadataDialog = document.querySelector("#metadata-dialog");
+const detailsDialog = document.querySelector("#media-details-dialog");
+const detailsCloseButton = document.querySelector("#media-details-close");
+const detailsEditButton = document.querySelector("#media-details-edit");
+const detailsLoading = document.querySelector("#media-details-loading");
+const detailsError = document.querySelector("#media-details-error");
+const detailsContent = document.querySelector("#media-details-content");
+const detailsPlaceholder = document.querySelector("#media-details-placeholder");
+const detailsDisplayTitle = document.querySelector("#media-details-display-title");
+const detailsKind = document.querySelector("#media-details-kind");
+const detailsTagsContainer = document.querySelector("#media-details-tags");
+const detailsProcessedContainer = document.querySelector("#media-details-processed");
+const detailsDescription = document.querySelector("#media-details-description");
+const detailsTechnical = document.querySelector("#media-details-technical");
+const detailsTechnicalList = document.querySelector("#media-details-technical-list");
+let metadataOpenerElement = null;
+let detailsOpenerElement = null;
+let detailsCurrentItem = null;
+let detailsMetadataToken = 0;
 const metadataSelectedCount = document.querySelector("#metadata-selected-count");
 const metadataCreateTagForm = document.querySelector("#metadata-create-tag-form");
 const metadataCreateKeyInput = document.querySelector("#metadata-create-key-input");
@@ -823,78 +842,84 @@ function renderCatalogCard(item) {
   if (metadataWorkspace.openMediaId === item.media_id) {
     card.classList.add("catalog-card--selected");
   }
-  const header = document.createElement("div");
-  header.className = "catalog-card__header";
-  const titleGroup = document.createElement("div");
+
+  const placeholder = document.createElement("div");
+  placeholder.className = "media-placeholder media-placeholder--" + item.media_kind;
+  placeholder.setAttribute("aria-hidden", "true");
+  const glyph = document.createElement("span");
+  glyph.className = "media-placeholder__glyph";
+  glyph.textContent = item.media_kind === "video" ? "▶" : "◆";
+  placeholder.appendChild(glyph);
+  const placeholderLabel = document.createElement("span");
+  placeholderLabel.className = "media-placeholder__label";
+  placeholderLabel.textContent = item.media_kind === "video" ? "Video placeholder" : "Animated image placeholder";
+  placeholder.appendChild(placeholderLabel);
+
+  const body = document.createElement("div");
+  body.className = "catalog-card__body";
   const title = document.createElement("h3");
   title.textContent = item.display_title || deriveCatalogFallbackTitle(item);
-  const subtitle = document.createElement("p");
-  subtitle.textContent = item.display_title
-    ? "Persisted display title"
-    : "Fallback label from first deterministic relative location";
-  titleGroup.append(title, subtitle);
-  const kind = document.createElement("span");
-  kind.className = "catalog-kind";
-  kind.textContent = formatCatalogKind(item.media_kind);
-  header.append(titleGroup, kind);
+  body.appendChild(title);
 
-  const facts = document.createElement("dl");
-  facts.className = "catalog-facts";
-  addMetadataValue(facts, "Locations", String(item.locations.length));
-  addMetadataValue(facts, "Availability", summarizeAvailability(item.locations));
-  addMetadataValue(facts, "Media ID", item.media_id);
-  if (item.collection_key) {
-    addMetadataValue(facts, "Collection", item.collection_key);
+  if (item.tags.length > 0) {
+    const tagsDiv = document.createElement("div");
+    tagsDiv.className = "catalog-card__tags";
+    const maxVisible = 3;
+    item.tags.slice(0, maxVisible).forEach((tag) => {
+      const pill = document.createElement("span");
+      pill.className = "catalog-card__tag";
+      pill.textContent = tag.display_name;
+      tagsDiv.appendChild(pill);
+    });
+    if (item.tags.length > maxVisible) {
+      const more = document.createElement("span");
+      more.className = "catalog-card__tag-more";
+      more.textContent = `+${item.tags.length - maxVisible}`;
+      tagsDiv.appendChild(more);
+    }
+    body.appendChild(tagsDiv);
+  }
+
+  const status = document.createElement("div");
+  status.className = "catalog-card__status";
+  if (item.collection_key === "processed") {
+    status.classList.add("catalog-card__status--processed");
+    const dot = document.createElement("span");
+    dot.className = "catalog-card__status-dot";
+    dot.setAttribute("aria-hidden", "true");
+    status.appendChild(dot);
+    const label = document.createElement("span");
+    label.textContent = "Processed";
+    status.appendChild(label);
     const processedTime = buildProcessedTimeElement(item.processed_at_ms);
     if (processedTime !== null) {
-      const wrapper = document.createElement("div");
-      const term = document.createElement("dt");
-      const detail = document.createElement("dd");
-      term.textContent = "Processed since";
-      detail.appendChild(processedTime);
-      wrapper.append(term, detail);
-      facts.appendChild(wrapper);
+      status.appendChild(processedTime);
     }
-  }
-
-  const tags = document.createElement("div");
-  tags.className = "catalog-tags";
-  if (item.tags.length === 0) {
-    const emptyTag = document.createElement("span");
-    emptyTag.className = "catalog-tag catalog-tag--empty";
-    emptyTag.textContent = "No canonical tags";
-    tags.appendChild(emptyTag);
   } else {
-    item.tags.forEach((tag) => {
-      const chip = document.createElement("span");
-      chip.className = "catalog-tag";
-      chip.textContent = `${tag.display_name} (${tag.position})`;
-      tags.appendChild(chip);
-    });
+    const dot = document.createElement("span");
+    dot.className = "catalog-card__status-dot";
+    dot.setAttribute("aria-hidden", "true");
+    status.appendChild(dot);
   }
+  body.appendChild(status);
 
-  const locations = document.createElement("ul");
-  locations.className = "catalog-locations";
-  item.locations.forEach((location) => {
-    const row = document.createElement("li");
-    const path = document.createElement("span");
-    path.className = "catalog-location-path";
-    path.textContent = location.relative_path;
-    const availability = document.createElement("span");
-    availability.className = "catalog-location-availability";
-    availability.textContent = location.availability;
-    row.append(path, availability);
-    locations.appendChild(row);
-  });
   const actions = document.createElement("div");
   actions.className = "catalog-card__actions";
-  const button = document.createElement("button");
-  button.className = "catalog-edit-button";
-  button.type = "button";
-  button.textContent = "Edit metadata";
-  button.addEventListener("click", () => handleOpenMetadataWorkspace(item));
-  actions.appendChild(button);
-  card.append(header, facts, tags, locations, actions);
+  const detailsButton = document.createElement("button");
+  detailsButton.className = "catalog-card__action";
+  detailsButton.type = "button";
+  detailsButton.textContent = "View details";
+  detailsButton.setAttribute("aria-label", `View details for ${item.display_title || deriveCatalogFallbackTitle(item)}`);
+  detailsButton.addEventListener("click", () => openDetailsDialog(item, detailsButton));
+  const editButton = document.createElement("button");
+  editButton.className = "catalog-card__action catalog-card__action--primary";
+  editButton.type = "button";
+  editButton.textContent = "Edit metadata";
+  editButton.setAttribute("aria-label", `Edit metadata for ${item.display_title || deriveCatalogFallbackTitle(item)}`);
+  editButton.addEventListener("click", () => handleOpenMetadataWorkspace(item, editButton));
+  actions.append(detailsButton, editButton);
+
+  card.append(placeholder, body, actions);
   return card;
 }
 
@@ -1152,12 +1177,15 @@ function renderMetadataWorkspace() {
   }
   metadataWorkspaceElement.hidden = false;
   metadataWorkspaceContext.textContent = metadataWorkspace.openItem
-    ? describeCatalogItem(metadataWorkspace.openItem)
+    ? (metadataWorkspace.openItem.display_title || deriveCatalogFallbackTitle(metadataWorkspace.openItem))
     : `Media ID ${metadataWorkspace.openMediaId}`;
   metadataTitleInput.value = metadataWorkspace.current.displayTitle || "";
-  metadataTitleFallback.textContent = metadataWorkspace.baseline.displayTitle === null && metadataWorkspace.openItem
-    ? `Catalog fallback label: ${deriveCatalogFallbackTitle(metadataWorkspace.openItem)}. This is presentation-only and is not persisted as title truth.`
-    : "Display title is persisted catalog metadata and remains separate from the physical filename.";
+  if (metadataWorkspace.baseline.displayTitle === null && metadataWorkspace.openItem) {
+    metadataTitleFallback.hidden = false;
+    metadataTitleFallback.textContent = `Fallback: ${deriveCatalogFallbackTitle(metadataWorkspace.openItem)}`;
+  } else {
+    metadataTitleFallback.hidden = true;
+  }
   const descriptionInput = document.querySelector("#metadata-description-input");
   descriptionInput.value = metadataWorkspace.current.description || "";
   updateDescriptionCount();
@@ -1207,10 +1235,130 @@ function applyMetadataPayloadToWorkspace(payload) {
   };
 }
 
-async function handleOpenMetadataWorkspace(item) {
+function openDetailsDialog(item, openerElement) {
+  if (!detailsDialog) return;
+  if (metadataWorkspace.openMediaId !== null) {
+    if (!confirmDiscardDirtyMetadata()) return;
+    closeMetadataWorkspace();
+  }
+  detailsOpenerElement = openerElement || document.activeElement;
+  detailsCurrentItem = item;
+  detailsLoading.hidden = false;
+  detailsError.hidden = true;
+  detailsContent.hidden = true;
+  if (typeof detailsDialog.showModal === "function") {
+    detailsDialog.showModal();
+  } else {
+    detailsDialog.setAttribute("open", "");
+  }
+  detailsCloseButton.focus();
+  populateDetailsDialog(item);
+}
+
+async function populateDetailsDialog(item) {
+  const token = ++detailsMetadataToken;
+  try {
+    const response = await fetch(metadataEndpoint(item.media_id), {
+      headers: { Accept: "application/json" },
+      cache: "no-store",
+    });
+    if (token !== detailsMetadataToken) return;
+    const payload = await response.json();
+    if (token !== detailsMetadataToken) return;
+    if (!response.ok) {
+      detailsLoading.hidden = true;
+      detailsError.hidden = false;
+      return;
+    }
+    detailsLoading.hidden = true;
+    detailsContent.hidden = false;
+
+    detailsPlaceholder.className = "media-placeholder media-placeholder--large media-placeholder--" + item.media_kind;
+    detailsPlaceholder.replaceChildren();
+    const glyph = document.createElement("span");
+    glyph.className = "media-placeholder__glyph";
+    glyph.textContent = item.media_kind === "video" ? "▶" : "◆";
+    detailsPlaceholder.appendChild(glyph);
+    const placeholderLabel = document.createElement("span");
+    placeholderLabel.className = "media-placeholder__label";
+    placeholderLabel.textContent = item.media_kind === "video" ? "Video placeholder" : "Animated image placeholder";
+    detailsPlaceholder.appendChild(placeholderLabel);
+
+    detailsDisplayTitle.textContent = item.display_title || deriveCatalogFallbackTitle(item);
+    detailsKind.textContent = formatCatalogKind(item.media_kind);
+
+    detailsTagsContainer.replaceChildren();
+    (item.tags || []).forEach((tag) => {
+      const pill = document.createElement("span");
+      pill.className = "media-details-dialog__tag";
+      pill.textContent = tag.display_name;
+      detailsTagsContainer.appendChild(pill);
+    });
+
+    if (item.collection_key === "processed" || payload.collection_key === "processed") {
+      detailsProcessedContainer.hidden = false;
+      detailsProcessedContainer.replaceChildren();
+      const label = document.createTextNode("Processed");
+      detailsProcessedContainer.appendChild(label);
+      const processedTime = buildProcessedTimeElement(item.processed_at_ms ?? payload.processed_at_ms);
+      if (processedTime !== null) {
+        detailsProcessedContainer.appendChild(document.createTextNode(" since "));
+        detailsProcessedContainer.appendChild(processedTime);
+      }
+    } else {
+      detailsProcessedContainer.hidden = true;
+    }
+
+    detailsDescription.textContent = payload.description || "";
+    if (!payload.description) {
+      detailsDescription.hidden = true;
+    } else {
+      detailsDescription.hidden = false;
+    }
+
+    detailsTechnicalList.replaceChildren();
+    addMetadataValue(detailsTechnicalList, "Media ID", item.media_id);
+    addMetadataValue(detailsTechnicalList, "Kind", formatCatalogKind(item.media_kind));
+    addMetadataValue(detailsTechnicalList, "Created", new Date(item.created_at_ms).toISOString());
+    addMetadataValue(detailsTechnicalList, "Collection", item.collection_key || "none");
+    if (item.processed_at_ms !== null && item.processed_at_ms !== undefined) {
+      addMetadataValue(detailsTechnicalList, "Processed at", new Date(item.processed_at_ms).toISOString());
+    }
+    item.locations.forEach((location, index) => {
+      addMetadataValue(detailsTechnicalList, `Location ${index + 1}`, location.relative_path);
+      addMetadataValue(detailsTechnicalList, `Availability ${index + 1}`, location.availability);
+    });
+  } catch {
+    if (token === detailsMetadataToken) {
+      detailsLoading.hidden = true;
+      detailsError.hidden = false;
+    }
+  }
+}
+
+function closeDetailsDialog() {
+  if (!detailsDialog) return;
+  if (typeof detailsDialog.close === "function") {
+    detailsDialog.close();
+  } else {
+    detailsDialog.removeAttribute("open");
+  }
+  detailsCurrentItem = null;
+  detailsMetadataToken++;
+  if (detailsOpenerElement) {
+    detailsOpenerElement.focus();
+    detailsOpenerElement = null;
+  }
+}
+
+async function handleOpenMetadataWorkspace(item, openerElement) {
   if (!confirmDiscardDirtyMetadata()) {
     return;
   }
+  if (detailsDialog && detailsDialog.hasAttribute("open")) {
+    closeDetailsDialog();
+  }
+  metadataOpenerElement = openerElement || document.activeElement;
   const token = metadataRequestToken + 1;
   metadataRequestToken = token;
   metadataWorkspace = {
@@ -1225,6 +1373,9 @@ async function handleOpenMetadataWorkspace(item) {
     current: { displayTitle: "", description: "", tagKeys: [], collectionKey: null, processedAtMs: null },
   };
   metadataCreateStatus.textContent = "";
+  if (metadataDialog && typeof metadataDialog.showModal === "function") {
+    metadataDialog.showModal();
+  }
   renderMetadataWorkspace();
   metadataWorkspaceTitle.focus();
   const tagsReady = await ensureCanonicalTags();
@@ -1344,7 +1495,14 @@ function closeMetadataWorkspace() {
     current: { displayTitle: "", description: "", tagKeys: [], collectionKey: null, processedAtMs: null },
   };
   metadataWorkspaceElement.hidden = true;
+  if (metadataDialog && typeof metadataDialog.close === "function") {
+    metadataDialog.close();
+  }
   syncMetadataBeforeUnloadProtection();
+  if (metadataOpenerElement) {
+    metadataOpenerElement.focus();
+    metadataOpenerElement = null;
+  }
   loadCatalog();
 }
 
@@ -2231,7 +2389,6 @@ document.querySelector("#metadata-description-input").addEventListener("input", 
 });
 metadataSaveButton.addEventListener("click", handleSaveMetadata);
 metadataDiscardButton.addEventListener("click", handleDiscardMetadataChanges);
-metadataCloseButton.addEventListener("click", closeMetadataWorkspace);
 metadataCreateTagForm.addEventListener("submit", handleCreateAndSelectTag);
 
 function openSettingsDialog() {
@@ -2290,6 +2447,52 @@ if (settingsDialog) {
       closeSettingsDialog();
     }
   });
+}
+
+if (detailsCloseButton) {
+  detailsCloseButton.addEventListener("click", () => closeDetailsDialog());
+}
+
+if (detailsDialog) {
+  detailsDialog.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      closeDetailsDialog();
+    }
+  });
+  detailsDialog.addEventListener("click", (event) => {
+    if (event.target === detailsDialog) {
+      closeDetailsDialog();
+    }
+  });
+}
+
+if (detailsEditButton) {
+  detailsEditButton.addEventListener("click", () => {
+    if (detailsCurrentItem) {
+      const item = detailsCurrentItem;
+      closeDetailsDialog();
+      handleOpenMetadataWorkspace(item, null);
+    }
+  });
+}
+
+if (metadataDialog) {
+  metadataDialog.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      closeMetadataWorkspace();
+    }
+  });
+  metadataDialog.addEventListener("click", (event) => {
+    if (event.target === metadataDialog) {
+      closeMetadataWorkspace();
+    }
+  });
+}
+
+if (metadataCloseButton) {
+  metadataCloseButton.addEventListener("click", () => closeMetadataWorkspace());
 }
 
 checkHealth();

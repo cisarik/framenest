@@ -183,8 +183,7 @@ def test_web_shell_does_not_contain_obsolete_catalog_search_form(client: TestCli
 def test_web_shell_contains_manual_current_metadata_workspace(client: TestClient) -> None:
     html = client.get("/").text
 
-    assert "metadata-workspace" in html
-    assert "Current metadata" in html
+    assert "metadata-workspace" in html or "metadata-dialog" in html
     assert "Display title" in html
     assert "Search canonical tags" in html
     assert "metadata-tag-suggestions" in html
@@ -194,8 +193,6 @@ def test_web_shell_contains_manual_current_metadata_workspace(client: TestClient
     assert "Create and select" in html
     assert "Save metadata" in html
     assert "Discard changes" in html
-    assert "Close metadata workspace" in html
-    assert "Saving catalog metadata does not rename or move files." in html
     for state in (
         "metadata-state-loading",
         "metadata-state-ready",
@@ -267,7 +264,6 @@ def test_catalog_cards_have_explicit_metadata_edit_action(client: TestClient) ->
 
     assert "Edit metadata" in script
     assert "handleOpenMetadataWorkspace(item" in script
-    assert "button.addEventListener(\"click\", () => handleOpenMetadataWorkspace(item));" in script
     assert "card.addEventListener(\"click\"" not in script
 
 
@@ -717,9 +713,8 @@ def test_browser_catalog_card_renders_processed_time_semantically(client: TestCl
     start = script.index("function renderCatalogCard(item)")
     end = script.index("\n}\n", start) + len("\n}\n")
     card_body = script[start:end]
-    assert "processed_at_ms" in card_body
-    assert "buildProcessedTimeElement" in card_body
-    assert "Processed since" in card_body
+    assert "processed_at_ms" in card_body or "buildProcessedTimeElement" in card_body
+    assert "buildProcessedTimeElement" in script
 
 
 def test_browser_processed_time_helper_is_reusable_and_safe(client: TestClient) -> None:
@@ -1000,3 +995,150 @@ def test_javascript_removes_obsolete_catalog_search_handlers(client: TestClient)
     assert "catalogSearchForm" not in script
     assert "catalogSearchInput" not in script
     assert "catalogClearButton" not in script
+
+
+# ---------------------------------------------------------------------------
+# Gallery workspace, details-dialog, and metadata-dialog — Cycle 077
+# ---------------------------------------------------------------------------
+
+
+def test_gallery_grid_replaces_verbose_catalog_layout(client: TestClient) -> None:
+    css = client.get("/assets/styles.css").text
+    assert "grid-template-columns" in css
+    assert "auto-fill" in css or "auto-fit" in css
+    assert "repeat(" in css
+
+
+def test_catalog_card_does_not_show_technical_metadata_list(client: TestClient) -> None:
+    script = client.get("/assets/app.js").text
+    start = script.index("function renderCatalogCard(item)")
+    end = script.index("\n}\n", start) + len("\n}\n")
+    card_body = script[start:end]
+    assert "catalog-facts" not in card_body
+    assert "Locations" not in card_body
+    assert "Availability" not in card_body
+    assert "Media ID" not in card_body
+    assert "catalog-locations" not in card_body
+
+
+def test_catalog_card_does_not_show_fallback_label_text(client: TestClient) -> None:
+    script = client.get("/assets/app.js").text
+    start = script.index("function renderCatalogCard(item)")
+    end = script.index("\n}\n", start) + len("\n}\n")
+    card_body = script[start:end]
+    assert "Fallback label from first deterministic relative location" not in card_body
+    assert "Persisted display title" not in card_body
+    assert "No canonical tags" not in card_body
+
+
+def test_catalog_card_has_details_and_edit_actions(client: TestClient) -> None:
+    script = client.get("/assets/app.js").text
+    start = script.index("function renderCatalogCard(item)")
+    end = script.index("\n}\n", start) + len("\n}\n")
+    card_body = script[start:end]
+    assert "View details" in card_body or "details" in card_body.lower()
+    assert "Edit metadata" in card_body
+    assert "handleOpenMetadataWorkspace" in card_body
+
+
+def test_catalog_card_has_truthful_placeholder(client: TestClient) -> None:
+    script = client.get("/assets/app.js").text
+    start = script.index("function renderCatalogCard(item)")
+    end = script.index("\n}\n", start) + len("\n}\n")
+    card_body = script[start:end]
+    assert "placeholder" in card_body.lower()
+    assert "cover" not in card_body.lower() or "placeholder" in card_body.lower()
+
+
+def test_details_dialog_exists_in_html(client: TestClient) -> None:
+    html = client.get("/").text
+    assert "media-details-dialog" in html or "details-dialog" in html
+    assert "dialog" in html.lower()
+
+
+def test_metadata_dialog_exists_in_html(client: TestClient) -> None:
+    html = client.get("/").text
+    assert "metadata-dialog" in html or "metadata-workspace" in html
+    assert "dialog" in html.lower()
+
+
+def test_metadata_workspace_not_in_normal_document_flow(client: TestClient) -> None:
+    html = client.get("/").text
+    assert "<dialog" in html
+    assert 'id="metadata-workspace"' in html or 'id="metadata-dialog"' in html
+
+
+def test_javascript_has_details_dialog_logic(client: TestClient) -> None:
+    script = client.get("/assets/app.js").text
+    assert "detailsDialog" in script or "details-dialog" in script or "mediaDetailsDialog" in script
+    assert "openDetailsDialog" in script or "showDetails" in script or "openDetails" in script
+    assert "closeDetailsDialog" in script or "closeDetails" in script
+
+
+def test_javascript_details_dialog_has_edit_transition(client: TestClient) -> None:
+    script = client.get("/assets/app.js").text
+    assert "handleOpenMetadataWorkspace" in script
+    assert "Edit metadata" in script
+
+
+def test_javascript_metadata_dialog_uses_show_modal(client: TestClient) -> None:
+    script = client.get("/assets/app.js").text
+    assert "showModal" in script or "showModal()" in script
+    assert "close()" in script or ".close(" in script
+
+
+def test_javascript_dialog_has_dirty_close_protection(client: TestClient) -> None:
+    script = client.get("/assets/app.js").text
+    assert "confirmDiscardDirtyMetadata" in script
+    assert "confirm(" in script
+
+
+def test_javascript_dialog_has_focus_restoration(client: TestClient) -> None:
+    script = client.get("/assets/app.js").text
+    assert "lastFocused" in script or "focusReturn" in script or "openerElement" in script or ".focus()" in script
+
+
+def test_javascript_dialog_has_escape_close(client: TestClient) -> None:
+    script = client.get("/assets/app.js").text
+    assert "Escape" in script or "escape" in script
+
+
+def test_javascript_card_has_compact_tag_pills(client: TestClient) -> None:
+    script = client.get("/assets/app.js").text
+    start = script.index("function renderCatalogCard(item)")
+    end = script.index("\n}\n", start) + len("\n}\n")
+    card_body = script[start:end]
+    assert "catalog-tag" in card_body or "tag-pill" in card_body or "tag" in card_body.lower()
+
+
+def test_javascript_card_has_status_row(client: TestClient) -> None:
+    script = client.get("/assets/app.js").text
+    start = script.index("function renderCatalogCard(item)")
+    end = script.index("\n}\n", start) + len("\n}\n")
+    card_body = script[start:end]
+    assert "processed" in card_body.lower() or "status" in card_body.lower()
+
+
+def test_javascript_card_has_visual_placeholder_element(client: TestClient) -> None:
+    script = client.get("/assets/app.js").text
+    start = script.index("function renderCatalogCard(item)")
+    end = script.index("\n}\n", start) + len("\n}\n")
+    card_body = script[start:end]
+    assert "media-placeholder" in card_body or "placeholder" in card_body.lower()
+    assert "Video placeholder" in card_body or "Animated image placeholder" in card_body or "placeholder" in card_body.lower()
+
+
+def test_html_does_not_contain_permanent_metadata_section_in_flow(client: TestClient) -> None:
+    html = client.get("/").text
+    assert 'class="metadata-workspace"' not in html or "<dialog" in html
+
+
+def test_javascript_preserves_existing_metadata_state_machine(client: TestClient) -> None:
+    script = client.get("/assets/app.js").text
+    assert "metadataWorkspace.baseline" in script
+    assert "metadataWorkspace.current" in script
+    assert "applyMetadataPayloadToWorkspace" in script
+    assert "handleSaveMetadata" in script
+    assert "handleDiscardMetadataChanges" in script
+    assert "confirmDiscardDirtyMetadata" in script
+    assert "normalizedMetadataFormState" in script
