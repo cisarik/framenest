@@ -80,12 +80,11 @@ const libraryStateEmpty = document.querySelector("#library-state-empty");
 const libraryStateUnavailable = document.querySelector("#library-state-unavailable");
 const libraryStateError = document.querySelector("#library-state-error");
 const libraryCardTemplate = document.querySelector("#library-card-template");
-const catalogSearchForm = document.querySelector("#catalog-search-form");
-const catalogSearchInput = document.querySelector("#catalog-search-input");
-const catalogClearButton = document.querySelector("#catalog-clear-button");
 const catalogTagFilters = document.querySelector("#catalog-tag-filters");
-const catalogActiveFilters = document.querySelector("#catalog-active-filters");
 const catalogTagsState = document.querySelector("#catalog-tags-state");
+const commandSearchInput = document.querySelector("#command-search-input");
+const commandSearchClear = document.querySelector("#command-search-clear");
+const commandSearchSuggestions = document.querySelector("#command-search-suggestions");
 const catalogStateLoading = document.querySelector("#catalog-state-loading");
 const catalogStateEmpty = document.querySelector("#catalog-state-empty");
 const catalogStateUnavailable = document.querySelector("#catalog-state-unavailable");
@@ -903,8 +902,8 @@ function renderCatalogSuccess(page) {
   catalogResults.replaceChildren();
   catalogState.total = page.total;
   catalogState.offset = page.offset;
-  catalogSearchInput.value = page.q || catalogState.q;
-  renderActiveCatalogFilters(page.tag_keys || catalogState.tagKeys);
+  if (commandSearchInput) commandSearchInput.value = page.q || catalogState.q;
+  renderCatalogTagFilterStates();
   setCatalogPagination(page);
   if (page.items.length === 0) {
     showCatalogState("empty");
@@ -916,26 +915,17 @@ function renderCatalogSuccess(page) {
   showCatalogState("success");
 }
 
-function renderActiveCatalogFilters(tagKeys) {
-  catalogActiveFilters.replaceChildren();
-  if (tagKeys.length === 0) {
-    const empty = document.createElement("p");
-    empty.textContent = "No active canonical tag filters.";
-    catalogActiveFilters.appendChild(empty);
-    return;
-  }
-  tagKeys.forEach((key) => {
-    const chip = document.createElement("button");
-    chip.type = "button";
-    chip.className = "catalog-active-filter";
-    chip.textContent = `Remove ${key}`;
-    chip.addEventListener("click", () => {
-      catalogState.tagKeys = catalogState.tagKeys.filter((activeKey) => activeKey !== key);
-      catalogState.offset = 0;
-      renderActiveCatalogFilters(catalogState.tagKeys);
-      loadCatalog();
-    });
-    catalogActiveFilters.appendChild(chip);
+function renderCatalogTagFilterStates() {
+  if (!catalogTagFilters) return;
+  const buttons = catalogTagFilters.querySelectorAll(".catalog-filter-chip");
+  buttons.forEach((button) => {
+    const key = button.dataset.tagKey;
+    const isActive = catalogState.tagKeys.includes(key);
+    button.setAttribute("aria-pressed", String(isActive));
+    const removeSpan = button.querySelector(".catalog-filter-chip__remove");
+    if (removeSpan) {
+      removeSpan.style.display = isActive ? "" : "none";
+    }
   });
 }
 
@@ -944,34 +934,49 @@ function renderCatalogTagFilters(tags) {
   canonicalTagsLoaded = true;
   catalogTagFilters.replaceChildren();
   if (tags.length === 0) {
-    catalogTagsState.textContent = "No canonical tag definitions exist yet.";
+    if (catalogTagsState) {
+      catalogTagsState.hidden = false;
+      catalogTagsState.textContent = "No tags.";
+    }
     return;
   }
-  catalogTagsState.textContent = "Canonical tag filters loaded.";
+  if (catalogTagsState) catalogTagsState.hidden = true;
   tags.forEach((tag) => {
     const button = document.createElement("button");
     button.type = "button";
     button.className = "catalog-filter-chip";
     button.dataset.tagKey = tag.key;
+    button.setAttribute("aria-pressed", "false");
     button.textContent = tag.display_name;
+    const removeSpan = document.createElement("span");
+    removeSpan.className = "catalog-filter-chip__remove";
+    removeSpan.textContent = " ×";
+    removeSpan.setAttribute("aria-hidden", "true");
+    removeSpan.style.display = "none";
+    button.appendChild(removeSpan);
     button.addEventListener("click", () => {
       if (catalogState.tagKeys.includes(tag.key)) {
-        return;
+        catalogState.tagKeys = catalogState.tagKeys.filter((activeKey) => activeKey !== tag.key);
+      } else {
+        catalogState.tagKeys = [...catalogState.tagKeys, tag.key];
       }
-      catalogState.tagKeys = [...catalogState.tagKeys, tag.key];
       catalogState.offset = 0;
-      renderActiveCatalogFilters(catalogState.tagKeys);
+      renderCatalogTagFilterStates();
       loadCatalog();
     });
     catalogTagFilters.appendChild(button);
   });
+  renderCatalogTagFilterStates();
   if (metadataWorkspace.openMediaId !== null) {
     renderMetadataWorkspace();
   }
 }
 
 async function loadCatalogTags() {
-  catalogTagsState.textContent = "Loading canonical tag filters...";
+  if (catalogTagsState) {
+    catalogTagsState.hidden = false;
+    catalogTagsState.textContent = "Loading tags...";
+  }
   try {
     const response = await fetch(CANONICAL_TAGS_ENDPOINT, {
       headers: { Accept: "application/json" },
@@ -979,13 +984,13 @@ async function loadCatalogTags() {
     });
     const payload = await response.json();
     if (!response.ok) {
-      catalogTagsState.textContent = "Canonical tag filters are unavailable.";
+      if (catalogTagsState) catalogTagsState.textContent = "Tags unavailable.";
       return false;
     }
     renderCatalogTagFilters(payload.tags || []);
     return true;
   } catch {
-    catalogTagsState.textContent = "Canonical tag filters could not be loaded.";
+    if (catalogTagsState) catalogTagsState.textContent = "Tags could not be loaded.";
     return false;
   }
 }
@@ -1912,7 +1917,7 @@ async function handlePreviewClick(library, card) {
   const button = card.querySelector(".preview-button");
   const status = card.querySelector(".scan-status");
   button.disabled = true;
-  status.textContent = "Running a bounded read-only scan preview...";
+  status.textContent = "Scanning...";
   try {
     const response = await fetch(`${LIBRARIES_ENDPOINT}/${library.id}/scan-preview`, {
       method: "POST",
@@ -1921,14 +1926,12 @@ async function handlePreviewClick(library, card) {
     });
     const payload = await response.json();
     if (!response.ok) {
-      status.textContent = payload.error
-        ? payload.error.message
-        : "Scan preview failed with a sanitized local error.";
+      status.textContent = "Scan failed.";
       return;
     }
     renderScanResult(card, payload);
   } catch {
-    status.textContent = "Scan preview failed before the local response could be read.";
+    status.textContent = "Scan failed.";
   } finally {
     button.disabled = false;
   }
@@ -1950,7 +1953,6 @@ function renderLibraries(libraries) {
     const fragment = libraryCardTemplate.content.cloneNode(true);
     const card = fragment.querySelector(".library-card");
     fragment.querySelector(".library-name").textContent = library.display_name;
-    fragment.querySelector(".library-meta").textContent = `Library ID ${library.id}; ${library.path_flavor} path flavor. Root path is intentionally hidden.`;
     fragment.querySelector(".preview-button").addEventListener("click", () => {
       handlePreviewClick(library, card);
     });
@@ -2010,29 +2012,195 @@ document.querySelector("#catalog-scope-processed").addEventListener("click", () 
   setCatalogScope(PROCESSED_COLLECTION);
 });
 
-catalogSearchForm.addEventListener("submit", (event) => {
-  event.preventDefault();
-  catalogState.q = catalogSearchInput.value;
-  catalogState.offset = 0;
-  loadCatalog();
-});
+let commandSearchDebounceTimer = null;
+let commandSearchRequestToken = 0;
+let commandSearchActiveIndex = -1;
+let commandSearchCurrentSuggestions = [];
 
-catalogClearButton.addEventListener("click", () => {
-  if (!confirmDiscardDirtyMetadata()) {
+function closeCommandSearchSuggestions() {
+  if (!commandSearchSuggestions) return;
+  commandSearchSuggestions.hidden = true;
+  commandSearchSuggestions.replaceChildren();
+  commandSearchInput.setAttribute("aria-expanded", "false");
+  commandSearchActiveIndex = -1;
+  commandSearchCurrentSuggestions = [];
+}
+
+function renderCommandSearchSuggestions(titleItems, tagMatches) {
+  if (!commandSearchSuggestions) return;
+  commandSearchSuggestions.replaceChildren();
+  commandSearchCurrentSuggestions = [];
+  const maxTitles = 5;
+  const maxTags = 5;
+  let count = 0;
+  titleItems.forEach((item) => {
+    if (count >= maxTitles) return;
+    const li = document.createElement("li");
+    li.className = "command-search-suggestion";
+    li.setAttribute("role", "option");
+    li.dataset.suggestionType = "title";
+    li.dataset.suggestionMediaId = item.media_id;
+    const typeSpan = document.createElement("span");
+    typeSpan.className = "command-search-suggestion__type";
+    typeSpan.textContent = "Title";
+    const labelSpan = document.createElement("span");
+    labelSpan.className = "command-search-suggestion__label";
+    labelSpan.textContent = item.display_title || item.media_id;
+    li.appendChild(typeSpan);
+    li.appendChild(labelSpan);
+    li.addEventListener("click", () => {
+      commandSearchInput.value = item.display_title || "";
+      catalogState.q = item.display_title || "";
+      catalogState.offset = 0;
+      closeCommandSearchSuggestions();
+      loadCatalog();
+    });
+    commandSearchSuggestions.appendChild(li);
+    commandSearchCurrentSuggestions.push(li);
+    count++;
+  });
+  tagMatches.forEach((tag) => {
+    if (commandSearchCurrentSuggestions.length >= maxTitles + maxTags) return;
+    const li = document.createElement("li");
+    li.className = "command-search-suggestion";
+    li.setAttribute("role", "option");
+    li.dataset.suggestionType = "tag";
+    li.dataset.suggestionTagKey = tag.key;
+    const typeSpan = document.createElement("span");
+    typeSpan.className = "command-search-suggestion__type";
+    typeSpan.textContent = "Tag";
+    const labelSpan = document.createElement("span");
+    labelSpan.className = "command-search-suggestion__label";
+    labelSpan.textContent = tag.display_name;
+    li.appendChild(typeSpan);
+    li.appendChild(labelSpan);
+    li.addEventListener("click", () => {
+      if (!catalogState.tagKeys.includes(tag.key)) {
+        catalogState.tagKeys = [...catalogState.tagKeys, tag.key];
+        catalogState.offset = 0;
+        renderCatalogTagFilterStates();
+        loadCatalog();
+      }
+      commandSearchInput.value = "";
+      closeCommandSearchSuggestions();
+    });
+    commandSearchSuggestions.appendChild(li);
+    commandSearchCurrentSuggestions.push(li);
+  });
+  if (commandSearchCurrentSuggestions.length === 0) {
+    const li = document.createElement("li");
+    li.className = "command-search-suggestion__empty";
+    li.textContent = "No matches.";
+    commandSearchSuggestions.appendChild(li);
+  }
+  commandSearchSuggestions.hidden = false;
+  commandSearchInput.setAttribute("aria-expanded", "true");
+  commandSearchActiveIndex = -1;
+}
+
+function updateSuggestionActiveState() {
+  commandSearchCurrentSuggestions.forEach((li, index) => {
+    li.classList.toggle("command-search-suggestion--active", index === commandSearchActiveIndex);
+  });
+  if (commandSearchActiveIndex >= 0 && commandSearchCurrentSuggestions[commandSearchActiveIndex]) {
+    commandSearchCurrentSuggestions[commandSearchActiveIndex].scrollIntoView({ block: "nearest" });
+  }
+}
+
+async function performCommandSearch(query) {
+  if (!query || query.trim().length === 0) {
+    closeCommandSearchSuggestions();
     return;
   }
-  if (metadataWorkspace.openMediaId !== null) {
-    metadataWorkspace.openMediaId = null;
-    metadataWorkspaceElement.hidden = true;
-    syncMetadataBeforeUnloadProtection();
+  const token = ++commandSearchRequestToken;
+  const tagMatches = canonicalTagDefinitions
+    .filter((tag) =>
+      tag.key.toLowerCase().includes(query.toLowerCase()) ||
+      tag.display_name.toLowerCase().includes(query.toLowerCase())
+    )
+    .slice(0, 5);
+  try {
+    const params = new URLSearchParams();
+    params.set("q", query);
+    params.set("limit", "5");
+    params.set("offset", "0");
+    const response = await fetch(`${MEDIA_CATALOG_ENDPOINT}?${params.toString()}`, {
+      headers: { Accept: "application/json" },
+      cache: "no-store",
+    });
+    if (token !== commandSearchRequestToken) return;
+    if (!response.ok) {
+      renderCommandSearchSuggestions([], tagMatches);
+      return;
+    }
+    const payload = await response.json();
+    if (token !== commandSearchRequestToken) return;
+    const titleItems = (payload.items || []).filter((item) => item.display_title);
+    renderCommandSearchSuggestions(titleItems, tagMatches);
+  } catch {
+    if (token !== commandSearchRequestToken) return;
+    renderCommandSearchSuggestions([], tagMatches);
   }
-  catalogState.q = "";
-  catalogState.tagKeys = [];
-  catalogState.offset = 0;
-  catalogSearchInput.value = "";
-  renderActiveCatalogFilters(catalogState.tagKeys);
-  loadCatalog();
-});
+}
+
+if (commandSearchInput) {
+  commandSearchInput.addEventListener("input", () => {
+    if (commandSearchClear) commandSearchClear.hidden = commandSearchInput.value.length === 0;
+    if (commandSearchDebounceTimer) clearTimeout(commandSearchDebounceTimer);
+    const query = commandSearchInput.value;
+    if (query.trim().length === 0) {
+      closeCommandSearchSuggestions();
+      return;
+    }
+    commandSearchDebounceTimer = setTimeout(() => {
+      performCommandSearch(query);
+    }, 200);
+  });
+
+  commandSearchInput.addEventListener("keydown", (event) => {
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      if (commandSearchCurrentSuggestions.length === 0) return;
+      commandSearchActiveIndex = Math.min(commandSearchActiveIndex + 1, commandSearchCurrentSuggestions.length - 1);
+      updateSuggestionActiveState();
+    } else if (event.key === "ArrowUp") {
+      event.preventDefault();
+      if (commandSearchCurrentSuggestions.length === 0) return;
+      commandSearchActiveIndex = Math.max(commandSearchActiveIndex - 1, -1);
+      updateSuggestionActiveState();
+    } else if (event.key === "Enter") {
+      if (commandSearchActiveIndex >= 0 && commandSearchCurrentSuggestions[commandSearchActiveIndex]) {
+        event.preventDefault();
+        commandSearchCurrentSuggestions[commandSearchActiveIndex].click();
+      } else {
+        catalogState.q = commandSearchInput.value;
+        catalogState.offset = 0;
+        closeCommandSearchSuggestions();
+        loadCatalog();
+      }
+    } else if (event.key === "Escape") {
+      closeCommandSearchSuggestions();
+    }
+  });
+
+  commandSearchInput.addEventListener("blur", () => {
+    setTimeout(() => {
+      closeCommandSearchSuggestions();
+    }, 150);
+  });
+}
+
+if (commandSearchClear) {
+  commandSearchClear.addEventListener("click", () => {
+    commandSearchInput.value = "";
+    commandSearchClear.hidden = true;
+    catalogState.q = "";
+    catalogState.offset = 0;
+    closeCommandSearchSuggestions();
+    loadCatalog();
+    commandSearchInput.focus();
+  });
+}
 
 catalogPrevButton.addEventListener("click", () => {
   catalogState.offset = Math.max(0, catalogState.offset - catalogState.limit);
@@ -2065,8 +2233,6 @@ metadataSaveButton.addEventListener("click", handleSaveMetadata);
 metadataDiscardButton.addEventListener("click", handleDiscardMetadataChanges);
 metadataCloseButton.addEventListener("click", closeMetadataWorkspace);
 metadataCreateTagForm.addEventListener("submit", handleCreateAndSelectTag);
-
-renderActiveCatalogFilters(catalogState.tagKeys);
 
 function openSettingsDialog() {
   if (!settingsDialog) return;

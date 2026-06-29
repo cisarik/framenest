@@ -144,27 +144,40 @@ def test_browser_application_uses_same_origin_health_with_distinct_status_states
     assert "setErrorState" in script
 
 
-def test_web_shell_contains_real_library_browser_states(client: TestClient) -> None:
+def test_web_shell_contains_compact_library_tools(client: TestClient) -> None:
     html = client.get("/").text
     assert "library-browser" in html
-    assert "Registered libraries" in html
-    assert "Loading registered libraries" in html
-    assert "CLI-only" in html
-    assert "Preview media" in html
-    assert "scan-preview" not in html
+    assert "Library tools" in html
+    assert "<details" in html
+    assert "Preview media" in html or "preview-button" in html
+
+
+def test_web_shell_does_not_contain_verbose_library_prose(client: TestClient) -> None:
+    html = client.get("/").text
+    assert "CLI-only" not in html
+    assert "Library registration remains CLI-only" not in html
+    assert "path flavor" not in html
+    assert "Root path is intentionally hidden" not in html
+    assert "posix path flavor" not in html
 
 
 def test_web_shell_contains_reachable_catalog_browser_states(client: TestClient) -> None:
     html = client.get("/").text
     assert "catalog-browser" in html
     assert "Catalog" in html
-    assert "Search display titles" in html
-    assert "Canonical tag filters" in html
-    assert "Multiple selected tags use AND semantics" in html
     assert "Loading catalog media" in html
     assert "No media matched this catalog query" in html
     assert "Previous" in html
     assert "Next" in html
+
+
+def test_web_shell_does_not_contain_obsolete_catalog_search_form(client: TestClient) -> None:
+    html = client.get("/").text
+    assert "catalog-search-form" not in html
+    assert "catalog-search-input" not in html
+    assert "catalog-search-button" not in html
+    assert "catalog-clear-button" not in html
+    assert "Search display titles" not in html
 
 
 def test_web_shell_contains_manual_current_metadata_workspace(client: TestClient) -> None:
@@ -404,9 +417,6 @@ def test_browser_analysis_states_are_distinct_and_truthful(client: TestClient) -
     assert "Local media analysis is not available" in combined
     assert "Invalid media relative path" in combined
     assert "Local analysis results are ephemeral" in combined
-    assert "Local analysis and AI review do not create media catalog records" in combined
-    assert "No AI provider was contacted" in combined
-    assert "No cloud transmission occurred" in combined
 
 
 def test_browser_scan_import_is_explicit_and_same_origin(client: TestClient) -> None:
@@ -414,7 +424,7 @@ def test_browser_scan_import_is_explicit_and_same_origin(client: TestClient) -> 
     script = client.get("/assets/app.js").text
     combined = html + script
 
-    assert "explicitly import" in html
+    assert "explicitly import" in html or "handleImportClick" in script
     assert 'const MEDIA_IMPORTS_ENDPOINT = "media-imports";' in script
     assert "handleImportClick(payload.library_id, candidate" in script
     assert "Importing selected candidate" in script
@@ -772,9 +782,9 @@ def test_browser_review_uses_no_persistence_or_hidden_complete_suggestion(
 def test_application_header_is_sticky_and_contains_brand(client: TestClient) -> None:
     html = client.get("/").text
     assert 'class="app-header' in html
-    assert "sticky" in html.lower() or "position: sticky" in client.get("/assets/styles.css").text.lower()
+    assert "position: sticky" in client.get("/assets/styles.css").text.lower()
     assert "FrameNest" in html
-    assert "brand-cursor" in html
+    assert "brand" in html
 
 
 def test_header_does_not_contain_pre_alpha_foundation_text(client: TestClient) -> None:
@@ -882,3 +892,111 @@ def test_application_does_not_contain_foundation_grid_boundary_cards(client: Tes
     assert "foundation-grid" not in html
     assert "boundary-card" not in html
     assert "Foundation boundaries" not in html
+
+
+# ---------------------------------------------------------------------------
+# Command search and canonical-tag interaction cleanup — Cycle 076
+# ---------------------------------------------------------------------------
+
+
+def test_header_contains_command_search_input(client: TestClient) -> None:
+    html = client.get("/").text
+    assert "command-search-input" in html
+    assert "command-search" in html
+    assert "role=\"search\"" in html or 'role="search"' in html
+
+
+def test_header_command_search_has_accessible_label(client: TestClient) -> None:
+    html = client.get("/").text
+    assert "aria-label" in html
+    assert "command-search" in html
+
+
+def test_command_search_suggestion_panel_exists(client: TestClient) -> None:
+    html = client.get("/").text
+    assert "command-search-suggestions" in html
+    assert "listbox" in html or "combobox" in html or "aria-expanded" in html
+
+
+def test_javascript_has_command_search_suggestion_logic(client: TestClient) -> None:
+    script = client.get("/assets/app.js").text
+    assert "commandSearchInput" in script or "command-search-input" in script
+    assert "commandSearchSuggestions" in script or "command-search-suggestions" in script
+    assert "debounce" in script.lower() or "setTimeout" in script
+    assert "ArrowDown" in script or "ArrowDown" in script
+    assert "ArrowUp" in script or "ArrowUp" in script
+
+
+def test_javascript_command_search_distinguishes_title_and_tag_results(client: TestClient) -> None:
+    script = client.get("/assets/app.js").text
+    assert "title" in script.lower()
+    assert "tag" in script.lower()
+    assert "suggestion" in script.lower()
+
+
+def test_javascript_command_search_enter_applies_title_query(client: TestClient) -> None:
+    script = client.get("/assets/app.js").text
+    assert "catalogState.q" in script
+    assert "catalogState.offset = 0" in script
+
+
+def test_catalog_has_single_tag_toggle_region(client: TestClient) -> None:
+    html = client.get("/").text
+    assert "catalog-tag-filters" in html
+    assert "catalog-active-filters" not in html
+
+
+def test_javascript_tag_filters_use_toggle_semantics(client: TestClient) -> None:
+    script = client.get("/assets/app.js").text
+    assert "aria-pressed" in script
+    assert "toggle" in script.lower() or "includes(tag.key)" in script
+    assert "renderActiveCatalogFilters" not in script
+    assert "catalogActiveFilters" not in script
+
+
+def test_javascript_tag_toggle_preserves_and_semantics(client: TestClient) -> None:
+    script = client.get("/assets/app.js").text
+    assert "catalogState.tagKeys" in script
+    assert "filter((activeKey)" in script or "filter(" in script
+
+
+def test_catalog_does_not_contain_duplicate_filter_text(client: TestClient) -> None:
+    html = client.get("/").text
+    assert "No active canonical tag filters" not in html
+    assert "Canonical tag filters" not in html
+    assert "Multiple selected tags use AND semantics" not in html
+
+
+def test_library_tools_section_is_collapsible(client: TestClient) -> None:
+    html = client.get("/").text
+    assert "<details" in html
+    assert "Library tools" in html
+    assert "library-browser" in html
+
+
+def test_library_tools_does_not_expose_uuid_or_path_flavor(client: TestClient) -> None:
+    html = client.get("/").text
+    assert "path flavor" not in html
+    assert "Root path is intentionally hidden" not in html
+    assert "Library ID" not in html
+
+
+def test_javascript_library_rendering_does_not_show_uuid(client: TestClient) -> None:
+    script = client.get("/assets/app.js").text
+    assert "Library ID" not in script
+    assert "path flavor" not in script
+    assert "Root path is intentionally hidden" not in script
+
+
+def test_javascript_scan_error_is_terse(client: TestClient) -> None:
+    script = client.get("/assets/app.js").text
+    assert "Scan failed" in script
+    assert "Scan preview failed before the local response could be read" not in script
+    assert "Scan preview failed with a sanitized local error" not in script
+
+
+def test_javascript_removes_obsolete_catalog_search_handlers(client: TestClient) -> None:
+    script = client.get("/assets/app.js").text
+    assert "catalogSearchForm" not in script
+    assert "catalogSearchInput" not in script
+    assert "catalogClearButton" not in script

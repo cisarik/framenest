@@ -13,7 +13,24 @@
     <header class="app-header" aria-label="FrameNest application header">
       <div class="brand" aria-label="FrameNest">
         <span class="brand-mark" aria-hidden="true">FN</span>
-        <span class="brand-name">FrameNest</span><span class="brand-cursor" aria-hidden="true"></span>
+        <span class="brand-name">FrameNest</span>
+      </div>
+      <div class="header-search" role="search" aria-label="Search catalog">
+        <span class="header-search__prompt" aria-hidden="true">&gt;</span>
+        <input
+          id="command-search-input"
+          class="header-search__input"
+          type="search"
+          autocomplete="off"
+          maxlength="240"
+          placeholder="search titles and tags"
+          aria-label="Search catalog by title or tag"
+          aria-expanded="false"
+          aria-controls="command-search-suggestions"
+          aria-autocomplete="list"
+        >
+        <button id="command-search-clear" class="header-search__clear" type="button" aria-label="Clear search" hidden>&times;</button>
+        <ul id="command-search-suggestions" class="command-search-suggestions" role="listbox" aria-label="Search suggestions" hidden></ul>
       </div>
       <div class="header-status-group">
         <button id="server-health-button" class="status-button status-button--checking" type="button" aria-label="Local server healthy" title="Checking local server...">
@@ -67,31 +84,12 @@
           <p class="eyebrow">Catalog</p>
           <h2 id="catalog-title">Imported media</h2>
         </div>
-        <form id="catalog-search-form" class="catalog-toolbar" role="search">
-          <label class="catalog-search-label" for="catalog-search-input">
-            <span>Search display titles</span>
-            <input id="catalog-search-input" type="search" name="q" autocomplete="off" maxlength="240">
-          </label>
-          <div class="catalog-actions">
-            <button id="catalog-search-button" type="submit">Search</button>
-            <button id="catalog-clear-button" type="button">Clear</button>
-          </div>
-        </form>
         <div class="catalog-scope" role="group" aria-label="Catalog scope">
           <button id="catalog-scope-all" type="button" class="scope-active">All media</button>
           <button id="catalog-scope-processed" type="button">Processed</button>
         </div>
-        <div class="catalog-filter-panel" aria-labelledby="catalog-filter-title">
-          <div class="catalog-filter-heading">
-            <h3 id="catalog-filter-title">Canonical tag filters</h3>
-            <p>Multiple selected tags use AND semantics.</p>
-          </div>
-          <div id="catalog-active-filters" class="catalog-active-filters" aria-live="polite"></div>
-          <div id="catalog-tag-filters" class="catalog-tag-filters" aria-live="polite"></div>
-          <p id="catalog-tags-state" class="catalog-tags-state" role="status">
-            Loading canonical tag filters...
-          </p>
-        </div>
+        <div id="catalog-tag-filters" class="catalog-tag-filters" role="group" aria-label="Tag filters"></div>
+        <p id="catalog-tags-state" class="catalog-tags-state" role="status" hidden></p>
         <div id="catalog-state-loading" class="library-state" role="status">
           Loading catalog media...
         </div>
@@ -99,10 +97,10 @@
           No media matched this catalog query.
         </div>
         <div id="catalog-state-unavailable" class="library-state library-state--warning" hidden>
-          The local catalog is not available. Run the explicit database migration command before browsing media.
+          The local catalog is not available.
         </div>
         <div id="catalog-state-error" class="library-state library-state--warning" hidden>
-          Catalog media could not be loaded from the local catalog.
+          Catalog media could not be loaded.
         </div>
         <div id="catalog-results" class="catalog-results" aria-live="polite"></div>
         <div class="catalog-pagination" aria-label="Catalog pagination">
@@ -195,42 +193,30 @@
         </section>
       </section>
 
-      <section id="library-browser" class="library-browser" aria-labelledby="libraries-title">
-        <div class="section-heading">
-          <p class="eyebrow">Local catalog</p>
-          <h2 id="libraries-title">Registered libraries</h2>
-          <p class="section-copy">
-            Library registration remains CLI-only in this pre-alpha slice. The
-            browser can list registered libraries and run an explicit read-only
-            scan preview, then explicitly import or inspect one returned
-            candidate without mutating media files.
-          </p>
-        </div>
+      <details id="library-browser" class="library-tools">
+        <summary class="library-tools__summary">Library tools</summary>
         <div id="library-state-loading" class="library-state" role="status">
-          Loading registered libraries...
+          Loading...
         </div>
         <div id="library-state-empty" class="library-state" hidden>
-          No registered libraries were found. Use the catalog CLI to register a library first.
+          No registered libraries.
         </div>
         <div id="library-state-unavailable" class="library-state library-state--warning" hidden>
-          The local catalog is not available. Run the explicit database migration command before browsing libraries.
+          Catalog unavailable.
         </div>
         <div id="library-state-error" class="library-state library-state--warning" hidden>
-          Libraries could not be loaded from the local catalog.
+          Libraries could not be loaded.
         </div>
         <div id="library-list" class="library-list" aria-live="polite"></div>
-      </section>
+      </details>
 
       <template id="library-card-template">
         <article class="library-card">
           <div class="library-card__header">
-            <div>
-              <h3 class="library-name"></h3>
-              <p class="library-meta"></p>
-            </div>
+            <h3 class="library-name"></h3>
             <button class="preview-button" type="button">Preview media</button>
           </div>
-          <p class="scan-status">Scan preview has not been requested.</p>
+          <p class="scan-status">Not scanned.</p>
           <dl class="scan-summary" hidden></dl>
           <div class="scan-candidates" hidden></div>
           <div class="local-preview" hidden>
@@ -241,15 +227,10 @@
               </div>
               <span class="local-preview-kind"></span>
             </div>
-            <p class="local-preview-status">Local preview has not been requested.</p>
+            <p class="local-preview-status">Not requested.</p>
             <dl class="analysis-metadata" hidden></dl>
             <div class="analysis-warnings" hidden></div>
             <div class="representative-frames" hidden></div>
-            <p class="ephemeral-note">
-              Scan results are ephemeral. Local analysis results are ephemeral.
-              Local analysis and AI review do not create media catalog records.
-              No AI provider was contacted. No cloud transmission occurred.
-            </p>
           </div>
           <div class="ai-panel" hidden>
             <div class="ai-panel__header">
