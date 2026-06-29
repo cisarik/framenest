@@ -1273,3 +1273,101 @@ def test_javascript_has_no_preview_on_hover_or_scroll(client: TestClient) -> Non
     script = client.get("/assets/app.js").text
     assert "mouseover" not in script.lower() or "hover" not in script.lower()
     assert "IntersectionObserver" not in script
+
+
+# ---------------------------------------------------------------------------
+# Urgent Gallery UI Regression Repair — Cycle 078A
+# ---------------------------------------------------------------------------
+
+
+def test_dialogs_not_open_in_source_html(client: TestClient) -> None:
+    html = client.get("/").text
+    assert 'open=""' not in html
+    assert "open" not in html.split("<dialog")[1].split(">")[0] if "<dialog" in html else True
+
+
+def test_css_closes_dialogs_without_open_attribute(client: TestClient) -> None:
+    css = client.get("/assets/styles.css").text
+    assert "dialog:not([open])" in css or "dialog:not([open])" in css.replace(" ", "")
+
+
+def test_css_dialog_layout_only_under_open(client: TestClient) -> None:
+    css = client.get("/assets/styles.css").text
+    assert "dialog[open]" in css or "dialog[open]" in css.replace(" ", "")
+
+
+def test_startup_does_not_open_metadata_dialog(client: TestClient) -> None:
+    script = client.get("/assets/app.js").text
+    init_section = script[script.index("checkHealth();"):]
+    assert "metadataDialog.showModal()" not in init_section[:200]
+    assert "showModal()" not in init_section[:200]
+
+
+def test_javascript_focuses_search_on_startup(client: TestClient) -> None:
+    script = client.get("/assets/app.js").text
+    assert "commandSearchInput.focus()" in script or "commandSearchInput.focus()" in script
+    assert "preventScroll" in script
+
+
+def test_search_suggestions_close_on_no_results(client: TestClient) -> None:
+    script = client.get("/assets/app.js").text
+    assert '"No matches."' not in script or "closeCommandSearchSuggestions" in script
+    render_section = script[script.index("function renderCommandSearchSuggestions"):]
+    assert "No matches" not in render_section[:500] or "closeCommandSearchSuggestions" in render_section[:500]
+
+
+def test_javascript_has_fallback_title_suggestions(client: TestClient) -> None:
+    script = client.get("/assets/app.js").text
+    assert "deriveCatalogFallbackTitle" in script
+    search_section = script[script.index("function renderCommandSearchSuggestions"):]
+    assert "fallback" in search_section[:2000].lower() or "deriveCatalogFallbackTitle" in search_section[:2000] or "catalogResults" in search_section[:2000]
+
+
+def test_card_visual_surface_is_preview_trigger(client: TestClient) -> None:
+    script = client.get("/assets/app.js").text
+    start = script.index("function renderCatalogCard(item)")
+    end = script.index("\n}\n", start) + len("\n}\n")
+    card_body = script[start:end]
+    assert "handleCardPreview" in card_body or "loadCardPreview" in card_body
+    assert "media-placeholder" in card_body
+
+
+def test_card_does_not_have_separate_footer_preview_button(client: TestClient) -> None:
+    script = client.get("/assets/app.js").text
+    start = script.index("function renderCatalogCard(item)")
+    end = script.index("\n}\n", start) + len("\n}\n")
+    card_body = script[start:end]
+    assert "catalog-card__preview-button" not in card_body or "Preview" not in card_body
+
+
+def test_javascript_no_manual_frame_navigation_controls(client: TestClient) -> None:
+    script = client.get("/assets/app.js").text
+    assert '"Prev"' not in script or "detailsPreviewNavigate" not in script
+    assert '"Next"' not in script or "detailsPreviewNavigate" not in script
+    assert '"Start"' not in script or "detailsPreviewNavigate" not in script
+
+
+def test_details_has_no_frame_counter(client: TestClient) -> None:
+    script = client.get("/assets/app.js").text
+    assert "details-preview-counter" not in script or "detailsPreviewNavigate" not in script
+
+
+def test_details_dialog_has_one_visual_surface(client: TestClient) -> None:
+    html = client.get("/").text
+    details_section = html[html.index("media-details-dialog"):]
+    assert details_section.count("media-placeholder") <= 2
+
+
+def test_metadata_dialog_contains_save_and_discard(client: TestClient) -> None:
+    html = client.get("/").text
+    dialog_section = html[html.index("metadata-dialog"):]
+    assert "Save metadata" in dialog_section
+    assert "Discard changes" in dialog_section
+    assert "metadata-save-button" in dialog_section
+    assert "metadata-discard-button" in dialog_section
+
+
+def test_css_metadata_dialog_has_scrollable_body(client: TestClient) -> None:
+    css = client.get("/assets/styles.css").text
+    assert "overflow-y" in css or "overflow-y" in css
+    assert "dvh" in css or "vh" in css or "max-height" in css

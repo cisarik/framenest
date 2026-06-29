@@ -121,8 +121,9 @@ const detailsEditButton = document.querySelector("#media-details-edit");
 const detailsLoading = document.querySelector("#media-details-loading");
 const detailsError = document.querySelector("#media-details-error");
 const detailsContent = document.querySelector("#media-details-content");
-const detailsPlaceholder = document.querySelector("#media-details-placeholder");
+const detailsPreviewContainer = document.querySelector("#details-preview-container");
 const detailsDisplayTitle = document.querySelector("#media-details-display-title");
+const detailsDialogTitle = document.querySelector("#media-details-title");
 const detailsKind = document.querySelector("#media-details-kind");
 const detailsTagsContainer = document.querySelector("#media-details-tags");
 const detailsProcessedContainer = document.querySelector("#media-details-processed");
@@ -559,10 +560,13 @@ function stopDetailsPreviewTimer() {
   detailsPreviewActive = false;
 }
 
-async function handleCardPreview(item, card, button) {
+async function handleCardPreview(item, card, placeholder) {
   if (activePreviewMediaId === item.media_id) {
     stopCardPreviewTimer();
-    renderCardPreviewState(card, item, "stopped");
+    const cached = getCachedPreview(item.media_id);
+    if (cached && !cached.error && cached.frames) {
+      renderCardPreviewFrames(card, item, cached);
+    }
     return;
   }
   stopCardPreviewTimer();
@@ -582,7 +586,6 @@ async function handleCardPreview(item, card, button) {
     return;
   }
   const token = ++previewRequestToken;
-  button.disabled = true;
   renderCardPreviewState(card, item, "loading");
   try {
     const response = await fetch(`${LIBRARIES_ENDPOINT}/${location.libraryId}/media-analysis-preview`, {
@@ -612,10 +615,6 @@ async function handleCardPreview(item, card, button) {
       setCachedPreview(item.media_id, { error: true });
       renderCardPreviewState(card, item, "error");
     }
-  } finally {
-    if (token === previewRequestToken) {
-      button.disabled = false;
-    }
   }
 }
 
@@ -643,7 +642,8 @@ function renderCardPreviewState(card, item, state) {
     retry.setAttribute("aria-label", "Retry preview");
     retry.addEventListener("click", () => {
       previewCacheMap.delete(item.media_id);
-      handleCardPreview(item, card, card.querySelector(".catalog-card__preview-button"));
+      const ph = card.querySelector(".media-placeholder");
+      handleCardPreview(item, card, ph);
     });
     placeholder.appendChild(retry);
   } else if (state === "unavailable-location") {
@@ -697,10 +697,6 @@ function startCardPreviewCycling(card, item, cacheEntry) {
     frameIndex = (frameIndex + 1) % cacheEntry.frames.length;
     img.src = cacheEntry.frames[frameIndex].objectUrl;
   }, PREVIEW_FRAME_INTERVAL_MS);
-  const button = card.querySelector(".catalog-card__preview-button");
-  if (button) {
-    button.setAttribute("aria-pressed", "true");
-  }
 }
 
 function loadDetailsPreview(item) {
@@ -788,55 +784,9 @@ function renderDetailsPreviewFrames(cacheEntry) {
   img.style.borderRadius = "var(--radius-md)";
   img.style.objectFit = "contain";
   container.appendChild(img);
-  if (cacheEntry.frames.length > 1) {
-    const controls = document.createElement("div");
-    controls.className = "details-preview-controls";
-    const counter = document.createElement("span");
-    counter.id = "details-preview-counter";
-    counter.textContent = `1 / ${cacheEntry.frames.length}`;
-    controls.appendChild(counter);
-    const prevBtn = document.createElement("button");
-    prevBtn.type = "button";
-    prevBtn.textContent = "Prev";
-    prevBtn.setAttribute("aria-label", "Previous frame");
-    prevBtn.addEventListener("click", () => detailsPreviewNavigate(-1));
-    controls.appendChild(prevBtn);
-    const nextBtn = document.createElement("button");
-    nextBtn.type = "button";
-    nextBtn.textContent = "Next";
-    nextBtn.setAttribute("aria-label", "Next frame");
-    nextBtn.addEventListener("click", () => detailsPreviewNavigate(1));
-    controls.appendChild(nextBtn);
-    if (!prefersReducedMotion) {
-      const startStopBtn = document.createElement("button");
-      startStopBtn.id = "details-preview-start-stop";
-      startStopBtn.type = "button";
-      startStopBtn.textContent = "Start";
-      startStopBtn.setAttribute("aria-pressed", "false");
-      startStopBtn.addEventListener("click", () => {
-        if (detailsPreviewActive) {
-          stopDetailsPreviewTimer();
-          startStopBtn.textContent = "Start";
-          startStopBtn.setAttribute("aria-pressed", "false");
-        } else {
-          startDetailsPreviewCycling();
-          startStopBtn.textContent = "Stop";
-          startStopBtn.setAttribute("aria-pressed", "true");
-        }
-      });
-      controls.appendChild(startStopBtn);
-    }
-    container.appendChild(controls);
+  if (cacheEntry.frames.length > 1 && !prefersReducedMotion) {
+    startDetailsPreviewCycling();
   }
-}
-
-function detailsPreviewNavigate(direction) {
-  if (!detailsPreviewFrames || detailsPreviewFrames.length === 0) return;
-  detailsPreviewFrameIndex = (detailsPreviewFrameIndex + direction + detailsPreviewFrames.length) % detailsPreviewFrames.length;
-  const img = document.querySelector("#details-preview-img");
-  if (img) img.src = detailsPreviewFrames[detailsPreviewFrameIndex].objectUrl;
-  const counter = document.querySelector("#details-preview-counter");
-  if (counter) counter.textContent = `${detailsPreviewFrameIndex + 1} / ${detailsPreviewFrames.length}`;
 }
 
 function startDetailsPreviewCycling() {
@@ -844,7 +794,10 @@ function startDetailsPreviewCycling() {
   stopDetailsPreviewTimer();
   detailsPreviewActive = true;
   detailsPreviewTimer = setInterval(() => {
-    detailsPreviewNavigate(1);
+    if (!detailsPreviewFrames) return;
+    detailsPreviewFrameIndex = (detailsPreviewFrameIndex + 1) % detailsPreviewFrames.length;
+    const img = document.querySelector("#details-preview-img");
+    if (img) img.src = detailsPreviewFrames[detailsPreviewFrameIndex].objectUrl;
   }, PREVIEW_FRAME_INTERVAL_MS);
 }
 
@@ -1206,13 +1159,18 @@ function setCatalogPagination(page) {
 function renderCatalogCard(item) {
   const card = document.createElement("article");
   card.className = "catalog-card";
+  card.dataset.mediaId = item.media_id;
   if (metadataWorkspace.openMediaId === item.media_id) {
     card.classList.add("catalog-card--selected");
   }
 
   const placeholder = document.createElement("div");
   placeholder.className = "media-placeholder media-placeholder--" + item.media_kind;
-  placeholder.setAttribute("aria-hidden", "true");
+  placeholder.setAttribute("role", "button");
+  placeholder.setAttribute("tabindex", "0");
+  const previewLabel = `Load preview for ${item.display_title || deriveCatalogFallbackTitle(item)}`;
+  placeholder.setAttribute("aria-label", previewLabel);
+  placeholder.title = "Preview";
   const cached = getCachedPreview(item.media_id);
   if (cached && !cached.error && cached.frames && cached.frames.length > 0) {
     placeholder.setAttribute("data-preview-state", "loaded");
@@ -1227,13 +1185,21 @@ function renderCatalogCard(item) {
   } else {
     const glyph = document.createElement("span");
     glyph.className = "media-placeholder__glyph";
-    glyph.textContent = item.media_kind === "video" ? "▶" : "◆";
+    glyph.textContent = item.media_kind === "video" ? "◆" : "◆";
+    glyph.setAttribute("aria-hidden", "true");
     placeholder.appendChild(glyph);
     const placeholderLabel = document.createElement("span");
     placeholderLabel.className = "media-placeholder__label";
     placeholderLabel.textContent = item.media_kind === "video" ? "Video placeholder" : "Animated image placeholder";
     placeholder.appendChild(placeholderLabel);
   }
+  placeholder.addEventListener("click", () => handleCardPreview(item, card, placeholder));
+  placeholder.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      handleCardPreview(item, card, placeholder);
+    }
+  });
 
   const body = document.createElement("div");
   body.className = "catalog-card__body";
@@ -1285,13 +1251,6 @@ function renderCatalogCard(item) {
 
   const actions = document.createElement("div");
   actions.className = "catalog-card__actions";
-  const previewButton = document.createElement("button");
-  previewButton.className = "catalog-card__action catalog-card__preview-button";
-  previewButton.type = "button";
-  previewButton.textContent = "Preview";
-  previewButton.setAttribute("aria-label", `Preview ${item.display_title || deriveCatalogFallbackTitle(item)}`);
-  previewButton.setAttribute("aria-pressed", "false");
-  previewButton.addEventListener("click", () => handleCardPreview(item, card, previewButton));
   const detailsButton = document.createElement("button");
   detailsButton.className = "catalog-card__action";
   detailsButton.type = "button";
@@ -1304,7 +1263,7 @@ function renderCatalogCard(item) {
   editButton.textContent = "Edit metadata";
   editButton.setAttribute("aria-label", `Edit metadata for ${item.display_title || deriveCatalogFallbackTitle(item)}`);
   editButton.addEventListener("click", () => handleOpenMetadataWorkspace(item, editButton));
-  actions.append(previewButton, detailsButton, editButton);
+  actions.append(detailsButton, editButton);
 
   card.append(placeholder, body, actions);
   return card;
@@ -1661,18 +1620,38 @@ async function populateDetailsDialog(item) {
     detailsLoading.hidden = true;
     detailsContent.hidden = false;
 
-    detailsPlaceholder.className = "media-placeholder media-placeholder--large media-placeholder--" + item.media_kind;
-    detailsPlaceholder.replaceChildren();
-    const glyph = document.createElement("span");
-    glyph.className = "media-placeholder__glyph";
-    glyph.textContent = item.media_kind === "video" ? "▶" : "◆";
-    detailsPlaceholder.appendChild(glyph);
-    const placeholderLabel = document.createElement("span");
-    placeholderLabel.className = "media-placeholder__label";
-    placeholderLabel.textContent = item.media_kind === "video" ? "Video placeholder" : "Animated image placeholder";
-    detailsPlaceholder.appendChild(placeholderLabel);
+    detailsPreviewContainer.className = "details-preview-container media-placeholder media-placeholder--large media-placeholder--" + item.media_kind;
+    detailsPreviewContainer.setAttribute("role", "button");
+    detailsPreviewContainer.setAttribute("tabindex", "0");
+    detailsPreviewContainer.setAttribute("aria-label", `Load preview for ${item.display_title || deriveCatalogFallbackTitle(item)}`);
+    detailsPreviewContainer.title = "Preview";
+    detailsPreviewContainer.replaceChildren();
+    const cachedPreview = getCachedPreview(item.media_id);
+    if (cachedPreview && !cachedPreview.error && cachedPreview.frames && cachedPreview.frames.length > 0) {
+      renderDetailsPreviewFrames(cachedPreview);
+    } else {
+      const glyph = document.createElement("span");
+      glyph.className = "media-placeholder__glyph";
+      glyph.textContent = "◆";
+      glyph.setAttribute("aria-hidden", "true");
+      detailsPreviewContainer.appendChild(glyph);
+      const placeholderLabel = document.createElement("span");
+      placeholderLabel.className = "media-placeholder__label";
+      placeholderLabel.textContent = item.media_kind === "video" ? "Video placeholder — click to preview" : "Animated image placeholder — click to preview";
+      detailsPreviewContainer.appendChild(placeholderLabel);
+      detailsPreviewContainer.onclick = () => loadDetailsPreview(item);
+      detailsPreviewContainer.onkeydown = (event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          loadDetailsPreview(item);
+        }
+      };
+    }
 
     detailsDisplayTitle.textContent = item.display_title || deriveCatalogFallbackTitle(item);
+    if (detailsDialogTitle) {
+      detailsDialogTitle.textContent = item.display_title || deriveCatalogFallbackTitle(item);
+    }
     detailsKind.textContent = formatCatalogKind(item.media_kind);
 
     detailsTagsContainer.replaceChildren();
@@ -2575,12 +2554,18 @@ function closeCommandSearchSuggestions() {
   commandSearchCurrentSuggestions = [];
 }
 
-function renderCommandSearchSuggestions(titleItems, tagMatches) {
+function renderCommandSearchSuggestions(titleItems, tagMatches, fallbackItems) {
   if (!commandSearchSuggestions) return;
+  const hasRealSuggestions = (titleItems && titleItems.length > 0) || (tagMatches && tagMatches.length > 0) || (fallbackItems && fallbackItems.length > 0);
+  if (!hasRealSuggestions) {
+    closeCommandSearchSuggestions();
+    return;
+  }
   commandSearchSuggestions.replaceChildren();
   commandSearchCurrentSuggestions = [];
   const maxTitles = 5;
   const maxTags = 5;
+  const maxFallback = 3;
   let count = 0;
   titleItems.forEach((item) => {
     if (count >= maxTitles) return;
@@ -2608,8 +2593,37 @@ function renderCommandSearchSuggestions(titleItems, tagMatches) {
     commandSearchCurrentSuggestions.push(li);
     count++;
   });
+  if (fallbackItems) {
+    fallbackItems.forEach((item) => {
+      if (commandSearchCurrentSuggestions.length >= maxTitles + maxFallback) return;
+      const li = document.createElement("li");
+      li.className = "command-search-suggestion";
+      li.setAttribute("role", "option");
+      li.dataset.suggestionType = "title";
+      li.dataset.suggestionMediaId = item.media_id;
+      const typeSpan = document.createElement("span");
+      typeSpan.className = "command-search-suggestion__type";
+      typeSpan.textContent = "File";
+      const labelSpan = document.createElement("span");
+      labelSpan.className = "command-search-suggestion__label";
+      labelSpan.textContent = deriveCatalogFallbackTitle(item);
+      li.appendChild(typeSpan);
+      li.appendChild(labelSpan);
+      li.addEventListener("click", () => {
+        closeCommandSearchSuggestions();
+        const card = document.querySelector(`[data-media-id="${item.media_id}"]`);
+        if (card) {
+          card.scrollIntoView({ block: "center", behavior: "smooth" });
+          card.classList.add("catalog-card--flash");
+          setTimeout(() => card.classList.remove("catalog-card--flash"), 1500);
+        }
+      });
+      commandSearchSuggestions.appendChild(li);
+      commandSearchCurrentSuggestions.push(li);
+    });
+  }
   tagMatches.forEach((tag) => {
-    if (commandSearchCurrentSuggestions.length >= maxTitles + maxTags) return;
+    if (commandSearchCurrentSuggestions.length >= maxTitles + maxTags + maxFallback) return;
     const li = document.createElement("li");
     li.className = "command-search-suggestion";
     li.setAttribute("role", "option");
@@ -2636,12 +2650,6 @@ function renderCommandSearchSuggestions(titleItems, tagMatches) {
     commandSearchSuggestions.appendChild(li);
     commandSearchCurrentSuggestions.push(li);
   });
-  if (commandSearchCurrentSuggestions.length === 0) {
-    const li = document.createElement("li");
-    li.className = "command-search-suggestion__empty";
-    li.textContent = "No matches.";
-    commandSearchSuggestions.appendChild(li);
-  }
   commandSearchSuggestions.hidden = false;
   commandSearchInput.setAttribute("aria-expanded", "true");
   commandSearchActiveIndex = -1;
@@ -2662,12 +2670,25 @@ async function performCommandSearch(query) {
     return;
   }
   const token = ++commandSearchRequestToken;
+  const lowerQuery = query.toLowerCase();
   const tagMatches = canonicalTagDefinitions
     .filter((tag) =>
-      tag.key.toLowerCase().includes(query.toLowerCase()) ||
-      tag.display_name.toLowerCase().includes(query.toLowerCase())
+      tag.key.toLowerCase().includes(lowerQuery) ||
+      tag.display_name.toLowerCase().includes(lowerQuery)
     )
     .slice(0, 5);
+  const fallbackMatches = [];
+  const cardElements = catalogResults.querySelectorAll(".catalog-card");
+  cardElements.forEach((card) => {
+    const mediaId = card.dataset.mediaId;
+    if (!mediaId) return;
+    const titleEl = card.querySelector("h3");
+    if (!titleEl) return;
+    const title = titleEl.textContent || "";
+    if (title.toLowerCase().includes(lowerQuery)) {
+      fallbackMatches.push({ media_id: mediaId, _fallbackTitle: title });
+    }
+  });
   try {
     const params = new URLSearchParams();
     params.set("q", query);
@@ -2679,16 +2700,19 @@ async function performCommandSearch(query) {
     });
     if (token !== commandSearchRequestToken) return;
     if (!response.ok) {
-      renderCommandSearchSuggestions([], tagMatches);
+      renderCommandSearchSuggestions([], tagMatches, fallbackMatches.slice(0, 3));
       return;
     }
     const payload = await response.json();
     if (token !== commandSearchRequestToken) return;
     const titleItems = (payload.items || []).filter((item) => item.display_title);
-    renderCommandSearchSuggestions(titleItems, tagMatches);
+    const filteredFallback = fallbackMatches.filter((fm) =>
+      !titleItems.some((ti) => ti.media_id === fm.media_id)
+    ).slice(0, 3);
+    renderCommandSearchSuggestions(titleItems, tagMatches, filteredFallback);
   } catch {
     if (token !== commandSearchRequestToken) return;
-    renderCommandSearchSuggestions([], tagMatches);
+    renderCommandSearchSuggestions([], tagMatches, fallbackMatches.slice(0, 3));
   }
 }
 
@@ -2868,15 +2892,6 @@ if (detailsEditButton) {
   });
 }
 
-const detailsPreviewLoadBtn = document.querySelector("#details-preview-load");
-if (detailsPreviewLoadBtn) {
-  detailsPreviewLoadBtn.addEventListener("click", () => {
-    if (detailsCurrentItem) {
-      loadDetailsPreview(detailsCurrentItem);
-    }
-  });
-}
-
 if (metadataDialog) {
   metadataDialog.addEventListener("keydown", (event) => {
     if (event.key === "Escape") {
@@ -2900,4 +2915,7 @@ loadAiCapability();
 loadCatalogTags();
 loadCatalog();
 loadLibraries();
+if (commandSearchInput) {
+  commandSearchInput.focus({ preventScroll: true });
+}
 window.addEventListener("pagehide", revokePreviewObjectUrls);
