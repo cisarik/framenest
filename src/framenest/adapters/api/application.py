@@ -15,6 +15,10 @@ from framenest.adapters.api.media_analysis_api import (
     MediaAnalysisApiDependencies,
     create_media_analysis_api_router,
 )
+from framenest.adapters.api.media_content_api import (
+    MediaContentApiDependencies,
+    create_media_content_api_router,
+)
 from framenest.adapters.api.media_import_api import (
     MediaImportApiDependencies,
     create_media_import_api_router,
@@ -41,6 +45,7 @@ from framenest.application.media_metadata import (
     SaveMediaMetadata,
 )
 from framenest.application.media_analysis import PrepareLocalMediaAnalysis
+from framenest.application.media_content import ResolveMediaContent
 from framenest.application.media_suggestion import PreviewMediaSuggestion
 from framenest.adapters.api.library_api import (
     LibraryApiDependencies,
@@ -51,6 +56,7 @@ from framenest.configuration import FrameNestSettings, load_settings
 from framenest.infrastructure.ai import NvidiaNimMediaSuggestionProvider
 from framenest.infrastructure.ai.credentials import load_nvidia_api_credential
 from framenest.infrastructure.filesystem.library_scanner import LocalLibraryScanner
+from framenest.infrastructure.filesystem.media_content import LocalMediaContentReader
 from framenest.infrastructure.media_analysis import LocalMediaAnalysisAdapter
 from framenest.infrastructure.persistence.engine import create_sqlite_engine, dispose_engine
 from framenest.infrastructure.persistence.library_repository import SqliteLibraryRepository
@@ -87,6 +93,7 @@ def create_app(
     media_catalog_api_dependencies: MediaCatalogApiDependencies | None = None,
     media_metadata_api_dependencies: MediaMetadataApiDependencies | None = None,
     media_analysis_api_dependencies: MediaAnalysisApiDependencies | None = None,
+    media_content_api_dependencies: MediaContentApiDependencies | None = None,
     media_suggestion_api_dependencies: MediaSuggestionApiDependencies | None = None,
 ) -> FastAPI:
     resolved_settings = settings if settings is not None else load_settings()
@@ -101,6 +108,7 @@ def create_app(
         or media_catalog_api_dependencies is None
         or media_metadata_api_dependencies is None
         or media_analysis_api_dependencies is None
+        or media_content_api_dependencies is None
         or media_suggestion_api_dependencies is None
     ):
         owned_engine = create_sqlite_engine(resolved_settings.database_path)
@@ -153,6 +161,17 @@ def create_app(
             ),
             catalog_available=resolved_settings.database_path.exists,
         )
+    if media_content_api_dependencies is None:
+        assert owned_media_repository is not None
+        assert owned_library_repository is not None
+        media_content_api_dependencies = MediaContentApiDependencies(
+            resolve_content=ResolveMediaContent(
+                owned_media_repository,
+                owned_library_repository,
+                LocalMediaContentReader(),
+            ),
+            catalog_available=resolved_settings.database_path.exists,
+        )
     if media_suggestion_api_dependencies is None:
         assert owned_library_repository is not None
         credential = load_nvidia_api_credential()
@@ -183,6 +202,7 @@ def create_app(
     app.include_router(create_media_catalog_api_router(media_catalog_api_dependencies))
     app.include_router(create_media_metadata_api_router(media_metadata_api_dependencies))
     app.include_router(create_media_analysis_api_router(media_analysis_api_dependencies))
+    app.include_router(create_media_content_api_router(media_content_api_dependencies))
     app.include_router(create_media_suggestion_api_router(media_suggestion_api_dependencies))
 
     @app.get("/", response_class=HTMLResponse)

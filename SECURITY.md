@@ -80,6 +80,20 @@ FrameNest security work should follow these principles:
 - Require explicit confirmation for destructive actions.
 - Do not distribute provider secrets to ordinary client installations.
 
+## Secure Media Content Endpoint
+
+The `GET /api/media/{media_id}/locations/{location_id}/content` endpoint serves registered local media content securely:
+
+- **Identity-only URLs**: The URL contains only catalog identities (`media_id`, `location_id`), never a filesystem path. Absolute paths, database paths, and filesystem details are never exposed in response bodies, headers, or error messages.
+- **Registered-root containment**: The filesystem adapter treats the registered library root as the only authority. The catalog relative path is resolved without permitting absolute paths or traversal, and the resolved target must remain inside the resolved registered root.
+- **Symlink escape prevention**: Symlinks are resolved and any target outside the registered root is rejected. A symlink is permitted only when its final resolved target remains inside that root.
+- **Catalog relationship checks**: Each request verifies that the logical media exists, the physical location exists, the location belongs to the requested logical media, the location availability is `available`, and the referenced library is registered.
+- **Exact kind/extension allowlist**: Only `video` + `.mp4` → `video/mp4` and `animated_image` + `.gif` → `image/gif` are served. No arbitrary MIME types are inferred and unsupported extensions are rejected.
+- **Sanitized failures**: Errors are mapped to stable sanitized codes and messages (`503` catalog unavailable, `404` identity not found or mismatched, `409` unavailable/unsafe/unsupported content, `416` unsatisfiable range, `500` unexpected failure). All error responses use `Cache-Control: no-store`. Underlying exception text, SQL, and filesystem paths are never disclosed.
+- **No arbitrary path-serving API**: The endpoint does not accept or serve arbitrary filesystem paths. It serves only catalog-referenced content beneath a registered library root.
+- **Read-only behavior**: The endpoint performs no database or filesystem mutation. Repository calls are read-only.
+- **Streaming safety**: Successful responses send `X-Content-Type-Options: nosniff`, `Cache-Control: private, no-store`, and `Accept-Ranges: bytes`. File handles are closed reliably including interrupted streaming.
+
 ## Dependencies and Updates
 
 Dependencies, update mechanisms, packaging flows, and production deployment procedures must be pinned where appropriate, reviewed, tested, and documented before production use.
