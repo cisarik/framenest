@@ -105,79 +105,46 @@
       </div>
     </dialog>
 
-    <dialog id="metadata-dialog" class="metadata-dialog" aria-label="Edit metadata">
+    <dialog id="metadata-dialog" class="metadata-dialog" aria-label="Edit media">
       <div class="metadata-dialog__header">
-        <h2 id="metadata-workspace-title" class="metadata-dialog__title" tabindex="-1">Current metadata</h2>
+        <h2 id="metadata-workspace-title" class="metadata-dialog__title" tabindex="-1">Edit media</h2>
         <button id="metadata-close-button" class="metadata-dialog__close" type="button" aria-label="Close metadata editor">✕</button>
       </div>
-      <p id="metadata-workspace-context" class="metadata-context">No imported medium is selected.</p>
-
-      <div class="metadata-state-strip" aria-live="polite" aria-atomic="true">
-        <p id="metadata-state-loading" class="metadata-state" hidden>Loading...</p>
-        <p id="metadata-state-ready" class="metadata-state" hidden>Clean.</p>
-        <p id="metadata-state-dirty" class="metadata-state metadata-state--dirty" hidden>Unsaved changes.</p>
-        <p id="metadata-state-saving" class="metadata-state" hidden>Saving...</p>
-        <p id="metadata-state-saved" class="metadata-state metadata-state--saved" hidden>Saved.</p>
-        <p id="metadata-state-unavailable" class="metadata-state metadata-state--warning" hidden>Catalog unavailable.</p>
-        <p id="metadata-state-not-found" class="metadata-state metadata-state--warning" hidden>Medium no longer available.</p>
-        <p id="metadata-state-validation" class="metadata-state metadata-state--warning" hidden>Validation failed.</p>
-        <p id="metadata-state-error" class="metadata-state metadata-state--warning" hidden>Error.</p>
-      </div>
+      <p id="metadata-workspace-context" class="metadata-context" hidden>No imported medium is selected.</p>
+      <p id="metadata-status" class="metadata-status" aria-live="polite" aria-atomic="true"></p>
 
       <div id="metadata-workspace" class="metadata-workspace" hidden>
         <div class="metadata-workspace__body">
           <div class="metadata-form-panel">
             <label class="metadata-field" for="metadata-title-input">
-              <span>Display title</span>
+              <span>Title</span>
               <input id="metadata-title-input" type="text" maxlength="240" autocomplete="off">
             </label>
             <p id="metadata-title-fallback" class="metadata-note" hidden></p>
             <p id="metadata-validation-message" class="metadata-validation" role="status"></p>
 
             <label class="metadata-field" for="metadata-description-input">
-              <span>Description (plain text)</span>
+              <span>Description</span>
               <textarea id="metadata-description-input" rows="5" autocomplete="off"></textarea>
             </label>
-            <p id="metadata-description-count" class="metadata-note">0 / 10000</p>
-            <div id="metadata-collection-status" class="metadata-field" hidden>
-              <span>Processed status</span>
-              <p id="metadata-collection-message" class="metadata-note">Not assigned to the Processed collection.</p>
-            </div>
+            <p id="metadata-description-status" class="metadata-note" aria-live="polite" hidden></p>
           </div>
 
           <div class="metadata-tags-panel">
             <label class="metadata-field" for="metadata-tag-search-input">
-              <span>Search canonical tags</span>
-              <input id="metadata-tag-search-input" type="text" autocomplete="off">
+              <span>Tags</span>
+              <input id="metadata-tag-search-input" type="text" autocomplete="off" placeholder="Search or add a tag" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="metadata-tag-suggestions">
             </label>
-            <div id="metadata-tag-suggestions" class="metadata-tag-suggestions" aria-live="polite"></div>
-            <div class="metadata-selected-heading">
-              <h4>Selected canonical tags</h4>
-              <p id="metadata-selected-count">0 of 32 selected.</p>
-            </div>
+            <div id="metadata-tag-suggestions" class="metadata-tag-suggestions" role="listbox"></div>
             <div id="metadata-selected-tags" class="metadata-selected-tags" aria-live="polite"></div>
+            <p id="metadata-tag-status" class="metadata-note" aria-live="polite"></p>
           </div>
-
-          <form id="metadata-create-tag-form" class="metadata-create-tag-form">
-            <div class="metadata-create-grid">
-              <label class="metadata-field" for="metadata-create-key-input">
-                <span>Canonical key</span>
-                <input id="metadata-create-key-input" type="text" autocomplete="off" maxlength="64">
-              </label>
-              <label class="metadata-field" for="metadata-create-name-input">
-                <span>Display name</span>
-                <input id="metadata-create-name-input" type="text" autocomplete="off" maxlength="80">
-              </label>
-            </div>
-            <button id="metadata-create-select-button" type="submit">Create and select</button>
-            <p id="metadata-create-status" class="metadata-create-status" role="status"></p>
-          </form>
         </div>
       </div>
 
       <div class="metadata-dialog__footer">
-        <button id="metadata-save-button" type="button" disabled>Save metadata</button>
-        <button id="metadata-discard-button" type="button" disabled>Discard changes</button>
+        <button id="metadata-save-button" type="button" disabled>Save</button>
+        <button id="metadata-discard-button" type="button">Cancel</button>
       </div>
     </dialog>
 

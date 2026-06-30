@@ -37,26 +37,25 @@ dashboard.
 ## Media Detail And Metadata Workspace
 
 The media detail direction is manual-first. The current packaged Catalog
-browser includes a bounded inline manual `Current` metadata workspace for one
-selected imported medium. Opening the workspace loads existing title/tag
-metadata and canonical tag definitions; it must not trigger an AI call, save
-catalog metadata, or mutate the filesystem. When no durable display title
-exists, the browser may show a fallback label derived from the first
+browser includes a bounded manual media editor for one selected imported
+medium. Opening the editor loads existing title, description, and tag metadata;
+it must not trigger an AI call, save catalog metadata, or mutate the filesystem.
+When no durable title exists, the browser may show a fallback label derived from the first
 deterministic relative location, but the display title, physical filename,
 library-relative path, suggested filename, catalog save, and future physical
 rename operation remain separate concepts.
 
-The current `Current` workspace edits display title, optional plain-text
-description, and ordered canonical tags only, and shows the persisted
-`Processed` workflow collection state read-only. The `Processed` membership is
-derived automatically from durable tag saves, not chosen manually. Future
-Metadata workspace work should expand the fixed editable `Current` working state
-and add optional separate AI drafts as described in
+The current editor exposes ordinary `Title`, `Description`, `Tags`, `Save`, and
+`Cancel` controls. Tag creation happens from the same search/add control and
+uses hidden stable tag keys; those internal keys, collection assignment, and
+`Processed` workflow state are not ordinary editor controls. The `Processed`
+membership remains derived automatically from durable tag saves, not chosen
+manually. Future metadata work should add optional separate AI drafts as described in
 [AI_WORKSPACE.md](AI_WORKSPACE.md) and
 [ADR-0023](docs/adr/0023-manual-first-metadata-and-multi-model-ai-drafts.md).
 AI draft comparison is future architecture. The current repository also
 implements the pre-alpha non-persistent browser AI suggestion review, which is
-separate from catalog `Current` saves.
+separate from manual catalog saves.
 
 The Details dialog now plays real local GIF and MP4 content through the
 identity-only `GET /api/media/{media_id}/locations/{location_id}/content`
@@ -72,8 +71,8 @@ opens actual Details playback, while card actions are labelled `Details` and
 thumbnails, or the future cover pipeline; generic available-media placeholders
 are rejected. Details is player-first. Native/VLC playback, downloadable files,
 and a broader media player are future work.
-Canonical tag editing should support suggestions, keyboard and mouse
-navigation, rounded removable chips, an explicit `×` control, visible
+Tag editing should support suggestions, keyboard and mouse navigation,
+rounded removable chips, an explicit `×` control, visible
 hover/focus/selected/AI-suggested/invalid states, case-insensitive duplicate
 prevention, and immediate local filtering without progress UI for trivial local
 search.

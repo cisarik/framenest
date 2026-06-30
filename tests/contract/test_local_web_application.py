@@ -201,27 +201,33 @@ def test_web_shell_contains_manual_current_metadata_workspace(client: TestClient
     html = client.get("/").text
 
     assert "metadata-workspace" in html or "metadata-dialog" in html
-    assert "Display title" in html
-    assert "Search canonical tags" in html
+    dialog_section = html[html.index("metadata-dialog"):]
+    assert "Edit media" in dialog_section
+    assert "Title" in dialog_section
+    assert "Description" in dialog_section
+    assert "Tags" in dialog_section
+    assert "Search or add a tag" in dialog_section
     assert "metadata-tag-suggestions" in html
     assert "metadata-selected-tags" in html
-    assert "Canonical key" in html
-    assert "Display name" in html
-    assert "Create and select" in html
-    assert "Save metadata" in html
-    assert "Discard changes" in html
-    for state in (
-        "metadata-state-loading",
-        "metadata-state-ready",
-        "metadata-state-dirty",
-        "metadata-state-saving",
-        "metadata-state-saved",
-        "metadata-state-unavailable",
-        "metadata-state-not-found",
-        "metadata-state-validation",
-        "metadata-state-error",
+    assert "Save" in dialog_section
+    assert "Cancel" in dialog_section
+    for obsolete in (
+        "Current metadata",
+        "Display title",
+        "Search canonical tags",
+        "Canonical key",
+        "Display name",
+        "Create and select",
+        "Selected canonical tags",
+        "Save metadata",
+        "Discard changes",
+        "Processed status",
+        "Clean.",
+        "Unsaved changes.",
+        "0 / 10000",
+        "0 of 32 selected",
     ):
-        assert state in html
+        assert obsolete not in dialog_section
 
 
 def test_browser_defines_unicode_code_point_length_helper(client: TestClient) -> None:
@@ -238,12 +244,13 @@ def test_browser_description_uses_code_point_length_instead_of_utf16(client: Tes
 
 def test_browser_description_counter_uses_code_point_length(client: TestClient) -> None:
     script = client.get("/assets/app.js").text
-    assert "unicodeCodePointLength(descriptionInput.value)" in script or "unicodeCodePointLength(input.value)" in script
+    assert "unicodeCodePointLength(metadataDescriptionInput.value)" in script
     assert "input.value.length" not in script or (
         "input.value.length" in script and "unicodeCodePointLength" in script
     )
-    counter_block = script[script.index("function updateDescriptionCount") : script.index("function renderMetadataWorkspace")]
-    assert "unicodeCodePointLength" in counter_block
+    status_block = script[script.index("function updateDescriptionStatus") : script.index("function renderMetadataWorkspace")]
+    assert "unicodeCodePointLength" in status_block
+    assert "metadataDescriptionStatus.hidden = true" in status_block
 
 
 def test_browser_description_textarea_has_no_maxlength(client: TestClient) -> None:
@@ -297,7 +304,8 @@ def test_javascript_metadata_workspace_uses_existing_same_origin_endpoints(
     assert 'body: JSON.stringify({ display_title: normalized.displayTitle, description: normalized.description, tag_keys: normalized.tagKeys })' in script
     assert 'fetch(CANONICAL_TAGS_ENDPOINT, {' in script
     assert 'method: "POST"' in script
-    assert "handleCreateAndSelectTag" in script
+    assert "createAndSelectMetadataTag" in script
+    assert "handleCreateAndSelectTag" not in script
     assert "CANONICAL_TAG_DEFINITION_CONFLICT" in script
     assert "CANONICAL_TAG_NOT_FOUND" in script
     assert "MEDIA_NOT_FOUND" in script
@@ -319,9 +327,10 @@ def test_javascript_metadata_workspace_tracks_sparse_baseline_dirty_and_discard(
     assert "rawTitle.trim() !== rawTitle" in script
     assert "hasControlCharacter(rawTitle)" in script
     assert "metadataSaveButton.disabled = metadataWorkspace.loading || metadataWorkspace.saving || !dirty || Boolean(validation);" in script
-    assert "metadataDiscardButton.disabled = metadataWorkspace.loading || metadataWorkspace.saving || !dirty;" in script
+    assert "metadataDiscardButton.disabled = metadataWorkspace.saving;" in script
     assert "confirm(\"Discard unsaved metadata changes?\")" in script
     assert "handleDiscardMetadataChanges" in script
+    assert "closeMetadataWorkspace();" in _javascript_function(script, "handleDiscardMetadataChanges")
     assert "metadataBeforeUnloadHandler" in script
     assert "beforeunload" in script
 
@@ -336,13 +345,17 @@ def test_javascript_metadata_workspace_tag_selection_ordering_and_limits(
     assert "function selectMetadataTag" in script
     assert "metadataWorkspace.current.tagKeys.includes(tag.key)" in script
     assert "metadataWorkspace.current.tagKeys.length >= MAX_METADATA_TAGS" in script
-    assert "function moveSelectedMetadataTag" in script
-    assert "moveSelectedMetadataTag(index, -1)" in script
-    assert "moveSelectedMetadataTag(index, 1)" in script
     assert "function removeSelectedMetadataTag" in script
-    assert "Move earlier" in script
-    assert "Move later" in script
-    assert "Remove tag" in script
+    assert "function handleMetadataTagSearchKeydown" in script
+    assert "ArrowDown" in script
+    assert "ArrowUp" in script
+    assert "Add “${displayName}”" in script
+    assert "uniqueTagKeyForDisplayName(displayName)" in script
+    assert "body: JSON.stringify({ key, display_name: displayName })" in script
+    assert "Remove ${displayName}" in script
+    assert "Move earlier" not in script
+    assert "Move later" not in script
+    assert "Remove tag" not in script
     assert "tag_keys: normalized.tagKeys" in script
     assert ".sort(" not in script[script.index("function renderSelectedMetadataTags") : script.index("function renderMetadataTagSuggestions")]
 
@@ -354,9 +367,10 @@ def test_javascript_metadata_save_refreshes_catalog_and_preserves_filters(
 
     assert "async function handleSaveMetadata" in script
     save_block = script[script.index("async function handleSaveMetadata") : script.index("async function handleInspectClick")]
-    assert "created" in save_block
-    assert "updated" in save_block
-    assert "unchanged" in save_block
+    assert 'setMetadataStatus("saved", "Saved.")' in save_block
+    assert "created" not in save_block
+    assert "updated" not in save_block
+    assert "unchanged" not in save_block
     assert "metadataWorkspace.openMediaId" in save_block
     assert "await loadCatalog();" in save_block
     assert "catalogState.q" not in save_block
@@ -657,13 +671,16 @@ def test_browser_catalog_scope_defaults_to_all_media_and_switching_is_well_forme
     assert "params.set(\"collection\", catalogState.collection)" in build_body
 
 
-def test_browser_metadata_workspace_shows_collection_state(client: TestClient) -> None:
+def test_browser_metadata_editor_hides_processed_state_but_preserves_collection_state(
+    client: TestClient,
+) -> None:
     html = client.get("/").text
     script = client.get("/assets/app.js").text
+    dialog_section = html[html.index("metadata-dialog"):]
 
-    assert "metadata-collection-status" in html
-    assert "Processed status" in html
-    assert "Processed collection" in script
+    assert "metadata-collection-status" not in dialog_section
+    assert "Processed status" not in dialog_section
+    assert "Processed collection" not in _javascript_function(script, "renderMetadataWorkspace")
     assert "collectionKey" in script
     assert "processedAtMs" in script
     assert "payload.collection_key" in script
@@ -712,7 +729,8 @@ def test_browser_metadata_workspace_renders_processed_time_semantically(client: 
     html = client.get("/").text
     script = client.get("/assets/app.js").text
 
-    assert "metadata-collection-status" in html
+    dialog_section = html[html.index("metadata-dialog"):]
+    assert "metadata-collection-status" not in dialog_section
     assert "createElement(\"time\")" in script or 'createElement("time")' in script
     assert "datetime" in script
     assert ".toISOString()" in script
@@ -720,8 +738,8 @@ def test_browser_metadata_workspace_renders_processed_time_semantically(client: 
     start = script.index("function renderMetadataWorkspace()")
     end = script.index("\n}\n", start) + len("\n}\n")
     workspace_body = script[start:end]
-    assert "buildProcessedTimeElement" in workspace_body
-    assert "processedAtMs" in workspace_body
+    assert "buildProcessedTimeElement" not in workspace_body
+    assert "processedAtMs" in script
 
 
 def test_browser_catalog_card_renders_processed_time_semantically(client: TestClient) -> None:
@@ -1525,7 +1543,7 @@ def test_javascript_details_replacement_invalidates_old_media_before_new_src(cli
 def test_gallery_reference_no_longer_contains_canonical_tag_fragment() -> None:
     gallery = Path("GALLERY.md").read_text(encoding="utf-8")
     assert "\nsuggestions, keyboard and mouse navigation" not in gallery
-    assert "Canonical tag editing should support suggestions" in gallery
+    assert "Tag editing should support suggestions" in gallery
 
 
 def test_gallery_reference_documents_content_first_playback_boundary() -> None:
@@ -1653,11 +1671,13 @@ def test_details_dialog_has_one_visual_surface(client: TestClient) -> None:
     assert "media-details-display-title" not in details_section
 
 
-def test_metadata_dialog_contains_save_and_discard(client: TestClient) -> None:
+def test_metadata_dialog_contains_save_and_cancel(client: TestClient) -> None:
     html = client.get("/").text
     dialog_section = html[html.index("metadata-dialog"):]
-    assert "Save metadata" in dialog_section
-    assert "Discard changes" in dialog_section
+    assert "Save" in dialog_section
+    assert "Cancel" in dialog_section
+    assert "Save metadata" not in dialog_section
+    assert "Discard changes" not in dialog_section
     assert "metadata-save-button" in dialog_section
     assert "metadata-discard-button" in dialog_section
 
