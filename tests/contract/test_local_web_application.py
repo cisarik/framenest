@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from html.parser import HTMLParser
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -59,6 +60,22 @@ def _parse_document(html: str) -> _AssetReferenceParser:
     parser = _AssetReferenceParser()
     parser.feed(html)
     return parser
+
+
+def _javascript_function(script: str, name: str) -> str:
+    marker = f"function {name}("
+    start = script.index(marker)
+    brace_start = script.index(") {", start) + 2
+    depth = 0
+    for index in range(brace_start, len(script)):
+        char = script[index]
+        if char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                return script[start : index + 1]
+    raise AssertionError(f"Could not find complete JavaScript function {name}")
 
 
 def test_root_serves_framenest_application_document(client: TestClient) -> None:
@@ -1270,9 +1287,7 @@ def test_javascript_details_selects_first_available_location(client: TestClient)
 
 def test_javascript_details_video_has_required_attributes(client: TestClient) -> None:
     script = client.get("/assets/app.js").text
-    start = script.index("function renderDetailsMedia(")
-    end = script.index("\n}\n", start) + len("\n}\n")
-    render_body = script[start:end]
+    render_body = _javascript_function(script, "renderDetailsMedia")
     assert "document.createElement(\"video\")" in render_body
     assert "video.controls = true" in render_body
     assert 'video.preload = "metadata"' in render_body
@@ -1282,18 +1297,14 @@ def test_javascript_details_video_has_required_attributes(client: TestClient) ->
 
 def test_javascript_details_image_uses_real_img(client: TestClient) -> None:
     script = client.get("/assets/app.js").text
-    start = script.index("function renderDetailsMedia(")
-    end = script.index("\n}\n", start) + len("\n}\n")
-    render_body = script[start:end]
+    render_body = _javascript_function(script, "renderDetailsMedia")
     assert "document.createElement(\"img\")" in render_body
     assert ".alt =" in render_body
 
 
 def test_javascript_details_media_uses_display_title(client: TestClient) -> None:
     script = client.get("/assets/app.js").text
-    start = script.index("function renderDetailsMedia(")
-    end = script.index("\n}\n", start) + len("\n}\n")
-    render_body = script[start:end]
+    render_body = _javascript_function(script, "renderDetailsMedia")
     assert "display_title" in render_body or "deriveCatalogFallbackTitle" in render_body
     assert "aria-label" in render_body or ".alt =" in render_body
 
@@ -1309,7 +1320,7 @@ def test_javascript_details_has_explicit_media_cleanup(client: TestClient) -> No
     assert "cleanupDetailsMedia" in script
     close_section = script[script.index("function closeDetailsDialog"):]
     assert "cleanupDetailsMedia" in close_section[:300]
-    cleanup_section = script[script.index("function cleanupDetailsMedia"):]
+    cleanup_section = _javascript_function(script, "cleanupDetailsMedia")
     assert "removeAttribute(\"src\")" in cleanup_section or "removeAttribute('src')" in cleanup_section
     assert "pause()" in cleanup_section
     assert "load()" in cleanup_section
@@ -1318,8 +1329,111 @@ def test_javascript_details_has_explicit_media_cleanup(client: TestClient) -> No
 def test_javascript_details_ignores_stale_media_events(client: TestClient) -> None:
     script = client.get("/assets/app.js").text
     assert "detailsMediaToken" in script
-    render_section = script[script.index("function renderDetailsMedia("):]
+    render_section = _javascript_function(script, "renderDetailsMedia")
     assert "token !== detailsMediaToken" in render_section
+
+
+def test_javascript_details_media_handlers_exist_before_src(client: TestClient) -> None:
+    script = client.get("/assets/app.js").text
+    render_section = _javascript_function(script, "renderDetailsMedia")
+    video_start = render_section.index('document.createElement("video")')
+    image_start = render_section.index('document.createElement("img")')
+    video_section = render_section[video_start:image_start]
+    image_section = render_section[image_start:]
+
+    for handler in ("video.onloadeddata =", "video.oncanplay =", "video.onerror ="):
+        assert video_section.index(handler) < video_section.index("video.src = url")
+    assert video_section.index("video.src = url") < video_section.index("appendChild(video)")
+
+    for handler in ("img.onload =", "img.onerror ="):
+        assert image_section.index(handler) < image_section.index("img.src = url")
+    assert image_section.index("img.src = url") < image_section.index("appendChild(img)")
+
+
+def test_javascript_details_media_loading_cannot_start_before_handlers(client: TestClient) -> None:
+    script = client.get("/assets/app.js").text
+    render_section = _javascript_function(script, "renderDetailsMedia")
+
+    video_src_index = render_section.index("video.src = url")
+    assert render_section.index("video.onloadeddata =") < video_src_index
+    assert render_section.index("video.oncanplay =") < video_src_index
+    assert render_section.index("video.onerror =") < video_src_index
+
+    image_src_index = render_section.index("img.src = url")
+    assert render_section.index("img.onload =") < image_src_index
+    assert render_section.index("img.onerror =") < image_src_index
+
+
+def test_javascript_details_media_success_reveals_element_and_clears_loading(client: TestClient) -> None:
+    script = client.get("/assets/app.js").text
+    render_section = _javascript_function(script, "renderDetailsMedia")
+    loadeddata_section = render_section[
+        render_section.index("video.onloadeddata =") : render_section.index("video.oncanplay =")
+    ]
+    canplay_section = render_section[
+        render_section.index("video.oncanplay =") : render_section.index("video.onerror =")
+    ]
+    image_load_section = render_section[
+        render_section.index("img.onload =") : render_section.index("img.onerror =")
+    ]
+
+    for handler_section in (loadeddata_section, canplay_section, image_load_section):
+        assert "token !== detailsMediaToken" in handler_section
+        assert "loading.remove()" in handler_section
+        assert ".hidden = false" in handler_section
+
+
+def test_javascript_details_media_error_shows_unavailable_state(client: TestClient) -> None:
+    script = client.get("/assets/app.js").text
+    render_section = _javascript_function(script, "renderDetailsMedia")
+    video_error_section = render_section[
+        render_section.index("video.onerror =") : render_section.index("detailsMediaElement = video")
+    ]
+    image_error_section = render_section[
+        render_section.index("img.onerror =") : render_section.index("detailsMediaElement = img")
+    ]
+
+    for handler_section in (video_error_section, image_error_section):
+        assert "token !== detailsMediaToken" in handler_section
+        assert "cleanupDetailsMedia({ invalidate: false })" in handler_section
+        assert "renderDetailsMediaUnavailable(detailsPreviewContainer)" in handler_section
+
+
+def test_javascript_details_media_append_is_guarded_after_src_assignment(client: TestClient) -> None:
+    script = client.get("/assets/app.js").text
+    render_section = _javascript_function(script, "renderDetailsMedia")
+
+    assert "token === detailsMediaToken && detailsMediaElement === video" in render_section
+    assert "token === detailsMediaToken && detailsMediaElement === img" in render_section
+
+
+def test_javascript_details_cleanup_invalidates_loading_media(client: TestClient) -> None:
+    script = client.get("/assets/app.js").text
+    cleanup_section = _javascript_function(script, "cleanupDetailsMedia")
+    close_section = _javascript_function(script, "closeDetailsDialog")
+
+    assert "invalidate = true" in cleanup_section
+    assert "detailsMediaToken += 1" in cleanup_section
+    assert "cleanupDetailsMedia()" in close_section
+
+
+def test_javascript_details_replacement_invalidates_old_media_before_new_src(client: TestClient) -> None:
+    script = client.get("/assets/app.js").text
+    render_section = _javascript_function(script, "renderDetailsMedia")
+
+    cleanup_index = render_section.index("cleanupDetailsMedia()")
+    token_index = render_section.index("const token = ++detailsMediaToken")
+    video_src_index = render_section.index("video.src = url")
+    image_src_index = render_section.index("img.src = url")
+
+    assert cleanup_index < token_index < video_src_index
+    assert cleanup_index < token_index < image_src_index
+
+
+def test_gallery_reference_no_longer_contains_canonical_tag_fragment() -> None:
+    gallery = Path("GALLERY.md").read_text(encoding="utf-8")
+    assert "\nsuggestions, keyboard and mouse navigation" not in gallery
+    assert "Canonical tag editing should support suggestions" in gallery
 
 
 def test_javascript_details_no_longer_loads_representative_frames(client: TestClient) -> None:

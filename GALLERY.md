@@ -67,10 +67,11 @@ with controls, metadata preload, and `playsinline`; animated images use a real
 `<img>`. Cards continue to use the explicit representative-frame preview action,
 which is separate from full Details playback. Native/VLC playback, downloadable
 files, and a broader media player are future work.
-suggestions, keyboard and mouse navigation, rounded removable chips, an
-explicit `×` control, visible hover/focus/selected/AI-suggested/invalid states,
-case-insensitive duplicate prevention, and immediate local filtering without
-progress UI for trivial local search.
+Canonical tag editing should support suggestions, keyboard and mouse
+navigation, rounded removable chips, an explicit `×` control, visible
+hover/focus/selected/AI-suggested/invalid states, case-insensitive duplicate
+prevention, and immediate local filtering without progress UI for trivial local
+search.
 
 ## Visual And Interaction Direction
 

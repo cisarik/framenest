@@ -550,7 +550,10 @@ function stopCardPreviewTimer() {
   activePreviewMediaId = null;
 }
 
-function cleanupDetailsMedia() {
+function cleanupDetailsMedia({ invalidate = true } = {}) {
+  if (invalidate) {
+    detailsMediaToken += 1;
+  }
   if (detailsMediaElement) {
     if (detailsMediaElement.tagName === "VIDEO") {
       detailsMediaElement.pause();
@@ -734,9 +737,8 @@ function renderDetailsMediaUnavailable(container) {
 
 function renderDetailsMedia(item) {
   if (!detailsPreviewContainer) return;
-  detailsMediaToken += 1;
-  const token = detailsMediaToken;
   cleanupDetailsMedia();
+  const token = ++detailsMediaToken;
   detailsPreviewContainer.className = "details-preview-container";
   detailsPreviewContainer.removeAttribute("role");
   detailsPreviewContainer.removeAttribute("tabindex");
@@ -766,9 +768,6 @@ function renderDetailsMedia(item) {
     video.autoplay = false;
     video.setAttribute("aria-label", title);
     video.hidden = true;
-    video.src = url;
-    detailsPreviewContainer.appendChild(video);
-    detailsMediaElement = video;
 
     video.onloadeddata = () => {
       if (token !== detailsMediaToken) return;
@@ -782,17 +781,19 @@ function renderDetailsMedia(item) {
     };
     video.onerror = () => {
       if (token !== detailsMediaToken) return;
-      cleanupDetailsMedia();
+      cleanupDetailsMedia({ invalidate: false });
       renderDetailsMediaUnavailable(detailsPreviewContainer);
     };
+    detailsMediaElement = video;
+    video.src = url;
+    if (token === detailsMediaToken && detailsMediaElement === video) {
+      detailsPreviewContainer.appendChild(video);
+    }
   } else {
     const img = document.createElement("img");
     img.className = "details-media-img";
     img.alt = title;
     img.hidden = true;
-    img.src = url;
-    detailsPreviewContainer.appendChild(img);
-    detailsMediaElement = img;
 
     img.onload = () => {
       if (token !== detailsMediaToken) return;
@@ -801,9 +802,14 @@ function renderDetailsMedia(item) {
     };
     img.onerror = () => {
       if (token !== detailsMediaToken) return;
-      cleanupDetailsMedia();
+      cleanupDetailsMedia({ invalidate: false });
       renderDetailsMediaUnavailable(detailsPreviewContainer);
     };
+    detailsMediaElement = img;
+    img.src = url;
+    if (token === detailsMediaToken && detailsMediaElement === img) {
+      detailsPreviewContainer.appendChild(img);
+    }
   }
 }
 
