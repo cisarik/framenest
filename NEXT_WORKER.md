@@ -1,167 +1,193 @@
 # Next Worker Handoff
 
-## 1. Title And Authority
+## 1. Authority and lifecycle
 
-This file is the current canonical repository-native Worker handoff. It supersedes every earlier version of `NEXT_WORKER.md` in Git history.
+This file is the current canonical repository-native Worker handoff.
+It supersedes every earlier version of `NEXT_WORKER.md` in Git history.
 
 It is a non-authoritative context-restoration document. It grants no task authority.
-
 A fresh Worker instance still requires a new authoritative ORCHESTRATOR prompt before performing any repository work.
 
-## 2. Repository State
+The current concrete Kimi K2.7 Code/Cline Worker session is permanently closed after this handoff commit.
+No active Worker instance remains.
+
+Model, client, and provider do not redefine the persistent `WORKER` role.
+Old Cline checkpoints, pending commands, and temporary task state must not be resumed.
+
+## 2. Repository state
 
 - Repository: `https://github.com/cisarik/framenest.git`
 - Normal local path: `/Users/agile/framenest`
 - Branch: `main`
-- Final implementation HEAD: `0e60b0f83cc928d6d7911326afb50f0f21411447`
-- Subject: `fix: stabilize gallery dialog interactions`
-- Parent: `fcf73de1749f980ca6b923e39fec8c904fcd0e42`
+- Implementation boundary before this handoff commit: `f73f5abb18054720f3de00f0837c8496f3664bde`
+- Implementation subject: `feat: play local media in details`
+- Implementation parent: `358241c56c012d331613aade2eb853abc98ab9cd`
 - Current migration head: `0007`
 - Current highest accepted ADR: `ADR-0030`
-- Expected state: clean worktree, clean index
-- Public verification: a fresh Worker must independently verify HEAD, `origin/main`, and `refs/heads/main` before starting work.
+- Expected final repository state: clean worktree, clean index
+- Public verification: a fresh Worker must independently verify HEAD, `origin/main`, and `refs/heads/main` before starting work. The enclosing handoff commit SHA, public main, and its parent must be discovered and verified, not taken from this file.
 
-## 3. Worker Lifecycle
+## 3. Implemented product horizon
 
-The current GLM-5.2 Worker session is permanently closed. No active Worker instance remains.
+### Existing foundation
 
-The persistent `WORKER` protocol role continues and requires a fresh instance plus a new authoritative ORCHESTRATOR prompt for future work.
-
-The next concrete Worker implementation is expected to be a fresh Codex Worker in Cursor IDE, subject to a new ORCHESTRATOR prompt.
-
-Model, client, and provider do not redefine the `WORKER` role.
-
-## 4. Implemented Product Horizon
-
-The following are committed and implemented on `main`:
-
-- Local server: FastAPI application factory, Uvicorn loopback-first runtime, typed health endpoint.
+- Loopback-first FastAPI application factory and Uvicorn runtime.
 - Packaged vanilla HTML/CSS/JavaScript web application served same-origin at `GET /`.
-- SQLite/Alembic persistence through migration `0007`.
-- Device and library registration via `framenest-catalog` CLI.
+- SQLite, SQLAlchemy Core, and Alembic migrations through `0007`.
+- Registered device and library registry via `framenest-catalog` CLI.
 - Explicit read-only library scan preview.
-- Explicit idempotent scan-candidate import.
-- Catalog with display-title search, canonical-tag AND filters, bounded offset pagination.
-- Persistent display title, optional plain-text description, and ordered canonical tags.
+- Explicit idempotent scan-candidate import into the persistent media catalog.
+- Searchable deterministic media catalog with display-title search, canonical-tag AND filters, and bounded offset pagination.
+- Persistent display title, optional plain-text description, and ordered canonical tags up to 32 per medium.
 - Automatic built-in `Processed` workflow collection derived from durable tag saves.
-- Terminal-glass sticky application header with server-health and AI-status controls.
-- Header command search with title and tag suggestions, current-page fallback-title matching.
-- Canonical-tag toggle pills with `aria-pressed` semantics, no duplicate active-filter region.
-- Gallery grid with compact media cards, deterministic visual placeholders.
-- On-demand representative-frame preview using the existing local media-analysis API.
-- Bounded in-memory session preview cache (LRU, max 12).
-- Single active frame-cycling preview, automatic cycling, no manual frame controls.
-- Media-details dialog with one unified visual surface, collapsed technical details.
-- Metadata edit dialog with complete form, always-visible Save/Discard footer.
-- Collapsible Library tools section.
-- Settings → AI shell dialog (provider configuration not yet implemented).
-- `prefers-reduced-motion` support throughout.
-- `dialog:not([open]) { display: none }` ensures no dialog is visible on startup.
+- Packaged Gallery with logical-media cards, representative-frame previews, Details dialog, and metadata workspace.
+- Explicit AI boundaries with no automatic cloud calls; suggestion review requires `--confirm-cloud-upload` and a configured provider key.
 
-## 5. Critical COOPERATOR UX Direction
+### Secure content backend
 
-These are explicit product requirements from Michal:
+Identity-only endpoint:
 
-1. Gallery is the main product experience.
-2. Cards must ultimately show real visual media content, not remain placeholder-only.
-3. Real local thumbnail/frame loading should feel automatic and content-first, while staying bounded and safe.
-4. Decorative Play glyphs that do nothing are forbidden.
-5. Clicking the media surface should lead naturally into the media detail/playback experience.
-6. The Details heading should be the media title, not generic `Media details`.
-7. Representative frames are an automatic preview, not a manually paginated mini-gallery.
-8. Do not add `Prev`, `Next`, `Start`, or `Stop` for representative frames.
-9. Full GIF/video playback must be real playback, not frame switching.
-10. A future secure read-only media-content boundary must handle path safety and MP4 Range requests.
-11. Search remains a terminal-style primary input.
-12. Search must support Arrow Up/Down and Enter.
-13. Suggestions should eventually show a small static visual preview on black beside the title.
-14. Suggestions open only when actual results exist.
-15. Exactly one clear control may be visible.
-16. Metadata dialog must expose the complete form plus always-visible Save and Discard.
-17. The main app must remain compact and free of verbose explanatory text.
-18. `View details` as a prominent side button is not the preferred final interaction; content/card interaction should carry the flow.
-19. AI must be visually recognizable in the product through a future honest `Analyze` action with a magic-wand treatment and restrained gradient/glow.
-20. Do not present AI as configured when it is unavailable.
-21. A future Cover workflow should offer `Generate Cover` and user cover selection, but it requires a deliberate persisted-cover architecture.
-22. The accepted visual direction is premium 2026 terminal glass: near-black, restrained terminal green, glass surfaces, fast subtle effects, content-first layout.
-23. The final desktop direction remains a native cross-platform webview/tray shell, with Tauri v2 already accepted unless a later dedicated ADR changes it.
-24. The COOPERATOR is dissatisfied with repeated source-contract-only UI work; future UI tasks require actual rendered acceptance and screenshot-driven checks before commit where practical.
-25. Modal headers should be black with green terminal-style title text.
-26. Close buttons should use `✕` (Unicode), not the word `Close`.
-27. Dialog animations should include blur+fade-in for a wow effect.
+`GET /api/media/{media_id}/locations/{location_id}/content`
 
-## 6. Known Unresolved Scope
+Implemented in commits:
 
-The following are explicitly unimplemented or incomplete:
+- `14d01d9543c82c9812c7f59f1a89ceaa2f3721c5` — `feat: add secure media content endpoint`
+- `9067139e6bbaf9fe6d9c0cf236e81ad86aefc920` — `fix: harden media content streaming`
+- `358241c56c012d331613aade2eb853abc98ab9cd` — `fix: sanitize media descriptor cleanup`
 
-- Automatic real visual Gallery thumbnails (currently requires explicit click).
-- Durable thumbnail/cover cache.
-- Full GIF playback.
-- Full MP4 playback.
-- Safe media-content endpoint.
-- HTTP Range requests for MP4 streaming.
-- Search-result visual thumbnails.
-- Final card-to-detail interaction model.
-- AI Analyze entry point in Gallery/Details.
-- Provider Settings and secure credentials.
-- Generate Cover and cover selection.
-- Tauri shell and tray integration.
-- Download/copy workflow.
-- Remote-device synchronization.
-- Dialog blur+fade-in animations (CSS transitions not yet implemented for dialog open).
+Properties:
 
-## 7. Known Current Risks
+- Media, location, and library relationship authorization.
+- Location availability must be `available`.
+- Exact kind/extension allowlist: `video` + `.mp4` → `video/mp4`, `animated_image` + `.gif` → `image/gif`.
+- Registered-root containment and symlink escape prevention.
+- Complete streaming and single byte-range request support.
+- Stable single opened file descriptor; descriptor size from `fstat`.
+- Idempotent cleanup and sanitized failures.
+- No arbitrary path-serving API and no absolute-path disclosure in responses, headers, or errors.
 
-- Vanilla JS UI has accumulated source-contract tests that do not prove rendered UX.
-- Actual browser/rendered acceptance must accompany future UI work.
-- Current analysis frames are ephemeral and not durable covers.
-- No real private-media task may assume access to `/Users/agile/Video`.
-- Current public implementation may still require visual cleanup despite passing tests.
-- Do not begin another broad UI rewrite without screenshots and explicit acceptance criteria.
-- The preview click handler is attached during card rendering; after `loadCatalog()` rerenders cards, cached previews are shown but cycling is not automatically restarted.
-- The metadata dialog `#metadata-workspace` `hidden` attribute is managed by `renderMetadataWorkspace()`; the footer (Save/Discard) is now outside the workspace div and always visible in the dialog.
+### Details frontend integration
 
-## 8. Recommended Next Task
+Commit `f73f5abb18054720f3de00f0837c8496f3664bde` — `feat: play local media in details` — implements:
 
-`Secure local media playback and visual Gallery foundation`
+- First deterministic `available` location selection.
+- Content URLs built only from `media_id` and `location_id` via `mediaContentUrl()`.
+- Real native `<video>` for MP4 with `controls`, `preload="metadata"`, `playsinline`, no autoplay, and no automatic loop.
+- Real `<img>` for animated GIF with `alt` text based on the displayed title.
+- Loading and unavailable states.
+- Explicit `cleanupDetailsMedia()` on Details replacement and close.
+- `detailsMediaToken` stale-event checking so old handlers do not affect the current dialog.
+- Preservation of card representative-frame preview behavior.
+- Removal of Details representative-PNG playback simulation.
 
-The fresh ORCHESTRATOR should first decide its exact scope, likely separating:
+Worker-observed validation evidence (not public CI proof):
 
-1. Safe read-only media-content endpoint and MP4 Range support.
-2. Real GIF/video playback in Details.
-3. Bounded automatic Gallery thumbnail/frame loading.
-4. Visual search-result thumbnails.
+- Focused changed tests: `155 passed`.
+- Full `poetry run pytest`: `1119 passed, 3 skipped` (expected real-tool / NVIDIA skips).
+- Changed-test Ruff checks: passed.
+- Rendered browser acceptance was explicitly not performed in this slice.
 
-Do not grant this task through `NEXT_WORKER.md`.
+## 4. Confirmed open work and risks
 
-## 9. Security And Privacy
+### Rendered acceptance is still required
 
+A future Browser-capable task must validate using only disposable synthetic media and a disposable catalog under a unique `/tmp/framenest-*` root:
+
+- Real GIF appears in Details.
+- Real MP4 metadata loads and native controls appear.
+- Playback starts and `currentTime` advances.
+- Seeking works and exercises byte-range requests.
+- Closing or replacing Details stops playback and old network activity.
+- Actual title, metadata, and Edit action remain functional.
+- No absolute path appears in UI, response body, or headers.
+- The server binds to loopback only.
+- The temporary server and task root are cleaned up.
+
+The private path `/Users/agile/Video` remains forbidden without new task-specific authority.
+
+### Potential media-event ordering race
+
+Evidence-based risk requiring inspection, not a proven runtime failure:
+
+- Current `renderDetailsMedia()` in `src/framenest/adapters/api/web/app.js` sets `src` and inserts the element before assigning all load/error handlers.
+- A very fast or cached load might complete before the handler assignment.
+- The fresh Orchestrator should authorize a targeted fix if inspection confirms it.
+- The likely correction is to attach handlers before setting `src` and before exposure to loading, while preserving `detailsMediaToken` and `cleanupDetailsMedia()` behavior.
+- Rendered acceptance must verify the final behavior.
+
+### Confirmed `GALLERY.md` prose defect
+
+The playback insertion left a sentence fragment. The text currently begins:
+
+`suggestions, keyboard and mouse navigation, rounded removable chips, an explicit × control, ...`
+
+The missing opening should restore the intended canonical-tag statement, approximately:
+
+`Canonical tag editing should feel like a premium local interaction: searchable suggestions, keyboard and mouse navigation, ...`
+
+This is a documentation correction, not evidence that playback code failed.
+
+### Environment note
+
+A stale `framenest-server` process had been observed in earlier work but was outside this task authority and was not touched. A future task must independently inspect port/process state and must not kill an unrelated process without explicit authority.
+
+## 5. Recommended next sequence toward MVP
+
+These are recommendations only and grant no task authority.
+
+Recommended immediate next slice: **Stabilize and render-validate Details playback**.
+
+Prefer one Browser-capable Worker task that:
+
+1. Inspects and, if confirmed, fixes the media handler ordering risk.
+2. Fixes the small `GALLERY.md` sentence fragment.
+3. Creates only synthetic GIF/MP4 media and a disposable migrated catalog under `/tmp`.
+4. Performs focused rendered acceptance of GIF, MP4, seek/range behavior, and cleanup.
+5. Runs focused and full automated validation.
+6. Creates one exact commit.
+
+If the chosen execution client has no real browser/DOM capability, do not pretend static source checks are rendered acceptance. Separate the small source/document correction from a later Browser-capable acceptance task.
+
+After playback is visibly accepted, the Orchestrator should choose the smallest next Gallery MVP slice based on observed UX. Likely priorities include:
+
+- Content-first visual Gallery cards.
+- Automatic bounded representative visuals rather than placeholder-heavy cards.
+- Natural media-surface interaction leading to Details/playback.
+- Dense, useful Gallery presentation.
+
+Do not jump yet to:
+
+- Tauri packaging.
+- VLC integration.
+- AI Settings.
+- Automatic AI analysis.
+- Downloader or clipboard workflows.
+- Synchronization.
+- Broad cover-pipeline work.
+- Unrelated documentation audits.
+
+## 6. Product and security direction
+
+Preserve succinctly:
+
+- Gallery is the flagship product surface.
+- It should resemble a premium dense visual GIF/video picker, not an administration dashboard.
+- Real visuals and truthful controls matter; decorative controls that do nothing are forbidden.
+- Representative frames are previews, not playback.
+- Metadata editing remains manual-first and independent of AI.
+- Cloud calls require explicit action and confirmation.
+- Private media, catalogs, credentials, and providers require explicit task authority.
+- Tauri v2 remains a future native-shell direction, not the immediate next task.
 - `/Users/agile/Video` is private and inaccessible by default.
-- No list, stat, read, hash, scan, or analysis without explicit authority.
-- No cloud upload without separate confirmation.
-- No credential exposure.
-- No filesystem mutation without explicit authority.
-- No public binding by default.
-- No real-catalog migrations without authority.
 
-## 10. Protocol Rules
-
-- COOPERATOR does not normally execute Git/repository commands.
-- WORKER handles repo gates, implementation, tests, commit, push, and local verification under explicit authority.
-- ORCHESTRATOR independently verifies public commits.
-- NEXT/BOOT files restore context but grant no task.
-- Reports must distinguish public evidence from local runtime evidence.
-- One Worker instance at a time under current AP v1 topology.
-
-## 11. Restart Instructions
+## 7. Fresh Worker bootstrap
 
 A fresh Worker must:
 
-1. Receive a new ORCHESTRATOR prompt.
-2. Verify repository truth (HEAD, `origin/main`, `refs/heads/main`).
-3. Read `BOOT_WORKER.md`.
-4. Read `AP.md`.
-5. Read `AP_WORKER.md`.
-6. Read this `NEXT_WORKER.md`.
-7. Inspect the relevant current implementation.
-8. Not revive this closed session's authority.
+1. Read `AP.md`, `AGENTS.md`, `BOOT_WORKER.md`, and this `NEXT_WORKER.md`.
+2. Verify public and local repository state before work.
+3. Follow only the new explicit ORCHESTRATOR task.
+4. Use Poetry for project Python commands.
+5. Respect exact write allowlists and Git gates.
+6. Stop early on genuine blockers.
+7. Keep reports compact and in English, beginning with `### Report for ORCHESTRATOR_CHAT`.
