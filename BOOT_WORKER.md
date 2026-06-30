@@ -18,7 +18,7 @@ FrameNest is a local-first, privacy-conscious, cross-platform library for video 
 
 The COOPERATOR is the human project owner and owns strategic intent, account-level actions, physical-device actions, and approval of irreversible or security-sensitive operations.
 
-The ORCHESTRATOR is the ChatGPT coordination layer and issues bounded Worker tasks, reviews reports, verifies public commits, and decides whether to accept, correct, continue, pause, or close a session.
+The ORCHESTRATOR is the coordination layer and issues bounded Worker tasks, reviews reports, verifies public commits, and decides whether to accept, correct, continue, pause, or close a session. The role is vendor-neutral and is not a specific product, model, provider, IDE, CLI, or chat.
 
 The WORKER is the repository execution role defined by the Analytic Programming protocol. Any compatible Worker implementation may fulfill it inside the repository or execution environment. The Worker executes only the authorized task and reports evidence honestly.
 
@@ -30,9 +30,9 @@ If the repository root, remote, branch, starting commit, or working tree state d
 
 ## Inspection Before Change
 
-The Worker must inspect relevant files and state before modifying anything.
+The Worker must inspect relevant files and state before modifying anything, and use the repository as evidence rather than relying on memory when current files or Git state can be checked.
 
-The Worker must use the repository as evidence and avoid relying on memory when current files or Git state can be checked.
+Practice context economy: read only files relevant to the current slice, prefer targeted search and relevant ranges over full-file dumps, avoid rereading unchanged files, summarize command output instead of pasting large logs, avoid broad repository audits without explicit authority, avoid browser automation unless required by acceptance, and avoid sub-agents unless they clearly reduce total work.
 
 ## Task-Specific Authority
 
@@ -54,7 +54,9 @@ Git write operations are prohibited unless the concrete task explicitly authoriz
 
 This includes staging, committing, pushing, pulling, fetching, merging, rebasing, resetting, restoring, checking out, switching branches, cleaning, stashing, tagging, branch creation or deletion, remote modification, and Git configuration writes.
 
-When Git writes are authorized, the Worker must stay within the exact authorization.
+A capable Worker may receive normal bounded authority to edit authorized paths, run focused validation, stage exact paths, create one exact commit, push normally to `origin/main`, and verify local, tracking, and public equality.
+
+When Git writes are authorized, the Worker must stay within the exact authorization and must not use `git add .`, `git add -A`, force-push, destructive history rewriting, unrelated cleanup, or reset/clean as silent recovery. Prefer a new explicit fix or revert commit to correct a bad public commit.
 
 ## Product and Architecture Boundaries
 
@@ -68,11 +70,19 @@ The Worker must not access secrets, private keys, credential stores, browser pro
 
 The Worker must not print real secrets in reports.
 
-## Dependencies
+## Dependencies and Python environment
 
-The Worker must not install, update, or initialize packages unless explicitly authorized.
+The Worker must not install, update, or initialize packages unless explicitly authorized, and must not create package-manager files or framework scaffolding unless the task explicitly allows it.
 
-The Worker must not create package-manager files or framework scaffolding unless the task explicitly allows it.
+FrameNest uses Poetry as its authoritative Python environment and dependency manager. Use the committed `pyproject.toml`, committed `poetry.lock`, and the project's pinned Python range. Run project Python tools through `poetry run <command>`. Run `poetry install --no-interaction` only when the locked environment is missing or incomplete.
+
+Do not use direct project `pip install` outside Poetry, arbitrary system Python for project commands, or `poetry update` without explicit dependency authority. Do not modify `pyproject.toml` or `poetry.lock` unless the task authorizes dependency changes. Do not invoke `pyenv shell`; investigate or repair pyenv only if it prevents Poetry from executing the authorized task.
+
+## Temporary files
+
+Temporary writes are allowed when useful. Use a unique task root under `${TMPDIR:-/tmp}` or a clearly named path beginning with `/tmp/framenest-`. Temporary content may include helper scripts, logs, caches, redirected command output, and disposable data.
+
+Temporary writes are not repository modifications. This authority does not grant access to arbitrary user files. The task must state what should be preserved or removed.
 
 ## Tests and Evidence
 
@@ -94,15 +104,19 @@ Orchestrator communication with the Cooperator is Slovak.
 
 Do not use Czech in repository documents, Worker prompts, or Worker reports.
 
-## Partial Completion and Deviations
+## Partial Completion, Deviations, and Failures
 
-Partial completion must be reported honestly.
+Partial completion must be reported honestly. The Worker must report deviations, unexpected state, validation failures, and evidence-based risks.
 
-The Worker must report deviations, unexpected state, validation failures, and evidence-based risks.
+When a technique fails, inspect the concrete error and make at most one materially different bounded retry; do not repeat the same failed command pattern or build a chain of increasingly complex workarounds. An unrelated environment warning is not a blocker unless it prevents the authorized task.
+
+Report `BLOCKED` early when progress requires unavailable, unsafe, or unauthorized capability.
 
 ## Stopping Conditions
 
-The Worker must stop when no concrete task exists, repository identity fails, required evidence is missing, file boundaries are insufficient, a secret would be exposed, validation requires a forbidden command, authentication fails, or completion would require unauthorized destructive action.
+The Worker must stop when no concrete task exists, repository identity fails, required evidence is missing, file boundaries are insufficient, a secret would be exposed, validation requires a forbidden command, authentication fails, completion would require unauthorized destructive action, or progress requires unavailable, unsafe, or unauthorized capability.
+
+The Worker must also stop once acceptance criteria and focused validation pass and the authorized commit and push are verified. Do not continue polishing beyond the authorized slice or self-authorize adjacent work.
 
 ## Public Commit Verification Awareness
 

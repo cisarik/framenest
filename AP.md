@@ -147,9 +147,13 @@ Committed documentation and evidence artifacts MUST follow the classification, c
 
 ## 9. Task Shaping
 
-A Worker task SHOULD be small enough to verify and large enough to produce a coherent result.
+A Worker task SHOULD be the smallest coherent slice that produces useful, verifiable progress: one primary outcome, the implementation needed for it, focused validation, normally one exact commit, and one compact report.
 
-Each task SHOULD include a task ID, task type, working directory, current verified state, context, exact goal, hard rules, files to inspect, files allowed to change, allowed commands, forbidden actions, Git restrictions, validation commands, acceptance criteria, stopping conditions, and required report structure.
+Avoid both oversized multi-stage missions that combine unrelated audits, design, implementation, browser investigation, and infrastructure work, and meaningless micro-tasks that produce no useful result.
+
+A task SHOULD include a task ID, task type, working directory, current verified state, context, exact goal, hard rules, files to inspect, files allowed to change, allowed commands, forbidden actions, Git restrictions, validation commands, acceptance criteria, stopping conditions, and required report structure.
+
+Prioritize the shortest safe route to useful MVP progress over process ceremony.
 
 ## 10. Worker Task Contract
 
@@ -175,7 +179,11 @@ Git write operations MUST NOT be performed without explicit task-specific author
 
 Git write operations include staging, committing, pushing, pulling, fetching, merging, rebasing, resetting, restoring, checking out, switching branches, cleaning, stashing, tagging, branch creation or deletion, remote modification, and Git configuration writes.
 
-When Git writes are authorized, the task SHOULD name the exact commands or the exact allowed operation class.
+A capable Worker MAY receive normal bounded authority to edit authorized paths, run focused validation, stage exact paths, create one exact commit, push normally, and verify local, tracking, and public equality.
+
+A Git-authorized task SHOULD specify the expected starting HEAD, a clean worktree gate, an exact write allowlist, forbidden unrelated paths, the exact commit subject, normal push, and post-push verification.
+
+When Git writes are authorized, the Worker MUST stay within the exact authorization and MUST NOT use `git add .`, `git add -A`, force-push, destructive history rewriting, unrelated cleanup, or reset/clean as silent recovery. Prefer a new explicit fix or revert commit to correct a bad public commit.
 
 ## 13. Testing and Verification
 
@@ -271,7 +279,9 @@ Failures MUST be reported with sanitized output.
 
 The Worker SHOULD explain whether a failure was expected, whether it affected the task, and what evidence remains available.
 
-The Worker MUST NOT silently repair out-of-scope issues.
+When a technique fails, the Worker MUST inspect the concrete error, make at most one materially different bounded retry, and MUST NOT repeat the same failed pattern or build a chain of increasingly complex workarounds. An unrelated environment warning is not a blocker unless it prevents the authorized task.
+
+The Worker MUST NOT silently repair out-of-scope issues and MUST report `BLOCKED` early when progress requires unavailable, unsafe, or unauthorized capability.
 
 ## 24. Partial Completion
 
@@ -471,7 +481,9 @@ A new session MUST independently verify the current repository HEAD and public c
 
 ## 31. Stopping Conditions
 
-The Worker MUST stop when required identity checks fail, authorized files differ from expectations, secrets would be exposed, required evidence is missing, authentication fails in an unsafe way, or completion would require out-of-scope changes.
+The Worker MUST stop when required identity checks fail, authorized files differ from expectations, secrets would be exposed, required evidence is missing, authentication fails in an unsafe way, completion would require out-of-scope changes, or progress requires unavailable, unsafe, or unauthorized capability.
+
+The Worker MUST stop once acceptance criteria and focused validation pass and the authorized commit and push are verified; it MUST NOT continue polishing beyond the authorized slice or self-authorize adjacent features.
 
 The Orchestrator MUST stop or reframe when the next step requires Cooperator approval.
 
@@ -501,6 +513,8 @@ Anti-patterns include silent scope expansion, implementation before inspection, 
 7. Perform authorized Git operations only when explicitly allowed.
 8. Report evidence, artifact lifecycle state, deviations, risks, and final state.
 
+The Worker SHOULD practice context economy: read only files relevant to the current slice, prefer targeted search and relevant ranges over full-file dumps, avoid rereading unchanged files, summarize command output instead of pasting large logs, avoid broad repository audits without explicit authority, avoid browser automation unless required by acceptance, and avoid sub-agents unless they clearly reduce total work.
+
 ## 35. Example Task Lifecycle
 
 The Cooperator asks for a capability.
@@ -523,21 +537,23 @@ Repositories MAY use a compact communication mode to reduce prompt and report ve
 
 ### Worker prompts
 
+Worker prompts are machine-oriented operational instructions, not essays. Reference authoritative repository files instead of copying their contents, and prefer precise constraints over long defensive prose.
+
 A compact prompt MAY reference stable protocol documents such as `AGENTS.md`, `BOOT_WORKER.md`, and `AP_WORKER.md` instead of repeating them verbatim.
 
 A compact prompt MUST still explicitly contain:
 
-- task ID and goal;
-- working directory;
-- expected repository state or HEAD;
-- task-specific allowed paths;
+- role and task (with task ID and goal);
+- expected starting state (working directory and repository HEAD);
+- required reading;
+- task-specific allowed paths (write scope);
 - task-specific scope prohibitions;
-- Git write authority;
+- explicit authority (commands and Git write authority);
 - required validation;
 - acceptance and stopping conditions;
 - required report format.
 
-Stable restrictions already defined in repository protocol documents need not be copied into every prompt.
+Stable restrictions already defined in repository protocol documents need not be copied into every prompt, and the same prohibition need not be repeated across several sections.
 
 ### Worker reports
 

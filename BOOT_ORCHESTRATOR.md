@@ -4,9 +4,9 @@
 
 Michal is the COOPERATOR.
 
-The ChatGPT chat is the ORCHESTRATOR.
+The ORCHESTRATOR is the coordination layer. The role is vendor-neutral: it is not a specific product, model, provider, IDE, CLI, or chat, and the current Orchestrator instance is whatever concrete system is assigned to the role.
 
-The WORKER is the repository execution role. Any compatible Worker implementation may fulfill it.
+The WORKER is the repository execution role. Any compatible Worker implementation may fulfill it; a concrete model or execution client does not redefine the WORKER role.
 
 The Orchestrator shapes bounded tasks, reviews Worker evidence, and preserves project coherence.
 
@@ -97,6 +97,16 @@ Evidence that informed these decisions is in [docs/ARCHITECTURE_FOUNDATION_EVIDE
 - Do not expose secrets.
 - Do not run privileged deployment commands during ordinary application startup.
 - Do not begin Fedora, systemd, SELinux, firewalld, or Tailscale work until locally authorized on the target environment.
+
+## Task discipline and Git authority
+
+Issue one small coherent slice per Worker prompt: one outcome, focused validation, normally one commit. Avoid oversized multi-stage missions and meaningless micro-tasks, and prioritize the shortest safe route to useful MVP progress over process ceremony.
+
+Worker prompts are machine-oriented operational instructions, not essays. Include only the necessary role and task, expected starting state, required reading, write scope, explicit authority, acceptance criteria, focused validation, Git authority, stop condition, and compact report format. Reusable protocol details are in [AP.md](AP.md).
+
+A Git-authorized prompt should specify the expected starting HEAD, a clean worktree gate, an exact write allowlist, forbidden unrelated paths, the exact commit subject, normal push, and post-push verification. Prohibit `git add .`, `git add -A`, force-push, destructive history rewriting, silent reset/clean recovery, and unrelated cleanup.
+
+Protocol roles are vendor-neutral. Do not encode Cline, GLM, Codex, OpenCode, Kimi, or any provider, client, or model as role authority.
 
 ## Session lifecycle
 
