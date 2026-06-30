@@ -1177,7 +1177,6 @@ def test_javascript_has_preview_cache(client: TestClient) -> None:
 
 def test_preview_cache_does_not_use_persistent_storage(client: TestClient) -> None:
     script = client.get("/assets/app.js").text
-    cache_section = script
     assert "localStorage" not in script
     assert "sessionStorage" not in script
     assert "indexedDB" not in script
@@ -1231,28 +1230,108 @@ def test_javascript_preview_does_not_mutate_metadata_state(client: TestClient) -
     assert preview_section_start != -1
 
 
-def test_details_dialog_has_preview_integration(client: TestClient) -> None:
+def test_details_dialog_has_playback_integration(client: TestClient) -> None:
     script = client.get("/assets/app.js").text
-    assert "detailsPreview" in script or "details-dialog" in script.lower() or "media-details-dialog" in script
-    assert "Load preview" in script or "loadPreview" in script or "loadDetailsPreview" in script
+    assert "media-details-dialog" in script
+    assert "renderDetailsMedia" in script
+    assert "mediaContentUrl" in script
+    assert "/content" in script
 
 
-def test_details_dialog_has_frame_navigation(client: TestClient) -> None:
+def test_details_dialog_does_not_use_frame_navigation(client: TestClient) -> None:
     script = client.get("/assets/app.js").text
-    assert "Previous frame" in script or "prevFrame" in script or "previousFrame" in script or "Prev" in script
-    assert "Next frame" in script or "nextFrame" in script or "Next" in script
+    assert "Previous frame" not in script
+    assert "Next frame" not in script
+    assert "detailsPreviewFrameIndex" not in script
+    assert "detailsPreviewTimer" not in script
+
+
+def test_javascript_details_playback_uses_identity_only_url(client: TestClient) -> None:
+    script = client.get("/assets/app.js").text
+    start = script.index("function mediaContentUrl(")
+    end = script.index("\n}\n", start) + len("\n}\n")
+    url_body = script[start:end]
+    assert "MEDIA_CATALOG_ENDPOINT" in url_body
+    assert "media_id" in url_body or "mediaId" in url_body
+    assert "location_id" in url_body or "locationId" in url_body
+    assert "relative_path" not in url_body
+    assert "library.path" not in url_body
+
+
+def test_javascript_details_selects_first_available_location(client: TestClient) -> None:
+    script = client.get("/assets/app.js").text
+    start = script.index("function selectPlaybackLocation(")
+    end = script.index("\n}\n", start) + len("\n}\n")
+    location_body = script[start:end]
+    assert "availability" in location_body
+    assert "available" in location_body
+    assert "location_id" in location_body
+
+
+def test_javascript_details_video_has_required_attributes(client: TestClient) -> None:
+    script = client.get("/assets/app.js").text
+    start = script.index("function renderDetailsMedia(")
+    end = script.index("\n}\n", start) + len("\n}\n")
+    render_body = script[start:end]
+    assert "document.createElement(\"video\")" in render_body
+    assert "video.controls = true" in render_body
+    assert 'video.preload = "metadata"' in render_body
+    assert "video.playsInline = true" in render_body
+    assert "video.autoplay = false" in render_body or "video.autoplay" not in render_body
+
+
+def test_javascript_details_image_uses_real_img(client: TestClient) -> None:
+    script = client.get("/assets/app.js").text
+    start = script.index("function renderDetailsMedia(")
+    end = script.index("\n}\n", start) + len("\n}\n")
+    render_body = script[start:end]
+    assert "document.createElement(\"img\")" in render_body
+    assert ".alt =" in render_body
+
+
+def test_javascript_details_media_uses_display_title(client: TestClient) -> None:
+    script = client.get("/assets/app.js").text
+    start = script.index("function renderDetailsMedia(")
+    end = script.index("\n}\n", start) + len("\n}\n")
+    render_body = script[start:end]
+    assert "display_title" in render_body or "deriveCatalogFallbackTitle" in render_body
+    assert "aria-label" in render_body or ".alt =" in render_body
+
+
+def test_javascript_details_has_unavailable_state(client: TestClient) -> None:
+    script = client.get("/assets/app.js").text
+    assert "renderDetailsMediaUnavailable" in script
+    assert "Media unavailable." in script
+
+
+def test_javascript_details_has_explicit_media_cleanup(client: TestClient) -> None:
+    script = client.get("/assets/app.js").text
+    assert "cleanupDetailsMedia" in script
+    close_section = script[script.index("function closeDetailsDialog"):]
+    assert "cleanupDetailsMedia" in close_section[:300]
+    cleanup_section = script[script.index("function cleanupDetailsMedia"):]
+    assert "removeAttribute(\"src\")" in cleanup_section or "removeAttribute('src')" in cleanup_section
+    assert "pause()" in cleanup_section
+    assert "load()" in cleanup_section
+
+
+def test_javascript_details_ignores_stale_media_events(client: TestClient) -> None:
+    script = client.get("/assets/app.js").text
+    assert "detailsMediaToken" in script
+    render_section = script[script.index("function renderDetailsMedia("):]
+    assert "token !== detailsMediaToken" in render_section
+
+
+def test_javascript_details_no_longer_loads_representative_frames(client: TestClient) -> None:
+    script = client.get("/assets/app.js").text
+    assert "loadDetailsPreview" not in script
+    assert "renderDetailsPreviewFrames" not in script
+    assert "startDetailsPreviewCycling" not in script
 
 
 def test_javascript_has_reduced_motion_preview_behavior(client: TestClient) -> None:
     script = client.get("/assets/app.js").text
     assert "prefers-reduced-motion" in script or "reducedMotion" in script or "matchMedia" in script
-
-
-def test_javascript_preview_timer_cleanup_on_close(client: TestClient) -> None:
-    script = client.get("/assets/app.js").text
-    assert "closeDetailsDialog" in script
-    close_section = script[script.index("function closeDetailsDialog"):]
-    assert "clearInterval" in close_section[:500] or "stopPreview" in close_section[:500] or "timer" in close_section[:500].lower()
 
 
 def test_javascript_reuses_base64_decode_helper(client: TestClient) -> None:

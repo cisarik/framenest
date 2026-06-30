@@ -58,7 +58,15 @@ AI draft comparison is future architecture. The current repository also
 implements the pre-alpha non-persistent browser AI suggestion review, which is
 separate from catalog `Current` saves.
 
-Canonical tag editing should feel like a premium local interaction: searchable
+The Details dialog now plays real local GIF and MP4 content through the
+identity-only `GET /api/media/{media_id}/locations/{location_id}/content`
+endpoint when the first catalog location is `available`. It selects only by
+`media_id` and `location_id`; it never constructs playback URLs from relative
+paths, absolute paths, or library roots. Video uses a native `<video>` element
+with controls, metadata preload, and `playsinline`; animated images use a real
+`<img>`. Cards continue to use the explicit representative-frame preview action,
+which is separate from full Details playback. Native/VLC playback, downloadable
+files, and a broader media player are future work.
 suggestions, keyboard and mouse navigation, rounded removable chips, an
 explicit `×` control, visible hover/focus/selected/AI-suggested/invalid states,
 case-insensitive duplicate prevention, and immediate local filtering without
