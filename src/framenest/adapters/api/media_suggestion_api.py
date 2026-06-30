@@ -15,6 +15,7 @@ from framenest.application.media_analysis import (
 )
 from framenest.application.media_suggestion import (
     FrameNestMediaSuggestionError,
+    ImportedMediaSuggestionPreviewResult,
     MediaSuggestion,
     MediaSuggestionNotFoundError,
     MediaSuggestionPreparationFailedError,
@@ -28,7 +29,7 @@ from framenest.application.media_suggestion import (
     PROMPT_VERSION,
 )
 from framenest.application.ports.library_repository import FrameNestLibraryRepositoryError
-from framenest.domain import LibraryId
+from framenest.domain import LibraryId, MediaId, MediaLocationId
 from framenest.infrastructure.ai.constants import DEFAULT_MODEL_ID, DEFAULT_PROVIDER_ID
 
 NO_STORE_HEADERS = {"Cache-Control": "no-store"}
@@ -81,6 +82,10 @@ class MediaSuggestionPreviewRequest(BaseModel):
     confirm_cloud_upload: object
 
 
+class ImportedMediaSuggestionPreviewRequest(BaseModel):
+    confirm_cloud_upload: object
+
+
 class SuggestionBodyResponse(BaseModel):
     title: str
     description: str
@@ -102,12 +107,23 @@ class MediaSuggestionPreviewResponse(BaseModel):
     suggestion: SuggestionBodyResponse
 
 
+class ImportedMediaSuggestionPreviewResponse(BaseModel):
+    media_id: str
+    location_id: str
+    sent_frame_count: int
+    provider_id: str
+    model_id: str
+    prompt_version: str
+    suggestion: SuggestionBodyResponse
+
+
 @dataclass(frozen=True, slots=True)
 class MediaSuggestionApiDependencies:
     """Injected dependencies for explicit AI media suggestion API routes."""
 
     preview_suggestion: object | None
     provider_configured: bool
+    preview_imported_suggestion: object | None = None
     provider_id: str = DEFAULT_PROVIDER_ID
     model_id: str = DEFAULT_MODEL_ID
     prompt_version: str = PROMPT_VERSION
@@ -208,6 +224,79 @@ def create_media_suggestion_api_router(dependencies: MediaSuggestionApiDependenc
             return _error_response(502, AI_PROVIDER_FAILED_CODE, AI_PROVIDER_FAILED_MESSAGE)
         return _json_response(_preview_response(result))
 
+    @router.post(
+        "/api/media/{media_id}/locations/{location_id}/ai-suggestion-preview",
+        response_model=ImportedMediaSuggestionPreviewResponse,
+        responses={
+            404: {"model": ErrorResponse},
+            409: {"model": ErrorResponse},
+            422: {"model": ErrorResponse},
+            429: {"model": ErrorResponse},
+            500: {"model": ErrorResponse},
+            502: {"model": ErrorResponse},
+            503: {"model": ErrorResponse},
+        },
+    )
+    def preview_imported_media_suggestion(
+        media_id: UUID4,
+        location_id: UUID4,
+        request: ImportedMediaSuggestionPreviewRequest,
+    ) -> ImportedMediaSuggestionPreviewResponse | JSONResponse:
+        if request.confirm_cloud_upload is not True:
+            return _error_response(
+                409,
+                CLOUD_CONFIRMATION_REQUIRED_CODE,
+                CLOUD_CONFIRMATION_REQUIRED_MESSAGE,
+            )
+        if dependencies.preview_imported_suggestion is None or not dependencies.provider_configured:
+            return _error_response(
+                503,
+                AI_PROVIDER_NOT_CONFIGURED_CODE,
+                AI_PROVIDER_NOT_CONFIGURED_MESSAGE,
+            )
+        try:
+            result = dependencies.preview_imported_suggestion.execute(
+                MediaId.from_string(str(media_id)),
+                MediaLocationId.from_string(str(location_id)),
+            )
+        except MediaSuggestionNotFoundError:
+            return _error_response(404, LIBRARY_NOT_FOUND_CODE, LIBRARY_NOT_FOUND_MESSAGE)
+        except (FrameNestMediaAnalysisError, FrameNestMediaSuggestionError):
+            return _error_response(422, INVALID_MEDIA_PATH_CODE, INVALID_MEDIA_PATH_MESSAGE)
+        except MediaSuggestionPreparationUnavailableError:
+            return _error_response(
+                409,
+                MEDIA_PREPARATION_UNAVAILABLE_CODE,
+                MEDIA_PREPARATION_UNAVAILABLE_MESSAGE,
+            )
+        except MediaSuggestionPreparationFailedError:
+            return _error_response(
+                500,
+                MEDIA_PREPARATION_FAILED_CODE,
+                MEDIA_PREPARATION_FAILED_MESSAGE,
+            )
+        except MediaSuggestionProviderAuthError:
+            return _error_response(
+                503,
+                AI_PROVIDER_AUTHENTICATION_FAILED_CODE,
+                AI_PROVIDER_AUTHENTICATION_FAILED_MESSAGE,
+            )
+        except MediaSuggestionProviderRateLimitedError:
+            return _error_response(429, AI_PROVIDER_RATE_LIMITED_CODE, AI_PROVIDER_RATE_LIMITED_MESSAGE)
+        except MediaSuggestionProviderUnavailableError:
+            return _error_response(503, AI_PROVIDER_UNAVAILABLE_CODE, AI_PROVIDER_UNAVAILABLE_MESSAGE)
+        except MediaSuggestionProviderInvalidResponseError:
+            return _error_response(
+                502,
+                AI_PROVIDER_INVALID_RESPONSE_CODE,
+                AI_PROVIDER_INVALID_RESPONSE_MESSAGE,
+            )
+        except MediaSuggestionProviderFailedError:
+            return _error_response(502, AI_PROVIDER_FAILED_CODE, AI_PROVIDER_FAILED_MESSAGE)
+        except Exception:
+            return _error_response(502, AI_PROVIDER_FAILED_CODE, AI_PROVIDER_FAILED_MESSAGE)
+        return _json_response(_imported_preview_response(result))
+
     return router
 
 
@@ -252,6 +341,20 @@ def _preview_response(result: MediaSuggestionPreviewResult) -> MediaSuggestionPr
     return MediaSuggestionPreviewResponse(
         library_id=result.library_id.to_string(),
         relative_path=result.relative_path.value,
+        sent_frame_count=result.sent_frame_count,
+        provider_id=result.suggestion.provider_id,
+        model_id=result.suggestion.model_id,
+        prompt_version=result.suggestion.prompt_version,
+        suggestion=_suggestion_response(result.suggestion),
+    )
+
+
+def _imported_preview_response(
+    result: ImportedMediaSuggestionPreviewResult,
+) -> ImportedMediaSuggestionPreviewResponse:
+    return ImportedMediaSuggestionPreviewResponse(
+        media_id=result.media_id.to_string(),
+        location_id=result.location_id.to_string(),
         sent_frame_count=result.sent_frame_count,
         provider_id=result.suggestion.provider_id,
         model_id=result.suggestion.model_id,

@@ -1682,6 +1682,57 @@ def test_metadata_dialog_contains_save_and_cancel(client: TestClient) -> None:
     assert "metadata-discard-button" in dialog_section
 
 
+def test_metadata_dialog_contains_explicit_ai_analysis_and_draft_review(client: TestClient) -> None:
+    html = client.get("/").text
+    dialog_section = html[html.index("metadata-dialog"):]
+
+    assert "Analyze by AI" in dialog_section
+    assert "AI Draft" in dialog_section
+    assert "Use draft" in dialog_section
+    assert "Discard draft" in dialog_section
+    assert "Suggested filename" in dialog_section
+    assert "No physical file has been renamed" in dialog_section
+    assert "up to 3 optimized preview frames" in dialog_section
+    assert "original media file, local path, and API key are not uploaded" in dialog_section
+    assert "Canonical key" not in dialog_section
+    assert "NVIDIA_API_KEY" not in dialog_section
+    assert "Authorization" not in dialog_section
+
+
+def test_javascript_metadata_ai_analysis_requires_confirmation_and_identity_url(
+    client: TestClient,
+) -> None:
+    script = client.get("/assets/app.js").text
+
+    assert "function mediaAiSuggestionEndpoint(mediaId, locationId)" in script
+    assert "${mediaId}/locations/${locationId}/ai-suggestion-preview" in script
+    assert "handleAnalyzeMetadataByAi" in script
+    analyze_body = script[script.index("async function handleAnalyzeMetadataByAi") : script.index("function aiSuggestionErrorMessage")]
+    assert "confirm(" in analyze_body
+    assert "confirm_cloud_upload: true" in script
+    assert "metadataAiRequestToken" in script
+    assert "token !== metadataAiRequestToken" in script
+    assert "metadataWorkspace.openMediaId === null" in script
+    assert "relative_path" not in analyze_body
+    assert "NVIDIA_API_KEY" not in script
+    assert "Authorization" not in script
+
+
+def test_javascript_metadata_ai_draft_does_not_autosave_or_rename(client: TestClient) -> None:
+    script = client.get("/assets/app.js").text
+    use_body = script[script.index("async function handleUseMetadataAiDraft") : script.index("function handleDiscardMetadataAiDraft")]
+
+    assert "metadataWorkspace.current.displayTitle = draft.title" in use_body
+    assert "metadataWorkspace.current.description = draft.description" in use_body
+    assert "metadataWorkspace.current.tagKeys = tagKeys.slice(0, MAX_METADATA_TAGS)" in use_body
+    assert "ensureMetadataTagKey(tag)" in use_body
+    assert "fetch(metadataEndpoint" not in use_body
+    assert "Save when ready" in use_body
+    assert "rename" not in use_body.lower()
+    assert "handleDiscardMetadataAiDraft" in script
+    assert "metadataWorkspace.aiDraft = null" in _javascript_function(script, "handleDiscardMetadataAiDraft")
+
+
 def test_css_metadata_dialog_has_scrollable_body(client: TestClient) -> None:
     css = client.get("/assets/styles.css").text
     assert "overflow-y" in css or "overflow-y" in css

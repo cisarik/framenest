@@ -19,14 +19,17 @@ from framenest.application.media_analysis import (
     RepresentativeFrame,
     TechnicalMetadata,
 )
+from framenest.application.media_content import supported_media_type
 from framenest.application.ports.library_repository import LibraryRepository
-from framenest.domain import LibraryId
+from framenest.application.ports.media_repository import MediaRepository
+from framenest.domain import LibraryId, MediaId, MediaLocationId
+from framenest.domain.media import MediaLocationAvailability
 
 if TYPE_CHECKING:
     from framenest.application.ports.media_analysis import LocalMediaAnalysisPreparer
     from framenest.application.ports.media_suggestion import MediaSuggestionProvider
 
-PROMPT_VERSION = "framenest-media-suggestion-v2"
+PROMPT_VERSION = "framenest-media-suggestion-v3"
 
 INVALID_SUGGESTION_REQUEST_MESSAGE = "Invalid media suggestion request."
 INVALID_SUGGESTION_MESSAGE = "Invalid media suggestion."
@@ -339,6 +342,20 @@ class MediaSuggestionPreviewResult:
         return len(self.prepared.representative_frames)
 
 
+@dataclass(frozen=True, slots=True)
+class ImportedMediaSuggestionPreviewResult:
+    """Complete non-persistent suggestion preview for one imported media location."""
+
+    media_id: MediaId
+    location_id: MediaLocationId
+    prepared: PreparedAnalysisResult
+    suggestion: MediaSuggestion
+
+    @property
+    def sent_frame_count(self) -> int:
+        return len(self.prepared.representative_frames)
+
+
 def build_suggestion_request(prepared: PreparedAnalysisResult) -> MediaSuggestionRequest:
     """Construct one provider-neutral request from a prepared analysis result."""
     return MediaSuggestionRequest(
@@ -392,6 +409,73 @@ class PreviewMediaSuggestion:
         return MediaSuggestionPreviewResult(
             library_id=library_id,
             relative_path=relative_path,
+            prepared=prepared,
+            suggestion=suggestion,
+        )
+
+
+class PreviewImportedMediaSuggestion:
+    """Compose local preparation and provider suggestion for one imported media location."""
+
+    def __init__(
+        self,
+        media_repository: MediaRepository,
+        library_repository: LibraryRepository,
+        preparer: LocalMediaAnalysisPreparer,
+        provider: MediaSuggestionProvider,
+    ) -> None:
+        self._media_repository = media_repository
+        self._library_repository = library_repository
+        self._preparer = preparer
+        self._provider = provider
+
+    def execute(
+        self,
+        media_id: MediaId,
+        location_id: MediaLocationId,
+    ) -> ImportedMediaSuggestionPreviewResult:
+        media = self._media_repository.get_media(media_id)
+        if media is None:
+            raise MediaSuggestionNotFoundError(LIBRARY_NOT_FOUND_MESSAGE)
+        location = self._media_repository.get_location(location_id)
+        if location is None or location.media_id != media_id:
+            raise MediaSuggestionNotFoundError(LIBRARY_NOT_FOUND_MESSAGE)
+        if location.availability != MediaLocationAvailability.AVAILABLE:
+            raise MediaSuggestionPreparationUnavailableError(
+                SUGGESTION_PREPARATION_UNAVAILABLE_MESSAGE
+            )
+        library = self._library_repository.get(location.library_id)
+        if library is None:
+            raise MediaSuggestionPreparationUnavailableError(
+                SUGGESTION_PREPARATION_UNAVAILABLE_MESSAGE
+            )
+        extension = source_extension(MediaRelativePath(location.relative_path.value))
+        if supported_media_type(media.kind, extension) is None:
+            raise FrameNestMediaSuggestionError(INVALID_SUGGESTION_REQUEST_MESSAGE)
+        try:
+            prepared = self._preparer.prepare(
+                library.root,
+                MediaRelativePath(location.relative_path.value),
+            )
+        except MediaAnalysisNotFoundError:
+            raise MediaSuggestionNotFoundError(LIBRARY_NOT_FOUND_MESSAGE) from None
+        except MediaAnalysisUnavailableError:
+            raise MediaSuggestionPreparationUnavailableError(
+                SUGGESTION_PREPARATION_UNAVAILABLE_MESSAGE
+            ) from None
+        except MediaAnalysisFailedError:
+            raise MediaSuggestionPreparationFailedError(
+                SUGGESTION_PREPARATION_FAILED_MESSAGE
+            ) from None
+        except FrameNestMediaAnalysisError:
+            raise MediaSuggestionPreparationUnavailableError(
+                SUGGESTION_PREPARATION_UNAVAILABLE_MESSAGE
+            ) from None
+        request = build_suggestion_request(prepared)
+        suggestion = self._provider.suggest(request)
+        return ImportedMediaSuggestionPreviewResult(
+            media_id=media_id,
+            location_id=location_id,
             prepared=prepared,
             suggestion=suggestion,
         )

@@ -193,7 +193,7 @@ def test_build_request_uses_exact_endpoint_and_data_urls() -> None:
     assert "response_format" not in body
     content = body["messages"][0]["content"]
     assert content[0]["type"] == "text"
-    assert "framenest-media-suggestion-v2" in content[0]["text"]
+    assert "framenest-media-suggestion-v3" in content[0]["text"]
     assert "Representative frame 1 of 3" in content[0]["text"]
     assert "Timestamp: 00:00:00.000" in content[0]["text"]
     assert "Representative frame 3 of 3" in content[0]["text"]
@@ -532,5 +532,5 @@ def test_valid_v2_json_produces_validated_suggestion() -> None:
 
     suggestion = provider.suggest(_sample_request())
 
-    assert suggestion.prompt_version == "framenest-media-suggestion-v2"
+    assert suggestion.prompt_version == "framenest-media-suggestion-v3"
     assert suggestion.title == "Evening clip"

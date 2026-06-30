@@ -20,22 +20,29 @@ from framenest.application.media_analysis import (
 )
 from framenest.application.media_suggestion import (
     FrameNestMediaSuggestionError,
+    ImportedMediaSuggestionPreviewResult,
     MediaSuggestion,
     MediaSuggestionNotFoundError,
+    MediaSuggestionPreparationUnavailableError,
     MediaSuggestionPreviewResult,
     MediaSuggestionProviderFailedError,
     MediaSuggestionRequest,
+    PreviewImportedMediaSuggestion,
     PreviewMediaSuggestion,
     PROMPT_VERSION,
     build_suggestion_request,
     validate_suggested_filename,
 )
-from framenest.domain import DeviceId, Library, LibraryId, LibraryPathFlavor, LibraryRoot
+from framenest.domain import DeviceId, Library, LibraryId, LibraryPathFlavor, LibraryRoot, MediaId, MediaLocationId
+from framenest.domain.media import LogicalMedia, MediaKind, MediaLocation, MediaLocationAvailability
+from framenest.domain.media import MediaRelativePath as DomainMediaRelativePath
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
 APPLICATION_SUGGESTION = REPOSITORY_ROOT / "src" / "framenest" / "application" / "media_suggestion.py"
 MEDIA_ANALYSIS_API = REPOSITORY_ROOT / "src" / "framenest" / "adapters" / "api" / "media_analysis_api.py"
 _VALID_PNG = PNG_SIGNATURE + b"png"
+MEDIA_ID = MediaId.from_string("99999999-8888-4777-9666-555555555555")
+LOCATION_ID = MediaLocationId.from_string("aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee")
 
 
 def _sample_metadata() -> TechnicalMetadata:
@@ -99,6 +106,45 @@ class _FakeLibraryRepository:
         return () if self._library is None else (self._library,)
 
 
+class _FakeMediaRepository:
+    def __init__(self, media: LogicalMedia | None, location: MediaLocation | None) -> None:
+        self._media = media
+        self._location = location
+        self.write_calls = 0
+
+    def add_media(self, media: LogicalMedia) -> None:
+        self.write_calls += 1
+
+    def get_media(self, media_id: MediaId) -> LogicalMedia | None:
+        if self._media is not None and self._media.id == media_id:
+            return self._media
+        return None
+
+    def list_media(self) -> tuple[LogicalMedia, ...]:
+        return ()
+
+    def add_location(self, location: MediaLocation) -> None:
+        self.write_calls += 1
+
+    def add_media_with_location(self, media: LogicalMedia, location: MediaLocation) -> None:
+        self.write_calls += 1
+
+    def get_location(self, location_id: MediaLocationId) -> MediaLocation | None:
+        if self._location is not None and self._location.id == location_id:
+            return self._location
+        return None
+
+    def get_location_by_library_path(
+        self,
+        library_id: LibraryId,
+        relative_path: DomainMediaRelativePath,
+    ) -> MediaLocation | None:
+        return None
+
+    def list_locations_for_media(self, media_id: MediaId) -> tuple[MediaLocation, ...]:
+        return ()
+
+
 class _FakePreparer:
     def __init__(self, prepared: PreparedAnalysisResult) -> None:
         self.prepared = prepared
@@ -130,16 +176,39 @@ def _sample_library() -> Library:
     )
 
 
+def _sample_media(kind: MediaKind = MediaKind.VIDEO) -> LogicalMedia:
+    return LogicalMedia(id=MEDIA_ID, kind=kind, created_at_ms=10, updated_at_ms=10)
+
+
+def _sample_location(
+    *,
+    media_id: MediaId = MEDIA_ID,
+    relative_path: str = "clips/sample.mp4",
+    availability: MediaLocationAvailability = MediaLocationAvailability.AVAILABLE,
+) -> MediaLocation:
+    return MediaLocation(
+        id=LOCATION_ID,
+        media_id=media_id,
+        library_id=_sample_library().id,
+        relative_path=DomainMediaRelativePath(relative_path),
+        availability=availability,
+        observed_size_bytes=100,
+        observed_mtime_ns=200,
+        created_at_ms=10,
+        updated_at_ms=10,
+    )
+
+
 def test_request_uses_basename_without_absolute_path() -> None:
     prepared = _sample_prepared()
     request = build_suggestion_request(prepared)
     assert request.basename == "sample.mp4"
     assert "/" not in request.basename
-    assert request.prompt_version == "framenest-media-suggestion-v2"
+    assert request.prompt_version == "framenest-media-suggestion-v3"
 
 
-def test_prompt_version_is_v2() -> None:
-    assert PROMPT_VERSION == "framenest-media-suggestion-v2"
+def test_prompt_version_is_v3() -> None:
+    assert PROMPT_VERSION == "framenest-media-suggestion-v3"
 
 
 def test_hidden_segments_rejected_for_suggestion_paths() -> None:
@@ -206,6 +275,75 @@ def test_preview_service_prepares_once_and_invokes_provider_once() -> None:
     assert provider.last_request.basename == "sample.mp4"
     assert result.suggestion.provider_id == "nvidia-nim"
     assert repository.write_calls == 0
+
+
+def test_imported_preview_service_uses_media_location_identity_without_paths() -> None:
+    library = _sample_library()
+    media_repository = _FakeMediaRepository(_sample_media(), _sample_location())
+    library_repository = _FakeLibraryRepository(library)
+    preparer = _FakePreparer(_sample_prepared())
+    provider = _FakeProvider(_sample_suggestion())
+    service = PreviewImportedMediaSuggestion(media_repository, library_repository, preparer, provider)
+
+    result = service.execute(MEDIA_ID, LOCATION_ID)
+
+    assert isinstance(result, ImportedMediaSuggestionPreviewResult)
+    assert result.media_id == MEDIA_ID
+    assert result.location_id == LOCATION_ID
+    assert preparer.calls == 1
+    assert provider.calls == 1
+    assert provider.last_request is not None
+    assert provider.last_request.basename == "sample.mp4"
+    assert "/" not in provider.last_request.basename
+    assert media_repository.write_calls == 0
+    assert library_repository.write_calls == 0
+
+
+def test_imported_preview_service_rejects_mismatched_location() -> None:
+    service = PreviewImportedMediaSuggestion(
+        _FakeMediaRepository(_sample_media(), _sample_location(media_id=MediaId.new())),
+        _FakeLibraryRepository(_sample_library()),
+        _FakePreparer(_sample_prepared()),
+        _FakeProvider(_sample_suggestion()),
+    )
+
+    with pytest.raises(MediaSuggestionNotFoundError):
+        service.execute(MEDIA_ID, LOCATION_ID)
+
+
+def test_imported_preview_service_rejects_unavailable_location_before_preparation() -> None:
+    preparer = _FakePreparer(_sample_prepared())
+    provider = _FakeProvider(_sample_suggestion())
+    service = PreviewImportedMediaSuggestion(
+        _FakeMediaRepository(
+            _sample_media(),
+            _sample_location(availability=MediaLocationAvailability.MISSING),
+        ),
+        _FakeLibraryRepository(_sample_library()),
+        preparer,
+        provider,
+    )
+
+    with pytest.raises(MediaSuggestionPreparationUnavailableError):
+        service.execute(MEDIA_ID, LOCATION_ID)
+    assert preparer.calls == 0
+    assert provider.calls == 0
+
+
+def test_imported_preview_service_rejects_unsupported_kind_extension_pair() -> None:
+    preparer = _FakePreparer(_sample_prepared())
+    provider = _FakeProvider(_sample_suggestion())
+    service = PreviewImportedMediaSuggestion(
+        _FakeMediaRepository(_sample_media(MediaKind.VIDEO), _sample_location(relative_path="clips/sample.gif")),
+        _FakeLibraryRepository(_sample_library()),
+        preparer,
+        provider,
+    )
+
+    with pytest.raises(FrameNestMediaSuggestionError):
+        service.execute(MEDIA_ID, LOCATION_ID)
+    assert preparer.calls == 0
+    assert provider.calls == 0
 
 
 def test_preview_service_raises_not_found_for_missing_library() -> None:

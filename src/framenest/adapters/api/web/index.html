@@ -139,6 +139,48 @@
             <div id="metadata-selected-tags" class="metadata-selected-tags" aria-live="polite"></div>
             <p id="metadata-tag-status" class="metadata-note" aria-live="polite"></p>
           </div>
+
+          <section id="metadata-ai-panel" class="metadata-ai-panel" aria-labelledby="metadata-ai-title">
+            <div class="metadata-ai-panel__header">
+              <div>
+                <h3 id="metadata-ai-title">AI Draft</h3>
+                <p id="metadata-ai-capability" class="metadata-note">AI analysis is not configured.</p>
+              </div>
+              <button id="metadata-ai-analyze-button" type="button" disabled>Analyze by AI</button>
+            </div>
+            <p class="metadata-ai-disclosure">
+              FrameNest will send up to 3 optimized preview frames and limited media metadata to NVIDIA for analysis.
+              The original media file, local path, and API key are not uploaded.
+            </p>
+            <p id="metadata-ai-status" class="metadata-note" aria-live="polite"></p>
+            <div id="metadata-ai-loading" class="metadata-ai-loading" hidden>
+              <span class="loading-spinner" aria-hidden="true"></span>
+              <span>Analyzing media...</span>
+            </div>
+            <div id="metadata-ai-draft" class="metadata-ai-draft" hidden>
+              <label class="metadata-field" for="metadata-ai-title-input">
+                <span>Title</span>
+                <input id="metadata-ai-title-input" type="text" maxlength="120" autocomplete="off">
+              </label>
+              <label class="metadata-field" for="metadata-ai-description-input">
+                <span>Description</span>
+                <textarea id="metadata-ai-description-input" rows="4" maxlength="600" autocomplete="off"></textarea>
+              </label>
+              <label class="metadata-field" for="metadata-ai-tags-input">
+                <span>Tags</span>
+                <input id="metadata-ai-tags-input" type="text" autocomplete="off" placeholder="Comma-separated tags">
+              </label>
+              <label class="metadata-field" for="metadata-ai-filename-input">
+                <span>Suggested filename</span>
+                <input id="metadata-ai-filename-input" type="text" maxlength="180" autocomplete="off">
+              </label>
+              <p class="metadata-note">Filename is a proposal only. No physical file has been renamed.</p>
+              <div class="metadata-ai-actions">
+                <button id="metadata-ai-use-button" type="button">Use draft</button>
+                <button id="metadata-ai-discard-button" type="button">Discard draft</button>
+              </div>
+            </div>
+          </section>
         </div>
       </div>
 

@@ -47,6 +47,7 @@ from framenest.application.media_metadata import (
 from framenest.application.media_analysis import PrepareLocalMediaAnalysis
 from framenest.application.media_content import ResolveMediaContent
 from framenest.application.media_suggestion import PreviewMediaSuggestion
+from framenest.application.media_suggestion import PreviewImportedMediaSuggestion
 from framenest.adapters.api.library_api import (
     LibraryApiDependencies,
     create_library_api_router,
@@ -176,14 +177,23 @@ def create_app(
         assert owned_library_repository is not None
         credential = load_nvidia_api_credential()
         suggestion_preview = None
+        imported_suggestion_preview = None
         if credential is not None:
+            provider = NvidiaNimMediaSuggestionProvider(credential)
             suggestion_preview = PreviewMediaSuggestion(
                 owned_library_repository,
                 LocalMediaAnalysisAdapter(),
-                NvidiaNimMediaSuggestionProvider(credential),
+                provider,
+            )
+            imported_suggestion_preview = PreviewImportedMediaSuggestion(
+                owned_media_repository,
+                owned_library_repository,
+                LocalMediaAnalysisAdapter(),
+                provider,
             )
         media_suggestion_api_dependencies = MediaSuggestionApiDependencies(
             preview_suggestion=suggestion_preview,
+            preview_imported_suggestion=imported_suggestion_preview,
             provider_configured=suggestion_preview is not None,
         )
 

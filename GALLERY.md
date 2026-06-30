@@ -50,12 +50,14 @@ The current editor exposes ordinary `Title`, `Description`, `Tags`, `Save`, and
 uses hidden stable tag keys; those internal keys, collection assignment, and
 `Processed` workflow state are not ordinary editor controls. The `Processed`
 membership remains derived automatically from durable tag saves, not chosen
-manually. Future metadata work should add optional separate AI drafts as described in
-[AI_WORKSPACE.md](AI_WORKSPACE.md) and
-[ADR-0023](docs/adr/0023-manual-first-metadata-and-multi-model-ai-drafts.md).
-AI draft comparison is future architecture. The current repository also
-implements the pre-alpha non-persistent browser AI suggestion review, which is
-separate from manual catalog saves.
+manually. The editor can explicitly run NVIDIA-backed analysis for an imported
+available GIF or MP4 after confirmation. That request sends up to three
+optimized preview frames plus bounded metadata, disables model reasoning for the
+validated JSON request, and returns a separate editable AI Draft containing
+title, description, tags, and suggested filename. The draft never overwrites
+manual work silently. `Use draft` changes only the unsaved editor state; Save
+remains explicit, and no physical rename occurs. Persistent drafts, model
+comparison, provider Settings, and explicit physical rename remain future work.
 
 The Details dialog now plays real local GIF and MP4 content through the
 identity-only `GET /api/media/{media_id}/locations/{location_id}/content`

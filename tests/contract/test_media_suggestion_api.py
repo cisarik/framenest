@@ -29,6 +29,7 @@ from framenest.application.media_analysis import (
     PNG_SIGNATURE,
 )
 from framenest.application.media_suggestion import (
+    ImportedMediaSuggestionPreviewResult,
     MediaSuggestion,
     MediaSuggestionNotFoundError,
     MediaSuggestionPreparationFailedError,
@@ -42,9 +43,11 @@ from framenest.application.media_suggestion import (
     PROMPT_VERSION,
 )
 from framenest.configuration import FrameNestSettings
-from framenest.domain import LibraryId
+from framenest.domain import LibraryId, MediaId, MediaLocationId
 
 CANONICAL_LIBRARY_ID = "12345678-1234-4234-9234-123456789abc"
+CANONICAL_MEDIA_ID = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
+CANONICAL_LOCATION_ID = "bbbbbbbb-cccc-4ddd-9eee-ffffffffffff"
 PRIVATE_ROOT_PATH = "/Users/example/private/videos"
 PRIVATE_DATABASE_PATH = "/Users/example/private/catalog.sqlite3"
 RAW_PROVIDER_CONTENT = "raw provider markdown or reasoning"
@@ -135,6 +138,27 @@ class _FakeSuggestionPreview:
         return self.result
 
 
+class _FakeImportedSuggestionPreview:
+    def __init__(
+        self,
+        result: ImportedMediaSuggestionPreviewResult | None = None,
+        error: Exception | None = None,
+    ) -> None:
+        self.result = result or _imported_suggestion_result()
+        self.error = error
+        self.calls: list[tuple[MediaId, MediaLocationId]] = []
+
+    def execute(
+        self,
+        media_id: MediaId,
+        location_id: MediaLocationId,
+    ) -> ImportedMediaSuggestionPreviewResult:
+        self.calls.append((media_id, location_id))
+        if self.error is not None:
+            raise self.error
+        return self.result
+
+
 def _prepared_result() -> PreparedAnalysisResult:
     frame = build_representative_frame(timestamp_ms=100, payload=PNG_SIGNATURE + b"frame")
     return PreparedAnalysisResult(
@@ -181,14 +205,25 @@ def _suggestion_result() -> MediaSuggestionPreviewResult:
     )
 
 
+def _imported_suggestion_result() -> ImportedMediaSuggestionPreviewResult:
+    return ImportedMediaSuggestionPreviewResult(
+        media_id=MediaId.from_string(CANONICAL_MEDIA_ID),
+        location_id=MediaLocationId.from_string(CANONICAL_LOCATION_ID),
+        prepared=_prepared_result(),
+        suggestion=_suggestion(),
+    )
+
+
 def _client(
     *,
     configured: bool = True,
     preview: _FakeSuggestionPreview | None = None,
+    imported_preview: _FakeImportedSuggestionPreview | None = None,
     catalog_available: bool = True,
     database_path: Path | None = None,
-) -> tuple[TestClient, _FakeSuggestionPreview]:
+) -> tuple[TestClient, _FakeSuggestionPreview, _FakeImportedSuggestionPreview]:
     suggestion_preview = preview or _FakeSuggestionPreview()
+    imported_suggestion_preview = imported_preview or _FakeImportedSuggestionPreview()
     settings = FrameNestSettings(
         host="127.0.0.1",
         database_path=database_path or Path("/tmp/framenest-media-suggestion-api.sqlite3"),
@@ -208,9 +243,10 @@ def _client(
         media_suggestion_api_dependencies=MediaSuggestionApiDependencies(
             preview_suggestion=suggestion_preview if configured else None,
             provider_configured=configured,
+            preview_imported_suggestion=imported_suggestion_preview if configured else None,
         ),
     )
-    return TestClient(app), suggestion_preview
+    return TestClient(app), suggestion_preview, imported_suggestion_preview
 
 
 def _post_preview(
@@ -228,9 +264,22 @@ def _post_preview(
     )
 
 
+def _post_imported_preview(
+    client: TestClient,
+    *,
+    media_id: str = CANONICAL_MEDIA_ID,
+    location_id: str = CANONICAL_LOCATION_ID,
+    confirm_cloud_upload: object = True,
+):
+    return client.post(
+        f"/api/media/{media_id}/locations/{location_id}/ai-suggestion-preview",
+        json={"confirm_cloud_upload": confirm_cloud_upload},
+    )
+
+
 def test_capability_configured_and_unconfigured_are_sanitized_no_store() -> None:
-    configured_client, configured_preview = _client(configured=True)
-    unconfigured_client, unconfigured_preview = _client(configured=False)
+    configured_client, configured_preview, configured_imported_preview = _client(configured=True)
+    unconfigured_client, unconfigured_preview, unconfigured_imported_preview = _client(configured=False)
 
     configured = configured_client.get("/api/ai/media-suggestion-capability")
     unconfigured = unconfigured_client.get("/api/ai/media-suggestion-capability")
@@ -241,7 +290,7 @@ def test_capability_configured_and_unconfigured_are_sanitized_no_store() -> None
         "available": True,
         "provider_id": "nvidia-nim",
         "model_id": "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
-        "prompt_version": "framenest-media-suggestion-v2",
+        "prompt_version": "framenest-media-suggestion-v3",
         "execution": "cloud",
         "requires_explicit_confirmation": True,
     }
@@ -253,11 +302,13 @@ def test_capability_configured_and_unconfigured_are_sanitized_no_store() -> None
     assert "Authorization" not in combined
     assert "NVIDIA_API_KEY" not in combined
     assert configured_preview.calls == []
+    assert configured_imported_preview.calls == []
     assert unconfigured_preview.calls == []
+    assert unconfigured_imported_preview.calls == []
 
 
 def test_success_returns_validated_editable_suggestion_no_frames_or_raw_content() -> None:
-    client, preview = _client()
+    client, preview, imported_preview = _client()
 
     response = _post_preview(client)
 
@@ -269,7 +320,7 @@ def test_success_returns_validated_editable_suggestion_no_frames_or_raw_content(
         "sent_frame_count": 1,
         "provider_id": "nvidia-nim",
         "model_id": "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
-        "prompt_version": "framenest-media-suggestion-v2",
+        "prompt_version": "framenest-media-suggestion-v3",
         "suggestion": {
             "title": "Editable title",
             "description": "Editable description",
@@ -282,6 +333,7 @@ def test_success_returns_validated_editable_suggestion_no_frames_or_raw_content(
         },
     }
     assert preview.calls == [(LibraryId.from_string(CANONICAL_LIBRARY_ID), MediaRelativePath("Series/Episode 01.mkv"))]
+    assert imported_preview.calls == []
     body = response.text
     assert "payload_base64" not in body
     assert "image/jpeg" not in body
@@ -299,7 +351,7 @@ def test_success_returns_validated_editable_suggestion_no_frames_or_raw_content(
 def test_confirmation_is_required_before_preparation_or_provider(
     confirm_cloud_upload: object,
 ) -> None:
-    client, preview = _client()
+    client, preview, imported_preview = _client()
 
     response = _post_preview(client, confirm_cloud_upload=confirm_cloud_upload)
 
@@ -312,16 +364,18 @@ def test_confirmation_is_required_before_preparation_or_provider(
         }
     }
     assert preview.calls == []
+    assert imported_preview.calls == []
 
 
 def test_unconfigured_provider_returns_503_without_preview_call() -> None:
-    client, preview = _client(configured=False)
+    client, preview, imported_preview = _client(configured=False)
 
     response = _post_preview(client)
 
     assert response.status_code == 503
     assert response.json()["error"]["code"] == "AI_PROVIDER_NOT_CONFIGURED"
     assert preview.calls == []
+    assert imported_preview.calls == []
 
 
 @pytest.mark.parametrize(
@@ -333,13 +387,135 @@ def test_unconfigured_provider_returns_503_without_preview_call() -> None:
     ],
 )
 def test_invalid_path_mapping(relative_path: str, status_code: int, code: str) -> None:
-    client, preview = _client()
+    client, preview, imported_preview = _client()
 
     response = _post_preview(client, relative_path=relative_path)
 
     assert response.status_code == status_code
     assert response.json()["error"]["code"] == code
     assert preview.calls == []
+    assert imported_preview.calls == []
+
+
+def test_imported_media_identity_preview_returns_sanitized_draft_without_path() -> None:
+    client, preview, imported_preview = _client()
+
+    response = _post_imported_preview(client)
+
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "no-store"
+    assert response.json() == {
+        "media_id": CANONICAL_MEDIA_ID,
+        "location_id": CANONICAL_LOCATION_ID,
+        "sent_frame_count": 1,
+        "provider_id": "nvidia-nim",
+        "model_id": "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
+        "prompt_version": "framenest-media-suggestion-v3",
+        "suggestion": {
+            "title": "Editable title",
+            "description": "Editable description",
+            "collection": "Meme",
+            "tags": ["Meme", "Animation"],
+            "suggested_filename": "editable-name.mkv",
+            "confidence": 0.85,
+            "evidence": ["Visible evidence"],
+            "uncertainties": ["Unclear context"],
+        },
+    }
+    assert preview.calls == []
+    assert imported_preview.calls == [
+        (
+            MediaId.from_string(CANONICAL_MEDIA_ID),
+            MediaLocationId.from_string(CANONICAL_LOCATION_ID),
+        )
+    ]
+    body = response.text
+    assert "relative_path" not in body
+    assert PRIVATE_ROOT_PATH not in body
+    assert PRIVATE_DATABASE_PATH not in body
+    assert "Authorization" not in body
+    assert "data:" not in body
+
+
+@pytest.mark.parametrize("confirm_cloud_upload", [False, None, "true"])
+def test_imported_media_identity_preview_requires_confirmation_before_provider(
+    confirm_cloud_upload: object,
+) -> None:
+    client, preview, imported_preview = _client()
+
+    response = _post_imported_preview(client, confirm_cloud_upload=confirm_cloud_upload)
+
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "CLOUD_CONFIRMATION_REQUIRED"
+    assert preview.calls == []
+    assert imported_preview.calls == []
+
+
+def test_imported_media_identity_preview_never_accepts_browser_path() -> None:
+    client, preview, imported_preview = _client()
+
+    response = client.post(
+        f"/api/media/{CANONICAL_MEDIA_ID}/locations/{CANONICAL_LOCATION_ID}/ai-suggestion-preview",
+        json={"confirm_cloud_upload": True, "relative_path": "/Users/example/private.mp4"},
+    )
+
+    assert response.status_code == 200
+    assert preview.calls == []
+    assert imported_preview.calls == [
+        (
+            MediaId.from_string(CANONICAL_MEDIA_ID),
+            MediaLocationId.from_string(CANONICAL_LOCATION_ID),
+        )
+    ]
+    assert "/Users/example" not in response.text
+
+
+@pytest.mark.parametrize(
+    ("error", "status_code", "code", "message"),
+    [
+        (MediaSuggestionNotFoundError(RAW_EXCEPTION_TEXT), 404, "LIBRARY_NOT_FOUND", "Library not found."),
+        (
+            MediaSuggestionPreparationUnavailableError(RAW_EXCEPTION_TEXT),
+            409,
+            "MEDIA_PREPARATION_UNAVAILABLE",
+            "Local media preparation is not available.",
+        ),
+        (
+            MediaSuggestionProviderAuthError(RAW_EXCEPTION_TEXT),
+            503,
+            "AI_PROVIDER_AUTHENTICATION_FAILED",
+            "The configured AI provider credential was rejected.",
+        ),
+        (
+            MediaSuggestionProviderRateLimitedError(RAW_EXCEPTION_TEXT),
+            429,
+            "AI_PROVIDER_RATE_LIMITED",
+            "The AI suggestion provider rate limit was reached.",
+        ),
+        (
+            MediaSuggestionProviderInvalidResponseError(RAW_EXCEPTION_TEXT),
+            502,
+            "AI_PROVIDER_INVALID_RESPONSE",
+            "The AI suggestion provider response was invalid.",
+        ),
+    ],
+)
+def test_imported_media_identity_error_mappings_are_sanitized(
+    error: Exception,
+    status_code: int,
+    code: str,
+    message: str,
+) -> None:
+    client, _preview, _imported_preview = _client(
+        imported_preview=_FakeImportedSuggestionPreview(error=error)
+    )
+
+    response = _post_imported_preview(client)
+
+    assert response.status_code == status_code
+    assert response.headers["cache-control"] == "no-store"
+    assert response.json() == {"error": {"code": code, "message": message}}
+    assert RAW_EXCEPTION_TEXT not in response.text
 
 
 @pytest.mark.parametrize(
@@ -402,7 +578,7 @@ def test_error_mappings_are_sanitized(
     code: str,
     message: str,
 ) -> None:
-    client, _preview = _client(preview=_FakeSuggestionPreview(error=error))
+    client, _preview, _imported_preview = _client(preview=_FakeSuggestionPreview(error=error))
 
     response = _post_preview(client)
 
@@ -413,7 +589,7 @@ def test_error_mappings_are_sanitized(
 
 
 def test_existing_core_api_contracts_remain_available() -> None:
-    client, _preview = _client()
+    client, _preview, _imported_preview = _client()
 
     assert client.get("/health").json() == {"status": "ok"}
     assert client.get("/").status_code == 200
