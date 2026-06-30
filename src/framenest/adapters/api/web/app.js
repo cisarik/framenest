@@ -34,6 +34,7 @@ let previewCacheMap = new Map();
 let previewRequestToken = 0;
 let activePreviewMediaId = null;
 let activePreviewTimer = null;
+let cardMediaElements = new Set();
 let detailsMediaToken = 0;
 let detailsMediaElement = null;
 const prefersReducedMotion = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -120,7 +121,6 @@ const detailsLoading = document.querySelector("#media-details-loading");
 const detailsError = document.querySelector("#media-details-error");
 const detailsContent = document.querySelector("#media-details-content");
 const detailsPreviewContainer = document.querySelector("#details-preview-container");
-const detailsDisplayTitle = document.querySelector("#media-details-display-title");
 const detailsDialogTitle = document.querySelector("#media-details-title");
 const detailsKind = document.querySelector("#media-details-kind");
 const detailsTagsContainer = document.querySelector("#media-details-tags");
@@ -132,6 +132,7 @@ let metadataOpenerElement = null;
 let detailsOpenerElement = null;
 let detailsCurrentItem = null;
 let detailsMetadataToken = 0;
+let detailsPlayRequested = false;
 const metadataSelectedCount = document.querySelector("#metadata-selected-count");
 const metadataCreateTagForm = document.querySelector("#metadata-create-tag-form");
 const metadataCreateKeyInput = document.querySelector("#metadata-create-key-input");
@@ -550,6 +551,28 @@ function stopCardPreviewTimer() {
   activePreviewMediaId = null;
 }
 
+function cleanupCatalogCardMedia() {
+  cardMediaElements.forEach((element) => {
+    if (element.tagName === "VIDEO") {
+      element.pause();
+      element.removeAttribute("src");
+      try {
+        element.load();
+      } catch {
+        // Ignore load failures during card media cleanup.
+      }
+    } else if (element.tagName === "IMG") {
+      element.removeAttribute("src");
+    }
+    element.onerror = null;
+    element.onload = null;
+    element.onloadeddata = null;
+    element.onloadedmetadata = null;
+    element.oncanplay = null;
+  });
+  cardMediaElements = new Set();
+}
+
 function cleanupDetailsMedia({ invalidate = true } = {}) {
   if (invalidate) {
     detailsMediaToken += 1;
@@ -735,7 +758,7 @@ function renderDetailsMediaUnavailable(container) {
   container.appendChild(text);
 }
 
-function renderDetailsMedia(item) {
+function renderDetailsMedia(item, { playWhenReady = false } = {}) {
   if (!detailsPreviewContainer) return;
   cleanupDetailsMedia();
   const token = ++detailsMediaToken;
@@ -778,6 +801,12 @@ function renderDetailsMedia(item) {
       if (token !== detailsMediaToken) return;
       loading.remove();
       video.hidden = false;
+      if (playWhenReady) {
+        video.play().catch(() => {
+          // Native controls remain available when the browser blocks playback.
+        });
+        playWhenReady = false;
+      }
     };
     video.onerror = () => {
       if (token !== detailsMediaToken) return;
@@ -1138,6 +1167,93 @@ function summarizeAvailability(locations) {
     .join(", ");
 }
 
+function openPlaybackDetails(item, openerElement) {
+  openDetailsDialog(item, openerElement, { playWhenReady: true });
+}
+
+function renderUnavailableCardMediaSurface(item, title) {
+  const surface = document.createElement("div");
+  surface.className = "media-placeholder media-placeholder--unavailable";
+  surface.setAttribute("data-media-state", "unavailable");
+  surface.setAttribute("aria-label", `No local playback available for ${title}`);
+  const text = document.createElement("span");
+  text.className = "media-placeholder__error";
+  text.textContent = "Unavailable";
+  surface.appendChild(text);
+  return surface;
+}
+
+function renderCatalogCardMediaSurface(item) {
+  const title = item.display_title || deriveCatalogFallbackTitle(item);
+  const location = selectPlaybackLocation(item);
+  if (!location) {
+    return renderUnavailableCardMediaSurface(item, title);
+  }
+
+  const surface = document.createElement("div");
+  surface.className = `media-placeholder media-placeholder--live media-placeholder--${item.media_kind}`;
+  surface.setAttribute("data-media-state", "live");
+  surface.setAttribute("aria-label", `Open playback for ${title}`);
+  surface.title = "Open playback";
+
+  const url = mediaContentUrl(item.media_id, location.location_id);
+  const showUnavailable = () => {
+    surface.replaceChildren();
+    surface.className = "media-placeholder media-placeholder--unavailable";
+    surface.setAttribute("data-media-state", "unavailable");
+    const text = document.createElement("span");
+    text.className = "media-placeholder__error";
+    text.textContent = "Media unavailable.";
+    surface.appendChild(text);
+  };
+
+  if (item.media_kind === "video") {
+    const video = document.createElement("video");
+    video.className = "media-placeholder__video";
+    video.preload = "metadata";
+    video.playsInline = true;
+    video.autoplay = false;
+    video.muted = true;
+    video.controls = false;
+    video.loop = false;
+    video.setAttribute("aria-label", `Paused video preview for ${title}`);
+    video.onerror = showUnavailable;
+    cardMediaElements.add(video);
+    video.src = url;
+    surface.appendChild(video);
+  } else {
+    const img = document.createElement("img");
+    img.className = "media-placeholder__image";
+    img.alt = `Animated preview for ${title}`;
+    img.onerror = showUnavailable;
+    cardMediaElements.add(img);
+    img.src = url;
+    surface.appendChild(img);
+  }
+
+  const playButton = document.createElement("button");
+  playButton.className = "media-placeholder__play";
+  playButton.type = "button";
+  playButton.textContent = "▶";
+  playButton.setAttribute("aria-label", `Play ${title}`);
+  playButton.addEventListener("click", (event) => {
+    event.stopPropagation();
+    openPlaybackDetails(item, playButton);
+  });
+  surface.appendChild(playButton);
+
+  surface.addEventListener("click", () => openPlaybackDetails(item, surface));
+  surface.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      openPlaybackDetails(item, surface);
+    }
+  });
+  surface.setAttribute("role", "button");
+  surface.setAttribute("tabindex", "0");
+  return surface;
+}
+
 function setCatalogPagination(page) {
   const start = page.total === 0 ? 0 : page.offset + 1;
   const end = Math.min(page.offset + page.limit, page.total);
@@ -1156,42 +1272,7 @@ function renderCatalogCard(item) {
     card.classList.add("catalog-card--selected");
   }
 
-  const placeholder = document.createElement("div");
-  placeholder.className = "media-placeholder media-placeholder--" + item.media_kind;
-  placeholder.setAttribute("role", "button");
-  placeholder.setAttribute("tabindex", "0");
-  const previewLabel = `Load preview for ${item.display_title || deriveCatalogFallbackTitle(item)}`;
-  placeholder.setAttribute("aria-label", previewLabel);
-  placeholder.title = "Preview";
-  const cached = getCachedPreview(item.media_id);
-  if (cached && !cached.error && cached.frames && cached.frames.length > 0) {
-    placeholder.setAttribute("data-preview-state", "loaded");
-    const img = document.createElement("img");
-    img.className = "media-placeholder__preview-img";
-    img.src = cached.frames[0].objectUrl;
-    img.alt = `Local preview frame for ${item.display_title || deriveCatalogFallbackTitle(item)}`;
-    img.style.width = "100%";
-    img.style.height = "100%";
-    img.style.objectFit = "contain";
-    placeholder.appendChild(img);
-  } else {
-    const glyph = document.createElement("span");
-    glyph.className = "media-placeholder__glyph";
-    glyph.textContent = item.media_kind === "video" ? "◆" : "◆";
-    glyph.setAttribute("aria-hidden", "true");
-    placeholder.appendChild(glyph);
-    const placeholderLabel = document.createElement("span");
-    placeholderLabel.className = "media-placeholder__label";
-    placeholderLabel.textContent = item.media_kind === "video" ? "Video placeholder" : "Animated image placeholder";
-    placeholder.appendChild(placeholderLabel);
-  }
-  placeholder.addEventListener("click", () => handleCardPreview(item, card, placeholder));
-  placeholder.addEventListener("keydown", (event) => {
-    if (event.key === "Enter" || event.key === " ") {
-      event.preventDefault();
-      handleCardPreview(item, card, placeholder);
-    }
-  });
+  const mediaSurface = renderCatalogCardMediaSurface(item);
 
   const body = document.createElement("div");
   body.className = "catalog-card__body";
@@ -1246,22 +1327,23 @@ function renderCatalogCard(item) {
   const detailsButton = document.createElement("button");
   detailsButton.className = "catalog-card__action";
   detailsButton.type = "button";
-  detailsButton.textContent = "View details";
-  detailsButton.setAttribute("aria-label", `View details for ${item.display_title || deriveCatalogFallbackTitle(item)}`);
+  detailsButton.textContent = "Details";
+  detailsButton.setAttribute("aria-label", `Details for ${item.display_title || deriveCatalogFallbackTitle(item)}`);
   detailsButton.addEventListener("click", () => openDetailsDialog(item, detailsButton));
   const editButton = document.createElement("button");
   editButton.className = "catalog-card__action catalog-card__action--primary";
   editButton.type = "button";
-  editButton.textContent = "Edit metadata";
-  editButton.setAttribute("aria-label", `Edit metadata for ${item.display_title || deriveCatalogFallbackTitle(item)}`);
+  editButton.textContent = "Edit";
+  editButton.setAttribute("aria-label", `Edit ${item.display_title || deriveCatalogFallbackTitle(item)}`);
   editButton.addEventListener("click", () => handleOpenMetadataWorkspace(item, editButton));
   actions.append(detailsButton, editButton);
 
-  card.append(placeholder, body, actions);
+  card.append(mediaSurface, body, actions);
   return card;
 }
 
 function renderCatalogSuccess(page) {
+  cleanupCatalogCardMedia();
   catalogResults.replaceChildren();
   catalogState.total = page.total;
   catalogState.offset = page.offset;
@@ -1573,7 +1655,7 @@ function applyMetadataPayloadToWorkspace(payload) {
   };
 }
 
-function openDetailsDialog(item, openerElement) {
+function openDetailsDialog(item, openerElement, { playWhenReady = false } = {}) {
   if (!detailsDialog) return;
   if (metadataWorkspace.openMediaId !== null) {
     if (!confirmDiscardDirtyMetadata()) return;
@@ -1583,6 +1665,7 @@ function openDetailsDialog(item, openerElement) {
   cleanupDetailsMedia();
   detailsOpenerElement = openerElement || document.activeElement;
   detailsCurrentItem = item;
+  detailsPlayRequested = playWhenReady;
   detailsLoading.hidden = false;
   detailsError.hidden = true;
   detailsContent.hidden = true;
@@ -1613,9 +1696,8 @@ async function populateDetailsDialog(item) {
     detailsLoading.hidden = true;
     detailsContent.hidden = false;
 
-    renderDetailsMedia(item);
+    renderDetailsMedia(item, { playWhenReady: detailsPlayRequested });
 
-    detailsDisplayTitle.textContent = item.display_title || deriveCatalogFallbackTitle(item);
     if (detailsDialogTitle) {
       detailsDialogTitle.textContent = item.display_title || deriveCatalogFallbackTitle(item);
     }
@@ -1651,6 +1733,9 @@ async function populateDetailsDialog(item) {
     }
 
     detailsTechnicalList.replaceChildren();
+    if (detailsTechnical) {
+      detailsTechnical.removeAttribute("open");
+    }
     addMetadataValue(detailsTechnicalList, "Media ID", item.media_id);
     addMetadataValue(detailsTechnicalList, "Kind", formatCatalogKind(item.media_kind));
     addMetadataValue(detailsTechnicalList, "Created", new Date(item.created_at_ms).toISOString());
@@ -1679,6 +1764,7 @@ function closeDetailsDialog() {
     detailsDialog.removeAttribute("open");
   }
   detailsCurrentItem = null;
+  detailsPlayRequested = false;
   detailsMetadataToken++;
   if (detailsOpenerElement) {
     detailsOpenerElement.focus();

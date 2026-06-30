@@ -64,9 +64,14 @@ endpoint when the first catalog location is `available`. It selects only by
 `media_id` and `location_id`; it never constructs playback URLs from relative
 paths, absolute paths, or library roots. Video uses a native `<video>` element
 with controls, metadata preload, and `playsinline`; animated images use a real
-`<img>`. Cards continue to use the explicit representative-frame preview action,
-which is separate from full Details playback. Native/VLC playback, downloadable
-files, and a broader media player are future work.
+`<img>`. Available local Gallery cards show immediate real media visuals:
+animated GIFs may animate directly, and MP4 items use a real paused decoded-frame
+visual from the identity-only content endpoint. A centered real `▶` affordance
+opens actual Details playback, while card actions are labelled `Details` and
+`Edit`. These immediate card visuals are not durable accepted covers, persistent
+thumbnails, or the future cover pipeline; generic available-media placeholders
+are rejected. Details is player-first. Native/VLC playback, downloadable files,
+and a broader media player are future work.
 Canonical tag editing should support suggestions, keyboard and mouse
 navigation, rounded removable chips, an explicit `×` control, visible
 hover/focus/selected/AI-suggested/invalid states, case-insensitive duplicate

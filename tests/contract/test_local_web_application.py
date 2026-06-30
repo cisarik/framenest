@@ -278,8 +278,9 @@ def test_browser_description_workspace_includes_dirty_state_for_description(clie
 
 def test_catalog_cards_have_explicit_metadata_edit_action(client: TestClient) -> None:
     script = client.get("/assets/app.js").text
+    card_body = _javascript_function(script, "renderCatalogCard")
 
-    assert "Edit metadata" in script
+    assert "Edit" in card_body
     assert "handleOpenMetadataWorkspace(item" in script
     assert "card.addEventListener(\"click\"" not in script
 
@@ -1049,21 +1050,21 @@ def test_catalog_card_does_not_show_fallback_label_text(client: TestClient) -> N
 
 def test_catalog_card_has_details_and_edit_actions(client: TestClient) -> None:
     script = client.get("/assets/app.js").text
-    start = script.index("function renderCatalogCard(item)")
-    end = script.index("\n}\n", start) + len("\n}\n")
-    card_body = script[start:end]
-    assert "View details" in card_body or "details" in card_body.lower()
-    assert "Edit metadata" in card_body
+    card_body = _javascript_function(script, "renderCatalogCard")
+    assert "Details" in card_body
+    assert "Edit" in card_body
+    assert "View details" not in card_body
+    assert "Edit metadata" not in card_body
     assert "handleOpenMetadataWorkspace" in card_body
 
 
-def test_catalog_card_has_truthful_placeholder(client: TestClient) -> None:
+def test_catalog_card_has_truthful_unavailable_fallback(client: TestClient) -> None:
     script = client.get("/assets/app.js").text
-    start = script.index("function renderCatalogCard(item)")
-    end = script.index("\n}\n", start) + len("\n}\n")
-    card_body = script[start:end]
-    assert "placeholder" in card_body.lower()
-    assert "cover" not in card_body.lower() or "placeholder" in card_body.lower()
+    fallback_body = _javascript_function(script, "renderUnavailableCardMediaSurface")
+    assert "data-media-state" in fallback_body
+    assert "unavailable" in fallback_body
+    assert "No local playback available" in fallback_body
+    assert "mediaContentUrl" not in fallback_body
 
 
 def test_details_dialog_exists_in_html(client: TestClient) -> None:
@@ -1094,7 +1095,7 @@ def test_javascript_has_details_dialog_logic(client: TestClient) -> None:
 def test_javascript_details_dialog_has_edit_transition(client: TestClient) -> None:
     script = client.get("/assets/app.js").text
     assert "handleOpenMetadataWorkspace" in script
-    assert "Edit metadata" in script
+    assert "Edit" in script
 
 
 def test_javascript_metadata_dialog_uses_show_modal(client: TestClient) -> None:
@@ -1135,13 +1136,14 @@ def test_javascript_card_has_status_row(client: TestClient) -> None:
     assert "processed" in card_body.lower() or "status" in card_body.lower()
 
 
-def test_javascript_card_has_visual_placeholder_element(client: TestClient) -> None:
+def test_javascript_card_has_content_first_media_surface(client: TestClient) -> None:
     script = client.get("/assets/app.js").text
-    start = script.index("function renderCatalogCard(item)")
-    end = script.index("\n}\n", start) + len("\n}\n")
-    card_body = script[start:end]
-    assert "media-placeholder" in card_body or "placeholder" in card_body.lower()
-    assert "Video placeholder" in card_body or "Animated image placeholder" in card_body or "placeholder" in card_body.lower()
+    surface_body = _javascript_function(script, "renderCatalogCardMediaSurface")
+    assert "mediaContentUrl(item.media_id, location.location_id)" in surface_body
+    assert 'document.createElement("video")' in surface_body
+    assert 'document.createElement("img")' in surface_body
+    assert "Video placeholder" not in surface_body
+    assert "Animated image placeholder" not in surface_body
 
 
 def test_html_does_not_contain_permanent_metadata_section_in_flow(client: TestClient) -> None:
@@ -1165,13 +1167,12 @@ def test_javascript_preserves_existing_metadata_state_machine(client: TestClient
 # ---------------------------------------------------------------------------
 
 
-def test_card_has_explicit_preview_control(client: TestClient) -> None:
+def test_card_has_explicit_playback_control(client: TestClient) -> None:
     script = client.get("/assets/app.js").text
-    start = script.index("function renderCatalogCard(item)")
-    end = script.index("\n}\n", start) + len("\n}\n")
-    card_body = script[start:end]
-    assert "Preview" in card_body or "preview" in card_body.lower()
-    assert "handleCardPreview" in script or "loadCardPreview" in script or "requestPreview" in script
+    surface_body = _javascript_function(script, "renderCatalogCardMediaSurface")
+    assert 'playButton.textContent = "▶"' in surface_body
+    assert "openPlaybackDetails" in surface_body
+    assert "handleCardPreview" not in _javascript_function(script, "renderCatalogCard")
 
 
 def test_no_automatic_analysis_on_page_load(client: TestClient) -> None:
@@ -1273,6 +1274,97 @@ def test_javascript_details_playback_uses_identity_only_url(client: TestClient) 
     assert "location_id" in url_body or "locationId" in url_body
     assert "relative_path" not in url_body
     assert "library.path" not in url_body
+
+
+def test_javascript_available_cards_use_identity_only_media_urls(client: TestClient) -> None:
+    script = client.get("/assets/app.js").text
+    surface_body = _javascript_function(script, "renderCatalogCardMediaSurface")
+    media_url_body = _javascript_function(script, "mediaContentUrl")
+
+    assert "selectPlaybackLocation(item)" in surface_body
+    assert "mediaContentUrl(item.media_id, location.location_id)" in surface_body
+    assert "MEDIA_CATALOG_ENDPOINT" in media_url_body
+    assert "mediaId" in media_url_body
+    assert "locationId" in media_url_body
+    assert "relative_path" not in media_url_body
+    assert "library" not in media_url_body.lower()
+
+
+def test_javascript_available_gif_card_renders_real_gif_media(client: TestClient) -> None:
+    script = client.get("/assets/app.js").text
+    surface_body = _javascript_function(script, "renderCatalogCardMediaSurface")
+    image_section = surface_body[surface_body.index('document.createElement("img")') :]
+
+    assert "img.src = url" in image_section
+    assert "media-placeholder__image" in image_section
+    assert "img.onerror = showUnavailable" in image_section
+
+
+def test_javascript_available_mp4_card_renders_paused_safe_video(client: TestClient) -> None:
+    script = client.get("/assets/app.js").text
+    surface_body = _javascript_function(script, "renderCatalogCardMediaSurface")
+    video_section = surface_body[
+        surface_body.index('document.createElement("video")') : surface_body.index("} else {")
+    ]
+
+    assert "video.src = url" in video_section
+    assert 'video.preload = "metadata"' in video_section
+    assert "video.playsInline = true" in video_section
+    assert "video.autoplay = false" in video_section
+    assert "video.muted = true" in video_section
+    assert "video.controls = false" in video_section
+    assert "video.loop = false" in video_section
+    assert "video.play(" not in video_section
+
+
+def test_javascript_card_play_overlay_is_accessible_and_opens_real_details(client: TestClient) -> None:
+    script = client.get("/assets/app.js").text
+    surface_body = _javascript_function(script, "renderCatalogCardMediaSurface")
+    open_body = _javascript_function(script, "openPlaybackDetails")
+
+    assert 'playButton.textContent = "▶"' in surface_body
+    assert "media-placeholder__play" in surface_body
+    assert "aria-label" in surface_body
+    assert "Play ${title}" in surface_body
+    assert "openPlaybackDetails(item, playButton)" in surface_body
+    assert "openDetailsDialog(item, openerElement, { playWhenReady: true })" in open_body
+    assert "mediaContentUrl" in _javascript_function(script, "renderDetailsMedia")
+
+
+def test_javascript_details_button_does_not_request_automatic_play(client: TestClient) -> None:
+    script = client.get("/assets/app.js").text
+    card_body = _javascript_function(script, "renderCatalogCard")
+    details_click_index = card_body.index("detailsButton.addEventListener")
+    details_click_section = card_body[details_click_index : details_click_index + 160]
+
+    assert "openDetailsDialog(item, detailsButton)" in details_click_section
+    assert "playWhenReady" not in details_click_section
+
+
+def test_javascript_catalog_rerender_cleans_card_media_resources(client: TestClient) -> None:
+    script = client.get("/assets/app.js").text
+    cleanup_body = _javascript_function(script, "cleanupCatalogCardMedia")
+    success_body = _javascript_function(script, "renderCatalogSuccess")
+
+    assert "cardMediaElements.forEach" in cleanup_body
+    assert "element.pause()" in cleanup_body
+    assert "element.removeAttribute(\"src\")" in cleanup_body
+    assert "element.load()" in cleanup_body
+    assert "cardMediaElements = new Set()" in cleanup_body
+    assert success_body.index("cleanupCatalogCardMedia()") < success_body.index("catalogResults.replaceChildren()")
+
+
+def test_javascript_details_is_player_first_with_single_title(client: TestClient) -> None:
+    html = client.get("/").text
+    script = client.get("/assets/app.js").text
+    details_section = html[html.index("media-details-dialog") : html.index("</dialog>", html.index("media-details-dialog"))]
+    populate_body = _javascript_function(script, "populateDetailsDialog")
+
+    assert 'id="media-details-title"' in details_section
+    assert "media-details-display-title" not in details_section
+    assert "detailsDialogTitle.textContent" in populate_body
+    assert "detailsDisplayTitle" not in script
+    assert "detailsTechnical.removeAttribute(\"open\")" in populate_body
 
 
 def test_javascript_details_selects_first_available_location(client: TestClient) -> None:
@@ -1436,6 +1528,17 @@ def test_gallery_reference_no_longer_contains_canonical_tag_fragment() -> None:
     assert "Canonical tag editing should support suggestions" in gallery
 
 
+def test_gallery_reference_documents_content_first_playback_boundary() -> None:
+    gallery = Path("GALLERY.md").read_text(encoding="utf-8")
+    assert "Available local Gallery cards show immediate real media visuals" in gallery
+    assert "centered real `▶` affordance" in gallery
+    assert "not durable accepted covers" in gallery
+    assert "persistent\nthumbnails" in gallery
+    assert "generic available-media placeholders" in gallery
+    assert "are rejected" in gallery
+    assert "Details is player-first" in gallery
+
+
 def test_javascript_details_no_longer_loads_representative_frames(client: TestClient) -> None:
     script = client.get("/assets/app.js").text
     assert "loadDetailsPreview" not in script
@@ -1518,11 +1621,9 @@ def test_javascript_has_fallback_title_suggestions(client: TestClient) -> None:
 
 def test_card_visual_surface_is_preview_trigger(client: TestClient) -> None:
     script = client.get("/assets/app.js").text
-    start = script.index("function renderCatalogCard(item)")
-    end = script.index("\n}\n", start) + len("\n}\n")
-    card_body = script[start:end]
-    assert "handleCardPreview" in card_body or "loadCardPreview" in card_body
-    assert "media-placeholder" in card_body
+    surface_body = _javascript_function(script, "renderCatalogCardMediaSurface")
+    assert "openPlaybackDetails(item" in surface_body
+    assert "media-placeholder__play" in surface_body
 
 
 def test_card_does_not_have_separate_footer_preview_button(client: TestClient) -> None:
@@ -1549,6 +1650,7 @@ def test_details_dialog_has_one_visual_surface(client: TestClient) -> None:
     html = client.get("/").text
     details_section = html[html.index("media-details-dialog"):]
     assert details_section.count("media-placeholder") <= 2
+    assert "media-details-display-title" not in details_section
 
 
 def test_metadata_dialog_contains_save_and_discard(client: TestClient) -> None:
