@@ -16,22 +16,56 @@ Supported runtime: CPython `>=3.13,<3.14`. Local development uses a uv-managed C
 
 From the repository root on Apple Silicon macOS:
 
-```fish
-set UV_MANAGED_PYTHON (uv python find --managed-python --no-config --no-project 3.13.14)
-env POETRY_VIRTUALENVS_IN_PROJECT=true poetry env use "$UV_MANAGED_PYTHON"
-env POETRY_VIRTUALENVS_IN_PROJECT=true poetry install
-env POETRY_VIRTUALENVS_IN_PROJECT=true poetry run pytest
+```text
+./framenest setup
+poetry run pytest
 ```
+
+`./framenest setup` idempotently uses `uv` to locate or install CPython
+`3.13.14`, configures Poetry for the in-project `.venv/`, and installs the
+committed dependencies. Re-run it after dependency or lockfile changes.
 
 ## Local Server
 
-Start the loopback-first development server:
+Start the browser-development application from the repository root:
 
 ```text
-poetry run framenest-server
+./framenest start
 ```
 
 Default application URL: `http://127.0.0.1:8000`. Health path: `/health`.
+
+Common launcher commands:
+
+```text
+./framenest start
+./framenest start --no-open
+./framenest status
+./framenest open
+./framenest logs
+./framenest logs --follow
+./framenest restart
+./framenest stop
+```
+
+The launcher is browser-development tooling. It is not `FrameNest.app`, not a
+Tauri shell, and not a production service. It binds the managed server to
+loopback, explicitly migrates the persistent development database as part of
+user-invoked `start`, waits for the real `/health` response, opens the external
+default browser by default, and controls only a process proven to have been
+started by the launcher.
+
+Lower-level developer/operator commands remain available:
+
+```text
+poetry run framenest-server
+poetry run framenest-db status
+poetry run framenest-db migrate
+poetry run framenest-catalog --help
+```
+
+The raw `poetry run framenest-server` process keeps its existing behavior: it
+does not migrate automatically and runs in the foreground until stopped.
 
 The default URL serves the packaged pre-alpha FrameNest web shell. It can confirm that the real local application server is running, load the same-origin health endpoint, list registered libraries from the local catalog, browse imported catalog media with persisted display-title search and repeated canonical-tag AND filters, open one imported medium in a manual `Current` metadata workspace, edit or clear its persisted display title, edit or clear its optional plain-text description, select and order up to 32 canonical tags, explicitly create canonical tag definitions, save or discard title/description/tag changes, run an explicit read-only library scan preview, import one selected scan candidate into the persistent media catalog, explicitly inspect one returned candidate locally for bounded technical metadata and representative PNG frames, and, when the server-side NVIDIA credential is configured, request one editable AI suggestion review after explicit cloud-upload confirmation. Same-origin APIs can create/list canonical tags, get/save media display-title/description/tag metadata, and retrieve a deterministic read-only media catalog page. Library registration remains available through the catalog CLI in this slice. The media content endpoint `GET /api/media/{media_id}/locations/{location_id}/content` is same-origin, read-only, identity-only (the URL contains catalog identities, never a filesystem path), and streams registered local GIF and MP4 content with single byte-range support. It verifies the catalog relationship between the logical media, physical location, and registered library, requires location availability `available`, allows only the exact supported kind/extension pairs (`video` + `.mp4` → `video/mp4`, `animated_image` + `.gif` → `image/gif`), enforces registered-root containment with symlink escape prevention, and returns sanitized errors without path disclosure. Gallery Details now renders the real local GIF or MP4 content from the identity-only endpoint when an `available` location exists; cards continue to use the explicit representative-frame preview action. Rendered browser acceptance and further playback polish are outside this slice. Premium gallery exposure with covers, downloads, Settings, full native/VLC playback, provider selection, GUI credential entry, arbitrary user-created collections, suggested filenames, and AI Draft persistence remain future work.
 
@@ -56,17 +90,27 @@ These API paths do not run migrations automatically and do not expose library ro
 
 The AI capability endpoint is same-origin, sanitized, and does not contact the provider. During this pre-alpha development slice the server composition boundary may read `NVIDIA_API_KEY` from the process environment. The browser never receives that value, credential state, key prefix, Authorization header, raw provider response, prompt payload, image payloads, absolute media path, or database path. When configured, the AI suggestion preview endpoint requires `confirm_cloud_upload: true`, reuses local read-only media preparation, sends at most three derived JPEG frames plus bounded metadata to NVIDIA NIM through the server, returns one validated editable suggestion, and performs no filesystem, catalog, or database mutation. Accepting or rejecting the browser draft is session-only. Future GUI Settings and a secret-store adapter are expected to replace the temporary process-environment credential source.
 
-FrameNest-owned runtime logs are compact JSON lines written to `stderr` by the direct application process. The installed console entrypoint `.venv/bin/framenest-server` is the strict application-process boundary used by machine-readable output contract tests. Ordinary interactive termination with Ctrl+C or SIGTERM through that direct entrypoint must not emit an unstructured traceback.
+FrameNest-owned runtime logs are compact JSON lines written to `stderr` by the direct application process. The installed console entrypoint `.venv/bin/framenest-server` is the strict application-process boundary used by machine-readable output contract tests. Ordinary interactive termination with Ctrl+C or SIGTERM through that direct entrypoint must not emit an unstructured traceback. The browser-development launcher redirects its managed child process output to the user development log shown by `./framenest logs`.
 
 `poetry run framenest-server` remains the normal development command, but Poetry or other launchers may additionally emit their own diagnostics outside the FrameNest logging graph. Those launcher-owned lines are not FrameNest structured log records and are not covered by the application JSON contract.
 
-Override bind address with `FRAMENEST_HOST` and `FRAMENEST_PORT`. Default binding is loopback-only (`127.0.0.1`). Setting `FRAMENEST_HOST=0.0.0.0` is an explicit exposure override and is not the recommended default.
+Override bind address with `FRAMENEST_HOST` and `FRAMENEST_PORT` for the raw server command. Default binding is loopback-only (`127.0.0.1`). Setting `FRAMENEST_HOST=0.0.0.0` is an explicit exposure override and is not the recommended default. The browser-development launcher enforces loopback and accepts only `FRAMENEST_PORT` for port selection.
 
 Reload, deployment, systemd, and Tailscale behavior are not provided yet.
 
 ## Local Database Foundation
 
 FrameNest reads `FRAMENEST_DATABASE_PATH` through the centralized settings boundary.
+
+The browser-development launcher uses a persistent development database at:
+
+```text
+~/Library/Application Support/FrameNest/development/catalog.sqlite3
+```
+
+If an explicit absolute `FRAMENEST_DATABASE_PATH` is already set, the launcher
+honors it. The launcher applies packaged Alembic migrations to the selected
+development database during `./framenest start`.
 
 The current default is temporary development behavior:
 
@@ -240,6 +284,7 @@ Current foundation files:
 - [`SPEC.md`](SPEC.md) defines the initial normative product and system requirements.
 - [`ROADMAP.md`](ROADMAP.md) defines the staged evidence-based development roadmap.
 - [`DESKTOP.md`](DESKTOP.md) records accepted desktop shell architecture and UX direction.
+- [`DEVELOPMENT.md`](DEVELOPMENT.md) describes the local browser-development launcher workflow.
 - [`SERVER.md`](SERVER.md) records accepted optional server and NUC aggregation direction.
 - [`GALLERY.md`](GALLERY.md) records accepted gallery product and UX direction.
 - [`AI_WORKSPACE.md`](AI_WORKSPACE.md) records accepted manual-first metadata and multi-model AI workspace direction.

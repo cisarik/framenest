@@ -10,6 +10,7 @@ dependencies = ["pydantic-settings (>=2.14.2,<3.0.0)", "fastapi (>=0.138.0,<0.13
 framenest-server = "framenest.server:main"
 framenest-db = "framenest.infrastructure.persistence.cli:main"
 framenest-catalog = "framenest.adapters.cli.catalog:main"
+framenest-dev = "framenest.adapters.cli.development:main"
 
 [tool.poetry]
 package-mode = true

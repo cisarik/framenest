@@ -109,6 +109,12 @@ diagnostics. Browser mode may lack native-only features such as file-manager
 reveal, native clipboard for media files, and tray behavior. It should degrade
 clearly rather than pretending those capabilities exist.
 
+The repository-root `./framenest` launcher is the current browser-development
+bridge. It can supervise the local FastAPI server and open the external default
+browser, but it does not replace or implement the accepted future Tauri shell.
+The future `FrameNest.app` will own its WebView and supervised sidecar
+lifecycle.
+
 ## Native Capability Boundary
 
 Future native capabilities may include file selection, directory selection,

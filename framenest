@@ -1,0 +1,81 @@
+#!/usr/bin/env fish
+
+set -g script_dir (dirname (status filename))
+set -g repo_root (realpath "$script_dir")
+set -g controller "$repo_root/.venv/bin/framenest-dev"
+set -gx POETRY_VIRTUALENVS_IN_PROJECT true
+
+function _framenest_help
+    echo "FrameNest local development launcher"
+    echo ""
+    echo "Usage:"
+    echo "  ./framenest setup"
+    echo "  ./framenest start [--no-open]"
+    echo "  ./framenest stop"
+    echo "  ./framenest restart [--no-open]"
+    echo "  ./framenest status"
+    echo "  ./framenest open"
+    echo "  ./framenest logs [--follow]"
+    echo "  ./framenest --help"
+    echo "  ./framenest <command> --help"
+end
+
+function _framenest_setup
+    if not command -q uv
+        echo "FrameNest setup requires uv." >&2
+        return 127
+    end
+    if not command -q poetry
+        echo "FrameNest setup requires Poetry." >&2
+        return 127
+    end
+
+    set -l python_path
+    set python_path (command uv python find 3.13.14 2>/dev/null)
+    if test $status -ne 0
+        echo "Installing CPython 3.13.14 with uv..."
+        command uv python install 3.13.14
+        or return $status
+        set python_path (command uv python find 3.13.14)
+        or return $status
+    end
+
+    cd "$repo_root"
+    or return $status
+    command poetry env use "$python_path"
+    or return $status
+    command poetry install --no-interaction
+    or return $status
+
+    if not test -x "$controller"
+        echo "FrameNest setup failed: development controller is unavailable." >&2
+        return 1
+    end
+
+    echo "FrameNest setup complete."
+end
+
+if test (count $argv) -eq 0
+    _framenest_help
+    exit 0
+end
+
+switch "$argv[1]"
+    case --help -h
+        _framenest_help
+        exit 0
+    case setup
+        _framenest_setup
+        exit $status
+    case start stop restart status open logs
+        if not test -x "$controller"
+            _framenest_setup
+            or exit $status
+        end
+        "$controller" $argv
+        exit $status
+    case '*'
+        echo "Unknown FrameNest command: $argv[1]" >&2
+        _framenest_help >&2
+        exit 2
+end
