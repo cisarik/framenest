@@ -34,6 +34,14 @@ def _open_flags() -> int:
     return flags
 
 
+def _close_descriptor(fd: int) -> None:
+    """Best-effort close of a raw descriptor; suppresses cleanup failures."""
+    try:
+        os.close(fd)
+    except OSError:
+        pass
+
+
 def _resolve_safe_target(
     root: LibraryRoot,
     relative_path: MediaRelativePath,
@@ -102,13 +110,13 @@ class LocalMediaContentReader:
         try:
             stat_result = os.fstat(fd)
         except OSError:
-            os.close(fd)
+            _close_descriptor(fd)
             raise MediaContentUnavailableError(
                 MEDIA_CONTENT_UNAVAILABLE_MESSAGE,
             ) from None
 
         if not stat_module.S_ISREG(stat_result.st_mode):
-            os.close(fd)
+            _close_descriptor(fd)
             raise MediaContentUnavailableError(MEDIA_CONTENT_UNAVAILABLE_MESSAGE)
 
         byte_size = stat_result.st_size
@@ -118,10 +126,7 @@ class LocalMediaContentReader:
             nonlocal closed
             if not closed:
                 closed = True
-                try:
-                    os.close(fd)
-                except OSError:
-                    pass
+                _close_descriptor(fd)
 
         def stream(start: int, length: int | None) -> Iterator[bytes]:
             remaining = length

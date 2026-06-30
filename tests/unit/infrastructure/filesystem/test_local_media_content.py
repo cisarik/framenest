@@ -308,3 +308,83 @@ def test_ranged_stream_uses_stable_handle(tmp_path):
     opened = _reader().open(_posix_root(root), MediaRelativePath("clip.mp4"), MediaKind.VIDEO)
     assert b"".join(opened.stream(100, 50)) == payload[100:150]
     assert opened.byte_size == len(payload)
+
+
+def test_fstat_failure_with_close_failure_sanitizes_and_attempts_once(
+    tmp_path,
+    monkeypatch,
+):
+    root = tmp_path / "library"
+    root.mkdir()
+    _write_mp4(root, "clip.mp4", MP4_BYTES)
+
+    close_calls = []
+    synthetic_fd = 999
+
+    def fake_open(path, flags):
+        return synthetic_fd
+
+    def fake_fstat(fd):
+        raise OSError("private fstat raw text")
+
+    def fake_close(fd):
+        close_calls.append(fd)
+        raise OSError("private close raw text")
+
+    monkeypatch.setattr("os.open", fake_open)
+    monkeypatch.setattr("os.fstat", fake_fstat)
+    monkeypatch.setattr("os.close", fake_close)
+
+    with pytest.raises(MediaContentUnavailableError) as exc_info:
+        _reader().open(
+            _posix_root(root),
+            MediaRelativePath("clip.mp4"),
+            MediaKind.VIDEO,
+        )
+
+    assert str(exc_info.value) == MEDIA_CONTENT_UNAVAILABLE_MESSAGE
+    assert close_calls == [synthetic_fd]
+    assert "private fstat raw text" not in str(exc_info.value)
+    assert "private close raw text" not in str(exc_info.value)
+
+
+def test_non_regular_descriptor_with_close_failure_sanitizes_and_attempts_once(
+    tmp_path,
+    monkeypatch,
+):
+    root = tmp_path / "library"
+    root.mkdir()
+    _write_mp4(root, "clip.mp4", MP4_BYTES)
+
+    close_calls = []
+    synthetic_fd = 999
+
+    class FakeStat:
+        def __init__(self):
+            self.st_mode = stat.S_IFDIR
+            self.st_size = 0
+
+    def fake_open(path, flags):
+        return synthetic_fd
+
+    def fake_fstat(fd):
+        return FakeStat()
+
+    def fake_close(fd):
+        close_calls.append(fd)
+        raise OSError("private close raw text")
+
+    monkeypatch.setattr("os.open", fake_open)
+    monkeypatch.setattr("os.fstat", fake_fstat)
+    monkeypatch.setattr("os.close", fake_close)
+
+    with pytest.raises(MediaContentUnavailableError) as exc_info:
+        _reader().open(
+            _posix_root(root),
+            MediaRelativePath("clip.mp4"),
+            MediaKind.VIDEO,
+        )
+
+    assert str(exc_info.value) == MEDIA_CONTENT_UNAVAILABLE_MESSAGE
+    assert close_calls == [synthetic_fd]
+    assert "private close raw text" not in str(exc_info.value)
