@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import stat as stat_module
 from collections.abc import Iterator
 from pathlib import Path, PurePosixPath
 
@@ -24,6 +25,13 @@ def _native_path_flavor() -> LibraryPathFlavor:
     if os.name == "nt":
         return LibraryPathFlavor.WINDOWS
     return LibraryPathFlavor.POSIX
+
+
+def _open_flags() -> int:
+    flags = os.O_RDONLY
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    return flags
 
 
 def _resolve_safe_target(
@@ -60,12 +68,6 @@ def _resolve_safe_target(
     except ValueError:
         raise MediaContentUnavailableError(MEDIA_CONTENT_UNAVAILABLE_MESSAGE) from None
 
-    try:
-        if not resolved_target.is_file():
-            raise MediaContentUnavailableError(MEDIA_CONTENT_UNAVAILABLE_MESSAGE)
-    except OSError:
-        raise MediaContentUnavailableError(MEDIA_CONTENT_UNAVAILABLE_MESSAGE) from None
-
     return resolved_target
 
 
@@ -85,15 +87,7 @@ class LocalMediaContentReader:
             if media_type is None:
                 raise MediaContentUnavailableError(MEDIA_CONTENT_UNAVAILABLE_MESSAGE)
             try:
-                stat_result = target.stat()
-            except OSError:
-                raise MediaContentUnavailableError(
-                    MEDIA_CONTENT_UNAVAILABLE_MESSAGE,
-                ) from None
-            byte_size = stat_result.st_size
-            try:
-                with open(target, "rb") as handle:
-                    handle.read(0)
+                fd = os.open(str(target), _open_flags())
             except OSError:
                 raise MediaContentUnavailableError(
                     MEDIA_CONTENT_UNAVAILABLE_MESSAGE,
@@ -105,18 +99,49 @@ class LocalMediaContentReader:
         except Exception:
             raise MediaContentFailedError(MEDIA_CONTENT_FAILED_MESSAGE) from None
 
-        resolved_target = target
+        try:
+            stat_result = os.fstat(fd)
+        except OSError:
+            os.close(fd)
+            raise MediaContentUnavailableError(
+                MEDIA_CONTENT_UNAVAILABLE_MESSAGE,
+            ) from None
+
+        if not stat_module.S_ISREG(stat_result.st_mode):
+            os.close(fd)
+            raise MediaContentUnavailableError(MEDIA_CONTENT_UNAVAILABLE_MESSAGE)
+
+        byte_size = stat_result.st_size
+        closed = False
+
+        def _close() -> None:
+            nonlocal closed
+            if not closed:
+                closed = True
+                try:
+                    os.close(fd)
+                except OSError:
+                    pass
 
         def stream(start: int, length: int | None) -> Iterator[bytes]:
             remaining = length
-            handle = open(resolved_target, "rb")
             try:
                 if start > 0:
-                    handle.seek(start)
+                    try:
+                        os.lseek(fd, start, os.SEEK_SET)
+                    except OSError:
+                        raise MediaContentFailedError(
+                            MEDIA_CONTENT_FAILED_MESSAGE,
+                        ) from None
                 while True:
                     if remaining is not None and remaining <= 0:
                         break
-                    chunk = handle.read(_CHUNK_SIZE)
+                    try:
+                        chunk = os.read(fd, _CHUNK_SIZE)
+                    except OSError:
+                        raise MediaContentFailedError(
+                            MEDIA_CONTENT_FAILED_MESSAGE,
+                        ) from None
                     if not chunk:
                         break
                     if remaining is not None:
@@ -125,10 +150,11 @@ class LocalMediaContentReader:
                     if remaining is not None:
                         remaining -= len(chunk)
             finally:
-                handle.close()
+                _close()
 
         return OpenedMediaContent(
             media_type=media_type,
             byte_size=byte_size,
             stream=stream,
+            close=_close,
         )

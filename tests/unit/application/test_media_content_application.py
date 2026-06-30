@@ -121,6 +121,7 @@ def _opened(media_type="video/mp4", byte_size=10):
         media_type=media_type,
         byte_size=byte_size,
         stream=lambda start, length: iter([b"x" * (length or byte_size)]),
+        close=lambda: None,
     )
 
 

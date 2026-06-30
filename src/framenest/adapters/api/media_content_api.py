@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 
 from fastapi import APIRouter, Request
@@ -127,6 +127,7 @@ def create_media_content_api_router(
             return _full_content_response(resolved)
         parsed = _parse_byte_range(range_header, resolved.byte_size)
         if parsed is None:
+            resolved.close()
             return _range_not_satisfiable_response(resolved.byte_size)
         start, end = parsed
         return _partial_content_response(resolved, start, end)
@@ -134,9 +135,20 @@ def create_media_content_api_router(
     return router
 
 
+def _stream_with_finalization(
+    resolved: ResolvedMediaContent,
+    start: int,
+    length: int | None,
+) -> Iterator[bytes]:
+    try:
+        yield from resolved.stream(start, length)
+    finally:
+        resolved.close()
+
+
 def _full_content_response(resolved: ResolvedMediaContent) -> StreamingResponse:
     return StreamingResponse(
-        content=resolved.stream(0, None),
+        content=_stream_with_finalization(resolved, 0, None),
         status_code=200,
         headers={
             "X-Content-Type-Options": "nosniff",
@@ -155,7 +167,7 @@ def _partial_content_response(
 ) -> StreamingResponse:
     length = end - start + 1
     return StreamingResponse(
-        content=resolved.stream(start, length),
+        content=_stream_with_finalization(resolved, start, length),
         status_code=206,
         headers={
             "X-Content-Type-Options": "nosniff",

@@ -38,19 +38,20 @@ class _FakeResolveContent:
         return self.result
 
 
-def _resolved(media_type, payload):
-    return ResolvedMediaContent(
-        media_type=media_type,
-        byte_size=len(payload),
-        stream=lambda start, length: _slice(payload, start, length),
-    )
-
-
 def _slice(payload, start, length):
     if length is None:
         yield payload[start:]
     else:
         yield payload[start : start + length]
+
+
+def _resolved(media_type, payload, close=None):
+    return ResolvedMediaContent(
+        media_type=media_type,
+        byte_size=len(payload),
+        stream=lambda start, length: _slice(payload, start, length),
+        close=close or (lambda: None),
+    )
 
 
 def _client(
@@ -194,3 +195,41 @@ def test_no_absolute_path_or_exception_disclosure():
         response = _client(resolve=_FakeResolveContent(error=error)).get(CONTENT_PATH)
         assert "private-path-leak" not in response.text
         assert PRIVATE_TEXT not in response.text
+
+
+def test_malformed_range_closes_content():
+    closed = []
+    resolved = _resolved("video/mp4", MP4_BYTES, close=lambda: closed.append(1))
+    response = _client(resolve=_FakeResolveContent(result=resolved)).get(
+        CONTENT_PATH, headers={"Range": "bytes=abc"}
+    )
+    assert response.status_code == 416
+    assert closed == [1]
+
+
+def test_unsatisfiable_range_closes_content():
+    closed = []
+    resolved = _resolved("video/mp4", MP4_BYTES, close=lambda: closed.append(1))
+    response = _client(resolve=_FakeResolveContent(result=resolved)).get(
+        CONTENT_PATH, headers={"Range": f"bytes={len(MP4_BYTES)}-"}
+    )
+    assert response.status_code == 416
+    assert closed == [1]
+
+
+def test_response_finalization_closes_content_on_full_stream():
+    closed = []
+    resolved = _resolved("video/mp4", MP4_BYTES, close=lambda: closed.append(1))
+    response = _client(resolve=_FakeResolveContent(result=resolved)).get(CONTENT_PATH)
+    assert response.status_code == 200
+    assert closed == [1]
+
+
+def test_response_finalization_closes_content_on_ranged_stream():
+    closed = []
+    resolved = _resolved("video/mp4", MP4_BYTES, close=lambda: closed.append(1))
+    response = _client(resolve=_FakeResolveContent(result=resolved)).get(
+        CONTENT_PATH, headers={"Range": "bytes=0-9"}
+    )
+    assert response.status_code == 206
+    assert closed == [1]

@@ -37,11 +37,12 @@ class MediaContentFailedError(RuntimeError):
 
 @dataclass(frozen=True, slots=True)
 class ResolvedMediaContent:
-    """Resolved media content ready for bounded byte streaming."""
+    """Resolved media content ready for bounded byte streaming from a stable handle."""
 
     media_type: str
     byte_size: int
     stream: Callable[[int, int | None], Iterator[bytes]]
+    close: Callable[[], None]
 
 
 def supported_media_type(kind: MediaKind, extension: str) -> str | None:
@@ -107,6 +108,7 @@ class ResolveMediaContent:
             media_type=opened.media_type,
             byte_size=opened.byte_size,
             stream=opened.stream,
+            close=opened.close,
         )
 
 

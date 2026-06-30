@@ -8,7 +8,10 @@ import sys
 
 import pytest
 
-from framenest.application.media_content import MediaContentUnavailableError
+from framenest.application.media_content import (
+    MEDIA_CONTENT_UNAVAILABLE_MESSAGE,
+    MediaContentUnavailableError,
+)
 from framenest.domain import LibraryPathFlavor, LibraryRoot
 from framenest.domain.media import (
     FrameNestMediaRelativePathError,
@@ -19,7 +22,6 @@ from framenest.infrastructure.filesystem.media_content import LocalMediaContentR
 
 MP4_BYTES = b"\x00\x00\x00\x18ftypmp42" + b"\x01" * 100
 GIF_BYTES = b"GIF89a" + b"\x02" * 50
-_WINDOWS_FLAVOR = LibraryPathFlavor.WINDOWS
 
 
 def _reader():
@@ -149,14 +151,30 @@ def test_kind_extension_mismatch_rejected(tmp_path):
         _reader().open(_posix_root(root), MediaRelativePath("anim.gif"), MediaKind.VIDEO)
 
 
-def test_bounded_byte_iteration_returns_exact_subset(tmp_path):
+def test_bounded_range_returns_exact_subset(tmp_path):
     root = tmp_path / "library"
     root.mkdir()
     payload = bytes(range(256))
     _write_mp4(root, "clip.mp4", payload)
     opened = _reader().open(_posix_root(root), MediaRelativePath("clip.mp4"), MediaKind.VIDEO)
     assert b"".join(opened.stream(10, 5)) == payload[10:15]
+
+
+def test_zero_length_range_returns_empty(tmp_path):
+    root = tmp_path / "library"
+    root.mkdir()
+    payload = bytes(range(256))
+    _write_mp4(root, "clip.mp4", payload)
+    opened = _reader().open(_posix_root(root), MediaRelativePath("clip.mp4"), MediaKind.VIDEO)
     assert b"".join(opened.stream(0, 0)) == b""
+
+
+def test_bounded_range_beyond_eof_returns_available(tmp_path):
+    root = tmp_path / "library"
+    root.mkdir()
+    payload = bytes(range(256))
+    _write_mp4(root, "clip.mp4", payload)
+    opened = _reader().open(_posix_root(root), MediaRelativePath("clip.mp4"), MediaKind.VIDEO)
     assert b"".join(opened.stream(250, 100)) == payload[250:]
 
 
@@ -202,5 +220,91 @@ def test_sanitized_failures_do_not_disclose_paths(tmp_path):
     except MediaContentUnavailableError as exc:
         assert str(root) not in str(exc)
         assert "missing.mp4" not in str(exc)
+        assert str(exc) == MEDIA_CONTENT_UNAVAILABLE_MESSAGE
     else:
         pytest.fail("expected MediaContentUnavailableError")
+
+
+def test_size_obtained_from_open_descriptor(tmp_path):
+    root = tmp_path / "library"
+    root.mkdir()
+    _write_mp4(root, "clip.mp4", MP4_BYTES)
+    opened = _reader().open(_posix_root(root), MediaRelativePath("clip.mp4"), MediaKind.VIDEO)
+    original_size = opened.byte_size
+    with open(root / "clip.mp4", "ab") as handle:
+        handle.write(b"\x00" * 50)
+    assert opened.byte_size == original_size
+    assert opened.byte_size == len(MP4_BYTES)
+    opened.close()
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="requires posix unlink-on-open semantics")
+def test_file_not_reopened_for_streaming(tmp_path):
+    root = tmp_path / "library"
+    root.mkdir()
+    _write_mp4(root, "clip.mp4", MP4_BYTES)
+    opened = _reader().open(_posix_root(root), MediaRelativePath("clip.mp4"), MediaKind.VIDEO)
+    (root / "clip.mp4").unlink()
+    assert b"".join(opened.stream(0, None)) == MP4_BYTES
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="requires posix unlink-on-open semantics")
+def test_replacing_path_after_open_does_not_change_content(tmp_path):
+    root = tmp_path / "library"
+    root.mkdir()
+    _write_mp4(root, "clip.mp4", MP4_BYTES)
+    opened = _reader().open(_posix_root(root), MediaRelativePath("clip.mp4"), MediaKind.VIDEO)
+    (root / "clip.mp4").unlink()
+    (root / "clip.mp4").write_bytes(b"REPLACED")
+    assert b"".join(opened.stream(0, None)) == MP4_BYTES
+    assert opened.byte_size == len(MP4_BYTES)
+
+
+def test_close_is_idempotent(tmp_path):
+    root = tmp_path / "library"
+    root.mkdir()
+    _write_mp4(root)
+    opened = _reader().open(_posix_root(root), MediaRelativePath("clip.mp4"), MediaKind.VIDEO)
+    opened.close()
+    opened.close()
+    opened.close()
+
+
+def test_close_before_stream_prevents_subsequent_streaming(tmp_path):
+    root = tmp_path / "library"
+    root.mkdir()
+    _write_mp4(root, "clip.mp4", MP4_BYTES)
+    opened = _reader().open(_posix_root(root), MediaRelativePath("clip.mp4"), MediaKind.VIDEO)
+    opened.close()
+    with pytest.raises(Exception):
+        list(opened.stream(0, None))
+
+
+def test_normal_completion_closes_handle(tmp_path):
+    root = tmp_path / "library"
+    root.mkdir()
+    _write_mp4(root)
+    opened = _reader().open(_posix_root(root), MediaRelativePath("clip.mp4"), MediaKind.VIDEO)
+    list(opened.stream(0, None))
+    opened.close()
+
+
+def test_response_finalization_close_is_safe_after_stream(tmp_path):
+    root = tmp_path / "library"
+    root.mkdir()
+    _write_mp4(root)
+    opened = _reader().open(_posix_root(root), MediaRelativePath("clip.mp4"), MediaKind.VIDEO)
+    gen = opened.stream(0, None)
+    list(gen)
+    opened.close()
+    opened.close()
+
+
+def test_ranged_stream_uses_stable_handle(tmp_path):
+    root = tmp_path / "library"
+    root.mkdir()
+    payload = bytes(range(256)) * 4
+    _write_mp4(root, "clip.mp4", payload)
+    opened = _reader().open(_posix_root(root), MediaRelativePath("clip.mp4"), MediaKind.VIDEO)
+    assert b"".join(opened.stream(100, 50)) == payload[100:150]
+    assert opened.byte_size == len(payload)

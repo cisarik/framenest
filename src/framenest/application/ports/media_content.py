@@ -17,11 +17,12 @@ SUPPORTED_MEDIA_CONTENT: dict[tuple[MediaKind, str], str] = {
 
 @dataclass(frozen=True, slots=True)
 class OpenedMediaContent:
-    """Validated openable media content with bounded byte streaming."""
+    """Validated open media content with a stable descriptor and bounded byte streaming."""
 
     media_type: str
     byte_size: int
     stream: Callable[[int, int | None], Iterator[bytes]]
+    close: Callable[[], None]
 
 
 class MediaContentReader(Protocol):
