@@ -361,7 +361,10 @@ def test_spawn_environment_enforces_loopback_and_disposable_database(
         captured["kwargs"] = kwargs
         return _Process(6060)
 
-    runtime = DevelopmentRuntime(environ=_env(tmp_path), spawn_process=spawn)
+    runtime_env = _env(tmp_path)
+    runtime_env["NVIDIA_API_KEY"] = "synthetic-nvidia-key"
+    runtime_env["AI_GATEWAY_API_KEY"] = "synthetic-gateway-key"
+    runtime = DevelopmentRuntime(environ=runtime_env, spawn_process=spawn)
     monkeypatch.setattr(runtime, "_migrate_database", lambda: _Migration("at_head"))
     monkeypatch.setattr(
         runtime,
@@ -377,6 +380,8 @@ def test_spawn_environment_enforces_loopback_and_disposable_database(
     env = captured["kwargs"]["env"]
     assert env["FRAMENEST_HOST"] == "127.0.0.1"
     assert env["FRAMENEST_DATABASE_PATH"] == str(tmp_path / "data" / "catalog.sqlite3")
+    assert env["NVIDIA_API_KEY"] == "synthetic-nvidia-key"
+    assert env["AI_GATEWAY_API_KEY"] == "synthetic-gateway-key"
 
 
 def test_no_sigkill_literal_in_runtime_source() -> None:

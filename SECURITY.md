@@ -57,6 +57,13 @@ The initial local media-analysis preparation boundary uses optional external `ff
 
 The initial media suggestion preview uses an explicit cloud-upload confirmation gate and sends provider requests only through the FrameNest server. Server AI administration is performed by `./framenest ai status`, `./framenest ai configure`, and `./framenest ai test`. `status` is network-free. `configure` writes only non-secret provider/model selection outside the repository and must not write API keys, Authorization headers, cookies, provider responses, prompts, frame data, media paths, or database paths. `test` is an explicit minimal text-only provider request and persists only a safe category and timestamp. NVIDIA NIM uses `NVIDIA_API_KEY`; Vercel AI Gateway uses `AI_GATEWAY_API_KEY`. Operator commands, browser diagnostics, and sanitized errors must not include API keys, Authorization headers, absolute paths, raw provider responses, raw prompts, PNG/base64 payloads, or reasoning/chain-of-thought content. Suggestion output is untrusted preview data and must not be persisted automatically.
 
+The ignored local-development file `.secrets/ai.env.fish` may export
+`NVIDIA_API_KEY` and/or `AI_GATEWAY_API_KEY` for the root launcher. The launcher
+must reject symlinks, non-private files, wrong ownership, and invalid Fish
+syntax before sourcing it, and must not print file contents or credential
+values. Fedora production deployment must use a later service-secret boundary
+rather than this developer file.
+
 Avoid exposing:
 
 - Home-directory paths when they are not necessary.

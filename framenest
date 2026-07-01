@@ -4,6 +4,7 @@ set -g script_dir (dirname (status filename))
 set -g repo_root (realpath "$script_dir")
 set -g controller "$repo_root/.venv/bin/framenest-dev"
 set -g ai_controller "$repo_root/.venv/bin/framenest-ai"
+set -g local_ai_env "$repo_root/.secrets/ai.env.fish"
 set -gx POETRY_VIRTUALENVS_IN_PROJECT true
 
 function _framenest_help
@@ -59,6 +60,57 @@ function _framenest_setup
     echo "FrameNest setup complete."
 end
 
+function _framenest_load_local_ai_env
+    if not test -e "$local_ai_env"
+        return 0
+    end
+    if test -L "$local_ai_env"
+        echo "FrameNest local AI secrets file is unsafe." >&2
+        return 1
+    end
+    if not test -f "$local_ai_env"
+        echo "FrameNest local AI secrets file is unsafe." >&2
+        return 1
+    end
+
+    set -l current_uid (id -u)
+    set -l stat_output
+    set -l stat_fields
+    set stat_output (command stat -f "%u %Lp" "$local_ai_env" 2>/dev/null)
+    if test $status -ne 0
+        set stat_output (command stat -c "%u %a" "$local_ai_env" 2>/dev/null)
+        if test $status -ne 0
+            echo "FrameNest local AI secrets file metadata is unavailable." >&2
+            return 1
+        end
+    end
+    set stat_fields (string split " " -- $stat_output)
+    if test (count $stat_fields) -ne 2
+        echo "FrameNest local AI secrets file metadata is unavailable." >&2
+        return 1
+    end
+    if test "$stat_fields[1]" != "$current_uid"
+        echo "FrameNest local AI secrets file is unsafe." >&2
+        return 1
+    end
+    set -l group_other_permissions (math "$stat_fields[2] % 100")
+    if test "$group_other_permissions" -ne 0
+        echo "FrameNest local AI secrets file is unsafe." >&2
+        return 1
+    end
+    command fish --no-execute "$local_ai_env" >/dev/null 2>/dev/null
+    if test $status -ne 0
+        echo "FrameNest local AI secrets file is invalid." >&2
+        return 1
+    end
+    source "$local_ai_env" >/dev/null 2>/dev/null
+    if test $status -ne 0
+        echo "FrameNest local AI secrets file could not be loaded." >&2
+        return 1
+    end
+    return 0
+end
+
 if test (count $argv) -eq 0
     _framenest_help
     exit 0
@@ -76,6 +128,10 @@ switch "$argv[1]"
             _framenest_setup
             or exit $status
         end
+        if contains -- "$argv[1]" start restart
+            _framenest_load_local_ai_env
+            or exit $status
+        end
         "$controller" $argv
         exit $status
     case ai
@@ -83,6 +139,8 @@ switch "$argv[1]"
             _framenest_setup
             or exit $status
         end
+        _framenest_load_local_ai_env
+        or exit $status
         "$ai_controller" $argv[2..-1]
         exit $status
     case '*'

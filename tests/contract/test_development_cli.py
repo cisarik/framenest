@@ -15,6 +15,8 @@ from framenest.infrastructure.runtime.development import RuntimeStatus
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 ROOT_WRAPPER = REPOSITORY_ROOT / "framenest"
+SYNTHETIC_NVIDIA_KEY = "synthetic-nvidia-key"
+SYNTHETIC_GATEWAY_KEY = "synthetic-gateway-key"
 
 
 class _Runtime:
@@ -141,6 +143,177 @@ def test_root_wrapper_routes_ai_commands_to_ai_controller(tmp_path: Path) -> Non
 
     assert result.returncode == 23
     assert result.stdout.splitlines() == ["status", "--config-path"]
+
+
+def test_root_wrapper_loads_local_ai_env_for_ai_controller(tmp_path: Path) -> None:
+    launcher = tmp_path / "framenest"
+    shutil.copy2(ROOT_WRAPPER, launcher)
+    secrets_dir = tmp_path / ".secrets"
+    secrets_dir.mkdir()
+    secrets_file = secrets_dir / "ai.env.fish"
+    secrets_file.write_text(
+        "\n".join(
+            [
+                f"set -gx NVIDIA_API_KEY '{SYNTHETIC_NVIDIA_KEY}'",
+                f"set -gx AI_GATEWAY_API_KEY '{SYNTHETIC_GATEWAY_KEY}'",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    secrets_file.chmod(0o600)
+    venv_bin = tmp_path / ".venv" / "bin"
+    venv_bin.mkdir(parents=True)
+    controller = venv_bin / "framenest-ai"
+    controller.write_text(
+        "#!/bin/sh\n"
+        f'test "$NVIDIA_API_KEY" = "{SYNTHETIC_NVIDIA_KEY}" || exit 41\n'
+        f'test "$AI_GATEWAY_API_KEY" = "{SYNTHETIC_GATEWAY_KEY}" || exit 42\n'
+        "printf 'received\\n'\n",
+        encoding="utf-8",
+    )
+    controller.chmod(0o755)
+
+    result = subprocess.run(
+        ["fish", str(launcher), "ai", "status"],
+        check=False,
+        text=True,
+        capture_output=True,
+    )
+
+    assert result.returncode == 0
+    assert result.stdout.strip() == "received"
+    assert SYNTHETIC_NVIDIA_KEY not in result.stdout + result.stderr
+    assert SYNTHETIC_GATEWAY_KEY not in result.stdout + result.stderr
+
+
+def test_root_wrapper_loads_local_ai_env_for_managed_start(tmp_path: Path) -> None:
+    launcher = tmp_path / "framenest"
+    shutil.copy2(ROOT_WRAPPER, launcher)
+    secrets_dir = tmp_path / ".secrets"
+    secrets_dir.mkdir()
+    secrets_file = secrets_dir / "ai.env.fish"
+    secrets_file.write_text(
+        "\n".join(
+            [
+                f"set -gx NVIDIA_API_KEY '{SYNTHETIC_NVIDIA_KEY}'",
+                f"set -gx AI_GATEWAY_API_KEY '{SYNTHETIC_GATEWAY_KEY}'",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    secrets_file.chmod(0o600)
+    venv_bin = tmp_path / ".venv" / "bin"
+    venv_bin.mkdir(parents=True)
+    controller = venv_bin / "framenest-dev"
+    controller.write_text(
+        "#!/bin/sh\n"
+        f'test "$NVIDIA_API_KEY" = "{SYNTHETIC_NVIDIA_KEY}" || exit 43\n'
+        f'test "$AI_GATEWAY_API_KEY" = "{SYNTHETIC_GATEWAY_KEY}" || exit 44\n'
+        "printf 'started\\n'\n",
+        encoding="utf-8",
+    )
+    controller.chmod(0o755)
+
+    result = subprocess.run(
+        ["fish", str(launcher), "start", "--no-open"],
+        check=False,
+        text=True,
+        capture_output=True,
+    )
+
+    assert result.returncode == 0
+    assert result.stdout.strip() == "started"
+    assert SYNTHETIC_NVIDIA_KEY not in result.stdout + result.stderr
+    assert SYNTHETIC_GATEWAY_KEY not in result.stdout + result.stderr
+
+
+def test_root_wrapper_rejects_symlinked_local_ai_env(tmp_path: Path) -> None:
+    launcher = tmp_path / "framenest"
+    shutil.copy2(ROOT_WRAPPER, launcher)
+    secrets_dir = tmp_path / ".secrets"
+    secrets_dir.mkdir()
+    target = tmp_path / "target.env.fish"
+    target.write_text(f"set -gx NVIDIA_API_KEY '{SYNTHETIC_NVIDIA_KEY}'\n", encoding="utf-8")
+    target.chmod(0o600)
+    (secrets_dir / "ai.env.fish").symlink_to(target)
+    venv_bin = tmp_path / ".venv" / "bin"
+    venv_bin.mkdir(parents=True)
+    controller = venv_bin / "framenest-ai"
+    controller.write_text("#!/bin/sh\nprintf 'controller-ran\\n'\n", encoding="utf-8")
+    controller.chmod(0o755)
+
+    result = subprocess.run(
+        ["fish", str(launcher), "ai", "status"],
+        check=False,
+        text=True,
+        capture_output=True,
+    )
+
+    assert result.returncode != 0
+    assert "unsafe" in result.stderr
+    assert "controller-ran" not in result.stdout
+    assert SYNTHETIC_NVIDIA_KEY not in result.stdout + result.stderr
+
+
+def test_root_wrapper_rejects_insecure_local_ai_env_permissions(tmp_path: Path) -> None:
+    launcher = tmp_path / "framenest"
+    shutil.copy2(ROOT_WRAPPER, launcher)
+    secrets_dir = tmp_path / ".secrets"
+    secrets_dir.mkdir()
+    secrets_file = secrets_dir / "ai.env.fish"
+    secrets_file.write_text(f"set -gx NVIDIA_API_KEY '{SYNTHETIC_NVIDIA_KEY}'\n", encoding="utf-8")
+    secrets_file.chmod(0o644)
+    if stat.S_IMODE(secrets_file.stat().st_mode) != 0o644:
+        pytest.skip("platform did not preserve test file permissions")
+    venv_bin = tmp_path / ".venv" / "bin"
+    venv_bin.mkdir(parents=True)
+    controller = venv_bin / "framenest-ai"
+    controller.write_text("#!/bin/sh\nprintf 'controller-ran\\n'\n", encoding="utf-8")
+    controller.chmod(0o755)
+
+    result = subprocess.run(
+        ["fish", str(launcher), "ai", "status"],
+        check=False,
+        text=True,
+        capture_output=True,
+    )
+
+    assert result.returncode != 0
+    assert "unsafe" in result.stderr
+    assert "controller-ran" not in result.stdout
+    assert SYNTHETIC_NVIDIA_KEY not in result.stdout + result.stderr
+
+
+def test_root_wrapper_rejects_invalid_local_ai_env_before_execution(tmp_path: Path) -> None:
+    launcher = tmp_path / "framenest"
+    shutil.copy2(ROOT_WRAPPER, launcher)
+    secrets_dir = tmp_path / ".secrets"
+    secrets_dir.mkdir()
+    secrets_file = secrets_dir / "ai.env.fish"
+    secrets_file.write_text(
+        f"echo '{SYNTHETIC_NVIDIA_KEY}'\nset -gx NVIDIA_API_KEY (\n",
+        encoding="utf-8",
+    )
+    secrets_file.chmod(0o600)
+    venv_bin = tmp_path / ".venv" / "bin"
+    venv_bin.mkdir(parents=True)
+    controller = venv_bin / "framenest-ai"
+    controller.write_text("#!/bin/sh\nprintf 'controller-ran\\n'\n", encoding="utf-8")
+    controller.chmod(0o755)
+
+    result = subprocess.run(
+        ["fish", str(launcher), "ai", "status"],
+        check=False,
+        text=True,
+        capture_output=True,
+    )
+
+    assert result.returncode != 0
+    assert "invalid" in result.stderr
+    assert "controller-ran" not in result.stdout
+    assert SYNTHETIC_NVIDIA_KEY not in result.stdout + result.stderr
 
 
 def test_setup_uses_uv_managed_python_and_poetry_install_without_real_download(

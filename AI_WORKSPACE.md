@@ -56,6 +56,12 @@ Vercel AI Gateway is also supported with preferred model
 environment (`NVIDIA_API_KEY` or `AI_GATEWAY_API_KEY`) and are not stored in the
 browser or non-secret AI configuration file.
 
+For local development, `./framenest` may bootstrap those provider credentials
+from the ignored `.secrets/ai.env.fish` file when it is present and private.
+That file is a developer/operator convenience for managed local commands, not a
+product credential store. Fedora production credentials remain future
+service-secret deployment work.
+
 The full multi-model AI draft comparison, inline model picker, persistent draft
 storage, arbitrary user-created collections, a general collection manager,
 physical rename, and premium media detail workspace remain future
