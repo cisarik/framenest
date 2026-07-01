@@ -79,6 +79,22 @@ def test_health_endpoint_returns_ok_status(
     assert response.json() == {"status": "ok"}
 
 
+def test_cloud_status_endpoint_reports_sanitized_loopback_status(
+    settings_with_secret: FrameNestSettings,
+) -> None:
+    app = create_app(settings=settings_with_secret)
+    response = TestClient(app).get("/api/status/cloud")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "server": "connected",
+        "connection": "loopback",
+        "remote_access": None,
+    }
+    assert "127.0.0.1" not in response.text
+    assert REPRESENTATIVE_SECRET not in response.text
+
+
 def test_health_contract_is_present_in_openapi(
     settings_with_secret: FrameNestSettings,
 ) -> None:

@@ -92,6 +92,7 @@ class MediaSuggestionCapabilityResponse(BaseModel):
     execution: str
     status: AiProviderStatus
     configured: bool
+    last_status_check: dict[str, object] | None
     last_connection_test: dict[str, object] | None
     requires_explicit_confirmation: bool
 
@@ -148,6 +149,7 @@ class MediaSuggestionApiDependencies:
     model_id: str = DEFAULT_MODEL_ID
     prompt_version: str = PROMPT_VERSION
     status: AiProviderStatus = "not_configured"
+    last_status_check: dict[str, object] | None = None
     last_connection_test: dict[str, object] | None = None
 
 
@@ -175,6 +177,7 @@ def create_media_suggestion_api_router(dependencies: MediaSuggestionApiDependenc
                 execution="server",
                 status=status,
                 configured=dependencies.provider_configured,
+                last_status_check=dependencies.last_status_check,
                 last_connection_test=dependencies.last_connection_test,
                 requires_explicit_confirmation=True,
             )

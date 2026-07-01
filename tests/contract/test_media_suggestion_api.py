@@ -221,6 +221,7 @@ def _client(
     imported_preview: _FakeImportedSuggestionPreview | None = None,
     catalog_available: bool = True,
     database_path: Path | None = None,
+    last_status_check: dict[str, object] | None = None,
 ) -> tuple[TestClient, _FakeSuggestionPreview, _FakeImportedSuggestionPreview]:
     suggestion_preview = preview or _FakeSuggestionPreview()
     imported_suggestion_preview = imported_preview or _FakeImportedSuggestionPreview()
@@ -244,6 +245,7 @@ def _client(
             preview_suggestion=suggestion_preview if configured else None,
             provider_configured=configured,
             preview_imported_suggestion=imported_suggestion_preview if configured else None,
+            last_status_check=last_status_check,
         ),
     )
     return TestClient(app), suggestion_preview, imported_suggestion_preview
@@ -295,6 +297,7 @@ def test_capability_configured_and_unconfigured_are_sanitized_no_store() -> None
         "execution": "server",
         "status": "configured_unverified",
         "configured": True,
+        "last_status_check": None,
         "last_connection_test": None,
         "requires_explicit_confirmation": True,
     }
@@ -309,6 +312,29 @@ def test_capability_configured_and_unconfigured_are_sanitized_no_store() -> None
     assert configured_imported_preview.calls == []
     assert unconfigured_preview.calls == []
     assert unconfigured_imported_preview.calls == []
+
+
+def test_capability_exposes_safe_last_status_snapshot_without_provider_request() -> None:
+    preview = _FakeSuggestionPreview()
+    imported_preview = _FakeImportedSuggestionPreview()
+    client, _, _ = _client(
+        preview=preview,
+        imported_preview=imported_preview,
+        last_status_check={
+            "configuration_state": "configured",
+            "checked_at_ms": 123,
+        },
+    )
+
+    response = client.get("/api/ai/media-suggestion-capability")
+
+    assert response.status_code == 200
+    assert response.json()["last_status_check"] == {
+        "configuration_state": "configured",
+        "checked_at_ms": 123,
+    }
+    assert preview.calls == []
+    assert imported_preview.calls == []
 
 
 def test_success_returns_validated_editable_suggestion_no_frames_or_raw_content() -> None:

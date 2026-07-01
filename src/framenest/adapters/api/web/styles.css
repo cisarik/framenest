@@ -461,11 +461,15 @@ button {
 }
 
 .settings-dialog__tab {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  border-bottom: 2px solid transparent;
   padding: 10px 16px;
   color: var(--text-soft);
   font-size: 0.84rem;
   font-weight: 700;
-  border-bottom: 2px solid transparent;
+  cursor: pointer;
   transition: color var(--transition-fast), border-color var(--transition-fast);
 }
 
@@ -490,38 +494,50 @@ button {
   color: var(--text);
 }
 
-.settings-ai-status {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 12px 14px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-md);
-  background: var(--surface-input);
-  font-size: 0.86rem;
-  color: var(--text-muted);
-}
-
-.settings-ai-status .status-button__dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--warning);
-}
-
-.settings-ai-status.is-available .status-button__dot {
-  background: var(--accent);
-  box-shadow: 0 0 8px var(--accent-glow);
-}
-
-.settings-ai-status.is-unavailable .status-button__dot {
-  background: var(--danger);
-}
-
 .settings-ai-provider {
   margin: 0;
+  color: var(--text);
+  font-size: 0.96rem;
+  font-weight: 700;
+}
+
+.settings-ai-model {
+  display: grid;
+  gap: 4px;
+}
+
+.settings-ai-model-id {
+  margin: 0;
   color: var(--text-soft);
-  font-size: 0.82rem;
+  font-size: 0.84rem;
+}
+
+.settings-status-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+
+.settings-status-list div {
+  display: grid;
+  grid-template-columns: minmax(110px, 0.4fr) minmax(0, 1fr);
+  gap: 10px;
+  align-items: baseline;
+  padding: 8px 0;
+  border-top: 1px solid var(--line);
+}
+
+.settings-status-list dt {
+  color: var(--text-soft);
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.settings-status-list dd {
+  margin: 0;
+  color: var(--text);
+  font-size: 0.86rem;
 }
 
 .settings-dialog__note {
@@ -1689,10 +1705,8 @@ h2 {
   pointer-events: none;
 }
 
-.metadata-dialog__footer .metadata-ai-analyze-button:hover::after,
-.metadata-dialog__footer .metadata-ai-analyze-button:focus-visible::after,
 .metadata-dialog__footer .metadata-ai-analyze-button[aria-busy="true"]::after {
-  animation: ai-wand-sweep 900ms ease-out;
+  animation: metadata-ai-analyzing 1.25s linear infinite;
 }
 
 .metadata-dialog__footer .metadata-ai-analyze-button:hover,
@@ -1702,10 +1716,19 @@ h2 {
   color: #000;
 }
 
-.metadata-dialog__footer .metadata-ai-analyze-button:disabled {
+.metadata-dialog__footer .metadata-ai-analyze-button:disabled:not([aria-busy="true"]) {
   border-color: rgba(106, 122, 106, 0.3);
   background: transparent;
   color: var(--text-soft);
+}
+
+.metadata-dialog__footer .metadata-ai-analyze-button[aria-busy="true"] {
+  border-color: #39ff14;
+  background: linear-gradient(90deg, #051f0e, #13c955 46%, #b7ff9a);
+  color: #020402;
+  box-shadow: 0 0 18px rgba(57, 255, 20, 0.42);
+  cursor: progress;
+  opacity: 1;
 }
 
 .metadata-ai-analyze-button > * {
@@ -1776,15 +1799,6 @@ h2 {
   grid-column: 1 / -1;
 }
 
-.loading-spinner {
-  width: 14px;
-  height: 14px;
-  border: 2px solid rgba(0, 0, 0, 0.24);
-  border-top-color: #000;
-  border-radius: 50%;
-  animation: spin 0.8s linear infinite;
-}
-
 .metadata-ai-suggestion {
   display: grid;
   gap: 12px;
@@ -1792,18 +1806,13 @@ h2 {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .loading-spinner {
+  .metadata-dialog__footer .metadata-ai-analyze-button[aria-busy="true"]::after {
     animation: none;
+    transform: translateX(0);
   }
 }
 
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-@keyframes ai-wand-sweep {
+@keyframes metadata-ai-analyzing {
   to {
     transform: translateX(120%);
   }

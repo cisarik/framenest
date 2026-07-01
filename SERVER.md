@@ -154,12 +154,19 @@ Server operators use the root CLI:
 ./framenest ai test
 ```
 
-`status` is network-free. `configure` writes only schema-versioned non-secret
-provider/model selection outside the repository, using the platform application
-configuration location or an explicit configuration-path override. `test` is an
-explicit minimal text-only provider request and persists only safe historical
-test category/timestamp state. NVIDIA NIM remains supported. Vercel AI Gateway
-is supported with preferred model `google/gemini-3.1-flash-lite`.
+`status` is network-free and writes only a safe status snapshot beside the
+non-secret AI configuration state. `configure` writes only schema-versioned
+non-secret provider/model selection outside the repository, using the platform
+application configuration location or an explicit configuration-path override.
+`test` is an explicit minimal text-only provider request and persists only safe
+historical test category/timestamp state. NVIDIA NIM remains supported. Vercel
+AI Gateway is supported with preferred model `google/gemini-3.1-flash-lite`.
+
+The browser Status modal is read-only. Its AI tab shows the configured provider
+and model plus safe historical status rows when such state exists. Its Cloud tab
+uses the sanitized server status contract and reports the local development
+server as connected over loopback; it does not implement Tailscale detection or
+authorization.
 
 Provider credentials remain in the server environment/service-secret boundary:
 `NVIDIA_API_KEY` for NVIDIA NIM and `AI_GATEWAY_API_KEY` for Vercel AI Gateway.

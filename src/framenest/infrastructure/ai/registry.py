@@ -10,10 +10,13 @@ from typing import Mapping
 from framenest.configuration import FrameNestSettings
 from framenest.infrastructure.ai.configuration import (
     AiConfigurationError,
+    AiStatusSnapshot,
     AiTestState,
     default_ai_config_path,
+    default_ai_status_snapshot_path,
     default_ai_test_state_path,
     load_ai_server_config,
+    load_ai_status_snapshot,
     load_ai_test_state,
     provider_default_model,
     validate_model_id,
@@ -50,8 +53,10 @@ class ResolvedAiProvider:
     credential_available: bool
     provider: object | None
     last_test: AiTestState | None
+    last_status: AiStatusSnapshot | None
     config_path: Path
     test_state_path: Path
+    status_snapshot_path: Path
 
     @property
     def configured(self) -> bool:
@@ -111,7 +116,13 @@ def resolve_ai_provider(
     credential_available = bool(source.get(definition.credential_environment_name, "").strip())
     provider = _build_provider(provider_id, model_id, source, transport=transport)
     test_state_path = default_ai_test_state_path(resolved_config_path)
+    status_snapshot_path = default_ai_status_snapshot_path(resolved_config_path)
     last_test = _load_matching_test_state(test_state_path, provider_id=provider_id, model_id=model_id)
+    last_status = _load_matching_status_snapshot(
+        status_snapshot_path,
+        provider_id=provider_id,
+        model_id=model_id,
+    )
     return ResolvedAiProvider(
         provider_id=provider_id,
         display_name=definition.display_name,
@@ -121,8 +132,10 @@ def resolve_ai_provider(
         credential_available=credential_available,
         provider=provider,
         last_test=last_test,
+        last_status=last_status,
         config_path=resolved_config_path,
         test_state_path=test_state_path,
+        status_snapshot_path=status_snapshot_path,
     )
 
 
@@ -158,3 +171,17 @@ def _load_matching_test_state(
     if state.provider_id != provider_id or state.model_id != model_id:
         return None
     return state
+
+
+def _load_matching_status_snapshot(
+    path: Path,
+    *,
+    provider_id: str,
+    model_id: str,
+) -> AiStatusSnapshot | None:
+    snapshot = load_ai_status_snapshot(path)
+    if snapshot is None:
+        return None
+    if snapshot.provider_id != provider_id or snapshot.model_id != model_id:
+        return None
+    return snapshot

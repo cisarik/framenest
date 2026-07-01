@@ -21,6 +21,7 @@ from framenest.configuration import load_settings
 from framenest.infrastructure.ai.configuration import (
     AiConfigurationError,
     AiServerConfig,
+    AiStatusSnapshot,
     AiTestState,
     default_ai_config_path,
     default_ai_test_state_path,
@@ -30,6 +31,7 @@ from framenest.infrastructure.ai.configuration import (
     validate_model_id,
     validate_provider_id,
     write_ai_server_config,
+    write_ai_status_snapshot,
     write_ai_test_state,
 )
 from framenest.infrastructure.ai.constants import DEFAULT_PROVIDER_ID, VERCEL_AI_GATEWAY_PROVIDER_ID
@@ -88,6 +90,15 @@ def main(argv: Sequence[str] | None = None) -> int:
 def status_command(context: _CliContext, *, output: Output = print) -> int:
     """Print sanitized network-free AI status."""
     resolved = _resolve(context)
+    write_ai_status_snapshot(
+        AiStatusSnapshot(
+            provider_id=resolved.provider_id,
+            model_id=resolved.model_id,
+            configuration_state="configured" if resolved.configured else "not_configured",
+            checked_at_ms=now_ms(),
+        ),
+        resolved.status_snapshot_path,
+    )
     output("AI status")
     output(f"Active provider: {resolved.display_name}")
     output(f"Model: {resolved.model_id}")

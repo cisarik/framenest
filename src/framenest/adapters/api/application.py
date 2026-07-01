@@ -73,6 +73,12 @@ class HealthResponse(BaseModel):
     status: Literal["ok"]
 
 
+class CloudStatusResponse(BaseModel):
+    server: Literal["connected", "unavailable"]
+    connection: Literal["loopback", "lan", "tailscale", "unknown"]
+    remote_access: str | None = None
+
+
 _ASSET_MEDIA_TYPES = {
     "styles.css": "text/css; charset=utf-8",
     "app.js": "text/javascript; charset=utf-8",
@@ -201,6 +207,7 @@ def create_app(
                 configured=suggestion_preview is not None,
                 last_status=None if resolved_ai.last_test is None else resolved_ai.last_test.status,
             ),
+            last_status_check=_last_status_payload(resolved_ai.last_status),
             last_connection_test=_last_test_payload(resolved_ai.last_test),
         )
 
@@ -243,6 +250,10 @@ def create_app(
     def health() -> HealthResponse:
         return HealthResponse(status="ok")
 
+    @app.get("/api/status/cloud", response_model=CloudStatusResponse)
+    def cloud_status() -> CloudStatusResponse:
+        return CloudStatusResponse(server="connected", connection="loopback", remote_access=None)
+
     return app
 
 
@@ -270,4 +281,13 @@ def _last_test_payload(last_test: object | None) -> dict[str, object] | None:
     return {
         "status": getattr(last_test, "status"),
         "tested_at_ms": getattr(last_test, "tested_at_ms"),
+    }
+
+
+def _last_status_payload(last_status: object | None) -> dict[str, object] | None:
+    if last_status is None:
+        return None
+    return {
+        "configuration_state": getattr(last_status, "configuration_state"),
+        "checked_at_ms": getattr(last_status, "checked_at_ms"),
     }

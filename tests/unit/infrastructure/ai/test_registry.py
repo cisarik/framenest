@@ -5,7 +5,13 @@ from __future__ import annotations
 from pathlib import Path
 
 from framenest.configuration import FrameNestSettings
-from framenest.infrastructure.ai.configuration import AiServerConfig, write_ai_server_config
+from framenest.infrastructure.ai.configuration import (
+    AiServerConfig,
+    AiStatusSnapshot,
+    default_ai_status_snapshot_path,
+    write_ai_status_snapshot,
+    write_ai_server_config,
+)
 from framenest.infrastructure.ai.constants import VERCEL_AI_GATEWAY_DEFAULT_MODEL_ID
 from framenest.infrastructure.ai.registry import resolve_ai_provider
 
@@ -86,3 +92,32 @@ def test_unconfigured_prefers_vercel_identity_without_provider(tmp_path: Path) -
     assert resolved.provider_id == "vercel-ai-gateway"
     assert resolved.source == "unconfigured"
     assert resolved.configured is False
+
+
+def test_status_snapshot_is_loaded_only_for_matching_identity(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.json"
+    status_path = default_ai_status_snapshot_path(config_path)
+    write_ai_status_snapshot(
+        AiStatusSnapshot(
+            provider_id="vercel-ai-gateway",
+            model_id=VERCEL_AI_GATEWAY_DEFAULT_MODEL_ID,
+            configuration_state="configured",
+            checked_at_ms=123,
+        ),
+        status_path,
+    )
+
+    matching = resolve_ai_provider(
+        _settings(tmp_path, ai_provider_id="vercel-ai-gateway"),
+        environ={"AI_GATEWAY_API_KEY": "secret"},
+        config_path=config_path,
+    )
+    stale = resolve_ai_provider(
+        _settings(tmp_path, ai_provider_id="nvidia-nim"),
+        environ={"NVIDIA_API_KEY": "secret"},
+        config_path=config_path,
+    )
+
+    assert matching.last_status is not None
+    assert matching.last_status.checked_at_ms == 123
+    assert stale.last_status is None

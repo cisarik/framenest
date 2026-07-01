@@ -10,11 +10,14 @@ import pytest
 from framenest.infrastructure.ai.configuration import (
     AiConfigurationError,
     AiServerConfig,
+    AiStatusSnapshot,
     AiTestState,
     default_ai_config_path,
+    load_ai_status_snapshot,
     load_ai_server_config,
     load_ai_test_state,
     now_ms,
+    write_ai_status_snapshot,
     write_ai_server_config,
     write_ai_test_state,
 )
@@ -102,4 +105,33 @@ def test_safe_test_state_contains_only_category_and_identity(tmp_path: Path) -> 
         "schema_version",
         "status",
         "tested_at_ms",
+    ]
+
+
+def test_safe_status_snapshot_contains_only_config_state_and_identity(tmp_path: Path) -> None:
+    path = tmp_path / "status-snapshot.json"
+
+    write_ai_status_snapshot(
+        AiStatusSnapshot(
+            provider_id="vercel-ai-gateway",
+            model_id=VERCEL_AI_GATEWAY_DEFAULT_MODEL_ID,
+            configuration_state="configured",
+            checked_at_ms=456,
+        ),
+        path,
+    )
+
+    assert load_ai_status_snapshot(path) == AiStatusSnapshot(
+        provider_id="vercel-ai-gateway",
+        model_id=VERCEL_AI_GATEWAY_DEFAULT_MODEL_ID,
+        configuration_state="configured",
+        checked_at_ms=456,
+    )
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    assert sorted(payload) == [
+        "checked_at_ms",
+        "configuration_state",
+        "model_id",
+        "provider_id",
+        "schema_version",
     ]

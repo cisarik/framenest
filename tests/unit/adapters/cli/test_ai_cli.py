@@ -15,7 +15,11 @@ from framenest.application.media_suggestion import (
     MediaSuggestionProviderRateLimitedError,
     MediaSuggestionProviderUnavailableError,
 )
-from framenest.infrastructure.ai.configuration import load_ai_server_config, load_ai_test_state
+from framenest.infrastructure.ai.configuration import (
+    load_ai_server_config,
+    load_ai_status_snapshot,
+    load_ai_test_state,
+)
 from framenest.infrastructure.ai.constants import VERCEL_AI_GATEWAY_DEFAULT_MODEL_ID
 
 
@@ -73,8 +77,10 @@ def test_status_uses_resolver_without_provider_request(
         credential_available=True,
         provider=_Provider(),
         last_test=None,
+        last_status=None,
         config_path=tmp_path / "config.json",
         test_state_path=tmp_path / "test-state.json",
+        status_snapshot_path=tmp_path / "status-snapshot.json",
     )
     monkeypatch.setattr(ai, "_resolve", lambda _context: resolved)
     lines: list[str] = []
@@ -85,6 +91,12 @@ def test_status_uses_resolver_without_provider_request(
     assert "AI status" in output
     assert "Credential available to this process: yes" in output
     assert "secret" not in output
+    snapshot = load_ai_status_snapshot(tmp_path / "status-snapshot.json")
+    assert snapshot is not None
+    assert snapshot.provider_id == "vercel-ai-gateway"
+    assert snapshot.model_id == VERCEL_AI_GATEWAY_DEFAULT_MODEL_ID
+    assert snapshot.configuration_state == "configured"
+    assert not (tmp_path / "test-state.json").exists()
 
 
 def test_test_command_performs_one_text_only_provider_request(
@@ -107,8 +119,10 @@ def test_test_command_performs_one_text_only_provider_request(
         credential_available=True,
         provider=provider,
         last_test=None,
+        last_status=None,
         config_path=tmp_path / "config.json",
         test_state_path=tmp_path / "test-state.json",
+        status_snapshot_path=tmp_path / "status-snapshot.json",
     )
     monkeypatch.setattr(ai, "_resolve", lambda _context: resolved)
     lines: list[str] = []
@@ -152,8 +166,10 @@ def test_test_command_categorizes_safe_failures(
         credential_available=True,
         provider=_Provider(),
         last_test=None,
+        last_status=None,
         config_path=tmp_path / "config.json",
         test_state_path=tmp_path / "test-state.json",
+        status_snapshot_path=tmp_path / "status-snapshot.json",
     )
     monkeypatch.setattr(ai, "_resolve", lambda _context: resolved)
     lines: list[str] = []

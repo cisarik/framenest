@@ -20,6 +20,7 @@ from framenest.infrastructure.ai.constants import (
 
 AI_CONFIG_SCHEMA_VERSION = 1
 AI_TEST_STATE_SCHEMA_VERSION = 1
+AI_STATUS_SNAPSHOT_SCHEMA_VERSION = 1
 AI_CONFIG_PATH_ENVIRONMENT_NAME = "FRAMENEST_AI_CONFIG_PATH"
 SUPPORTED_PROVIDER_IDS = frozenset({DEFAULT_PROVIDER_ID, VERCEL_AI_GATEWAY_PROVIDER_ID})
 SAFE_TEST_STATUSES = frozenset(
@@ -58,6 +59,17 @@ class AiTestState:
     status: str
     tested_at_ms: int
     schema_version: int = AI_TEST_STATE_SCHEMA_VERSION
+
+
+@dataclass(frozen=True, slots=True)
+class AiStatusSnapshot:
+    """Safe network-free AI status snapshot."""
+
+    provider_id: str
+    model_id: str
+    configuration_state: str
+    checked_at_ms: int
+    schema_version: int = AI_STATUS_SNAPSHOT_SCHEMA_VERSION
 
 
 def provider_default_model(provider_id: str) -> str:
@@ -125,6 +137,11 @@ def default_ai_config_path(
 def default_ai_test_state_path(config_path: Path) -> Path:
     """Return the safe test-state path beside the non-secret config file."""
     return config_path.parent / "test-state.json"
+
+
+def default_ai_status_snapshot_path(config_path: Path) -> Path:
+    """Return the safe status snapshot path beside the non-secret config file."""
+    return config_path.parent / "status-snapshot.json"
 
 
 def load_ai_server_config(path: Path) -> AiServerConfig | None:
@@ -204,6 +221,47 @@ def write_ai_test_state(state: AiTestState, path: Path) -> None:
     }
     if state.status not in SAFE_TEST_STATUSES:
         raise AiConfigurationError("AI test state is malformed.")
+    _atomic_write_json(path, payload)
+
+
+def load_ai_status_snapshot(path: Path) -> AiStatusSnapshot | None:
+    """Load optional safe network-free AI status snapshot."""
+    normalized = _prepare_existing_or_missing_path(path)
+    if not normalized.exists():
+        return None
+    try:
+        payload = json.loads(normalized.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        raise AiConfigurationError("AI status snapshot is malformed.") from None
+    if not isinstance(payload, dict) or payload.get("schema_version") != AI_STATUS_SNAPSHOT_SCHEMA_VERSION:
+        raise AiConfigurationError("AI status snapshot version is unsupported.")
+    provider_id = validate_provider_id(payload.get("provider_id"))
+    model_id = validate_model_id(payload.get("model_id"))
+    configuration_state = payload.get("configuration_state")
+    checked_at_ms = payload.get("checked_at_ms")
+    if configuration_state not in {"configured", "not_configured"}:
+        raise AiConfigurationError("AI status snapshot is malformed.")
+    if not isinstance(checked_at_ms, int) or checked_at_ms < 0:
+        raise AiConfigurationError("AI status snapshot is malformed.")
+    return AiStatusSnapshot(
+        provider_id=provider_id,
+        model_id=model_id,
+        configuration_state=configuration_state,
+        checked_at_ms=checked_at_ms,
+    )
+
+
+def write_ai_status_snapshot(snapshot: AiStatusSnapshot, path: Path) -> None:
+    """Atomically write safe network-free AI status snapshot."""
+    payload = {
+        "schema_version": AI_STATUS_SNAPSHOT_SCHEMA_VERSION,
+        "provider_id": validate_provider_id(snapshot.provider_id),
+        "model_id": validate_model_id(snapshot.model_id),
+        "configuration_state": snapshot.configuration_state,
+        "checked_at_ms": snapshot.checked_at_ms,
+    }
+    if snapshot.configuration_state not in {"configured", "not_configured"}:
+        raise AiConfigurationError("AI status snapshot is malformed.")
     _atomic_write_json(path, payload)
 
 

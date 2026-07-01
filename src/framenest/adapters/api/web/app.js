@@ -6,6 +6,7 @@ const MEDIA_CATALOG_ENDPOINT = "/api/media";
 const MEDIA_METADATA_ENDPOINT_PREFIX = "/api/media";
 const CANONICAL_TAGS_ENDPOINT = "/api/canonical-tags";
 const AI_CAPABILITY_ENDPOINT = "/api/ai/media-suggestion-capability";
+const CLOUD_STATUS_ENDPOINT = "/api/status/cloud";
 const MEDIA_IMPORTS_ENDPOINT = "media-imports";
 const CATALOG_PAGE_SIZE_OPTIONS = [10, 30, 60, 90];
 const CATALOG_PAGE_SIZE_STORAGE_KEY = "framenest.catalog.pageSize";
@@ -78,6 +79,7 @@ let aiCapability = {
   status: "not_configured",
   configured: false,
   last_connection_test: null,
+  last_status_check: null,
   requires_explicit_confirmation: true,
 };
 
@@ -105,15 +107,24 @@ const serverHealthButton = document.querySelector("#server-health-button");
 const serverHealthButtonText = document.querySelector("#server-health-button-text");
 const aiStatusButton = document.querySelector("#ai-status-button");
 const aiStatusButtonText = document.querySelector("#ai-status-button-text");
-const settingsDialog = document.querySelector("#settings-dialog");
-const settingsCloseButton = document.querySelector("#settings-close-button");
-const settingsAiStatus = document.querySelector("#settings-ai-status");
-const settingsAiStatusText = document.querySelector("#settings-ai-status-text");
+const statusDialog = document.querySelector("#status-dialog");
+const statusCloseButton = document.querySelector("#status-close-button");
+const statusTabAi = document.querySelector("#status-tab-ai");
+const statusTabCloud = document.querySelector("#status-tab-cloud");
+const statusPanelAi = document.querySelector("#status-panel-ai");
+const statusPanelCloud = document.querySelector("#status-panel-cloud");
 const settingsAiProvider = document.querySelector("#settings-ai-provider");
-const settingsAiDetail = document.querySelector("#settings-ai-detail");
+const settingsAiModel = document.querySelector("#settings-ai-model");
+const settingsAiServerRow = document.querySelector("#settings-ai-server-row");
+const settingsAiServerCheck = document.querySelector("#settings-ai-server-check");
+const settingsAiTestRow = document.querySelector("#settings-ai-test-row");
 const settingsAiTestResult = document.querySelector("#settings-ai-test-result");
+const statusCloudServer = document.querySelector("#status-cloud-server");
+const statusCloudConnection = document.querySelector("#status-cloud-connection");
+const statusCloudRemoteRow = document.querySelector("#status-cloud-remote-row");
+const statusCloudRemote = document.querySelector("#status-cloud-remote");
 let healthCheckInFlight = false;
-let lastFocusedElementBeforeSettings = null;
+let lastFocusedElementBeforeStatus = null;
 const libraryList = document.querySelector("#library-list");
 const libraryStateLoading = document.querySelector("#library-state-loading");
 const libraryStateEmpty = document.querySelector("#library-state-empty");
@@ -211,10 +222,10 @@ function setServerHealthButtonState(state, label) {
   if (serverHealthButtonText) serverHealthButtonText.textContent = label;
   if (state === "healthy") {
     serverHealthButton.setAttribute("aria-label", "Local server healthy");
-    serverHealthButton.title = "Local server healthy";
+    serverHealthButton.title = "Local server healthy. Click to open status.";
   } else if (state === "unhealthy") {
     serverHealthButton.setAttribute("aria-label", "Local server unhealthy or unreachable");
-    serverHealthButton.title = "Local server unhealthy or unreachable. Click to retry.";
+    serverHealthButton.title = "Local server unhealthy or unreachable. Click to open status.";
   } else {
     serverHealthButton.setAttribute("aria-label", "Checking local server");
     serverHealthButton.title = "Checking local server...";
@@ -228,13 +239,13 @@ function setAiStatusButtonState(state, label) {
   if (aiStatusButtonText) aiStatusButtonText.textContent = label;
   if (state === "healthy") {
     aiStatusButton.setAttribute("aria-label", "AI available");
-    aiStatusButton.title = "AI available. Click to open settings.";
+    aiStatusButton.title = "AI available. Click to open status.";
   } else if (state === "unhealthy") {
     aiStatusButton.setAttribute("aria-label", "AI unavailable");
-    aiStatusButton.title = "AI unavailable. Click to open settings.";
+    aiStatusButton.title = "AI unavailable. Click to open status.";
   } else {
     aiStatusButton.setAttribute("aria-label", "Checking AI status");
-    aiStatusButton.title = "Checking AI capability...";
+    aiStatusButton.title = "Checking AI status...";
   }
 }
 
@@ -273,18 +284,26 @@ function setAiStatusClass(className) {
   aiStatus.classList.add(className);
 }
 
-function updateSettingsAiStatus(state, text, providerInfo, detail, testResult) {
-  if (!settingsAiStatus) return;
-  settingsAiStatus.classList.remove("is-available", "is-unavailable");
-  if (state === "available") settingsAiStatus.classList.add("is-available");
-  else if (state === "unavailable") settingsAiStatus.classList.add("is-unavailable");
-  if (settingsAiStatusText) settingsAiStatusText.textContent = text;
-  if (settingsAiProvider) settingsAiProvider.textContent = providerInfo || "";
-  if (settingsAiDetail) settingsAiDetail.textContent = detail || "";
-  if (settingsAiTestResult) settingsAiTestResult.textContent = testResult || "";
+function updateSettingsAiStatus() {
+  const providerName = aiCapability.provider_display_name || aiCapability.provider_id || "Unavailable";
+  if (settingsAiProvider) settingsAiProvider.textContent = providerName;
+  if (settingsAiModel) settingsAiModel.textContent = aiCapability.model_id || "";
+  renderOptionalStatusRow(
+    settingsAiServerRow,
+    settingsAiServerCheck,
+    aiCapability.last_status_check,
+    serverCheckText,
+  );
+  renderOptionalStatusRow(
+    settingsAiTestRow,
+    settingsAiTestResult,
+    aiCapability.last_connection_test,
+    providerTestText,
+  );
 }
 
 function aiStatusLabel(status) {
+  if (status === "success") return "Successful";
   if (status === "verified") return "Verified";
   if (status === "configured_unverified") return "Configured, unverified";
   if (status === "authentication_failed") return "Authentication failed";
@@ -295,11 +314,38 @@ function aiStatusLabel(status) {
   return "Not configured";
 }
 
-function lastConnectionTestText(last) {
-  if (!last || !last.status) return "";
-  const status = aiStatusLabel(String(last.status));
-  const message = last.message ? String(last.message) : "";
-  return message ? `Last test: ${status}. ${message}` : `Last test: ${status}.`;
+function formatLocalTimestamp(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric < 0) return "";
+  const date = new Date(numeric);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleString();
+}
+
+function renderOptionalStatusRow(row, valueElement, payload, formatter) {
+  if (!row || !valueElement) return;
+  if (!payload) {
+    row.hidden = true;
+    valueElement.textContent = "";
+    return;
+  }
+  const text = formatter(payload);
+  row.hidden = !text;
+  valueElement.textContent = text;
+}
+
+function serverCheckText(payload) {
+  const checkedAt = formatLocalTimestamp(payload.checked_at_ms);
+  if (!checkedAt) return "";
+  const state = payload.configuration_state === "configured" ? "Configured" : "Unavailable";
+  return `${state} (${checkedAt})`;
+}
+
+function providerTestText(payload) {
+  const testedAt = formatLocalTimestamp(payload.tested_at_ms);
+  const status = payload.status ? aiStatusLabel(String(payload.status)) : "";
+  if (!testedAt || !status || status === "Not configured") return "";
+  return `${status} (${testedAt})`;
 }
 
 function renderAiCapability(payload) {
@@ -312,47 +358,35 @@ function renderAiCapability(payload) {
     execution: payload && payload.execution ? String(payload.execution) : "server",
     status: payload && payload.status ? String(payload.status) : "not_configured",
     configured: payload && payload.configured === true,
+    last_status_check: payload && payload.last_status_check ? payload.last_status_check : null,
     last_connection_test: payload && payload.last_connection_test ? payload.last_connection_test : null,
     requires_explicit_confirmation: !payload || payload.requires_explicit_confirmation !== false,
   };
   const providerName = aiCapability.provider_display_name || aiCapability.provider_id;
   const providerInfo = aiCapability.model_id ? `${providerName} / ${aiCapability.model_id}` : providerName;
   const statusText = aiStatusLabel(aiCapability.status);
-  const testText = lastConnectionTestText(aiCapability.last_connection_test);
   if (aiCapability.available) {
     setAiStatusClass("status--healthy");
     aiStatusText.textContent = "AI configured";
     aiStatusDetail.textContent =
       `${providerInfo}; ${statusText}; ${aiCapability.execution}.`;
     setAiStatusButtonState("healthy", "AI available");
-    updateSettingsAiStatus(
-      "available",
-      statusText,
-      providerInfo,
-      "AI is configured by the FrameNest server operator.",
-      testText,
-    );
+    updateSettingsAiStatus();
     return;
   }
   setAiStatusClass("status--error");
   aiStatusText.textContent = "AI not configured";
   aiStatusDetail.textContent = "Configure a server-side AI provider before starting FrameNest.";
   setAiStatusButtonState("unhealthy", "AI unavailable");
-  updateSettingsAiStatus(
-    "unavailable",
-    statusText,
-    providerInfo,
-    "AI is configured by the FrameNest server operator. No provider request is made for capability discovery.",
-    testText,
-  );
+  updateSettingsAiStatus();
 }
 
 async function loadAiCapability() {
   setAiStatusClass("status--loading");
-  aiStatusText.textContent = "Checking AI capability...";
+  aiStatusText.textContent = "Checking AI status...";
   aiStatusDetail.textContent = "No provider request is made for capability discovery.";
   setAiStatusButtonState("checking", "Checking AI");
-  updateSettingsAiStatus("checking", "Checking...", "", "", "", false);
+  updateSettingsAiStatus();
   try {
     const response = await fetch(AI_CAPABILITY_ENDPOINT, {
       headers: { Accept: "application/json" },
@@ -365,6 +399,38 @@ async function loadAiCapability() {
     renderAiCapability(await response.json());
   } catch {
     renderAiCapability({ available: false });
+  }
+}
+
+function renderCloudStatus(payload) {
+  const server = payload && payload.server === "connected" ? "Connected" : "Unavailable";
+  const connection = payload && payload.connection ? String(payload.connection) : "unknown";
+  const labels = {
+    loopback: "Local loopback",
+    lan: "LAN",
+    tailscale: "Tailscale",
+    unknown: "Unknown",
+  };
+  if (statusCloudServer) statusCloudServer.textContent = server;
+  if (statusCloudConnection) statusCloudConnection.textContent = labels[connection] || "Unknown";
+  const remote = payload && payload.remote_access ? String(payload.remote_access) : "";
+  if (statusCloudRemoteRow && statusCloudRemote) {
+    statusCloudRemoteRow.hidden = !remote;
+    statusCloudRemote.textContent = remote;
+  }
+}
+
+async function loadCloudStatus() {
+  renderCloudStatus({ server: "unavailable", connection: "unknown" });
+  try {
+    const response = await fetch(CLOUD_STATUS_ENDPOINT, {
+      headers: { Accept: "application/json" },
+      cache: "no-store",
+    });
+    if (!response.ok) return;
+    renderCloudStatus(await response.json());
+  } catch {
+    renderCloudStatus({ server: "unavailable", connection: "unknown" });
   }
 }
 
@@ -1683,15 +1749,12 @@ function renderMetadataAiAnalyzeButtonContent(isAnalyzing) {
   if (!metadataAiAnalyzeButton) return;
   metadataAiAnalyzeButton.replaceChildren();
   if (!isAnalyzing) {
-    metadataAiAnalyzeButton.textContent = "🧠 Analyze by AI";
+    metadataAiAnalyzeButton.textContent = "Analyze by AI";
     return;
   }
-  const spinner = document.createElement("span");
-  spinner.className = "loading-spinner";
-  spinner.setAttribute("aria-hidden", "true");
   const label = document.createElement("span");
   label.textContent = "Analyzing…";
-  metadataAiAnalyzeButton.append(spinner, label);
+  metadataAiAnalyzeButton.append(label);
 }
 
 function renderSelectedMetadataTags() {
@@ -1858,16 +1921,25 @@ async function handleAnalyzeMetadataByAi() {
       cache: "no-store",
     });
     const payload = await response.json();
-    if (token !== metadataAiRequestToken || metadataWorkspace.openMediaId === null) return;
-    metadataWorkspace.analyzing = false;
+    if (token !== metadataAiRequestToken || metadataWorkspace.openMediaId === null) {
+      metadataWorkspace.analyzing = false;
+      updateMetadataControls();
+      return;
+    }
     if (!response.ok) {
+      metadataWorkspace.analyzing = false;
       metadataAiStatus.textContent = aiSuggestionErrorMessage(payload);
       renderMetadataWorkspace();
       return;
     }
     const suggestion = aiSuggestionFromPayload(payload);
     const tagKeys = await metadataTagKeysFromSuggestion(suggestion.tags);
-    if (token !== metadataAiRequestToken || metadataWorkspace.openMediaId === null) return;
+    if (token !== metadataAiRequestToken || metadataWorkspace.openMediaId === null) {
+      metadataWorkspace.analyzing = false;
+      updateMetadataControls();
+      return;
+    }
+    metadataWorkspace.analyzing = false;
     metadataWorkspace.current.displayTitle = suggestion.title;
     metadataWorkspace.current.description = suggestion.description;
     metadataWorkspace.current.tagKeys = tagKeys;
@@ -3256,60 +3328,106 @@ metadataAiFilenameInput.addEventListener("input", () => {
   metadataWorkspace.suggestedFilename = metadataAiFilenameInput.value;
 });
 
-function openSettingsDialog() {
-  if (!settingsDialog) return;
-  lastFocusedElementBeforeSettings = document.activeElement;
-  if (typeof settingsDialog.showModal === "function") {
-    settingsDialog.showModal();
-  } else {
-    settingsDialog.setAttribute("open", "");
+function setActiveStatusTab(tabName, { focusTab = false } = {}) {
+  const isCloud = tabName === "cloud";
+  if (!statusTabAi || !statusTabCloud || !statusPanelAi || !statusPanelCloud) return;
+  statusTabAi.classList.toggle("settings-dialog__tab--active", !isCloud);
+  statusTabCloud.classList.toggle("settings-dialog__tab--active", isCloud);
+  statusTabAi.setAttribute("aria-selected", String(!isCloud));
+  statusTabCloud.setAttribute("aria-selected", String(isCloud));
+  statusTabAi.tabIndex = isCloud ? -1 : 0;
+  statusTabCloud.tabIndex = isCloud ? 0 : -1;
+  statusPanelAi.hidden = isCloud;
+  statusPanelCloud.hidden = !isCloud;
+  if (isCloud) {
+    loadCloudStatus();
   }
-  settingsCloseButton.focus();
+  if (focusTab) {
+    (isCloud ? statusTabCloud : statusTabAi).focus();
+  }
 }
 
-function closeSettingsDialog() {
-  if (!settingsDialog) return;
-  if (typeof settingsDialog.close === "function") {
-    settingsDialog.close();
+function openStatusDialog(tabName = "ai") {
+  if (!statusDialog) return;
+  lastFocusedElementBeforeStatus = document.activeElement;
+  setActiveStatusTab(tabName);
+  if (typeof statusDialog.showModal === "function") {
+    statusDialog.showModal();
   } else {
-    settingsDialog.removeAttribute("open");
+    statusDialog.setAttribute("open", "");
   }
-  if (lastFocusedElementBeforeSettings) {
-    lastFocusedElementBeforeSettings.focus();
-    lastFocusedElementBeforeSettings = null;
+  const panel = tabName === "cloud" ? statusPanelCloud : statusPanelAi;
+  if (panel) panel.focus();
+}
+
+function closeStatusDialog() {
+  if (!statusDialog) return;
+  if (typeof statusDialog.close === "function") {
+    statusDialog.close();
+  } else {
+    statusDialog.removeAttribute("open");
+  }
+  if (lastFocusedElementBeforeStatus) {
+    lastFocusedElementBeforeStatus.focus();
+    lastFocusedElementBeforeStatus = null;
   } else {
     aiStatusButton.focus();
+  }
+}
+
+function handleStatusTabKeydown(event) {
+  if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+  event.preventDefault();
+  if (event.key === "Home") {
+    setActiveStatusTab("ai", { focusTab: true });
+  } else if (event.key === "End") {
+    setActiveStatusTab("cloud", { focusTab: true });
+  } else if (event.currentTarget === statusTabAi) {
+    setActiveStatusTab("cloud", { focusTab: true });
+  } else {
+    setActiveStatusTab("ai", { focusTab: true });
   }
 }
 
 if (serverHealthButton) {
   serverHealthButton.addEventListener("click", () => {
     retryHealth();
+    openStatusDialog("cloud");
   });
 }
 
 if (aiStatusButton) {
   aiStatusButton.addEventListener("click", () => {
-    openSettingsDialog();
+    openStatusDialog("ai");
   });
 }
 
-if (settingsCloseButton) {
-  settingsCloseButton.addEventListener("click", () => {
-    closeSettingsDialog();
+if (statusTabAi) {
+  statusTabAi.addEventListener("click", () => setActiveStatusTab("ai"));
+  statusTabAi.addEventListener("keydown", handleStatusTabKeydown);
+}
+
+if (statusTabCloud) {
+  statusTabCloud.addEventListener("click", () => setActiveStatusTab("cloud"));
+  statusTabCloud.addEventListener("keydown", handleStatusTabKeydown);
+}
+
+if (statusCloseButton) {
+  statusCloseButton.addEventListener("click", () => {
+    closeStatusDialog();
   });
 }
 
-if (settingsDialog) {
-  settingsDialog.addEventListener("keydown", (event) => {
+if (statusDialog) {
+  statusDialog.addEventListener("keydown", (event) => {
     if (event.key === "Escape") {
       event.preventDefault();
-      closeSettingsDialog();
+      closeStatusDialog();
     }
   });
-  settingsDialog.addEventListener("click", (event) => {
-    if (event.target === settingsDialog) {
-      closeSettingsDialog();
+  statusDialog.addEventListener("click", (event) => {
+    if (event.target === statusDialog) {
+      closeStatusDialog();
     }
   });
 }

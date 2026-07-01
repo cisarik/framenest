@@ -38,8 +38,9 @@ AI` requires confirmation before any provider request. The ordinary editor does
 not offer provider administration or credential entry. The confirmation explains
 that up to three optimized preview frames and bounded metadata are sent through
 the server, while the original file, local path, and API key are not uploaded.
-During a request, the button shows only one spinner and `Analyzing…`, and duplicate analysis requests are blocked. A
-successful result replaces the current unsaved title, description, and tags
+During a request, the button shows `Analyzing…` in a high-contrast busy state
+without a spinner, and duplicate analysis requests are blocked. A successful
+result replaces the current unsaved title, description, and tags
 directly in the same editor, reveals an editable suggested filename when
 supplied, hides the Analyze action for that modal-open session, does not save
 metadata, and does not rename a physical file. A failed request restores the
@@ -49,12 +50,12 @@ durable tag list, but `Processed` is not an ordinary editor control.
 
 Server AI administration is currently a CLI boundary. `./framenest ai
 configure` writes only non-secret provider/model selection outside the
-repository, `./framenest ai status` is network-free, and `./framenest ai test`
-is the only explicit text-only connection test. NVIDIA NIM remains supported.
-Vercel AI Gateway is also supported with preferred model
+repository, `./framenest ai status` is network-free and writes only a safe local
+status snapshot, and `./framenest ai test` is the only explicit text-only
+connection test. NVIDIA NIM remains supported. Vercel AI Gateway is also supported with preferred model
 `google/gemini-3.1-flash-lite`. Provider credentials remain in the server
 environment (`NVIDIA_API_KEY` or `AI_GATEWAY_API_KEY`) and are not stored in the
-browser or non-secret AI configuration file.
+browser, non-secret AI configuration file, or status snapshot.
 
 For local development, `./framenest` may bootstrap those provider credentials
 from the ignored `.secrets/ai.env.fish` file when it is present and private.
@@ -116,7 +117,7 @@ an AI draft.
 
 `Current` must never be silently overwritten. Values enter `Current` through
 manual editing, explicit promotion from a future AI draft, or the current
-browser's confirmed `🧠 Analyze by AI` replacement flow. `Current` remains unsaved
+browser's confirmed `Analyze by AI` replacement flow. `Current` remains unsaved
 until the user performs an explicit durable save.
 
 Unsaved `Current` work may be abandoned. A detail page must not save merely

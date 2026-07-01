@@ -556,7 +556,9 @@ def test_browser_presents_ai_capability_states_from_api(client: TestClient) -> N
     assert "model_id" in script
     assert "prompt_version" in script
     assert "execution" in script
-    assert "AI is configured by the FrameNest server operator" in combined
+    assert ">Model<" in html
+    assert "Last server check" in html
+    assert "AI is configured by the FrameNest server operator" not in combined
 
 
 def test_browser_analyze_is_explicit_confirmed_and_cloud_disclosed(client: TestClient) -> None:
@@ -642,7 +644,8 @@ def test_browser_editor_idle_ai_button_is_exact_and_not_loading(client: TestClie
     button_start = html.index('id="metadata-ai-analyze-button"')
     button_section = html[button_start : html.index("</button>", button_start)]
 
-    assert "🧠 Analyze by AI" in button_section
+    assert "Analyze by AI" in button_section
+    assert "🧠 Analyze by AI" not in button_section
     assert "🪄 Analyze by AI" not in button_section
     assert "loading-spinner" not in button_section
     assert "Analyzing…" not in button_section
@@ -656,12 +659,29 @@ def test_browser_editor_ai_button_active_state_replaces_entire_content(client: T
     analyze_block = script[script.index("async function handleAnalyzeMetadataByAi") : script.index("function aiSuggestionErrorMessage")]
 
     assert "metadataAiAnalyzeButton.replaceChildren()" in render_button_body
-    assert 'metadataAiAnalyzeButton.textContent = "🧠 Analyze by AI"' in render_button_body
-    assert 'spinner.className = "loading-spinner"' in render_button_body
+    assert 'metadataAiAnalyzeButton.textContent = "Analyze by AI"' in render_button_body
+    assert "loading-spinner" not in render_button_body
     assert 'label.textContent = "Analyzing…"' in render_button_body
-    assert "metadataAiAnalyzeButton.append(spinner, label)" in render_button_body
-    assert render_button_body.count("loading-spinner") == 1
+    assert "metadataAiAnalyzeButton.append(label)" in render_button_body
     assert 'metadataAiStatus.textContent = "Analyzing…"' not in analyze_block
+
+
+def test_browser_editor_ai_button_active_state_is_prominent_without_idle_animation(client: TestClient) -> None:
+    css = client.get("/assets/styles.css").text
+    busy_block = css[
+        css.index('.metadata-dialog__footer .metadata-ai-analyze-button[aria-busy="true"]')
+        : css.index(".metadata-ai-analyze-button > *")
+    ]
+    reduced_motion_block = css[css.index("@media (prefers-reduced-motion: reduce)") :]
+
+    assert 'metadata-ai-analyze-button:hover::after' not in css
+    assert 'metadata-ai-analyze-button:focus-visible::after' not in css
+    assert '[aria-busy="true"]::after' in busy_block
+    assert "metadata-ai-analyzing" in busy_block
+    assert ':disabled:not([aria-busy="true"])' in css
+    assert "opacity: 1" in busy_block
+    assert "cursor: progress" in busy_block
+    assert "animation: none" in reduced_motion_block
 
 
 def test_browser_ai_replacement_is_session_only_without_mutation_api(
@@ -938,11 +958,12 @@ def test_header_does_not_contain_pre_alpha_foundation_text(client: TestClient) -
 
 def test_header_contains_server_health_status_button(client: TestClient) -> None:
     html = client.get("/").text
+    header_section = html[html.index("<header") : html.index("</header>")]
     assert "server-health-button" in html
-    assert "Cloud" in html
-    assert "Server" not in html
-    assert "aria-label" in html
-    assert "Local server healthy" in html or "server-health-button" in html
+    assert "Cloud" in header_section
+    assert "Server" not in header_section
+    assert "aria-label" in header_section
+    assert "Local server healthy" in header_section or "server-health-button" in header_section
 
 
 def test_header_contains_ai_status_button(client: TestClient) -> None:
@@ -987,25 +1008,45 @@ def test_status_and_gallery_filters_have_white_border_hover_focus(client: TestCl
     assert ".catalog-scope button:focus-visible" in scope_hover
 
 
-def test_application_has_settings_dialog_element(client: TestClient) -> None:
+def test_application_has_status_dialog_element(client: TestClient) -> None:
     html = client.get("/").text
-    assert "settings-dialog" in html
-    assert "Settings" in html
+    assert 'id="status-dialog"' in html
+    assert "Status" in html
     assert "AI" in html
 
 
-def test_settings_dialog_does_not_contain_provider_configuration_inputs(client: TestClient) -> None:
+def test_status_dialog_has_accessible_ai_and_cloud_tabs(client: TestClient) -> None:
     html = client.get("/").text
-    start = html.index("settings-dialog")
-    settings_section = html[start : html.index("</dialog>", start)]
-    assert "Test connection" not in settings_section
-    assert "Open AI Settings" not in settings_section
-    assert "OpenAI" not in settings_section
-    assert "Anthropic" not in settings_section
-    assert "LMStudio" not in settings_section and "LM Studio" not in settings_section
-    assert "api-key" not in settings_section.lower()
-    assert "api_key" not in settings_section.lower()
-    assert '<input' not in settings_section
+    start = html.index('id="status-dialog"')
+    status_section = html[start : html.index("</dialog>", start)]
+
+    assert 'role="tablist"' in status_section
+    assert 'id="status-tab-ai"' in status_section
+    assert 'id="status-tab-cloud"' in status_section
+    assert status_section.index('id="status-tab-ai"') < status_section.index('id="status-tab-cloud"')
+    assert 'role="tab"' in status_section
+    assert 'aria-selected="true"' in status_section
+    assert 'aria-controls="status-panel-ai"' in status_section
+    assert 'aria-controls="status-panel-cloud"' in status_section
+    assert 'role="tabpanel"' in status_section
+    assert ">Model<" in status_section
+    assert ">Cloud<" in status_section
+
+
+def test_status_dialog_does_not_contain_provider_configuration_inputs(client: TestClient) -> None:
+    html = client.get("/").text
+    start = html.index('id="status-dialog"')
+    status_section = html[start : html.index("</dialog>", start)]
+    assert "Test connection" not in status_section
+    assert "Open AI Settings" not in status_section
+    assert "OpenAI" not in status_section
+    assert "Anthropic" not in status_section
+    assert "LMStudio" not in status_section and "LM Studio" not in status_section
+    assert "api-key" not in status_section.lower()
+    assert "api_key" not in status_section.lower()
+    assert '<input' not in status_section
+    assert "AI capability" not in status_section
+    assert "Last test" not in status_section
 
 
 def test_javascript_has_health_retry_logic(client: TestClient) -> None:
@@ -1015,17 +1056,23 @@ def test_javascript_has_health_retry_logic(client: TestClient) -> None:
     assert "healthCheckInFlight" in script or "healthRequestToken" in script or "inFlight" in script
 
 
-def test_javascript_ai_status_button_opens_settings(client: TestClient) -> None:
+def test_javascript_status_buttons_open_status_tabs(client: TestClient) -> None:
     script = client.get("/assets/app.js").text
     assert "ai-status-button" in script or "aiStatusButton" in script
-    assert "settings-dialog" in script or "settingsDialog" in script
-    assert "showModal" in script or "openSettings" in script or "settings" in script.lower()
+    assert "status-dialog" in script or "statusDialog" in script
+    assert 'openStatusDialog("ai")' in script
+    assert 'openStatusDialog("cloud")' in script
+    assert "loadCloudStatus()" in script
+    assert "handleStatusTabKeydown" in script
+    assert "ArrowLeft" in script and "ArrowRight" in script
+    assert "showModal" in script
 
 
-def test_javascript_settings_dialog_close_behavior(client: TestClient) -> None:
+def test_javascript_status_dialog_close_behavior(client: TestClient) -> None:
     script = client.get("/assets/app.js").text
     assert "close" in script.lower()
     assert "Escape" in script or "escape" in script or "keydown" in script
+    assert "lastFocusedElementBeforeStatus" in script
 
 
 def test_javascript_has_distinct_health_states(client: TestClient) -> None:
