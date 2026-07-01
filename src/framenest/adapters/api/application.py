@@ -54,8 +54,7 @@ from framenest.adapters.api.library_api import (
 )
 import framenest.adapters.api.web as web_resources
 from framenest.configuration import FrameNestSettings, load_settings
-from framenest.infrastructure.ai import NvidiaNimMediaSuggestionProvider
-from framenest.infrastructure.ai.credentials import load_nvidia_api_credential
+from framenest.infrastructure.ai.registry import resolve_ai_provider
 from framenest.infrastructure.filesystem.library_scanner import LocalLibraryScanner
 from framenest.infrastructure.filesystem.media_content import LocalMediaContentReader
 from framenest.infrastructure.media_analysis import LocalMediaAnalysisAdapter
@@ -175,11 +174,11 @@ def create_app(
         )
     if media_suggestion_api_dependencies is None:
         assert owned_library_repository is not None
-        credential = load_nvidia_api_credential()
+        resolved_ai = resolve_ai_provider(resolved_settings)
+        provider = resolved_ai.provider
         suggestion_preview = None
         imported_suggestion_preview = None
-        if credential is not None:
-            provider = NvidiaNimMediaSuggestionProvider(credential)
+        if provider is not None:
             suggestion_preview = PreviewMediaSuggestion(
                 owned_library_repository,
                 LocalMediaAnalysisAdapter(),
@@ -195,6 +194,14 @@ def create_app(
             preview_suggestion=suggestion_preview,
             preview_imported_suggestion=imported_suggestion_preview,
             provider_configured=suggestion_preview is not None,
+            provider_id=resolved_ai.provider_id,
+            provider_display_name=resolved_ai.display_name,
+            model_id=resolved_ai.model_id,
+            status=_ai_status_from_last_test(
+                configured=suggestion_preview is not None,
+                last_status=None if resolved_ai.last_test is None else resolved_ai.last_test.status,
+            ),
+            last_connection_test=_last_test_payload(resolved_ai.last_test),
         )
 
     @asynccontextmanager
@@ -237,3 +244,30 @@ def create_app(
         return HealthResponse(status="ok")
 
     return app
+
+
+def _ai_status_from_last_test(*, configured: bool, last_status: str | None) -> str:
+    if not configured:
+        return "not_configured"
+    if last_status == "success":
+        return "verified"
+    if last_status in {
+        "authentication_failed",
+        "rate_limited_or_quota_exhausted",
+        "model_unavailable",
+    }:
+        return last_status
+    if last_status == "provider_unreachable":
+        return "provider_unreachable"
+    if last_status in {"invalid_response", "provider_error"}:
+        return "provider_error"
+    return "configured_unverified"
+
+
+def _last_test_payload(last_test: object | None) -> dict[str, object] | None:
+    if last_test is None:
+        return None
+    return {
+        "status": getattr(last_test, "status"),
+        "tested_at_ms": getattr(last_test, "tested_at_ms"),
+    }

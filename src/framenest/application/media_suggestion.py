@@ -39,6 +39,7 @@ SUGGESTION_PREPARATION_FAILED_MESSAGE = "Local media preparation failed."
 SUGGESTION_PROVIDER_UNAVAILABLE_MESSAGE = "Media suggestion provider is not available."
 SUGGESTION_PROVIDER_AUTH_MESSAGE = "Media suggestion provider authentication was rejected."
 SUGGESTION_PROVIDER_RATE_LIMITED_MESSAGE = "Media suggestion provider rate limit was reached."
+SUGGESTION_PROVIDER_MODEL_UNAVAILABLE_MESSAGE = "Media suggestion provider model is not available."
 SUGGESTION_PROVIDER_INVALID_RESPONSE_MESSAGE = "Media suggestion provider response was invalid."
 SUGGESTION_PROVIDER_FAILED_MESSAGE = "Media suggestion provider request failed."
 
@@ -94,6 +95,10 @@ class MediaSuggestionProviderAuthError(RuntimeError):
 
 class MediaSuggestionProviderRateLimitedError(RuntimeError):
     """Raised when the provider rate limit is reached."""
+
+
+class MediaSuggestionProviderModelUnavailableError(RuntimeError):
+    """Raised when the configured provider model is unavailable."""
 
 
 class MediaSuggestionProviderInvalidResponseError(RuntimeError):

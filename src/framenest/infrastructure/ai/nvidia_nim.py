@@ -15,6 +15,7 @@ from framenest.application.media_suggestion import (
     MediaSuggestionProviderAuthError,
     MediaSuggestionProviderFailedError,
     MediaSuggestionProviderInvalidResponseError,
+    MediaSuggestionProviderModelUnavailableError,
     MediaSuggestionProviderRateLimitedError,
     MediaSuggestionProviderUnavailableError,
     MediaSuggestionRequest,
@@ -22,6 +23,7 @@ from framenest.application.media_suggestion import (
     SUGGESTION_PROVIDER_AUTH_MESSAGE,
     SUGGESTION_PROVIDER_FAILED_MESSAGE,
     SUGGESTION_PROVIDER_INVALID_RESPONSE_MESSAGE,
+    SUGGESTION_PROVIDER_MODEL_UNAVAILABLE_MESSAGE,
     SUGGESTION_PROVIDER_RATE_LIMITED_MESSAGE,
     SUGGESTION_PROVIDER_UNAVAILABLE_MESSAGE,
     validate_suggested_filename,
@@ -52,6 +54,7 @@ from framenest.infrastructure.ai.transport import (
     HttpsTransportError,
     TRANSPORT_AUTH_REJECTED_MESSAGE,
     TRANSPORT_INVALID_RESPONSE_MESSAGE,
+    TRANSPORT_MODEL_UNAVAILABLE_MESSAGE,
     TRANSPORT_RATE_LIMITED_MESSAGE,
     TRANSPORT_UNAVAILABLE_MESSAGE,
 )
@@ -188,6 +191,21 @@ def build_nvidia_request_body(
         "temperature": TEMPERATURE,
         "top_k": TOP_K,
         "max_tokens": MAX_TOKENS,
+        "chat_template_kwargs": {"enable_thinking": False},
+    }
+
+
+def build_nvidia_connection_test_body(*, model_id: str) -> dict[str, Any]:
+    """Build a text-only NVIDIA provider connection test request."""
+    return {
+        "model": model_id,
+        "messages": [
+            {"role": "user", "content": "Return the single word ok."},
+        ],
+        "stream": False,
+        "temperature": 0,
+        "top_k": TOP_K,
+        "max_tokens": 8,
         "chat_template_kwargs": {"enable_thinking": False},
     }
 
@@ -347,6 +365,10 @@ def _status_error(status_code: int) -> Exception:
         return MediaSuggestionProviderAuthError(SUGGESTION_PROVIDER_AUTH_MESSAGE)
     if status_code == 429:
         return MediaSuggestionProviderRateLimitedError(SUGGESTION_PROVIDER_RATE_LIMITED_MESSAGE)
+    if status_code == 404:
+        return MediaSuggestionProviderModelUnavailableError(
+            SUGGESTION_PROVIDER_MODEL_UNAVAILABLE_MESSAGE
+        )
     if status_code >= 500:
         return MediaSuggestionProviderUnavailableError(SUGGESTION_PROVIDER_UNAVAILABLE_MESSAGE)
     return MediaSuggestionProviderInvalidResponseError(SUGGESTION_PROVIDER_INVALID_RESPONSE_MESSAGE)
@@ -358,6 +380,10 @@ def _map_transport_error(exc: HttpsTransportError) -> Exception:
         return MediaSuggestionProviderAuthError(SUGGESTION_PROVIDER_AUTH_MESSAGE)
     if message == TRANSPORT_RATE_LIMITED_MESSAGE:
         return MediaSuggestionProviderRateLimitedError(SUGGESTION_PROVIDER_RATE_LIMITED_MESSAGE)
+    if message == TRANSPORT_MODEL_UNAVAILABLE_MESSAGE:
+        return MediaSuggestionProviderModelUnavailableError(
+            SUGGESTION_PROVIDER_MODEL_UNAVAILABLE_MESSAGE
+        )
     if message in {
         TRANSPORT_UNAVAILABLE_MESSAGE,
         TRANSPORT_INVALID_RESPONSE_MESSAGE,
@@ -429,6 +455,7 @@ class NvidiaNimMediaSuggestionProvider:
         except (
             MediaSuggestionProviderAuthError,
             MediaSuggestionProviderInvalidResponseError,
+            MediaSuggestionProviderModelUnavailableError,
             MediaSuggestionProviderRateLimitedError,
             MediaSuggestionProviderUnavailableError,
         ):
@@ -443,6 +470,39 @@ class NvidiaNimMediaSuggestionProvider:
             provider_id=self._provider_id,
             model_id=self._model_id,
         )
+
+    def test_connection(self) -> None:
+        body_dict = build_nvidia_connection_test_body(model_id=self._model_id)
+        body = json.dumps(body_dict, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+        headers = {
+            "Authorization": self._credential.authorization_header(),
+            "Content-Type": "application/json",
+        }
+        try:
+            response = self._transport.post_json(
+                NVIDIA_CHAT_COMPLETIONS_URL,
+                headers=headers,
+                body=body,
+                max_request_bytes=MAX_REQUEST_BODY_BYTES,
+            )
+            response = self._resolve_pending_response(
+                response,
+                headers={"Authorization": headers["Authorization"]},
+            )
+            payload = _decode_json_body(response)
+            extract_message_content(payload)
+        except HttpsTransportError as exc:
+            raise _map_transport_error(exc) from None
+        except (
+            MediaSuggestionProviderAuthError,
+            MediaSuggestionProviderInvalidResponseError,
+            MediaSuggestionProviderModelUnavailableError,
+            MediaSuggestionProviderRateLimitedError,
+            MediaSuggestionProviderUnavailableError,
+        ):
+            raise
+        except Exception:
+            raise MediaSuggestionProviderFailedError(SUGGESTION_PROVIDER_FAILED_MESSAGE) from None
 
     def _resolve_pending_response(
         self,

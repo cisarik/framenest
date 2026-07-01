@@ -137,12 +137,35 @@ itself; application-level authorization remains required.
 Later Fedora KDE/systemd deployment must be designed and verified in a bounded
 task. Do not describe Fedora deployment as current.
 
-## Server-Side AI Provider Possibility
+## Server-Side AI Provider Boundary
 
-The NUC may later become a centralized AI-provider boundary so ordinary desktop
-clients do not receive provider secrets. Such a role requires explicit Settings,
-secret storage, authorization, provider selection, logging, and privacy
-decisions before implementation.
+FrameNest now has an initial server-operated AI provider boundary for the local
+development server. Ordinary browser clients do not configure providers, select
+models, enter API keys, receive provider credentials, or call NVIDIA, Vercel,
+Google, or another provider directly. Browser clients may view sanitized
+read-only server AI status and may explicitly request AI analysis through the
+FrameNest server when a provider is configured.
+
+Server operators use the root CLI:
+
+```text
+./framenest ai status
+./framenest ai configure
+./framenest ai test
+```
+
+`status` is network-free. `configure` writes only schema-versioned non-secret
+provider/model selection outside the repository, using the platform application
+configuration location or an explicit configuration-path override. `test` is an
+explicit minimal text-only provider request and persists only safe historical
+test category/timestamp state. NVIDIA NIM remains supported. Vercel AI Gateway
+is supported with preferred model `google/gemini-3.1-flash-lite`.
+
+Provider credentials remain in the server environment/service-secret boundary:
+`NVIDIA_API_KEY` for NVIDIA NIM and `AI_GATEWAY_API_KEY` for Vercel AI Gateway.
+Persistent secret storage, OS keychain integration, Fedora/systemd credential
+files, browser provider Settings, and application-level remote administrator
+authorization remain future bounded work.
 
 ## Security And Authorization Deferred Decisions
 

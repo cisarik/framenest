@@ -4,7 +4,7 @@
 
 FrameNest is in foundation-stage pre-alpha development. This document defines normative requirements for future implementation.
 
-A minimal Poetry package foundation exists with centralized configuration, a FastAPI application factory, a typed health endpoint, a loopback-first Uvicorn runtime dependency and startup command, a minimal SQLAlchemy Core/Alembic SQLite migration foundation, pure domain identity primitives, local device and library registries, a minimum persistent logical-media and physical-location catalog foundation, persistent display-title and canonical-tag core, catalog retrieval with display-title search and canonical-tag AND filtering, a manual browser `Current` metadata workspace for display-title and ordered canonical-tag assignment, an automatic built-in `Processed` workflow collection derived from durable tag saves, read-only library scan preview, explicit idempotent scan-candidate import, local media-analysis preview, provider-neutral NVIDIA suggestion preview, VLM JPEG derivative transport, a packaged local web shell, and an explicit editable browser AI suggestion review. There is no completed user application, premium gallery, arbitrary user-created collections, a general collection manager, suggested filenames, covers, thumbnails, persistent AI Drafts, deployment, systemd integration, trusted-proxy configuration, or Tailscale integration yet. Unresolved architecture choices remain subject to future architecture decision records.
+A minimal Poetry package foundation exists with centralized configuration, a FastAPI application factory, a typed health endpoint, a loopback-first Uvicorn runtime dependency and startup command, a minimal SQLAlchemy Core/Alembic SQLite migration foundation, pure domain identity primitives, local device and library registries, a minimum persistent logical-media and physical-location catalog foundation, persistent display-title and canonical-tag core, catalog retrieval with display-title search and canonical-tag AND filtering, a manual browser `Current` metadata workspace for display-title and ordered canonical-tag assignment, an automatic built-in `Processed` workflow collection derived from durable tag saves, read-only library scan preview, explicit idempotent scan-candidate import, local media-analysis preview, provider-neutral NVIDIA/Vercel suggestion preview, VLM JPEG derivative transport, a server-operated AI configuration and diagnostics CLI, a packaged local web shell, and an explicit editable browser AI suggestion review. There is no completed user application, premium gallery, arbitrary user-created collections, a general collection manager, suggested filenames, covers, thumbnails, persistent AI Drafts, deployment, systemd integration, trusted-proxy configuration, OS keychain support, or Tailscale integration yet. Unresolved architecture choices remain subject to future architecture decision records.
 
 This specification translates approved direction from [PRODUCT.md](PRODUCT.md), [README.md](README.md), [AGENTS.md](AGENTS.md), and [SECURITY.md](SECURITY.md) into requirements. It does not select frameworks, schemas, protocols, or packaging tools.
 
@@ -456,6 +456,33 @@ Users SHOULD understand what payload is sent.
 Provider secrets SHOULD remain server-held where possible.
 
 Provider secrets MUST NOT be returned to ordinary clients.
+
+Ordinary browser clients MUST NOT configure AI providers, activate models, enter
+provider API keys, receive provider API keys, or call external AI providers
+directly.
+
+Server AI provider administration MUST use an operator boundary. The initial
+operator boundary is `./framenest ai configure`, `./framenest ai status`, and
+`./framenest ai test`.
+
+Server AI configuration files MUST contain only schema-versioned non-secret
+provider/model selection and safe timestamps. They MUST NOT contain API keys,
+Authorization headers, cookies, provider responses, prompts, frame data, media
+paths, or database paths.
+
+AI configuration precedence MUST preserve deployment overrides: explicit
+FrameNest provider/model environment overrides first, then persisted non-secret
+server AI configuration, then legacy NVIDIA compatibility when `NVIDIA_API_KEY`
+is present and no explicit provider configuration exists, then unconfigured.
+
+`./framenest ai status` MUST be network-free. `./framenest ai test` MUST be an
+explicit text-only provider request, upload no media data, and persist only a
+safe last-test category and timestamp.
+
+NVIDIA NIM and Vercel AI Gateway are supported server providers in this slice.
+Vercel AI Gateway uses `AI_GATEWAY_API_KEY` and preferred model
+`google/gemini-3.1-flash-lite`. NVIDIA NIM keeps the existing `NVIDIA_API_KEY`
+credential boundary and default model.
 
 Suspicious filename analysis MUST occur only on user action.
 

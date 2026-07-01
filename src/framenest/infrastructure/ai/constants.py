@@ -1,10 +1,13 @@
-"""Constants for the initial NVIDIA NIM prototype adapter."""
+"""Constants for server-side AI provider adapters."""
 
 from __future__ import annotations
 
 DEFAULT_PROVIDER_ID = "nvidia-nim"
 DEFAULT_MODEL_ID = "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning"
 NVIDIA_CHAT_COMPLETIONS_URL = "https://integrate.api.nvidia.com/v1/chat/completions"
+VERCEL_AI_GATEWAY_PROVIDER_ID = "vercel-ai-gateway"
+VERCEL_AI_GATEWAY_DEFAULT_MODEL_ID = "google/gemini-3.1-flash-lite"
+VERCEL_AI_GATEWAY_CHAT_COMPLETIONS_URL = "https://ai-gateway.vercel.sh/v1/chat/completions"
 
 MAX_MODEL_ID_LENGTH = 120
 MAX_REQUEST_BODY_BYTES = 24 * 1024 * 1024

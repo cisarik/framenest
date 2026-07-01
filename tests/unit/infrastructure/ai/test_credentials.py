@@ -7,7 +7,9 @@ import pytest
 from framenest.infrastructure.ai.credentials import (
     CREDENTIAL_MISSING_MESSAGE,
     NvidiaApiCredential,
+    VercelAiGatewayCredential,
     load_nvidia_api_credential,
+    load_vercel_ai_gateway_credential,
 )
 
 
@@ -50,3 +52,16 @@ def test_key_is_absent_from_errors_and_repr() -> None:
 
 def test_unrelated_environment_values_are_ignored() -> None:
     assert load_nvidia_api_credential({"OTHER_API_KEY": "unrelated-secret"}) is None
+
+
+def test_vercel_gateway_key_uses_unprefixed_environment_name() -> None:
+    credential = load_vercel_ai_gateway_credential({"AI_GATEWAY_API_KEY": "gateway-secret"})
+
+    assert isinstance(credential, VercelAiGatewayCredential)
+    assert credential.authorization_header() == "Bearer gateway-secret"
+    assert "gateway-secret" not in repr(credential)
+
+
+def test_vercel_gateway_missing_key_returns_none() -> None:
+    assert load_vercel_ai_gateway_credential({}) is None
+    assert load_vercel_ai_gateway_credential({"FRAMENEST_AI_GATEWAY_API_KEY": "wrong"}) is None

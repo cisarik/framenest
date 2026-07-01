@@ -24,8 +24,8 @@ ORCHESTRATOR authority.
 
 FrameNest currently implements explicit, same-origin, non-persistent browser AI
 assistance per [ADR-0020](docs/adr/0020-on-demand-ai-suggestion-review.md).
-It is pre-alpha, session-only, provider-confirmed for cloud execution, and does
-not save catalog metadata or mutate files.
+It is pre-alpha, session-only, server-provider-confirmed for cloud execution,
+and does not save catalog metadata or mutate files.
 
 The packaged browser now implements a bounded manual `Edit media` dialog for
 one selected imported medium. It can load sparse or persisted metadata, edit or
@@ -33,19 +33,28 @@ clear the title, edit or clear an optional plain-text description, search
 existing tags locally, assign up to 32 tags, explicitly create tag definitions
 through the hidden-key tag control, save through the existing metadata API,
 cancel unsaved changes, and refresh the active Catalog view after a successful
-save. When NVIDIA is configured, `🧠 Analyze by AI` requires confirmation before
-any provider request. The ordinary editor does not show a persistent
-provider/model line. The confirmation explains that up to three optimized
-preview frames and bounded metadata are sent, while the original file, local
-path, and API key are not uploaded. During a request, the button shows only one
-spinner and `Analyzing…`, and duplicate analysis requests are blocked. A
+save. When the FrameNest server has an active provider configured, `Analyze by
+AI` requires confirmation before any provider request. The ordinary editor does
+not offer provider administration or credential entry. The confirmation explains
+that up to three optimized preview frames and bounded metadata are sent through
+the server, while the original file, local path, and API key are not uploaded.
+During a request, the button shows only one spinner and `Analyzing…`, and duplicate analysis requests are blocked. A
 successful result replaces the current unsaved title, description, and tags
 directly in the same editor, reveals an editable suggested filename when
 supplied, hides the Analyze action for that modal-open session, does not save
 metadata, and does not rename a physical file. A failed request restores the
-idle `🧠 Analyze by AI` action and preserves the current unsaved editor values.
+idle `Analyze by AI` action and preserves the current unsaved editor values.
 The save derives the automatic built-in `Processed` workflow collection from the
 durable tag list, but `Processed` is not an ordinary editor control.
+
+Server AI administration is currently a CLI boundary. `./framenest ai
+configure` writes only non-secret provider/model selection outside the
+repository, `./framenest ai status` is network-free, and `./framenest ai test`
+is the only explicit text-only connection test. NVIDIA NIM remains supported.
+Vercel AI Gateway is also supported with preferred model
+`google/gemini-3.1-flash-lite`. Provider credentials remain in the server
+environment (`NVIDIA_API_KEY` or `AI_GATEWAY_API_KEY`) and are not stored in the
+browser or non-secret AI configuration file.
 
 The full multi-model AI draft comparison, inline model picker, persistent draft
 storage, arbitrary user-created collections, a general collection manager,
@@ -160,9 +169,10 @@ Browsing, filtering, selecting, or highlighting a model must not invoke a
 provider. Only an explicit final action such as `Analyze with this model` may
 invoke analysis.
 
-Settings remains responsible for credentials, provider configuration, provider
-enablement, defaults, discovery refresh, and unavailable-provider remediation.
-The workspace picker selects from configured, currently compatible choices.
+Server-side administration remains responsible for credentials, provider
+configuration, provider enablement, defaults, discovery refresh, and
+unavailable-provider remediation. The workspace picker selects from configured,
+currently compatible choices.
 
 Free or trial information must be treated as provider-reported and temporary,
 not as permanent product truth.
@@ -202,10 +212,10 @@ local or cloud. Cloud execution requires explicit confirmation before each
 request. Local execution must not be mislabeled as cloud, and cloud execution
 must not be hidden behind generic wording.
 
-Provider credentials remain server-side. Browser code must not receive API
-keys, Authorization headers, credential state that reveals a value, raw prompt
-payloads, raw provider responses, frame payloads, absolute media paths, or
-database paths.
+Provider credentials remain server-side. Browser code must not configure
+providers, activate models, enter API keys, or receive API keys, Authorization
+headers, credential state that reveals a value, raw prompt payloads, raw
+provider responses, frame payloads, absolute media paths, or database paths.
 
 ## Draft Navigation
 

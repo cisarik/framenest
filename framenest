@@ -3,6 +3,7 @@
 set -g script_dir (dirname (status filename))
 set -g repo_root (realpath "$script_dir")
 set -g controller "$repo_root/.venv/bin/framenest-dev"
+set -g ai_controller "$repo_root/.venv/bin/framenest-ai"
 set -gx POETRY_VIRTUALENVS_IN_PROJECT true
 
 function _framenest_help
@@ -16,6 +17,9 @@ function _framenest_help
     echo "  ./framenest status"
     echo "  ./framenest open"
     echo "  ./framenest logs [--follow]"
+    echo "  ./framenest ai status"
+    echo "  ./framenest ai configure"
+    echo "  ./framenest ai test"
     echo "  ./framenest --help"
     echo "  ./framenest <command> --help"
 end
@@ -73,6 +77,13 @@ switch "$argv[1]"
             or exit $status
         end
         "$controller" $argv
+        exit $status
+    case ai
+        if not test -x "$ai_controller"
+            _framenest_setup
+            or exit $status
+        end
+        "$ai_controller" $argv[2..-1]
         exit $status
     case '*'
         echo "Unknown FrameNest command: $argv[1]" >&2

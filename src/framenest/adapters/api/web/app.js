@@ -71,9 +71,13 @@ let metadataTagSuggestionState = {
 let aiCapability = {
   available: false,
   provider_id: "",
+  provider_display_name: "",
   model_id: "",
   prompt_version: "",
-  execution: "cloud",
+  execution: "server",
+  status: "not_configured",
+  configured: false,
+  last_connection_test: null,
   requires_explicit_confirmation: true,
 };
 
@@ -106,6 +110,8 @@ const settingsCloseButton = document.querySelector("#settings-close-button");
 const settingsAiStatus = document.querySelector("#settings-ai-status");
 const settingsAiStatusText = document.querySelector("#settings-ai-status-text");
 const settingsAiProvider = document.querySelector("#settings-ai-provider");
+const settingsAiDetail = document.querySelector("#settings-ai-detail");
+const settingsAiTestResult = document.querySelector("#settings-ai-test-result");
 let healthCheckInFlight = false;
 let lastFocusedElementBeforeSettings = null;
 const libraryList = document.querySelector("#library-list");
@@ -267,38 +273,78 @@ function setAiStatusClass(className) {
   aiStatus.classList.add(className);
 }
 
-function updateSettingsAiStatus(state, text, providerInfo) {
+function updateSettingsAiStatus(state, text, providerInfo, detail, testResult) {
   if (!settingsAiStatus) return;
   settingsAiStatus.classList.remove("is-available", "is-unavailable");
   if (state === "available") settingsAiStatus.classList.add("is-available");
   else if (state === "unavailable") settingsAiStatus.classList.add("is-unavailable");
   if (settingsAiStatusText) settingsAiStatusText.textContent = text;
   if (settingsAiProvider) settingsAiProvider.textContent = providerInfo || "";
+  if (settingsAiDetail) settingsAiDetail.textContent = detail || "";
+  if (settingsAiTestResult) settingsAiTestResult.textContent = testResult || "";
+}
+
+function aiStatusLabel(status) {
+  if (status === "verified") return "Verified";
+  if (status === "configured_unverified") return "Configured, unverified";
+  if (status === "authentication_failed") return "Authentication failed";
+  if (status === "rate_limited_or_quota_exhausted") return "Rate limited or quota exhausted";
+  if (status === "model_unavailable") return "Model unavailable";
+  if (status === "provider_unreachable") return "Provider unreachable";
+  if (status === "provider_error") return "Provider error";
+  return "Not configured";
+}
+
+function lastConnectionTestText(last) {
+  if (!last || !last.status) return "";
+  const status = aiStatusLabel(String(last.status));
+  const message = last.message ? String(last.message) : "";
+  return message ? `Last test: ${status}. ${message}` : `Last test: ${status}.`;
 }
 
 function renderAiCapability(payload) {
   aiCapability = {
     available: payload && payload.available === true,
     provider_id: payload && payload.provider_id ? String(payload.provider_id) : "",
+    provider_display_name: payload && payload.provider_display_name ? String(payload.provider_display_name) : "",
     model_id: payload && payload.model_id ? String(payload.model_id) : "",
     prompt_version: payload && payload.prompt_version ? String(payload.prompt_version) : "",
-    execution: payload && payload.execution ? String(payload.execution) : "cloud",
+    execution: payload && payload.execution ? String(payload.execution) : "server",
+    status: payload && payload.status ? String(payload.status) : "not_configured",
+    configured: payload && payload.configured === true,
+    last_connection_test: payload && payload.last_connection_test ? payload.last_connection_test : null,
     requires_explicit_confirmation: !payload || payload.requires_explicit_confirmation !== false,
   };
+  const providerName = aiCapability.provider_display_name || aiCapability.provider_id;
+  const providerInfo = aiCapability.model_id ? `${providerName} / ${aiCapability.model_id}` : providerName;
+  const statusText = aiStatusLabel(aiCapability.status);
+  const testText = lastConnectionTestText(aiCapability.last_connection_test);
   if (aiCapability.available) {
     setAiStatusClass("status--healthy");
-    aiStatusText.textContent = "Cloud AI available";
+    aiStatusText.textContent = "AI configured";
     aiStatusDetail.textContent =
-      `${aiCapability.provider_id} / ${aiCapability.model_id}; prompt ${aiCapability.prompt_version}; ${aiCapability.execution}.`;
+      `${providerInfo}; ${statusText}; ${aiCapability.execution}.`;
     setAiStatusButtonState("healthy", "AI available");
-    updateSettingsAiStatus("available", "Available", `${aiCapability.provider_id} / ${aiCapability.model_id}`);
+    updateSettingsAiStatus(
+      "available",
+      statusText,
+      providerInfo,
+      "AI is configured by the FrameNest server operator.",
+      testText,
+    );
     return;
   }
   setAiStatusClass("status--error");
-  aiStatusText.textContent = "AI unavailable";
-  aiStatusDetail.textContent = "Configure the server-side NVIDIA credential before starting FrameNest.";
+  aiStatusText.textContent = "AI not configured";
+  aiStatusDetail.textContent = "Configure a server-side AI provider before starting FrameNest.";
   setAiStatusButtonState("unhealthy", "AI unavailable");
-  updateSettingsAiStatus("unavailable", "Unavailable", "");
+  updateSettingsAiStatus(
+    "unavailable",
+    statusText,
+    providerInfo,
+    "AI is configured by the FrameNest server operator. No provider request is made for capability discovery.",
+    testText,
+  );
 }
 
 async function loadAiCapability() {
@@ -306,7 +352,7 @@ async function loadAiCapability() {
   aiStatusText.textContent = "Checking AI capability...";
   aiStatusDetail.textContent = "No provider request is made for capability discovery.";
   setAiStatusButtonState("checking", "Checking AI");
-  updateSettingsAiStatus("checking", "Checking...", "");
+  updateSettingsAiStatus("checking", "Checking...", "", "", "", false);
   try {
     const response = await fetch(AI_CAPABILITY_ENDPOINT, {
       headers: { Accept: "application/json" },
@@ -1050,8 +1096,8 @@ function renderAiPanelUnavailable(card) {
   elements.provider.textContent = aiCapability.provider_id || "nvidia-nim";
   elements.model.textContent = aiCapability.model_id || "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning";
   elements.prompt.textContent = aiCapability.prompt_version || "framenest-media-suggestion-v3";
-  elements.execution.textContent = aiCapability.execution || "cloud";
-  elements.status.textContent = "Configure the server-side NVIDIA credential before starting FrameNest.";
+  elements.execution.textContent = aiCapability.execution || "server";
+  elements.status.textContent = "Configure a server-side AI provider before starting FrameNest.";
   elements.checkbox.checked = false;
   elements.analyzeButton.dataset.confirmed = "false";
   elements.analyzeButton.disabled = true;
@@ -1061,13 +1107,13 @@ function renderAiPanelReady(card, payload) {
   const elements = aiElements(card);
   elements.panel.hidden = false;
   elements.panel.dataset.state = "ready";
-  elements.capability.textContent = "Cloud AI available";
+  elements.capability.textContent = "AI analysis available";
   elements.provider.textContent = aiCapability.provider_id;
   elements.model.textContent = aiCapability.model_id;
   elements.prompt.textContent = aiCapability.prompt_version;
   elements.execution.textContent = aiCapability.execution;
   elements.status.textContent =
-    "Cloud analysis is available for this inspected candidate. The full video is not uploaded.";
+    "Server-side analysis is available for this inspected candidate. The full video is not uploaded.";
   elements.checkbox.checked = false;
   elements.analyzeButton.dataset.confirmed = "false";
   elements.analyzeButton.disabled = true;
@@ -1791,7 +1837,7 @@ async function handleAnalyzeMetadataByAi() {
     return;
   }
   const accepted = confirm(
-    "FrameNest will send up to 3 optimized preview frames and bounded metadata to NVIDIA. The original file, local path, and API key are not uploaded. Returned values will replace the current unsaved Title, Description, and Tags in this editor. The result will not be saved automatically, and the physical file will not be renamed.",
+    "FrameNest will send up to 3 optimized preview frames and bounded metadata to the configured server-side AI provider. The original file, local path, and API key are not uploaded. Returned values will replace the current unsaved Title, Description, and Tags in this editor. The result will not be saved automatically, and the physical file will not be renamed.",
   );
   if (!accepted) {
     metadataAiStatus.textContent = "";
@@ -1846,6 +1892,7 @@ function aiSuggestionErrorMessage(payload) {
   if (code === "MEDIA_PREPARATION_UNAVAILABLE") return "This media cannot be analyzed locally.";
   if (code === "AI_PROVIDER_AUTHENTICATION_FAILED") return "AI provider authentication was rejected.";
   if (code === "AI_PROVIDER_RATE_LIMITED") return "AI provider rate limit was reached.";
+  if (code === "AI_PROVIDER_MODEL_UNAVAILABLE") return "AI provider model is not available.";
   if (code === "AI_PROVIDER_INVALID_RESPONSE") return "AI response was invalid.";
   if (code === "AI_PROVIDER_UNAVAILABLE") return "AI provider is not available.";
   return "AI analysis failed.";
@@ -2742,6 +2789,9 @@ function suggestionErrorMessage(code) {
   }
   if (code === "AI_PROVIDER_RATE_LIMITED") {
     return "The AI suggestion provider rate limit was reached.";
+  }
+  if (code === "AI_PROVIDER_MODEL_UNAVAILABLE") {
+    return "The configured AI provider model is not available.";
   }
   if (code === "AI_PROVIDER_UNAVAILABLE") {
     return "The AI suggestion provider is not available.";

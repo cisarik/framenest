@@ -120,6 +120,29 @@ def test_root_wrapper_resolves_script_root_from_another_cwd_and_preserves_exit(
     assert lines == [str(cwd), "status", "value with spaces"]
 
 
+def test_root_wrapper_routes_ai_commands_to_ai_controller(tmp_path: Path) -> None:
+    launcher = tmp_path / "framenest"
+    shutil.copy2(ROOT_WRAPPER, launcher)
+    venv_bin = tmp_path / ".venv" / "bin"
+    venv_bin.mkdir(parents=True)
+    controller = venv_bin / "framenest-ai"
+    controller.write_text(
+        "#!/bin/sh\nprintf '%s\\n' \"$1\" \"$2\"\nexit 23\n",
+        encoding="utf-8",
+    )
+    controller.chmod(0o755)
+
+    result = subprocess.run(
+        ["fish", str(launcher), "ai", "status", "--config-path"],
+        check=False,
+        text=True,
+        capture_output=True,
+    )
+
+    assert result.returncode == 23
+    assert result.stdout.splitlines() == ["status", "--config-path"]
+
+
 def test_setup_uses_uv_managed_python_and_poetry_install_without_real_download(
     tmp_path: Path,
 ) -> None:

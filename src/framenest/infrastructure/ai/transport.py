@@ -11,6 +11,7 @@ from typing import Mapping
 
 TRANSPORT_AUTH_REJECTED_MESSAGE = "Provider authentication was rejected."
 TRANSPORT_RATE_LIMITED_MESSAGE = "Provider rate limit was reached."
+TRANSPORT_MODEL_UNAVAILABLE_MESSAGE = "Provider model is not available."
 TRANSPORT_UNAVAILABLE_MESSAGE = "Provider is not available."
 TRANSPORT_INVALID_RESPONSE_MESSAGE = "Provider response was invalid."
 TRANSPORT_FAILED_MESSAGE = "Provider request failed."
@@ -91,6 +92,8 @@ class HttpsJsonTransport:
                 raise HttpsTransportError(TRANSPORT_AUTH_REJECTED_MESSAGE) from None
             if status == 429:
                 raise HttpsTransportError(TRANSPORT_RATE_LIMITED_MESSAGE) from None
+            if status == 404:
+                raise HttpsTransportError(TRANSPORT_MODEL_UNAVAILABLE_MESSAGE) from None
             if status >= 500:
                 raise HttpsTransportError(TRANSPORT_UNAVAILABLE_MESSAGE) from None
             raise HttpsTransportError(TRANSPORT_INVALID_RESPONSE_MESSAGE) from None

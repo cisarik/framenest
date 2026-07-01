@@ -289,9 +289,13 @@ def test_capability_configured_and_unconfigured_are_sanitized_no_store() -> None
     assert configured.json() == {
         "available": True,
         "provider_id": "nvidia-nim",
+        "provider_display_name": "NVIDIA NIM",
         "model_id": "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
         "prompt_version": "framenest-media-suggestion-v3",
-        "execution": "cloud",
+        "execution": "server",
+        "status": "configured_unverified",
+        "configured": True,
+        "last_connection_test": None,
         "requires_explicit_confirmation": True,
     }
     assert unconfigured.status_code == 200

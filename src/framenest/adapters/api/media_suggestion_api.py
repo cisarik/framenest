@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Literal
 
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
@@ -23,6 +24,7 @@ from framenest.application.media_suggestion import (
     MediaSuggestionProviderAuthError,
     MediaSuggestionProviderFailedError,
     MediaSuggestionProviderInvalidResponseError,
+    MediaSuggestionProviderModelUnavailableError,
     MediaSuggestionProviderRateLimitedError,
     MediaSuggestionProviderUnavailableError,
     MediaSuggestionPreviewResult,
@@ -51,12 +53,25 @@ AI_PROVIDER_AUTHENTICATION_FAILED_CODE = "AI_PROVIDER_AUTHENTICATION_FAILED"
 AI_PROVIDER_AUTHENTICATION_FAILED_MESSAGE = "The configured AI provider credential was rejected."
 AI_PROVIDER_RATE_LIMITED_CODE = "AI_PROVIDER_RATE_LIMITED"
 AI_PROVIDER_RATE_LIMITED_MESSAGE = "The AI suggestion provider rate limit was reached."
+AI_PROVIDER_MODEL_UNAVAILABLE_CODE = "AI_PROVIDER_MODEL_UNAVAILABLE"
+AI_PROVIDER_MODEL_UNAVAILABLE_MESSAGE = "The configured AI provider model is not available."
 AI_PROVIDER_UNAVAILABLE_CODE = "AI_PROVIDER_UNAVAILABLE"
 AI_PROVIDER_UNAVAILABLE_MESSAGE = "The AI suggestion provider is not available."
 AI_PROVIDER_INVALID_RESPONSE_CODE = "AI_PROVIDER_INVALID_RESPONSE"
 AI_PROVIDER_INVALID_RESPONSE_MESSAGE = "The AI suggestion provider response was invalid."
 AI_PROVIDER_FAILED_CODE = "AI_PROVIDER_FAILED"
 AI_PROVIDER_FAILED_MESSAGE = "The AI suggestion provider request failed."
+
+AiProviderStatus = Literal[
+    "not_configured",
+    "configured_unverified",
+    "verified",
+    "authentication_failed",
+    "rate_limited_or_quota_exhausted",
+    "model_unavailable",
+    "provider_unreachable",
+    "provider_error",
+]
 
 
 class ErrorBody(BaseModel):
@@ -71,9 +86,13 @@ class ErrorResponse(BaseModel):
 class MediaSuggestionCapabilityResponse(BaseModel):
     available: bool
     provider_id: str
+    provider_display_name: str
     model_id: str
     prompt_version: str
     execution: str
+    status: AiProviderStatus
+    configured: bool
+    last_connection_test: dict[str, object] | None
     requires_explicit_confirmation: bool
 
 
@@ -125,8 +144,11 @@ class MediaSuggestionApiDependencies:
     provider_configured: bool
     preview_imported_suggestion: object | None = None
     provider_id: str = DEFAULT_PROVIDER_ID
+    provider_display_name: str = "NVIDIA NIM"
     model_id: str = DEFAULT_MODEL_ID
     prompt_version: str = PROMPT_VERSION
+    status: AiProviderStatus = "not_configured"
+    last_connection_test: dict[str, object] | None = None
 
 
 def create_media_suggestion_api_router(dependencies: MediaSuggestionApiDependencies) -> APIRouter:
@@ -138,13 +160,22 @@ def create_media_suggestion_api_router(dependencies: MediaSuggestionApiDependenc
         response_model=MediaSuggestionCapabilityResponse,
     )
     def media_suggestion_capability() -> JSONResponse:
+        status = dependencies.status
+        if not dependencies.provider_configured:
+            status = "not_configured"
+        elif status == "not_configured":
+            status = "configured_unverified"
         return _json_response(
             MediaSuggestionCapabilityResponse(
                 available=dependencies.provider_configured,
                 provider_id=dependencies.provider_id,
+                provider_display_name=dependencies.provider_display_name,
                 model_id=dependencies.model_id,
                 prompt_version=dependencies.prompt_version,
-                execution="cloud",
+                execution="server",
+                status=status,
+                configured=dependencies.provider_configured,
+                last_connection_test=dependencies.last_connection_test,
                 requires_explicit_confirmation=True,
             )
         )
@@ -210,6 +241,12 @@ def create_media_suggestion_api_router(dependencies: MediaSuggestionApiDependenc
             )
         except MediaSuggestionProviderRateLimitedError:
             return _error_response(429, AI_PROVIDER_RATE_LIMITED_CODE, AI_PROVIDER_RATE_LIMITED_MESSAGE)
+        except MediaSuggestionProviderModelUnavailableError:
+            return _error_response(
+                503,
+                AI_PROVIDER_MODEL_UNAVAILABLE_CODE,
+                AI_PROVIDER_MODEL_UNAVAILABLE_MESSAGE,
+            )
         except MediaSuggestionProviderUnavailableError:
             return _error_response(503, AI_PROVIDER_UNAVAILABLE_CODE, AI_PROVIDER_UNAVAILABLE_MESSAGE)
         except MediaSuggestionProviderInvalidResponseError:
@@ -283,6 +320,12 @@ def create_media_suggestion_api_router(dependencies: MediaSuggestionApiDependenc
             )
         except MediaSuggestionProviderRateLimitedError:
             return _error_response(429, AI_PROVIDER_RATE_LIMITED_CODE, AI_PROVIDER_RATE_LIMITED_MESSAGE)
+        except MediaSuggestionProviderModelUnavailableError:
+            return _error_response(
+                503,
+                AI_PROVIDER_MODEL_UNAVAILABLE_CODE,
+                AI_PROVIDER_MODEL_UNAVAILABLE_MESSAGE,
+            )
         except MediaSuggestionProviderUnavailableError:
             return _error_response(503, AI_PROVIDER_UNAVAILABLE_CODE, AI_PROVIDER_UNAVAILABLE_MESSAGE)
         except MediaSuggestionProviderInvalidResponseError:

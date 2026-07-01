@@ -550,12 +550,13 @@ def test_browser_presents_ai_capability_states_from_api(client: TestClient) -> N
     combined = html + script
 
     assert "AI unavailable" in combined
-    assert "Cloud AI available" in combined
+    assert "AI configured" in combined
     assert "provider_id" in script
+    assert "provider_display_name" in script
     assert "model_id" in script
     assert "prompt_version" in script
     assert "execution" in script
-    assert "Configure the server-side NVIDIA credential before starting FrameNest." in combined
+    assert "AI is configured by the FrameNest server operator" in combined
 
 
 def test_browser_analyze_is_explicit_confirmed_and_cloud_disclosed(client: TestClient) -> None:
@@ -947,7 +948,8 @@ def test_header_contains_server_health_status_button(client: TestClient) -> None
 def test_header_contains_ai_status_button(client: TestClient) -> None:
     html = client.get("/").text
     assert "ai-status-button" in html
-    assert "🧠 AI" in html
+    assert ">AI<" in html
+    assert "🧠 AI" not in html
     assert "aria-label" in html
 
 
@@ -994,15 +996,16 @@ def test_application_has_settings_dialog_element(client: TestClient) -> None:
 
 def test_settings_dialog_does_not_contain_provider_configuration_inputs(client: TestClient) -> None:
     html = client.get("/").text
-    settings_section = html[html.index("settings-dialog"):]
-    assert "NVIDIA" not in settings_section or "not yet available" in settings_section.lower()
+    start = html.index("settings-dialog")
+    settings_section = html[start : html.index("</dialog>", start)]
+    assert "Test connection" not in settings_section
+    assert "Open AI Settings" not in settings_section
     assert "OpenAI" not in settings_section
     assert "Anthropic" not in settings_section
     assert "LMStudio" not in settings_section and "LM Studio" not in settings_section
-    assert "Vercel" not in settings_section
     assert "api-key" not in settings_section.lower()
     assert "api_key" not in settings_section.lower()
-    assert '<input' not in settings_section or "not yet available" in settings_section.lower()
+    assert '<input' not in settings_section
 
 
 def test_javascript_has_health_retry_logic(client: TestClient) -> None:
@@ -1906,9 +1909,9 @@ def test_header_uses_compact_brand_and_accessible_status_labels(client: TestClie
     assert ">FN<" in header_section
     assert ">FrameNest<" not in header_section
     assert ">Cloud<" in header_section
-    assert ">🧠 AI<" in header_section
+    assert ">AI<" in header_section
+    assert ">🧠 AI<" not in header_section
     assert ">Server<" not in header_section
-    assert ">AI<" not in header_section
     for visible_state in (">Healthy<", ">Available<", ">Unavailable<", ">Checking<"):
         assert visible_state not in header_section
     assert "visually-hidden" in header_section
