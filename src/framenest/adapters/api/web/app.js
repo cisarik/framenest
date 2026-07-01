@@ -1368,17 +1368,6 @@ function renderCatalogCardMediaSurface(item) {
     decodeImage.src = url;
   }
 
-  const playButton = document.createElement("button");
-  playButton.className = "media-placeholder__play";
-  playButton.type = "button";
-  playButton.textContent = "▶";
-  playButton.setAttribute("aria-label", `Play ${title}`);
-  playButton.addEventListener("click", (event) => {
-    event.stopPropagation();
-    openPlaybackDetails(item, playButton);
-  });
-  surface.appendChild(playButton);
-
   surface.addEventListener("click", () => openPlaybackDetails(item, surface));
   surface.addEventListener("keydown", (event) => {
     if (event.key === "Enter" || event.key === " ") {
@@ -1639,12 +1628,24 @@ function updateMetadataControls() {
       || metadataWorkspace.analyzing
       || metadataWorkspace.aiSuggestionApplied
       || !available;
-    const idle = metadataAiAnalyzeButton.querySelector(".metadata-ai-analyze-button__idle");
-    const loading = metadataAiAnalyzeButton.querySelector(".metadata-ai-analyze-button__loading");
-    if (idle) idle.hidden = metadataWorkspace.analyzing;
-    if (loading) loading.hidden = !metadataWorkspace.analyzing;
+    renderMetadataAiAnalyzeButtonContent(metadataWorkspace.analyzing);
     metadataAiAnalyzeButton.setAttribute("aria-busy", metadataWorkspace.analyzing ? "true" : "false");
   }
+}
+
+function renderMetadataAiAnalyzeButtonContent(isAnalyzing) {
+  if (!metadataAiAnalyzeButton) return;
+  metadataAiAnalyzeButton.replaceChildren();
+  if (!isAnalyzing) {
+    metadataAiAnalyzeButton.textContent = "🧠 Analyze by AI";
+    return;
+  }
+  const spinner = document.createElement("span");
+  spinner.className = "loading-spinner";
+  spinner.setAttribute("aria-hidden", "true");
+  const label = document.createElement("span");
+  label.textContent = "Analyzing…";
+  metadataAiAnalyzeButton.append(spinner, label);
 }
 
 function renderSelectedMetadataTags() {
@@ -1658,8 +1659,9 @@ function renderSelectedMetadataTags() {
     label.textContent = displayName;
     const remove = document.createElement("button");
     remove.type = "button";
+    remove.className = "metadata-tag-chip__remove";
     remove.textContent = "×";
-    remove.setAttribute("aria-label", `Remove ${displayName}`);
+    remove.setAttribute("aria-label", `Remove ${displayName} from this media`);
     remove.addEventListener("click", () => removeSelectedMetadataTag(key));
     chip.append(label, remove);
     metadataSelectedTags.appendChild(chip);
@@ -1753,7 +1755,7 @@ function renderMetadataAiPanel() {
   if (!metadataAiPanel) return;
   const location = metadataAiLocation();
   metadataAiCapability.textContent = aiCapability.available
-    ? `${aiCapability.provider_id || "AI"} / ${aiCapability.model_id || "configured model"}`
+    ? "AI analysis is available after confirmation."
     : "AI analysis is not configured.";
   if (aiCapability.available && !location) {
     metadataAiCapability.textContent = "AI analysis needs an available local GIF or MP4.";
@@ -1796,16 +1798,8 @@ async function handleAnalyzeMetadataByAi() {
     return;
   }
   const token = ++metadataAiRequestToken;
-  const beforeRequest = {
-    displayTitle: metadataWorkspace.current.displayTitle,
-    description: metadataWorkspace.current.description,
-    tagKeys: [...metadataWorkspace.current.tagKeys],
-    collectionKey: metadataWorkspace.current.collectionKey,
-    processedAtMs: metadataWorkspace.current.processedAtMs,
-    suggestedFilename: metadataWorkspace.suggestedFilename,
-  };
   metadataWorkspace.analyzing = true;
-  metadataAiStatus.textContent = "Analyzing…";
+  metadataAiStatus.textContent = "";
   updateMetadataControls();
   try {
     const response = await fetch(mediaAiSuggestionEndpoint(metadataWorkspace.openMediaId, location.location_id), {
@@ -1822,8 +1816,6 @@ async function handleAnalyzeMetadataByAi() {
     metadataWorkspace.analyzing = false;
     if (!response.ok) {
       metadataAiStatus.textContent = aiSuggestionErrorMessage(payload);
-      metadataWorkspace.current = beforeRequest;
-      metadataWorkspace.suggestedFilename = beforeRequest.suggestedFilename;
       renderMetadataWorkspace();
       return;
     }
@@ -1842,8 +1834,6 @@ async function handleAnalyzeMetadataByAi() {
     if (token === metadataAiRequestToken) {
       metadataWorkspace.analyzing = false;
       metadataAiStatus.textContent = "AI analysis failed.";
-      metadataWorkspace.current = beforeRequest;
-      metadataWorkspace.suggestedFilename = beforeRequest.suggestedFilename;
       renderMetadataWorkspace();
     }
   }

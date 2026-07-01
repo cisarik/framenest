@@ -140,17 +140,18 @@ button {
 
 .brand-mark {
   display: grid;
-  width: 32px;
-  height: 32px;
+  width: 36px;
+  height: 36px;
   place-items: center;
-  border: 1px solid var(--accent-border);
-  border-radius: var(--radius-sm);
-  background: var(--accent-soft);
-  color: var(--accent);
+  border: 1px solid rgba(0, 255, 65, 0.75);
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.62);
+  color: var(--accent-strong);
   font-size: 0.76rem;
   font-weight: 800;
   font-family: var(--font-mono);
-  box-shadow: 0 0 12px var(--accent-glow);
+  text-shadow: 0 0 10px var(--accent-glow);
+  box-shadow: 0 0 18px rgba(0, 0, 0, 0.5);
 }
 
 /* --- Header command search --- */
@@ -310,7 +311,7 @@ button {
 
 .status-button:hover,
 .status-button:focus-visible {
-  border-color: var(--line-strong);
+  border-color: rgba(255, 255, 255, 0.86);
   background: var(--surface-raised);
   box-shadow: 0 0 12px rgba(0, 0, 0, 0.3);
 }
@@ -343,6 +344,10 @@ button {
   animation: dot-pulse 1.5s ease-in-out infinite;
 }
 
+.status-button--checking .status-button__label {
+  color: var(--text-soft);
+}
+
 .status-button--healthy {
   border-color: var(--accent-border);
   background: var(--accent-soft);
@@ -358,6 +363,10 @@ button {
   color: var(--accent);
 }
 
+.status-button--healthy .status-button__label {
+  color: var(--accent);
+}
+
 .status-button--unhealthy {
   border-color: var(--danger-border);
   background: var(--danger-soft);
@@ -370,6 +379,10 @@ button {
 }
 
 .status-button--unhealthy .status-button__state {
+  color: var(--danger);
+}
+
+.status-button--unhealthy .status-button__label {
   color: var(--danger);
 }
 
@@ -795,8 +808,9 @@ h2 {
   transition: background var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast), box-shadow var(--transition-fast);
 }
 
-.catalog-filter-chip:hover {
-  border-color: var(--line-strong);
+.catalog-filter-chip:hover,
+.catalog-filter-chip:focus-visible {
+  border-color: rgba(255, 255, 255, 0.86);
   background: var(--surface-raised);
 }
 
@@ -836,8 +850,9 @@ h2 {
   transition: background var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast), box-shadow var(--transition-fast);
 }
 
-.catalog-scope button:hover {
-  border-color: var(--line-strong);
+.catalog-scope button:hover,
+.catalog-scope button:focus-visible {
+  border-color: rgba(255, 255, 255, 0.86);
   background: var(--surface-raised);
 }
 
@@ -949,38 +964,6 @@ h2 {
 
 .media-placeholder__video {
   pointer-events: none;
-}
-
-.media-placeholder__play {
-  position: absolute;
-  z-index: 3;
-  left: 50%;
-  top: 50%;
-  width: 42px;
-  height: 42px;
-  transform: translate(-50%, -50%);
-  border: 1px solid rgba(0, 255, 65, 0.75);
-  border-radius: 50%;
-  background: rgba(0, 0, 0, 0.62);
-  color: var(--accent-strong);
-  cursor: pointer;
-  display: grid;
-  place-items: center;
-  font: inherit;
-  font-size: 1.15rem;
-  line-height: 1;
-  padding: 0 0 0 2px;
-  text-shadow: 0 0 10px var(--accent-glow);
-  box-shadow: 0 0 18px rgba(0, 0, 0, 0.5);
-  transition: background var(--transition-fast), border-color var(--transition-fast), transform var(--transition-fast);
-}
-
-.media-placeholder__play:hover,
-.media-placeholder__play:focus-visible {
-  background: rgba(0, 255, 65, 0.18);
-  border-color: var(--accent);
-  outline: 2px solid var(--focus);
-  outline-offset: 2px;
 }
 
 .media-placeholder--unavailable {
@@ -1686,6 +1669,10 @@ h2 {
 
 .metadata-dialog__footer .metadata-ai-analyze-button {
   position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
   overflow: hidden;
   border: 1px solid #020402;
   background: linear-gradient(90deg, #0b2514, #00c853 48%, #39ff14);
@@ -1721,8 +1708,7 @@ h2 {
   color: var(--text-soft);
 }
 
-.metadata-ai-analyze-button__idle,
-.metadata-ai-analyze-button__loading {
+.metadata-ai-analyze-button > * {
   position: relative;
   z-index: 1;
   display: inline-flex;
@@ -1929,6 +1915,14 @@ h2 {
   font-size: 0.9rem;
   line-height: 1;
   white-space: nowrap;
+}
+
+.metadata-tag-chip__remove:hover,
+.metadata-tag-chip__remove:focus-visible {
+  border-color: var(--danger);
+  background: var(--danger-soft);
+  color: var(--danger);
+  box-shadow: 0 0 10px var(--danger-glow);
 }
 
 /* --- Library cards --- */

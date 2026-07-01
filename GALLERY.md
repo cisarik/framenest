@@ -73,18 +73,20 @@ with controls, metadata preload, and `playsinline`; animated images use a real
 cards use a static real-content preview so the grid does not animate
 automatically; GIF animation occurs in Details after explicit user interaction.
 MP4 cards use a real paused decoded-frame visual from the identity-only content
-endpoint with no autoplay, loop, card controls, or automatic audio. A centered
-real `▶` affordance and the media surface open actual Details playback, while
-the only visible card action is `Edit`. These immediate card visuals are not
+endpoint with no autoplay, loop, card controls, or automatic audio. The
+meaningful media surface opens actual Details playback by pointer or keyboard,
+while the only visible card action is `Edit`. These immediate card visuals are not
 durable accepted covers, persistent thumbnails, or the future cover pipeline;
 generic available-media placeholders are rejected. Details uses a black
 player-first surface. Native/VLC playback, downloadable files, and a broader
 media player are future work.
 
 The Gallery header and pagination should stay compact: the temporary `FN` mark
-is sufficient branding in the current shell, status labels should be short and
-accessible, and pagination should offer bounded page-size choices without
-verbose navigation labels.
+is sufficient non-interactive branding in the current shell, visible `Cloud`
+and `🧠 AI` status labels should stay short while preserving accessible state
+truth, and pagination should offer bounded page-size choices without verbose
+navigation labels. The current browser omits visible `Catalog` and `Imported
+media` headings for compactness.
 
 Developer-oriented Library tools do not belong in the flagship Gallery
 surface. Future library selection belongs in `Settings > General`. Upload,

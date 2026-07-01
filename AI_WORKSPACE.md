@@ -33,15 +33,19 @@ clear the title, edit or clear an optional plain-text description, search
 existing tags locally, assign up to 32 tags, explicitly create tag definitions
 through the hidden-key tag control, save through the existing metadata API,
 cancel unsaved changes, and refresh the active Catalog view after a successful
-save. When NVIDIA is configured, `Analyze by AI` requires confirmation before
-any provider request. The confirmation explains that up to three optimized
+save. When NVIDIA is configured, `🧠 Analyze by AI` requires confirmation before
+any provider request. The ordinary editor does not show a persistent
+provider/model line. The confirmation explains that up to three optimized
 preview frames and bounded metadata are sent, while the original file, local
-path, and API key are not uploaded. A successful result replaces the current
-unsaved title, description, and tags directly in the same editor, reveals an
-editable suggested filename when supplied, does not save metadata, and does not
-rename a physical file. The save derives the automatic built-in `Processed`
-workflow collection from the durable tag list, but `Processed` is not an
-ordinary editor control.
+path, and API key are not uploaded. During a request, the button shows only one
+spinner and `Analyzing…`, and duplicate analysis requests are blocked. A
+successful result replaces the current unsaved title, description, and tags
+directly in the same editor, reveals an editable suggested filename when
+supplied, hides the Analyze action for that modal-open session, does not save
+metadata, and does not rename a physical file. A failed request restores the
+idle `🧠 Analyze by AI` action and preserves the current unsaved editor values.
+The save derives the automatic built-in `Processed` workflow collection from the
+durable tag list, but `Processed` is not an ordinary editor control.
 
 The full multi-model AI draft comparison, inline model picker, persistent draft
 storage, arbitrary user-created collections, a general collection manager,
@@ -97,7 +101,7 @@ an AI draft.
 
 `Current` must never be silently overwritten. Values enter `Current` through
 manual editing, explicit promotion from a future AI draft, or the current
-browser's confirmed `Analyze by AI` replacement flow. `Current` remains unsaved
+browser's confirmed `🧠 Analyze by AI` replacement flow. `Current` remains unsaved
 until the user performs an explicit durable save.
 
 Unsaved `Current` work may be abandoned. A detail page must not save merely

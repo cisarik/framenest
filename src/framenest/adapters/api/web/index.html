@@ -34,12 +34,12 @@
       <div class="header-status-group">
         <button id="server-health-button" class="status-button status-button--checking" type="button" aria-label="Local server healthy" title="Checking local server...">
           <span class="status-button__dot" aria-hidden="true"></span>
-          <span class="status-button__label">Server</span>
+          <span class="status-button__label">Cloud</span>
           <span id="server-health-button-text" class="status-button__state visually-hidden">Checking server</span>
         </button>
         <button id="ai-status-button" class="status-button status-button--checking" type="button" aria-label="AI status" title="Checking AI capability...">
           <span class="status-button__dot" aria-hidden="true"></span>
-          <span class="status-button__label">AI</span>
+          <span class="status-button__label">🧠 AI</span>
           <span id="ai-status-button-text" class="status-button__state visually-hidden">Checking AI</span>
         </button>
       </div>
@@ -156,22 +156,14 @@
       <div class="metadata-dialog__footer">
         <button id="metadata-save-button" type="button" disabled>Save</button>
         <button id="metadata-ai-analyze-button" class="metadata-ai-analyze-button" type="button" disabled>
-          <span class="metadata-ai-analyze-button__idle">🪄 Analyze by AI</span>
-          <span class="metadata-ai-analyze-button__loading" hidden>
-            <span class="loading-spinner" aria-hidden="true"></span>
-            <span>Analyzing…</span>
-          </span>
+          🧠 Analyze by AI
         </button>
         <button id="metadata-discard-button" type="button">Cancel</button>
       </div>
     </dialog>
 
     <main id="main" class="app-shell">
-      <section id="catalog-browser" class="catalog-browser" aria-labelledby="catalog-title">
-        <div class="section-heading">
-          <p class="eyebrow">Catalog</p>
-          <h2 id="catalog-title">Imported media</h2>
-        </div>
+      <section id="catalog-browser" class="catalog-browser" aria-label="Media browser">
         <div class="catalog-scope" role="group" aria-label="Catalog scope">
           <button id="catalog-scope-all" type="button" class="scope-active">All media</button>
           <button id="catalog-scope-processed" type="button">Processed</button>
