@@ -689,12 +689,14 @@ def test_browser_ai_replacement_is_session_only_without_mutation_api(
 ) -> None:
     script = client.get("/assets/app.js").text
     analyze_block = script[script.index("async function handleAnalyzeMetadataByAi") : script.index("function aiSuggestionErrorMessage")]
+    controls_body = _javascript_function(script, "updateMetadataControls")
 
     assert "metadataWorkspace.current.displayTitle = suggestion.title" in analyze_block
     assert "metadataWorkspace.current.description = suggestion.description" in analyze_block
     assert "metadataWorkspace.current.tagKeys = tagKeys" in analyze_block
     assert "metadataWorkspace.suggestedFilename = suggestion.suggestedFilename" in analyze_block
     assert "metadataWorkspace.aiSuggestionApplied = true" in analyze_block
+    assert "metadataAiAnalyzeButton.hidden = metadataWorkspace.aiSuggestionApplied && !metadataWorkspace.analyzing;" in controls_body
     assert "fetch(metadataEndpoint" not in analyze_block
     assert "confirm_cloud_upload: true" in analyze_block
     assert "if (metadataWorkspace.analyzing || metadataWorkspace.aiSuggestionApplied) return;" in analyze_block
@@ -715,6 +717,7 @@ def test_browser_editor_ai_failure_restores_idle_action_and_preserves_values(cli
     assert "beforeRequest" not in analyze_block
     assert "renderMetadataAiAnalyzeButtonContent(metadataWorkspace.analyzing)" in controls_body
     assert "metadataAiAnalyzeButton.disabled = metadataWorkspace.loading" in controls_body
+    assert 'metadataAiAnalyzeButton.textContent = "Analyze by AI"' in script
 
 
 def test_selected_metadata_tag_remove_is_red_and_bounded_to_current_media(client: TestClient) -> None:
@@ -1008,6 +1011,17 @@ def test_status_and_gallery_filters_have_white_border_hover_focus(client: TestCl
     assert ".catalog-scope button:focus-visible" in scope_hover
 
 
+def test_frontend_hidden_attribute_is_authoritative(client: TestClient) -> None:
+    css = client.get("/assets/styles.css").text
+
+    hidden_block = css[css.index("[hidden]") : css.index(":root")]
+
+    assert "[hidden]" in hidden_block
+    assert "display: none !important;" in hidden_block
+    assert css.index("[hidden]") < css.index(".settings-dialog__section")
+    assert css.index("[hidden]") < css.index(".metadata-dialog__footer .metadata-ai-analyze-button")
+
+
 def test_application_has_status_dialog_element(client: TestClient) -> None:
     html = client.get("/").text
     assert 'id="status-dialog"' in html
@@ -1058,6 +1072,8 @@ def test_javascript_has_health_retry_logic(client: TestClient) -> None:
 
 def test_javascript_status_buttons_open_status_tabs(client: TestClient) -> None:
     script = client.get("/assets/app.js").text
+    set_tab_body = _javascript_function(script, "setActiveStatusTab")
+
     assert "ai-status-button" in script or "aiStatusButton" in script
     assert "status-dialog" in script or "statusDialog" in script
     assert 'openStatusDialog("ai")' in script
@@ -1065,7 +1081,23 @@ def test_javascript_status_buttons_open_status_tabs(client: TestClient) -> None:
     assert "loadCloudStatus()" in script
     assert "handleStatusTabKeydown" in script
     assert "ArrowLeft" in script and "ArrowRight" in script
+    assert "statusPanelAi.hidden = isCloud" in set_tab_body
+    assert "statusPanelCloud.hidden = !isCloud" in set_tab_body
+    assert 'statusTabAi.setAttribute("aria-selected", String(!isCloud))' in set_tab_body
+    assert 'statusTabCloud.setAttribute("aria-selected", String(isCloud))' in set_tab_body
     assert "showModal" in script
+
+
+def test_javascript_status_optional_rows_hide_complete_empty_rows(client: TestClient) -> None:
+    script = client.get("/assets/app.js").text
+    render_row_body = _javascript_function(script, "renderOptionalStatusRow")
+    render_cloud_body = _javascript_function(script, "renderCloudStatus")
+
+    assert "row.hidden = true" in render_row_body
+    assert 'valueElement.textContent = ""' in render_row_body
+    assert "row.hidden = !text" in render_row_body
+    assert "statusCloudRemoteRow.hidden = !remote" in render_cloud_body
+    assert "statusCloudRemote.textContent = remote" in render_cloud_body
 
 
 def test_javascript_status_dialog_close_behavior(client: TestClient) -> None:

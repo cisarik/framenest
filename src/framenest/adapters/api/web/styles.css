@@ -7,6 +7,10 @@ dialog[open] {
   flex-direction: column;
 }
 
+[hidden] {
+  display: none !important;
+}
+
 :root {
   color-scheme: dark;
   --background: #0a0e0a;
