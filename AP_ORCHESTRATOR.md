@@ -139,6 +139,33 @@ After reviewing a Worker report, the Orchestrator decides whether to accept, cor
 
 Session closure SHOULD include a deliberate handoff when the project uses handoff files. Handoff files describe session state but do not replace permanent repository documents.
 
+## Designing and Processing COOPERATOR Acceptance Reports
+
+For user-visible work where rendered or physical interaction matters, the
+Orchestrator SHOULD create numbered, answerable acceptance items after Worker
+implementation evidence is verified.
+
+Each item SHOULD name the exact state or action being inspected. Avoid vague
+items such as "UX is good". Specify screenshots, video, logs, or physical
+observations when they would materially improve evidence.
+
+The Orchestrator SHOULD accept responses such as `PASS + comment`,
+`FAIL + comment`, `NOT TESTED + comment`, and `+` for adjacent feedback. The
+status and commentary must be preserved separately. Positive observations
+remain positive evidence even when a comment also reveals a defect.
+
+Before authorizing work, the Orchestrator MUST summarize accepted behavior,
+failed behavior, not-tested behavior, missing evidence, new product decisions,
+and adjacent scope. Confirmed defects should become the smallest correction task
+that addresses the observed problem. Newly proposed ideas do not automatically
+enter that task.
+
+Screenshots or videos are evidence. They are not repository modification
+authority by themselves. Do not call acceptance `PASS` when important numbered
+items were not tested.
+
+Use COOPERATOR, ORCHESTRATOR, and WORKER as the normative role names.
+
 ## Session Rotation and Context Pressure
 
 The Orchestrator SHOULD detect context pressure proactively.
@@ -213,6 +240,8 @@ Before accepting artifact-related work, the Orchestrator SHOULD verify:
 - Name allowed and forbidden commands.
 - State Git write permissions explicitly.
 - Define validation and acceptance criteria.
+- For rendered or physical interaction, prepare numbered COOPERATOR acceptance
+  items and classify responses before authorizing correction work.
 - Include stopping conditions.
 - Define artifact classification, consumer, authority, discoverability, retention trigger, and cleanup owner when a committed evidence document is required.
 - Require structured reporting.

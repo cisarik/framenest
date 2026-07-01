@@ -23,7 +23,7 @@ ORCHESTRATOR authority.
 ## Current Implementation Boundary
 
 FrameNest currently implements explicit, same-origin, non-persistent browser AI
-Draft review per [ADR-0020](docs/adr/0020-on-demand-ai-suggestion-review.md).
+assistance per [ADR-0020](docs/adr/0020-on-demand-ai-suggestion-review.md).
 It is pre-alpha, session-only, provider-confirmed for cloud execution, and does
 not save catalog metadata or mutate files.
 
@@ -33,12 +33,15 @@ clear the title, edit or clear an optional plain-text description, search
 existing tags locally, assign up to 32 tags, explicitly create tag definitions
 through the hidden-key tag control, save through the existing metadata API,
 cancel unsaved changes, and refresh the active Catalog view after a successful
-save. When NVIDIA is configured, `Analyze by AI` requires confirmation and
-returns a separate editable AI Draft with title, description, tags, and a
-suggested filename. `Use draft` copies reviewed draft values into the unsaved
-manual editor only; it does not save metadata and does not rename a physical
-file. The save derives the automatic built-in `Processed` workflow collection
-from the durable tag list, but `Processed` is not an ordinary editor control.
+save. When NVIDIA is configured, `Analyze by AI` requires confirmation before
+any provider request. The confirmation explains that up to three optimized
+preview frames and bounded metadata are sent, while the original file, local
+path, and API key are not uploaded. A successful result replaces the current
+unsaved title, description, and tags directly in the same editor, reveals an
+editable suggested filename when supplied, does not save metadata, and does not
+rename a physical file. The save derives the automatic built-in `Processed`
+workflow collection from the durable tag list, but `Processed` is not an
+ordinary editor control.
 
 The full multi-model AI draft comparison, inline model picker, persistent draft
 storage, arbitrary user-created collections, a general collection manager,
@@ -93,8 +96,9 @@ available before any AI run, remains editable after AI, and is not closable like
 an AI draft.
 
 `Current` must never be silently overwritten. Values enter `Current` through
-manual editing or explicit promotion from an AI draft. `Current` remains
-unsaved until the user performs an explicit durable save.
+manual editing, explicit promotion from a future AI draft, or the current
+browser's confirmed `Analyze by AI` replacement flow. `Current` remains unsaved
+until the user performs an explicit durable save.
 
 Unsaved `Current` work may be abandoned. A detail page must not save merely
 because it opened or because an AI draft exists.
@@ -254,11 +258,11 @@ metadata from its own invocation boundary rather than trusting model text.
 
 ## Ephemeral And Future Persistent Boundaries
 
-Current implemented AI Draft review is ephemeral page-session state. Discarding
-the draft only removes the draft. Using the draft may create missing tag
-definitions through the existing tag endpoint, then copies title, description,
-and tags into unsaved `Current`; it does not call the metadata Save endpoint and
-does not rename a file.
+Current implemented AI assistance is ephemeral modal-session state. A successful
+confirmed analysis may create missing tag definitions through the existing tag
+endpoint, then writes title, description, and tags into unsaved `Current` and
+reveals an editable suggested filename. It does not call the metadata Save
+endpoint and does not rename a file.
 
 Future persistent drafts, audit history, catalog save behavior, draft retention,
 and provenance persistence require separate implementation tasks and likely

@@ -13,7 +13,6 @@
     <header class="app-header" aria-label="FrameNest application header">
       <div class="brand" aria-label="FrameNest">
         <span class="brand-mark" aria-hidden="true">FN</span>
-        <span class="brand-name">FrameNest</span>
       </div>
       <div class="header-search" role="search" aria-label="Search catalog">
         <span class="header-search__prompt" aria-hidden="true">&gt;</span>
@@ -36,12 +35,12 @@
         <button id="server-health-button" class="status-button status-button--checking" type="button" aria-label="Local server healthy" title="Checking local server...">
           <span class="status-button__dot" aria-hidden="true"></span>
           <span class="status-button__label">Server</span>
-          <span id="server-health-button-text" class="status-button__state">Checking</span>
+          <span id="server-health-button-text" class="status-button__state visually-hidden">Checking server</span>
         </button>
         <button id="ai-status-button" class="status-button status-button--checking" type="button" aria-label="AI status" title="Checking AI capability...">
           <span class="status-button__dot" aria-hidden="true"></span>
           <span class="status-button__label">AI</span>
-          <span id="ai-status-button-text" class="status-button__state">Checking</span>
+          <span id="ai-status-button-text" class="status-button__state visually-hidden">Checking AI</span>
         </button>
       </div>
     </header>
@@ -140,45 +139,15 @@
             <p id="metadata-tag-status" class="metadata-note" aria-live="polite"></p>
           </div>
 
-          <section id="metadata-ai-panel" class="metadata-ai-panel" aria-labelledby="metadata-ai-title">
-            <div class="metadata-ai-panel__header">
-              <div>
-                <h3 id="metadata-ai-title">AI Draft</h3>
-                <p id="metadata-ai-capability" class="metadata-note">AI analysis is not configured.</p>
-              </div>
-              <button id="metadata-ai-analyze-button" type="button" disabled>Analyze by AI</button>
-            </div>
-            <p class="metadata-ai-disclosure">
-              FrameNest will send up to 3 optimized preview frames and limited media metadata to NVIDIA for analysis.
-              The original media file, local path, and API key are not uploaded.
-            </p>
+          <section id="metadata-ai-panel" class="metadata-ai-panel" aria-label="AI assistance">
+            <p id="metadata-ai-capability" class="metadata-note">AI analysis is not configured.</p>
             <p id="metadata-ai-status" class="metadata-note" aria-live="polite"></p>
-            <div id="metadata-ai-loading" class="metadata-ai-loading" hidden>
-              <span class="loading-spinner" aria-hidden="true"></span>
-              <span>Analyzing media...</span>
-            </div>
-            <div id="metadata-ai-draft" class="metadata-ai-draft" hidden>
-              <label class="metadata-field" for="metadata-ai-title-input">
-                <span>Title</span>
-                <input id="metadata-ai-title-input" type="text" maxlength="120" autocomplete="off">
-              </label>
-              <label class="metadata-field" for="metadata-ai-description-input">
-                <span>Description</span>
-                <textarea id="metadata-ai-description-input" rows="4" maxlength="600" autocomplete="off"></textarea>
-              </label>
-              <label class="metadata-field" for="metadata-ai-tags-input">
-                <span>Tags</span>
-                <input id="metadata-ai-tags-input" type="text" autocomplete="off" placeholder="Comma-separated tags">
-              </label>
+            <div id="metadata-ai-suggestion" class="metadata-ai-suggestion" hidden>
               <label class="metadata-field" for="metadata-ai-filename-input">
                 <span>Suggested filename</span>
                 <input id="metadata-ai-filename-input" type="text" maxlength="180" autocomplete="off">
               </label>
-              <p class="metadata-note">Filename is a proposal only. No physical file has been renamed.</p>
-              <div class="metadata-ai-actions">
-                <button id="metadata-ai-use-button" type="button">Use draft</button>
-                <button id="metadata-ai-discard-button" type="button">Discard draft</button>
-              </div>
+              <p class="metadata-note">The physical file has not been renamed.</p>
             </div>
           </section>
         </div>
@@ -186,6 +155,13 @@
 
       <div class="metadata-dialog__footer">
         <button id="metadata-save-button" type="button" disabled>Save</button>
+        <button id="metadata-ai-analyze-button" class="metadata-ai-analyze-button" type="button" disabled>
+          <span class="metadata-ai-analyze-button__idle">🪄 Analyze by AI</span>
+          <span class="metadata-ai-analyze-button__loading" hidden>
+            <span class="loading-spinner" aria-hidden="true"></span>
+            <span>Analyzing…</span>
+          </span>
+        </button>
         <button id="metadata-discard-button" type="button">Cancel</button>
       </div>
     </dialog>
@@ -216,94 +192,21 @@
         </div>
         <div id="catalog-results" class="catalog-results gallery-grid" aria-live="polite"></div>
         <div class="catalog-pagination" aria-label="Catalog pagination">
-          <button id="catalog-prev-button" type="button">Previous</button>
+          <label class="catalog-page-size" for="catalog-page-size-select">
+            <select id="catalog-page-size-select" aria-label="Catalog page size">
+              <option value="10">10 per page</option>
+              <option value="30" selected>30 per page</option>
+              <option value="60">60 per page</option>
+              <option value="90">90 per page</option>
+            </select>
+          </label>
           <p id="catalog-page-summary" role="status">No catalog page loaded.</p>
-          <button id="catalog-next-button" type="button">Next</button>
+          <div class="catalog-pagination__nav">
+            <button id="catalog-prev-button" type="button" aria-label="Previous page">&lt;</button>
+            <button id="catalog-next-button" type="button" aria-label="Next page">&gt;</button>
+          </div>
         </div>
       </section>
-
-      <details id="library-browser" class="library-tools">
-        <summary class="library-tools__summary">Library tools</summary>
-        <div id="library-state-loading" class="library-state" role="status">
-          Loading...
-        </div>
-        <div id="library-state-empty" class="library-state" hidden>
-          No registered libraries.
-        </div>
-        <div id="library-state-unavailable" class="library-state library-state--warning" hidden>
-          Catalog unavailable.
-        </div>
-        <div id="library-state-error" class="library-state library-state--warning" hidden>
-          Libraries could not be loaded.
-        </div>
-        <div id="library-list" class="library-list" aria-live="polite"></div>
-      </details>
-
-      <template id="library-card-template">
-        <article class="library-card">
-          <div class="library-card__header">
-            <h3 class="library-name"></h3>
-            <button class="preview-button" type="button">Preview media</button>
-          </div>
-          <p class="scan-status">Not scanned.</p>
-          <dl class="scan-summary" hidden></dl>
-          <div class="scan-candidates" hidden></div>
-          <div class="local-preview" hidden>
-            <div class="local-preview__header">
-              <div>
-                <h4>Local preview</h4>
-                <p class="local-preview-path"></p>
-              </div>
-              <span class="local-preview-kind"></span>
-            </div>
-            <p class="local-preview-status">Not requested.</p>
-            <dl class="analysis-metadata" hidden></dl>
-            <div class="analysis-warnings" hidden></div>
-            <div class="representative-frames" hidden></div>
-          </div>
-          <div class="ai-panel" hidden>
-            <div class="ai-panel__header">
-              <div>
-                <h4>AI suggestion review</h4>
-                <p class="ai-capability">AI unavailable</p>
-              </div>
-              <span class="ai-execution">cloud</span>
-            </div>
-            <dl class="ai-metadata">
-              <div>
-                <dt>Provider</dt>
-                <dd class="ai-provider"></dd>
-              </div>
-              <div>
-                <dt>Model</dt>
-                <dd class="ai-model"></dd>
-              </div>
-              <div>
-                <dt>Prompt</dt>
-                <dd class="ai-prompt"></dd>
-              </div>
-            </dl>
-            <p class="ai-disclosure">
-              This cloud-based Analyze action sends up to three derived JPEG frames
-              and bounded metadata to the configured provider. The full video is
-              not uploaded. Nothing is persisted or applied automatically.
-            </p>
-            <label class="ai-confirmation">
-              <input class="ai-confirmation-checkbox" type="checkbox">
-              <span>I confirm this request may send bounded derived frames and metadata to the cloud provider.</span>
-            </label>
-            <button class="analyze-button" type="button" disabled>Analyze</button>
-            <p class="ai-status-message" role="status"></p>
-            <p class="accepted-message-template" hidden>
-              Draft accepted for this review session. No file or catalog change was applied.
-            </p>
-            <p class="rejected-message-template" hidden>
-              Draft rejected. No changes were applied.
-            </p>
-            <div class="ai-review" hidden></div>
-          </div>
-        </article>
-      </template>
     </main>
   </body>
 </html>

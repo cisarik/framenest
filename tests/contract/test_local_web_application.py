@@ -161,12 +161,14 @@ def test_browser_application_uses_same_origin_health_with_distinct_status_states
     assert "setErrorState" in script
 
 
-def test_web_shell_contains_compact_library_tools(client: TestClient) -> None:
+def test_web_shell_removes_developer_library_tools_from_gallery(client: TestClient) -> None:
     html = client.get("/").text
-    assert "library-browser" in html
-    assert "Library tools" in html
-    assert "<details" in html
-    assert "Preview media" in html or "preview-button" in html
+    assert "library-browser" not in html
+    assert "Library tools" not in html
+    assert "Preview media" not in html
+    assert "Not scanned" not in html
+    assert "Local preview" not in html
+    assert "AI suggestion review" not in html
 
 
 def test_web_shell_does_not_contain_verbose_library_prose(client: TestClient) -> None:
@@ -184,8 +186,12 @@ def test_web_shell_contains_reachable_catalog_browser_states(client: TestClient)
     assert "Catalog" in html
     assert "Loading catalog media" in html
     assert "No media matched this catalog query" in html
-    assert "Previous" in html
-    assert "Next" in html
+    assert "Previous page" in html
+    assert "Next page" in html
+    assert "&lt;" in html
+    assert "&gt;" in html
+    for page_size in ("10 per page", "30 per page", "60 per page", "90 per page"):
+        assert page_size in html
 
 
 def test_web_shell_does_not_contain_obsolete_catalog_search_form(client: TestClient) -> None:
@@ -367,12 +373,13 @@ def test_javascript_metadata_save_refreshes_catalog_and_preserves_filters(
 
     assert "async function handleSaveMetadata" in script
     save_block = script[script.index("async function handleSaveMetadata") : script.index("async function handleInspectClick")]
-    assert 'setMetadataStatus("saved", "Saved.")' in save_block
+    assert 'setMetadataStatus("saved", "Saved.")' not in save_block
     assert "created" not in save_block
     assert "updated" not in save_block
     assert "unchanged" not in save_block
     assert "metadataWorkspace.openMediaId" in save_block
     assert "await loadCatalog();" in save_block
+    assert "closeMetadataWorkspace();" in save_block
     assert "catalogState.q" not in save_block
     assert "catalogState.tagKeys" not in save_block
     assert "catalogState.offset = 0" not in save_block
@@ -508,7 +515,7 @@ def test_browser_does_not_store_frame_payloads_or_add_external_runtime_urls(
     script = client.get("/assets/app.js").text
     html = client.get("/").text
 
-    assert "localStorage" not in script
+    assert "payload_base64" not in script[script.index("function restoredCatalogPageSize") : script.index("function setStatusClass")]
     assert "sessionStorage" not in script
     assert "indexedDB" not in script
     assert "data:image" not in script
@@ -548,12 +555,12 @@ def test_browser_analyze_is_explicit_confirmed_and_cloud_disclosed(client: TestC
     combined = html + script
 
     assert "Analyze" in combined
-    assert "derived JPEG frames" in combined
-    assert "full video is not uploaded" in combined
+    assert "optimized preview frames" in combined
+    assert "original file, local path, and API key are not uploaded" in combined
+    assert "will replace the current unsaved Title, Description, and Tags" in combined
+    assert "will not be saved automatically" in combined
+    assert "physical file will not be renamed" in combined
     assert "confirm_cloud_upload" in script
-    assert ".ai-confirmation-checkbox" in script
-    assert "elements.analyzeButton.disabled = !elements.checkbox.checked" in script
-    assert "Preparing frames and requesting an editable suggestion" in combined
     assert "Cancel analysis" not in combined
     assert "Provider selection" not in combined
     assert "Model selection" not in combined
@@ -575,46 +582,35 @@ def test_browser_analyze_appears_only_after_successful_local_inspection(
     assert "suggestionRequestToken" in script
 
 
-def test_browser_editable_review_form_and_tag_controls(client: TestClient) -> None:
+def test_browser_editor_uses_single_form_ai_assistance(client: TestClient) -> None:
     html = client.get("/").text
     script = client.get("/assets/app.js").text
-    combined = html + script
+    dialog_section = html[html.index("metadata-dialog"):]
 
-    assert "AI suggestion review" in combined
-    assert "review-title-input" in combined
-    assert "review-description-input" in combined
-    assert "review-collection-input" in combined
-    assert "review-filename-input" in combined
-    assert "review-tag-input" in combined
-    assert "Add tag" in combined
-    assert "removeTag" in script
-    assert "Duplicate tags are not allowed." in script
-    assert "confidence" in script
-    assert "evidence" in script
-    assert "uncertainties" in script
+    assert "metadata-title-input" in dialog_section
+    assert "metadata-description-input" in dialog_section
+    assert "metadata-tag-search-input" in dialog_section
+    assert "metadata-ai-filename-input" in dialog_section
+    assert "review-title-input" not in dialog_section
+    assert "review-description-input" not in dialog_section
+    assert "review-tag-input" not in dialog_section
+    assert "metadataTagKeysFromSuggestion" in script
     assert "provider_id" in script
     assert "model_id" in script
     assert "prompt_version" in script
 
 
-def test_browser_accept_and_reject_are_session_only_without_mutation_api(
+def test_browser_ai_replacement_is_session_only_without_mutation_api(
     client: TestClient,
 ) -> None:
-    html = client.get("/").text
     script = client.get("/assets/app.js").text
-    combined = html + script
+    analyze_block = script[script.index("async function handleAnalyzeMetadataByAi") : script.index("function aiSuggestionErrorMessage")]
 
-    assert "Accept draft for this session" in combined
-    assert "Reject draft" in combined
-    assert "Draft accepted for this review session. No file or catalog change was applied." in combined
-    assert "Draft rejected. No changes were applied." in combined
-    assert "markReviewEdited" in script
-    assert "fetch(" in script
-    assert "rename" not in script.lower()
-    review_block = script[script.index("function renderEditableReview") : script.index("function suggestionErrorMessage")]
-    assert "save" not in review_block.lower()
-    assert "apply" not in review_block.lower()
-    assert "commit" not in script.lower()
+    assert "metadataWorkspace.current.displayTitle = suggestion.title" in analyze_block
+    assert "metadataWorkspace.aiSuggestionApplied = true" in analyze_block
+    assert "fetch(metadataEndpoint" not in analyze_block
+    assert "confirm_cloud_upload: true" in analyze_block
+    assert "commit" not in analyze_block.lower()
 
 
 def test_javascript_uses_safe_dom_text_apis_for_repository_values(client: TestClient) -> None:
@@ -794,7 +790,7 @@ def test_browser_review_uses_no_persistence_or_hidden_complete_suggestion(
 ) -> None:
     script = client.get("/assets/app.js").text
 
-    assert "localStorage" not in script
+    assert "framenest.catalog.pageSize" in script
     assert "sessionStorage" not in script
     assert "indexedDB" not in script
     assert "location.search" not in script
@@ -997,11 +993,11 @@ def test_catalog_does_not_contain_duplicate_filter_text(client: TestClient) -> N
     assert "Multiple selected tags use AND semantics" not in html
 
 
-def test_library_tools_section_is_collapsible(client: TestClient) -> None:
+def test_library_tools_section_is_absent_from_flagship_gallery(client: TestClient) -> None:
     html = client.get("/").text
-    assert "<details" in html
-    assert "Library tools" in html
-    assert "library-browser" in html
+    assert "Library tools" not in html
+    assert "library-browser" not in html
+    assert "library-card-template" not in html
 
 
 def test_library_tools_does_not_expose_uuid_or_path_flavor(client: TestClient) -> None:
@@ -1066,13 +1062,16 @@ def test_catalog_card_does_not_show_fallback_label_text(client: TestClient) -> N
     assert "No canonical tags" not in card_body
 
 
-def test_catalog_card_has_details_and_edit_actions(client: TestClient) -> None:
+def test_catalog_card_has_play_surface_and_edit_action_without_details_button(client: TestClient) -> None:
     script = client.get("/assets/app.js").text
     card_body = _javascript_function(script, "renderCatalogCard")
-    assert "Details" in card_body
+    surface_body = _javascript_function(script, "renderCatalogCardMediaSurface")
+    assert "Details" not in card_body
     assert "Edit" in card_body
     assert "View details" not in card_body
     assert "Edit metadata" not in card_body
+    assert 'playButton.textContent = "▶"' in surface_body
+    assert "openPlaybackDetails" in surface_body
     assert "handleOpenMetadataWorkspace" in card_body
 
 
@@ -1213,7 +1212,8 @@ def test_javascript_has_preview_cache(client: TestClient) -> None:
 
 def test_preview_cache_does_not_use_persistent_storage(client: TestClient) -> None:
     script = client.get("/assets/app.js").text
-    assert "localStorage" not in script
+    preview_section = script[script.index("function renderCardPreviewFrames") : script.index("function selectPlaybackLocation")]
+    assert "localStorage" not in preview_section
     assert "sessionStorage" not in script
     assert "indexedDB" not in script
 
@@ -1308,14 +1308,16 @@ def test_javascript_available_cards_use_identity_only_media_urls(client: TestCli
     assert "library" not in media_url_body.lower()
 
 
-def test_javascript_available_gif_card_renders_real_gif_media(client: TestClient) -> None:
+def test_javascript_available_gif_card_renders_static_real_content_canvas(client: TestClient) -> None:
     script = client.get("/assets/app.js").text
     surface_body = _javascript_function(script, "renderCatalogCardMediaSurface")
     image_section = surface_body[surface_body.index('document.createElement("img")') :]
 
-    assert "img.src = url" in image_section
-    assert "media-placeholder__image" in image_section
-    assert "img.onerror = showUnavailable" in image_section
+    assert 'document.createElement("canvas")' in surface_body
+    assert "media-placeholder__canvas" in surface_body
+    assert "context.drawImage(decodeImage, 0, 0)" in surface_body
+    assert "decodeImage.src = url" in surface_body
+    assert "decodeImage.onerror" in image_section
 
 
 def test_javascript_available_mp4_card_renders_paused_safe_video(client: TestClient) -> None:
@@ -1349,14 +1351,11 @@ def test_javascript_card_play_overlay_is_accessible_and_opens_real_details(clien
     assert "mediaContentUrl" in _javascript_function(script, "renderDetailsMedia")
 
 
-def test_javascript_details_button_does_not_request_automatic_play(client: TestClient) -> None:
+def test_javascript_catalog_card_details_button_is_removed(client: TestClient) -> None:
     script = client.get("/assets/app.js").text
     card_body = _javascript_function(script, "renderCatalogCard")
-    details_click_index = card_body.index("detailsButton.addEventListener")
-    details_click_section = card_body[details_click_index : details_click_index + 160]
-
-    assert "openDetailsDialog(item, detailsButton)" in details_click_section
-    assert "playWhenReady" not in details_click_section
+    assert "detailsButton" not in card_body
+    assert "openDetailsDialog(item, detailsButton)" not in card_body
 
 
 def test_javascript_catalog_rerender_cleans_card_media_resources(client: TestClient) -> None:
@@ -1549,12 +1548,14 @@ def test_gallery_reference_no_longer_contains_canonical_tag_fragment() -> None:
 def test_gallery_reference_documents_content_first_playback_boundary() -> None:
     gallery = Path("GALLERY.md").read_text(encoding="utf-8")
     assert "Available local Gallery cards show immediate real media visuals" in gallery
-    assert "centered real `▶` affordance" in gallery
-    assert "not durable accepted covers" in gallery
-    assert "persistent\nthumbnails" in gallery
+    assert "GIF\ncards use a static real-content preview" in gallery
+    assert "MP4 cards use a real paused decoded-frame visual" in gallery
+    assert "A centered\nreal `▶` affordance" in gallery
+    assert "not\ndurable accepted covers" in gallery
+    assert "persistent thumbnails" in gallery
     assert "generic available-media placeholders" in gallery
     assert "are rejected" in gallery
-    assert "Details is player-first" in gallery
+    assert "Details uses a black\nplayer-first surface" in gallery
 
 
 def test_javascript_details_no_longer_loads_representative_frames(client: TestClient) -> None:
@@ -1578,7 +1579,8 @@ def test_javascript_reuses_base64_decode_helper(client: TestClient) -> None:
 
 def test_javascript_preview_does_not_persist_frames(client: TestClient) -> None:
     script = client.get("/assets/app.js").text
-    assert "localStorage" not in script
+    preview_section = script[script.index("function renderCardPreviewFrames") : script.index("function selectPlaybackLocation")]
+    assert "localStorage" not in preview_section
     assert "sessionStorage" not in script
     assert "indexedDB" not in script
 
@@ -1682,18 +1684,18 @@ def test_metadata_dialog_contains_save_and_cancel(client: TestClient) -> None:
     assert "metadata-discard-button" in dialog_section
 
 
-def test_metadata_dialog_contains_explicit_ai_analysis_and_draft_review(client: TestClient) -> None:
+def test_metadata_dialog_contains_single_form_ai_assistance(client: TestClient) -> None:
     html = client.get("/").text
     dialog_section = html[html.index("metadata-dialog"):]
 
     assert "Analyze by AI" in dialog_section
-    assert "AI Draft" in dialog_section
-    assert "Use draft" in dialog_section
-    assert "Discard draft" in dialog_section
+    assert "AI Draft" not in dialog_section
+    assert "Use draft" not in dialog_section
+    assert "Discard draft" not in dialog_section
     assert "Suggested filename" in dialog_section
-    assert "No physical file has been renamed" in dialog_section
-    assert "up to 3 optimized preview frames" in dialog_section
-    assert "original media file, local path, and API key are not uploaded" in dialog_section
+    assert "The physical file has not been renamed" in dialog_section
+    assert dialog_section.index("metadata-save-button") < dialog_section.index("metadata-ai-analyze-button")
+    assert dialog_section.index("metadata-ai-analyze-button") < dialog_section.index("metadata-discard-button")
     assert "Canonical key" not in dialog_section
     assert "NVIDIA_API_KEY" not in dialog_section
     assert "Authorization" not in dialog_section
@@ -1718,19 +1720,86 @@ def test_javascript_metadata_ai_analysis_requires_confirmation_and_identity_url(
     assert "Authorization" not in script
 
 
-def test_javascript_metadata_ai_draft_does_not_autosave_or_rename(client: TestClient) -> None:
+def test_javascript_metadata_ai_success_populates_single_form_without_autosave_or_rename(client: TestClient) -> None:
     script = client.get("/assets/app.js").text
-    use_body = script[script.index("async function handleUseMetadataAiDraft") : script.index("function handleDiscardMetadataAiDraft")]
+    analyze_body = script[script.index("async function handleAnalyzeMetadataByAi") : script.index("function aiSuggestionErrorMessage")]
 
-    assert "metadataWorkspace.current.displayTitle = draft.title" in use_body
-    assert "metadataWorkspace.current.description = draft.description" in use_body
-    assert "metadataWorkspace.current.tagKeys = tagKeys.slice(0, MAX_METADATA_TAGS)" in use_body
-    assert "ensureMetadataTagKey(tag)" in use_body
-    assert "fetch(metadataEndpoint" not in use_body
-    assert "Save when ready" in use_body
-    assert "rename" not in use_body.lower()
-    assert "handleDiscardMetadataAiDraft" in script
-    assert "metadataWorkspace.aiDraft = null" in _javascript_function(script, "handleDiscardMetadataAiDraft")
+    assert "metadataWorkspace.current.displayTitle = suggestion.title" in analyze_body
+    assert "metadataWorkspace.current.description = suggestion.description" in analyze_body
+    assert "metadataWorkspace.current.tagKeys = tagKeys" in analyze_body
+    assert "metadataWorkspace.suggestedFilename = suggestion.suggestedFilename" in analyze_body
+    assert "metadataWorkspace.aiSuggestionApplied = true" in analyze_body
+    assert "metadataTagKeysFromSuggestion(suggestion.tags)" in analyze_body
+    assert "metadataAiAnalyzeButton.hidden = metadataWorkspace.aiSuggestionApplied" in script
+    assert "fetch(metadataEndpoint" not in analyze_body
+    assert "Review the updated fields, then Save." in analyze_body
+    assert "fetch(metadataEndpoint" not in analyze_body
+    assert "handleUseMetadataAiDraft" not in script
+    assert "handleDiscardMetadataAiDraft" not in script
+
+
+def test_header_uses_compact_brand_and_accessible_status_labels(client: TestClient) -> None:
+    html = client.get("/").text
+    header_section = html[html.index("app-header") : html.index("</header>")]
+
+    assert ">FN<" in header_section
+    assert ">FrameNest<" not in header_section
+    assert ">Server<" in header_section
+    assert ">AI<" in header_section
+    for visible_state in (">Healthy<", ">Available<", ">Unavailable<", ">Checking<"):
+        assert visible_state not in header_section
+    assert "visually-hidden" in header_section
+
+
+def test_javascript_catalog_page_size_is_bounded_persisted_and_resets_page(client: TestClient) -> None:
+    script = client.get("/assets/app.js").text
+
+    assert "const CATALOG_PAGE_SIZE_OPTIONS = [10, 30, 60, 90];" in script
+    assert 'const CATALOG_PAGE_SIZE = 30;' in script
+    assert "framenest.catalog.pageSize" in script
+    assert "CATALOG_PAGE_SIZE_OPTIONS.includes(stored)" in script
+    assert "catalogState.offset = 0;" in script[script.index("catalogPageSizeSelect.addEventListener"):]
+    assert 'params.set("limit", String(catalogState.limit));' in script
+
+
+def test_css_details_dialog_uses_black_player_first_surfaces(client: TestClient) -> None:
+    css = client.get("/assets/styles.css").text
+    details_css = css[css.index(".media-details-dialog") : css.index("/* --- Metadata edit dialog --- */")]
+
+    assert "background: #000;" in details_css
+    assert ".media-details-dialog__header" in details_css
+    assert ".media-details-dialog__footer" in details_css
+    assert ".details-preview-container" in details_css
+    assert "max-height: min(62dvh, 560px)" in details_css
+
+
+def test_javascript_static_gif_card_cleanup_releases_decoder_resources(client: TestClient) -> None:
+    script = client.get("/assets/app.js").text
+    cleanup_body = _javascript_function(script, "cleanupCatalogCardMedia")
+    surface_body = _javascript_function(script, "renderCatalogCardMediaSurface")
+
+    assert "__framenestGifImage" in surface_body
+    assert "__framenestCleanup" in surface_body
+    assert "decodeImage.removeAttribute(\"src\")" in surface_body
+    assert "__framenestGifImage" in cleanup_body
+    assert "element.__framenestGifImage.onload = null" in cleanup_body
+    assert "element.__framenestGifImage.removeAttribute(\"src\")" in cleanup_body
+
+
+def test_protocol_documents_define_numbered_cooperator_acceptance_method() -> None:
+    ap = Path("AP.md").read_text(encoding="utf-8")
+    orchestrator = Path("AP_ORCHESTRATOR.md").read_text(encoding="utf-8")
+
+    assert "Numbered COOPERATOR Acceptance Feedback" in ap
+    assert "`PASS`" in ap
+    assert "`FAIL`" in ap
+    assert "`NOT TESTED`" in ap
+    assert "new product decision" in ap
+    assert "Rendered acceptance evidence MUST be distinguished" in ap
+    assert "Designing and Processing COOPERATOR Acceptance Reports" in orchestrator
+    assert "avoid vague" in orchestrator.lower()
+    assert "Screenshots or videos are evidence" in orchestrator
+    assert "smallest correction task" in orchestrator
 
 
 def test_css_metadata_dialog_has_scrollable_body(client: TestClient) -> None:

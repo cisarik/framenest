@@ -7,7 +7,9 @@ const MEDIA_METADATA_ENDPOINT_PREFIX = "/api/media";
 const CANONICAL_TAGS_ENDPOINT = "/api/canonical-tags";
 const AI_CAPABILITY_ENDPOINT = "/api/ai/media-suggestion-capability";
 const MEDIA_IMPORTS_ENDPOINT = "media-imports";
-const CATALOG_PAGE_SIZE = 24;
+const CATALOG_PAGE_SIZE_OPTIONS = [10, 30, 60, 90];
+const CATALOG_PAGE_SIZE_STORAGE_KEY = "framenest.catalog.pageSize";
+const CATALOG_PAGE_SIZE = 30;
 const MAX_METADATA_TITLE_CODE_POINTS = 240;
 const MAX_METADATA_DESCRIPTION_CODE_POINTS = 10000;
 const MAX_METADATA_TAGS = 32;
@@ -57,8 +59,8 @@ let metadataWorkspace = {
   notFound: false,
   statusOverride: null,
   analyzing: false,
-  aiDraft: null,
-  aiDraftDirty: false,
+  aiSuggestionApplied: false,
+  suggestedFilename: "",
   baseline: { displayTitle: null, description: null, tagKeys: [], collectionKey: null, processedAtMs: null },
   current: { displayTitle: "", description: "", tagKeys: [], collectionKey: null, processedAtMs: null },
 };
@@ -74,6 +76,20 @@ let aiCapability = {
   execution: "cloud",
   requires_explicit_confirmation: true,
 };
+
+function restoredCatalogPageSize() {
+  try {
+    const stored = Number(window.localStorage.getItem(CATALOG_PAGE_SIZE_STORAGE_KEY));
+    if (CATALOG_PAGE_SIZE_OPTIONS.includes(stored)) {
+      return stored;
+    }
+  } catch {
+    // Ignore unavailable localStorage and keep the default page size.
+  }
+  return CATALOG_PAGE_SIZE;
+}
+
+catalogState.limit = restoredCatalogPageSize();
 
 const statusContainer = document.querySelector("#server-status");
 const statusText = document.querySelector("#server-status-text");
@@ -111,6 +127,7 @@ const catalogResults = document.querySelector("#catalog-results");
 const catalogPrevButton = document.querySelector("#catalog-prev-button");
 const catalogNextButton = document.querySelector("#catalog-next-button");
 const catalogPageSummary = document.querySelector("#catalog-page-summary");
+const catalogPageSizeSelect = document.querySelector("#catalog-page-size-select");
 const metadataWorkspaceElement = document.querySelector("#metadata-workspace");
 const metadataWorkspaceTitle = document.querySelector("#metadata-workspace-title");
 const metadataWorkspaceContext = document.querySelector("#metadata-workspace-context");
@@ -129,14 +146,8 @@ const metadataAiPanel = document.querySelector("#metadata-ai-panel");
 const metadataAiCapability = document.querySelector("#metadata-ai-capability");
 const metadataAiAnalyzeButton = document.querySelector("#metadata-ai-analyze-button");
 const metadataAiStatus = document.querySelector("#metadata-ai-status");
-const metadataAiLoading = document.querySelector("#metadata-ai-loading");
-const metadataAiDraft = document.querySelector("#metadata-ai-draft");
-const metadataAiTitleInput = document.querySelector("#metadata-ai-title-input");
-const metadataAiDescriptionInput = document.querySelector("#metadata-ai-description-input");
-const metadataAiTagsInput = document.querySelector("#metadata-ai-tags-input");
+const metadataAiSuggestion = document.querySelector("#metadata-ai-suggestion");
 const metadataAiFilenameInput = document.querySelector("#metadata-ai-filename-input");
-const metadataAiUseButton = document.querySelector("#metadata-ai-use-button");
-const metadataAiDiscardButton = document.querySelector("#metadata-ai-discard-button");
 const metadataDialog = document.querySelector("#metadata-dialog");
 const detailsDialog = document.querySelector("#media-details-dialog");
 const detailsCloseButton = document.querySelector("#media-details-close");
@@ -169,14 +180,14 @@ function setLoadingState() {
   setStatusClass("status--loading");
   statusText.textContent = "Checking local server...";
   statusDetail.textContent = "Waiting for the same-origin health response.";
-  setServerHealthButtonState("checking", "Checking");
+  setServerHealthButtonState("checking", "Checking server");
 }
 
 function setHealthyState() {
   setStatusClass("status--healthy");
   statusText.textContent = "Local server healthy";
   statusDetail.textContent = "The FrameNest application process answered the health check.";
-  setServerHealthButtonState("healthy", "Healthy");
+  setServerHealthButtonState("healthy", "Server healthy");
 }
 
 function setErrorState() {
@@ -184,7 +195,7 @@ function setErrorState() {
   statusText.textContent = "Health check unavailable";
   statusDetail.textContent =
     "The page loaded, but the local health endpoint did not return the expected response.";
-  setServerHealthButtonState("unhealthy", "Unhealthy");
+  setServerHealthButtonState("unhealthy", "Server unavailable");
 }
 
 function setServerHealthButtonState(state, label) {
@@ -279,14 +290,14 @@ function renderAiCapability(payload) {
     aiStatusText.textContent = "Cloud AI available";
     aiStatusDetail.textContent =
       `${aiCapability.provider_id} / ${aiCapability.model_id}; prompt ${aiCapability.prompt_version}; ${aiCapability.execution}.`;
-    setAiStatusButtonState("healthy", "Available");
+    setAiStatusButtonState("healthy", "AI available");
     updateSettingsAiStatus("available", "Available", `${aiCapability.provider_id} / ${aiCapability.model_id}`);
     return;
   }
   setAiStatusClass("status--error");
   aiStatusText.textContent = "AI unavailable";
   aiStatusDetail.textContent = "Configure the server-side NVIDIA credential before starting FrameNest.";
-  setAiStatusButtonState("unhealthy", "Unavailable");
+  setAiStatusButtonState("unhealthy", "AI unavailable");
   updateSettingsAiStatus("unavailable", "Unavailable", "");
 }
 
@@ -294,7 +305,7 @@ async function loadAiCapability() {
   setAiStatusClass("status--loading");
   aiStatusText.textContent = "Checking AI capability...";
   aiStatusDetail.textContent = "No provider request is made for capability discovery.";
-  setAiStatusButtonState("checking", "Checking");
+  setAiStatusButtonState("checking", "Checking AI");
   updateSettingsAiStatus("checking", "Checking...", "");
   try {
     const response = await fetch(AI_CAPABILITY_ENDPOINT, {
@@ -312,6 +323,9 @@ async function loadAiCapability() {
 }
 
 function showLibraryState(state) {
+  if (!libraryList || !libraryStateLoading || !libraryStateEmpty || !libraryStateUnavailable || !libraryStateError) {
+    return;
+  }
   libraryStateLoading.hidden = state !== "loading";
   libraryStateEmpty.hidden = state !== "empty";
   libraryStateUnavailable.hidden = state !== "unavailable";
@@ -486,7 +500,7 @@ function findTagByDisplayName(displayName) {
 }
 
 function metadataDirtyForBeforeUnload() {
-  return metadataWorkspace.openMediaId !== null && (metadataIsDirty() || metadataWorkspace.aiDraftDirty);
+  return metadataWorkspace.openMediaId !== null && (metadataIsDirty() || metadataWorkspace.aiSuggestionApplied);
 }
 
 function metadataBeforeUnloadHandler(event) {
@@ -617,6 +631,10 @@ function stopCardPreviewTimer() {
 
 function cleanupCatalogCardMedia() {
   cardMediaElements.forEach((element) => {
+    if (typeof element.__framenestCleanup === "function") {
+      element.__framenestCleanup();
+      element.__framenestCleanup = null;
+    }
     if (element.tagName === "VIDEO") {
       element.pause();
       element.removeAttribute("src");
@@ -627,6 +645,11 @@ function cleanupCatalogCardMedia() {
       }
     } else if (element.tagName === "IMG") {
       element.removeAttribute("src");
+    } else if (element.__framenestGifImage) {
+      element.__framenestGifImage.onload = null;
+      element.__framenestGifImage.onerror = null;
+      element.__framenestGifImage.removeAttribute("src");
+      element.__framenestGifImage = null;
     }
     element.onerror = null;
     element.onload = null;
@@ -1185,6 +1208,9 @@ function renderScanResult(card, payload) {
 }
 
 function buildCatalogQueryParams() {
+  if (!CATALOG_PAGE_SIZE_OPTIONS.includes(catalogState.limit)) {
+    catalogState.limit = CATALOG_PAGE_SIZE;
+  }
   const params = new URLSearchParams();
   const trimmed = catalogState.q.trim();
   if (trimmed) {
@@ -1201,6 +1227,12 @@ function buildCatalogQueryParams() {
   return params;
 }
 
+function syncCatalogPageSizeControl() {
+  if (catalogPageSizeSelect) {
+    catalogPageSizeSelect.value = String(catalogState.limit);
+  }
+}
+
 function deriveCatalogFallbackTitle(item) {
   if (!item.locations || item.locations.length === 0) {
     return "Untitled media";
@@ -1208,6 +1240,20 @@ function deriveCatalogFallbackTitle(item) {
   const firstPath = String(item.locations[0].relative_path || "");
   const parts = firstPath.split("/");
   return parts[parts.length - 1] || "Untitled media";
+}
+
+function metadataDialogHeading() {
+  const currentTitle = metadataWorkspace.current.displayTitle.trim();
+  if (currentTitle) {
+    return currentTitle;
+  }
+  if (metadataWorkspace.openItem) {
+    const fallback = deriveCatalogFallbackTitle(metadataWorkspace.openItem).trim();
+    if (fallback && fallback !== "Untitled media") {
+      return fallback;
+    }
+  }
+  return "Media";
 }
 
 function formatCatalogKind(kind) {
@@ -1286,13 +1332,40 @@ function renderCatalogCardMediaSurface(item) {
     video.src = url;
     surface.appendChild(video);
   } else {
-    const img = document.createElement("img");
-    img.className = "media-placeholder__image";
-    img.alt = `Animated preview for ${title}`;
-    img.onerror = showUnavailable;
-    cardMediaElements.add(img);
-    img.src = url;
-    surface.appendChild(img);
+    const canvas = document.createElement("canvas");
+    canvas.className = "media-placeholder__canvas";
+    canvas.setAttribute("role", "img");
+    canvas.setAttribute("aria-label", `Static image preview for ${title}`);
+    const decodeImage = document.createElement("img");
+    let active = true;
+    canvas.__framenestGifImage = decodeImage;
+    decodeImage.onload = () => {
+      if (!active || canvas.__framenestGifImage !== decodeImage || !decodeImage.naturalWidth || !decodeImage.naturalHeight) {
+        return;
+      }
+      canvas.width = decodeImage.naturalWidth;
+      canvas.height = decodeImage.naturalHeight;
+      const context = canvas.getContext("2d");
+      if (!context) {
+        showUnavailable();
+        return;
+      }
+      context.drawImage(decodeImage, 0, 0);
+      decodeImage.onload = null;
+      decodeImage.onerror = null;
+      decodeImage.removeAttribute("src");
+      canvas.__framenestGifImage = null;
+    };
+    decodeImage.onerror = () => {
+      if (!active || canvas.__framenestGifImage !== decodeImage) return;
+      showUnavailable();
+    };
+    canvas.__framenestCleanup = () => {
+      active = false;
+    };
+    cardMediaElements.add(canvas);
+    surface.appendChild(canvas);
+    decodeImage.src = url;
   }
 
   const playButton = document.createElement("button");
@@ -1388,19 +1461,13 @@ function renderCatalogCard(item) {
 
   const actions = document.createElement("div");
   actions.className = "catalog-card__actions";
-  const detailsButton = document.createElement("button");
-  detailsButton.className = "catalog-card__action";
-  detailsButton.type = "button";
-  detailsButton.textContent = "Details";
-  detailsButton.setAttribute("aria-label", `Details for ${item.display_title || deriveCatalogFallbackTitle(item)}`);
-  detailsButton.addEventListener("click", () => openDetailsDialog(item, detailsButton));
   const editButton = document.createElement("button");
   editButton.className = "catalog-card__action catalog-card__action--primary";
   editButton.type = "button";
   editButton.textContent = "Edit";
   editButton.setAttribute("aria-label", `Edit ${item.display_title || deriveCatalogFallbackTitle(item)}`);
   editButton.addEventListener("click", () => handleOpenMetadataWorkspace(item, editButton));
-  actions.append(detailsButton, editButton);
+  actions.appendChild(editButton);
 
   card.append(mediaSurface, body, actions);
   return card;
@@ -1411,6 +1478,8 @@ function renderCatalogSuccess(page) {
   catalogResults.replaceChildren();
   catalogState.total = page.total;
   catalogState.offset = page.offset;
+  catalogState.limit = CATALOG_PAGE_SIZE_OPTIONS.includes(page.limit) ? page.limit : catalogState.limit;
+  syncCatalogPageSizeControl();
   if (commandSearchInput) commandSearchInput.value = page.q || catalogState.q;
   renderCatalogTagFilterStates();
   setCatalogPagination(page);
@@ -1558,10 +1627,23 @@ function updateMetadataControls() {
     metadataStatus.textContent = metadataStatus.textContent || "Please check this edit.";
   } else if (metadataWorkspace.statusOverride === "error") {
     metadataStatus.textContent = metadataStatus.textContent || "Save failed.";
-  } else if (metadataWorkspace.statusOverride === "saved") {
-    metadataStatus.textContent = "Saved.";
   } else {
     metadataStatus.textContent = "";
+  }
+  if (metadataAiAnalyzeButton) {
+    const location = metadataAiLocation();
+    const available = Boolean(aiCapability.available && location);
+    metadataAiAnalyzeButton.hidden = metadataWorkspace.aiSuggestionApplied && !metadataWorkspace.analyzing;
+    metadataAiAnalyzeButton.disabled = metadataWorkspace.loading
+      || metadataWorkspace.saving
+      || metadataWorkspace.analyzing
+      || metadataWorkspace.aiSuggestionApplied
+      || !available;
+    const idle = metadataAiAnalyzeButton.querySelector(".metadata-ai-analyze-button__idle");
+    const loading = metadataAiAnalyzeButton.querySelector(".metadata-ai-analyze-button__loading");
+    if (idle) idle.hidden = metadataWorkspace.analyzing;
+    if (loading) loading.hidden = !metadataWorkspace.analyzing;
+    metadataAiAnalyzeButton.setAttribute("aria-busy", metadataWorkspace.analyzing ? "true" : "false");
   }
 }
 
@@ -1642,6 +1724,7 @@ function renderMetadataWorkspace() {
     return;
   }
   metadataWorkspaceElement.hidden = false;
+  metadataWorkspaceTitle.textContent = metadataDialogHeading();
   metadataWorkspaceContext.textContent = metadataWorkspace.openItem
     ? (metadataWorkspace.openItem.display_title || deriveCatalogFallbackTitle(metadataWorkspace.openItem))
     : `Media ID ${metadataWorkspace.openMediaId}`;
@@ -1669,50 +1752,19 @@ function metadataAiLocation() {
 function renderMetadataAiPanel() {
   if (!metadataAiPanel) return;
   const location = metadataAiLocation();
-  const available = Boolean(aiCapability.available && location);
   metadataAiCapability.textContent = aiCapability.available
     ? `${aiCapability.provider_id || "AI"} / ${aiCapability.model_id || "configured model"}`
     : "AI analysis is not configured.";
   if (aiCapability.available && !location) {
     metadataAiCapability.textContent = "AI analysis needs an available local GIF or MP4.";
   }
-  metadataAiAnalyzeButton.disabled = metadataWorkspace.loading
-    || metadataWorkspace.saving
-    || metadataWorkspace.analyzing
-    || !available;
-  metadataAiLoading.hidden = !metadataWorkspace.analyzing;
-  if (metadataWorkspace.aiDraft) {
-    metadataAiDraft.hidden = false;
-    metadataAiTitleInput.value = metadataWorkspace.aiDraft.title;
-    metadataAiDescriptionInput.value = metadataWorkspace.aiDraft.description;
-    metadataAiTagsInput.value = metadataWorkspace.aiDraft.tags.join(", ");
-    metadataAiFilenameInput.value = metadataWorkspace.aiDraft.suggestedFilename;
+  if (metadataWorkspace.suggestedFilename) {
+    metadataAiSuggestion.hidden = false;
+    metadataAiFilenameInput.value = metadataWorkspace.suggestedFilename;
   } else {
-    metadataAiDraft.hidden = true;
-    metadataAiTitleInput.value = "";
-    metadataAiDescriptionInput.value = "";
-    metadataAiTagsInput.value = "";
+    metadataAiSuggestion.hidden = true;
     metadataAiFilenameInput.value = "";
   }
-}
-
-function metadataAiDraftFromInputs() {
-  const tags = metadataAiTagsInput.value
-    .split(",")
-    .map((tag) => normalizedTagDisplayName(tag))
-    .filter((tag) => tag.length > 0);
-  return {
-    title: metadataAiTitleInput.value.trim(),
-    description: metadataAiDescriptionInput.value.trim(),
-    tags,
-    suggestedFilename: metadataAiFilenameInput.value.trim(),
-  };
-}
-
-function storeMetadataAiDraftFromInputs() {
-  if (!metadataWorkspace.aiDraft) return;
-  metadataWorkspace.aiDraft = metadataAiDraftFromInputs();
-  metadataWorkspace.aiDraftDirty = true;
 }
 
 function aiSuggestionFromPayload(payload) {
@@ -1725,39 +1777,36 @@ function aiSuggestionFromPayload(payload) {
   };
 }
 
-function confirmDiscardEditedAiDraft() {
-  if (!metadataWorkspace.aiDraft || !metadataWorkspace.aiDraftDirty) {
-    return true;
-  }
-  return confirm("Discard the edited AI Draft?");
-}
-
 async function handleAnalyzeMetadataByAi() {
   if (!aiCapability.available) {
     metadataAiStatus.textContent = "AI analysis is not configured.";
     return;
   }
-  if (!confirmDiscardEditedAiDraft()) return;
+  if (metadataWorkspace.analyzing || metadataWorkspace.aiSuggestionApplied) return;
   const location = metadataAiLocation();
   if (!location) {
     metadataAiStatus.textContent = "AI analysis needs an available local GIF or MP4.";
     return;
   }
-  const provider = aiCapability.provider_id || "configured provider";
-  const model = aiCapability.model_id || "configured model";
   const accepted = confirm(
-    `FrameNest will send up to 3 optimized preview frames and limited media metadata to NVIDIA for analysis using ${provider} / ${model}. The original media file, local path, and API key are not uploaded.`,
+    "FrameNest will send up to 3 optimized preview frames and bounded metadata to NVIDIA. The original file, local path, and API key are not uploaded. Returned values will replace the current unsaved Title, Description, and Tags in this editor. The result will not be saved automatically, and the physical file will not be renamed.",
   );
   if (!accepted) {
-    metadataAiStatus.textContent = "AI analysis cancelled.";
+    metadataAiStatus.textContent = "";
     return;
   }
   const token = ++metadataAiRequestToken;
+  const beforeRequest = {
+    displayTitle: metadataWorkspace.current.displayTitle,
+    description: metadataWorkspace.current.description,
+    tagKeys: [...metadataWorkspace.current.tagKeys],
+    collectionKey: metadataWorkspace.current.collectionKey,
+    processedAtMs: metadataWorkspace.current.processedAtMs,
+    suggestedFilename: metadataWorkspace.suggestedFilename,
+  };
   metadataWorkspace.analyzing = true;
-  metadataWorkspace.aiDraft = null;
-  metadataWorkspace.aiDraftDirty = false;
-  metadataAiStatus.textContent = "Analyzing media...";
-  renderMetadataAiPanel();
+  metadataAiStatus.textContent = "Analyzing…";
+  updateMetadataControls();
   try {
     const response = await fetch(mediaAiSuggestionEndpoint(metadataWorkspace.openMediaId, location.location_id), {
       method: "POST",
@@ -1773,18 +1822,29 @@ async function handleAnalyzeMetadataByAi() {
     metadataWorkspace.analyzing = false;
     if (!response.ok) {
       metadataAiStatus.textContent = aiSuggestionErrorMessage(payload);
-      renderMetadataAiPanel();
+      metadataWorkspace.current = beforeRequest;
+      metadataWorkspace.suggestedFilename = beforeRequest.suggestedFilename;
+      renderMetadataWorkspace();
       return;
     }
-    metadataWorkspace.aiDraft = aiSuggestionFromPayload(payload);
-    metadataWorkspace.aiDraftDirty = false;
-    metadataAiStatus.textContent = "AI Draft ready. Review before using it.";
-    renderMetadataAiPanel();
+    const suggestion = aiSuggestionFromPayload(payload);
+    const tagKeys = await metadataTagKeysFromSuggestion(suggestion.tags);
+    if (token !== metadataAiRequestToken || metadataWorkspace.openMediaId === null) return;
+    metadataWorkspace.current.displayTitle = suggestion.title;
+    metadataWorkspace.current.description = suggestion.description;
+    metadataWorkspace.current.tagKeys = tagKeys;
+    metadataWorkspace.suggestedFilename = suggestion.suggestedFilename;
+    metadataWorkspace.aiSuggestionApplied = true;
+    metadataWorkspace.statusOverride = null;
+    metadataAiStatus.textContent = "Review the updated fields, then Save.";
+    renderMetadataWorkspace();
   } catch {
     if (token === metadataAiRequestToken) {
       metadataWorkspace.analyzing = false;
       metadataAiStatus.textContent = "AI analysis failed.";
-      renderMetadataAiPanel();
+      metadataWorkspace.current = beforeRequest;
+      metadataWorkspace.suggestedFilename = beforeRequest.suggestedFilename;
+      renderMetadataWorkspace();
     }
   }
 }
@@ -1824,12 +1884,10 @@ async function ensureMetadataTagKey(displayName) {
   return payload.tag.key;
 }
 
-async function handleUseMetadataAiDraft() {
-  if (!metadataWorkspace.aiDraft) return;
-  const draft = metadataAiDraftFromInputs();
+async function metadataTagKeysFromSuggestion(tags) {
   const folded = new Set();
   const tagNames = [];
-  for (const tag of draft.tags) {
+  for (const tag of tags) {
     const key = tag.toLocaleLowerCase();
     if (!folded.has(key)) {
       folded.add(key);
@@ -1837,36 +1895,14 @@ async function handleUseMetadataAiDraft() {
     }
   }
   if (tagNames.length > MAX_METADATA_TAGS) {
-    metadataAiStatus.textContent = "Tag limit reached.";
-    return;
+    throw new Error("Tag limit reached.");
   }
-  try {
-    const tagKeys = [];
-    for (const tag of tagNames) {
-      const key = await ensureMetadataTagKey(tag);
-      if (!tagKeys.includes(key)) tagKeys.push(key);
-    }
-    metadataWorkspace.current.displayTitle = draft.title;
-    metadataWorkspace.current.description = draft.description;
-    metadataWorkspace.current.tagKeys = tagKeys.slice(0, MAX_METADATA_TAGS);
-    metadataWorkspace.statusOverride = null;
-    metadataWorkspace.aiDraft = draft;
-    metadataWorkspace.aiDraftDirty = false;
-    metadataAiStatus.textContent = "Draft copied into the editor. Save when ready.";
-    renderMetadataWorkspace();
-  } catch {
-    metadataAiStatus.textContent = "Draft could not be applied. Manual edits are unchanged.";
-    metadataWorkspace.aiDraft = draft;
-    metadataWorkspace.aiDraftDirty = true;
-    renderMetadataAiPanel();
+  const tagKeys = [];
+  for (const tag of tagNames) {
+    const key = await ensureMetadataTagKey(tag);
+    if (!tagKeys.includes(key)) tagKeys.push(key);
   }
-}
-
-function handleDiscardMetadataAiDraft() {
-  metadataWorkspace.aiDraft = null;
-  metadataWorkspace.aiDraftDirty = false;
-  metadataAiStatus.textContent = "AI Draft discarded.";
-  renderMetadataAiPanel();
+  return tagKeys.slice(0, MAX_METADATA_TAGS);
 }
 
 function applyMetadataPayloadToWorkspace(payload) {
@@ -2025,14 +2061,15 @@ async function handleOpenMetadataWorkspace(item, openerElement) {
     notFound: false,
     statusOverride: null,
     analyzing: false,
-    aiDraft: null,
-    aiDraftDirty: false,
+    aiSuggestionApplied: false,
+    suggestedFilename: "",
     baseline: { displayTitle: null, description: null, tagKeys: [], collectionKey: null, processedAtMs: null },
     current: { displayTitle: "", description: "", tagKeys: [], collectionKey: null, processedAtMs: null },
   };
   metadataStatus.textContent = "";
   metadataValidationMessage.textContent = "";
   metadataAiStatus.textContent = "";
+  metadataAiFilenameInput.value = "";
   metadataTagSearchInput.value = "";
   metadataTagSuggestionState = { items: [], activeIndex: -1 };
   if (metadataDialog && typeof metadataDialog.showModal === "function") {
@@ -2143,8 +2180,8 @@ function closeMetadataWorkspace() {
     notFound: false,
     statusOverride: null,
     analyzing: false,
-    aiDraft: null,
-    aiDraftDirty: false,
+    aiSuggestionApplied: false,
+    suggestedFilename: "",
     baseline: { displayTitle: null, description: null, tagKeys: [], collectionKey: null, processedAtMs: null },
     current: { displayTitle: "", description: "", tagKeys: [], collectionKey: null, processedAtMs: null },
   };
@@ -2152,6 +2189,7 @@ function closeMetadataWorkspace() {
   metadataStatus.textContent = "";
   metadataValidationMessage.textContent = "";
   metadataAiStatus.textContent = "";
+  metadataAiFilenameInput.value = "";
   metadataTagSearchInput.value = "";
   metadataTagSuggestionState = { items: [], activeIndex: -1 };
   metadataTagSuggestions.replaceChildren();
@@ -2315,9 +2353,10 @@ async function handleSaveMetadata() {
     metadataWorkspace.saving = false;
     if (response.ok) {
       applyMetadataPayloadToWorkspace(payload.metadata);
-      setMetadataStatus("saved", "Saved.");
-      renderMetadataWorkspace();
+      metadataWorkspace.aiSuggestionApplied = false;
+      metadataWorkspace.suggestedFilename = "";
       await loadCatalog();
+      closeMetadataWorkspace();
       return;
     }
     const code = payload.error ? payload.error.code : "";
@@ -2812,6 +2851,7 @@ function prepareAiControls(card) {
 }
 
 function renderLibraries(libraries) {
+  if (!libraryList || !libraryCardTemplate) return;
   libraryList.replaceChildren();
   if (libraries.length === 0) {
     showLibraryState("empty");
@@ -2831,6 +2871,7 @@ function renderLibraries(libraries) {
 }
 
 async function loadLibraries() {
+  if (!libraryList || !libraryCardTemplate) return;
   showLibraryState("loading");
   try {
     const response = await fetch(LIBRARIES_ENDPOINT, {
@@ -3128,6 +3169,22 @@ catalogNextButton.addEventListener("click", () => {
   loadCatalog();
 });
 
+if (catalogPageSizeSelect) {
+  syncCatalogPageSizeControl();
+  catalogPageSizeSelect.addEventListener("change", () => {
+    const nextLimit = Number(catalogPageSizeSelect.value);
+    catalogState.limit = CATALOG_PAGE_SIZE_OPTIONS.includes(nextLimit) ? nextLimit : CATALOG_PAGE_SIZE;
+    catalogState.offset = 0;
+    syncCatalogPageSizeControl();
+    try {
+      window.localStorage.setItem(CATALOG_PAGE_SIZE_STORAGE_KEY, String(catalogState.limit));
+    } catch {
+      // Ignore unavailable localStorage; the in-memory selection still applies.
+    }
+    loadCatalog();
+  });
+}
+
 metadataTitleInput.addEventListener("input", () => {
   metadataWorkspace.current.displayTitle = metadataTitleInput.value;
   metadataWorkspace.statusOverride = null;
@@ -3155,10 +3212,8 @@ metadataDescriptionInput.addEventListener("input", () => {
 metadataSaveButton.addEventListener("click", handleSaveMetadata);
 metadataDiscardButton.addEventListener("click", handleDiscardMetadataChanges);
 metadataAiAnalyzeButton.addEventListener("click", handleAnalyzeMetadataByAi);
-metadataAiUseButton.addEventListener("click", handleUseMetadataAiDraft);
-metadataAiDiscardButton.addEventListener("click", handleDiscardMetadataAiDraft);
-[metadataAiTitleInput, metadataAiDescriptionInput, metadataAiTagsInput, metadataAiFilenameInput].forEach((input) => {
-  input.addEventListener("input", storeMetadataAiDraftFromInputs);
+metadataAiFilenameInput.addEventListener("input", () => {
+  metadataWorkspace.suggestedFilename = metadataAiFilenameInput.value;
 });
 
 function openSettingsDialog() {

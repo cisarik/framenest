@@ -53,11 +53,15 @@ membership remains derived automatically from durable tag saves, not chosen
 manually. The editor can explicitly run NVIDIA-backed analysis for an imported
 available GIF or MP4 after confirmation. That request sends up to three
 optimized preview frames plus bounded metadata, disables model reasoning for the
-validated JSON request, and returns a separate editable AI Draft containing
-title, description, tags, and suggested filename. The draft never overwrites
-manual work silently. `Use draft` changes only the unsaved editor state; Save
-remains explicit, and no physical rename occurs. Persistent drafts, model
-comparison, provider Settings, and explicit physical rename remain future work.
+validated JSON request, and can replace the current unsaved `Title`,
+`Description`, and `Tags` fields directly only after explicit confirmation. The
+confirmation must state that current unsaved fields will be replaced, that the
+result is not saved automatically, and that no physical rename occurs. A
+successful analysis may reveal one compact editable `Suggested filename` field
+inside the same editor; that field is not included in metadata Save and does
+not rename the file. Save remains explicit and closes the editor on success.
+Persistent drafts, model comparison, provider Settings, and explicit physical
+rename remain future work.
 
 The Details dialog now plays real local GIF and MP4 content through the
 identity-only `GET /api/media/{media_id}/locations/{location_id}/content`
@@ -65,14 +69,27 @@ endpoint when the first catalog location is `available`. It selects only by
 `media_id` and `location_id`; it never constructs playback URLs from relative
 paths, absolute paths, or library roots. Video uses a native `<video>` element
 with controls, metadata preload, and `playsinline`; animated images use a real
-`<img>`. Available local Gallery cards show immediate real media visuals:
-animated GIFs may animate directly, and MP4 items use a real paused decoded-frame
-visual from the identity-only content endpoint. A centered real `▶` affordance
-opens actual Details playback, while card actions are labelled `Details` and
-`Edit`. These immediate card visuals are not durable accepted covers, persistent
-thumbnails, or the future cover pipeline; generic available-media placeholders
-are rejected. Details is player-first. Native/VLC playback, downloadable files,
-and a broader media player are future work.
+`<img>`. Available local Gallery cards show immediate real media visuals. GIF
+cards use a static real-content preview so the grid does not animate
+automatically; GIF animation occurs in Details after explicit user interaction.
+MP4 cards use a real paused decoded-frame visual from the identity-only content
+endpoint with no autoplay, loop, card controls, or automatic audio. A centered
+real `▶` affordance and the media surface open actual Details playback, while
+the only visible card action is `Edit`. These immediate card visuals are not
+durable accepted covers, persistent thumbnails, or the future cover pipeline;
+generic available-media placeholders are rejected. Details uses a black
+player-first surface. Native/VLC playback, downloadable files, and a broader
+media player are future work.
+
+The Gallery header and pagination should stay compact: the temporary `FN` mark
+is sufficient branding in the current shell, status labels should be short and
+accessible, and pagination should offer bounded page-size choices without
+verbose navigation labels.
+
+Developer-oriented Library tools do not belong in the flagship Gallery
+surface. Future library selection belongs in `Settings > General`. Upload,
+central-server synchronization, server media storage, and download-on-demand
+remain unresolved separate product and architecture scope.
 Tag editing should support suggestions, keyboard and mouse navigation,
 rounded removable chips, an explicit `×` control, visible
 hover/focus/selected/AI-suggested/invalid states, case-insensitive duplicate

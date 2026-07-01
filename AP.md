@@ -598,7 +598,39 @@ A separate bootstrap-only task SHOULD still be used when:
 
 The Worker MUST stop before modification if the integrated bootstrap gate fails.
 
-## 37. Artifact Lifecycle and Repository Hygiene
+## 37. Numbered COOPERATOR Acceptance Feedback
+
+User-visible work is not fully accepted by source inspection or automated tests
+alone when rendered behavior, physical interaction, media playback, native UI,
+or device state matters.
+
+After implementation verification, the ORCHESTRATOR SHOULD prepare a numbered
+checklist of independently observable outcomes. Each item SHOULD test one clear
+behavior where practical.
+
+The COOPERATOR may respond to each item with:
+
+- `PASS`;
+- `FAIL`;
+- `NOT TESTED`;
+- any result followed by `+` and commentary;
+- `+` alone for new brainstorming or adjacent product feedback.
+
+The `+` marker adds evidence or context. It does not silently change the item
+status.
+
+Screenshots, video, logs, physical observations, or other evidence SHOULD
+identify the relevant item number and state.
+
+The ORCHESTRATOR MUST classify each response as accepted behavior, concrete
+defect, missing evidence, new product decision, or adjacent scope. Concrete
+defects MAY become bounded correction tasks. New ideas do not automatically
+expand the current Worker task.
+
+Rendered acceptance evidence MUST be distinguished from Worker-observed tests
+and static source claims.
+
+## 38. Artifact Lifecycle and Repository Hygiene
 
 Repository hygiene requires every committed documentation or evidence artifact to have a defined lifecycle. Artifact lifecycle rules apply proportionally and MUST NOT create bureaucracy heavier than the artifact itself.
 
