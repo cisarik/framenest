@@ -6,1021 +6,933 @@ You are a fresh Orchestrator instance assigned to the persistent,
 vendor-neutral FrameNest `ORCHESTRATOR` role.
 
 This file is the current repository-native Orchestrator handoff. It supersedes
-all earlier versions of `NEXT_ORCHESTRATOR.md` where they conflict. It restores
-context; it grants no repository-modification, Git, Worker-task, private-media,
-credential, cloud-call, runtime, or filesystem-mutation authority.
+all earlier versions of `NEXT_ORCHESTRATOR.md` where they conflict.
 
-Every concrete Worker task requires a new explicit ORCHESTRATOR prompt. Worker
-reports are evidence-bearing testimony, not repository truth. Public repository
-state must be independently verified before authorizing work. Do not revive old
-checkpoints, terminals, compacted execution state, temporary roots, browser
-sessions, pending commands, or closed Worker sessions.
+It restores context only. It grants no repository modification, Git,
+Worker-task, private-media, credential, provider-call, runtime, deployment, or
+filesystem-mutation authority.
 
-The current Orchestrator session closes with the enclosing handoff commit. The
-COOPERATOR, Michal, manually places this finalized file in the repository and
-creates the handoff commit. The expected enclosing commit subject is:
+Every concrete Worker task requires a new explicit ORCHESTRATOR prompt.
+
+Worker reports are evidence-bearing testimony, not repository truth. Public
+repository state must be independently verified before authorizing work.
+
+Do not revive old Worker sessions, checkpoints, terminals, compacted execution
+state, temporary roots, browser sessions, pending commands, or previously
+prepared prompts as authority.
+
+The Orchestrator session that created this file closes with the enclosing
+Orchestrator handoff commit.
+
+The COOPERATOR, Michal, manually places this finalized file in the repository
+and creates the handoff commit.
+
+Expected enclosing Orchestrator handoff subject:
 
 ```text
 handout
-```
 
 The enclosing commit SHA cannot be written here before the commit exists. A
-fresh Orchestrator instance must discover and verify it from public repository
-state.
+fresh Orchestrator instance must discover and verify it publicly.
 
-## 2. Enclosing Handoff Commit To Verify
+2. Enclosing Handoff Chain To Verify
 
-Immediately before Michal's Orchestrator handoff commit, public `main` is
-expected to be:
+Immediately before Michal's handout commit, public main is expected to
+contain a Worker closeout commit with:
 
-- SHA: `a661f0995b2d822c7e6ed8fe12fd26726bd02bdd`
-- Subject: `docs: close rendered UX worker session`
-- Parent: `db665e7053ed750f398164866b85e10e3f32e9cd`
-- Changed path: `NEXT_WORKER.md` only
+subject:
+docs: prepare server library worker handoff
+
+parent:
+c581c8d0c5620d91e5f93c38697a6026a5691d45
+
+changed path:
+NEXT_WORKER.md only
+
+The actual Worker closeout SHA must be discovered publicly. Do not infer or
+invent it from this file.
 
 The enclosing Orchestrator handoff commit is expected to:
 
-- have subject `handout`;
-- have parent `a661f0995b2d822c7e6ed8fe12fd26726bd02bdd`;
-- change only `NEXT_ORCHESTRATOR.md`;
-- contain this exact file as its public raw content.
+have subject handout;
+have the discovered Worker closeout commit as its parent;
+change only NEXT_ORCHESTRATOR.md;
+contain this exact file as its public raw content.
 
 The fresh Orchestrator must independently verify:
 
-1. public `refs/heads/main`;
-2. the enclosing handoff SHA;
-3. its parent and exact subject;
-4. changed-path count and exact changed path;
-5. raw public `NEXT_ORCHESTRATOR.md`;
-6. that the preceding Worker handoff commit is exactly
-   `a661f0995b2d822c7e6ed8fe12fd26726bd02bdd`;
-7. local/tracking/public equality where future Worker evidence is available.
+public refs/heads/main;
+the enclosing handout SHA;
+its parent and exact subject;
+changed-path count and exact changed path;
+raw public NEXT_ORCHESTRATOR.md;
+the preceding Worker closeout SHA;
+the Worker closeout parent, subject, and changed path;
+raw public NEXT_WORKER.md;
+that the latest product implementation boundary before handoffs is
+c581c8d0c5620d91e5f93c38697a6026a5691d45;
+local/tracking/public equality where future Worker evidence is available.
 
 Do not claim an enclosing handoff SHA from this file.
 
-## 3. Current Repository Truth
-
-- Project: `FrameNest`
-- Repository: `https://github.com/cisarik/framenest.git`
-- Normal local path: `/Users/agile/framenest`
-- Branch: `main`
-- Latest implementation boundary before Worker and Orchestrator handoffs:
-  `db665e7053ed750f398164866b85e10e3f32e9cd`
-- Implementation subject: `fix: apply rendered acceptance feedback`
-- Implementation parent: `78e69152ad60e97e8a61da02b110a7d21ecd64fd`
-- Current Worker handoff boundary before this Orchestrator handoff:
-  `a661f0995b2d822c7e6ed8fe12fd26726bd02bdd`
-- Worker handoff subject: `docs: close rendered UX worker session`
-- Migration head: `0007`
-- Highest accepted ADR: `ADR-0030`
-- Expected tracked worktree and index after handoff completion: clean.
-
-The implementation boundary remains `db665e7...`; the newer Worker and
-Orchestrator handoff commits are lifecycle/documentation boundaries, not product
-implementation.
-
-## 4. Human And Communication Context
+3. Human And Communication Context
 
 The COOPERATOR is Michal.
 
-Communicate with him in Slovak. Address him using masculine grammatical forms.
-Use feminine grammatical forms for Orchestrator self-reference. Worker prompts
-are in English. Worker reports are in English and begin exactly:
+Communicate with him in Slovak.
 
-```text
+Address Michal using masculine grammatical forms.
+
+Use feminine grammatical forms for Orchestrator self-reference.
+
+Worker prompts are in English.
+
+Worker reports are in English and begin exactly:
+
 ### Report for ORCHESTRATOR_CHAT
-```
 
-Distinguish:
+Distinguish explicitly between:
 
-- independently verified repository fact;
-- Worker-observed evidence;
-- COOPERATOR-observed rendered or physical evidence;
-- inference;
-- recommendation;
-- unresolved product or architecture decision.
+independently verified repository fact;
+Worker-observed evidence;
+COOPERATOR-observed rendered or physical evidence;
+inference;
+recommendation;
+unresolved product or architecture decision.
 
 Michal retains final authority over:
 
-- rendered and physical UX acceptance;
-- Worker and Orchestrator rotation timing;
-- private-media access;
-- cloud upload confirmation;
-- credentials;
-- destructive or irreversible filesystem actions;
-- final product direction.
+rendered and physical UX acceptance;
+Worker and Orchestrator rotation timing;
+private-media access;
+credentials;
+real provider calls;
+cloud-upload confirmation;
+destructive or irreversible filesystem actions;
+final product direction.
 
-Do not ask him to perform ordinary Git, migration, test, build, runtime,
-repository-maintenance, or disposable-environment commands. Process ceremony
-must not replace visible product progress. Ask at most one focused product
-question only when a real unresolved choice blocks safe implementation.
+Do not ask Michal to perform ordinary Git, migration, test, build, runtime,
+repository-maintenance, or disposable-environment commands.
 
-## 5. Worker And Orchestrator Lifecycle
+Process ceremony must not replace visible product progress.
 
-The Worker session closed by
-`a661f0995b2d822c7e6ed8fe12fd26726bd02bdd` is definitively closed. No active
-Worker remains after that commit. The next implementation must use a fresh
-Worker instance assigned to the persistent `WORKER` role.
+Ask at most one focused product question only when a genuine unresolved choice
+blocks safe implementation.
 
-Do not revive the closed Worker merely because its client window may still
-exist. Do not resume compacted memory, old task state, old temporary roots, old
-browser state, or previously prepared prompts as authority.
+4. Current Repository Truth
+Project: FrameNest
+Repository: https://github.com/cisarik/framenest.git
+Normal local path: /Users/agile/framenest
+Branch: main
+Latest product implementation boundary:
+c581c8d0c5620d91e5f93c38697a6026a5691d45
+Implementation subject:
+fix: honor hidden UI states
+Implementation parent:
+1af36706530f763173742398aec4dda09ee62380
+Migration head: 0007
+Highest accepted ADR: ADR-0030
+Expected tracked worktree and index after both handoffs: clean
+Expected active disposable runtime after closeout: none
+Active Worker after verified closeout: none
 
-The current Orchestrator session closes with Michal's enclosing `handout`
-commit. A fresh Orchestrator instance must restore state from public repository
-truth and this file.
+The Worker and Orchestrator handoff commits are lifecycle/documentation
+boundaries, not product implementation boundaries.
 
-Orchestrator rotation and Worker rotation are independent lifecycles:
+5. Worker And Orchestrator Lifecycle
 
-- rotating the Orchestrator does not activate or rotate a Worker;
-- rotating a Worker does not activate or rotate the Orchestrator;
-- handoff files restore context but grant no concrete task authority.
+The Worker session closed immediately before this Orchestrator handoff is
+definitively closed.
 
-## 6. Context Pressure And Automatic Compaction
+It must receive no further task, even if its client window still exists.
 
-Michal decides when a concrete Worker or Orchestrator context is no longer
-trustworthy enough to continue.
+The next implementation requires a fresh Worker instance assigned to the
+persistent WORKER role.
 
-Observed Worker-session evidence from this project:
+The next Worker should normally use Medium reasoning.
 
-- a first automatic context compaction did not prevent a carefully bounded
-  implementation task from completing successfully after repository and
-  protocol restoration;
-- a later Worker session also completed a documentation-only closeout after a
-  second compaction;
-- another Worker was closed before assigning further implementation when its
-  context was reported full;
-- exact token usage was frequently not exposed by the execution client.
+The next Orchestrator instance is expected to use High reasoning.
 
-Operational guidance:
+Orchestrator and Worker rotations are independent:
 
-1. Compaction is not a clean-session reset.
-2. After compaction, require rereading current protocol and handoff files,
-   repeating repository gates, and reconstructing authority from the exact
-   current prompt.
-3. Continue only when scope, security boundaries, repository state, and intended
-   outcome are unambiguous.
-4. Prefer a fresh Worker for a new substantial logical slice when context is
-   already full or a second compaction is imminent.
-5. A Worker near lifecycle close should receive only a bounded closeout task
-   replacing `NEXT_WORKER.md`, validating it, committing it, and pushing it.
-6. Do not plan implementation through a third compaction.
-7. Never estimate token usage or compaction count when the client does not
-   expose it.
+rotating the Orchestrator does not activate a Worker;
+rotating the Worker does not rotate the Orchestrator;
+handoff files restore context but grant no concrete task authority.
+6. Context Pressure And Prompt Economy
 
-These are risk controls, not a claim that every first compaction must force
-immediate rotation. Michal retains the final rotation decision.
+The closed Worker experienced one automatic context compaction and later
+reported approximately 54% context usage as observed by the COOPERATOR. The
+execution client did not expose exact token usage.
 
-## 7. Implemented Product Horizon
+It successfully completed bounded work after compaction, but a new substantial
+logical slice must use a fresh Worker.
+
+Operational rules:
+
+Compaction is not a fresh-session reset.
+After compaction, require repository and protocol restoration before
+continuing.
+Do not plan substantial implementation through repeated compactions.
+Use Medium reasoning for normal implementation, bugfix, tests, and Git work.
+Reserve High reasoning for genuinely difficult architecture, security,
+transaction, concurrency, or recovery problems.
+Keep Worker prompts compact.
+Do not restate the entire handoff in every Worker prompt.
+Instruct a fresh Worker to read current repository-native protocol and
+handoff files.
+Put only exact gates, scope, invariants, validation, Git authority, and
+report requirements into the concrete task prompt.
+Separate implementation from disposable rendered-acceptance setup when
+practical.
+
+A previous oversized first Worker prompt consumed approximately 63% of its
+context. Do not repeat that pattern.
+
+7. Recent Implementation Sequence
+
+Important recent commits:
+
+af020f77735e258f2536d2ff6f8ec6251ebd3a95
+fix: refine gallery and AI editor UX
+d2f31b49b12fee2ca0f13f9bff40770d4ede5bf1
+feat: add server AI CLI and Vercel provider
+b51d95e266e1eb39163822253fc74d66e6a2d7fa
+fix: load local AI credentials consistently
+1af36706530f763173742398aec4dda09ee62380
+fix: refine status and AI progress UX
+c581c8d0c5620d91e5f93c38697a6026a5691d45
+fix: honor hidden UI states
+
+Do not resume older product assumptions where these commits, current code, this
+handoff, or later COOPERATOR decisions conflict.
+
+8. Implemented Product Horizon
 
 FrameNest currently has:
 
-- a loopback-first FastAPI application;
-- a packaged same-origin vanilla HTML/CSS/JavaScript frontend;
-- SQLite with SQLAlchemy Core;
-- Alembic migrations through `0007`;
-- device and library registration;
-- explicit read-only scanning;
-- idempotent candidate import;
-- persistent logical media and physical locations;
-- editable title, description, and ordered canonical tags;
-- internal automatic `Processed` behavior hidden from ordinary editor UX;
-- catalog search and tag filtering;
-- bounded pagination with `10`, `30`, `60`, and `90` items per page;
-- local development launcher commands through root `./framenest`;
-- secure identity-only GIF/MP4 streaming;
-- full and single-range MP4 responses;
-- real media card visuals;
-- static real-content GIF card previews;
-- paused, muted real MP4 card previews;
-- real GIF and MP4 playback in Details;
-- a simplified single-form media editor;
-- explicit NVIDIA-backed imported-media analysis;
-- direct AI population of current unsaved editor fields;
-- an editable Suggested filename proposal;
-- no automatic metadata save;
-- no physical rename yet;
-- reusable numbered COOPERATOR acceptance methodology in `AP.md` and
-  `AP_ORCHESTRATOR.md`.
+a loopback-first FastAPI application;
+a packaged same-origin vanilla HTML/CSS/JavaScript frontend;
+SQLite with SQLAlchemy Core;
+Alembic migrations through 0007;
+device and library registration;
+explicit read-only scanning;
+idempotent candidate import;
+persistent logical media and physical locations;
+editable title, description, and ordered canonical tags;
+hidden internal Processed behavior;
+catalog search and tag filtering;
+bounded pagination;
+root ./framenest developer/operator launcher;
+secure identity-only GIF/MP4 content delivery;
+full and single-range MP4 responses;
+real-content Gallery visuals;
+static GIF card previews;
+paused MP4 card previews;
+real GIF and MP4 Details playback;
+native MP4 controls and seeking;
+a single metadata editor;
+server-side AI media analysis;
+direct population of unsaved Title, Description, Tags, and Suggested
+filename;
+no AI autosave;
+no physical filename rename;
+NVIDIA NIM provider support;
+Vercel AI Gateway provider support;
+provider-neutral server AI configuration;
+server-operator AI CLI;
+provider-neutral local-development credential loading;
+read-only browser Status diagnostics;
+numbered COOPERATOR acceptance methodology.
 
-Important recent implementation sequence:
+Do not claim that the full server/client MVP is finished.
 
-- `815039506be9cc8e7ffa72ca88ad234e314b628e`
-  `fix: stabilize details media loading`
-- `a15dfef0bcb1e9827087f12f8b8b8d04fcee9b77`
-  `feat: make gallery playback content-first`
-- `d7aabd36b64d3b9ab6420aaf43b182a3aba2d958`
-  `feat: simplify media editor UX`
-- `67d7ec9061b2ecaac8826ba1e39ebd1d47055872`
-  `feat: integrate AI media drafts`
-- `db665e7053ed750f398164866b85e10e3f32e9cd`
-  `fix: apply rendered acceptance feedback`
+9. Secure Media Playback Truth
 
-Do not claim the current Gallery is a finished MVP. It is materially closer,
-but one small rendered-acceptance correction is still pending, followed by
-physical rename and first-run onboarding/import.
+The identity-only content endpoint remains the authority for media playback:
 
-## 8. Secure Media Content And Playback
-
-The secure identity-only media endpoint remains:
-
-```text
 GET /api/media/{media_id}/locations/{location_id}/content
-```
 
-Current accepted security and behavior boundaries include:
+Accepted boundaries include:
 
-- media/location/library relationship authorization;
-- location availability checks;
-- exact supported GIF/MP4 kind-extension pairs;
-- registered-root containment;
-- traversal rejection;
-- symlink-escape prevention;
-- no arbitrary path-serving API;
-- no absolute-path disclosure;
-- read-only content serving;
-- full response and one byte-range request;
-- sanitized failures;
-- stable media cleanup and stale-event protection.
+media/location/library relationship validation;
+availability validation;
+exact GIF/MP4 kind-extension support;
+registered-root containment;
+traversal rejection;
+symlink-escape prevention;
+no arbitrary path-serving API;
+no absolute-path disclosure;
+read-only content serving;
+full responses;
+one MP4 byte-range request;
+sanitized failures.
 
 COOPERATOR-observed evidence established:
 
-- GIF animates in Details;
-- MP4 loads and plays;
-- native controls are visible;
-- seeking works;
-- switching from MP4 to GIF stops MP4;
-- closing the Details player stops playback;
-- black player-first Details styling is accepted.
+GIF playback works;
+MP4 playback works;
+MP4 native controls and seeking work;
+closing or replacing Details stops playback;
+Gallery media surfaces open Details playback;
+no visible private path is exposed.
+10. AI Architecture Truth
 
-Static source tests are not a substitute for rendered evidence, but the core
-playback path is now both automated-test covered and manually observed.
+AI provider execution occurs only on the authoritative FrameNest server.
 
-## 9. Current Gallery And Details UX
+Ordinary browser clients:
 
-At implementation boundary `db665e7...`:
+never receive provider credentials;
+never configure provider credentials;
+never activate providers;
+never select provider models;
+never call NVIDIA, Vercel, Google, or another provider directly;
+request analysis only from the FrameNest server;
+receive only sanitized capability and result data.
 
-- available GIF cards display static real-content previews;
-- available MP4 cards display real paused frames;
-- GIF cards do not animate automatically;
-- clicking a card's media surface opens real Details playback;
-- the visible `Details` card button has been removed;
-- `Edit` remains;
-- a visible centered circular `▶` control still exists;
-- Details has a black player-first surface;
-- title is not unnecessarily duplicated;
-- Technical details start collapsed;
-- native MP4 controls and seeking remain;
-- card and Details URLs remain identity-only;
-- there is no durable accepted cover or persistent thumbnail pipeline yet.
+Supported providers:
 
-Latest COOPERATOR decision:
+nvidia-nim
+vercel-ai-gateway
 
-- the visible `▶` is now rejected as redundant because the card media surface
-  already performs the same playback action;
-- the attractive circular styling should be reused for the header `FN` brand
-  mark instead of being discarded;
-- media-surface mouse and keyboard accessibility must remain after removing the
-  visible overlay.
+Current NVIDIA model:
 
-This correction is not implemented at the handoff boundary.
+nvidia/nemotron-3-nano-omni-30b-a3b-reasoning
 
-## 10. Current Editor And AI UX
+Preferred Vercel model:
 
-At `db665e7...` the media editor has:
+google/gemini-3.1-flash-lite
 
-- dynamic heading from current title or filename fallback;
-- exactly one Title field;
-- exactly one Description field;
-- one searchable Tags interaction;
-- selected display-name chips with `×` removal;
-- hidden canonical keys;
-- hidden Processed semantics;
-- Save and Cancel;
-- explicit AI confirmation;
-- direct AI population of the existing unsaved fields;
-- editable Suggested filename proposal;
-- successful Save closing and refreshing the Gallery;
-- no automatic save from AI;
-- no physical file rename.
+Accepted credential environment variables:
 
-The older duplicated AI Draft form, `Use draft`, and `Discard draft` controls no
-longer exist.
+NVIDIA_API_KEY
+AI_GATEWAY_API_KEY
 
-Latest screenshot-backed defect:
+Local development may use the ignored file:
 
-- during an active request, the AI button visibly contains both the idle label
-  and the loading label/spinner;
-- idle and loading content are not mutually exclusive.
+.secrets/ai.env.fish
 
-Latest accepted correction decisions:
+The root launcher validates and loads that exact provider-neutral file for
+relevant managed commands.
 
-1. Idle button label must be exactly `🧠 Analyze by AI`.
-2. Idle state shows no spinner and no `Analyzing…` text.
-3. During a real request, the entire button content becomes only the familiar
-   spinner plus `Analyzing…`.
-4. After a successful AI result, hide the Analyze action for the remainder of
-   that modal-open session.
-5. Remove the always-visible provider/model line from the ordinary editor.
-6. Keep the explicit cloud confirmation.
-7. Keep one Title/Description/Tags state only.
-8. Suggested filename remains an editable proposal until the dedicated rename
-   slice.
+The file may contain both provider credentials, but provider activation and
+model selection are non-secret server configuration.
 
-These corrections are not implemented at the handoff boundary.
+Never print, log, summarize, hash, partially reveal, stage, or commit its
+contents or credential values.
 
-## 11. Current AI Integration Truth
+Fedora production credentials must later use an appropriate service-secret or
+systemd boundary. The local Fish file is not the final production secret store.
 
-Imported-media AI analysis uses the identity-only endpoint:
+11. AI CLI Truth
 
-```text
+Implemented commands:
+
+./framenest ai status
+./framenest ai configure
+./framenest ai test
+
+ai status:
+
+is network-free;
+reports active provider/model and safe configuration state;
+stores only a safe operational status snapshot and timestamp;
+must not claim live provider reachability.
+
+ai configure:
+
+changes only non-secret server provider/model configuration;
+performs no provider request;
+stores no credential.
+
+ai test:
+
+is the explicit server-operator live provider check;
+performs one minimal text-only request;
+uploads no media;
+stores only a sanitized result category and timestamp.
+
+A real NVIDIA ai test succeeded.
+
+A real NVIDIA media analysis subsequently succeeded and populated useful
+metadata.
+
+The historical AI unavailable failure was traced to the root launcher not
+loading an already existing local secrets file. Commit
+b51d95e266e1eb39163822253fc74d66e6a2d7fa fixed that environment propagation.
+
+Do not revive the assumption that NVIDIA code was broken merely because the
+earlier runtime lacked the inherited credential.
+
+Vercel provider code exists, but a live Vercel provider smoke is not yet
+accepted evidence.
+
+12. AI Media Analysis Security
+
+Imported-media analysis remains explicit and confirmation-gated.
+
+The identity-only endpoint remains:
+
 POST /api/media/{media_id}/locations/{location_id}/ai-suggestion-preview
-```
 
-Current provider/model behavior:
+Current boundaries:
 
-- provider: NVIDIA NIM;
-- model: `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning`;
-- prompt version: `framenest-media-suggestion-v3`;
-- reasoning disabled explicitly through
-  `chat_template_kwargs.enable_thinking=false`;
-- maximum three optimized JPEG representative frames;
-- bounded path-free technical metadata;
-- strict validated JSON response;
-- server-side credential only;
-- explicit user confirmation required;
-- no request on Gallery, Details, or editor open;
-- no original GIF/MP4 upload;
-- no absolute path upload;
-- no API-key exposure;
-- no chain-of-thought request, display, or persistence;
-- no metadata save or filesystem mutation during analysis.
+maximum three optimized derived JPEG frames;
+bounded path-free technical metadata;
+strict validated result;
+no original GIF/MP4 upload;
+no absolute path upload;
+no API-key exposure;
+no browser-side provider call;
+no chain-of-thought request, display, or persistence;
+no automatic request on Gallery, Details, editor, or Status open;
+no automatic metadata save;
+no physical rename.
 
-The response provides:
+The result contains:
 
-- title;
-- description;
-- tags;
-- suggested filename.
+title;
+description;
+tags;
+suggested filename.
+13. Current Gallery, Editor, And Status UX
 
-AI results populate only the current unsaved editor state after explicit
-confirmation. Manual editing remains fully usable without AI or internet.
+Accepted MVP-level direction:
 
-Worker-observed live NVIDIA evidence from the explicitly authorized local media:
+premium dark terminal-glass visual style;
+real-content Gallery cards;
+content-first playback;
+one metadata editor state;
+compact UI;
+minimal explanatory text;
+FN circular branding;
+header status controls Cloud and AI;
+read-only Status modal;
+AI and Cloud tabs;
+no provider administration in browser;
+no library administration in Gallery.
 
-GIF proposal:
+AI action:
 
-- Title: `Leonardo DiCaprio Clapping`
-- Description: `Leonardo DiCaprio in a suit claps his hands with a subtle smile, appearing to applaud in an office setting.`
-- Tags: `Leonardo DiCaprio`, `Clapping`, `Office`, `Reaction`, `Meme`
-- Suggested filename: `leonardo-di-caprio-clapping.gif`
+idle label: Analyze by AI;
+active label: Analyzing…;
+no spinner;
+active request uses a prominent animated background;
+duplicate requests are blocked;
+successful analysis hides the action for the current modal session;
+failure restores it;
+fields remain editable;
+Save does not rename a physical file.
 
-MP4 proposal:
+Commit c581c8d0c5620d91e5f93c38697a6026a5691d45 added a global semantic
+hidden-state invariant:
 
-- Title: `Man Pointing While Holding Cup`
-- Description: `A man in a yellow shirt sits in a chair, holding a cup and pointing forward with his other hand.`
-- Tags: `Man`, `Pointing`, `Cup`, `Yellow Shirt`, `Chair`, `Indoor`, `Reaction`
-- Suggested filename: `dicaprio-pointing-cup.mp4`
+[hidden] {
+  display: none !important;
+}
 
-Two successful provider calls were made in that controlled smoke. There was no
-retry, no auto-save, no rename, no original-file upload, and no observed
-credential/path/prompt/frame/raw-response leakage. Do not rerun those provider
-calls merely to reproduce already sufficient evidence.
+This corrected a CSS cascade problem where hidden Status panels, optional rows,
+and the post-success Analyze action remained rendered.
 
-The established ignored local credential source may be
-`.secrets/nvidia.env.fish`. Never print, stage, commit, summarize, hash, or
-partially reveal its value. A future task must independently verify that no real
-credential is tracked or staged before a provider call.
+Automated tests cover the invariant.
 
-## 12. Latest COOPERATOR Rendered Acceptance
+A final rendered reconfirmation of the c581c8d... correction was not recorded
+before Worker rotation. It may be reconfirmed alongside the next useful
+acceptance environment rather than creating a dedicated UX-only ceremony.
 
-The latest numbered acceptance report is COOPERATOR-observed rendered evidence.
+14. UX Freeze For MVP
 
-Accepted:
+Michal values polished UX and the current visual direction is accepted.
 
-1. real card visuals;
-2. static GIF card behavior;
-3. paused MP4 card behavior;
-4. media-surface playback;
-5. black player-first Details;
-6. MP4 playback and seeking;
-7. one editor field set;
-8. dynamic editor heading;
-9. truthful cloud confirmation;
-10. useful AI result quality;
-11. editable AI-populated values;
-12. no autosave before Save;
-13. successful Save closes and refreshes;
-14. pagination basics;
-15. removal of Library tools;
-16. no visible private/internal leakage.
+However, broad visual polishing is now frozen until after MVP.
 
-Confirmed correction needs and accepted product refinements:
+Before MVP:
 
-1. Remove the redundant visible centered `▶` card control.
-2. Preserve media-surface playback and keyboard accessibility.
-3. Reuse its circular visual treatment for header `FN` branding.
-4. Fix mutually exclusive AI idle/loading content.
-5. Use exact idle label `🧠 Analyze by AI`.
-6. Use only spinner plus `Analyzing…` during a request.
-7. Hide the Analyze action after successful analysis in that modal session.
-8. Remove the ordinary editor's provider/model line.
-9. Rename visible status `Server` to `Cloud`.
-10. Rename visible AI status to `🧠 AI`.
-11. Use green visible text when healthy/available, red when unavailable, and
-    subdued neutral only while checking.
-12. Try a white-border hover treatment for status pills.
-13. Try a white-border hover treatment for main Gallery tag/filter controls.
-14. Give selected-tag `×` a clearly red destructive-looking hover/focus state,
-    while keeping its current bounded meaning: remove from this media only.
-15. Remove visible `Catalog` and `Imported media` headings for compactness.
+fix concrete usability defects;
+fix misleading states;
+fix accessibility regressions;
+fix broken interactions;
+do not spend substantial slices on cosmetic refinements;
+prioritize server/client workflow and real product capability.
 
-Screenshot evidence is optional, not mandatory ceremony. The latest single
-screenshot was sufficient to establish the AI-button state bug. Do not demand
-many screenshots when Michal's direct rendered report is already precise.
+Do not restart a visual redesign without a new explicit COOPERATOR decision.
 
-## 13. Immediate Next Worker Task
+15. Server And Client Product Direction
 
-After verifying the enclosing Orchestrator handoff commit, the fresh
-Orchestrator should open a fresh Worker session and issue one bounded correction
-task.
+The intended product direction is server-authoritative.
 
-Task name:
+The Fedora Linux server will run:
 
-```text
-Refine post-acceptance Gallery and AI editor UX
-```
+the authoritative backend;
+the catalog database;
+media storage;
+AI provider execution;
+server-operator CLI;
+media streaming and future download endpoints.
+
+The Fedora server may also display the client UI locally.
+
+Ordinary remote devices run only the client.
+
+Ordinary clients:
+
+consume server catalog state;
+view covers/previews;
+stream media;
+explicitly request downloads;
+explicitly request AI analysis;
+never configure server filesystem paths;
+never receive provider credentials.
+
+Tailscale is a high-priority future remote-access direction.
+
+Current Cloud transport is truthfully local loopback.
+
+Do not:
+
+infer authentication from matching client/server IP;
+attempt MAC-address identity;
+trust browser-supplied forwarding headers;
+fake Tailscale availability.
+
+Future Tailscale status and identity must come from an authoritative integration
+boundary.
+
+16. Immediate Next Task
+
+The next concrete task must use a fresh Worker instance with Medium reasoning.
+
+Task:
+
+Add a server-operator library onboarding and refresh workflow
 
 Expected implementation commit subject:
 
-```text
-fix: refine gallery and AI editor UX
-```
+feat: add server library workflow
 
-Expected starting HEAD:
+The new ORCHESTRATOR prompt should authorize exactly:
 
-- the exact enclosing Orchestrator `handout` commit SHA discovered publicly;
-- not merely `a661f099...`;
-- the Worker prompt must insert the real exact handoff SHA, parent, subject, and
-  changed path after verification.
+./framenest library status
+./framenest library add
+./framenest library refresh
 
-The correction must implement only:
+The root Fish wrapper must remain thin. Use testable Python CLI/application
+boundaries and the existing device, library, scan, and import services.
 
-- removal of the redundant visible `▶` control;
-- preservation of media-surface playback and keyboard accessibility;
-- circular `FN` brand treatment based on the accepted former play-control
-  styling without creating a fake button;
-- visible `Cloud` and `🧠 AI` status labels;
-- green/red/neutral state-colored visible status text;
-- accessible hidden/title state descriptions;
-- white-border hover/focus refinement for status pills;
-- white-border hover/focus refinement for Gallery tag/filter controls;
-- red hover/focus styling for the selected-tag `×` remove control;
-- removal of visible `Catalog` and `Imported media` headings;
-- removal of visible provider/model noise from the editor;
-- exact idle AI label `🧠 Analyze by AI`;
-- no idle spinner or idle `Analyzing…`;
-- active button content only spinner plus `Analyzing…`;
-- duplicate-request prevention;
-- hiding Analyze after success for that modal-open session;
-- existing confirmation, field population, Suggested filename, Save, Cancel,
-  cleanup, stale-response, and security behavior;
-- narrow `GALLERY.md` and `AI_WORKSPACE.md` reconciliation;
-- automated validation;
-- a new disposable rendered-acceptance environment.
+library add
 
-Do not include physical rename, global tag deletion, Settings, sync, onboarding,
-demo mode, or Tauri in this correction.
+Requirements:
 
-### Preferred write allowlist
+interactive and explicit non-interactive operation;
+absolute existing server-local directory only;
+display name with a safe default;
+deterministic device resolution;
+read-only scan summary before confirmation;
+explicit durable import confirmation;
+idempotent import;
+no copy, move, rename, delete, transcode, AI request, or upload;
+no browser path endpoint;
+no background watch.
 
-Prefer only:
+Device resolution:
 
-- `GALLERY.md`
-- `AI_WORKSPACE.md`
-- `src/framenest/adapters/api/web/index.html`
-- `src/framenest/adapters/api/web/app.js`
-- `src/framenest/adapters/api/web/styles.css`
-- `tests/contract/test_local_web_application.py`
+no registered device:
+create one stable FrameNest Server device only inside a confirmed durable
+operation;
+exactly one device:
+reuse it;
+multiple devices:
+require explicit selection;
+never guess.
 
-Allow one additional existing frontend test file only if inspection proves it
-is the correct established location. Do not silently expand scope.
+Existing canonical root:
 
-### Required implementation evidence
+reuse it;
+do not duplicate it because of a different display name;
+offer the same refresh/import behavior.
+library refresh
 
-Tests should prove at minimum:
+Requirements:
 
-1. visible `▶` card control is absent;
-2. media surface still opens real Details playback;
-3. media surface remains keyboard accessible;
-4. `Edit` remains;
-5. `FN` uses the circular brand treatment without becoming a deceptive inert
-   button;
-6. visible statuses are `Cloud` and `🧠 AI`;
-7. accessible status truth remains available;
-8. healthy/available, unavailable, and checking states receive correct visible
-   text classes;
-9. white-border hover/focus classes exist for status and Gallery tag/filter
-   controls;
-10. selected-tag `×` has red hover/focus styling without global-deletion
-    behavior;
-11. `Catalog` and `Imported media` headings are absent;
-12. editor still has exactly one Title, one Description, and one Tags workflow;
-13. provider/model line is absent from ordinary editor view;
-14. idle button is exactly `🧠 Analyze by AI`;
-15. idle state contains no spinner or `Analyzing…`;
-16. request state replaces the complete button content with spinner plus
-    `Analyzing…`;
-17. no second spinner appears;
-18. successful response populates current fields and Suggested filename;
-19. successful response hides the Analyze action for that open session;
-20. failure restores the idle button and preserves values;
-21. confirmation remains mandatory;
-22. Save still does not rename a file;
-23. `×` still removes only from the current media;
-24. no private path, canonical key, credential, prompt, data URL, or raw
-    provider response appears.
+select by ID or use the only library;
+require explicit choice when multiple exist;
+run safe scan;
+display summary;
+require confirmation;
+import only new exact candidates;
+repeated refresh remains idempotent;
+do not delete missing media;
+do not mark missing media unavailable;
+do not modify existing metadata or tags.
+library status
 
-### Required validation
+Requirements:
 
-Use focused affected tests, then:
+read-only;
+network-free;
+no scan;
+show device and library counts;
+show library IDs and display names;
+local operator CLI may show absolute roots;
+show total and available imported-location counts;
+browser APIs must remain path-free.
 
-```text
-node --check src/framenest/adapters/api/web/app.js
-poetry run pytest
-git diff --check
-```
+Use temporary databases and synthetic media trees in tests.
 
-Validate local Markdown links in changed documentation. Inspect the complete and
-staged diff, exact changed-path set, tracked/staged credential-shaped patterns,
-and final cleanliness. Ruff is not a required gate unless intentionally added
-as a committed dependency.
+No migration should be added unless inspection proves one strictly necessary
+and the ORCHESTRATOR separately authorizes it.
 
-Require exactly one commit with the expected subject, normal push, no
-force-push, post-push local/tracking/public equality, and a clean final tracked
-worktree/index.
+17. Acceptance After Library Workflow
 
-## 14. Private Local Media For Acceptance
+After independently verifying the implementation commit, use a separate short
+prompt to prepare a disposable acceptance environment.
 
-Two optional local acceptance inputs may exist only in Michal's local clone:
+Acceptance should prove:
 
-- `assets/gif/dicaprio_bravo.gif`
-  SHA-256:
-  `a5102a628c3409de6def8a21ebda8a30133abbbf3181336fc92727d50f92ce50`
-- `assets/mp4/dicaprio.mp4`
-  SHA-256:
-  `520d43ee7f5853fec1aa9d72908b8d1a45a004a634a7558ff2889a32ff8e7ca9`
+a server-local test library can be added through the CLI;
+the scan summary appears before confirmation;
+confirmed import populates the catalog;
+the existing Gallery displays the imported media;
+Details playback works;
+repeated refresh creates no duplicate;
+adding a new file and refreshing imports only the new candidate;
+no source file is changed;
+browser responses expose no server root path;
+the hidden-state correction still renders Status tabs and the post-success
+AI action correctly when AI is exercised.
+
+Do not mix library implementation and acceptance-runtime setup into one large
+initial Worker prompt unless necessary.
+
+18. MVP Sequence After Library Onboarding
+
+Recommended order:
+
+Server library add/status/refresh workflow.
+Verify server-imported media naturally appears in Gallery and playback.
+Secure explicit media download.
+Persistent server-generated covers/previews appropriate for remote clients.
+Fedora service/deployment workflow.
+Authoritative Tailscale remote access.
+Trusted client-local download registration and availability.
+Thin native/Tauri client once the server workflow is coherent.
+
+This order may be adjusted by Michal, but do not silently expand one task into
+several slices.
+
+19. Explicit Download Direction
+
+Michal wants a client user to:
+
+see server media;
+play it from the server;
+explicitly download it;
+eventually see it as available locally.
+
+The first browser download slice should provide:
+
+an explicit Download action;
+identity-only authorization;
+safe content disposition;
+an appropriate suggested filename;
+no automatic background download;
+no server path disclosure;
+no catalog mutation claiming local availability.
+
+A browser download request alone does not prove:
+
+the final destination path;
+successful completion;
+continued file existence;
+a trustworthy client-local physical location.
+
+Therefore the browser MVP must not mark media Available on this device merely
+because download was initiated.
+
+A later trusted native/local-client boundary may:
+
+choose or confirm a destination;
+verify completion;
+register the local location;
+report Available on this device truthfully.
+
+Do not hardcode a Desktop path from ordinary browser JavaScript.
+
+20. Cover Pipeline Direction
+
+Current cards display real-content previews, but there is no durable persistent
+server-generated cover pipeline.
+
+For remote clients this matters because Gallery cards should not require
+unnecessary transfer or decoding of large original media merely to display a
+cover.
+
+A future bounded cover task should determine:
+
+server-generated static GIF cover;
+server-generated MP4 representative frame;
+storage ownership;
+cache invalidation;
+identity-only delivery;
+import-time versus explicit generation;
+fallback behavior;
+security and resource limits.
+
+Do not mix this into the immediate library CLI task.
+
+21. Physical Rename Direction
+
+A reviewed Suggested filename should eventually be capable of renaming the real
+selected media file through an explicit Save flow.
+
+This is accepted but not implemented.
+
+The dedicated slice must guarantee:
+
+explicit old/new basename confirmation;
+filename-only input;
+extension preservation;
+safe normalization;
+no path injection;
+same-directory rename;
+registered-root containment;
+symlink-escape prevention;
+collision detection;
+no overwrite by default;
+coordinated database and filesystem state;
+recoverable operation order or compensation;
+no rename from analysis alone;
+no batch rename;
+explicit disposable-media acceptance.
+
+Do not mix physical rename into library onboarding or browser download.
+
+22. Global Tag Deletion
+
+Current tag-chip × removes the assignment only from the current media.
+
+Global tag deletion remains a separate destructive feature.
+
+A future design must determine:
+
+affected-media count;
+assignment removal versus definition deletion;
+transaction behavior;
+confirmation;
+reversibility;
+AI recreation behavior;
+unused-definition cleanup.
+
+Do not turn the ordinary tag-chip × into global deletion.
+
+23. Central Sync And Cache
+
+Server-authoritative storage is accepted, but complete upload/sync/cache
+semantics remain unresolved.
+
+Future work must separately determine:
+
+upload authority;
+canonical ownership;
+conflict resolution;
+deletion semantics;
+download-on-demand;
+cache ownership;
+cache eviction;
+offline behavior;
+verification;
+progress, retry, and cancellation;
+identity across devices.
+
+Do not fake this with a generic Sync button or arbitrary-path API.
+
+24. Private Media Policy
+
+Optional private acceptance inputs may exist only in Michal's local clone:
+
+assets/gif/dicaprio_bravo.gif
+SHA-256:
+a5102a628c3409de6def8a21ebda8a30133abbbf3181336fc92727d50f92ce50
+assets/mp4/dicaprio.mp4
+SHA-256:
+520d43ee7f5853fec1aa9d72908b8d1a45a004a634a7558ff2889a32ff8e7ca9
 
 They are:
 
-- not repository source;
-- not public demo fixtures;
-- not assumed redistributable;
-- locally ignored through exact `.git/info/exclude` entries;
-- never to be staged or committed without a separate licensing and repository
-  size decision.
+not repository source;
+not public demo fixtures;
+not assumed redistributable;
+never to be staged or committed.
 
 No Worker may inspect, hash, read, copy, analyze, upload, rename, move, or delete
 them without explicit task-specific authority.
 
-For the immediate correction task, the Orchestrator may explicitly authorize:
+/Users/agile/Video remains forbidden by default.
 
-- hash verification;
-- read-only copying into one unique disposable acceptance library after the
-  implementation commit;
-- no modification of originals;
-- no autonomous provider call;
-- no upload of original GIF/MP4 bytes.
+Every task requiring private media must grant only the minimum required
+authority and must preserve the originals.
 
-The Worker may prepare an acceptance server with AI capability available, but
-Michal must explicitly click and confirm the AI request in the rendered UI.
-
-`/Users/agile/Video` remains forbidden by default.
-
-## 15. Rendered Acceptance After The Immediate Correction
-
-After independently verifying the correction commit, request a short numbered
-COOPERATOR report. Do not require many screenshots unless a visual state is
-unclear.
-
-Recommended acceptance items:
-
-1. Card has no visible `▶`; clicking and keyboard-activating the media surface
-   still opens playback.
-2. Header `FN` has the accepted circular styling.
-3. Header shows only `Cloud` and `🧠 AI`, with correct green/red/neutral state
-   coloring and acceptable white-border hover.
-4. Main tag/filter hover uses the refined border treatment; selected-tag `×`
-   turns red on hover/focus.
-5. `Catalog` and `Imported media` headings are absent without leaving awkward
-   spacing.
-6. Editor idle state shows only `🧠 Analyze by AI`, without spinner/loading
-   text or provider/model noise.
-7. During a real confirmed request, the button shows only spinner plus
-   `Analyzing…`.
-8. After success, existing Title/Description/Tags and Suggested filename are
-   populated and the AI button disappears.
-9. Save still closes and updates metadata but does not yet rename the file.
-10. No private/internal value, stale loading state, or new playback regression
-    appears.
-
-Accepted response syntax:
-
-```text
-1. PASS
-2. PASS + comment
-3. FAIL + concrete defect
-4. NOT TESTED + reason
-5. + adjacent brainstorming
-```
-
-Classify every response into accepted behavior, concrete defect, missing
-evidence, new product decision, or adjacent scope. New brainstorming does not
-automatically expand an active Worker task.
-
-## 16. Physical Filename Rename: Next Major Slice
-
-Michal's latest accepted product direction is stronger than an indefinite
-future Rename button:
-
-> A reviewed and editable Suggested filename should be capable of renaming the
-> real selected media file when the user explicitly saves.
-
-This is not implemented yet and must remain separate from the immediate visual
-correction.
-
-Recommended first-slice UX:
-
-1. AI analysis or manual editing may populate/edit Suggested filename.
-2. Analysis alone never renames.
-3. Populating fields never renames.
-4. When Save is pressed and Suggested filename is valid and differs from the
-   current basename, show one explicit confirmation containing the old and new
-   basenames.
-5. The primary action is `Save and rename`; Cancel returns to the editor without
-   mutation.
-6. When no filename proposal exists or it equals the current basename, Save
-   remains metadata-only.
-7. Close the modal only after all requested metadata and rename effects
-   succeed.
-8. On failure, keep the editor open, preserve unsaved values, and report one
-   concise sanitized error.
-
-The implementation must guarantee:
-
-- one selected available physical location in the first slice;
-- extension preservation;
-- filename-only input;
-- safe normalized filename validation;
-- no slash, backslash, control character, leading dot, `..`, or path injection;
-- same-directory rename only;
-- registered-root containment;
-- symlink-escape protection;
-- current-location identity revalidation;
-- collision detection;
-- no overwrite by default;
-- no directory move;
-- no broad batch rename;
-- no automatic rename of all physical locations;
-- coordinated filesystem and database-location update;
-- a proven recoverable operation order or compensation when one side fails;
-- no stale catalog path after success;
-- content endpoint continues to work after rename;
-- metadata and Gallery refresh remain coherent;
-- explicit filesystem and database tests;
-- explicit rendered/manual acceptance using disposable copied media.
-
-A dedicated design/implementation task must inspect current location schema,
-repositories, transaction boundaries, scan/import idempotency, and content
-security before selecting the operation order. Do not improvise rename inside a
-frontend-only task.
-
-## 17. Tag Removal And Global Tag Deletion
-
-Current `×` semantics are bounded:
-
-- remove the selected tag from the current media's unsaved editor state;
-- Save persists the current media's tag list;
-- the canonical tag definition remains available to other media.
-
-Latest UX refinement for the immediate correction:
-
-- `×` should use a clearly red hover/focus treatment.
-
-Michal also brainstormed a future confirmation asking whether to remove the tag
-entirely from the database. That is a separate destructive domain feature and
-is not yet authorized.
-
-A future global tag-deletion design must determine:
-
-- affected-media count and disclosure;
-- whether deletion is allowed while any media uses the tag;
-- whether the operation removes assignments, the definition, or both;
-- reversibility or undo;
-- transaction behavior;
-- how AI may recreate the same semantic tag;
-- whether unused definitions are garbage-collected automatically or deleted
-  only explicitly;
-- confirmation wording and permission boundaries.
-
-Do not silently turn the ordinary chip `×` into global database deletion.
-
-## 18. First-Run Library Onboarding And Settings
-
-After physical rename acceptance, the highest-value product slice is first-run
-library onboarding/import.
-
-Accepted direction:
-
-- the flagship Gallery must not expose developer `Library tools`;
-- library selection belongs under `Settings > General`;
-- the ordinary user should see a concise current-library state and a clear
-  `Change` or equivalent action;
-- Save/Cancel and a familiar loading indicator should be used where an actual
-  operation occurs;
-- scan remains read-only;
-- import remains explicit and idempotent;
-- no cloud request occurs merely from selecting a library;
-- no media rename/move/delete occurs during import;
-- no arbitrary browser-supplied path endpoint is introduced.
-
-Before native Tauri folder selection exists, a bounded browser-development
-bridge may reuse current launcher/CLI registry, scan, and import boundaries. A
-future Worker must inspect existing commands before choosing exact UX or command
-names.
-
-The final desktop path should use a narrowly scoped native system directory
-picker and a trusted boundary passing only the selected path to the authoritative
-Python backend.
-
-## 19. Central Server, Upload, Sync, And Download-On-Demand
-
-Michal's longer-term product direction includes media stored on a central
-server, with downloads performed only on explicit user request. AI analysis is
-also explicitly on demand.
-
-This direction is not implemented and remains a separate architecture/product
-slice. Do not mix it into Gallery correction, rename, or first-run local import.
-
-The future design must resolve:
-
-- local versus server authority;
-- canonical ownership of media bytes and metadata;
-- upload versus sync semantics;
-- conflict resolution;
-- availability and offline behavior;
-- explicit download-on-demand behavior;
-- local cache ownership, eviction, and verification;
-- deletion semantics;
-- identity across devices and libraries;
-- authorization and transport security;
-- progress, retry, and cancellation UX;
-- privacy and cloud-upload confirmation;
-- how AI frame upload relates to server-resident or locally downloaded media.
-
-Do not fake this with an arbitrary-path API, generic `Sync` button, or hidden
-background transfer.
-
-## 20. Deterministic Demo Strategy
-
-A deterministic demo is accepted as a useful developer/product aid, but is not
-yet implemented.
-
-Preferred future namespace:
-
-```text
-./framenest demo start
-./framenest demo status
-./framenest demo reset
-```
-
-Optional convenience alias:
-
-```text
-./framenest demo
-```
-
-Demo mode should:
-
-- use an isolated database, runtime, and logs;
-- build state deterministically from migrations and imports;
-- never commit a generated SQLite database;
-- never mix with the persistent development catalog;
-- use only generated, original, or clearly redistributable fixtures;
-- never depend on the two private local DiCaprio inputs;
-- provide an immediately populated Gallery;
-- remove only positively identified demo-owned state;
-- reuse the existing launcher/controller process-management architecture.
-
-Do not create top-level `load_demo` and `remove_demo` commands without a bounded
-launcher design task.
-
-## 21. Desktop And Packaging Direction
-
-Tauri v2 remains the intended thin native shell, but it is not the immediate
-next task.
-
-Begin the shell only after the core user path is coherent enough to wrap:
-
-1. add/select/import media;
-2. view populated Gallery;
-3. play media;
-4. analyze explicitly;
-5. edit metadata and tags;
-6. save and safely rename when requested.
-
-The shell should eventually provide:
-
-- native desktop window/WebView;
-- single instance;
-- supervised Python/FastAPI sidecar;
-- loopback-only connection;
-- readiness handshake;
-- clean owned-child shutdown;
-- tray/menu-bar behavior;
-- native folder picker;
-- minimal Tauri permissions;
-- per-launch local authentication/bootstrap before packaged release.
-
-End users should not need fish, Poetry, uv, Python, Node, or Rust. Native CI
-runners should build host-native macOS, Linux, and Windows artifacts. Signing,
-notarization, updater, and installers remain later release work.
-
-## 22. Analytic Programming Acceptance Methodology
-
-`AP.md` and `AP_ORCHESTRATOR.md` now normatively define numbered COOPERATOR
-acceptance feedback.
-
-For user-visible work, the ORCHESTRATOR should prepare numbered independently
-observable outcomes. The COOPERATOR may answer with:
-
-- `PASS`;
-- `FAIL`;
-- `NOT TESTED`;
-- a status followed by `+` commentary;
-- `+` alone for brainstorming or adjacent feedback.
-
-`+` adds evidence or context; it does not silently change the status.
-
-Screenshots, videos, logs, or physical observations should identify the relevant
-item when useful. Screenshots are optional evidence, not mandatory ceremony.
-The ORCHESTRATOR may request a specific screenshot only when it materially
-resolves uncertainty.
-
-The ORCHESTRATOR must classify responses into:
-
-- accepted behavior;
-- concrete defect;
-- missing evidence;
-- new product decision;
-- adjacent scope.
-
-Preserve positive acceptance while extracting a concrete defect from
-`PASS + comment`. Authorize the smallest bounded correction for confirmed
-defects. Do not silently add adjacent brainstorming to a Worker task.
-
-## 23. Evidence Classification
-
-Worker-observed automated evidence for implementation boundary `db665e7...`:
-
-- focused frontend contract tests: `174 passed`;
-- full suite: `1193 passed, 3 skipped`;
-- JavaScript syntax check: passed;
-- `git diff --check`: passed;
-- changed-document Markdown links: `24 checked, 0 missing`;
-- final tracked worktree and index: clean;
-- public refs were reported equal after push.
-
-Worker closeout evidence for `a661f099...`:
-
-- only `NEXT_WORKER.md` changed;
-- `git diff --check` passed;
-- public raw handoff matched local committed content;
-- final tracked worktree/index was clean;
-- the disposable acceptance runtime was stopped and removed;
-- local media hashes remained unchanged;
-- no active Worker remained.
-
-Treat all test/runtime details above as Worker-observed evidence unless a fresh
-Orchestrator or Worker independently reruns them. Treat the numbered UI findings
-as COOPERATOR-observed rendered evidence. Treat public commit identity and raw
-files as independently verifiable repository facts.
-
-## 24. Private Data And Secret Rules
-
-`/Users/agile/Video` remains forbidden by default. No Worker may list, stat,
-scan, hash, read, analyze, extract frames from, upload, rename, move, or delete
-from it without explicit task-specific authority.
-
-The two local acceptance inputs are also forbidden by default despite being
-inside the local repository directory. Every task requiring them must grant the
-minimum explicit read-only/copy/cloud authority.
+25. Secret Policy
 
 Never expose:
 
-- NVIDIA API keys;
-- Authorization headers;
-- browser cookies;
-- secret-store contents;
-- raw provider payloads;
-- raw data URLs;
-- chain-of-thought;
-- unrelated catalog paths;
-- private absolute paths in public logs, APIs, UI, commits, or reports.
+NVIDIA keys;
+Vercel Gateway keys;
+Authorization headers;
+secret-file content;
+browser cookies;
+provider raw payloads;
+raw data URLs;
+prompts;
+chain-of-thought;
+private absolute paths in browser APIs, public logs, commits, or reports.
 
-Credentials must remain server-side and outside source code, catalog database,
-Git history, and ordinary logs.
+Credentials remain server-side and outside:
 
-## 25. Documentation Drift
+source code;
+Git history;
+catalog database;
+browser storage;
+API responses;
+ordinary logs.
 
-Some older `ROADMAP.md`, product, and architecture wording may lag behind the
-implemented Gallery/editor/AI state.
+The local .secrets/ai.env.fish file is a development/operator convenience,
+not a production secret-distribution mechanism.
 
-Newer verified code, commits, `README.md`, `GALLERY.md`, `AI_WORKSPACE.md`, AP
-protocol documents, current handoffs, and COOPERATOR decisions take precedence
-over stale wording where they conflict.
+26. Evidence Classification
 
-Do not begin a broad documentation rewrite during the immediate correction. A
-future bounded reconciliation may update roadmap milestones after the correction
-and rename slices are accepted.
+Latest Worker-observed evidence at implementation boundary c581c8d...:
 
-## 26. Immediate Non-Goals
+focused packaged-web tests: 188 passed;
+full suite: 1246 passed, 3 skipped;
+Fish syntax: passed;
+JavaScript syntax: passed;
+git diff --check: passed;
+hidden-state CSS invariant present;
+public commit and raw-file spot check reported successful;
+tracked worktree and index reported clean;
+no provider request occurred during the hidden-state correction;
+private acceptance media remained unchanged.
 
-The immediate correction must not expand into:
+Treat these as Worker-observed evidence unless independently rerun.
 
-- physical rename;
-- global tag deletion;
-- tag garbage collection;
-- library Settings or native picker;
-- upload or sync;
-- central-server storage;
-- download-on-demand;
-- provider Settings;
-- multi-model AI drafts;
-- persistent AI result storage;
-- cover pipeline;
-- thumbnail persistence;
-- first-run onboarding;
-- demo mode;
-- Tauri;
-- packaging, signing, or installers;
-- unrelated backend redesign.
+COOPERATOR-observed evidence includes:
 
-After the correction passes rendered acceptance, the next major slice is the
-safe Save-and-rename workflow, not a broad feature wave.
+real GIF and MP4 playback;
+MP4 seeking;
+NVIDIA text-only provider test success;
+real NVIDIA media analysis success;
+useful metadata/tag output;
+editable AI-populated fields;
+no AI autosave;
+no physical rename;
+rendered Status/Analyze hidden-state defects before c581c8d....
 
-## 27. Fresh Orchestrator Bootstrap Behavior
+The corrective hidden-state implementation is public and automated-test
+covered. Final rendered reconfirmation remains pending and may be combined with
+the next useful acceptance environment.
+
+27. Analytic Programming Acceptance Methodology
+
+For user-visible work, prepare numbered independently observable outcomes.
+
+Michal may answer using:
+
+PASS;
+FAIL;
+NOT TESTED;
+a status followed by + commentary;
++ alone for adjacent brainstorming.
+
+Classify each response into:
+
+accepted behavior;
+concrete defect;
+missing evidence;
+new product decision;
+adjacent scope.
+
+Preserve accepted behavior while extracting concrete defects.
+
+Authorize the smallest bounded correction for a confirmed defect.
+
+Do not silently add adjacent brainstorming to an active Worker task.
+
+Screenshots are useful evidence but not mandatory ceremony.
+
+28. Fresh Orchestrator Bootstrap Behavior
 
 The fresh Orchestrator must:
 
-1. State that she is a fresh Orchestrator instance assigned to the persistent
-   `ORCHESTRATOR` role.
-2. Communicate with Michal in Slovak using feminine self-reference.
-3. Verify the public enclosing `handout` commit and actual `main`.
-4. Verify its SHA, parent, subject, changed-path count, exact changed path, and
-   raw `NEXT_ORCHESTRATOR.md`.
-5. Verify preceding Worker handoff
-   `a661f0995b2d822c7e6ed8fe12fd26726bd02bdd` and raw `NEXT_WORKER.md`.
-6. Recognize that no Worker is active.
-7. Report restoration as `PASS`, `PARTIAL`, or `BLOCKED`.
-8. Avoid asking Michal to repeat project history or paste public repository
-   files.
-9. Open a fresh Worker session for the immediate correction.
-10. Insert the exact enclosing Orchestrator handoff SHA as the Worker's expected
-    starting HEAD.
-11. Issue a bounded correction prompt following Section 13.
-12. Independently verify the resulting commit.
-13. Request the short numbered rendered acceptance in Section 15.
-14. Stop and clean up the disposable runtime after acceptance.
-15. If a concrete defect remains, authorize only one small correction.
-16. If accepted, proceed to the safe physical rename slice in Section 16.
-17. Then prioritize first-run library onboarding/import.
-18. Keep central-server sync/download architecture separate.
-19. Implement isolated demo mode later.
-20. Begin Tauri only after the core workflow is coherent.
+State that she is a fresh Orchestrator instance assigned to the persistent
+ORCHESTRATOR role.
+Communicate with Michal in Slovak using feminine self-reference.
+Verify the public enclosing handout commit.
+Discover and verify the preceding Worker closeout commit.
+Verify both raw handoff files.
+Verify implementation boundary c581c8d....
+Recognize that no Worker is active.
+Report restoration as PASS, PARTIAL, or BLOCKED.
+Avoid asking Michal to repeat project history or paste public files.
+Open a fresh Worker session using Medium reasoning.
+Issue a compact bounded prompt for the server library workflow.
+Insert the exact discovered handoff HEAD as the Worker's expected start.
+Independently verify the resulting implementation commit.
+Prepare acceptance as a separate short prompt.
+Prioritize end-to-end MVP functionality over further cosmetic polishing.
+After library acceptance, move to secure explicit download.
+Keep covers, Fedora/Tailscale deployment, native local availability,
+rename, global tag deletion, and sync as separate slices.
+29. Immediate Non-Goals
 
-## 28. Closure Status
+The immediate library task must not expand into:
 
-- Latest implementation boundary:
-  `db665e7053ed750f398164866b85e10e3f32e9cd`
-- Latest Worker handoff boundary before this file:
-  `a661f0995b2d822c7e6ed8fe12fd26726bd02bdd`
-- Expected enclosing Orchestrator handoff subject: `handout`
-- Expected enclosing handoff parent:
-  `a661f0995b2d822c7e6ed8fe12fd26726bd02bdd`
-- Expected enclosing changed path: `NEXT_ORCHESTRATOR.md` only
-- Migration: `0007`
-- Highest accepted ADR: `ADR-0030`
-- Active Worker: none
-- Current Orchestrator session: closes with the enclosing handoff commit
-- Immediate next task: refine post-acceptance Gallery and AI editor UX
-- Expected next implementation subject:
-  `fix: refine gallery and AI editor UX`
-- Next major product slice after acceptance: safe physical rename during an
-  explicit Save flow
-- Next product slice afterward: first-run library onboarding/import
-- Later architecture slice: central-server upload/sync/download-on-demand
-- Later developer/product aid: isolated deterministic demo mode
-- Long-term shell: Tauri v2
+browser directory selection;
+browser filesystem paths;
+background watchers;
+deletion or missing-file reconciliation;
+media copying or moving;
+physical rename;
+AI analysis;
+provider configuration;
+explicit download;
+client-local availability;
+covers or thumbnails;
+Tailscale;
+authentication;
+upload or sync;
+demo mode;
+Tauri;
+packaging;
+unrelated UX redesign.
+30. Closure Status
+Latest implementation boundary:
+c581c8d0c5620d91e5f93c38697a6026a5691d45
+Latest implementation subject:
+fix: honor hidden UI states
+Expected Worker closeout subject:
+docs: prepare server library worker handoff
+Expected Orchestrator handoff subject:
+handout
+Migration head:
+0007
+Highest accepted ADR:
+ADR-0030
+Active Worker after closeout:
+none
+Active disposable runtime after closeout:
+none
+Immediate next task:
+server-operator library onboarding and refresh
+Expected next implementation subject:
+feat: add server library workflow
+Next MVP slice:
+secure explicit media download
+Later MVP slices:
+persistent covers, Fedora deployment, Tailscale remote access, trusted
+client-local availability
+Current visual direction:
+accepted and frozen for MVP except concrete defects
+Long-term shell:
+Tauri v2
 
 This file restores context and grants no concrete task authority.
