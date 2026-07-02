@@ -335,6 +335,26 @@ The Worker MUST NOT substitute unavailable tools with broader or riskier actions
 
 The Worker MUST NOT infer permission from tool availability.
 
+### Browser and rendered acceptance automation
+
+When browser or rendered acceptance evidence is required, the Worker MUST verify the required browser capability before relying on it.
+
+The Worker MUST operate only on task-authorized origins, URL patterns, runtime instances, accounts, and test data.
+
+The Worker MUST avoid unrelated tabs, windows, browser profiles, credentials, account state, browsing history, bookmarks, cookies, tokens, extensions, and website storage outside the authorized origin.
+
+The Worker MUST NOT change browser, operating-system, automation, accessibility, remote-control, or security permissions unless the COOPERATOR explicitly authorizes that action.
+
+Helper scripts, screenshots, browser logs, downloads, and captured responses SHOULD stay outside the repository unless the task explicitly authorizes committed test tooling or evidence.
+
+Reports MUST sanitize absolute private paths, credentials, cookies, tokens, private data, and browser-profile details.
+
+If response interception or synthetic browser responses are used, the Worker MUST label that evidence explicitly and distinguish it from real provider, network, or application responses.
+
+The Worker MUST report what was directly observed in the browser, what was inferred from APIs or source inspection, and what remains unproven.
+
+The Worker MUST stop when required browser capability is unavailable and no safe authorized alternative can satisfy mandatory evidence.
+
 ### Context and authority
 
 A large context window does not change task authority, repository source of truth, verification requirements, or handoff obligations.

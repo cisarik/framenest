@@ -58,6 +58,46 @@ Missing required capabilities MUST NOT be compensated by broader filesystem, net
 
 Tool availability does not grant permission.
 
+### Browser automation capability
+
+Browser automation is an optional Worker capability, not an inherent WORKER-role power.
+
+Tool availability, an enabled browser setting, an installed adapter, or a previously successful automation run does not grant task authority.
+
+Browser automation requires explicit task-specific authority when it can:
+
+- navigate or interact with pages;
+- execute browser-side JavaScript;
+- inspect DOM, network responses, rendered state, storage, screenshots, or browser logs;
+- mutate application state;
+- access a browser profile or existing browser session.
+
+An authorizing task SHOULD define, proportionally:
+
+- the permitted browser or adapter capability;
+- exact allowed origins, URL patterns, or loopback runtime;
+- permitted interactions and observations;
+- JavaScript execution and request-interception authority;
+- whether external network traffic is allowed;
+- permitted account state and test data;
+- temporary artifact rules and required cleanup.
+
+Workers SHOULD prefer disposable loopback runtimes, synthetic data, and a dedicated acceptance window or session where practical.
+
+Browser automation MUST NOT inspect or control unrelated tabs, windows, browsing history, bookmarks, passwords, passkeys, cookies, tokens, account sessions, extensions, browser-profile files, or website storage outside the authorized origin.
+
+The Worker MUST NOT enable or weaken browser, operating-system, automation, accessibility, remote-control, or security settings without explicit COOPERATOR authorization.
+
+Temporary acceptance scripts belong outside the repository by default and are transient evidence unless the task explicitly authorizes committed test tooling.
+
+Worker reports MUST distinguish real-browser rendered evidence, browser evidence using synthetic response interception, automated non-browser tests, static source inspection, and COOPERATOR-observed physical or rendered evidence.
+
+Browser automation MAY be used during implementation or acceptance only when it is the lightest authorized evidence mechanism for the concrete task. It MUST NOT become a default broad audit of arbitrary pages.
+
+Platform-specific adapters belong in project bootstrap or environment documentation, not as reusable protocol requirements.
+
+A missing mandatory browser capability SHOULD produce honest missing evidence or `BLOCKED` status; it MUST NOT justify unsafe workarounds.
+
 ### Multi-agent accountability
 
 A multi-agent Worker implementation is still one accountable WORKER at the protocol boundary.

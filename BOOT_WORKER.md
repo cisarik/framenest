@@ -70,6 +70,35 @@ The Worker must not access secrets, private keys, credential stores, browser pro
 
 The Worker must not print real secrets in reports.
 
+## Browser Acceptance Capability
+
+Project-specific browser acceptance adapters are capability context only. Every use still requires an explicit task with exact browser boundaries.
+
+On the primary macOS development environment, the Cooperator has enabled Safari's `Allow JavaScript from Apple Events` capability. Safari controlled through Apple Events may therefore be used as a browser-side acceptance adapter when a concrete task authorizes that adapter.
+
+An authorized task may allow, proportionally:
+
+- launching or addressing Safari through `osascript` or Apple Events;
+- opening or using a dedicated acceptance window or tab;
+- navigating only to exact task-authorized origins, normally a disposable loopback FrameNest runtime;
+- executing browser-side JavaScript for DOM, computed-style, rendered-state, playback, or interaction evidence;
+- clicking, typing, seeking, or otherwise interacting only when specifically authorized;
+- browser-level synthetic response interception only when explicitly authorized and clearly reported as synthetic evidence;
+- sanitized screenshots, logs, and DOM evidence;
+- temporary helper scripts under the authorized temporary task root.
+
+Use a dedicated acceptance window or tab where practical. Do not inspect or control unrelated Safari windows or tabs. Do not inspect history, bookmarks, passwords, passkeys, cookies, tokens, extensions, browser-profile data, or unrelated website storage.
+
+Do not change Safari developer settings, macOS Automation permissions, Accessibility permissions, remote-control settings, or security settings. If a new operating-system permission prompt or setting change is required, stop and request a Cooperator action through the Orchestrator.
+
+External network access remains forbidden unless the concrete task explicitly authorizes it. Absolute private paths, credentials, tokens, profile details, and private data must not appear in reports.
+
+Helper scripts and evidence are transient and stay outside the repository unless explicitly authorized.
+
+The current enabled setting is not permanent or guaranteed. The Worker must verify capability availability before browser evidence is required.
+
+FrameNest currently has no guaranteed default Linux browser-automation adapter. A future Linux development or deployment task may authorize and document a suitable adapter. Any adapter must obey the same exact-origin, private-state, external-network, evidence, and cleanup boundaries. The Worker must not install or activate a browser adapter merely because browser acceptance would be convenient. When mandatory browser evidence lacks an authorized adapter, report missing evidence or `BLOCKED`.
+
 ## Dependencies and Python environment
 
 The Worker must not install, update, or initialize packages unless explicitly authorized, and must not create package-manager files or framework scaffolding unless the task explicitly allows it.
