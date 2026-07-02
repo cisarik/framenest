@@ -82,15 +82,32 @@ def test_legacy_nvidia_credential_is_backward_compatible(tmp_path: Path) -> None
     assert resolved.configured is True
 
 
-def test_unconfigured_prefers_vercel_identity_without_provider(tmp_path: Path) -> None:
+def test_unconfigured_has_no_fallback_provider_identity(tmp_path: Path) -> None:
     resolved = resolve_ai_provider(
         _settings(tmp_path),
         environ={},
         config_path=tmp_path / "missing.json",
     )
 
-    assert resolved.provider_id == "vercel-ai-gateway"
+    assert resolved.provider_id is None
+    assert resolved.model_id is None
+    assert resolved.display_name is None
+    assert resolved.credential_environment_name is None
     assert resolved.source == "unconfigured"
+    assert resolved.configured is False
+
+
+def test_selected_provider_without_credential_preserves_safe_identity(tmp_path: Path) -> None:
+    resolved = resolve_ai_provider(
+        _settings(tmp_path, ai_provider_id="vercel-ai-gateway", ai_model_id="google/custom"),
+        environ={},
+        config_path=tmp_path / "missing.json",
+    )
+
+    assert resolved.provider_id == "vercel-ai-gateway"
+    assert resolved.model_id == "google/custom"
+    assert resolved.display_name == "Vercel AI Gateway"
+    assert resolved.credential_available is False
     assert resolved.configured is False
 
 

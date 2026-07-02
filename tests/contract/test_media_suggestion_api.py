@@ -217,6 +217,10 @@ def _imported_suggestion_result() -> ImportedMediaSuggestionPreviewResult:
 def _client(
     *,
     configured: bool = True,
+    status: str = "not_configured",
+    provider_id: str | None = "nvidia-nim",
+    provider_display_name: str | None = "NVIDIA NIM",
+    model_id: str | None = "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
     preview: _FakeSuggestionPreview | None = None,
     imported_preview: _FakeImportedSuggestionPreview | None = None,
     catalog_available: bool = True,
@@ -245,6 +249,10 @@ def _client(
             preview_suggestion=suggestion_preview if configured else None,
             provider_configured=configured,
             preview_imported_suggestion=imported_suggestion_preview if configured else None,
+            provider_id=provider_id,
+            provider_display_name=provider_display_name,
+            model_id=model_id,
+            status=status,
             last_status_check=last_status_check,
         ),
     )
@@ -281,7 +289,12 @@ def _post_imported_preview(
 
 def test_capability_configured_and_unconfigured_are_sanitized_no_store() -> None:
     configured_client, configured_preview, configured_imported_preview = _client(configured=True)
-    unconfigured_client, unconfigured_preview, unconfigured_imported_preview = _client(configured=False)
+    unconfigured_client, unconfigured_preview, unconfigured_imported_preview = _client(
+        configured=False,
+        provider_id=None,
+        provider_display_name=None,
+        model_id=None,
+    )
 
     configured = configured_client.get("/api/ai/media-suggestion-capability")
     unconfigured = unconfigured_client.get("/api/ai/media-suggestion-capability")
@@ -297,13 +310,18 @@ def test_capability_configured_and_unconfigured_are_sanitized_no_store() -> None
         "execution": "server",
         "status": "configured_unverified",
         "configured": True,
-        "last_status_check": None,
-        "last_connection_test": None,
         "requires_explicit_confirmation": True,
     }
     assert unconfigured.status_code == 200
     assert unconfigured.headers["cache-control"] == "no-store"
-    assert unconfigured.json()["available"] is False
+    assert unconfigured.json() == {
+        "available": False,
+        "prompt_version": "framenest-media-suggestion-v3",
+        "execution": "server",
+        "status": "not_configured",
+        "configured": False,
+        "requires_explicit_confirmation": True,
+    }
     combined = configured.text + unconfigured.text
     assert SECRET_VALUE not in combined
     assert "Authorization" not in combined
@@ -312,6 +330,33 @@ def test_capability_configured_and_unconfigured_are_sanitized_no_store() -> None
     assert configured_imported_preview.calls == []
     assert unconfigured_preview.calls == []
     assert unconfigured_imported_preview.calls == []
+
+
+def test_capability_selected_provider_without_credential_is_actionable_without_request() -> None:
+    client, preview, imported_preview = _client(
+        configured=False,
+        status="credential_unavailable",
+        provider_id="vercel-ai-gateway",
+        provider_display_name="Vercel AI Gateway",
+        model_id="google/custom",
+    )
+
+    response = client.get("/api/ai/media-suggestion-capability")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "available": False,
+        "provider_id": "vercel-ai-gateway",
+        "provider_display_name": "Vercel AI Gateway",
+        "model_id": "google/custom",
+        "prompt_version": "framenest-media-suggestion-v3",
+        "execution": "server",
+        "status": "credential_unavailable",
+        "configured": False,
+        "requires_explicit_confirmation": True,
+    }
+    assert preview.calls == []
+    assert imported_preview.calls == []
 
 
 def test_capability_exposes_safe_last_status_snapshot_without_provider_request() -> None:

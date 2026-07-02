@@ -64,8 +64,9 @@ AI_PROVIDER_FAILED_MESSAGE = "The AI suggestion provider request failed."
 
 AiProviderStatus = Literal[
     "not_configured",
+    "credential_unavailable",
     "configured_unverified",
-    "verified",
+    "available",
     "authentication_failed",
     "rate_limited_or_quota_exhausted",
     "model_unavailable",
@@ -85,9 +86,9 @@ class ErrorResponse(BaseModel):
 
 class MediaSuggestionCapabilityResponse(BaseModel):
     available: bool
-    provider_id: str
-    provider_display_name: str
-    model_id: str
+    provider_id: str | None = None
+    provider_display_name: str | None = None
+    model_id: str | None = None
     prompt_version: str
     execution: str
     status: AiProviderStatus
@@ -144,9 +145,9 @@ class MediaSuggestionApiDependencies:
     preview_suggestion: object | None
     provider_configured: bool
     preview_imported_suggestion: object | None = None
-    provider_id: str = DEFAULT_PROVIDER_ID
-    provider_display_name: str = "NVIDIA NIM"
-    model_id: str = DEFAULT_MODEL_ID
+    provider_id: str | None = DEFAULT_PROVIDER_ID
+    provider_display_name: str | None = "NVIDIA NIM"
+    model_id: str | None = DEFAULT_MODEL_ID
     prompt_version: str = PROMPT_VERSION
     status: AiProviderStatus = "not_configured"
     last_status_check: dict[str, object] | None = None
@@ -164,7 +165,7 @@ def create_media_suggestion_api_router(dependencies: MediaSuggestionApiDependenc
     def media_suggestion_capability() -> JSONResponse:
         status = dependencies.status
         if not dependencies.provider_configured:
-            status = "not_configured"
+            status = status if status in {"not_configured", "credential_unavailable"} else "not_configured"
         elif status == "not_configured":
             status = "configured_unverified"
         return _json_response(
@@ -365,7 +366,7 @@ def _error_response(status_code: int, code: str, message: str) -> JSONResponse:
 def _json_response(response: BaseModel) -> JSONResponse:
     return JSONResponse(
         status_code=200,
-        content=response.model_dump(),
+        content=response.model_dump(exclude_none=True),
         headers=NO_STORE_HEADERS,
     )
 

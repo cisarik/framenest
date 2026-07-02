@@ -229,7 +229,8 @@ def create_app(
             provider_display_name=resolved_ai.display_name,
             model_id=resolved_ai.model_id,
             status=_ai_status_from_last_test(
-                configured=suggestion_preview is not None,
+                provider_selected=resolved_ai.provider_id is not None,
+                credential_available=resolved_ai.credential_available,
                 last_status=None if resolved_ai.last_test is None else resolved_ai.last_test.status,
             ),
             last_status_check=_last_status_payload(resolved_ai.last_status),
@@ -283,11 +284,18 @@ def create_app(
     return app
 
 
-def _ai_status_from_last_test(*, configured: bool, last_status: str | None) -> str:
-    if not configured:
+def _ai_status_from_last_test(
+    *,
+    provider_selected: bool,
+    credential_available: bool,
+    last_status: str | None,
+) -> str:
+    if not provider_selected:
         return "not_configured"
+    if not credential_available:
+        return "credential_unavailable"
     if last_status == "success":
-        return "verified"
+        return "available"
     if last_status in {
         "authentication_failed",
         "rate_limited_or_quota_exhausted",

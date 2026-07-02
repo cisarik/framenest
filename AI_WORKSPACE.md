@@ -52,10 +52,26 @@ Server AI administration is currently a CLI boundary. `./framenest ai
 configure` writes only non-secret provider/model selection outside the
 repository, `./framenest ai status` is network-free and writes only a safe local
 status snapshot, and `./framenest ai test` is the only explicit text-only
-connection test. NVIDIA NIM remains supported. Vercel AI Gateway is also supported with preferred model
-`google/gemini-3.1-flash-lite`. Provider credentials remain in the server
-environment (`NVIDIA_API_KEY` or `AI_GATEWAY_API_KEY`) and are not stored in the
-browser, non-secret AI configuration file, or status snapshot.
+connection test. NVIDIA NIM remains supported. Vercel AI Gateway is also
+supported with preferred model `google/gemini-3.1-flash-lite`. Provider
+credentials remain in the server environment (`NVIDIA_API_KEY` or
+`AI_GATEWAY_API_KEY`) and are not stored in the browser, non-secret AI
+configuration file, or status snapshot.
+
+The browser AI capability response is read-only and distinguishes
+`not_configured`, `credential_unavailable`, `configured_unverified`,
+`available`, `authentication_failed`, `rate_limited_or_quota_exhausted`,
+`model_unavailable`, `provider_unreachable`, and `provider_error`. When no
+environment override, persisted non-secret provider selection, or legacy
+NVIDIA-compatible configuration exists, FrameNest reports `not_configured` and
+does not present a fallback provider/model as selected. When a provider/model
+selection exists but the matching server credential is unavailable, FrameNest
+reports `credential_unavailable` while preserving the safe selected
+provider/model diagnostics. `available` means a credentialed server provider
+implementation is available; live reachability remains represented by the
+matching last test evidence when present. The browser Status modal shows only a
+compact sanitized heading, reason, safe selected provider/model values when
+they genuinely exist, and safe last status/test evidence.
 
 For local development, `./framenest` may bootstrap those provider credentials
 from the ignored `.secrets/ai.env.fish` file when it is present and private.

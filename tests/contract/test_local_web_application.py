@@ -550,7 +550,9 @@ def test_browser_presents_ai_capability_states_from_api(client: TestClient) -> N
     combined = html + script
 
     assert "AI unavailable" in combined
-    assert "AI configured" in combined
+    assert "AI not configured" in combined
+    assert "Server credential unavailable" in combined
+    assert "Authentication failed" in combined
     assert "provider_id" in script
     assert "provider_display_name" in script
     assert "model_id" in script
@@ -558,6 +560,8 @@ def test_browser_presents_ai_capability_states_from_api(client: TestClient) -> N
     assert "execution" in script
     assert ">Model<" in html
     assert "Last server check" in html
+    assert "No server AI provider has been selected." in combined
+    assert "The selected provider credential is not available" in combined
     assert "AI is configured by the FrameNest server operator" not in combined
 
 
@@ -689,13 +693,16 @@ def test_browser_ai_replacement_is_session_only_without_mutation_api(
 ) -> None:
     script = client.get("/assets/app.js").text
     analyze_block = script[script.index("async function handleAnalyzeMetadataByAi") : script.index("function aiSuggestionErrorMessage")]
+    apply_body = _javascript_function(script, "applyResolvedAiSuggestionToMetadataWorkspace")
     controls_body = _javascript_function(script, "updateMetadataControls")
 
-    assert "metadataWorkspace.current.displayTitle = suggestion.title" in analyze_block
-    assert "metadataWorkspace.current.description = suggestion.description" in analyze_block
-    assert "metadataWorkspace.current.tagKeys = tagKeys" in analyze_block
-    assert "metadataWorkspace.suggestedFilename = suggestion.suggestedFilename" in analyze_block
-    assert "metadataWorkspace.aiSuggestionApplied = true" in analyze_block
+    assert "metadataTagKeysFromSuggestion(suggestion.tags)" in analyze_block
+    assert "applyResolvedAiSuggestionToMetadataWorkspace(suggestion, tagKeys)" in analyze_block
+    assert "metadataWorkspace.current.displayTitle = suggestion.title" in apply_body
+    assert "metadataWorkspace.current.description = suggestion.description" in apply_body
+    assert "metadataWorkspace.current.tagKeys = tagKeys" in apply_body
+    assert "metadataWorkspace.suggestedFilename = suggestion.suggestedFilename" in apply_body
+    assert "metadataWorkspace.aiSuggestionApplied = true" in apply_body
     assert "metadataAiAnalyzeButton.hidden = metadataWorkspace.aiSuggestionApplied && !metadataWorkspace.analyzing;" in controls_body
     assert "fetch(metadataEndpoint" not in analyze_block
     assert "confirm_cloud_upload: true" in analyze_block
@@ -1305,7 +1312,7 @@ def test_catalog_card_has_play_surface_and_edit_action_without_details_button(cl
     assert "View details" not in card_body
     assert "Edit metadata" not in card_body
     assert 'textContent = "▶"' not in surface_body
-    assert "media-placeholder__play-indicator" in script
+    assert "media-placeholder__play-indicator" not in script
     assert "activateCardPlayback" in surface_body
     assert "openDetailsDialog(item, titleButton)" in card_body
     assert "handleOpenMetadataWorkspace" in card_body
@@ -1427,14 +1434,61 @@ def test_javascript_preserves_existing_metadata_state_machine(client: TestClient
 def test_card_uses_media_surface_for_playback_without_visible_play_control(client: TestClient) -> None:
     script = client.get("/assets/app.js").text
     surface_body = _javascript_function(script, "renderCatalogCardMediaSurface")
+    preview_body = _javascript_function(script, "renderPersistentPreview")
+    fallback_body = _javascript_function(script, "renderPreviewFallback")
     assert 'textContent = "▶"' not in surface_body
-    assert "media-placeholder__play-indicator" in script
+    assert "media-placeholder__play-indicator" not in script
+    assert "buildCardPlayIndicator" not in script
+    assert "play-indicator" not in preview_body
+    assert "play-indicator" not in fallback_body
     assert "activateCardPlayback" in surface_body
     assert 'surface.addEventListener("click"' in surface_body
     assert 'surface.addEventListener("keydown"' in surface_body
     assert 'surface.setAttribute("role", "button")' in surface_body
     assert 'surface.setAttribute("tabindex", "0")' in surface_body
     assert "handleCardPreview" not in _javascript_function(script, "renderCatalogCard")
+
+
+def test_catalog_card_analyze_shortcut_only_for_untagged_supported_media(client: TestClient) -> None:
+    script = client.get("/assets/app.js").text
+    card_body = _javascript_function(script, "renderCatalogCard")
+    needs_body = _javascript_function(script, "cardNeedsMetadata")
+
+    assert 'analyzeButton.textContent = "Analyze"' in card_body
+    assert "cardNeedsMetadata(item)" in card_body
+    assert "selectSupportedAvailableLocation(item) !== null" in needs_body
+    assert "(!item.tags || item.tags.length === 0)" in needs_body
+    assert card_body.index("actions.appendChild(analyzeButton)") < card_body.index("actions.appendChild(editButton)")
+
+
+def test_catalog_card_unavailable_ai_opens_status_without_request(client: TestClient) -> None:
+    script = client.get("/assets/app.js").text
+    analyze_body = _javascript_function(script, "handleAnalyzeCatalogCard")
+    unavailable_section = analyze_body[
+        analyze_body.index("if (!aiCapability.available)") : analyze_body.index("cardAiAnalyzingMediaIds.add(item.media_id)")
+    ]
+
+    assert 'openStatusDialog("ai")' in unavailable_section
+    assert "fetch(" not in unavailable_section
+    assert 'analyzeButton.setAttribute("aria-disabled", aiCapability.available ? "false" : "true")' in script
+
+
+def test_catalog_card_analyze_request_busy_success_and_failure_flow(client: TestClient) -> None:
+    script = client.get("/assets/app.js").text
+    analyze_body = _javascript_function(script, "handleAnalyzeCatalogCard")
+    state_body = _javascript_function(script, "setCardAnalyzeButtonState")
+    open_body = _javascript_function(script, "handleOpenMetadataWorkspace")
+
+    assert 'button.textContent = state === "analyzing" ? "Analyzing…" : "Analyze"' in state_body
+    assert 'button.setAttribute("aria-busy", state === "analyzing" ? "true" : "false")' in state_body
+    assert "cardAiAnalyzingMediaIds.has(item.media_id)" in analyze_body
+    assert "cardAiAnalyzingMediaIds.add(item.media_id)" in analyze_body
+    assert "mediaAiSuggestionEndpoint(item.media_id, location.location_id)" in analyze_body
+    assert "confirm_cloud_upload: true" in analyze_body
+    assert "handleOpenMetadataWorkspace(item, button, { aiSuggestion: suggestion })" in analyze_body
+    assert "aiSuggestionErrorMessage(payload)" in analyze_body
+    assert "fetch(metadataEndpoint" in open_body
+    assert "fetch(metadataEndpoint" not in analyze_body
 
 
 def test_no_automatic_analysis_on_page_load(client: TestClient) -> None:
@@ -1826,10 +1880,10 @@ def test_gallery_reference_documents_content_first_playback_boundary() -> None:
     assert "Initial card rendering does not require original\nGIF or MP4 transfer" in gallery
     assert "Missing or unavailable derivatives use a compact\nnon-original fallback" in gallery
     assert "Activating the card's media\nsurface" in gallery
-    assert "Opening Details from the card title continues to use\noriginal GIF/MP4 content" in gallery
+    assert "Opening Details from the card\ntitle continues to use original GIF/MP4 content" in gallery
     assert "not durable accepted covers" in gallery
     assert "Cover Studio state" in gallery
-    assert "Details uses a black player-first surface" in gallery
+    assert "Details uses a black player-first\nsurface" in gallery
 
 
 def test_javascript_details_no_longer_loads_representative_frames(client: TestClient) -> None:
@@ -1917,7 +1971,7 @@ def test_card_visual_surface_is_preview_trigger(client: TestClient) -> None:
     script = client.get("/assets/app.js").text
     surface_body = _javascript_function(script, "renderCatalogCardMediaSurface")
     assert "activateCardPlayback(item" in surface_body
-    assert "media-placeholder__play-indicator" in script
+    assert "media-placeholder__play-indicator" not in script
     assert 'surface.setAttribute("role", "button")' in surface_body
 
 
@@ -1998,16 +2052,17 @@ def test_javascript_metadata_ai_analysis_requires_confirmation_and_identity_url(
 def test_javascript_metadata_ai_success_populates_single_form_without_autosave_or_rename(client: TestClient) -> None:
     script = client.get("/assets/app.js").text
     analyze_body = script[script.index("async function handleAnalyzeMetadataByAi") : script.index("function aiSuggestionErrorMessage")]
+    apply_body = _javascript_function(script, "applyResolvedAiSuggestionToMetadataWorkspace")
 
-    assert "metadataWorkspace.current.displayTitle = suggestion.title" in analyze_body
-    assert "metadataWorkspace.current.description = suggestion.description" in analyze_body
-    assert "metadataWorkspace.current.tagKeys = tagKeys" in analyze_body
-    assert "metadataWorkspace.suggestedFilename = suggestion.suggestedFilename" in analyze_body
-    assert "metadataWorkspace.aiSuggestionApplied = true" in analyze_body
+    assert "metadataWorkspace.current.displayTitle = suggestion.title" in apply_body
+    assert "metadataWorkspace.current.description = suggestion.description" in apply_body
+    assert "metadataWorkspace.current.tagKeys = tagKeys" in apply_body
+    assert "metadataWorkspace.suggestedFilename = suggestion.suggestedFilename" in apply_body
+    assert "metadataWorkspace.aiSuggestionApplied = true" in apply_body
     assert "metadataTagKeysFromSuggestion(suggestion.tags)" in analyze_body
     assert "metadataAiAnalyzeButton.hidden = metadataWorkspace.aiSuggestionApplied" in script
     assert "fetch(metadataEndpoint" not in analyze_body
-    assert "Review the updated fields, then Save." in analyze_body
+    assert "Review the updated fields, then Save." in apply_body
     assert "fetch(metadataEndpoint" not in analyze_body
     assert "handleUseMetadataAiDraft" not in script
     assert "handleDiscardMetadataAiDraft" not in script

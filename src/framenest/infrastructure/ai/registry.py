@@ -45,11 +45,11 @@ class AiProviderDefinition:
 
 @dataclass(frozen=True, slots=True)
 class ResolvedAiProvider:
-    provider_id: str
-    display_name: str
-    model_id: str
+    provider_id: str | None
+    display_name: str | None
+    model_id: str | None
     source: str
-    credential_environment_name: str
+    credential_environment_name: str | None
     credential_available: bool
     provider: object | None
     last_test: AiTestState | None
@@ -110,25 +110,31 @@ def resolve_ai_provider(
             model_id = provider_default_model(provider_id)
             configuration_source = "legacy compatibility"
     if provider_id is None:
-        provider_id = VERCEL_AI_GATEWAY_PROVIDER_ID
-        model_id = provider_default_model(provider_id)
-    definition = PROVIDER_DEFINITIONS[provider_id]
-    credential_available = bool(source.get(definition.credential_environment_name, "").strip())
-    provider = _build_provider(provider_id, model_id, source, transport=transport)
+        definition = None
+        credential_available = False
+        provider = None
+    else:
+        assert model_id is not None
+        definition = PROVIDER_DEFINITIONS[provider_id]
+        credential_available = bool(source.get(definition.credential_environment_name, "").strip())
+        provider = _build_provider(provider_id, model_id, source, transport=transport)
     test_state_path = default_ai_test_state_path(resolved_config_path)
     status_snapshot_path = default_ai_status_snapshot_path(resolved_config_path)
-    last_test = _load_matching_test_state(test_state_path, provider_id=provider_id, model_id=model_id)
-    last_status = _load_matching_status_snapshot(
-        status_snapshot_path,
-        provider_id=provider_id,
-        model_id=model_id,
-    )
+    last_test = None
+    last_status = None
+    if provider_id is not None and model_id is not None:
+        last_test = _load_matching_test_state(test_state_path, provider_id=provider_id, model_id=model_id)
+        last_status = _load_matching_status_snapshot(
+            status_snapshot_path,
+            provider_id=provider_id,
+            model_id=model_id,
+        )
     return ResolvedAiProvider(
         provider_id=provider_id,
-        display_name=definition.display_name,
+        display_name=None if definition is None else definition.display_name,
         model_id=model_id,
         source=configuration_source,
-        credential_environment_name=definition.credential_environment_name,
+        credential_environment_name=None if definition is None else definition.credential_environment_name,
         credential_available=credential_available,
         provider=provider,
         last_test=last_test,

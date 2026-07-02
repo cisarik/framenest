@@ -3,7 +3,7 @@
 ## Status
 
 This is a living permanent product and UX reference. It records accepted gallery
-direction; it does not claim that a persistent gallery is currently implemented.
+direction and the current pre-alpha persistent-preview Gallery boundary.
 
 Classification: living permanent product architecture/UX reference.
 
@@ -80,13 +80,25 @@ generate derivatives. Missing or unavailable derivatives use a compact
 non-original fallback until explicit playback. Activating the card's media
 surface by pointer or keyboard replaces the static derivative or fallback in
 the same card with original GIF or MP4 content from the identity-only
-`/content` endpoint. Opening Details from the card title continues to use
-original GIF/MP4 content and Details playback semantics. Gallery-preview
-generation remains an explicit server-operator action. These persistent
-gallery previews are not durable accepted covers, cover candidates, catalog
-metadata, or Cover Studio state. Details uses a black player-first surface.
-Native/VLC playback, downloadable files, and a broader media player are future
-work.
+`/content` endpoint. Static cards do not show a permanent central play icon,
+corner badge, or playback overlay; the media surface itself remains the
+accessible playback control with visible focus. Opening Details from the card
+title continues to use original GIF/MP4 content and Details playback semantics.
+Gallery-preview generation remains an explicit server-operator action. These
+persistent gallery previews are not durable accepted covers, cover candidates,
+catalog metadata, or Cover Studio state. Details uses a black player-first
+surface. Native/VLC playback, downloadable files, and a broader media player
+are future work.
+
+Untagged supported GIF and MP4 cards may show a direct `Analyze` action above
+`Edit`. It is a needs-metadata shortcut, not durable proof that analysis has or
+has not happened. When server AI is available, the shortcut uses the existing
+identity-only suggestion endpoint and opens the existing metadata editor with
+unsaved editable suggestions; persistence still requires `Save`, and the
+physical file is not renamed. When server AI is unavailable, the shortcut opens
+the read-only AI Status panel with a sanitized reason and does not send an
+analysis request. Tagged cards continue to show meaningful tag information and
+omit the card-level shortcut.
 
 The Gallery header and pagination should stay compact: the temporary `FN` mark
 is sufficient non-interactive branding in the current shell, visible `Cloud`

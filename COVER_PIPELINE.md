@@ -161,9 +161,9 @@ derivative, performs no generation or catalog mutation, returns inline JPEG
 bytes with an ETag, supports `If-None-Match`, and does not expose source paths,
 cache paths, database paths, or cache filenames.
 
-Deferred scope remains cleanup, eviction, Gallery UI consumption, accepted
-covers, Cover Studio, cover candidates, AI cover generation, animated previews,
-background generation, and arbitrary collection or cover management.
+Deferred scope remains cleanup, eviction, accepted covers, Cover Studio, cover
+candidates, AI cover generation, animated previews, background generation, and
+arbitrary collection or cover management.
 
 ## Imported Image Covers
 

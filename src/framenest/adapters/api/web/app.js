@@ -45,6 +45,7 @@ let detailsMediaElement = null;
 const prefersReducedMotion = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 let metadataBeforeUnloadAttached = false;
 let metadataAiRequestToken = 0;
+let cardAiAnalyzingMediaIds = new Set();
 let catalogState = {
   q: "",
   tagKeys: [],
@@ -287,9 +288,10 @@ function setAiStatusClass(className) {
 }
 
 function updateSettingsAiStatus() {
-  const providerName = aiCapability.provider_display_name || aiCapability.provider_id || "Unavailable";
-  if (settingsAiProvider) settingsAiProvider.textContent = providerName;
-  if (settingsAiModel) settingsAiModel.textContent = aiCapability.model_id || "";
+  const providerName = aiCapability.provider_display_name || aiCapability.provider_id || "";
+  const status = aiStatusInfo(aiCapability.status);
+  if (settingsAiProvider) settingsAiProvider.textContent = providerName ? `Provider: ${providerName}` : status.heading;
+  if (settingsAiModel) settingsAiModel.textContent = aiCapability.model_id ? `Model: ${aiCapability.model_id}` : status.reason;
   renderOptionalStatusRow(
     settingsAiServerRow,
     settingsAiServerCheck,
@@ -306,14 +308,70 @@ function updateSettingsAiStatus() {
 
 function aiStatusLabel(status) {
   if (status === "success") return "Successful";
-  if (status === "verified") return "Verified";
+  if (status === "available") return "Available";
   if (status === "configured_unverified") return "Configured, unverified";
+  if (status === "credential_unavailable") return "Credential unavailable";
   if (status === "authentication_failed") return "Authentication failed";
   if (status === "rate_limited_or_quota_exhausted") return "Rate limited or quota exhausted";
   if (status === "model_unavailable") return "Model unavailable";
   if (status === "provider_unreachable") return "Provider unreachable";
   if (status === "provider_error") return "Provider error";
   return "Not configured";
+}
+
+function aiStatusInfo(status) {
+  if (status === "credential_unavailable") {
+    return {
+      heading: "Server credential unavailable",
+      reason: "The selected provider credential is not available to this FrameNest server process.",
+    };
+  }
+  if (status === "configured_unverified") {
+    return {
+      heading: "AI configured, not verified",
+      reason: "A provider is selected, but no matching successful server test is recorded.",
+    };
+  }
+  if (status === "available") {
+    return {
+      heading: "AI available",
+      reason: "A credentialed server provider is available for explicit analysis requests.",
+    };
+  }
+  if (status === "authentication_failed") {
+    return {
+      heading: "Authentication failed",
+      reason: "The provider rejected the configured server credential.",
+    };
+  }
+  if (status === "rate_limited_or_quota_exhausted") {
+    return {
+      heading: "Rate limited",
+      reason: "The configured provider reported a rate limit or quota condition.",
+    };
+  }
+  if (status === "model_unavailable") {
+    return {
+      heading: "Model unavailable",
+      reason: "The selected provider model is not currently available.",
+    };
+  }
+  if (status === "provider_unreachable") {
+    return {
+      heading: "Provider unreachable",
+      reason: "The server could not reach the configured provider during the last test.",
+    };
+  }
+  if (status === "provider_error") {
+    return {
+      heading: "Provider error",
+      reason: "The configured provider returned an unavailable or invalid response.",
+    };
+  }
+  return {
+    heading: "AI not configured",
+    reason: "No server AI provider has been selected.",
+  };
 }
 
 function formatLocalTimestamp(value) {
@@ -366,19 +424,19 @@ function renderAiCapability(payload) {
   };
   const providerName = aiCapability.provider_display_name || aiCapability.provider_id;
   const providerInfo = aiCapability.model_id ? `${providerName} / ${aiCapability.model_id}` : providerName;
-  const statusText = aiStatusLabel(aiCapability.status);
+  const status = aiStatusInfo(aiCapability.status);
   if (aiCapability.available) {
     setAiStatusClass("status--healthy");
-    aiStatusText.textContent = "AI configured";
+    aiStatusText.textContent = status.heading;
     aiStatusDetail.textContent =
-      `${providerInfo}; ${statusText}; ${aiCapability.execution}.`;
+      `${providerInfo}; ${status.reason}; ${aiCapability.execution}.`;
     setAiStatusButtonState("healthy", "AI available");
     updateSettingsAiStatus();
     return;
   }
   setAiStatusClass("status--error");
-  aiStatusText.textContent = "AI not configured";
-  aiStatusDetail.textContent = "Configure a server-side AI provider before starting FrameNest.";
+  aiStatusText.textContent = status.heading;
+  aiStatusDetail.textContent = status.reason;
   setAiStatusButtonState("unhealthy", "AI unavailable");
   updateSettingsAiStatus();
 }
@@ -1434,15 +1492,6 @@ function renderPreviewFallback(surface, title) {
   text.className = "media-placeholder__error";
   text.textContent = "Preview unavailable.";
   surface.appendChild(text);
-  surface.appendChild(buildCardPlayIndicator(title));
-}
-
-function buildCardPlayIndicator(title) {
-  const indicator = document.createElement("span");
-  indicator.className = "media-placeholder__play-indicator";
-  indicator.setAttribute("aria-hidden", "true");
-  indicator.title = `Play ${title}`;
-  return indicator;
 }
 
 function renderPersistentPreview(surface, item, location, title) {
@@ -1462,7 +1511,6 @@ function renderPersistentPreview(surface, item, location, title) {
   };
   image.src = mediaGalleryPreviewUrl(item.media_id, location.location_id);
   surface.appendChild(image);
-  surface.appendChild(buildCardPlayIndicator(title));
 }
 
 function renderCardOriginalPlayback(surface, item, location, title) {
@@ -1546,6 +1594,70 @@ function renderCatalogCardMediaSurface(item) {
   return surface;
 }
 
+function cardNeedsMetadata(item) {
+  return selectSupportedAvailableLocation(item) !== null && (!item.tags || item.tags.length === 0);
+}
+
+function setCardAnalyzeButtonState(button, state, message = "") {
+  button.dataset.analysisState = state;
+  button.setAttribute("aria-busy", state === "analyzing" ? "true" : "false");
+  button.disabled = state === "analyzing";
+  button.textContent = state === "analyzing" ? "Analyzing…" : "Analyze";
+  const status = button.closest(".catalog-card")?.querySelector(".catalog-card__analysis-status");
+  if (status) {
+    status.textContent = message;
+    status.hidden = !message;
+  }
+}
+
+function applyResolvedAiSuggestionToMetadataWorkspace(suggestion, tagKeys) {
+  metadataWorkspace.current.displayTitle = suggestion.title;
+  metadataWorkspace.current.description = suggestion.description;
+  metadataWorkspace.current.tagKeys = tagKeys;
+  metadataWorkspace.suggestedFilename = suggestion.suggestedFilename;
+  metadataWorkspace.aiSuggestionApplied = true;
+  metadataWorkspace.statusOverride = null;
+  metadataAiStatus.textContent = "Review the updated fields, then Save.";
+}
+
+async function handleAnalyzeCatalogCard(item, button) {
+  if (cardAiAnalyzingMediaIds.has(item.media_id)) return;
+  const location = selectSupportedAvailableLocation(item);
+  if (!location) return;
+  if (!aiCapability.available) {
+    openStatusDialog("ai");
+    return;
+  }
+  cardAiAnalyzingMediaIds.add(item.media_id);
+  setCardAnalyzeButtonState(button, "analyzing");
+  try {
+    const response = await fetch(mediaAiSuggestionEndpoint(item.media_id, location.location_id), {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ confirm_cloud_upload: true }),
+      cache: "no-store",
+    });
+    const payload = await response.json();
+    if (!response.ok) {
+      setCardAnalyzeButtonState(button, "error", aiSuggestionErrorMessage(payload));
+      return;
+    }
+    const suggestion = aiSuggestionFromPayload(payload);
+    await handleOpenMetadataWorkspace(item, button, { aiSuggestion: suggestion });
+    setCardAnalyzeButtonState(button, "idle");
+  } catch {
+    setCardAnalyzeButtonState(button, "error", "AI analysis failed.");
+  } finally {
+    cardAiAnalyzingMediaIds.delete(item.media_id);
+    if (button.dataset.analysisState === "analyzing") {
+      setCardAnalyzeButtonState(button, "idle");
+    }
+  }
+}
+
 function setCatalogPagination(page) {
   const start = page.total === 0 ? 0 : page.offset + 1;
   const end = Math.min(page.offset + page.limit, page.total);
@@ -1597,10 +1709,9 @@ function renderCatalogCard(item) {
     body.appendChild(tagsDiv);
   }
 
-  const status = document.createElement("div");
-  status.className = "catalog-card__status";
   if (item.collection_key === "processed") {
-    status.classList.add("catalog-card__status--processed");
+    const status = document.createElement("div");
+    status.className = "catalog-card__status catalog-card__status--processed";
     const dot = document.createElement("span");
     dot.className = "catalog-card__status-dot";
     dot.setAttribute("aria-hidden", "true");
@@ -1612,16 +1723,23 @@ function renderCatalogCard(item) {
     if (processedTime !== null) {
       status.appendChild(processedTime);
     }
-  } else {
-    const dot = document.createElement("span");
-    dot.className = "catalog-card__status-dot";
-    dot.setAttribute("aria-hidden", "true");
-    status.appendChild(dot);
+    body.appendChild(status);
   }
-  body.appendChild(status);
 
   const actions = document.createElement("div");
   actions.className = "catalog-card__actions";
+  if (cardNeedsMetadata(item)) {
+    const analyzeButton = document.createElement("button");
+    analyzeButton.className = "catalog-card__action catalog-card__action--analyze";
+    analyzeButton.type = "button";
+    analyzeButton.textContent = "Analyze";
+    analyzeButton.dataset.analysisState = "idle";
+    analyzeButton.setAttribute("aria-busy", "false");
+    analyzeButton.setAttribute("aria-disabled", aiCapability.available ? "false" : "true");
+    analyzeButton.setAttribute("aria-label", `Analyze ${item.display_title || deriveCatalogFallbackTitle(item)}`);
+    analyzeButton.addEventListener("click", () => handleAnalyzeCatalogCard(item, analyzeButton));
+    actions.appendChild(analyzeButton);
+  }
   const editButton = document.createElement("button");
   editButton.className = "catalog-card__action catalog-card__action--primary";
   editButton.type = "button";
@@ -1629,8 +1747,11 @@ function renderCatalogCard(item) {
   editButton.setAttribute("aria-label", `Edit ${item.display_title || deriveCatalogFallbackTitle(item)}`);
   editButton.addEventListener("click", () => handleOpenMetadataWorkspace(item, editButton));
   actions.appendChild(editButton);
+  const analysisStatus = document.createElement("p");
+  analysisStatus.className = "catalog-card__analysis-status";
+  analysisStatus.hidden = true;
 
-  card.append(mediaSurface, body, actions);
+  card.append(mediaSurface, body, actions, analysisStatus);
   return card;
 }
 
@@ -2000,13 +2121,7 @@ async function handleAnalyzeMetadataByAi() {
       return;
     }
     metadataWorkspace.analyzing = false;
-    metadataWorkspace.current.displayTitle = suggestion.title;
-    metadataWorkspace.current.description = suggestion.description;
-    metadataWorkspace.current.tagKeys = tagKeys;
-    metadataWorkspace.suggestedFilename = suggestion.suggestedFilename;
-    metadataWorkspace.aiSuggestionApplied = true;
-    metadataWorkspace.statusOverride = null;
-    metadataAiStatus.textContent = "Review the updated fields, then Save.";
+    applyResolvedAiSuggestionToMetadataWorkspace(suggestion, tagKeys);
     renderMetadataWorkspace();
   } catch {
     if (token === metadataAiRequestToken) {
@@ -2211,7 +2326,7 @@ function closeDetailsDialog() {
   }
 }
 
-async function handleOpenMetadataWorkspace(item, openerElement) {
+async function handleOpenMetadataWorkspace(item, openerElement, { aiSuggestion = null } = {}) {
   if (!confirmDiscardDirtyMetadata()) {
     return;
   }
@@ -2284,6 +2399,13 @@ async function handleOpenMetadataWorkspace(item, openerElement) {
       return;
     }
     applyMetadataPayloadToWorkspace(payload);
+    if (aiSuggestion) {
+      const tagKeys = await metadataTagKeysFromSuggestion(aiSuggestion.tags);
+      if (token !== metadataRequestToken) {
+        return;
+      }
+      applyResolvedAiSuggestionToMetadataWorkspace(aiSuggestion, tagKeys);
+    }
     renderMetadataWorkspace();
     metadataTitleInput.focus();
   } catch {
