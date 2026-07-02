@@ -65,21 +65,28 @@ rename remain future work.
 
 The Details dialog now plays real local GIF and MP4 content through the
 identity-only `GET /api/media/{media_id}/locations/{location_id}/content`
-endpoint when the first catalog location is `available`. It selects only by
-`media_id` and `location_id`; it never constructs playback URLs from relative
-paths, absolute paths, or library roots. Video uses a native `<video>` element
-with controls, metadata preload, and `playsinline`; animated images use a real
-`<img>`. Available local Gallery cards show immediate real media visuals. GIF
-cards use a static real-content preview so the grid does not animate
-automatically; GIF animation occurs in Details after explicit user interaction.
-MP4 cards use a real paused decoded-frame visual from the identity-only content
-endpoint with no autoplay, loop, card controls, or automatic audio. The
-meaningful media surface opens actual Details playback by pointer or keyboard,
-while the only visible card action is `Edit`. These immediate card visuals are not
-durable accepted covers, persistent thumbnails, or the future cover pipeline;
-generic available-media placeholders are rejected. Details uses a black
-player-first surface. Native/VLC playback, downloadable files, and a broader
-media player are future work.
+endpoint when the first supported catalog location is `available`. It selects
+only by `media_id` and `location_id`; it never constructs playback URLs from
+relative paths, absolute paths, or library roots. Video uses a native `<video>`
+element with controls, metadata preload, and `playsinline`; animated images use
+a real `<img>`.
+
+Available local Gallery cards use persistent server-generated static JPEG
+gallery preview derivatives through the identity-only
+`GET /api/media/{media_id}/locations/{location_id}/gallery-preview` endpoint
+when the derivative is ready. Initial card rendering does not require original
+GIF or MP4 transfer, does not call local media-analysis preview, and does not
+generate derivatives. Missing or unavailable derivatives use a compact
+non-original fallback until explicit playback. Activating the card's media
+surface by pointer or keyboard replaces the static derivative or fallback in
+the same card with original GIF or MP4 content from the identity-only
+`/content` endpoint. Opening Details from the card title continues to use
+original GIF/MP4 content and Details playback semantics. Gallery-preview
+generation remains an explicit server-operator action. These persistent
+gallery previews are not durable accepted covers, cover candidates, catalog
+metadata, or Cover Studio state. Details uses a black player-first surface.
+Native/VLC playback, downloadable files, and a broader media player are future
+work.
 
 The Gallery header and pagination should stay compact: the temporary `FN` mark
 is sufficient non-interactive branding in the current shell, visible `Cloud`

@@ -38,6 +38,8 @@ let previewRequestToken = 0;
 let activePreviewMediaId = null;
 let activePreviewTimer = null;
 let cardMediaElements = new Set();
+let activeCardMediaSurface = null;
+let activeCardMediaRestore = null;
 let detailsMediaToken = 0;
 let detailsMediaElement = null;
 const prefersReducedMotion = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -742,6 +744,16 @@ function stopCardPreviewTimer() {
 }
 
 function cleanupCatalogCardMedia() {
+  if (activeCardMediaRestore && activeCardMediaRestore.surface && activeCardMediaRestore.surface.isConnected) {
+    renderPersistentPreview(
+      activeCardMediaRestore.surface,
+      activeCardMediaRestore.item,
+      activeCardMediaRestore.location,
+      activeCardMediaRestore.title,
+    );
+  }
+  activeCardMediaSurface = null;
+  activeCardMediaRestore = null;
   cardMediaElements.forEach((element) => {
     if (typeof element.__framenestCleanup === "function") {
       element.__framenestCleanup();
@@ -944,8 +956,18 @@ function selectPlaybackLocation(item) {
   return item.locations.find((location) => location.availability === "available" && location.location_id) || null;
 }
 
+function selectSupportedAvailableLocation(item) {
+  if (!item.locations || item.locations.length === 0) return null;
+  if (item.media_kind !== "video" && item.media_kind !== "animated_image") return null;
+  return item.locations.find((location) => location.availability === "available" && location.location_id) || null;
+}
+
 function mediaContentUrl(mediaId, locationId) {
-  return `${MEDIA_CATALOG_ENDPOINT}/${mediaId}/locations/${locationId}/content`;
+  return `${MEDIA_CATALOG_ENDPOINT}/${encodeURIComponent(mediaId)}/locations/${encodeURIComponent(locationId)}/content`;
+}
+
+function mediaGalleryPreviewUrl(mediaId, locationId) {
+  return `${MEDIA_CATALOG_ENDPOINT}/${encodeURIComponent(mediaId)}/locations/${encodeURIComponent(locationId)}/gallery-preview`;
 }
 
 function renderDetailsMediaUnavailable(container) {
@@ -1405,28 +1427,58 @@ function renderUnavailableCardMediaSurface(item, title) {
   return surface;
 }
 
-function renderCatalogCardMediaSurface(item) {
-  const title = item.display_title || deriveCatalogFallbackTitle(item);
-  const location = selectPlaybackLocation(item);
-  if (!location) {
-    return renderUnavailableCardMediaSurface(item, title);
-  }
+function renderPreviewFallback(surface, title) {
+  surface.replaceChildren();
+  surface.setAttribute("data-media-state", "preview-unavailable");
+  const text = document.createElement("span");
+  text.className = "media-placeholder__error";
+  text.textContent = "Preview unavailable.";
+  surface.appendChild(text);
+  surface.appendChild(buildCardPlayIndicator(title));
+}
 
-  const surface = document.createElement("div");
+function buildCardPlayIndicator(title) {
+  const indicator = document.createElement("span");
+  indicator.className = "media-placeholder__play-indicator";
+  indicator.setAttribute("aria-hidden", "true");
+  indicator.title = `Play ${title}`;
+  return indicator;
+}
+
+function renderPersistentPreview(surface, item, location, title) {
+  surface.replaceChildren();
+  surface.className = `media-placeholder media-placeholder--preview media-placeholder--${item.media_kind}`;
+  surface.setAttribute("data-media-state", "preview");
+
+  const image = document.createElement("img");
+  image.className = "media-placeholder__preview-img";
+  image.alt = `Gallery preview for ${title}`;
+  image.loading = "lazy";
+  image.decoding = "async";
+  image.onerror = () => {
+    image.onerror = null;
+    image.removeAttribute("src");
+    renderPreviewFallback(surface, title);
+  };
+  image.src = mediaGalleryPreviewUrl(item.media_id, location.location_id);
+  surface.appendChild(image);
+  surface.appendChild(buildCardPlayIndicator(title));
+}
+
+function renderCardOriginalPlayback(surface, item, location, title) {
+  surface.replaceChildren();
   surface.className = `media-placeholder media-placeholder--live media-placeholder--${item.media_kind}`;
-  surface.setAttribute("data-media-state", "live");
-  surface.setAttribute("aria-label", `Open playback for ${title}`);
-  surface.title = "Open playback";
+  surface.setAttribute("data-media-state", "playing");
+  activeCardMediaSurface = surface;
+  activeCardMediaRestore = { surface, item, location, title };
 
   const url = mediaContentUrl(item.media_id, location.location_id);
-  const showUnavailable = () => {
-    surface.replaceChildren();
-    surface.className = "media-placeholder media-placeholder--unavailable";
-    surface.setAttribute("data-media-state", "unavailable");
-    const text = document.createElement("span");
-    text.className = "media-placeholder__error";
-    text.textContent = "Media unavailable.";
-    surface.appendChild(text);
+  const showPreviewAgain = () => {
+    if (activeCardMediaSurface === surface) {
+      activeCardMediaSurface = null;
+      activeCardMediaRestore = null;
+    }
+    renderPersistentPreview(surface, item, location, title);
   };
 
   if (item.media_kind === "video") {
@@ -1438,53 +1490,55 @@ function renderCatalogCardMediaSurface(item) {
     video.muted = true;
     video.controls = false;
     video.loop = false;
-    video.setAttribute("aria-label", `Paused video preview for ${title}`);
-    video.onerror = showUnavailable;
+    video.setAttribute("aria-label", `Playing video preview for ${title}`);
+    video.onerror = showPreviewAgain;
     cardMediaElements.add(video);
     video.src = url;
     surface.appendChild(video);
+    video.play().catch(() => {
+      // The explicit Details surface remains available if compact-card playback is blocked.
+    });
   } else {
-    const canvas = document.createElement("canvas");
-    canvas.className = "media-placeholder__canvas";
-    canvas.setAttribute("role", "img");
-    canvas.setAttribute("aria-label", `Static image preview for ${title}`);
-    const decodeImage = document.createElement("img");
-    let active = true;
-    canvas.__framenestGifImage = decodeImage;
-    decodeImage.onload = () => {
-      if (!active || canvas.__framenestGifImage !== decodeImage || !decodeImage.naturalWidth || !decodeImage.naturalHeight) {
-        return;
-      }
-      canvas.width = decodeImage.naturalWidth;
-      canvas.height = decodeImage.naturalHeight;
-      const context = canvas.getContext("2d");
-      if (!context) {
-        showUnavailable();
-        return;
-      }
-      context.drawImage(decodeImage, 0, 0);
-      decodeImage.onload = null;
-      decodeImage.onerror = null;
-      decodeImage.removeAttribute("src");
-      canvas.__framenestGifImage = null;
-    };
-    decodeImage.onerror = () => {
-      if (!active || canvas.__framenestGifImage !== decodeImage) return;
-      showUnavailable();
-    };
-    canvas.__framenestCleanup = () => {
-      active = false;
-    };
-    cardMediaElements.add(canvas);
-    surface.appendChild(canvas);
-    decodeImage.src = url;
+    const image = document.createElement("img");
+    image.className = "media-placeholder__image";
+    image.alt = `Playing animated image preview for ${title}`;
+    image.onerror = showPreviewAgain;
+    cardMediaElements.add(image);
+    image.src = url;
+    surface.appendChild(image);
+  }
+}
+
+function activateCardPlayback(item, surface) {
+  const title = item.display_title || deriveCatalogFallbackTitle(item);
+  const location = selectSupportedAvailableLocation(item);
+  if (!location) {
+    renderPreviewFallback(surface, title);
+    return;
+  }
+  cleanupCatalogCardMedia();
+  renderCardOriginalPlayback(surface, item, location, title);
+}
+
+function renderCatalogCardMediaSurface(item) {
+  const title = item.display_title || deriveCatalogFallbackTitle(item);
+  const location = selectSupportedAvailableLocation(item);
+  if (!location) {
+    return renderUnavailableCardMediaSurface(item, title);
   }
 
-  surface.addEventListener("click", () => openPlaybackDetails(item, surface));
+  const surface = document.createElement("div");
+  surface.className = `media-placeholder media-placeholder--preview media-placeholder--${item.media_kind}`;
+  surface.setAttribute("data-media-state", "preview");
+  surface.setAttribute("aria-label", `Play ${title}`);
+  surface.title = "Play";
+  renderPersistentPreview(surface, item, location, title);
+
+  surface.addEventListener("click", () => activateCardPlayback(item, surface));
   surface.addEventListener("keydown", (event) => {
     if (event.key === "Enter" || event.key === " ") {
       event.preventDefault();
-      openPlaybackDetails(item, surface);
+      activateCardPlayback(item, surface);
     }
   });
   surface.setAttribute("role", "button");
@@ -1515,7 +1569,13 @@ function renderCatalogCard(item) {
   const body = document.createElement("div");
   body.className = "catalog-card__body";
   const title = document.createElement("h3");
-  title.textContent = item.display_title || deriveCatalogFallbackTitle(item);
+  const titleButton = document.createElement("button");
+  titleButton.className = "catalog-card__title-button";
+  titleButton.type = "button";
+  titleButton.textContent = item.display_title || deriveCatalogFallbackTitle(item);
+  titleButton.setAttribute("aria-label", `Open details for ${item.display_title || deriveCatalogFallbackTitle(item)}`);
+  titleButton.addEventListener("click", () => openDetailsDialog(item, titleButton));
+  title.appendChild(titleButton);
   body.appendChild(title);
 
   if (item.tags.length > 0) {

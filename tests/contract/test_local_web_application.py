@@ -1301,13 +1301,13 @@ def test_catalog_card_has_play_surface_and_edit_action_without_details_button(cl
     script = client.get("/assets/app.js").text
     card_body = _javascript_function(script, "renderCatalogCard")
     surface_body = _javascript_function(script, "renderCatalogCardMediaSurface")
-    assert "Details" not in card_body
     assert "Edit" in card_body
     assert "View details" not in card_body
     assert "Edit metadata" not in card_body
     assert 'textContent = "▶"' not in surface_body
-    assert "media-placeholder__play" not in surface_body
-    assert "openPlaybackDetails" in surface_body
+    assert "media-placeholder__play-indicator" in script
+    assert "activateCardPlayback" in surface_body
+    assert "openDetailsDialog(item, titleButton)" in card_body
     assert "handleOpenMetadataWorkspace" in card_body
 
 
@@ -1389,12 +1389,16 @@ def test_javascript_card_has_status_row(client: TestClient) -> None:
     assert "processed" in card_body.lower() or "status" in card_body.lower()
 
 
-def test_javascript_card_has_content_first_media_surface(client: TestClient) -> None:
+def test_javascript_card_has_persistent_preview_first_media_surface(client: TestClient) -> None:
     script = client.get("/assets/app.js").text
     surface_body = _javascript_function(script, "renderCatalogCardMediaSurface")
-    assert "mediaContentUrl(item.media_id, location.location_id)" in surface_body
-    assert 'document.createElement("video")' in surface_body
-    assert 'document.createElement("img")' in surface_body
+    preview_body = _javascript_function(script, "renderPersistentPreview")
+    assert "mediaGalleryPreviewUrl(item.media_id, location.location_id)" in preview_body
+    assert 'document.createElement("img")' in preview_body
+    assert 'image.loading = "lazy"' in preview_body
+    assert 'image.decoding = "async"' in preview_body
+    assert "mediaContentUrl(" not in surface_body
+    assert 'document.createElement("video")' not in surface_body
     assert "Video placeholder" not in surface_body
     assert "Animated image placeholder" not in surface_body
 
@@ -1424,8 +1428,8 @@ def test_card_uses_media_surface_for_playback_without_visible_play_control(clien
     script = client.get("/assets/app.js").text
     surface_body = _javascript_function(script, "renderCatalogCardMediaSurface")
     assert 'textContent = "▶"' not in surface_body
-    assert "media-placeholder__play" not in surface_body
-    assert "openPlaybackDetails" in surface_body
+    assert "media-placeholder__play-indicator" in script
+    assert "activateCardPlayback" in surface_body
     assert 'surface.addEventListener("click"' in surface_body
     assert 'surface.addEventListener("keydown"' in surface_body
     assert 'surface.setAttribute("role", "button")' in surface_body
@@ -1535,38 +1539,62 @@ def test_javascript_details_playback_uses_identity_only_url(client: TestClient) 
     assert "library.path" not in url_body
 
 
-def test_javascript_available_cards_use_identity_only_media_urls(client: TestClient) -> None:
+def test_javascript_available_cards_use_identity_only_preview_and_content_urls(client: TestClient) -> None:
     script = client.get("/assets/app.js").text
     surface_body = _javascript_function(script, "renderCatalogCardMediaSurface")
     media_url_body = _javascript_function(script, "mediaContentUrl")
+    preview_url_body = _javascript_function(script, "mediaGalleryPreviewUrl")
 
-    assert "selectPlaybackLocation(item)" in surface_body
-    assert "mediaContentUrl(item.media_id, location.location_id)" in surface_body
+    assert "selectSupportedAvailableLocation(item)" in surface_body
+    assert "renderPersistentPreview(surface, item, location, title)" in surface_body
     assert "MEDIA_CATALOG_ENDPOINT" in media_url_body
     assert "mediaId" in media_url_body
     assert "locationId" in media_url_body
+    assert "encodeURIComponent(mediaId)" in media_url_body
+    assert "encodeURIComponent(locationId)" in media_url_body
+    assert "gallery-preview" in preview_url_body
+    assert "encodeURIComponent(mediaId)" in preview_url_body
+    assert "encodeURIComponent(locationId)" in preview_url_body
     assert "relative_path" not in media_url_body
+    assert "relative_path" not in preview_url_body
     assert "library" not in media_url_body.lower()
+    assert "library" not in preview_url_body.lower()
 
 
-def test_javascript_available_gif_card_renders_static_real_content_canvas(client: TestClient) -> None:
+def test_javascript_initial_card_renders_static_persistent_preview_image(client: TestClient) -> None:
+    script = client.get("/assets/app.js").text
+    preview_body = _javascript_function(script, "renderPersistentPreview")
+
+    assert 'document.createElement("img")' in preview_body
+    assert "media-placeholder__preview-img" in preview_body
+    assert "image.alt = `Gallery preview for ${title}`" in preview_body
+    assert "image.src = mediaGalleryPreviewUrl(item.media_id, location.location_id)" in preview_body
+    assert "renderPreviewFallback(surface, title)" in preview_body
+    assert "mediaContentUrl" not in preview_body
+
+
+def test_javascript_initial_card_render_does_not_fetch_original_or_generate_preview(client: TestClient) -> None:
     script = client.get("/assets/app.js").text
     surface_body = _javascript_function(script, "renderCatalogCardMediaSurface")
-    image_section = surface_body[surface_body.index('document.createElement("img")') :]
+    preview_body = _javascript_function(script, "renderPersistentPreview")
+    fallback_body = _javascript_function(script, "renderPreviewFallback")
 
-    assert 'document.createElement("canvas")' in surface_body
-    assert "media-placeholder__canvas" in surface_body
-    assert "context.drawImage(decodeImage, 0, 0)" in surface_body
-    assert "decodeImage.src = url" in surface_body
-    assert "decodeImage.onerror" in image_section
+    assert "mediaGalleryPreviewUrl(item.media_id, location.location_id)" in preview_body
+    assert "mediaContentUrl" not in surface_body
+    assert "/content" not in surface_body
+    assert "media-analysis-preview" not in surface_body
+    assert "media-analysis-preview" not in preview_body
+    assert "previews generate" not in script
+    assert "mediaContentUrl" not in fallback_body
 
 
-def test_javascript_available_mp4_card_renders_paused_safe_video(client: TestClient) -> None:
+def test_javascript_explicit_card_play_renders_original_media(client: TestClient) -> None:
     script = client.get("/assets/app.js").text
-    surface_body = _javascript_function(script, "renderCatalogCardMediaSurface")
-    video_section = surface_body[
-        surface_body.index('document.createElement("video")') : surface_body.index("} else {")
+    playback_body = _javascript_function(script, "renderCardOriginalPlayback")
+    video_section = playback_body[
+        playback_body.index('document.createElement("video")') : playback_body.index("} else {")
     ]
+    image_section = playback_body[playback_body.index('document.createElement("img")') :]
 
     assert "video.src = url" in video_section
     assert 'video.preload = "metadata"' in video_section
@@ -1575,19 +1603,24 @@ def test_javascript_available_mp4_card_renders_paused_safe_video(client: TestCli
     assert "video.muted = true" in video_section
     assert "video.controls = false" in video_section
     assert "video.loop = false" in video_section
-    assert "video.play(" not in video_section
+    assert "video.play(" in video_section
+    assert "image.src = url" in image_section
+    assert "mediaContentUrl(item.media_id, location.location_id)" in playback_body
 
 
-def test_javascript_card_media_surface_is_accessible_and_opens_real_details(client: TestClient) -> None:
+def test_javascript_card_media_surface_is_accessible_and_card_title_opens_details(client: TestClient) -> None:
     script = client.get("/assets/app.js").text
     surface_body = _javascript_function(script, "renderCatalogCardMediaSurface")
+    card_body = _javascript_function(script, "renderCatalogCard")
     open_body = _javascript_function(script, "openPlaybackDetails")
 
     assert "aria-label" in surface_body
-    assert "Open playback for ${title}" in surface_body
-    assert "openPlaybackDetails(item, surface)" in surface_body
+    assert "Play ${title}" in surface_body
+    assert "activateCardPlayback(item, surface)" in surface_body
     assert "Enter" in surface_body
     assert "event.key === \" \"" in surface_body
+    assert "Open details for" in card_body
+    assert "openDetailsDialog(item, titleButton)" in card_body
     assert "openDetailsDialog(item, openerElement, { playWhenReady: true })" in open_body
     assert "mediaContentUrl" in _javascript_function(script, "renderDetailsMedia")
 
@@ -1788,16 +1821,15 @@ def test_gallery_reference_no_longer_contains_canonical_tag_fragment() -> None:
 
 def test_gallery_reference_documents_content_first_playback_boundary() -> None:
     gallery = Path("GALLERY.md").read_text(encoding="utf-8")
-    assert "Available local Gallery cards show immediate real media visuals" in gallery
-    assert "GIF\ncards use a static real-content preview" in gallery
-    assert "MP4 cards use a real paused decoded-frame visual" in gallery
-    assert "meaningful media surface opens actual Details playback" in gallery
-    assert "centered\nreal `▶` affordance" not in gallery
-    assert "not\ndurable accepted covers" in gallery
-    assert "persistent thumbnails" in gallery
-    assert "generic available-media placeholders" in gallery
-    assert "are rejected" in gallery
-    assert "Details uses a black\nplayer-first surface" in gallery
+    assert "persistent server-generated static JPEG\ngallery preview derivatives" in gallery
+    assert "/gallery-preview" in gallery
+    assert "Initial card rendering does not require original\nGIF or MP4 transfer" in gallery
+    assert "Missing or unavailable derivatives use a compact\nnon-original fallback" in gallery
+    assert "Activating the card's media\nsurface" in gallery
+    assert "Opening Details from the card title continues to use\noriginal GIF/MP4 content" in gallery
+    assert "not durable accepted covers" in gallery
+    assert "Cover Studio state" in gallery
+    assert "Details uses a black player-first surface" in gallery
 
 
 def test_javascript_details_no_longer_loads_representative_frames(client: TestClient) -> None:
@@ -1884,8 +1916,8 @@ def test_javascript_has_fallback_title_suggestions(client: TestClient) -> None:
 def test_card_visual_surface_is_preview_trigger(client: TestClient) -> None:
     script = client.get("/assets/app.js").text
     surface_body = _javascript_function(script, "renderCatalogCardMediaSurface")
-    assert "openPlaybackDetails(item" in surface_body
-    assert "media-placeholder__play" not in surface_body
+    assert "activateCardPlayback(item" in surface_body
+    assert "media-placeholder__play-indicator" in script
     assert 'surface.setAttribute("role", "button")' in surface_body
 
 
@@ -2018,17 +2050,19 @@ def test_css_details_dialog_uses_black_player_first_surfaces(client: TestClient)
     assert "max-height: min(62dvh, 560px)" in details_css
 
 
-def test_javascript_static_gif_card_cleanup_releases_decoder_resources(client: TestClient) -> None:
+def test_javascript_card_playback_cleanup_releases_media_resources(client: TestClient) -> None:
     script = client.get("/assets/app.js").text
     cleanup_body = _javascript_function(script, "cleanupCatalogCardMedia")
-    surface_body = _javascript_function(script, "renderCatalogCardMediaSurface")
+    playback_body = _javascript_function(script, "renderCardOriginalPlayback")
 
-    assert "__framenestGifImage" in surface_body
-    assert "__framenestCleanup" in surface_body
-    assert "decodeImage.removeAttribute(\"src\")" in surface_body
-    assert "__framenestGifImage" in cleanup_body
-    assert "element.__framenestGifImage.onload = null" in cleanup_body
-    assert "element.__framenestGifImage.removeAttribute(\"src\")" in cleanup_body
+    assert "activeCardMediaRestore" in cleanup_body
+    assert "renderPersistentPreview(" in cleanup_body
+    assert "cardMediaElements.add(video)" in playback_body
+    assert "cardMediaElements.add(image)" in playback_body
+    assert "element.pause()" in cleanup_body
+    assert "element.removeAttribute(\"src\")" in cleanup_body
+    assert "element.load()" in cleanup_body
+    assert "cardMediaElements = new Set()" in cleanup_body
 
 
 def test_protocol_documents_define_numbered_cooperator_acceptance_method() -> None:

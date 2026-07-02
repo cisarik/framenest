@@ -968,13 +968,15 @@ h2 {
   background: linear-gradient(135deg, #0d1018, #0a0e16);
 }
 
-.media-placeholder--live {
+.media-placeholder--live,
+.media-placeholder--preview {
   background: #000;
 }
 
 .media-placeholder__image,
 .media-placeholder__canvas,
-.media-placeholder__video {
+.media-placeholder__video,
+.media-placeholder__preview-img {
   display: block;
   width: 100%;
   height: 100%;
@@ -1010,20 +1012,42 @@ h2 {
   z-index: 1;
 }
 
-.media-placeholder[data-preview-state="loaded"] {
+.media-placeholder[data-preview-state="loaded"],
+.media-placeholder[data-media-state="preview"] {
   background: var(--surface-input);
 }
 
-.media-placeholder[data-preview-state="loaded"]::before {
+.media-placeholder[data-preview-state="loaded"]::before,
+.media-placeholder[data-media-state="preview"]::before {
   display: none;
 }
 
 .media-placeholder__preview-img {
-  display: block;
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
   animation: preview-fade-in 300ms ease;
+}
+
+.media-placeholder__play-indicator {
+  position: absolute;
+  inset: 50% auto auto 50%;
+  width: 44px;
+  height: 44px;
+  transform: translate(-50%, -50%);
+  border: 1px solid rgba(232, 240, 232, 0.62);
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.52);
+  box-shadow: 0 0 18px rgba(0, 0, 0, 0.5);
+  pointer-events: none;
+}
+
+.media-placeholder__play-indicator::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 52%;
+  transform: translate(-42%, -50%);
+  border-top: 9px solid transparent;
+  border-bottom: 9px solid transparent;
+  border-left: 14px solid var(--text);
 }
 
 @keyframes preview-fade-in {
@@ -1165,14 +1189,30 @@ h2 {
 
 .catalog-card h3 {
   margin: 0;
+}
+
+.catalog-card__title-button {
+  display: -webkit-box;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  font: inherit;
   font-size: 0.92rem;
   font-weight: 700;
-  color: var(--text);
   line-height: 1.3;
-  display: -webkit-box;
+  text-align: left;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
+}
+
+.catalog-card__title-button:hover,
+.catalog-card__title-button:focus-visible {
+  color: var(--accent-strong);
 }
 
 .catalog-card__tags {
