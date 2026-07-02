@@ -4,6 +4,7 @@ set -g script_dir (dirname (status filename))
 set -g repo_root (realpath "$script_dir")
 set -g controller "$repo_root/.venv/bin/framenest-dev"
 set -g ai_controller "$repo_root/.venv/bin/framenest-ai"
+set -g library_python "$repo_root/.venv/bin/python"
 set -g local_ai_env "$repo_root/.secrets/ai.env.fish"
 set -gx POETRY_VIRTUALENVS_IN_PROJECT true
 
@@ -21,6 +22,9 @@ function _framenest_help
     echo "  ./framenest ai status"
     echo "  ./framenest ai configure"
     echo "  ./framenest ai test"
+    echo "  ./framenest library status"
+    echo "  ./framenest library add"
+    echo "  ./framenest library refresh"
     echo "  ./framenest --help"
     echo "  ./framenest <command> --help"
 end
@@ -142,6 +146,15 @@ switch "$argv[1]"
         _framenest_load_local_ai_env
         or exit $status
         "$ai_controller" $argv[2..-1]
+        exit $status
+    case library
+        if not test -x "$library_python"
+            _framenest_setup
+            or exit $status
+        end
+        cd "$repo_root"
+        or exit $status
+        "$library_python" -m framenest.adapters.cli.library $argv[2..-1]
         exit $status
     case '*'
         echo "Unknown FrameNest command: $argv[1]" >&2

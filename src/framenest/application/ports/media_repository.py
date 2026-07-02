@@ -58,3 +58,6 @@ class MediaRepository(Protocol):
 
     def list_locations_for_media(self, media_id: MediaId) -> tuple[MediaLocation, ...]:
         """Return all locations for one logical media item in deterministic order."""
+
+    def list_all_locations(self) -> tuple[MediaLocation, ...]:
+        """Return all physical media locations in deterministic order."""

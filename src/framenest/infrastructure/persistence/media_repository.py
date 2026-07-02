@@ -237,6 +237,19 @@ class SqliteMediaRepository:
         except SQLAlchemyError as exc:
             raise FrameNestMediaRepositoryError(_REPOSITORY_FAILURE_MESSAGE) from exc
 
+    def list_all_locations(self) -> tuple[MediaLocation, ...]:
+        def operation(connection: Connection) -> tuple[MediaLocation, ...]:
+            rows = connection.execute(_location_select()).mappings()
+            loaded = tuple(_location_from_row(row) for row in rows)
+            return _sort_locations(loaded)
+
+        try:
+            return run_in_transaction(self._engine, operation)
+        except FrameNestMediaRepositoryError:
+            raise
+        except SQLAlchemyError as exc:
+            raise FrameNestMediaRepositoryError(_REPOSITORY_FAILURE_MESSAGE) from exc
+
 
 def _media_exists(connection: Connection, media_id_text: str) -> bool:
     return (
