@@ -23,13 +23,15 @@ ORCHESTRATOR authority.
 ## Current Implementation Boundary
 
 FrameNest currently has deterministic local media-analysis preparation,
-representative PNG frames for explicit preview, and ephemeral JPEG derivatives
-for VLM transport per
-[ADR-0019](docs/adr/0019-vlm-image-derivatives-and-nvidia-instruct-mode.md).
+representative PNG frames for explicit preview, ephemeral JPEG derivatives for
+VLM transport per
+[ADR-0019](docs/adr/0019-vlm-image-derivatives-and-nvidia-instruct-mode.md),
+and persistent server-owned gallery preview derivatives for imported available
+GIF and MP4 locations.
 
-FrameNest does not currently implement Cover Studio, persistent covers,
-accepted cover state, cover candidates, imported image covers, AI-generated
-covers, derived gallery thumbnails, or a cover cache.
+FrameNest does not currently implement Cover Studio, persistent accepted
+covers, accepted cover state, cover candidates, imported image covers, or
+AI-generated covers.
 
 ## Cover Concepts
 
@@ -109,6 +111,59 @@ Derivative generation must not imply that the full video should be downloaded
 merely to render an already available remote-only gallery card. Remote-only
 cards may use synchronized cover identity, provenance, and lightweight derived
 thumbnails when those records are available.
+
+## Persistent Gallery Preview Derivatives
+
+The current persistent gallery preview derivative is a server-owned cache
+artifact, not catalog metadata, a cover candidate, or an accepted cover. It is
+safe to delete and regenerate from one currently available imported GIF or MP4
+physical location.
+
+The implemented static format is JPEG (`image/jpeg`). The algorithm version is
+`gallery-preview-jpeg-v1`. It reuses local media-analysis preparation, selects
+the first deterministic representative PNG frame from the existing 10%, 50%,
+90% timestamp rule, converts alpha to RGB, preserves aspect ratio, limits the
+long edge to 512 pixels, encodes at JPEG quality 82 with 4:2:0 subsampling,
+non-progressive and non-optimized output, and validates a maximum encoded
+payload of 524,288 bytes.
+
+The cache root is configured centrally as `FRAMENEST_GALLERY_PREVIEW_CACHE_PATH`
+and defaults outside the repository under the local development data directory.
+It must be absolute. Generation refuses to publish cache artifacts inside any
+registered source-media root. Cache filenames are deterministic versioned keys
+derived from the algorithm version, media ID, location ID, media kind, and the
+current safely observed source size and mtime behind the registered-root
+containment boundary. A source identity change or algorithm-version change
+therefore produces a new expected derivative key.
+
+Generation is explicit through:
+
+```text
+./framenest previews status
+./framenest previews generate --library-id <library-id> --yes --max-items <n>
+./framenest previews generate --all --yes --max-items <n>
+```
+
+`status` is read-only and generation-free. `generate` displays a plan before
+durable cache writes and requires interactive confirmation unless `--yes` is
+provided. Publication writes a temporary file inside the verified cache root,
+validates the JPEG, then atomically replaces the final artifact.
+
+Browser delivery is identity-only through:
+
+```text
+GET /api/media/{media_id}/locations/{location_id}/gallery-preview
+```
+
+The endpoint validates the media/location/library relationship, requires a
+currently available supported location, serves only an already generated current
+derivative, performs no generation or catalog mutation, returns inline JPEG
+bytes with an ETag, supports `If-None-Match`, and does not expose source paths,
+cache paths, database paths, or cache filenames.
+
+Deferred scope remains cleanup, eviction, Gallery UI consumption, accepted
+covers, Cover Studio, cover candidates, AI cover generation, animated previews,
+background generation, and arbitrary collection or cover management.
 
 ## Imported Image Covers
 

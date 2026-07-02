@@ -23,6 +23,7 @@ class OpenedMediaContent:
     byte_size: int
     stream: Callable[[int, int | None], Iterator[bytes]]
     close: Callable[[], None]
+    mtime_ns: int | None = None
 
 
 class MediaContentReader(Protocol):

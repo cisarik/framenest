@@ -43,6 +43,7 @@ class ResolvedMediaContent:
     byte_size: int
     stream: Callable[[int, int | None], Iterator[bytes]]
     close: Callable[[], None]
+    mtime_ns: int | None = None
 
 
 def supported_media_type(kind: MediaKind, extension: str) -> str | None:
@@ -109,6 +110,7 @@ class ResolveMediaContent:
             byte_size=opened.byte_size,
             stream=opened.stream,
             close=opened.close,
+            mtime_ns=opened.mtime_ns,
         )
 
 

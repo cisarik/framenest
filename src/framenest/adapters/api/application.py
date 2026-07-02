@@ -15,6 +15,10 @@ from framenest.adapters.api.media_analysis_api import (
     MediaAnalysisApiDependencies,
     create_media_analysis_api_router,
 )
+from framenest.adapters.api.gallery_preview_api import (
+    GalleryPreviewApiDependencies,
+    create_gallery_preview_api_router,
+)
 from framenest.adapters.api.media_content_api import (
     MediaContentApiDependencies,
     create_media_content_api_router,
@@ -46,6 +50,7 @@ from framenest.application.media_metadata import (
 )
 from framenest.application.media_analysis import PrepareLocalMediaAnalysis
 from framenest.application.media_content import ResolveMediaContent
+from framenest.application.gallery_preview import GalleryPreviewService
 from framenest.application.media_suggestion import PreviewMediaSuggestion
 from framenest.application.media_suggestion import PreviewImportedMediaSuggestion
 from framenest.adapters.api.library_api import (
@@ -58,6 +63,10 @@ from framenest.infrastructure.ai.registry import resolve_ai_provider
 from framenest.infrastructure.filesystem.library_scanner import LocalLibraryScanner
 from framenest.infrastructure.filesystem.media_content import LocalMediaContentReader
 from framenest.infrastructure.media_analysis import LocalMediaAnalysisAdapter
+from framenest.infrastructure.media_analysis.gallery_preview import (
+    FilesystemGalleryPreviewCache,
+    PillowGalleryPreviewEncoder,
+)
 from framenest.infrastructure.persistence.engine import create_sqlite_engine, dispose_engine
 from framenest.infrastructure.persistence.library_repository import SqliteLibraryRepository
 from framenest.infrastructure.persistence.media_repository import SqliteMediaRepository
@@ -100,6 +109,7 @@ def create_app(
     media_metadata_api_dependencies: MediaMetadataApiDependencies | None = None,
     media_analysis_api_dependencies: MediaAnalysisApiDependencies | None = None,
     media_content_api_dependencies: MediaContentApiDependencies | None = None,
+    gallery_preview_api_dependencies: GalleryPreviewApiDependencies | None = None,
     media_suggestion_api_dependencies: MediaSuggestionApiDependencies | None = None,
 ) -> FastAPI:
     resolved_settings = settings if settings is not None else load_settings()
@@ -115,6 +125,7 @@ def create_app(
         or media_metadata_api_dependencies is None
         or media_analysis_api_dependencies is None
         or media_content_api_dependencies is None
+        or gallery_preview_api_dependencies is None
         or media_suggestion_api_dependencies is None
     ):
         owned_engine = create_sqlite_engine(resolved_settings.database_path)
@@ -178,6 +189,20 @@ def create_app(
             ),
             catalog_available=resolved_settings.database_path.exists,
         )
+    if gallery_preview_api_dependencies is None:
+        assert owned_media_repository is not None
+        assert owned_library_repository is not None
+        gallery_preview_api_dependencies = GalleryPreviewApiDependencies(
+            preview_service=GalleryPreviewService(
+                owned_media_repository,
+                owned_library_repository,
+                LocalMediaContentReader(),
+                LocalMediaAnalysisAdapter(),
+                PillowGalleryPreviewEncoder(),
+                FilesystemGalleryPreviewCache(resolved_settings.gallery_preview_cache_path),
+            ),
+            catalog_available=resolved_settings.database_path.exists,
+        )
     if media_suggestion_api_dependencies is None:
         assert owned_library_repository is not None
         resolved_ai = resolve_ai_provider(resolved_settings)
@@ -227,6 +252,7 @@ def create_app(
     app.include_router(create_media_metadata_api_router(media_metadata_api_dependencies))
     app.include_router(create_media_analysis_api_router(media_analysis_api_dependencies))
     app.include_router(create_media_content_api_router(media_content_api_dependencies))
+    app.include_router(create_gallery_preview_api_router(gallery_preview_api_dependencies))
     app.include_router(create_media_suggestion_api_router(media_suggestion_api_dependencies))
 
     @app.get("/", response_class=HTMLResponse)

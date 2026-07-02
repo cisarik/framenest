@@ -25,6 +25,8 @@ function _framenest_help
     echo "  ./framenest library status"
     echo "  ./framenest library add"
     echo "  ./framenest library refresh"
+    echo "  ./framenest previews status"
+    echo "  ./framenest previews generate"
     echo "  ./framenest --help"
     echo "  ./framenest <command> --help"
 end
@@ -155,6 +157,15 @@ switch "$argv[1]"
         cd "$repo_root"
         or exit $status
         "$library_python" -m framenest.adapters.cli.library $argv[2..-1]
+        exit $status
+    case previews
+        if not test -x "$library_python"
+            _framenest_setup
+            or exit $status
+        end
+        cd "$repo_root"
+        or exit $status
+        "$library_python" -m framenest.adapters.cli.previews $argv[2..-1]
         exit $status
     case '*'
         echo "Unknown FrameNest command: $argv[1]" >&2

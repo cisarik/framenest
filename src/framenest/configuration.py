@@ -13,6 +13,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 DEFAULT_ENV_FILE = Path(".env")
 DEVELOPMENT_DATABASE_DIRECTORY = "framenest-development"
 DEVELOPMENT_DATABASE_FILENAME = "catalog.sqlite3"
+DEVELOPMENT_GALLERY_PREVIEW_DIRECTORY = "gallery-previews"
 SUPPORTED_AI_PROVIDER_IDS = frozenset({"nvidia-nim", "vercel-ai-gateway"})
 
 
@@ -22,6 +23,24 @@ def _default_database_path() -> Path:
         / DEVELOPMENT_DATABASE_DIRECTORY
         / DEVELOPMENT_DATABASE_FILENAME
     )
+
+
+def _default_gallery_preview_cache_path() -> Path:
+    return _normalize_absolute_path(
+        Path(tempfile.gettempdir())
+        / DEVELOPMENT_DATABASE_DIRECTORY
+        / DEVELOPMENT_GALLERY_PREVIEW_DIRECTORY
+    )
+
+
+def _normalize_absolute_path(value: Any) -> Path:
+    try:
+        path = Path(value).expanduser()
+    except (RuntimeError, TypeError, ValueError) as exc:
+        raise ValueError("path must be an absolute path") from exc
+    if not path.is_absolute():
+        raise ValueError("path must be an absolute path")
+    return path.resolve(strict=False)
 
 
 def _normalize_database_path(value: Any) -> Path:
@@ -48,6 +67,10 @@ class FrameNestSettings(BaseSettings):
     port: int = Field(default=8000, ge=0, le=65535)
     api_key: SecretStr | None = Field(default=None)
     database_path: Path = Field(default_factory=_default_database_path, repr=False)
+    gallery_preview_cache_path: Path = Field(
+        default_factory=_default_gallery_preview_cache_path,
+        repr=False,
+    )
     ai_provider_id: str | None = Field(default=None)
     ai_model_id: str | None = Field(default=None)
 
@@ -64,6 +87,14 @@ class FrameNestSettings(BaseSettings):
     @classmethod
     def validate_database_path(cls, value: Any) -> Path:
         return _normalize_database_path(value)
+
+    @field_validator("gallery_preview_cache_path", mode="before")
+    @classmethod
+    def validate_gallery_preview_cache_path(cls, value: Any) -> Path:
+        try:
+            return _normalize_absolute_path(value)
+        except ValueError as exc:
+            raise ValueError("gallery preview cache path must be an absolute path") from exc
 
     @field_validator("ai_provider_id")
     @classmethod

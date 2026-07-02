@@ -120,6 +120,7 @@ class LocalMediaContentReader:
             raise MediaContentUnavailableError(MEDIA_CONTENT_UNAVAILABLE_MESSAGE)
 
         byte_size = stat_result.st_size
+        mtime_ns = stat_result.st_mtime_ns
         closed = False
 
         def _close() -> None:
@@ -162,4 +163,5 @@ class LocalMediaContentReader:
             byte_size=byte_size,
             stream=stream,
             close=_close,
+            mtime_ns=mtime_ns,
         )
