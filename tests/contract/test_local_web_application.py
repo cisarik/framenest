@@ -870,13 +870,17 @@ def test_browser_metadata_workspace_renders_processed_time_semantically(client: 
     assert "processedAtMs" in script
 
 
-def test_browser_catalog_card_renders_processed_time_semantically(client: TestClient) -> None:
+def test_browser_catalog_card_omits_internal_processed_status_and_time(client: TestClient) -> None:
     script = client.get("/assets/app.js").text
 
     start = script.index("function renderCatalogCard(item)")
     end = script.index("\n}\n", start) + len("\n}\n")
     card_body = script[start:end]
-    assert "processed_at_ms" in card_body or "buildProcessedTimeElement" in card_body
+    assert "Processed" not in card_body
+    assert "catalog-card__status" not in card_body
+    assert "catalog-card__status-dot" not in card_body
+    assert "processed_at_ms" not in card_body
+    assert "buildProcessedTimeElement" not in card_body
     assert "buildProcessedTimeElement" in script
 
 
@@ -1458,7 +1462,46 @@ def test_catalog_card_analyze_shortcut_only_for_untagged_supported_media(client:
     assert "cardNeedsMetadata(item)" in card_body
     assert "selectSupportedAvailableLocation(item) !== null" in needs_body
     assert "(!item.tags || item.tags.length === 0)" in needs_body
-    assert card_body.index("actions.appendChild(analyzeButton)") < card_body.index("actions.appendChild(editButton)")
+    assert card_body.index("actions.appendChild(analyzeButton)") < card_body.index("actions.appendChild(actionRow)")
+
+
+def test_catalog_card_has_identity_only_download_immediately_left_of_edit(
+    client: TestClient,
+) -> None:
+    script = client.get("/assets/app.js").text
+    card_body = _javascript_function(script, "renderCatalogCard")
+
+    assert "function mediaDownloadUrl(mediaId, locationId)" in script
+    assert "/download" in _javascript_function(script, "mediaDownloadUrl")
+    assert "downloadLink.href = mediaDownloadUrl(item.media_id, supportedLocation.location_id)" in card_body
+    assert 'downloadLink.setAttribute("aria-label", `Download ${displayTitle}`)' in card_body
+    assert 'downloadLink.title = "Download"' in card_body
+    assert "downloadIcon()" in card_body
+    assert "editIcon()" in card_body
+    assert 'editButton.setAttribute("aria-label", `Edit ${displayTitle}`)' in card_body
+    assert 'editButton.title = "Edit"' in card_body
+    assert card_body.index("actionRow.appendChild(downloadLink)") < card_body.index(
+        "actionRow.appendChild(editButton)"
+    )
+    assert "fetch(mediaDownloadUrl" not in script
+    assert "createObjectURL" in script
+    download_section = card_body[
+        card_body.index("const actionRow") : card_body.index("const analysisStatus")
+    ]
+    assert "URL.createObjectURL" not in download_section
+
+
+def test_catalog_card_download_appears_only_for_supported_available_location(
+    client: TestClient,
+) -> None:
+    script = client.get("/assets/app.js").text
+    card_body = _javascript_function(script, "renderCatalogCard")
+    supported_body = _javascript_function(script, "selectSupportedAvailableLocation")
+
+    assert "const supportedLocation = selectSupportedAvailableLocation(item)" in card_body
+    assert "if (supportedLocation)" in card_body
+    assert 'item.media_kind !== "video" && item.media_kind !== "animated_image"' in supported_body
+    assert 'location.availability === "available" && location.location_id' in supported_body
 
 
 def test_catalog_card_unavailable_ai_opens_status_without_request(client: TestClient) -> None:

@@ -85,8 +85,14 @@ def test_local_web_playback_endpoint_returns_gif_and_mp4_content_identity_only(
 
         entropy_url = f"/api/media/{entropy_media_id}/locations/{entropy_location['location_id']}/content"
         reaction_url = f"/api/media/{reaction_media_id}/locations/{reaction_location['location_id']}/content"
+        entropy_download_url = f"/api/media/{entropy_media_id}/locations/{entropy_location['location_id']}/download"
         entropy_response = client.get(entropy_url)
         reaction_response = client.get(reaction_url)
+        before_counts = _catalog_counts(database_path)
+        before_stat = (library_root / "entropy.mp4").stat()
+        entropy_download = client.get(entropy_download_url)
+        after_stat = (library_root / "entropy.mp4").stat()
+        after_counts = _catalog_counts(database_path)
 
         assert entropy_response.status_code == 200
         assert entropy_response.content == MP4_BYTES
@@ -94,10 +100,19 @@ def test_local_web_playback_endpoint_returns_gif_and_mp4_content_identity_only(
         assert reaction_response.status_code == 200
         assert reaction_response.content == GIF_BYTES
         assert reaction_response.headers["content-type"] == "image/gif"
+        assert entropy_download.status_code == 200
+        assert entropy_download.content == MP4_BYTES
+        assert entropy_download.headers["content-type"] == "video/mp4"
+        assert entropy_download.headers["content-disposition"] == 'attachment; filename="entropy.mp4"'
+        assert before_counts == after_counts
+        assert before_stat.st_size == after_stat.st_size
+        assert before_stat.st_mtime_ns == after_stat.st_mtime_ns
 
         assert str(library_root) not in entropy_response.text
         assert str(library_root) not in reaction_response.text
+        assert str(library_root) not in entropy_download.text
         assert "relative_path" not in entropy_url
+        assert "relative_path" not in entropy_download_url
 
 
 def test_local_web_playback_rejects_offline_location(
@@ -137,3 +152,80 @@ def test_local_web_playback_rejects_offline_location(
 
         response = client.get(f"/api/media/{media_id}/locations/{location['location_id']}/content")
         assert response.status_code == 409
+        download = client.get(f"/api/media/{media_id}/locations/{location['location_id']}/download")
+        assert download.status_code == 409
+
+
+def test_local_web_download_uses_sanitized_fallback_for_unsafe_filename(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "download-filename.sqlite3"
+    library_root = tmp_path / "registered-library"
+    library_root.mkdir()
+    unsafe_name = "💾\r\n.mp4"
+    (library_root / unsafe_name).write_bytes(MP4_BYTES)
+    settings = FrameNestSettings(database_path=database_path, _env_file=None)
+    upgrade_database_to_head(settings)
+    library_id = _register_library(database_path, library_root)
+
+    with TestClient(create_app(settings=settings)) as client:
+        imported = client.post(
+            f"/api/libraries/{library_id}/media-imports",
+            json={"relative_path": unsafe_name},
+        )
+        assert imported.status_code == 200
+        media_id = imported.json()["media"]["id"]
+        catalog = client.get("/api/media")
+        item = next(i for i in catalog.json()["items"] if i["media_id"] == media_id)
+        location = item["locations"][0]
+        response = client.get(f"/api/media/{media_id}/locations/{location['location_id']}/download")
+
+    assert response.status_code == 200
+    assert response.headers["content-disposition"] == (
+        f'attachment; filename="framenest-media-{media_id}.mp4"'
+    )
+    assert "\r" not in response.headers["content-disposition"]
+    assert "\n" not in response.headers["content-disposition"]
+
+
+def test_local_web_download_rejects_missing_file_without_path_disclosure(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "download-missing.sqlite3"
+    library_root = tmp_path / "registered-library"
+    library_root.mkdir()
+    target = library_root / "missing-later.mp4"
+    target.write_bytes(MP4_BYTES)
+    settings = FrameNestSettings(database_path=database_path, _env_file=None)
+    upgrade_database_to_head(settings)
+    library_id = _register_library(database_path, library_root)
+
+    with TestClient(create_app(settings=settings)) as client:
+        imported = client.post(
+            f"/api/libraries/{library_id}/media-imports",
+            json={"relative_path": "missing-later.mp4"},
+        )
+        assert imported.status_code == 200
+        media_id = imported.json()["media"]["id"]
+        catalog = client.get("/api/media")
+        item = next(i for i in catalog.json()["items"] if i["media_id"] == media_id)
+        location = item["locations"][0]
+        target.unlink()
+        response = client.get(f"/api/media/{media_id}/locations/{location['location_id']}/download")
+
+    assert response.status_code == 409
+    assert str(library_root) not in response.text
+    assert "missing-later.mp4" not in response.text
+
+
+def _catalog_counts(database_path: Path) -> tuple[int, int, int]:
+    engine = create_sqlite_engine(database_path)
+    try:
+        with engine.connect() as connection:
+            return (
+                connection.execute(text("SELECT COUNT(*) FROM logical_media")).scalar_one(),
+                connection.execute(text("SELECT COUNT(*) FROM physical_media_locations")).scalar_one(),
+                connection.execute(text("SELECT COUNT(*) FROM media_metadata")).scalar_one(),
+            )
+    finally:
+        dispose_engine(engine)

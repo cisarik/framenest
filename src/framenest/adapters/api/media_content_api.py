@@ -35,6 +35,7 @@ RANGE_NOT_SATISFIABLE_CODE = "RANGE_NOT_SATISFIABLE"
 RANGE_NOT_SATISFIABLE_MESSAGE = "Requested range is not satisfiable."
 
 _NO_STORE_HEADERS = {"Cache-Control": "no-store"}
+_FALLBACK_DOWNLOAD_FILENAME = "framenest-media.bin"
 
 
 class ErrorBody(BaseModel):
@@ -77,50 +78,10 @@ def create_media_content_api_router(
         location_id: UUID4,
         request: Request,
     ) -> StreamingResponse | JSONResponse:
-        if not dependencies.catalog_available():
-            return _error_response(
-                503,
-                CATALOG_UNAVAILABLE_CODE,
-                CATALOG_UNAVAILABLE_MESSAGE,
-            )
-        try:
-            resolved = dependencies.resolve_content.execute(
-                MediaId.from_string(str(media_id)),
-                MediaLocationId.from_string(str(location_id)),
-            )
-        except MediaContentNotFoundError:
-            return _error_response(
-                404,
-                MEDIA_CONTENT_NOT_FOUND_CODE,
-                MEDIA_NOT_FOUND_MESSAGE,
-            )
-        except MediaContentUnavailableError:
-            return _error_response(
-                409,
-                MEDIA_CONTENT_UNAVAILABLE_CODE,
-                MEDIA_CONTENT_UNAVAILABLE_MESSAGE,
-            )
-        except (
-            FrameNestMediaRepositoryError,
-            FrameNestLibraryRepositoryError,
-        ):
-            return _error_response(
-                500,
-                MEDIA_CONTENT_FAILED_CODE,
-                MEDIA_CONTENT_FAILED_MESSAGE,
-            )
-        except MediaContentFailedError:
-            return _error_response(
-                500,
-                MEDIA_CONTENT_FAILED_CODE,
-                MEDIA_CONTENT_FAILED_MESSAGE,
-            )
-        except Exception:
-            return _error_response(
-                500,
-                MEDIA_CONTENT_FAILED_CODE,
-                MEDIA_CONTENT_FAILED_MESSAGE,
-            )
+        resolved_or_error = _resolve_media_content(dependencies, media_id, location_id)
+        if isinstance(resolved_or_error, JSONResponse):
+            return resolved_or_error
+        resolved = resolved_or_error
 
         range_header = request.headers.get("range")
         if range_header is None:
@@ -132,7 +93,77 @@ def create_media_content_api_router(
         start, end = parsed
         return _partial_content_response(resolved, start, end)
 
+    @router.get(
+        "/api/media/{media_id}/locations/{location_id}/download",
+        response_model=None,
+        responses={
+            404: {"model": ErrorResponse},
+            409: {"model": ErrorResponse},
+            500: {"model": ErrorResponse},
+            503: {"model": ErrorResponse},
+        },
+    )
+    def download_media_content(
+        media_id: UUID4,
+        location_id: UUID4,
+    ) -> StreamingResponse | JSONResponse:
+        resolved_or_error = _resolve_media_content(dependencies, media_id, location_id)
+        if isinstance(resolved_or_error, JSONResponse):
+            return resolved_or_error
+        return _download_content_response(resolved_or_error)
+
     return router
+
+
+def _resolve_media_content(
+    dependencies: MediaContentApiDependencies,
+    media_id: UUID4,
+    location_id: UUID4,
+) -> ResolvedMediaContent | JSONResponse:
+    if not dependencies.catalog_available():
+        return _error_response(
+            503,
+            CATALOG_UNAVAILABLE_CODE,
+            CATALOG_UNAVAILABLE_MESSAGE,
+        )
+    try:
+        return dependencies.resolve_content.execute(
+            MediaId.from_string(str(media_id)),
+            MediaLocationId.from_string(str(location_id)),
+        )
+    except MediaContentNotFoundError:
+        return _error_response(
+            404,
+            MEDIA_CONTENT_NOT_FOUND_CODE,
+            MEDIA_NOT_FOUND_MESSAGE,
+        )
+    except MediaContentUnavailableError:
+        return _error_response(
+            409,
+            MEDIA_CONTENT_UNAVAILABLE_CODE,
+            MEDIA_CONTENT_UNAVAILABLE_MESSAGE,
+        )
+    except (
+        FrameNestMediaRepositoryError,
+        FrameNestLibraryRepositoryError,
+    ):
+        return _error_response(
+            500,
+            MEDIA_CONTENT_FAILED_CODE,
+            MEDIA_CONTENT_FAILED_MESSAGE,
+        )
+    except MediaContentFailedError:
+        return _error_response(
+            500,
+            MEDIA_CONTENT_FAILED_CODE,
+            MEDIA_CONTENT_FAILED_MESSAGE,
+        )
+    except Exception:
+        return _error_response(
+            500,
+            MEDIA_CONTENT_FAILED_CODE,
+            MEDIA_CONTENT_FAILED_MESSAGE,
+        )
 
 
 def _stream_with_finalization(
@@ -158,6 +189,30 @@ def _full_content_response(resolved: ResolvedMediaContent) -> StreamingResponse:
             "Content-Length": str(resolved.byte_size),
         },
     )
+
+
+def _download_content_response(resolved: ResolvedMediaContent) -> StreamingResponse:
+    return StreamingResponse(
+        content=_stream_with_finalization(resolved, 0, None),
+        status_code=200,
+        headers={
+            "X-Content-Type-Options": "nosniff",
+            "Cache-Control": "private, no-store",
+            "Content-Type": resolved.media_type,
+            "Content-Length": str(resolved.byte_size),
+            "Content-Disposition": f'attachment; filename="{_header_safe_filename(resolved.download_filename)}"',
+        },
+    )
+
+
+def _header_safe_filename(value: object) -> str:
+    if not isinstance(value, str) or not value:
+        return _FALLBACK_DOWNLOAD_FILENAME
+    if any(character in value for character in ('"', "\\", "\r", "\n", ";", "/")):
+        return _FALLBACK_DOWNLOAD_FILENAME
+    if any(ord(character) < 32 or ord(character) == 127 for character in value):
+        return _FALLBACK_DOWNLOAD_FILENAME
+    return value
 
 
 def _partial_content_response(

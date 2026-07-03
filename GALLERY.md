@@ -87,8 +87,17 @@ title continues to use original GIF/MP4 content and Details playback semantics.
 Gallery-preview generation remains an explicit server-operator action. These
 persistent gallery previews are not durable accepted covers, cover candidates,
 catalog metadata, or Cover Studio state. Details uses a black player-first
-surface. Native/VLC playback, downloadable files, and a broader media player
-are future work.
+surface. Native/VLC playback, managed downloads, and a broader media player are
+future work.
+
+Available supported GIF and MP4 cards also expose an explicit compact Download
+action. It targets the identity-only
+`GET /api/media/{media_id}/locations/{location_id}/download` endpoint, which
+returns an attachment response with a sanitized filename. This action only
+initiates ordinary browser download behavior. FrameNest does not know the
+browser's final destination, does not prove completion or continued existence,
+and does not register trusted client-local availability from this browser
+transfer.
 
 Untagged supported GIF and MP4 cards may show a direct `Analyze` action above
 `Edit`. It is a needs-metadata shortcut, not durable proof that analysis has or
@@ -99,6 +108,11 @@ physical file is not renamed. When server AI is unavailable, the shortcut opens
 the read-only AI Status panel with a sanitized reason and does not send an
 analysis request. Tagged cards continue to show meaningful tag information and
 omit the card-level shortcut.
+
+Gallery cards do not display the internal built-in `Processed` workflow label
+or timestamp. The `Processed` catalog scope and automatic persistence semantics
+remain available as catalog behavior, but the card surface should not expose
+that internal workflow state as a visible status block.
 
 The Gallery header and pagination should stay compact: the temporary `FN` mark
 is sufficient non-interactive branding in the current shell, visible `Cloud`
@@ -227,7 +241,6 @@ Embedded libVLC remains deferred.
 
 Future card or detail actions may include:
 
-- `Download`;
 - `Stream`;
 - `Download + Copy to Clipboard`;
 - `Show locations`;

@@ -12,6 +12,7 @@ from framenest.application.media_content import (
     MediaContentNotFoundError,
     MediaContentUnavailableError,
     ResolveMediaContent,
+    safe_download_filename,
     supported_media_type,
 )
 from framenest.application.ports.media_content import OpenedMediaContent
@@ -232,6 +233,26 @@ def test_successful_resolution_returns_resolved_content():
     result = _full_service(content_result=opened).execute(MEDIA_ID, LOCATION_ID)
     assert result.media_type == "video/mp4"
     assert result.byte_size == 10
+    assert result.download_filename == "sample.mp4"
+
+
+def test_safe_download_filename_sanitizes_unsafe_unicode_and_header_text():
+    filename = safe_download_filename(
+        media_id=MEDIA_ID,
+        relative_path=MediaRelativePath("clips/😈 bad\r\nname; report.mp4"),
+    )
+    assert filename == "bad-name-report.mp4"
+    assert "\r" not in filename
+    assert "\n" not in filename
+    assert ";" not in filename
+
+
+def test_safe_download_filename_uses_deterministic_fallback_when_required():
+    filename = safe_download_filename(
+        media_id=MEDIA_ID,
+        relative_path=MediaRelativePath("clips/😈.gif"),
+    )
+    assert filename == f"framenest-media-{MEDIA_ID.to_string()}.gif"
 
 
 def test_repository_failure_propagates_without_private_info():

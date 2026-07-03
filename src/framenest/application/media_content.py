@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
+import re
+import unicodedata
 
 from framenest.application.ports.library_repository import (
     LibraryRepository,
@@ -21,6 +23,9 @@ from framenest.domain.media import MediaKind, MediaLocationAvailability, MediaRe
 MEDIA_NOT_FOUND_MESSAGE = "Media content was not found."
 MEDIA_CONTENT_UNAVAILABLE_MESSAGE = "Media content is not available."
 MEDIA_CONTENT_FAILED_MESSAGE = "Media content delivery failed."
+_SAFE_FILENAME_PATTERN = re.compile(r"[^A-Za-z0-9._-]+")
+_SAFE_FILENAME_SEPARATOR_PATTERN = re.compile(r"[-_]{2,}")
+_MAX_DOWNLOAD_STEM_LENGTH = 80
 
 
 class MediaContentNotFoundError(RuntimeError):
@@ -44,6 +49,7 @@ class ResolvedMediaContent:
     stream: Callable[[int, int | None], Iterator[bytes]]
     close: Callable[[], None]
     mtime_ns: int | None = None
+    download_filename: str = "framenest-media.bin"
 
 
 def supported_media_type(kind: MediaKind, extension: str) -> str | None:
@@ -56,6 +62,31 @@ def _extension_for_relative_path(relative_path: MediaRelativePath) -> str:
     if "." not in filename:
         return ""
     return "." + filename.rsplit(".", 1)[-1].lower()
+
+
+def _safe_download_stem(value: str) -> str:
+    normalized = unicodedata.normalize("NFKD", value).encode("ascii", "ignore").decode("ascii")
+    safe = _SAFE_FILENAME_PATTERN.sub("-", normalized)
+    safe = _SAFE_FILENAME_SEPARATOR_PATTERN.sub("-", safe)
+    safe = safe.strip(" ._-")
+    if safe in {"", ".", ".."}:
+        return ""
+    return safe[:_MAX_DOWNLOAD_STEM_LENGTH].strip(" ._-")
+
+
+def safe_download_filename(
+    *,
+    media_id: MediaId,
+    relative_path: MediaRelativePath,
+) -> str:
+    """Return one ASCII attachment filename that preserves the supported extension."""
+    extension = _extension_for_relative_path(relative_path)
+    raw_filename = relative_path.filename
+    raw_stem = raw_filename[: -len(extension)] if extension else raw_filename
+    stem = _safe_download_stem(raw_stem)
+    if not stem:
+        stem = f"framenest-media-{media_id.to_string()}"
+    return f"{stem}{extension}"
 
 
 class ResolveMediaContent:
@@ -111,6 +142,10 @@ class ResolveMediaContent:
             stream=opened.stream,
             close=opened.close,
             mtime_ns=opened.mtime_ns,
+            download_filename=safe_download_filename(
+                media_id=media_id,
+                relative_path=location.relative_path,
+            ),
         )
 
 
@@ -123,5 +158,6 @@ __all__ = [
     "MediaContentUnavailableError",
     "ResolveMediaContent",
     "ResolvedMediaContent",
+    "safe_download_filename",
     "supported_media_type",
 ]

@@ -23,6 +23,7 @@ const MAX_REVIEW_TEXT = {
   tag: 40,
   filename: 180,
 };
+const SVG_NAMESPACE = "http" + "://www.w3.org/2000/svg";
 
 let analysisRequestToken = 0;
 let suggestionRequestToken = 0;
@@ -515,6 +516,34 @@ function showCatalogState(state) {
 
 function appendText(parent, value) {
   parent.appendChild(document.createTextNode(String(value)));
+}
+
+function inlineIcon(pathData, label) {
+  const svg = document.createElementNS(SVG_NAMESPACE, "svg");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("width", "16");
+  svg.setAttribute("height", "16");
+  svg.setAttribute("aria-hidden", "true");
+  svg.setAttribute("focusable", "false");
+  const title = document.createElementNS(SVG_NAMESPACE, "title");
+  title.textContent = label;
+  const path = document.createElementNS(SVG_NAMESPACE, "path");
+  path.setAttribute("d", pathData);
+  path.setAttribute("fill", "none");
+  path.setAttribute("stroke", "currentColor");
+  path.setAttribute("stroke-width", "2");
+  path.setAttribute("stroke-linecap", "round");
+  path.setAttribute("stroke-linejoin", "round");
+  svg.append(title, path);
+  return svg;
+}
+
+function downloadIcon() {
+  return inlineIcon("M12 3v12m0 0 4-4m-4 4-4-4M5 21h14", "Download");
+}
+
+function editIcon() {
+  return inlineIcon("M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5Z", "Edit");
 }
 
 function metadataEndpoint(mediaId) {
@@ -1022,6 +1051,10 @@ function selectSupportedAvailableLocation(item) {
 
 function mediaContentUrl(mediaId, locationId) {
   return `${MEDIA_CATALOG_ENDPOINT}/${encodeURIComponent(mediaId)}/locations/${encodeURIComponent(locationId)}/content`;
+}
+
+function mediaDownloadUrl(mediaId, locationId) {
+  return `${MEDIA_CATALOG_ENDPOINT}/${encodeURIComponent(mediaId)}/locations/${encodeURIComponent(locationId)}/download`;
 }
 
 function mediaGalleryPreviewUrl(mediaId, locationId) {
@@ -1709,23 +1742,8 @@ function renderCatalogCard(item) {
     body.appendChild(tagsDiv);
   }
 
-  if (item.collection_key === "processed") {
-    const status = document.createElement("div");
-    status.className = "catalog-card__status catalog-card__status--processed";
-    const dot = document.createElement("span");
-    dot.className = "catalog-card__status-dot";
-    dot.setAttribute("aria-hidden", "true");
-    status.appendChild(dot);
-    const label = document.createElement("span");
-    label.textContent = "Processed";
-    status.appendChild(label);
-    const processedTime = buildProcessedTimeElement(item.processed_at_ms);
-    if (processedTime !== null) {
-      status.appendChild(processedTime);
-    }
-    body.appendChild(status);
-  }
-
+  const supportedLocation = selectSupportedAvailableLocation(item);
+  const displayTitle = item.display_title || deriveCatalogFallbackTitle(item);
   const actions = document.createElement("div");
   actions.className = "catalog-card__actions";
   if (cardNeedsMetadata(item)) {
@@ -1740,13 +1758,26 @@ function renderCatalogCard(item) {
     analyzeButton.addEventListener("click", () => handleAnalyzeCatalogCard(item, analyzeButton));
     actions.appendChild(analyzeButton);
   }
+  const actionRow = document.createElement("div");
+  actionRow.className = "catalog-card__action-row";
+  if (supportedLocation) {
+    const downloadLink = document.createElement("a");
+    downloadLink.className = "catalog-card__action catalog-card__action--download";
+    downloadLink.href = mediaDownloadUrl(item.media_id, supportedLocation.location_id);
+    downloadLink.setAttribute("aria-label", `Download ${displayTitle}`);
+    downloadLink.title = "Download";
+    downloadLink.appendChild(downloadIcon());
+    actionRow.appendChild(downloadLink);
+  }
   const editButton = document.createElement("button");
   editButton.className = "catalog-card__action catalog-card__action--primary";
   editButton.type = "button";
-  editButton.textContent = "Edit";
-  editButton.setAttribute("aria-label", `Edit ${item.display_title || deriveCatalogFallbackTitle(item)}`);
+  editButton.setAttribute("aria-label", `Edit ${displayTitle}`);
+  editButton.title = "Edit";
+  editButton.appendChild(editIcon());
   editButton.addEventListener("click", () => handleOpenMetadataWorkspace(item, editButton));
-  actions.appendChild(editButton);
+  actionRow.appendChild(editButton);
+  actions.appendChild(actionRow);
   const analysisStatus = document.createElement("p");
   analysisStatus.className = "catalog-card__analysis-status";
   analysisStatus.hidden = true;

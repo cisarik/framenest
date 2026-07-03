@@ -25,6 +25,7 @@ PRIVATE_TEXT = "secret-private-db-path-leak"
 MP4_BYTES = bytes(range(256)) * 4
 GIF_BYTES = b"GIF89a" + b"\x00" * 100
 CONTENT_PATH = f"/api/media/{MEDIA_ID}/locations/{LOCATION_ID}/content"
+DOWNLOAD_PATH = f"/api/media/{MEDIA_ID}/locations/{LOCATION_ID}/download"
 
 
 @dataclass
@@ -45,12 +46,13 @@ def _slice(payload, start, length):
         yield payload[start : start + length]
 
 
-def _resolved(media_type, payload, close=None):
+def _resolved(media_type, payload, close=None, download_filename="safe-media.mp4"):
     return ResolvedMediaContent(
         media_type=media_type,
         byte_size=len(payload),
         stream=lambda start, length: _slice(payload, start, length),
         close=close or (lambda: None),
+        download_filename=download_filename,
     )
 
 
@@ -89,6 +91,39 @@ def test_full_mp4_200():
     assert response.content == MP4_BYTES
     assert response.headers["content-type"] == "video/mp4"
     assert response.headers["content-length"] == str(len(MP4_BYTES))
+
+
+def test_download_returns_attachment_without_range_semantics():
+    resolved = _resolved("video/mp4", MP4_BYTES, download_filename="safe-title.mp4")
+    response = _client(resolve=_FakeResolveContent(result=resolved)).get(DOWNLOAD_PATH)
+    assert response.status_code == 200
+    assert response.content == MP4_BYTES
+    assert response.headers["content-type"] == "video/mp4"
+    assert response.headers["content-length"] == str(len(MP4_BYTES))
+    assert response.headers["content-disposition"] == 'attachment; filename="safe-title.mp4"'
+    assert response.headers["x-content-type-options"] == "nosniff"
+    assert response.headers["cache-control"] == "private, no-store"
+    assert "accept-ranges" not in response.headers
+
+
+def test_download_content_disposition_uses_sanitized_filename_only():
+    unsafe = 'unsafe\r\nAuthorization: secret.mp4'
+    resolved = _resolved("video/mp4", MP4_BYTES, download_filename="unsafe-Authorization-secret.mp4")
+    response = _client(resolve=_FakeResolveContent(result=resolved)).get(DOWNLOAD_PATH)
+    assert response.status_code == 200
+    assert response.headers["content-disposition"] == (
+        'attachment; filename="unsafe-Authorization-secret.mp4"'
+    )
+    assert unsafe not in response.text
+    assert "\r" not in response.headers["content-disposition"]
+    assert "\n" not in response.headers["content-disposition"]
+
+
+def test_download_content_disposition_defends_against_unsanitized_dependency_filename():
+    resolved = _resolved("video/mp4", MP4_BYTES, download_filename='bad\r\nname".mp4')
+    response = _client(resolve=_FakeResolveContent(result=resolved)).get(DOWNLOAD_PATH)
+    assert response.status_code == 200
+    assert response.headers["content-disposition"] == 'attachment; filename="framenest-media.bin"'
 
 
 def test_closed_range_206():
@@ -169,12 +204,29 @@ def test_not_found_404():
     assert PRIVATE_TEXT not in response.text
 
 
+def test_download_not_found_404():
+    response = _client(
+        resolve=_FakeResolveContent(error=MediaContentNotFoundError(PRIVATE_TEXT))
+    ).get(DOWNLOAD_PATH)
+    assert response.status_code == 404
+    assert PRIVATE_TEXT not in response.text
+
+
 def test_unavailable_409():
     response = _client(
         resolve=_FakeResolveContent(error=MediaContentUnavailableError("x"))
     ).get(CONTENT_PATH)
     assert response.status_code == 409
     assert response.headers["cache-control"] == "no-store"
+
+
+def test_download_unavailable_409():
+    response = _client(
+        resolve=_FakeResolveContent(error=MediaContentUnavailableError(PRIVATE_TEXT))
+    ).get(DOWNLOAD_PATH)
+    assert response.status_code == 409
+    assert response.headers["cache-control"] == "no-store"
+    assert PRIVATE_TEXT not in response.text
 
 
 def test_unexpected_failure_500():
@@ -221,6 +273,14 @@ def test_response_finalization_closes_content_on_full_stream():
     closed = []
     resolved = _resolved("video/mp4", MP4_BYTES, close=lambda: closed.append(1))
     response = _client(resolve=_FakeResolveContent(result=resolved)).get(CONTENT_PATH)
+    assert response.status_code == 200
+    assert closed == [1]
+
+
+def test_download_response_finalization_closes_content_on_stream():
+    closed = []
+    resolved = _resolved("video/mp4", MP4_BYTES, close=lambda: closed.append(1))
+    response = _client(resolve=_FakeResolveContent(result=resolved)).get(DOWNLOAD_PATH)
     assert response.status_code == 200
     assert closed == [1]
 
