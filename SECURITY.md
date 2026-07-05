@@ -61,8 +61,9 @@ The ignored local-development file `.secrets/ai.env.fish` may export
 `NVIDIA_API_KEY` and/or `AI_GATEWAY_API_KEY` for the root launcher. The launcher
 must reject symlinks, non-private files, wrong ownership, and invalid Fish
 syntax before sourcing it, and must not print file contents or credential
-values. Fedora production deployment must use a later service-secret boundary
-rather than this developer file.
+values. The Fedora service foundation uses a separate uncommitted host-local
+service-secret environment file, not this developer file and not the committed
+non-secret environment template.
 
 Avoid exposing:
 

@@ -55,3 +55,4 @@ An accepted ADR may only be changed by a later ADR that supersedes it. Editing a
 | 0028 | Catalog Read Model and Search Semantics | Accepted | 2026-06-26 | [0028-catalog-read-model-and-search-semantics.md](0028-catalog-read-model-and-search-semantics.md) |
 | 0029 | Persistent Plain-Text Media Description | Accepted | 2026-06-26 | [0029-persistent-plain-text-media-description.md](0029-persistent-plain-text-media-description.md) |
 | 0030 | Automatic Processed Collection from Durable Tag Saves | Accepted | 2026-06-26 | [0030-automatic-processed-collection.md](0030-automatic-processed-collection.md) |
+| 0031 | Fedora systemd Service Foundation | Accepted | 2026-07-06 | [0031-fedora-systemd-service-foundation.md](0031-fedora-systemd-service-foundation.md) |

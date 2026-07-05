@@ -13,6 +13,7 @@ framenest-catalog = "framenest.adapters.cli.catalog:main"
 framenest-library = "framenest.adapters.cli.library:main"
 framenest-dev = "framenest.adapters.cli.development:main"
 framenest-ai = "framenest.adapters.cli.ai:main"
+framenest-production = "framenest.infrastructure.runtime.production:main"
 
 [tool.poetry]
 package-mode = true

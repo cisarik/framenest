@@ -1,0 +1,185 @@
+# FrameNest Fedora systemd Service
+
+## Status
+
+This is a repository-native Fedora operator workflow for the initial FrameNest
+systemd service foundation. It is not an installer, and it must not be treated
+as proof that a real Intel NUC deployment has been completed.
+
+Classification: deployment operator guide.
+
+Consumers: Cooperator, Orchestrator, Worker, Fedora operators, and security
+reviewers.
+
+Retention: remains while the Fedora systemd service foundation exists.
+
+Inbound links: [README.md](../README.md), [SERVER.md](../SERVER.md),
+[SECURITY.md](../SECURITY.md), [ROADMAP.md](../ROADMAP.md), and
+[ADR-0031](adr/0031-fedora-systemd-service-foundation.md).
+
+Cleanup/update owner: future explicitly authorized Worker under an Orchestrator
+task. Git history remains the archive.
+
+## Repository Artifacts
+
+```text
+deploy/systemd/framenest.service
+deploy/systemd/framenest.env.example
+```
+
+The service file is source material for a Fedora host. Committing it does not
+install, enable, start, stop, reload, or inspect a real service.
+
+## Service Model
+
+The Fedora service runs the installed server process directly:
+
+```text
+/opt/framenest/.venv/bin/framenest-server
+```
+
+The root `./framenest` launcher remains macOS/local browser-development
+tooling. It is not used by the Fedora systemd service.
+
+Before startup, systemd runs a read-only readiness gate:
+
+```text
+/opt/framenest/.venv/bin/framenest-production check-database-ready
+```
+
+The gate requires the configured SQLite database to already be at packaged
+Alembic head. It does not create the database and does not run migrations.
+
+## Stable Paths
+
+```text
+/opt/framenest                         repository checkout or release tree
+/opt/framenest/.venv                   Poetry-managed virtual environment
+/etc/framenest/framenest.env           non-secret service environment
+/etc/framenest/framenest-secrets.env   optional host-local secret environment
+/etc/framenest/ai/config.json          non-secret AI provider/model config
+/var/lib/framenest/catalog.sqlite3     production catalog database
+/var/cache/framenest/gallery-previews  server-owned preview cache
+/run/framenest                         service runtime directory
+```
+
+The service account is `framenest`. The service owns its state, cache,
+configuration, and runtime boundaries through systemd directory directives.
+
+## Non-Secret Environment
+
+Copy the committed template to the host-local configuration path:
+
+```text
+deploy/systemd/framenest.env.example -> /etc/framenest/framenest.env
+```
+
+The template contains only non-secret settings:
+
+```text
+FRAMENEST_HOST=127.0.0.1
+FRAMENEST_PORT=8000
+FRAMENEST_DATABASE_PATH=/var/lib/framenest/catalog.sqlite3
+FRAMENEST_GALLERY_PREVIEW_CACHE_PATH=/var/cache/framenest/gallery-previews
+FRAMENEST_AI_CONFIG_PATH=/etc/framenest/ai/config.json
+```
+
+Do not put provider keys, passwords, tokens, cookies, private keys, or
+authorization headers in `framenest.env`.
+
+## Secret Boundary
+
+Current provider adapters still read credentials from the process environment:
+
+```text
+NVIDIA_API_KEY
+AI_GATEWAY_API_KEY
+```
+
+If provider credentials are needed on Fedora, place them only in the host-local
+secret file:
+
+```text
+/etc/framenest/framenest-secrets.env
+```
+
+That file is optional, uncommitted, and not represented by a repository
+template. Keep it owned by root and readable only by root or the `framenest`
+service boundary according to the host policy. A later task may replace this
+with systemd credentials or another approved secret store.
+
+## Safe Operator Workflow
+
+1. Install a CPython 3.13 environment and Poetry according to the host policy.
+2. Place the repository or release tree at `/opt/framenest`.
+3. Install from the committed lock-based Poetry environment in `/opt/framenest`.
+4. Create the `framenest` service account and grant it only the required access.
+5. Install `framenest.service` as the host systemd unit source.
+6. Copy and edit `framenest.env.example` as `/etc/framenest/framenest.env`.
+7. Create `/etc/framenest/framenest-secrets.env` only when provider calls are
+   intentionally enabled.
+8. Prepare service-owned directories with restrictive permissions.
+9. Run the explicit migration command as an operator step:
+
+```text
+FRAMENEST_DATABASE_PATH=/var/lib/framenest/catalog.sqlite3 \
+/opt/framenest/.venv/bin/framenest-db migrate
+```
+
+10. Check readiness without starting the server:
+
+```text
+FRAMENEST_DATABASE_PATH=/var/lib/framenest/catalog.sqlite3 \
+/opt/framenest/.venv/bin/framenest-production check-database-ready
+```
+
+11. Only after the readiness gate reports `ready`, enable or start the unit
+    through ordinary Fedora systemd procedures.
+
+This repository slice does not perform any of those host actions.
+
+## Media Roots
+
+Registered library roots must be explicit, absolute, existing server-local
+directories. Grant the `framenest` service account read access only to intended
+media roots.
+
+The service unit uses `ProtectSystem=strict` and `ProtectHome=read-only`.
+If a media root needs additional read access under a protected location, use a
+host-local systemd drop-in with the narrowest suitable `ReadOnlyPaths=` entry.
+Do not give the service broad write access to media libraries merely to make
+imports or previews work.
+
+## Networking
+
+The template binds to `127.0.0.1` by default. Do not change it to `0.0.0.0` for
+ordinary deployment.
+
+Remote access remains a future Tailscale-only direction. This service
+foundation does not configure Tailscale Serve, authentication, firewall rules,
+SELinux policy, public ports, reverse proxies, or trusted proxy headers.
+
+## Logging
+
+FrameNest application logs are JSON lines written to stderr by the server
+process and captured by systemd/journald. FrameNest does not create service log
+files, rotate logs, enforce retention, or ship logs remotely in this slice.
+
+Review and sanitize logs before sharing them. Do not share provider keys,
+private paths, private media filenames, raw provider responses, or private
+network details.
+
+## Not Implemented Yet
+
+This service foundation does not include:
+
+- real Fedora host acceptance;
+- SELinux policy;
+- firewalld policy;
+- Tailscale Serve;
+- application authentication or authorization;
+- backup and restore;
+- automated updates;
+- systemd credentials;
+- public exposure;
+- desktop replacement behavior.

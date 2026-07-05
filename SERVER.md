@@ -36,8 +36,10 @@ The NUC may later provide:
 - centralized provider access for AI workflows;
 - future backup participation.
 
-Fedora KDE and systemd deployment are later targets only. They are not current
-implemented behavior.
+Fedora KDE remains the later optional server target. A repository-native
+systemd service foundation now exists, but real host installation, activation,
+NUC acceptance, Tailscale Serve, SELinux/firewalld policy, backup/restore, and
+authentication remain unimplemented.
 
 ## Same Core, Different Deployment Capabilities
 
@@ -134,8 +136,10 @@ accepted decision. FrameNest must not require router port forwarding or public
 internet exposure. Tailscale networking is not sufficient authorization by
 itself; application-level authorization remains required.
 
-Later Fedora KDE/systemd deployment must be designed and verified in a bounded
-task. Do not describe Fedora deployment as current.
+The current Fedora service foundation is recorded in
+[ADR-0031](docs/adr/0031-fedora-systemd-service-foundation.md) and documented
+in [docs/FEDORA_SERVICE.md](docs/FEDORA_SERVICE.md). Do not describe a real
+Fedora deployment as completed until a later host-acceptance task verifies it.
 
 ## Server-Side AI Provider Boundary
 
@@ -170,9 +174,11 @@ authorization.
 
 Provider credentials remain in the server environment/service-secret boundary:
 `NVIDIA_API_KEY` for NVIDIA NIM and `AI_GATEWAY_API_KEY` for Vercel AI Gateway.
-Persistent secret storage, OS keychain integration, Fedora/systemd credential
-files, browser provider Settings, and application-level remote administrator
-authorization remain future bounded work.
+Persistent secret storage, OS keychain integration, systemd credential files,
+browser provider Settings, and application-level remote administrator
+authorization remain future bounded work. The initial Fedora service foundation
+uses an optional uncommitted host-local service-secret environment file for the
+current provider environment variables.
 
 ## Security And Authorization Deferred Decisions
 
@@ -194,7 +200,7 @@ Deferred security decisions include:
 The current MacBook MVP does not include:
 
 - NUC deployment;
-- systemd service installation;
+- real systemd service installation or activation;
 - server aggregate catalog;
 - remote streaming;
 - transfer protocol;
