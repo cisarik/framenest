@@ -90,17 +90,18 @@ catalog metadata, or Cover Studio state. Details uses a black player-first
 surface. Native/VLC playback, managed downloads, and a broader media player are
 future work.
 
-Available supported GIF and MP4 cards also expose an explicit compact Download
-action. It targets the identity-only
-`GET /api/media/{media_id}/locations/{location_id}/download` endpoint, which
-returns an attachment response with a sanitized filename. This action only
-initiates ordinary browser download behavior. FrameNest does not know the
-browser's final destination, does not prove completion or continued existence,
-and does not register trusted client-local availability from this browser
-transfer.
+Available supported GIF and MP4 cards also expose compact overlay actions on
+the media surface: Analyze in the top-right corner when metadata is needed,
+Edit in the bottom-left corner, and Open original media in the bottom-right
+corner. Open original media targets the identity-only
+`GET /api/media/{media_id}/locations/{location_id}/content` endpoint in a new
+tab or window, so the opened document is the direct GIF or MP4 resource rather
+than a wrapper page. This browser transfer does not expose filesystem paths,
+does not mutate the catalog, does not claim client-local availability, and does
+not replace the separate explicit attachment-download API.
 
-Untagged supported GIF and MP4 cards may show a direct `Analyze` action above
-`Edit`. It is a needs-metadata shortcut, not durable proof that analysis has or
+Untagged supported GIF and MP4 cards may show a direct `Analyze` action. It is
+a needs-metadata shortcut, not durable proof that analysis has or
 has not happened. When server AI is available, the shortcut uses the existing
 identity-only suggestion endpoint and opens the existing metadata editor with
 unsaved editable suggestions; persistence still requires `Save`, and the

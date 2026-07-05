@@ -97,9 +97,14 @@ def test_local_web_playback_endpoint_returns_gif_and_mp4_content_identity_only(
         assert entropy_response.status_code == 200
         assert entropy_response.content == MP4_BYTES
         assert entropy_response.headers["content-type"] == "video/mp4"
+        assert "content-disposition" not in entropy_response.headers
+        assert "text/html" not in entropy_response.headers["content-type"]
+        assert "application/json" not in entropy_response.headers["content-type"]
         assert reaction_response.status_code == 200
         assert reaction_response.content == GIF_BYTES
         assert reaction_response.headers["content-type"] == "image/gif"
+        assert "text/html" not in reaction_response.headers["content-type"]
+        assert "application/json" not in reaction_response.headers["content-type"]
         assert entropy_download.status_code == 200
         assert entropy_download.content == MP4_BYTES
         assert entropy_download.headers["content-type"] == "video/mp4"

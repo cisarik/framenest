@@ -538,12 +538,16 @@ function inlineIcon(pathData, label) {
   return svg;
 }
 
-function downloadIcon() {
-  return inlineIcon("M12 3v12m0 0 4-4m-4 4-4-4M5 21h14", "Download");
+function analyzeIcon() {
+  return inlineIcon("M15 4V2m0 20v-2M8 8l-2-2m12 12-2-2M4 15H2m20 0h-2M8 22l8-8M3 21l18-18", "Analyze");
 }
 
 function editIcon() {
   return inlineIcon("M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5Z", "Edit");
+}
+
+function openOriginalIcon() {
+  return inlineIcon("M7 17 17 7M9 7h8v8M5 5h6M5 5v14h14v-6", "Open original media");
 }
 
 function metadataEndpoint(mediaId) {
@@ -1051,10 +1055,6 @@ function selectSupportedAvailableLocation(item) {
 
 function mediaContentUrl(mediaId, locationId) {
   return `${MEDIA_CATALOG_ENDPOINT}/${encodeURIComponent(mediaId)}/locations/${encodeURIComponent(locationId)}/content`;
-}
-
-function mediaDownloadUrl(mediaId, locationId) {
-  return `${MEDIA_CATALOG_ENDPOINT}/${encodeURIComponent(mediaId)}/locations/${encodeURIComponent(locationId)}/download`;
 }
 
 function mediaGalleryPreviewUrl(mediaId, locationId) {
@@ -1635,7 +1635,11 @@ function setCardAnalyzeButtonState(button, state, message = "") {
   button.dataset.analysisState = state;
   button.setAttribute("aria-busy", state === "analyzing" ? "true" : "false");
   button.disabled = state === "analyzing";
-  button.textContent = state === "analyzing" ? "Analyzing…" : "Analyze";
+  if (state === "analyzing") {
+    button.replaceChildren(document.createTextNode("Analyzing…"));
+  } else {
+    button.replaceChildren(analyzeIcon());
+  }
   const status = button.closest(".catalog-card")?.querySelector(".catalog-card__analysis-status");
   if (status) {
     status.textContent = message;
@@ -1710,6 +1714,9 @@ function renderCatalogCard(item) {
   }
 
   const mediaSurface = renderCatalogCardMediaSurface(item);
+  const mediaFrame = document.createElement("div");
+  mediaFrame.className = "catalog-card__media-frame";
+  mediaFrame.appendChild(mediaSurface);
 
   const body = document.createElement("div");
   body.className = "catalog-card__body";
@@ -1745,44 +1752,45 @@ function renderCatalogCard(item) {
   const supportedLocation = selectSupportedAvailableLocation(item);
   const displayTitle = item.display_title || deriveCatalogFallbackTitle(item);
   const actions = document.createElement("div");
-  actions.className = "catalog-card__actions";
+  actions.className = "catalog-card__actions catalog-card__actions--overlay";
   if (cardNeedsMetadata(item)) {
     const analyzeButton = document.createElement("button");
-    analyzeButton.className = "catalog-card__action catalog-card__action--analyze";
+    analyzeButton.className = "catalog-card__action catalog-card__action--overlay catalog-card__action--analyze catalog-card__action--top-right";
     analyzeButton.type = "button";
-    analyzeButton.textContent = "Analyze";
+    analyzeButton.appendChild(analyzeIcon());
     analyzeButton.dataset.analysisState = "idle";
     analyzeButton.setAttribute("aria-busy", "false");
     analyzeButton.setAttribute("aria-disabled", aiCapability.available ? "false" : "true");
-    analyzeButton.setAttribute("aria-label", `Analyze ${item.display_title || deriveCatalogFallbackTitle(item)}`);
+    analyzeButton.setAttribute("aria-label", `Analyze ${displayTitle}`);
+    analyzeButton.title = "Analyze";
     analyzeButton.addEventListener("click", () => handleAnalyzeCatalogCard(item, analyzeButton));
     actions.appendChild(analyzeButton);
   }
-  const actionRow = document.createElement("div");
-  actionRow.className = "catalog-card__action-row";
-  if (supportedLocation) {
-    const downloadLink = document.createElement("a");
-    downloadLink.className = "catalog-card__action catalog-card__action--download";
-    downloadLink.href = mediaDownloadUrl(item.media_id, supportedLocation.location_id);
-    downloadLink.setAttribute("aria-label", `Download ${displayTitle}`);
-    downloadLink.title = "Download";
-    downloadLink.appendChild(downloadIcon());
-    actionRow.appendChild(downloadLink);
-  }
   const editButton = document.createElement("button");
-  editButton.className = "catalog-card__action catalog-card__action--primary";
+  editButton.className = "catalog-card__action catalog-card__action--overlay catalog-card__action--edit catalog-card__action--bottom-left";
   editButton.type = "button";
   editButton.setAttribute("aria-label", `Edit ${displayTitle}`);
   editButton.title = "Edit";
   editButton.appendChild(editIcon());
   editButton.addEventListener("click", () => handleOpenMetadataWorkspace(item, editButton));
-  actionRow.appendChild(editButton);
-  actions.appendChild(actionRow);
+  actions.appendChild(editButton);
+  if (supportedLocation) {
+    const openOriginalLink = document.createElement("a");
+    openOriginalLink.className = "catalog-card__action catalog-card__action--overlay catalog-card__action--open-original catalog-card__action--bottom-right";
+    openOriginalLink.href = mediaContentUrl(item.media_id, supportedLocation.location_id);
+    openOriginalLink.target = "_blank";
+    openOriginalLink.rel = "noopener noreferrer";
+    openOriginalLink.setAttribute("aria-label", `Open original media ${displayTitle}`);
+    openOriginalLink.title = "Open original media";
+    openOriginalLink.appendChild(openOriginalIcon());
+    actions.appendChild(openOriginalLink);
+  }
+  mediaFrame.appendChild(actions);
   const analysisStatus = document.createElement("p");
   analysisStatus.className = "catalog-card__analysis-status";
   analysisStatus.hidden = true;
 
-  card.append(mediaSurface, body, actions, analysisStatus);
+  card.append(mediaFrame, body, analysisStatus);
   return card;
 }
 

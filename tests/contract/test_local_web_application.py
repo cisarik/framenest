@@ -1458,40 +1458,43 @@ def test_catalog_card_analyze_shortcut_only_for_untagged_supported_media(client:
     card_body = _javascript_function(script, "renderCatalogCard")
     needs_body = _javascript_function(script, "cardNeedsMetadata")
 
-    assert 'analyzeButton.textContent = "Analyze"' in card_body
+    assert "analyzeButton.appendChild(analyzeIcon())" in card_body
+    assert 'analyzeButton.title = "Analyze"' in card_body
     assert "cardNeedsMetadata(item)" in card_body
     assert "selectSupportedAvailableLocation(item) !== null" in needs_body
     assert "(!item.tags || item.tags.length === 0)" in needs_body
-    assert card_body.index("actions.appendChild(analyzeButton)") < card_body.index("actions.appendChild(actionRow)")
+    assert "actions.appendChild(analyzeButton)" in card_body
 
 
-def test_catalog_card_has_identity_only_download_immediately_left_of_edit(
+def test_catalog_card_has_overlay_original_media_action_in_bottom_right(
     client: TestClient,
 ) -> None:
     script = client.get("/assets/app.js").text
     card_body = _javascript_function(script, "renderCatalogCard")
 
-    assert "function mediaDownloadUrl(mediaId, locationId)" in script
-    assert "/download" in _javascript_function(script, "mediaDownloadUrl")
-    assert "downloadLink.href = mediaDownloadUrl(item.media_id, supportedLocation.location_id)" in card_body
-    assert 'downloadLink.setAttribute("aria-label", `Download ${displayTitle}`)' in card_body
-    assert 'downloadLink.title = "Download"' in card_body
-    assert "downloadIcon()" in card_body
+    assert "openOriginalLink.href = mediaContentUrl(item.media_id, supportedLocation.location_id)" in card_body
+    assert 'openOriginalLink.target = "_blank"' in card_body
+    assert 'openOriginalLink.rel = "noopener noreferrer"' in card_body
+    assert (
+        'openOriginalLink.setAttribute("aria-label", `Open original media ${displayTitle}`)'
+        in card_body
+    )
+    assert 'openOriginalLink.title = "Open original media"' in card_body
+    assert "openOriginalIcon()" in card_body
     assert "editIcon()" in card_body
     assert 'editButton.setAttribute("aria-label", `Edit ${displayTitle}`)' in card_body
     assert 'editButton.title = "Edit"' in card_body
-    assert card_body.index("actionRow.appendChild(downloadLink)") < card_body.index(
-        "actionRow.appendChild(editButton)"
-    )
+    assert "mediaDownloadUrl(item.media_id" not in card_body
+    assert "/download" not in card_body
     assert "fetch(mediaDownloadUrl" not in script
     assert "createObjectURL" in script
-    download_section = card_body[
-        card_body.index("const actionRow") : card_body.index("const analysisStatus")
+    open_section = card_body[
+        card_body.index("const editButton") : card_body.index("const analysisStatus")
     ]
-    assert "URL.createObjectURL" not in download_section
+    assert "URL.createObjectURL" not in open_section
 
 
-def test_catalog_card_download_appears_only_for_supported_available_location(
+def test_catalog_card_original_media_action_appears_only_for_supported_available_location(
     client: TestClient,
 ) -> None:
     script = client.get("/assets/app.js").text
@@ -1502,6 +1505,29 @@ def test_catalog_card_download_appears_only_for_supported_available_location(
     assert "if (supportedLocation)" in card_body
     assert 'item.media_kind !== "video" && item.media_kind !== "animated_image"' in supported_body
     assert 'location.availability === "available" && location.location_id' in supported_body
+
+
+def test_catalog_card_actions_are_compact_overlay_controls(client: TestClient) -> None:
+    script = client.get("/assets/app.js").text
+    styles = client.get("/assets/styles.css").text
+    card_body = _javascript_function(script, "renderCatalogCard")
+
+    assert 'mediaFrame.className = "catalog-card__media-frame"' in card_body
+    assert 'actions.className = "catalog-card__actions catalog-card__actions--overlay"' in card_body
+    assert "catalog-card__action--top-right" in card_body
+    assert "catalog-card__action--bottom-left" in card_body
+    assert "catalog-card__action--bottom-right" in card_body
+    assert "catalog-card__action--edit" in card_body
+    assert "catalog-card__action--open-original" in card_body
+    assert "catalog-card__action--primary" not in card_body
+    assert "catalog-card__action-row" not in card_body
+    assert ".catalog-card__actions--overlay" in styles
+    assert "position: absolute;" in styles
+    assert ".catalog-card__action--top-right" in styles
+    assert ".catalog-card__action--bottom-left" in styles
+    assert ".catalog-card__action--bottom-right" in styles
+    assert "width: 36px;" in styles
+    assert "height: 36px;" in styles
 
 
 def test_catalog_card_unavailable_ai_opens_status_without_request(client: TestClient) -> None:
@@ -1522,7 +1548,8 @@ def test_catalog_card_analyze_request_busy_success_and_failure_flow(client: Test
     state_body = _javascript_function(script, "setCardAnalyzeButtonState")
     open_body = _javascript_function(script, "handleOpenMetadataWorkspace")
 
-    assert 'button.textContent = state === "analyzing" ? "Analyzing…" : "Analyze"' in state_body
+    assert 'button.replaceChildren(document.createTextNode("Analyzing…"))' in state_body
+    assert "button.replaceChildren(analyzeIcon())" in state_body
     assert 'button.setAttribute("aria-busy", state === "analyzing" ? "true" : "false")' in state_body
     assert "cardAiAnalyzingMediaIds.has(item.media_id)" in analyze_body
     assert "cardAiAnalyzingMediaIds.add(item.media_id)" in analyze_body
