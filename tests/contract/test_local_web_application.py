@@ -1384,12 +1384,16 @@ def test_javascript_dialog_has_escape_close(client: TestClient) -> None:
     assert "Escape" in script or "escape" in script
 
 
-def test_javascript_card_has_compact_tag_pills(client: TestClient) -> None:
+def test_javascript_card_omits_tag_pills_and_hidden_tag_counter(client: TestClient) -> None:
     script = client.get("/assets/app.js").text
     start = script.index("function renderCatalogCard(item)")
     end = script.index("\n}\n", start) + len("\n}\n")
     card_body = script[start:end]
-    assert "catalog-tag" in card_body or "tag-pill" in card_body or "tag" in card_body.lower()
+    assert "catalog-card__tags" not in card_body
+    assert "catalog-card__tag" not in card_body
+    assert "catalog-card__tag-more" not in card_body
+    assert "maxVisible" not in card_body
+    assert "+${item.tags.length" not in card_body
 
 
 def test_javascript_card_has_status_row(client: TestClient) -> None:
@@ -1458,12 +1462,16 @@ def test_catalog_card_analyze_shortcut_only_for_untagged_supported_media(client:
     card_body = _javascript_function(script, "renderCatalogCard")
     needs_body = _javascript_function(script, "cardNeedsMetadata")
 
-    assert "analyzeButton.appendChild(analyzeIcon())" in card_body
-    assert 'analyzeButton.title = "Analyze"' in card_body
+    assert 'analyzeButton.textContent = "🧠"' in card_body
+    assert 'analyzeButton.title = "Analyze by AI"' in card_body
     assert "cardNeedsMetadata(item)" in card_body
     assert "selectSupportedAvailableLocation(item) !== null" in needs_body
     assert "(!item.tags || item.tags.length === 0)" in needs_body
     assert "actions.appendChild(analyzeButton)" in card_body
+    assert "item.tags.length > 0" not in card_body
+    assert "catalog-card__tags" not in card_body
+    assert "catalog-card__tag" not in card_body
+    assert "catalog-card__tag-more" not in card_body
 
 
 def test_catalog_card_has_overlay_original_media_action_in_bottom_right(
@@ -1511,6 +1519,15 @@ def test_catalog_card_actions_are_compact_overlay_controls(client: TestClient) -
     script = client.get("/assets/app.js").text
     styles = client.get("/assets/styles.css").text
     card_body = _javascript_function(script, "renderCatalogCard")
+    top_right_css = styles[
+        styles.index(".catalog-card__action--top-right") : styles.index(".catalog-card__action--bottom-left")
+    ]
+    bottom_right_css = styles[
+        styles.index(".catalog-card__action--bottom-right") : styles.index(".catalog-card__action--open-original")
+    ]
+    action_css = styles[
+        styles.index(".catalog-card__action {") : styles.index(".catalog-card__action svg")
+    ]
 
     assert 'mediaFrame.className = "catalog-card__media-frame"' in card_body
     assert 'actions.className = "catalog-card__actions catalog-card__actions--overlay"' in card_body
@@ -1526,8 +1543,11 @@ def test_catalog_card_actions_are_compact_overlay_controls(client: TestClient) -
     assert ".catalog-card__action--top-right" in styles
     assert ".catalog-card__action--bottom-left" in styles
     assert ".catalog-card__action--bottom-right" in styles
-    assert "width: 36px;" in styles
-    assert "height: 36px;" in styles
+    assert "width: 36px;" in action_css
+    assert "height: 36px;" in action_css
+    assert "right: 8px;" in top_right_css
+    assert "right: 8px;" in bottom_right_css
+    assert "left:" not in top_right_css
 
 
 def test_catalog_card_unavailable_ai_opens_status_without_request(client: TestClient) -> None:
@@ -1548,9 +1568,12 @@ def test_catalog_card_analyze_request_busy_success_and_failure_flow(client: Test
     state_body = _javascript_function(script, "setCardAnalyzeButtonState")
     open_body = _javascript_function(script, "handleOpenMetadataWorkspace")
 
-    assert 'button.replaceChildren(document.createTextNode("Analyzing…"))' in state_body
-    assert "button.replaceChildren(analyzeIcon())" in state_body
+    assert '"Analyzing…"' not in state_body
+    assert 'button.textContent = "🧠"' in state_body
+    assert 'button.replaceChildren(busyIndicator)' in state_body
+    assert 'busyIndicator.className = "catalog-card__analyze-busy"' in state_body
     assert 'button.setAttribute("aria-busy", state === "analyzing" ? "true" : "false")' in state_body
+    assert 'button.setAttribute("aria-label", state === "analyzing" ? `Analyzing ${title}` : `Analyze by AI ${title}`)' in state_body
     assert "cardAiAnalyzingMediaIds.has(item.media_id)" in analyze_body
     assert "cardAiAnalyzingMediaIds.add(item.media_id)" in analyze_body
     assert "mediaAiSuggestionEndpoint(item.media_id, location.location_id)" in analyze_body
@@ -1559,6 +1582,27 @@ def test_catalog_card_analyze_request_busy_success_and_failure_flow(client: Test
     assert "aiSuggestionErrorMessage(payload)" in analyze_body
     assert "fetch(metadataEndpoint" in open_body
     assert "fetch(metadataEndpoint" not in analyze_body
+
+
+def test_catalog_card_analyze_busy_keeps_fixed_size_and_reduced_motion(client: TestClient) -> None:
+    styles = client.get("/assets/styles.css").text
+    busy_css = styles[
+        styles.index(".catalog-card__action--analyze[data-analysis-state=\"analyzing\"]")
+        : styles.index(".catalog-card__action--analyze[data-analysis-state=\"analyzing\"] .catalog-card__analyze-busy")
+    ]
+    indicator_css = styles[
+        styles.index(".catalog-card__action--analyze[data-analysis-state=\"analyzing\"] .catalog-card__analyze-busy")
+        : styles.index(".catalog-card__analysis-status")
+    ]
+    reduced_css = styles[styles.index("@media (prefers-reduced-motion: reduce)") :]
+
+    assert "width: 36px;" in busy_css
+    assert "height: 36px;" in busy_css
+    assert "min-width" not in busy_css
+    assert "Analyzing" not in busy_css
+    assert "animation:" in indicator_css
+    assert ".catalog-card__analyze-busy" in reduced_css
+    assert "animation: none;" in reduced_css
 
 
 def test_no_automatic_analysis_on_page_load(client: TestClient) -> None:
@@ -1780,6 +1824,45 @@ def test_javascript_details_is_player_first_with_single_title(client: TestClient
     assert "detailsDialogTitle.textContent" in populate_body
     assert "detailsDisplayTitle" not in script
     assert "detailsTechnical.removeAttribute(\"open\")" in populate_body
+    assert "media-details-kind" not in details_section
+    assert "detailsKind.textContent" not in populate_body
+
+
+def test_javascript_details_tags_filter_gallery_with_existing_state(client: TestClient) -> None:
+    script = client.get("/assets/app.js").text
+    populate_body = _javascript_function(script, "populateDetailsDialog")
+    activate_body = _javascript_function(script, "activateDetailsTagFilter")
+
+    assert 'document.createElement("button")' in populate_body
+    assert 'pill.type = "button"' in populate_body
+    assert 'pill.className = "media-details-dialog__tag"' in populate_body
+    assert "activateDetailsTagFilter(tag.key)" in populate_body
+    assert "if (!catalogState.tagKeys.includes(tagKey))" in activate_body
+    assert "catalogState.tagKeys = [...catalogState.tagKeys, tagKey]" in activate_body
+    assert "catalogState.offset = 0" in activate_body
+    assert "catalogState.q" not in activate_body
+    assert "closeDetailsDialog({ restoreFocus: false })" in activate_body
+    assert "renderCatalogTagFilterStates()" in activate_body
+    assert "loadCatalog()" in activate_body
+    assert "focusCatalogFilterRegion()" in activate_body
+
+
+def test_javascript_details_description_replaces_prominent_processed_panel(client: TestClient) -> None:
+    script = client.get("/assets/app.js").text
+    styles = client.get("/assets/styles.css").text
+    populate_body = _javascript_function(script, "populateDetailsDialog")
+    principal_body = populate_body[: populate_body.index("detailsTechnicalList.replaceChildren()")]
+    details_css = styles[styles.index(".media-details-dialog") : styles.index("/* --- Metadata edit dialog --- */")]
+
+    assert "Processed" not in principal_body
+    assert " since " not in principal_body
+    assert "detailsDescription.textContent = payload.description" in populate_body
+    assert "detailsDescription.hidden = !payload.description" in populate_body
+    assert "detailsProcessedContainer" not in populate_body
+    assert 'addMetadataValue(detailsTechnicalList, "Processed at"' in populate_body
+    assert ".media-details-dialog__description" in details_css
+    assert "border: 1px solid var(--accent-border);" in details_css
+    assert "color: var(--accent);" in details_css
 
 
 def test_javascript_details_selects_first_available_location(client: TestClient) -> None:

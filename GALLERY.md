@@ -91,9 +91,11 @@ surface. Native/VLC playback, managed downloads, and a broader media player are
 future work.
 
 Available supported GIF and MP4 cards also expose compact overlay actions on
-the media surface: Analyze in the top-right corner when metadata is needed,
-Edit in the bottom-left corner, and Open original media in the bottom-right
-corner. Open original media targets the identity-only
+the media surface: a brain `Analyze by AI` control in the top-right corner when
+metadata is needed, Edit in the bottom-left corner, and Open original media in
+the bottom-right corner. Cards do not display canonical tag chips, a hidden-tag
+counter, or reserved tag space; the card body contains only the media title.
+Open original media targets the identity-only
 `GET /api/media/{media_id}/locations/{location_id}/content` endpoint in a new
 tab or window, so the opened document is the direct GIF or MP4 resource rather
 than a wrapper page. This browser transfer does not expose filesystem paths,
@@ -114,6 +116,15 @@ Gallery cards do not display the internal built-in `Processed` workflow label
 or timestamp. The `Processed` catalog scope and automatic persistence semantics
 remain available as catalog behavior, but the card surface should not expose
 that internal workflow state as a visible status block.
+
+Details prioritizes the original player, clickable canonical tags, and the
+persisted description. Details tag buttons activate the existing Gallery tag
+filter while preserving the current text query and other selected filters.
+Generic visible media-kind text and the prominent `Processed since` panel are
+not part of the main Details presentation; processed data remains internal and
+may appear inside Technical details. After acceptance of this presentation,
+Gallery cards and Details visual presentation are frozen for the MVP except for
+concrete defects.
 
 The Gallery header and pagination should stay compact: the temporary `FN` mark
 is sufficient non-interactive branding in the current shell, visible `Cloud`

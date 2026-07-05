@@ -178,9 +178,7 @@ const detailsError = document.querySelector("#media-details-error");
 const detailsContent = document.querySelector("#media-details-content");
 const detailsPreviewContainer = document.querySelector("#details-preview-container");
 const detailsDialogTitle = document.querySelector("#media-details-title");
-const detailsKind = document.querySelector("#media-details-kind");
 const detailsTagsContainer = document.querySelector("#media-details-tags");
-const detailsProcessedContainer = document.querySelector("#media-details-processed");
 const detailsDescription = document.querySelector("#media-details-description");
 const detailsTechnical = document.querySelector("#media-details-technical");
 const detailsTechnicalList = document.querySelector("#media-details-technical-list");
@@ -536,10 +534,6 @@ function inlineIcon(pathData, label) {
   path.setAttribute("stroke-linejoin", "round");
   svg.append(title, path);
   return svg;
-}
-
-function analyzeIcon() {
-  return inlineIcon("M15 4V2m0 20v-2M8 8l-2-2m12 12-2-2M4 15H2m20 0h-2M8 22l8-8M3 21l18-18", "Analyze");
 }
 
 function editIcon() {
@@ -1632,13 +1626,18 @@ function cardNeedsMetadata(item) {
 }
 
 function setCardAnalyzeButtonState(button, state, message = "") {
+  const title = button.dataset.mediaTitle || "media";
   button.dataset.analysisState = state;
   button.setAttribute("aria-busy", state === "analyzing" ? "true" : "false");
+  button.setAttribute("aria-label", state === "analyzing" ? `Analyzing ${title}` : `Analyze by AI ${title}`);
   button.disabled = state === "analyzing";
   if (state === "analyzing") {
-    button.replaceChildren(document.createTextNode("Analyzing…"));
+    const busyIndicator = document.createElement("span");
+    busyIndicator.className = "catalog-card__analyze-busy";
+    busyIndicator.setAttribute("aria-hidden", "true");
+    button.replaceChildren(busyIndicator);
   } else {
-    button.replaceChildren(analyzeIcon());
+    button.textContent = "🧠";
   }
   const status = button.closest(".catalog-card")?.querySelector(".catalog-card__analysis-status");
   if (status) {
@@ -1730,25 +1729,6 @@ function renderCatalogCard(item) {
   title.appendChild(titleButton);
   body.appendChild(title);
 
-  if (item.tags.length > 0) {
-    const tagsDiv = document.createElement("div");
-    tagsDiv.className = "catalog-card__tags";
-    const maxVisible = 3;
-    item.tags.slice(0, maxVisible).forEach((tag) => {
-      const pill = document.createElement("span");
-      pill.className = "catalog-card__tag";
-      pill.textContent = tag.display_name;
-      tagsDiv.appendChild(pill);
-    });
-    if (item.tags.length > maxVisible) {
-      const more = document.createElement("span");
-      more.className = "catalog-card__tag-more";
-      more.textContent = `+${item.tags.length - maxVisible}`;
-      tagsDiv.appendChild(more);
-    }
-    body.appendChild(tagsDiv);
-  }
-
   const supportedLocation = selectSupportedAvailableLocation(item);
   const displayTitle = item.display_title || deriveCatalogFallbackTitle(item);
   const actions = document.createElement("div");
@@ -1757,12 +1737,13 @@ function renderCatalogCard(item) {
     const analyzeButton = document.createElement("button");
     analyzeButton.className = "catalog-card__action catalog-card__action--overlay catalog-card__action--analyze catalog-card__action--top-right";
     analyzeButton.type = "button";
-    analyzeButton.appendChild(analyzeIcon());
+    analyzeButton.textContent = "🧠";
     analyzeButton.dataset.analysisState = "idle";
+    analyzeButton.dataset.mediaTitle = displayTitle;
     analyzeButton.setAttribute("aria-busy", "false");
     analyzeButton.setAttribute("aria-disabled", aiCapability.available ? "false" : "true");
-    analyzeButton.setAttribute("aria-label", `Analyze ${displayTitle}`);
-    analyzeButton.title = "Analyze";
+    analyzeButton.setAttribute("aria-label", `Analyze by AI ${displayTitle}`);
+    analyzeButton.title = "Analyze by AI";
     analyzeButton.addEventListener("click", () => handleAnalyzeCatalogCard(item, analyzeButton));
     actions.appendChild(analyzeButton);
   }
@@ -1869,6 +1850,29 @@ function renderCatalogTagFilters(tags) {
   if (metadataWorkspace.openMediaId !== null) {
     renderMetadataWorkspace();
   }
+}
+
+function focusCatalogFilterRegion() {
+  const activeFilter = catalogTagFilters?.querySelector("[aria-pressed=\"true\"]");
+  if (activeFilter) {
+    activeFilter.focus();
+    return;
+  }
+  if (catalogTagFilters) {
+    catalogTagFilters.setAttribute("tabindex", "-1");
+    catalogTagFilters.focus();
+  }
+}
+
+function activateDetailsTagFilter(tagKey) {
+  if (!catalogState.tagKeys.includes(tagKey)) {
+    catalogState.tagKeys = [...catalogState.tagKeys, tagKey];
+  }
+  catalogState.offset = 0;
+  closeDetailsDialog({ restoreFocus: false });
+  renderCatalogTagFilterStates();
+  loadCatalog();
+  focusCatalogFilterRegion();
 }
 
 async function loadCatalogTags() {
@@ -2294,36 +2298,20 @@ async function populateDetailsDialog(item) {
     if (detailsDialogTitle) {
       detailsDialogTitle.textContent = item.display_title || deriveCatalogFallbackTitle(item);
     }
-    detailsKind.textContent = formatCatalogKind(item.media_kind);
 
     detailsTagsContainer.replaceChildren();
     (item.tags || []).forEach((tag) => {
-      const pill = document.createElement("span");
+      const pill = document.createElement("button");
+      pill.type = "button";
       pill.className = "media-details-dialog__tag";
       pill.textContent = tag.display_name;
+      pill.setAttribute("aria-label", `Filter Gallery by ${tag.display_name}`);
+      pill.addEventListener("click", () => activateDetailsTagFilter(tag.key));
       detailsTagsContainer.appendChild(pill);
     });
 
-    if (item.collection_key === "processed" || payload.collection_key === "processed") {
-      detailsProcessedContainer.hidden = false;
-      detailsProcessedContainer.replaceChildren();
-      const label = document.createTextNode("Processed");
-      detailsProcessedContainer.appendChild(label);
-      const processedTime = buildProcessedTimeElement(item.processed_at_ms ?? payload.processed_at_ms);
-      if (processedTime !== null) {
-        detailsProcessedContainer.appendChild(document.createTextNode(" since "));
-        detailsProcessedContainer.appendChild(processedTime);
-      }
-    } else {
-      detailsProcessedContainer.hidden = true;
-    }
-
     detailsDescription.textContent = payload.description || "";
-    if (!payload.description) {
-      detailsDescription.hidden = true;
-    } else {
-      detailsDescription.hidden = false;
-    }
+    detailsDescription.hidden = !payload.description;
 
     detailsTechnicalList.replaceChildren();
     if (detailsTechnical) {
@@ -2333,8 +2321,9 @@ async function populateDetailsDialog(item) {
     addMetadataValue(detailsTechnicalList, "Kind", formatCatalogKind(item.media_kind));
     addMetadataValue(detailsTechnicalList, "Created", new Date(item.created_at_ms).toISOString());
     addMetadataValue(detailsTechnicalList, "Collection", item.collection_key || "none");
-    if (item.processed_at_ms !== null && item.processed_at_ms !== undefined) {
-      addMetadataValue(detailsTechnicalList, "Processed at", new Date(item.processed_at_ms).toISOString());
+    const processedAtMs = item.processed_at_ms ?? payload.processed_at_ms;
+    if (processedAtMs !== null && processedAtMs !== undefined) {
+      addMetadataValue(detailsTechnicalList, "Processed at", new Date(processedAtMs).toISOString());
     }
     item.locations.forEach((location, index) => {
       addMetadataValue(detailsTechnicalList, `Location ${index + 1}`, location.relative_path);
@@ -2348,7 +2337,7 @@ async function populateDetailsDialog(item) {
   }
 }
 
-function closeDetailsDialog() {
+function closeDetailsDialog({ restoreFocus = true } = {}) {
   if (!detailsDialog) return;
   cleanupDetailsMedia();
   if (typeof detailsDialog.close === "function") {
@@ -2359,10 +2348,10 @@ function closeDetailsDialog() {
   detailsCurrentItem = null;
   detailsPlayRequested = false;
   detailsMetadataToken++;
-  if (detailsOpenerElement) {
+  if (restoreFocus && detailsOpenerElement) {
     detailsOpenerElement.focus();
-    detailsOpenerElement = null;
   }
+  detailsOpenerElement = null;
 }
 
 async function handleOpenMetadataWorkspace(item, openerElement, { aiSuggestion = null } = {}) {
