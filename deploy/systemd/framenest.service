@@ -8,17 +8,19 @@ Wants=network-online.target
 Type=simple
 User=framenest
 Group=framenest
-WorkingDirectory=/opt/framenest
+WorkingDirectory=/opt/framenest/current
 Environment=PYTHONUNBUFFERED=1
 EnvironmentFile=/etc/framenest/framenest.env
-EnvironmentFile=-/etc/framenest/framenest-secrets.env
-ExecStartPre=/opt/framenest/.venv/bin/framenest-production check-database-ready
-ExecStart=/opt/framenest/.venv/bin/framenest-server
+ExecStartPre=/opt/framenest/current/.venv/bin/framenest-production check-database-ready
+ExecStart=/opt/framenest/current/.venv/bin/framenest-production serve
+KillSignal=SIGTERM
+TimeoutStopSec=30s
 Restart=on-failure
 RestartSec=5s
+StandardOutput=journal
+StandardError=journal
 StateDirectory=framenest
 CacheDirectory=framenest
-ConfigurationDirectory=framenest
 RuntimeDirectory=framenest
 UMask=0077
 NoNewPrivileges=true
@@ -30,6 +32,8 @@ ProtectKernelModules=true
 ProtectKernelTunables=true
 RestrictSUIDSGID=true
 LockPersonality=true
+CapabilityBoundingSet=
+AmbientCapabilities=
 
 [Install]
 WantedBy=multi-user.target

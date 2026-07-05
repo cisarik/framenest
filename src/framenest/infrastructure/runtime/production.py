@@ -11,6 +11,7 @@ from typing import NoReturn
 from framenest.configuration import load_settings
 from framenest.infrastructure.persistence.errors import FrameNestPersistenceError
 from framenest.infrastructure.persistence.migrations import inspect_database_migration_status
+from framenest.server import run_server
 
 COMMAND_ERROR_CODE = "FRAMENEST_PRODUCTION_COMMAND_FAILED"
 DATABASE_NOT_READY_CODE = "FRAMENEST_DATABASE_NOT_READY"
@@ -36,13 +37,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         parser = _build_parser()
         args = parser.parse_args(argv)
         operation = args.operation
-        if operation != "check-database-ready":
+        settings = load_settings(env_file=None)
+        if operation == "check-database-ready":
+            status = inspect_database_migration_status(settings)
+            if status.state != "at_head":
+                raise _DatabaseNotReadyError()
+            _write_success(operation, current_revision=status.current_revision)
+        elif operation == "serve":
+            run_server(settings=settings)
+        else:
             raise _UsageError("Invalid production command.")
-        settings = load_settings()
-        status = inspect_database_migration_status(settings)
-        if status.state != "at_head":
-            raise _DatabaseNotReadyError()
-        _write_success(operation, current_revision=status.current_revision)
         return 0
     except _UsageError:
         _write_error(
@@ -51,6 +55,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             message="Production command failed.",
         )
         return 2
+    except KeyboardInterrupt:
+        return 0
     except _DatabaseNotReadyError:
         _write_error(
             operation=operation,
@@ -73,6 +79,10 @@ def _build_parser() -> argparse.ArgumentParser:
     subcommands.add_parser(
         "check-database-ready",
         help="Verify the configured database is already migrated to head.",
+    )
+    subcommands.add_parser(
+        "serve",
+        help="Run the production FrameNest server in the foreground.",
     )
     return parser
 

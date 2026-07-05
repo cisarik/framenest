@@ -172,13 +172,12 @@ uses the sanitized server status contract and reports the local development
 server as connected over loopback; it does not implement Tailscale detection or
 authorization.
 
-Provider credentials remain in the server environment/service-secret boundary:
+In development, provider credentials remain in the server process environment:
 `NVIDIA_API_KEY` for NVIDIA NIM and `AI_GATEWAY_API_KEY` for Vercel AI Gateway.
-Persistent secret storage, OS keychain integration, systemd credential files,
-browser provider Settings, and application-level remote administrator
-authorization remain future bounded work. The initial Fedora service foundation
-uses an optional uncommitted host-local service-secret environment file for the
-current provider environment variables.
+Production provider-secret integration is not implemented by the Fedora service
+foundation. Persistent secret storage, OS keychain integration, systemd
+credential files, browser provider Settings, service-secret adapters, and
+application-level remote administrator authorization remain future bounded work.
 
 ## Security And Authorization Deferred Decisions
 
