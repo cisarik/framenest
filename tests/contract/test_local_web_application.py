@@ -1525,6 +1525,10 @@ def test_catalog_card_actions_are_compact_overlay_controls(client: TestClient) -
     bottom_right_css = styles[
         styles.index(".catalog-card__action--bottom-right") : styles.index(".catalog-card__action--open-original")
     ]
+    analyze_css = styles[
+        styles.index(".catalog-card__action--analyze {")
+        : styles.index(".catalog-card__action--analyze:hover")
+    ]
     action_css = styles[
         styles.index(".catalog-card__action {") : styles.index(".catalog-card__action svg")
     ]
@@ -1548,6 +1552,7 @@ def test_catalog_card_actions_are_compact_overlay_controls(client: TestClient) -
     assert "right: 8px;" in top_right_css
     assert "right: 8px;" in bottom_right_css
     assert "left:" not in top_right_css
+    assert "position:" not in analyze_css
 
 
 def test_catalog_card_unavailable_ai_opens_status_without_request(client: TestClient) -> None:

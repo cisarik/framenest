@@ -1288,7 +1288,6 @@ h2 {
 }
 
 .catalog-card__action--analyze {
-  position: relative;
   overflow: hidden;
   border-color: rgba(96, 165, 250, 0.55);
   background: rgba(29, 78, 216, 0.18);
