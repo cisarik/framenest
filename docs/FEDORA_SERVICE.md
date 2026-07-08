@@ -2,16 +2,22 @@
 
 ## Status
 
-This is a repository-native Fedora operator workflow for the initial FrameNest
-systemd service foundation. It is not an installer, and it must not be treated
-as proof that a real Intel NUC deployment has been completed.
+This is a superseded repository-native Fedora operator workflow for the initial
+FrameNest systemd service foundation. It is not the current deployment workflow,
+not an installer, and not proof that a real Intel NUC deployment has been
+completed.
+
+Current deployment guidance is [docs/UBUNTU_NUC_DEPLOYMENT.md](UBUNTU_NUC_DEPLOYMENT.md).
+[ADR-0032](adr/0032-ubuntu-nuc-deployment-foundation.md) supersedes
+[ADR-0031](adr/0031-fedora-systemd-service-foundation.md) for the active
+deployment target and operator workflow.
 
 Classification: deployment operator guide.
 
-Consumers: Cooperator, Orchestrator, Worker, Fedora operators, and security
-reviewers.
+Consumers: Cooperator, Orchestrator, Worker, maintainers, security reviewers,
+and anyone auditing the historical Fedora service foundation.
 
-Retention: remains while the Fedora systemd service foundation exists.
+Retention: retained as historical evidence for ADR-0031.
 
 Inbound links: [README.md](../README.md), [SERVER.md](../SERVER.md),
 [SECURITY.md](../SECURITY.md), [ROADMAP.md](../ROADMAP.md), and
@@ -20,26 +26,27 @@ Inbound links: [README.md](../README.md), [SERVER.md](../SERVER.md),
 Cleanup/update owner: future explicitly authorized Worker under an Orchestrator
 task. Git history remains the archive.
 
-## Repository Artifacts
+## Historical Repository Artifacts
 
 ```text
 deploy/systemd/framenest.service
 deploy/systemd/framenest.env.example
 ```
 
-The service file is source material for a Fedora host. Committing it does not
-install, enable, start, stop, reload, or inspect a real service.
+The service file began as source material for a Fedora host and remains generic
+systemd source material. Committing it does not install, enable, start, stop,
+reload, or inspect a real service.
 
-## Service Model
+## Historical Service Model
 
-The Fedora service runs through the production executable:
+The historical Fedora service model ran through the production executable:
 
 ```text
 /opt/framenest/current/.venv/bin/framenest-production
 ```
 
 The root `./framenest` launcher remains macOS/local browser-development
-tooling. It is not used by the Fedora systemd service.
+tooling. It is not used by the systemd service.
 
 Before startup, systemd runs a read-only readiness gate:
 
@@ -109,7 +116,11 @@ service-secret integration exists, likely systemd credentials or another
 approved service-secret adapter. Without credentials, configured providers
 preserve the existing sanitized `credential_unavailable` behavior.
 
-## Safe Operator Workflow
+## Superseded Safe Operator Workflow
+
+This section is retained for historical context only. Use
+[docs/UBUNTU_NUC_DEPLOYMENT.md](UBUNTU_NUC_DEPLOYMENT.md) for current Ubuntu
+NUC preparation and deployment workflow.
 
 1. Install a CPython 3.13 environment and Poetry according to the host policy.
 2. Place the active repository or release tree at `/opt/framenest/current`.
@@ -135,9 +146,9 @@ FRAMENEST_DATABASE_PATH=/var/lib/framenest/catalog.sqlite3 \
 ```
 
 10. Only after the readiness gate reports `ready`, enable or start the unit
-    through ordinary Fedora systemd procedures.
+    through ordinary host systemd procedures.
 
-This repository slice does not perform any of those host actions.
+This historical repository slice did not perform any of those host actions.
 
 ## Media Roots
 
@@ -162,7 +173,7 @@ ordinary deployment.
 
 Remote access remains a future Tailscale-only direction. This service
 foundation does not configure Tailscale Serve, authentication, firewall rules,
-SELinux policy, public ports, reverse proxies, or trusted proxy headers.
+Fedora SELinux policy, public ports, reverse proxies, or trusted proxy headers.
 
 ## Logging And Lifecycle
 
@@ -191,11 +202,12 @@ The unit does not grant a writable media-root path.
 
 ## Not Implemented Yet
 
-This service foundation does not include:
+This superseded service foundation does not include:
 
-- real Fedora host acceptance;
-- SELinux policy;
-- firewalld policy;
+- real host acceptance;
+- Ubuntu host acceptance;
+- AppArmor policy;
+- UFW policy;
 - Tailscale Serve;
 - application authentication or authorization;
 - backup and restore;

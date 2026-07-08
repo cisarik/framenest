@@ -34,7 +34,7 @@ The near-term convergence sequence is:
 8. persistent premium gallery;
 9. multi-model AI workspace;
 10. optional AI cover experiments;
-11. later Tauri and NUC work.
+11. later Tauri and bounded NUC deployment/aggregation work.
 
 This sequence preserves broader cross-platform goals while keeping the immediate
 critical path focused on a polished and functional macOS MVP.
@@ -99,11 +99,11 @@ Accepted so far:
 - Persistent display-title and canonical-tag core through [ADR-0027](docs/adr/0027-persistent-display-title-and-canonical-tags.md); implementation complete for API-level title/tag persistence.
 - Catalog read model and search semantics through [ADR-0028](docs/adr/0028-catalog-read-model-and-search-semantics.md); implementation complete for read-only imported-media listing, display-title search, canonical-tag AND filters, deterministic ordering, and bounded offset pagination.
 - Automatic built-in `Processed` workflow collection from durable tag saves through [ADR-0030](docs/adr/0030-automatic-processed-collection.md); accepted and implemented through migration `0007`, with one zero-or-one collection membership per medium, and no arbitrary collection CRUD or general collection manager.
-- Fedora systemd service foundation through [ADR-0031](docs/adr/0031-fedora-systemd-service-foundation.md); accepted and implemented as repository-local service source material, a non-secret environment template, a read-only database-readiness gate, and a safe operator workflow. Real host installation, activation, NUC acceptance, SELinux/firewalld policy, Tailscale Serve, authentication, and backup/restore remain unimplemented.
+- Fedora systemd service foundation through [ADR-0031](docs/adr/0031-fedora-systemd-service-foundation.md), superseded for the active deployment target by the Ubuntu NUC deployment foundation through [ADR-0032](docs/adr/0032-ubuntu-nuc-deployment-foundation.md); accepted and implemented as repository-local service source material, a non-secret environment template, a read-only database-readiness gate, and an Ubuntu operator runbook. Real host installation, activation, NUC acceptance, AppArmor/UFW policy, Tailscale Serve, authentication, and backup/restore remain unimplemented.
 
 The initial scaffold decision gate is complete. A Poetry package scaffold, centralized configuration boundary, FastAPI application factory, typed health endpoint, contract tests, Uvicorn runtime dependency, startup wiring, and a runnable loopback-only server command now exist.
 
-Broader architecture decisions still open include sidecar manifest format and versioning, metadata/tag/search schema, cover and thumbnail cache implementation details, desktop sidecar IPC, initial authentication boundary, media-tool distribution strategy, and Fedora host-acceptance details beyond the initial systemd service foundation.
+Broader architecture decisions still open include sidecar manifest format and versioning, metadata/tag/search schema, cover and thumbnail cache implementation details, desktop sidecar IPC, initial authentication boundary, media-tool distribution strategy, and Ubuntu NUC host-acceptance details beyond the initial systemd service foundation.
 
 Persistence strategy is accepted through [ADR-0010](docs/adr/0010-initial-persistence-foundation.md). The minimal SQLAlchemy/Alembic migration foundation is implemented. The current local catalog schema is implemented through revision `0007`, where revision `0007` adds the automatic built-in `Processed` collection columns for [ADR-0030](docs/adr/0030-automatic-processed-collection.md).
 
@@ -300,19 +300,19 @@ Exit evidence: tests or controlled verification showing backend separation and c
 
 Boundaries: embedded libVLC remains deferred.
 
-## Phase 11 — Intel NUC Fedora Deployment
+## Phase 11 — Intel NUC Ubuntu Deployment
 
-Status: planned after the MacBook MVP has a persistent local catalog, premium local gallery, and desktop shell direction ready for deployment packaging.
+Status: deployment-readiness documentation in progress; real host deployment not accepted.
 
-Goal: deploy and harden the server foundation on Fedora KDE Intel NUC.
+Goal: deploy and harden the server foundation on Ubuntu Server 24.04 on the Intel NUC6i5SYH personal production server.
 
-Key deliverables: Fedora KDE installation notes, updates, hardware/storage inspection, hardening, SELinux/firewalld policy, service user, systemd hardening, and backup/recovery documentation.
+Key deliverables: Ubuntu NUC deployment runbook, exact-release workflow, secure CPython 3.13 provisioning, hardware/storage inspection, hardening, AppArmor/UFW context, service user, systemd hardening, explicit migration and readiness, and backup/recovery documentation.
 
-Entry conditions: macOS local catalog, gallery, and desktop foundations are working and tested; server aggregation decisions are ready.
+Entry conditions: exact commit or release selected, backups and rollback planned, service user and release installation prepared, and real host authority granted in a later bounded task.
 
 Exit evidence: documented deployment checks and verified service behavior on the NUC.
 
-Boundaries: no destructive disk commands in roadmap tasks.
+Boundaries: no destructive disk commands in roadmap tasks; no public listener, router port forwarding, public SSH exposure, Tailscale setup, authentication implementation, provider-secret integration, or backup tooling without separate accepted tasks.
 
 ## Phase 12 — Tailscale-Only Remote Access
 

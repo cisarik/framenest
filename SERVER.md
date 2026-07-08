@@ -22,9 +22,10 @@ task. Git history remains the archive.
 
 ## Optional NUC Role
 
-The Intel NUC is a future optional aggregator and archive node. It is not
-required for local desktop operation and must not make desktop clients unusable
-thin clients.
+The Intel NUC is the current concrete personal production server preparation
+target for the optional aggregator and archive-node role. It is not required
+for local desktop operation and must not make desktop clients unusable thin
+clients.
 
 The NUC may later provide:
 
@@ -36,10 +37,11 @@ The NUC may later provide:
 - centralized provider access for AI workflows;
 - future backup participation.
 
-Fedora KDE remains the later optional server target. A repository-native
-systemd service foundation now exists, but real host installation, activation,
-NUC acceptance, Tailscale Serve, SELinux/firewalld policy, backup/restore, and
-authentication remain unimplemented.
+Ubuntu Server 24.04 on the Intel NUC6i5SYH supersedes Fedora as the active
+deployment target. A repository-native systemd service foundation and Ubuntu
+NUC deployment-readiness runbook now exist, but real host installation,
+activation, NUC acceptance, Tailscale Serve, AppArmor/UFW policy,
+backup/restore, and authentication remain unimplemented.
 
 ## Same Core, Different Deployment Capabilities
 
@@ -136,10 +138,13 @@ accepted decision. FrameNest must not require router port forwarding or public
 internet exposure. Tailscale networking is not sufficient authorization by
 itself; application-level authorization remains required.
 
-The current Fedora service foundation is recorded in
-[ADR-0031](docs/adr/0031-fedora-systemd-service-foundation.md) and documented
-in [docs/FEDORA_SERVICE.md](docs/FEDORA_SERVICE.md). Do not describe a real
-Fedora deployment as completed until a later host-acceptance task verifies it.
+The historical Fedora service foundation is recorded in
+[ADR-0031](docs/adr/0031-fedora-systemd-service-foundation.md). It is
+superseded for the active deployment target by
+[ADR-0032](docs/adr/0032-ubuntu-nuc-deployment-foundation.md) and the current
+[Ubuntu NUC deployment runbook](docs/UBUNTU_NUC_DEPLOYMENT.md). Do not describe
+a real NUC deployment as completed until a later host-acceptance task verifies
+it.
 
 ## Server-Side AI Provider Boundary
 
@@ -174,7 +179,7 @@ authorization.
 
 In development, provider credentials remain in the server process environment:
 `NVIDIA_API_KEY` for NVIDIA NIM and `AI_GATEWAY_API_KEY` for Vercel AI Gateway.
-Production provider-secret integration is not implemented by the Fedora service
+Production provider-secret integration is not implemented by the Ubuntu service
 foundation. Persistent secret storage, OS keychain integration, systemd
 credential files, browser provider Settings, service-secret adapters, and
 application-level remote administrator authorization remain future bounded work.
@@ -209,5 +214,6 @@ The current MacBook MVP does not include:
 - multi-device conflict resolution;
 - server-side media import.
 
-The next implementation priority is the persistent local media catalog, not NUC
-deployment.
+The local Gallery and Details phase is frozen for MVP absent a concrete defect.
+Further NUC work should stay bounded to deployment readiness, acceptance, or
+server aggregation tasks rather than reopening Gallery or Details UX.

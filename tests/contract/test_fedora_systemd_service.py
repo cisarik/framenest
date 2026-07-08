@@ -1,4 +1,4 @@
-"""Contract tests for repository-native Fedora systemd artifacts."""
+"""Contract tests for repository-native systemd deployment artifacts."""
 
 from __future__ import annotations
 
@@ -11,7 +11,11 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 SERVICE_PATH = REPOSITORY_ROOT / "deploy" / "systemd" / "framenest.service"
 ENV_TEMPLATE_PATH = REPOSITORY_ROOT / "deploy" / "systemd" / "framenest.env.example"
 FEDORA_DOC_PATH = REPOSITORY_ROOT / "docs" / "FEDORA_SERVICE.md"
-ADR_PATH = REPOSITORY_ROOT / "docs" / "adr" / "0031-fedora-systemd-service-foundation.md"
+UBUNTU_DOC_PATH = REPOSITORY_ROOT / "docs" / "UBUNTU_NUC_DEPLOYMENT.md"
+FEDORA_ADR_PATH = REPOSITORY_ROOT / "docs" / "adr" / "0031-fedora-systemd-service-foundation.md"
+UBUNTU_ADR_PATH = REPOSITORY_ROOT / "docs" / "adr" / "0032-ubuntu-nuc-deployment-foundation.md"
+ADR_INDEX_PATH = REPOSITORY_ROOT / "docs" / "adr" / "README.md"
+UBUNTU_SUPPORT_PATH = REPOSITORY_ROOT / "deploy" / "ubuntu" / "README.md"
 
 INSTALL_ROOT = "/opt/framenest/current"
 PRODUCTION_BIN = f"{INSTALL_ROOT}/.venv/bin/framenest-production"
@@ -192,11 +196,15 @@ def test_production_console_script_is_declared() -> None:
     )
 
 
-def test_fedora_operator_documentation_records_correct_boundaries() -> None:
+def test_fedora_operator_documentation_is_clearly_superseded() -> None:
     text = FEDORA_DOC_PATH.read_text(encoding="utf-8")
 
+    assert "superseded" in text.lower()
+    assert "not the current deployment workflow" in text
+    assert "docs/UBUNTU_NUC_DEPLOYMENT.md" in text
+    assert "ADR-0032" in text
     assert "not an installer" in text
-    assert "does not\ninstall, enable, start, stop, reload, or inspect a real service" in text
+    assert "install, enable, start, stop,\nreload, or inspect a real service" in text
     assert INSTALL_ROOT in text
     assert f"{PRODUCTION_BIN} serve" in text
     assert "/var/lib/framenest/catalog.sqlite3" in text
@@ -210,19 +218,93 @@ def test_fedora_operator_documentation_records_correct_boundaries() -> None:
     assert SUPERSEDED_INSTALL_BIN not in text
 
 
-def test_adr_records_correct_fedora_systemd_architecture_and_deferred_scope() -> None:
-    text = ADR_PATH.read_text(encoding="utf-8")
+def test_fedora_adr_remains_historical_and_ubuntu_adr_supersedes_it() -> None:
+    fedora_text = FEDORA_ADR_PATH.read_text(encoding="utf-8")
+    ubuntu_text = UBUNTU_ADR_PATH.read_text(encoding="utf-8")
+    index_text = ADR_INDEX_PATH.read_text(encoding="utf-8")
 
-    assert "Status\n\n`Accepted`" in text
-    assert INSTALL_ROOT in text
-    assert f"{PRODUCTION_BIN} check-database-ready" in text
-    assert f"{PRODUCTION_BIN} serve" in text
-    assert "read-only" in text
-    assert "env_file=None" in text
-    assert "/var/lib/framenest/ai/config.json" in text
-    assert REMOVED_SECRET_ENVIRONMENT not in text
-    assert SUPERSEDED_AI_CONFIG not in text
-    assert SUPERSEDED_INSTALL_BIN not in text
-    assert "systemd credentials" in text
-    assert "Tailscale Serve" in text
-    assert "automatic migrations during service startup" in text
+    assert "Status\n\n`Accepted`" in fedora_text
+    assert "Fedora systemd Service Foundation | Superseded by [ADR-0032]" in index_text
+    assert "0032 | Ubuntu NUC Deployment Foundation | Accepted | 2026-07-08" in index_text
+    assert "This ADR supersedes [ADR-0031]" in ubuntu_text
+    assert "Ubuntu Server 24.04" in ubuntu_text
+    assert "Intel NUC6i5SYH" in ubuntu_text
+    assert "personal production server" in ubuntu_text
+    assert INSTALL_ROOT in ubuntu_text
+    assert f"{PRODUCTION_BIN} check-database-ready" in ubuntu_text
+    assert f"{PRODUCTION_BIN} serve" in ubuntu_text
+    assert "read-only readiness gate" in ubuntu_text
+    assert "env_file=None" in fedora_text
+    assert "/var/lib/framenest/ai/config.json" in ubuntu_text
+    assert REMOVED_SECRET_ENVIRONMENT not in ubuntu_text
+    assert SUPERSEDED_AI_CONFIG not in ubuntu_text
+    assert SUPERSEDED_INSTALL_BIN not in ubuntu_text
+    assert "systemd credentials" in ubuntu_text
+    assert "Tailscale" in ubuntu_text
+    assert "never run migrations implicitly" in ubuntu_text
+
+
+def test_ubuntu_adr_records_secure_python_strategy_without_unsafe_installers() -> None:
+    text = UBUNTU_ADR_PATH.read_text(encoding="utf-8")
+
+    assert "CPython `3.13.14`" in text
+    assert "`uv` release version" in text
+    assert "`0.11.28`" in text
+    assert "sha256.sum" in text
+    assert "gh attestation verify" in text
+    assert "do not replace `/usr/bin/python3`" in text
+    assert "Poetry" in text
+    assert "/opt/framenest/current/.venv" in text
+    assert "future Ubuntu VPS" in text
+    assert "curl ... | sh" in text
+    assert "wget ... | sh" in text
+    assert "unreviewed PPA" in text
+
+
+def test_ubuntu_runbook_has_auditable_phase_and_safety_boundaries() -> None:
+    text = UBUNTU_DOC_PATH.read_text(encoding="utf-8")
+
+    for heading in [
+        "## 0. Preconditions And Authority",
+        "## 1. Check",
+        "## 2. Plan",
+        "## 3. Prepare Release",
+        "## 4. Apply One Bounded Change",
+        "## 5. Migrate",
+        "## 6. Readiness Verification",
+        "## 7. Controlled Activation",
+        "## 8. Health And Log Verification",
+        "## 9. Rollback",
+        "## 10. Evidence Capture",
+    ]:
+        assert heading in text
+
+    for marker in [
+        "Read-only checks",
+        "Planned mutations",
+        "Planned reversible mutations",
+        "Service-affecting mutation",
+        "Stop conditions",
+        "Evidence",
+        "Threat:",
+        "Benefit:",
+        "Limitation:",
+        "Rollback:",
+        "Verification:",
+    ]:
+        assert marker in text
+
+    assert "/srv/media" in text
+    assert "service-writable by default" in text
+    assert "Tailscale" in text
+    assert "Do not capture or share" in text
+
+
+def test_ubuntu_support_map_makes_required_phases_discoverable() -> None:
+    text = UBUNTU_SUPPORT_PATH.read_text(encoding="utf-8")
+
+    assert "docs/UBUNTU_NUC_DEPLOYMENT.md" in text
+    assert "ADR-0032" in text
+    for phase in ["check", "plan", "apply", "verify", "rollback"]:
+        assert f"| {phase} |" in text
+    assert "No executable helper is committed" in text
