@@ -284,9 +284,11 @@ remains unresolved; no provider key belongs in the committed environment
 template. systemd credentials or another approved service-secret adapter remain
 future bounded work.
 
-Backup and restore remain unresolved. A database backup before migration or
-service switch is mandatory operator workflow, but backup tooling is outside
-this task.
+Catalog backup and restore-to-new-destination tooling is accepted separately in
+[ADR-0033](0033-catalog-backup-and-recovery-foundation.md). A verified catalog
+backup before migration or service switch remains mandatory operator workflow;
+media second-copy strategy, retention automation, production database
+replacement, and real NUC restore acceptance remain outside this ADR.
 
 ## Rejected Scope
 
@@ -315,8 +317,9 @@ tooling, schema changes, application source changes, or a real deployment.
 - Managed Python distributions come from Astral `python-build-standalone`,
   because Python does not publish official Linux distributable binaries.
 - Real host acceptance is still absent.
-- Backups, provider-secret integration, Tailscale, authentication, AppArmor
-  policy, and UFW policy remain unresolved or future work.
+- Media backups, retention automation, production database replacement,
+  provider-secret integration, Tailscale, authentication, AppArmor policy, and
+  UFW policy remain unresolved or future work.
 - The NUC remains vulnerable to home power, connectivity, consumer-hardware,
   physical-theft, disk-failure, and no-system-disk-encryption risks.
 
@@ -350,8 +353,9 @@ Revisit this decision when:
 - `uv` managed Python or its artifact verification model becomes unsuitable;
 - Poetry deployment behavior changes materially;
 - the service moves away from `/opt/framenest/current` or systemd;
-- AppArmor, UFW, Tailscale, authentication, provider-secret integration, backup,
-  or VPS deployment is implemented;
+- AppArmor, UFW, Tailscale, authentication, provider-secret integration,
+  media backup, production database replacement, retention automation, or VPS
+  deployment is implemented;
 - the real NUC deployment produces evidence that contradicts this runbook.
 
 ## Official Sources Consulted
@@ -398,6 +402,7 @@ Revisit this decision when:
 - [ADR-0010](0010-initial-persistence-foundation.md)
 - [ADR-0022](0022-selective-media-placement-and-server-aggregation.md)
 - [ADR-0031](0031-fedora-systemd-service-foundation.md)
+- [ADR-0033](0033-catalog-backup-and-recovery-foundation.md)
 - [Ubuntu NUC deployment runbook](../UBUNTU_NUC_DEPLOYMENT.md)
 - [Superseded Fedora service guide](../FEDORA_SERVICE.md)
 - [systemd service artifact](../../deploy/systemd/framenest.service)

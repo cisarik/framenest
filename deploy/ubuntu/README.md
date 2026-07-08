@@ -6,7 +6,10 @@ untested host-mutating automation.
 The current authoritative runbook is
 [docs/UBUNTU_NUC_DEPLOYMENT.md](../../docs/UBUNTU_NUC_DEPLOYMENT.md). The
 architecture decision is
-[ADR-0032](../../docs/adr/0032-ubuntu-nuc-deployment-foundation.md).
+[ADR-0032](../../docs/adr/0032-ubuntu-nuc-deployment-foundation.md). The
+catalog backup and recovery prerequisite is documented in
+[docs/BACKUP_AND_RECOVERY.md](../../docs/BACKUP_AND_RECOVERY.md) and
+[ADR-0033](../../docs/adr/0033-catalog-backup-and-recovery-foundation.md).
 
 ## Phase Map
 
@@ -17,6 +20,7 @@ architecture decision is
 | apply | Runbook sections `3`, `4`, `5`, and `7` | planned, reversible, or service-affecting |
 | verify | Runbook sections `6`, `8`, and `10` | read-only after mutation |
 | rollback | Runbook section `9` | planned recovery mutation |
+| catalog backup | Backup runbook sections `create`, `verify`, and `restore drill` | new bundle or disposable restored catalog |
 
 ## Boundaries
 

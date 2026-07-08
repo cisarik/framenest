@@ -65,6 +65,15 @@ values. The Ubuntu systemd service foundation does not use this developer file a
 not implement production provider-secret integration. That integration remains
 deferred to a later systemd credentials or service-secret adapter decision.
 
+The catalog backup foundation uses `framenest-backup` for the SQLite catalog
+only. Backup manifests and command output must not contain source paths,
+destination paths, usernames, hostnames, IP addresses, environment values, SQL,
+media paths, media filenames, raw exception text, credentials, tokens, cookies,
+authorization headers, private keys, or secret prefixes. The initial bundle
+excludes Gallery preview cache, original media, non-secret AI configuration,
+and secrets. Restore writes only to a new absent destination and does not
+replace production, run migrations, start services, or prove readiness.
+
 Avoid exposing:
 
 - Home-directory paths when they are not necessary.

@@ -14,6 +14,7 @@ framenest-library = "framenest.adapters.cli.library:main"
 framenest-dev = "framenest.adapters.cli.development:main"
 framenest-ai = "framenest.adapters.cli.ai:main"
 framenest-production = "framenest.infrastructure.runtime.production:main"
+framenest-backup = "framenest.adapters.cli.backup:main"
 
 [tool.poetry]
 package-mode = true

@@ -41,7 +41,10 @@ Ubuntu Server 24.04 on the Intel NUC6i5SYH supersedes Fedora as the active
 deployment target. A repository-native systemd service foundation and Ubuntu
 NUC deployment-readiness runbook now exist, but real host installation,
 activation, NUC acceptance, Tailscale Serve, AppArmor/UFW policy,
-backup/restore, and authentication remain unimplemented.
+production database replacement, media backup, secret recovery, and
+authentication remain unimplemented. The minimum catalog backup and
+restore-to-new-destination foundation is documented in
+[docs/BACKUP_AND_RECOVERY.md](docs/BACKUP_AND_RECOVERY.md).
 
 ## Same Core, Different Deployment Capabilities
 

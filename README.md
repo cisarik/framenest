@@ -62,9 +62,13 @@ poetry run framenest-server
 poetry run framenest-db status
 poetry run framenest-db migrate
 poetry run framenest-catalog --help
+poetry run framenest-backup --help
 ./framenest ai status
 ./framenest ai configure
 ./framenest ai test
+./framenest backup create --help
+./framenest backup verify --help
+./framenest backup restore --help
 ```
 
 The raw `poetry run framenest-server` process keeps its existing behavior: it
@@ -103,7 +107,7 @@ FrameNest-owned runtime logs are compact JSON lines written to `stderr` by the d
 
 Override bind address with `FRAMENEST_HOST` and `FRAMENEST_PORT` for the raw server command. Default binding is loopback-only (`127.0.0.1`). Setting `FRAMENEST_HOST=0.0.0.0` is an explicit exposure override and is not the recommended default. The browser-development launcher enforces loopback and accepts only `FRAMENEST_PORT` for port selection.
 
-Reload, real host deployment, Tailscale behavior, authentication, AppArmor/UFW policy, and backup/restore are not provided yet. A repository-native generic systemd service bundle exists under `deploy/systemd/`, the superseded Fedora guide remains in [docs/FEDORA_SERVICE.md](docs/FEDORA_SERVICE.md), and the current Ubuntu NUC deployment-readiness workflow is documented in [docs/UBUNTU_NUC_DEPLOYMENT.md](docs/UBUNTU_NUC_DEPLOYMENT.md).
+Reload, real host deployment, Tailscale behavior, authentication, and AppArmor/UFW policy are not provided yet. A minimum catalog backup and restore-to-new-destination foundation exists through `framenest-backup` and is documented in [docs/BACKUP_AND_RECOVERY.md](docs/BACKUP_AND_RECOVERY.md); it does not copy original media, include secrets, automate retention, replace production databases, or prove a real NUC restore. A repository-native generic systemd service bundle exists under `deploy/systemd/`, the superseded Fedora guide remains in [docs/FEDORA_SERVICE.md](docs/FEDORA_SERVICE.md), and the current Ubuntu NUC deployment-readiness workflow is documented in [docs/UBUNTU_NUC_DEPLOYMENT.md](docs/UBUNTU_NUC_DEPLOYMENT.md).
 
 ## Local Database Foundation
 

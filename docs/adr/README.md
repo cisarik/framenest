@@ -57,3 +57,4 @@ An accepted ADR may only be changed by a later ADR that supersedes it. Editing a
 | 0030 | Automatic Processed Collection from Durable Tag Saves | Accepted | 2026-06-26 | [0030-automatic-processed-collection.md](0030-automatic-processed-collection.md) |
 | 0031 | Fedora systemd Service Foundation | Superseded by [ADR-0032](0032-ubuntu-nuc-deployment-foundation.md) | 2026-07-06 | [0031-fedora-systemd-service-foundation.md](0031-fedora-systemd-service-foundation.md) |
 | 0032 | Ubuntu NUC Deployment Foundation | Accepted | 2026-07-08 | [0032-ubuntu-nuc-deployment-foundation.md](0032-ubuntu-nuc-deployment-foundation.md) |
+| 0033 | Catalog Backup and Recovery Foundation | Accepted | 2026-07-08 | [0033-catalog-backup-and-recovery-foundation.md](0033-catalog-backup-and-recovery-foundation.md) |

@@ -99,7 +99,7 @@ Accepted so far:
 - Persistent display-title and canonical-tag core through [ADR-0027](docs/adr/0027-persistent-display-title-and-canonical-tags.md); implementation complete for API-level title/tag persistence.
 - Catalog read model and search semantics through [ADR-0028](docs/adr/0028-catalog-read-model-and-search-semantics.md); implementation complete for read-only imported-media listing, display-title search, canonical-tag AND filters, deterministic ordering, and bounded offset pagination.
 - Automatic built-in `Processed` workflow collection from durable tag saves through [ADR-0030](docs/adr/0030-automatic-processed-collection.md); accepted and implemented through migration `0007`, with one zero-or-one collection membership per medium, and no arbitrary collection CRUD or general collection manager.
-- Fedora systemd service foundation through [ADR-0031](docs/adr/0031-fedora-systemd-service-foundation.md), superseded for the active deployment target by the Ubuntu NUC deployment foundation through [ADR-0032](docs/adr/0032-ubuntu-nuc-deployment-foundation.md); accepted and implemented as repository-local service source material, a non-secret environment template, a read-only database-readiness gate, and an Ubuntu operator runbook. Real host installation, activation, NUC acceptance, AppArmor/UFW policy, Tailscale Serve, authentication, and backup/restore remain unimplemented.
+- Fedora systemd service foundation through [ADR-0031](docs/adr/0031-fedora-systemd-service-foundation.md), superseded for the active deployment target by the Ubuntu NUC deployment foundation through [ADR-0032](docs/adr/0032-ubuntu-nuc-deployment-foundation.md); accepted and implemented as repository-local service source material, a non-secret environment template, a read-only database-readiness gate, and an Ubuntu operator runbook. The catalog backup and restore-to-new-destination foundation is accepted through [ADR-0033](docs/adr/0033-catalog-backup-and-recovery-foundation.md). Real host installation, activation, NUC acceptance, AppArmor/UFW policy, Tailscale Serve, authentication, production database replacement, media backup, and secret recovery remain unimplemented.
 
 The initial scaffold decision gate is complete. A Poetry package scaffold, centralized configuration boundary, FastAPI application factory, typed health endpoint, contract tests, Uvicorn runtime dependency, startup wiring, and a runnable loopback-only server command now exist.
 
@@ -306,13 +306,13 @@ Status: deployment-readiness documentation in progress; real host deployment not
 
 Goal: deploy and harden the server foundation on Ubuntu Server 24.04 on the Intel NUC6i5SYH personal production server.
 
-Key deliverables: Ubuntu NUC deployment runbook, exact-release workflow, secure CPython 3.13 provisioning, hardware/storage inspection, hardening, AppArmor/UFW context, service user, systemd hardening, explicit migration and readiness, and backup/recovery documentation.
+Key deliverables: Ubuntu NUC deployment runbook, exact-release workflow, secure CPython 3.13 provisioning, hardware/storage inspection, hardening, AppArmor/UFW context, service user, systemd hardening, explicit migration and readiness, and catalog backup/recovery documentation.
 
 Entry conditions: exact commit or release selected, backups and rollback planned, service user and release installation prepared, and real host authority granted in a later bounded task.
 
 Exit evidence: documented deployment checks and verified service behavior on the NUC.
 
-Boundaries: no destructive disk commands in roadmap tasks; no public listener, router port forwarding, public SSH exposure, Tailscale setup, authentication implementation, provider-secret integration, or backup tooling without separate accepted tasks.
+Boundaries: no destructive disk commands in roadmap tasks; no public listener, router port forwarding, public SSH exposure, Tailscale setup, authentication implementation, provider-secret integration, production database replacement, media backup, or retention automation without separate accepted tasks.
 
 ## Phase 12 — Tailscale-Only Remote Access
 
@@ -386,17 +386,18 @@ Boundaries: no generated cover candidate replaces an approved cover without expl
 
 ## Phase 17 — Backup and Encrypted Cloud Restore
 
-Status: long-term scope only.
+Status: long-term scope only; minimum catalog backup and restore-to-new-destination
+foundation exists through [ADR-0033](docs/adr/0033-catalog-backup-and-recovery-foundation.md).
 
 Goal: provide future backup and restore without losing local-first ownership.
 
-Key deliverables: metadata-first restore, integrity checks, multiple providers, encryption, recovery workflows, and documentation.
+Key deliverables: metadata-first restore beyond the SQLite catalog bundle, media second-copy workflows, production database replacement, retention automation, multiple providers, encryption, recovery workflows, and documentation.
 
 Entry conditions: stable metadata, identity, server, and security foundations.
 
 Exit evidence: restore tests proving metadata and integrity behavior.
 
-Boundaries: not part of early implementation and not a cloud-only direction.
+Boundaries: not part of early implementation beyond the current catalog-only foundation and not a cloud-only direction.
 
 ## Deferred Early Non-Goals
 

@@ -43,6 +43,8 @@ deploy/systemd/framenest.service
 deploy/systemd/framenest.env.example
 deploy/ubuntu/README.md
 docs/adr/0032-ubuntu-nuc-deployment-foundation.md
+docs/adr/0033-catalog-backup-and-recovery-foundation.md
+docs/BACKUP_AND_RECOVERY.md
 ```
 
 The service artifacts are source material. Committing them does not install,
@@ -80,8 +82,9 @@ Read-only checks:
 
 - Verify the operator has a specific authorized deployment task.
 - Verify the exact repository commit or release SHA to deploy.
-- Verify backups have been designed and tested for the catalog database and
-  any operator-managed state.
+- Verify the catalog backup and restore-to-new-destination foundation in
+  [BACKUP_AND_RECOVERY.md](BACKUP_AND_RECOVERY.md) has been exercised for the
+  catalog database before important production state is created.
 - Verify the service user, release root, environment path, state path, cache
   path, runtime path, and media root are still the accepted paths.
 - Verify the NUC is not the only important copy of any media or catalog data.
@@ -101,7 +104,7 @@ Evidence:
 - Exact commit or release identifier.
 - Confirmation that repository `main`, tag, or release evidence is public and
   verifiable.
-- Backup plan reference and restore proof reference.
+- Catalog backup bundle verification evidence and restore-drill evidence.
 
 ## 1. Check
 
@@ -271,14 +274,14 @@ Security control: explicit migration.
 
 Stop conditions:
 
-- No fresh backup exists.
+- No fresh verified catalog backup exists.
 - The database path is not `/var/lib/framenest/catalog.sqlite3` or another
   explicitly accepted absolute production path.
 - Migration reports failure or an unexpected revision.
 
 Evidence:
 
-- Backup evidence.
+- Catalog backup verification evidence.
 - Migration command result.
 - Database readiness result.
 
@@ -384,8 +387,8 @@ Rollback sequence:
 
 1. Stop only the FrameNest service if the new release is running.
 2. Restore the previous `/opt/framenest/current` reference.
-3. Restore the previous database backup when migration compatibility requires
-   it.
+3. Restore a verified database backup to a new path and perform the separately
+   authorized controlled replacement when migration compatibility requires it.
 4. Run `check-database-ready` from the restored release.
 5. Start the service.
 6. Verify health and logs.
