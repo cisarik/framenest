@@ -14,26 +14,27 @@ deployment, SSH, sudo, package-manager, firewall, disk, mount, authentication,
 Tailscale, or filesystem-mutation authority.
 
 Every concrete Worker task requires a new explicit authoritative ORCHESTRATOR
-prompt.
+prompt. Every material host mutation must be presented to and executed by the
+COOPERATOR as a bounded, reversible, evidence-driven step unless a later prompt
+explicitly grants a Worker a narrow host boundary.
 
-Host-administration guidance given directly to the COOPERATOR must also remain
-bounded, reversible, evidence-driven, and stepwise. Availability of an SSH
-connection, local console, sudo capability, repository checkout, credential,
-tool, terminal, or previous command is capability context, not authority.
+Availability of an SSH connection, local console, sudo capability, repository
+checkout, credential, tool, terminal, or previous command is capability
+context, not authority.
 
 Worker reports are evidence-bearing testimony, not repository truth. Public
 repository state must be independently verified before authorizing repository
 work.
 
-Do not revive old Worker sessions, checkpoints, terminals, compacted execution
-state, browser sessions, temporary scripts, disposable databases, old prompts,
-or pending commands as authority.
+Do not revive old Worker sessions, terminals, compacted execution state,
+browser sessions, temporary scripts, old prompts, or pending commands as
+authority.
 
 The Orchestrator session that created this file closes with the enclosing
 Orchestrator handoff commit.
 
-The COOPERATOR, Michal, will place this finalized handoff in the repository and
-create the enclosing handoff commit.
+The COOPERATOR, Michal, will replace repository `NEXT_ORCHESTRATOR.md` with this
+file and create the enclosing handoff commit.
 
 Expected enclosing Orchestrator handoff subject:
 
@@ -46,24 +47,24 @@ fresh Orchestrator instance must discover and verify it independently.
 
 ## 2. Enclosing Handoff Chain To Verify
 
-Immediately before Michal's enclosing `handout` commit, the expected repository
-HEAD is the Worker closeout commit:
+Immediately before Michal's new enclosing `handout` commit, the expected
+repository HEAD is the previous Orchestrator handoff commit:
 
 ```text
 SHA:
-ceaf76c4e6f30450f0b7a9032d82377c4ecf4bfa
+867bd7a5dd088567d4cdfac2a6a7ad5d2154a61b
 
 subject:
-docs: prepare Fedora host readiness handoff
+handout
 
 parent:
-4a6dee4e7bb6af61d28855823a49fe40177e71ac
+ceaf76c4e6f30450f0b7a9032d82377c4ecf4bfa
 
 changed path:
-NEXT_WORKER.md only
+NEXT_ORCHESTRATOR.md only
 ```
 
-The latest product implementation boundary before this Orchestrator handoff is:
+The latest product implementation boundary remains:
 
 ```text
 SHA:
@@ -76,10 +77,10 @@ parent:
 614ea684958dcd24a80c6762bcb5b423f191797c
 ```
 
-The enclosing Orchestrator handoff commit is expected to:
+The new enclosing Orchestrator handoff commit is expected to:
 
 - have exact subject `handout`;
-- have `ceaf76c4e6f30450f0b7a9032d82377c4ecf4bfa` as its parent;
+- have `867bd7a5dd088567d4cdfac2a6a7ad5d2154a61b` as its parent;
 - change only `NEXT_ORCHESTRATOR.md`;
 - contain this exact file as its committed content.
 
@@ -88,25 +89,48 @@ A fresh Orchestrator must independently verify:
 1. repository root and exact remote;
 2. branch `main`;
 3. local `HEAD`, tracking `origin/main`, and public `refs/heads/main`;
-4. the enclosing handout SHA;
+4. the new enclosing handout SHA;
 5. its exact subject and parent;
 6. its exact changed-path count and path;
-7. raw public `NEXT_ORCHESTRATOR.md`;
-8. Worker closeout `ceaf76c4e6f30450f0b7a9032d82377c4ecf4bfa`;
-9. Worker closeout subject, parent, and sole changed path;
-10. raw public `NEXT_WORKER.md`;
-11. latest implementation boundary
-    `4a6dee4e7bb6af61d28855823a49fe40177e71ac`;
-12. clean tracked worktree and index.
+7. raw public `NEXT_ORCHESTRATOR.md` bound to the exact new SHA;
+8. previous handout `867bd7a5...` and its exact subject, parent, and sole path;
+9. Worker closeout `ceaf76c4...` and raw public `NEXT_WORKER.md`;
+10. latest implementation boundary `4a6dee4...`;
+11. clean tracked worktree and index.
 
-Use direct Git evidence such as `git ls-remote` for public branch truth. Web
-branch pages and raw-content caches have previously lagged behind exact public
-commit pages. Do not treat a cached branch page as stronger evidence than
-direct Git or exact commit-object verification.
+Do not claim the new enclosing Orchestrator handoff SHA from this file.
 
-Do not claim the enclosing Orchestrator handoff SHA from this file.
+## 3. GitHub Cache And Public Verification Discipline
 
-## 3. Human And Communication Context
+GitHub branch pages, history pages, and branch-bound raw content have previously
+lagged behind the real public ref.
+
+Use this evidence order:
+
+1. direct Git protocol evidence, preferably `git ls-remote`;
+2. a clean temporary clone or fetch of the exact public ref;
+3. exact commit-object verification of SHA, subject, parent, and changed paths;
+4. raw content bound to the exact commit SHA;
+5. byte-for-byte or SHA-256 comparison with the expected handoff file;
+6. branch pages and branch-bound raw content only as supplementary evidence.
+
+Do not treat a cached GitHub page as stronger evidence than direct Git or an
+exact commit object.
+
+If the execution sandbox cannot resolve GitHub or run the Git protocol:
+
+- state that limitation explicitly;
+- use the exact commit page and raw-by-SHA content as fallback public evidence;
+- do not claim local worktree cleanliness, `origin/main` equality, or successful
+  `git ls-remote` without evidence.
+
+At the end of the previous session, the exact public commit page for
+`867bd7a5...` and raw content bound to that SHA were accessible, and the
+branch-bound raw handoff matched. Direct Git from the sandbox failed because
+GitHub DNS resolution was unavailable. A fresh Orchestrator must reverify the
+new enclosing commit independently.
+
+## 4. Human And Communication Context
 
 The COOPERATOR is Michal.
 
@@ -134,6 +158,7 @@ Distinguish explicitly between:
 - independently verified repository fact;
 - Worker-observed evidence;
 - COOPERATOR-observed rendered or physical evidence;
+- command-observed host evidence supplied by the COOPERATOR;
 - inference;
 - recommendation;
 - accepted product decision;
@@ -151,63 +176,56 @@ Michal retains final authority over:
 - Worker and Orchestrator rotation;
 - final product direction.
 
-Do not ask Michal to perform routine repository tests, migrations, builds,
-commits, pushes, or disposable-environment maintenance when a properly
-authorized Worker can perform them.
+Host hardening is educational as well as operational. Explain the threat,
+benefit, limitation, rollback, and verification for each material control.
 
-Host installation and hardening are different: Michal is physically operating
-the NUC and wants to learn professional security practice. Guide him one safe,
-well-explained step at a time and wait for evidence after each material step.
-
-## 4. Shell And Command UX
+## 5. Shell And Command UX
 
 Michal's MacBook terminal uses **Fish shell**.
 
-The fresh Orchestrator must not forget this.
+The Ubuntu NUC login shell is verified as **Bash**.
 
-Commands intended for the MacBook must be Fish-compatible and labelled
-clearly, for example:
-
-```text
-[MacBook / fish]
-```
-
-Commands intended for the Ubuntu NUC must be labelled separately, for example:
+Commands intended for the MacBook must be Fish-compatible and begin with:
 
 ```text
-[NUC / remote shell]
+# [MacBook / fish]
 ```
 
-The Ubuntu account currently appears to use the normal Ubuntu shell, but this
-must be verified before relying on shell-specific syntax.
+Commands intended for an already-open NUC SSH session must be Bash-compatible
+and begin with:
 
-Do not mix local Mac commands and remote NUC commands in one unlabeled block.
+```text
+# [NUC / bash]
+```
 
-Do not give a long block requiring manual typing at the physical console when
-SSH copy-and-paste is not yet safely established.
+Every Fish or Bash command block given to Michal must end with this exact
+standalone delimiter:
 
-Prefer:
+```text
+#------------------------------------------------------
+```
 
-- one small command or tightly related block at a time;
-- no ambiguous multiline continuations;
-- no hidden stdin redirection during password bootstrap;
-- no complex command substitution before the connection state is understood;
-- explicit expected output;
-- an explanation of why the command is safe;
-- a stop condition when output differs.
+The delimiter lets Michal see where commands end and copied output begins.
 
-Never expose or request:
+Do not mix MacBook and NUC commands in one unlabeled block.
 
-- passwords;
-- private-key contents;
-- credential values;
-- secret-file contents;
-- full environment dumps.
+After the SSH bootstrap was proven, the preferred mode for a sequence of host
+steps became:
 
-Public-key fingerprints may be compared privately with Michal but should not be
-committed to the repository.
+1. connect once from the MacBook with `ssh framenest-nuc`;
+2. run labelled Bash blocks directly in the NUC session;
+3. use one-shot `ssh ... 'command'` only for intentionally isolated connection
+   proofs.
 
-## 5. Current Repository Truth
+Prefer one small mutation or tightly related block at a time. Wait for evidence
+after each material step. Avoid overly long paste-sensitive heredocs when a
+smaller command is sufficient.
+
+Never expose or request passwords, private-key contents, credential values,
+secret-file contents, authorization headers, cookies, or full environment
+dumps.
+
+## 6. Current Repository Truth
 
 ```text
 project:
@@ -222,8 +240,11 @@ normal local path:
 branch:
 main
 
-expected pre-handout Worker closeout:
-ceaf76c4e6f30450f0b7a9032d82377c4ecf4bfa
+expected pre-handout HEAD:
+867bd7a5dd088567d4cdfac2a6a7ad5d2154a61b
+
+expected pre-handout subject:
+handout
 
 latest product implementation boundary:
 4a6dee4e7bb6af61d28855823a49fe40177e71ac
@@ -243,60 +264,28 @@ ADR-0031
 cover-semantics authority:
 ADR-0024
 
-expected tracked worktree and index after handout:
-clean
-
 active Worker:
 none
 ```
 
-`NEXT_WORKER.md` is a context handoff only. Its recommendation for a Fedora
-host readiness audit was correct when written but is now superseded as product
-direction by Michal's later decision to use Ubuntu. It grants no task authority.
+No repository product implementation occurred during the closing Orchestrator
+session. The work was direct, stepwise Ubuntu host administration performed by
+Michal.
 
-The current repository contains a corrected repository-native systemd
-foundation originally framed around Fedora. Much of the service implementation
-is distro-neutral, but the target operating-system decision has changed.
-
-Do not rewrite history to pretend Fedora was never selected. A future bounded
-repository task should record the Ubuntu decision as a new superseding ADR and
-adapt current documentation truthfully.
-
-## 6. Recent Repository Sequence
-
-Important recent public boundaries include:
-
-```text
-c02c4e9c712aa0ae6b6a9d58850bfcc04d9f72f2
-fix: position analyze action correctly
-
-0d8de5b4b310a8b68455f11f5759b1a250451b93
-docs: prepare Fedora deployment worker handoff
-
-614ea684958dcd24a80c6762bcb5b423f191797c
-feat: add Fedora systemd service foundation
-
-4a6dee4e7bb6af61d28855823a49fe40177e71ac
-fix: align Fedora service boundaries
-
-ceaf76c4e6f30450f0b7a9032d82377c4ecf4bfa
-docs: prepare Fedora host readiness handoff
-```
-
-The last commit above is a Worker lifecycle/documentation boundary, not a new
-product implementation boundary.
-
-No Worker is active after `ceaf76c4...`.
+`NEXT_WORKER.md` is context only and grants no task authority. Its Fedora host
+readiness recommendation is obsolete as current product direction, although it
+must remain historical evidence until a new bounded repository task supersedes
+it truthfully.
 
 ## 7. Current FrameNest Product Horizon
 
-FrameNest currently has, at repository level:
+The repository currently includes:
 
 - a loopback-first FastAPI backend;
 - a packaged same-origin vanilla HTML, CSS, and JavaScript frontend;
 - SQLite through SQLAlchemy Core;
 - Alembic migrations through `0007`;
-- a root `./framenest` local development and operator launcher;
+- the root `./framenest` local developer/operator launcher;
 - explicit database status and migration commands;
 - server-library registration;
 - read-only scanning and idempotent import/refresh;
@@ -304,72 +293,47 @@ FrameNest currently has, at repository level:
 - editable title, description, and ordered canonical tags;
 - catalog search, repeated-tag AND filtering, Processed semantics, and bounded
   pagination;
-- server-owned persistent Gallery preview cache;
+- a server-owned Gallery preview cache;
 - original GIF and MP4 delivery;
 - MP4 range delivery and seeking;
-- direct inline Gallery playback;
-- original-media Details playback;
-- identity-only attachment-download backend;
-- card-level Open-original behavior;
+- direct Gallery playback and original-media Details playback;
 - server-side AI execution;
 - NVIDIA NIM and Vercel AI Gateway adapters;
-- operator AI CLI;
-- provider-neutral non-secret AI configuration;
+- operator AI CLI and provider-neutral non-secret selection;
 - sanitized browser AI status;
 - explicit unsaved AI suggestion review followed by explicit Save;
 - a repository-native systemd service foundation with a read-only production
   database readiness gate.
 
-Do not claim that the complete remote server/client MVP, Ubuntu deployment,
-authentication, upload/synchronization, trusted client-local availability,
-admin capability model, desktop shell, Tailscale access, or full production
-hardening is finished.
+Do not claim that Ubuntu deployment, authentication, Tailscale access,
+upload/synchronization, per-user state, administrator capabilities, desktop
+shell, production secret integration, backup, or the complete remote-client MVP
+is finished.
 
 ## 8. Frozen Gallery And Details UX
 
-Current Gallery-card UX is accepted and frozen for MVP absent a concrete
-usability, accessibility, misleading-state, broken-interaction, privacy, or
-security defect.
+The accepted Gallery and Details visual phase is frozen for MVP unless a
+concrete defect exists.
 
-Accepted card behavior:
+Accepted Gallery-card behavior includes:
 
 - media surface plus title;
-- no tag chips under the title;
-- no `+N`;
-- no empty metadata row;
-- no visible Processed status or timestamp;
-- no permanent play glyph;
-- unused media surface triggers direct inline playback;
+- no tag chips, `+N`, empty metadata row, Processed status, or timestamp;
+- no permanent decorative play glyph;
+- unused media surface triggers inline playback;
 - title opens Details;
-- compact Edit control at bottom-left;
-- compact Open-original control at bottom-right;
-- compact Analyze control at top-right when applicable;
-- idle Analyze uses `🧠`;
-- busy Analyze remains fixed-size and uses the accepted animation;
-- overlay activation does not accidentally trigger inline playback.
+- compact Edit at bottom-left;
+- compact Open-original at bottom-right;
+- compact Analyze at top-right when applicable;
+- accepted idle and busy Analyze states;
+- overlay controls do not trigger playback accidentally.
 
-COOPERATOR-observed evidence includes:
+Accepted Details behavior includes original playback, clickable canonical tags,
+compact description, Edit, and `Analyze by AI` in the metadata editor.
 
-- the final Analyze position was confirmed correct;
-- Open original works and preserves the Gallery tab;
-- compact overlay controls are accepted;
-- the visual phase is closed for MVP.
+Do not reopen broad Gallery or Details polishing during Ubuntu deployment work.
 
-Current Details behavior includes:
-
-- original media playback;
-- clickable green canonical-tag buttons;
-- tag activation closes Details and activates the Gallery filter;
-- no prominent generic media-kind label;
-- description appears once in the compact green panel;
-- no prominent Processed panel;
-- Edit remains available;
-- the metadata editor retains `Analyze by AI`.
-
-Do not reopen broad Gallery or Details polishing during the Ubuntu hardening or
-deployment work.
-
-## 9. Corrected Repository Systemd Foundation
+## 9. Repository Systemd Foundation
 
 The repository currently records this service contract:
 
@@ -402,371 +366,507 @@ runtime root:
 /run/framenest
 ```
 
-Production commands:
+Production commands are:
 
 ```text
 framenest-production check-database-ready
 framenest-production serve
 ```
 
-Both production operations explicitly disable repository `.env` loading.
+The service unit uses explicit readiness before start, loopback-first behavior,
+journald output, restart-on-failure, systemd-managed state/cache/runtime
+directories, and a hardened service boundary.
 
-Systemd contract includes:
+No real Ubuntu acceptance of this repository unit has occurred yet. The host
+currently has a system group named `framenest`, but the service user and
+FrameNest release have not been installed.
 
-```text
-WorkingDirectory=/opt/framenest/current
-EnvironmentFile=/etc/framenest/framenest.env
-ExecStartPre=/opt/framenest/current/.venv/bin/framenest-production check-database-ready
-ExecStart=/opt/framenest/current/.venv/bin/framenest-production serve
-KillSignal=SIGTERM
-TimeoutStopSec=30s
-Restart=on-failure
-RestartSec=5s
-StandardOutput=journal
-StandardError=journal
-StateDirectory=framenest
-CacheDirectory=framenest
-RuntimeDirectory=framenest
-```
+## 10. Operating-System And Hosting Direction
 
-Repository hardening includes a strict system boundary, private temporary
-storage, no-new-privileges, kernel/control-group protections, SUID/SGID
-restrictions, personality locking, and empty capability sets.
+Ubuntu supersedes Fedora as the current deployment target. Preserve the Fedora
+ADR and history rather than rewriting them.
 
-Production provider-secret integration remains unimplemented.
-
-No real Fedora or Ubuntu host acceptance of this unit has occurred.
-
-## 10. Operating-System Pivot
-
-Michal decided to use Ubuntu rather than install Fedora.
-
-Reasons:
-
-- the real test host is now an Ubuntu NUC;
-- the future production VPS is expected to run Ubuntu;
-- learning Ubuntu security hardening is directly transferable to that future
-  production environment;
-- the existing systemd service core can largely remain distro-neutral.
-
-The installed test OS is:
+Verified host OS:
 
 ```text
 Ubuntu Server 24.04.4 LTS
-architecture: amd64
+kernel 6.8.0-134-generic
+x86_64
 ```
 
-This is COOPERATOR-observed physical state and still requires command evidence
-from the host.
+The current machine is an Intel NUC6i5SYH. It began as a test and hardening
+laboratory.
 
-Future repository adaptation should:
+Michal is now seriously considering using the NUC as a long-running personal
+production FrameNest server because it has low power use and a 2 TB media SSD.
+A future Ubuntu VPS remains an optional portability target rather than an
+immediate requirement.
 
-- preserve the useful distro-neutral systemd implementation;
-- add a new ADR superseding Fedora as the deployment target;
-- preserve ADR-0031 as history rather than silently rewriting the decision;
-- add or rename operator documentation for Ubuntu;
-- replace Fedora-specific package, SELinux, and firewalld assumptions with
-  Ubuntu-specific apt, AppArmor, and UFW/nftables guidance;
-- retain loopback-first service behavior;
-- retain explicit migrations and the read-only startup gate;
-- retain server-only secrets;
-- remain compatible with a future Ubuntu VPS.
+This NUC-as-personal-server direction is strong brainstorming and should be
+recorded by a future ADR or deployment decision before being treated as final
+architecture.
 
-Python runtime provisioning is an important unresolved decision. FrameNest
-currently requires Python 3.13 while Ubuntu 24.04's system Python is not assumed
-to satisfy that requirement. Do not casually modify the system Python or choose
-an unreviewed third-party package source. Research and explicitly decide a
-secure, reproducible isolated Python 3.13 installation strategy before
-deployment.
+Do not expose FrameNest or SSH through router port forwarding.
 
-## 11. Physical Ubuntu NUC State
+## 11. Completed Logical Boundary
 
-COOPERATOR-observed current host state:
+The closing Orchestrator session completed and accepted this logical boundary:
 
 ```text
-hardware:
-Intel NUC6i5SYH
-
-purpose:
-test FrameNest server and professional Ubuntu hardening laboratory
-
-hostname:
-framenest-nuc
-
-administrator account:
-michal
-
-operating system:
-Ubuntu Server 24.04.4 LTS
-
-installation:
-completed successfully and rebooted
-
-system disk:
-approximately 256 GB M.2
-
-installer storage choice:
-use entire M.2 disk
-LVM disabled
-LUKS encryption disabled
-
-secondary disk:
-approximately 2 TB SATA
-
-local monitor:
-attached and intended to remain useful
-
-OpenSSH server:
-installed
-
-first password-based SSH connection from MacBook:
-successful
-
-reported remote verification:
-whoami -> michal
-hostname -> framenest-nuc
+Ubuntu NUC baseline hardening plus safe media-storage preparation
 ```
 
-The 2 TB disk's actual partition, filesystem, mount, and data state have not yet
-been verified by trusted command output. Do not assume it is empty merely
-because that is the intended use.
-
-The NUC is a test server, but Michal wants production-quality security habits.
-The later production server is expected to be an Ubuntu VPS.
-
-The system disk is not encrypted. This was accepted for the test NUC to permit
-unattended reboot and simplify recovery. Record the physical-theft trade-off;
-do not pretend that software hardening substitutes for encryption at rest.
-
-## 12. Current SSH Bootstrap State
-
-Confirmed:
-
-- password-based SSH from the MacBook to the NUC worked;
-- the connection reached the expected account and hostname;
-- the NUC is currently on a trusted local network;
-- no internet router port-forwarding was authorized.
-
-Not confirmed:
-
-- whether the dedicated Ed25519 key files were successfully created;
-- whether the public key was appended to the NUC's
-  `~/.ssh/authorized_keys`;
-- whether the attempted key-install command completed partially;
-- whether the original working SSH session is still open;
-- whether a second independent key-only SSH login works;
-- whether an SSH alias exists;
-- whether password authentication has been changed.
-
-A command resembling the following was attempted from the MacBook and appeared
-to hang:
+Status:
 
 ```text
-ssh michal@<NUC_LAN_IP> '<remote key-install command>' < <local-public-key>
+DONE
 ```
 
-Do not infer success or failure from the apparent hang.
+The boundary was accepted only after deliberate reboot and post-reboot
+verification.
 
-Do not repeat a complex stdin-redirection command.
+This clean boundary is the reason for the current Orchestrator rotation.
 
-The immediate operational goal is to recover and verify state without making
-another blind mutation.
+## 12. Verified Host Identity And Baseline
 
-The fresh Orchestrator should begin by:
+Command-observed host facts:
 
-1. telling Michal not to close any still-working SSH session;
-2. stopping only the visibly hung local command with `Ctrl+C` if it is still
-   active;
-3. confirming which terminal is local MacBook Fish and which is remote NUC;
-4. checking whether the local private and public key files exist without
-   displaying private-key content;
-5. obtaining the local public-key fingerprint;
-6. inspecting only the existence, permissions, and fingerprints of remote
-   `authorized_keys`, without printing unrelated key material;
-7. determining whether the intended key is already present;
-8. installing the public key only if proven absent;
-9. testing a new independent key-only connection;
-10. preserving the original password session as a recovery channel;
-11. disabling password SSH only in a later separate step after successful
-    key-only proof and configuration validation.
+- administrator account: `michal`;
+- hostname: `framenest-nuc`;
+- login shell: `/bin/bash`;
+- system clock synchronized;
+- NTP active through `systemd-timesyncd`;
+- server timezone: UTC;
+- wired interface active through DHCP;
+- Wi-Fi interface down;
+- DNS provided by the trusted LAN router;
+- no failed systemd units at final acceptance;
+- final system state: `running`;
+- only SSH was observed listening on network-facing TCP ports before
+  application deployment;
+- no router port forwarding was authorized.
 
-Do not proceed directly to firewall or SSH lock-down until this gate passes.
+The real LAN IP is intentionally omitted from repository handoffs.
 
-Use placeholder:
+## 13. SSH Bootstrap And Hardening
+
+SSH bootstrap is complete and accepted.
+
+Verified state:
+
+- a dedicated passphrase-protected Ed25519 key exists on the MacBook;
+- the matching public key is present in the NUC user's `authorized_keys`;
+- independent key-only login succeeded;
+- a MacBook SSH alias `framenest-nuc` works;
+- the alias uses the dedicated identity and `IdentitiesOnly yes`;
+- the local SSH config was backed up before activation;
+- the active client config disables password and keyboard-interactive fallback
+  for this alias;
+- the private-key passphrase prompt is local and expected.
+
+Server drop-in:
 
 ```text
-<NUC_LAN_IP>
+/etc/ssh/sshd_config.d/00-framenest-hardening.conf
 ```
 
-Do not persist the real LAN address in repository handoffs.
+Verified effective server policy:
 
-## 13. Security-Hardening Objective
+```text
+PermitRootLogin no
+PubkeyAuthentication yes
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+UsePAM yes
+X11Forwarding no
+AllowAgentForwarding no
+AllowTcpForwarding local
+AllowStreamLocalForwarding local
+GatewayPorts no
+PermitTunnel no
+```
 
-Michal wants a deep, educational, professional infosec hardening process, not a
-copy-pasted "hardening script."
+The complete config passed `sshd -t`, SSH was reloaded, a new independent
+key-only login succeeded, and an explicit password-only test failed with
+`Permission denied (publickey)`.
 
-The Orchestrator must teach:
+`AllowTcpForwarding local` is intentional so a future local `ssh -L` tunnel can
+reach a loopback-only FrameNest service. Remote forwarding is not allowed.
 
-- the threat each control addresses;
-- what the control does not protect;
-- the rollback path;
-- the exact verification step;
-- how the test NUC differs from the future Ubuntu VPS;
-- why a control is selected rather than cargo-culted.
+Do not loosen SSH policy merely because Tailscale may be added later.
 
-Operational method:
+## 14. UFW Firewall State
 
-- one material mutation at a time;
-- inspect before changing;
-- preserve a recovery path;
-- validate syntax before reload;
-- test a second independent connection before closing the first;
-- never combine disk, SSH, firewall, and package changes into one unreviewable
-  block;
-- do not use `curl | sh`;
-- do not run unaudited community hardening scripts;
-- do not apply broad sysctl lists without a concrete threat model;
-- do not remove packages or services before proving they are unnecessary;
-- do not expose SSH or FrameNest through router port forwarding;
-- search current official Ubuntu/OpenSSH/systemd documentation for unstable or
-  security-sensitive details.
+UFW is enabled and active.
 
-The local monitor and keyboard are a recovery asset, but not a reason to be
-careless.
+Verified policy:
 
-## 14. Recommended Host-Hardening Sequence
+```text
+incoming:
+deny
 
-Recommended order, subject to evidence:
+outgoing:
+allow
 
-1. recover and verify SSH public-key state;
-2. prove independent key-only login;
-3. create a clear MacBook SSH host alias after key proof;
-4. capture read-only baseline inventory;
-5. verify system time, DNS, network route, listening services, failed units,
-   Secure Boot state, firmware state, storage identity, and current update
-   state;
-6. apply official Ubuntu updates;
-7. reboot deliberately when required and prove recovery;
-8. harden SSH through a dedicated drop-in:
-   - prohibit root login;
-   - disable password authentication only after key proof;
-   - disable unnecessary forwarding only when it will not break planned use;
-   - validate with `sshd -t`;
-   - reload rather than blindly restart;
-   - test a new session before closing recovery sessions;
-9. configure UFW with SSH allowed before enabling it;
-10. initially restrict exposure to the trusted LAN where practical;
-11. verify unattended security updates;
-12. audit and minimize listening services;
-13. verify AppArmor status and profiles;
-14. configure sensible persistent journald retention and log review;
-15. evaluate brute-force protection based on the actual exposure model;
-16. verify sudo policy and account hygiene;
-17. review BIOS/UEFI, Secure Boot, firmware, and hardware health;
-18. prepare the 2 TB media disk safely;
-19. establish backup and recovery before important media/catalog state;
-20. adapt repository deployment guidance to Ubuntu;
-21. deploy FrameNest loopback-only;
-22. prove systemd service, migration, readiness, restart, logs, and health;
-23. add a minimal graphical administration session only after baseline
-    hardening;
-24. design production secret integration;
-25. add Tailscale in a separate bounded slice;
-26. add application authentication and capabilities before multi-user admin
-    features.
+routed:
+disabled/deny
 
-Do not treat this list as permission to execute all stages at once.
+logging:
+low
+```
 
-## 15. NUC Storage Direction
+SSH is allowed only:
 
-Accepted direction:
+- on the wired interface;
+- from the trusted local subnet;
+- on TCP port 22.
 
-- the M.2 disk holds Ubuntu, FrameNest application releases, database, preview
-  cache, logs/state, and system data;
-- the 2 TB SATA disk holds all original media, including GIF and MP4;
-- the 2 TB disk should not be mounted under `/home`;
-- intended mount root:
+A new independent SSH connection succeeded after UFW activation.
+
+There is currently no FrameNest application firewall rule and no Tailscale
+interface rule.
+
+When Tailscale is introduced, preserve UFW and design explicit `tailscale0`
+rules. Do not assume tailnet membership is application administrator authority.
+
+## 15. Updates, AppArmor, Logging, And Accounts
+
+Official Ubuntu repositories were refreshed and normal available updates were
+installed. A deliberate reboot was completed.
+
+Verified state:
+
+- no reboot is currently required;
+- `unattended-upgrades` is installed, enabled, and active;
+- `apt-daily.timer` and `apt-daily-upgrade.timer` are enabled and active;
+- daily package-list refresh and unattended upgrades are enabled;
+- automatic reboot is not explicitly enabled and therefore remains off;
+- allowed unattended origins are Ubuntu release/security and applicable Ubuntu
+  ESM security channels;
+- the last observed unattended-upgrades run completed successfully;
+- AppArmor is active and its module is loaded;
+- persistent journald storage exists under `/var/log/journal`;
+- logs across multiple boots were verified;
+- journal usage was small and default retention was accepted;
+- root is the only UID 0 account and its password is locked;
+- `michal` is the only human account and only sudo-group member;
+- no empty password hashes were found;
+- `visudo -c` passed;
+- no unexpected sudoers drop-ins exist.
+
+Fail2Ban was intentionally not added because SSH is key-only and limited by UFW
+to the trusted LAN. Reevaluate for a future public VPS or materially different
+exposure model.
+
+## 16. Secure Boot, TPM, Firmware, And fwupd
+
+Verified platform state:
+
+- boot mode: UEFI;
+- Secure Boot: disabled;
+- firmware reported Setup Mode;
+- TPM device was not detected by Linux;
+- kernel lockdown: none;
+- BIOS firmware is from 2020.
+
+Secure Boot was deliberately deferred. It is not required to continue the test
+or personal-server deployment, and enabling it from Setup Mode should not be
+done casually. It does not replace disk encryption. Revisit only with exact
+firmware documentation, local console, boot recovery media, and rollback
+planning.
+
+`fwupd` encountered a packaging mismatch after updates:
+
+```text
+fwupd daemon observed:
+1.9.33
+
+libfwupd2 observed:
+1.9.34
+
+new fwupd candidate observed:
+2.0.20 with phased rollout at 0 percent
+```
+
+The mismatch caused `fwupd.service` and `fwupd-refresh.service` to fail. The
+candidate was intentionally not forced because phased rollout at 0 percent
+indicated a stopped rollout.
+
+Accepted workaround:
+
+```text
+fwupd-refresh.timer:
+disabled and inactive
+```
+
+Failed-unit state was reset and the final system state is clean.
+
+Do not force the phased package, add proposed repositories, downgrade libraries,
+or remove fwupd without a new evidence-based decision. Recheck current official
+Ubuntu package state before changing this workaround because it is time
+sensitive.
+
+## 17. Storage Hardware And Health
+
+Physical storage roles:
+
+- Intel M.2 SATA SSD, approximately 240 GB: Ubuntu system disk;
+- Samsung 870 QVO SATA SSD, 2 TB: original-media disk.
+
+Do not rely on `/dev/sdX` names. Use stable by-id paths for inspection and UUID
+for persistent mounts.
+
+`smartmontools` was installed from official Ubuntu repositories.
+
+Verified state:
+
+- `smartmontools.service` is enabled and active;
+- both SSDs report SMART overall health `PASSED`;
+- both short SMART self-tests completed without error;
+- both SMART error logs were empty;
+- the 2 TB Samsung showed zero reallocated, uncorrectable, and CRC errors;
+- the system Intel SSD showed no uncorrectable or CRC errors;
+- the Intel SSD has a historical raw reallocated-block count of 71;
+- Intel Media Wearout Indicator was 85;
+- Intel unexpected power-loss count was historically high;
+- the system SSD is accepted for current use but must be monitored and must not
+  hold the only copy of important state.
+
+Exact disk serial numbers are intentionally omitted from this public handoff.
+
+## 18. Media Filesystem And Mount Contract
+
+The 2 TB Samsung SSD already contained one fresh ext4 filesystem. It was not
+reformatted.
+
+Evidence before mounting:
+
+- filesystem state was clean;
+- full read-only `e2fsck -f -n` completed without errors;
+- a temporary `ro,noload,nosuid,nodev,noexec` audit mount revealed no content
+  beyond standard ext4 `lost+found`;
+- the temporary mount was removed cleanly;
+- short SMART test passed.
+
+The ext4 reserved-block percentage was changed from 5 percent to 1 percent. The
+filesystem remained clean and unmounted after the change.
+
+Persistent mount root:
 
 ```text
 /srv/media
 ```
 
-Candidate media directories:
+The mount uses the filesystem UUID in `/etc/fstab`, not a volatile device name.
+The exact UUID is intentionally omitted from this public handoff.
+
+Accepted fstab semantics:
 
 ```text
-/srv/media/memes
-/srv/media/youtube
-/srv/media/movies
+ext4
+defaults
+nofail
+nodev
+nosuid
+noexec
+x-systemd.device-timeout=10s
+dump 0
+fsck pass 2
 ```
 
-These directory names are operational organization, not the sole source of
-catalog semantics.
+The existing `fstrim.timer` is enabled and active, so continuous `discard` was
+not added.
 
-Before any destructive storage command:
+A timestamped backup of the previous `/etc/fstab` exists on the NUC.
 
-1. capture `lsblk`, filesystem, mount, model, and size evidence;
-2. distinguish the M.2 and SATA devices beyond ambiguous `/dev/sdX` naming;
-3. verify whether the 2 TB disk contains data;
-4. inspect SMART health when tooling is available;
-5. obtain explicit COOPERATOR confirmation of the exact target disk;
-6. decide filesystem and encryption policy;
-7. create a partition/filesystem only in a separate authorized step;
-8. mount by UUID, not volatile device name;
-9. validate `/etc/fstab` with a non-destructive mount test before reboot;
-10. define root ownership and a least-privilege FrameNest group;
-11. preserve read-only source semantics for the FrameNest service unless an
-    explicit managed-ingest directory is later designed.
+The fstab candidate was validated before activation. The active fstab was
+validated after activation. The only warning is the installer-created swap file
+being a regular file, not an fstab parse error.
 
-Do not combine partitioning, formatting, fstab editing, permission changes, and
-reboot into one command block.
+Final post-reboot mount evidence:
 
-The intended test-server media disk is currently not treated as a backup.
-Backup and recovery remain required.
+```text
+/srv/media mounted automatically
+source resolved to the intended 2 TB SSD
+filesystem ext4
+options include rw,nosuid,nodev,noexec
+system state running
+no failed units
+```
 
-## 16. Local Graphical Administration
+## 19. Media Ownership And Directory Layout
 
-Michal does not want the NUC to remain permanently headless.
+A system group exists:
 
-The NUC has a monitor and should later provide a local browser client for an
-administrator.
+```text
+framenest
+```
 
-This does not mean:
+No FrameNest service user exists yet.
 
-- installing a full desktop before baseline hardening;
-- making the browser the service supervisor;
-- treating loopback as automatic admin authority;
-- bypassing authentication for the local browser;
-- granting local browser JavaScript filesystem authority.
+Accepted root ownership and permissions:
 
-A later explicit decision must choose between:
+```text
+/srv/media               root:framenest 2750
+/srv/media/memes         root:framenest 2750
+/srv/media/youtube       root:framenest 2750
+/srv/media/movies        root:framenest 2750
+/srv/media/lost+found    root:root      0700
+```
 
-- Ubuntu Desktop Minimal;
-- a smaller graphical session;
-- a kiosk-like browser session;
-- another reviewed local-admin approach.
+The setgid bit on the media root and category directories preserves group
+inheritance for future administrator-created entries.
 
-Evaluate:
+The `framenest` group currently has read/traverse access but not write access to
+these source directories.
 
-- attack-surface increase;
-- idle resource usage;
-- display-manager behavior;
-- update burden;
-- local session locking;
-- browser profile isolation;
-- automatic login risk.
+This is intentional. The future service should treat original media as
+read-only unless a separately designed managed-ingest boundary is introduced.
+Do not grant broad write access to `/srv/media` merely to implement upload.
 
-The local NUC browser must eventually use the same authenticated FrameNest
-server API and capability system as remote clients. Being on the same machine
-must not silently confer administrator rights.
+The category directory names are operational organization, not the sole source
+of catalog category semantics.
 
-## 17. Authoritative Server And Client Model
+## 20. Backup And Recovery State
 
-The central Ubuntu FrameNest server is the authoritative owner of:
+No complete backup strategy exists yet.
+
+Current safety assets include:
+
+- local monitor and keyboard;
+- a working key-only SSH path;
+- a timestamped MacBook SSH-config backup;
+- a timestamped NUC fstab backup;
+- clean ext4 and SMART evidence;
+- persistent logs;
+- explicit service and firewall configuration.
+
+These are not substitutes for backups.
+
+Before important catalog or media state is created, define at least:
+
+- catalog database backup and restore;
+- non-secret configuration backup;
+- service-secret recovery strategy;
+- media backup or explicit acknowledgement of media-loss risk;
+- off-device or geographically separate copies for irreplaceable content;
+- restore testing.
+
+The 2 TB media disk is not a backup simply because it is separate from the
+system disk.
+
+## 21. Personal NUC Server Direction
+
+Michal is enthusiastic about continuing from hardening into a real FrameNest
+deployment on this NUC.
+
+Plausible accepted direction to evaluate formally:
+
+- development remains on the MacBook;
+- the NUC runs the authoritative server;
+- the 2 TB SSD stores original media;
+- the NUC may remain powered continuously;
+- local LAN access is fast;
+- remote personal access uses Tailscale;
+- no monthly VPS cost is required initially;
+- future Ubuntu VPS compatibility is preserved.
+
+Trade-offs to document:
+
+- home power and internet outages;
+- upstream bandwidth limitations;
+- physical theft or hardware failure;
+- no system-disk encryption;
+- need for backups;
+- consumer hardware and availability expectations.
+
+Do not call this high-availability production hosting. A useful term is
+`personal production server` once the deployment is accepted.
+
+## 22. Tailscale Direction
+
+Tailscale is the preferred future remote-access direction, but it is not yet
+installed or configured.
+
+Desired properties:
+
+- no router port forwarding;
+- access from Michal's authorized devices through a private tailnet;
+- UFW remains enabled;
+- explicit rules for the Tailscale interface;
+- current official Tailscale documentation used at implementation time;
+- least-privilege access policy or grants;
+- no Tailscale Funnel for FrameNest;
+- MagicDNS may later provide a stable private name;
+- Tailscale membership does not confer FrameNest administrator capability;
+- application authentication remains server-side and explicit.
+
+Keep Tailscale installation and policy as a separate bounded slice after the
+Ubuntu repository deployment model is ready.
+
+## 23. Deployment Automation And Runbook Direction
+
+Michal brainstormed a repeatable deployment/hardening workflow derived from the
+successful NUC process.
+
+Do not turn the session transcript into one blind monolithic `01.sh`.
+
+Preferred repository outcome:
+
+- an auditable operator runbook in Markdown;
+- small idempotent tools or commands;
+- explicit `check`, `plan`, `apply`, and `verify` phases where useful;
+- clear checkpoints and rollback instructions;
+- interactive confirmation for destructive or lockout-risk operations;
+- no embedded credentials, IP addresses, fingerprints, serial numbers, or
+  host-specific UUIDs;
+- separation between host bootstrap, storage, Tailscale, release deployment,
+  migration, health verification, and rollback;
+- target the concrete NUC while remaining portable to a future Ubuntu VPS.
+
+A Worker prompt may implement this repository workflow, but the prompt itself
+must not become the only deploy artifact.
+
+Do not automate password entry, Secure Boot key enrollment, destructive disk
+selection, or broad firewall replacement.
+
+## 24. Python Runtime And Release Deployment Blocker
+
+FrameNest currently requires Python 3.13, while Ubuntu 24.04's system Python is
+not assumed to satisfy that requirement.
+
+Before deploying FrameNest, research and decide a secure, reproducible isolated
+Python 3.13 strategy.
+
+Do not:
+
+- replace Ubuntu's system Python;
+- use an unreviewed PPA casually;
+- use `curl | sh` installers;
+- compile from arbitrary unpinned source without a maintenance plan;
+- normalize ad hoc development directly on the server.
+
+Preferred deployment flow remains:
+
+```text
+MacBook:
+edit -> test -> commit -> push verified commit/release
+
+NUC:
+fetch exact verified commit/release -> prepare isolated runtime -> back up state
+-> explicit migration -> readiness check -> controlled restart -> health check
+```
+
+The exact release-switch and rollback mechanism remains unresolved.
+
+## 25. Authoritative Server And Client Model
+
+The central Ubuntu FrameNest server is authoritative for:
 
 - catalog records;
 - server media originals;
 - canonical title, description, and tags;
-- category and language metadata once implemented;
+- future category and language metadata;
 - per-user visibility state;
 - upload/ingest state;
 - server preview cache;
@@ -775,154 +875,44 @@ The central Ubuntu FrameNest server is the authoritative owner of:
 Ordinary clients:
 
 - request catalog state from the server;
-- may explicitly open, stream, or download authorized media;
-- must not receive provider secrets;
-- must not directly mutate arbitrary server files;
-- must not claim trusted local availability without a managed client boundary;
-- must not infer admin rights from IP, loopback, hostname, or Tailscale.
+- may explicitly stream, open, or download authorized media;
+- never receive provider secrets;
+- do not mutate arbitrary server files;
+- do not infer administrator authority from loopback, IP, hostname, Tailscale,
+  cookies, or same-machine execution.
 
-The local NUC browser is still a client.
+The future local NUC browser is still a client and must use the same server API
+and capability model.
 
-## 18. Upload And Synchronization Product Direction
+## 26. Upload, Synchronization, Trash, And Administration Direction
 
-Michal wants every appropriately authorized client to be able to upload GIF or
-MP4 media to the authoritative server.
+These are future product directions, not implemented behavior.
 
-This is future product direction, not implemented behavior.
+Keep distinct:
 
-Do not model "synchronization" as one vague operation. Separate:
+1. catalog synchronization;
+2. authenticated media ingest/upload;
+3. explicit client cache/download.
 
-1. **Catalog synchronization**
-   - titles;
-   - descriptions;
-   - canonical tags;
-   - categories;
-   - language metadata;
-   - per-user state.
+A future upload pipeline requires quarantine, content validation, limits, safe
+filenames, duplicate detection, atomic publication, failure cleanup, and
+server-managed placement. Clients must not choose arbitrary server paths.
 
-2. **Media ingest/upload**
-   - controlled client-to-server transfer;
-   - validation;
-   - quarantine;
-   - duplicate detection;
-   - server-managed final placement;
-   - catalog registration.
+Per-user Trash must be server-persisted visibility state and must not delete the
+server original.
 
-3. **Client cache/download**
-   - explicit local copies;
-   - cache ownership;
-   - eviction;
-   - truthful availability;
-   - no automatic server deletion.
-
-A future upload pipeline should include:
-
-- authenticated upload capability;
-- size and media-type limits;
-- safe filenames;
-- temporary quarantine outside the final media root;
-- content validation independent of extension;
-- duplicate detection;
-- atomic publication;
-- no path traversal;
-- no client-chosen absolute server path;
-- clear failure cleanup;
-- optional admin review where policy requires it;
-- audit evidence without secret or path leakage.
-
-Do not implement upload before authentication/capability architecture is
-defined.
-
-## 19. Per-User Trash And Cache Direction
-
-A user's Trash must not be cookie-only authoritative state.
-
-Cookies may identify a session, but the server must persist per-user media
-visibility state.
-
-Conceptual future state:
-
-```text
-user_id
-media_id
-state: visible | trashed
-trashed_at
-```
-
-Expected semantics:
-
-- `Trash` hides media for that user;
-- it does not delete the server original;
-- it synchronizes across that user's clients;
-- it supports Restore;
-- it must not be conflated with global delete;
-- `Empty Trash` requires explicit product semantics and still must not silently
-  destroy server media.
-
-Client cache clearing belongs in:
-
-```text
-Settings > General
-```
-
-A client may clear only FrameNest-managed cache for that client.
-
-Server preview-cache management is an administrator/operator concern.
-
-Server originals are not cache.
-
-Ordinary browser JavaScript cannot truthfully delete arbitrary files previously
-downloaded outside FrameNest-managed storage.
-
-## 20. Administrator Capability Direction
-
-Michal wants administrator operations available in the web UI where
-appropriate, especially content administration and synchronization workflows.
-
-Possible future admin UI includes:
-
-- upload/ingest review;
-- library refresh;
-- sync-job status;
-- deletion requests;
-- media Retire/Purge review;
-- preview regeneration;
-- catalog/category/language administration.
-
-Provider credentials, service secrets, operating-system mutation, and sensitive
-service operations remain operator boundaries unless a later secure design
-explicitly changes that.
-
-Administrator authority must be authenticated and enforced server-side.
-
-Do not infer it from:
-
-- loopback;
-- same-machine execution;
-- source IP;
-- hostname;
-- a client-set cookie;
-- a visual button style;
-- Tailscale membership alone.
-
-Michal likes a distinct animated red-gradient visual language for destructive
-or privileged admin controls. That may be used later as UX communication, but
-visual styling is never authorization.
-
-One ambiguous `Delete` control must not perform local removal for users and
-global destruction for admins.
-
-Keep distinct future operations:
+Keep separate operations such as:
 
 - Remove from this managed client;
-- Hide/Trash for this user;
+- Hide or Trash for this user;
 - Request server deletion;
 - Retire globally;
 - Purge physical originals.
 
-## 21. Category, Language, And Broader Media Direction
+Provider credentials, service secrets, operating-system mutation, and sensitive
+service operations remain operator boundaries.
 
-FrameNest is expanding beyond a meme-only catalog.
+## 27. Category, Language, And Playback Direction
 
 Future first-class categories include:
 
@@ -932,65 +922,20 @@ youtube
 movies
 ```
 
-These should be represented as a dedicated category/facet model, not merely
-ordinary semantic tags and not solely inferred from directories.
+Model categories as a dedicated facet, not merely semantic tags or directory
+names.
 
-Current ordinary tags remain semantic descriptors.
+Movies may carry explicit language metadata such as English, Slovak, or Czech.
+Prefer container/audio metadata and user editing before expensive AI analysis.
+Do not upload audio to a cloud provider automatically.
 
-Movies may also carry language metadata such as:
-
-```text
-english
-slovak
-czech
-```
-
-Language should be modeled explicitly rather than mixed indiscriminately into
-semantic tags.
-
-Potential evidence sources, in order of cost and risk:
-
-1. container/audio-track metadata;
-2. user editing;
-3. bounded audio-language analysis on explicit request;
-4. more expensive transcription only when separately authorized.
-
-Do not automatically upload audio to a cloud provider.
-
-Future Gallery/filter UI may expose categories as a dedicated filter group
-separate from ordinary tags.
-
-This needs a bounded product/domain task, migration design, API contract,
-documentation, and acceptance. It is not authorized by this handoff.
-
-## 22. Playback Direction
-
-Future media UX should support:
-
-- fullscreen for browser-playable video;
-- truthful audio-track selection when the browser/container stack supports it;
-- explicit download/open-original fallback;
-- capability detection rather than optimistic playback;
-- no fake Play action when the codec is unsupported.
-
-Subtitle support is not currently required.
-
-Audio-track switching is not assumed trivial across browsers and containers.
-A future task must inspect actual media/container/browser support and may need:
-
-- a supported container profile;
-- server remuxing;
-- transcoding;
-- a native player;
-- or download-only fallback.
+Future playback should support fullscreen and truthful audio-track selection
+where technically supported. Use capability detection and fallback rather than
+a fake Play action. Subtitle support is not currently required.
 
 Do not silently transcode originals.
 
-YouTube-related storage is a future product direction. Any downloader or ingest
-workflow must be separately designed and should respect the user's rights and
-the source platform's applicable rules. No downloader is currently authorized.
-
-## 23. AI And Secret Boundaries
+## 28. AI And Secret Boundaries
 
 AI provider execution remains server-side only.
 
@@ -1001,359 +946,268 @@ Ordinary clients:
 - never call providers directly;
 - receive only sanitized status and results.
 
-Safe non-secret selection previously observed:
+Never expose credential values or prefixes, secret paths, environment contents,
+Authorization headers, cookies, prompts, data URLs, private media paths, or
+private key material.
 
-```text
-provider:
-nvidia-nim
-
-model:
-nvidia/nemotron-3-nano-omni-30b-a3b-reasoning
-```
-
-Use placeholders:
-
-```text
-<SERVER_AI_CONFIG_PATH>
-<SERVICE_SECRET_BOUNDARY>
-<PRIVATE_MEMES_ROOT>
-```
-
-Never expose:
-
-- credential values or prefixes;
-- private-key contents;
-- secret-file paths;
-- environment contents;
-- Authorization headers;
-- cookies or session tokens;
-- raw provider payloads;
-- prompts;
-- data URLs;
-- private media paths or filenames.
-
-Production Ubuntu provider-secret integration is unresolved and requires a
+Production Ubuntu provider-secret integration remains unresolved and requires a
 separate architecture slice.
 
-## 24. Evidence Classification
+## 29. Analytic Programming Lifecycle Improvement
 
-### Independently Verifiable Repository Facts
+Michal established a new reusable lifecycle requirement:
 
-Before this Orchestrator handoff:
+- the Orchestrator instance must monitor context pressure and task boundaries;
+- after a coherent, verified logical boundary, she should proactively state
+  that it is the right time for rotation;
+- she must not rotate in the middle of an unverified mutation;
+- she should prepare a thorough, professional, easy-to-understand
+  `NEXT_ORCHESTRATOR.md` containing exact evidence, decisions, unresolved items,
+  safety boundaries, and the next step;
+- Michal commits and pushes the handoff as the only changed path with subject
+  `handout`;
+- a Worker is not created merely for Orchestrator rotation.
 
-- Worker closeout commit
-  `ceaf76c4e6f30450f0b7a9032d82377c4ecf4bfa` exists;
-- its subject is `docs: prepare Fedora host readiness handoff`;
-- its parent is `4a6dee4e7bb6af61d28855823a49fe40177e71ac`;
-- it changes only `NEXT_WORKER.md`;
-- latest product implementation boundary is
-  `4a6dee4e7bb6af61d28855823a49fe40177e71ac`;
-- current migration head is `0007`;
-- highest accepted ADR is ADR-0031.
+This principle should be added to the reusable Analytic Programming
+specification and relevant Orchestrator documentation.
 
-A fresh Orchestrator must still verify the enclosing `handout` commit and
-current public `main`.
+Repository ownership is unresolved:
 
-### Worker-Observed Evidence
+- FrameNest may need its local AP/Orchestrator docs updated;
+- the separate public `cisarik/ap` methodology repository may be the canonical
+  universal home.
 
-The Fedora service-boundary correction reported:
+Do not modify either repository without a bounded authoritative task and exact
+repository gate.
 
-- focused Fedora tests: `31 passed`;
-- relevant persistence/migration tests: `65 passed`;
-- full suite: `1332 passed, 3 skipped`;
-- `poetry check`: passed;
-- JavaScript syntax: passed;
-- Fish syntax: passed;
-- Python compilation: passed;
-- diff checks: passed;
-- local/tracking/public equality: reported;
-- final worktree and index: reported clean;
-- no real host, private media, credential, provider, or frontend access.
+## 30. Evidence Classification
 
-### COOPERATOR-Observed Physical Evidence
+### Independently verifiable repository facts before the new handoff
 
-Michal reported:
+- previous public handoff commit `867bd7a5...` exists;
+- its subject is `handout`;
+- its parent is `ceaf76c4...`;
+- it changes only `NEXT_ORCHESTRATOR.md`;
+- latest product implementation boundary remains `4a6dee4...`;
+- migration head was `0007`;
+- highest accepted ADR was ADR-0031.
 
-- Ubuntu Server 24.04.4 installed successfully on the NUC;
-- reboot and local login succeeded;
-- hostname is `framenest-nuc`;
-- administrator account is `michal`;
-- password SSH from the MacBook succeeded;
-- remote `whoami` and `hostname` returned expected values;
-- a key-install attempt appeared to hang;
-- the MacBook shell is Fish;
-- the 2 TB SATA disk is intended for all original media;
-- the NUC should later have a local graphical browser;
-- the test NUC is a learning platform for future Ubuntu production hardening.
+A fresh Orchestrator must verify the new enclosing commit and current public
+`main`.
 
-### Unresolved Or Unproven
+### Command-observed host evidence supplied by Michal
 
-Still unresolved:
+The closing session obtained command output supporting:
 
-- SSH key installation state;
-- SSH key-only authentication;
-- current open-session state;
-- host update state;
-- Secure Boot;
-- BIOS and firmware;
-- RAM and storage health;
-- exact disk layout after installation;
-- exact 2 TB disk state;
-- UFW;
-- AppArmor;
-- unattended-upgrades;
-- listening services;
-- Ubuntu Python 3.13 deployment strategy;
-- real systemd service installation and operation;
-- graphical-session choice;
-- production secret integration;
-- Tailscale;
-- authentication/capabilities;
-- upload/synchronization;
-- per-user Trash;
-- categories/languages;
-- fullscreen/audio-track support.
+- host identity, OS, kernel, shell, time, DNS, route, and network interfaces;
+- independent SSH key-only success and password-only failure;
+- effective hardened `sshd -T` values;
+- UFW activation and a new connection through it;
+- update, reboot, AppArmor, unattended-upgrades, account, sudoers, and journal
+  state;
+- exact storage roles and filesystem signatures;
+- clean read-only filesystem check;
+- SMART health and successful short tests for both SSDs;
+- fstab candidate validation and atomic activation with backup;
+- automatic post-reboot media mount;
+- final media ownership and directory permissions;
+- final `running` system state and no failed units.
 
-Do not convert unresolved items into confident claims.
+### Accepted decisions
 
-## 25. Immediate Next Orchestrator Task
+- Ubuntu is the deployment target;
+- SSH is key-only and LAN-restricted;
+- UFW remains active;
+- Secure Boot is deferred;
+- fwupd phased update is not forced;
+- original media root is `/srv/media`;
+- media source directories are read-only to the future service by default;
+- NUC personal production server plus Tailscale is the preferred direction to
+  design next;
+- no router port forwarding;
+- deployment automation must be auditable and incremental, not a blind script.
 
-The immediate task belongs to the fresh Orchestrator instance, not a Worker.
+### Unresolved
+
+- repository Ubuntu ADR and documentation adaptation;
+- secure Python 3.13 provisioning;
+- release layout and rollback mechanism;
+- service user creation and actual FrameNest deployment;
+- database and media backup/recovery;
+- production service-secret integration;
+- Tailscale install, grants, MagicDNS, and UFW policy;
+- application authentication and capabilities;
+- local graphical administration session;
+- upload/synchronization, per-user Trash, categories, languages, and playback
+  extensions;
+- future fwupd package repair;
+- optional Secure Boot hardening;
+- canonical AP documentation update.
+
+## 31. Immediate Next Orchestrator Task
+
+The fresh Orchestrator must first restore and verify context, not mutate the
+host.
 
 ```text
 Task:
-Safely restore and complete SSH public-key bootstrap on the Ubuntu NUC
+Verify the new handoff commit, acknowledge the completed NUC hardening/storage
+boundary, and prepare the next bounded repository-only Worker task for Ubuntu
+NUC deployment readiness
 
-Task type:
-Stepwise host administration with the COOPERATOR
-
-Worker required:
+Worker required immediately:
 no
 
-Reasoning:
-High
-
-Mutation authority:
-only the exact small SSH-key step explicitly presented to and executed by
-Michal after current state is inspected
-
-Repository authority:
+Host mutation authority:
 none
-```
 
-The fresh Orchestrator should not start with a long inventory block.
-
-The first response should:
-
-1. state restoration status;
-2. acknowledge that the MacBook uses Fish;
-3. state that no active Worker exists;
-4. explain that the previous key-install command has unknown outcome;
-5. preserve any existing working SSH session;
-6. give one minimal Fish-compatible local check;
-7. wait for its result before the next step.
-
-Recommended first local check:
-
-```text
-[MacBook / fish]
-
-test -f ~/.ssh/id_ed25519_framenest_nuc
-and echo "PRIVATE KEY EXISTS"
-or echo "PRIVATE KEY MISSING"
-
-test -f ~/.ssh/id_ed25519_framenest_nuc.pub
-and echo "PUBLIC KEY EXISTS"
-or echo "PUBLIC KEY MISSING"
-```
-
-The fresh Orchestrator should adjust the exact command if current evidence
-requires it.
-
-Do not print the private key.
-
-Only after local key existence is known should the Orchestrator inspect remote
-authorized-key fingerprints and decide whether installation is needed.
-
-## 26. When To Create A Fresh Worker
-
-No Worker is active now.
-
-Do not create a Worker merely to guide terminal commands on the NUC.
-
-A fresh Worker becomes useful after one of these gates:
-
-### Gate A: host baseline captured
-
-Then a repository-only Worker may implement the Ubuntu documentation/ADR pivot
-without touching the host.
-
-### Gate B: Ubuntu repository adaptation completed
-
-Then a separately authorized Worker may perform a read-only host readiness
-audit through an exact SSH boundary.
-
-### Gate C: deployment plan accepted
-
-Then a fresh Worker may perform a bounded mutation task on the test NUC.
-
-Recommended first repository Worker task after the host baseline:
-
-```text
-Task:
-Adapt the repository-native service foundation from Fedora-specific target
-documentation to Ubuntu 24.04 and a future Ubuntu VPS
-
-Task type:
-Repository implementation, ADR, documentation, and tests only
+Repository mutation authority:
+none until a new exact Worker prompt is issued
 
 Reasoning:
-High
-
-Host access:
-none
+high
 ```
 
-Expected content:
+The fresh Orchestrator's first response should:
 
-- new ADR superseding Fedora as current deployment target;
-- preserved ADR-0031 history;
-- distro-neutral systemd core retained;
-- Ubuntu operator guide;
-- apt/AppArmor/UFW truth;
-- secure Python 3.13 strategy researched and explicitly decided or documented
-  as a blocking decision;
-- no real host mutation;
-- no secrets;
-- no Tailscale;
-- no authentication;
-- no frontend redesign.
+1. state that she is a fresh Orchestrator instance assigned to the persistent
+   ORCHESTRATOR role;
+2. report handoff restoration as `PASS`, `PARTIAL`, or `BLOCKED`;
+3. cite the exact new enclosing handoff SHA after verification;
+4. state that the NUC baseline-hardening and media-storage boundary is `DONE`;
+5. state that no Worker is active;
+6. remember MacBook Fish, NUC Bash, and the mandatory command-block delimiter;
+7. avoid repeating host checks already accepted without a concrete reason;
+8. recommend the repository-only Ubuntu deployment-readiness slice before real
+   FrameNest host deployment.
 
-A future authoritative prompt must use the exact then-current repository HEAD.
+## 32. Recommended First Worker Task After Verification
 
-## 27. Recommended Development And Deployment Model
+After exact repository verification, prepare a fresh bounded Worker prompt.
 
-Development remains on the MacBook.
-
-Preferred flow:
+Recommended task:
 
 ```text
-MacBook:
-edit -> test -> commit -> push verified commit
-
-Ubuntu server:
-fetch -> select exact verified commit/release -> prepare isolated environment
--> back up state -> explicit migration -> readiness check -> restart
--> health verification
+Adapt FrameNest repository deployment truth from Fedora to Ubuntu 24.04 and
+prepare an auditable NUC-first deployment workflow, without host access
 ```
 
-Do not normalize ad hoc production editing on the server.
+Recommended scope:
 
-Do not treat unrestricted `git pull` as the final deployment mechanism.
+- new ADR superseding Fedora as current deployment target while preserving
+  ADR-0031 history;
+- Ubuntu 24.04 operator documentation using apt, AppArmor, UFW, systemd, and
+  journald truth;
+- NUC personal production server as the current concrete target, with future
+  Ubuntu VPS portability;
+- explicit secure Python 3.13 provisioning decision or a clearly documented
+  blocking decision;
+- auditable deployment runbook/tool structure with check, plan, apply, verify,
+  and rollback boundaries;
+- use exact verified releases/commits rather than ad hoc server development;
+- preserve loopback-first service behavior and explicit migrations/readiness;
+- preserve server-only secrets;
+- document media root expectations without host-specific UUIDs, IPs, serials,
+  fingerprints, or secrets;
+- document that `/srv/media` source content is read-only to the service by
+  default;
+- tests and documentation validation appropriate to the repository.
 
-The repository's `/opt/framenest/current` contract suggests versioned or
-otherwise controlled releases with an explicit active release boundary. The
-exact release-switch/rollback mechanism remains to be designed.
+Explicit exclusions:
 
-## 28. Orchestrator Rotation Plan
+- no SSH or real host access;
+- no Tailscale installation;
+- no provider calls or credentials;
+- no private media access;
+- no authentication implementation;
+- no upload implementation;
+- no Gallery redesign;
+- no destructive storage actions;
+- no deployment to the NUC in the same task.
 
-The Orchestrator instance reading this file is fresh.
+The Worker prompt must use the exact then-current repository HEAD and normal AP
+Git gates.
 
-The previous Orchestrator instance is closed by the enclosing `handout` commit.
+The AP lifecycle documentation improvement may be included only if the exact
+repository ownership and scope remain bounded. Otherwise authorize it as a
+separate later task, especially for the public `cisarik/ap` repository.
 
-A future Orchestrator rotation is recommended after a coherent operational
-boundary, for example:
+## 33. Subsequent Recommended Sequence
 
-- SSH key hardening complete;
-- baseline inventory captured;
-- updates and first reboot accepted;
-- UFW and SSH hardening accepted;
-- 2 TB media disk safely mounted;
-- repository Ubuntu pivot completed;
-- before the first real FrameNest deployment mutation.
+After the repository Ubuntu deployment-readiness slice is accepted:
 
-Do not rotate in the middle of an unverified SSH or disk mutation unless
-context safety requires it.
+1. decide and implement secure isolated Python 3.13 provisioning;
+2. design database, configuration, and media backup/recovery;
+3. prepare the NUC service user and release directories;
+4. deploy an exact verified FrameNest release loopback-only;
+5. run explicit migration, readiness, systemd, restart, log, and health tests;
+6. verify source-media read-only access;
+7. add Tailscale in a separate bounded slice;
+8. design application authentication and capabilities;
+9. only then expose FrameNest to authorized remote clients;
+10. evaluate a minimal local graphical administration session.
 
-When rotating, create a new repository-native `NEXT_ORCHESTRATOR.md`, commit it
-as the sole changed path, and preserve exact host/repository evidence without
-including secrets, real IP addresses, key fingerprints, or private media
-paths.
+Do not combine these into one Worker task or one shell script.
 
-## 29. Immediate Non-Goals
+## 34. Immediate Non-Goals
 
-The immediate SSH/hardening continuation must not expand into:
+The fresh session must not immediately expand into:
 
-- FrameNest deployment;
-- formatting the 2 TB disk;
-- desktop installation;
-- Tailscale;
+- formatting or repartitioning disks;
 - router port forwarding;
-- public SSH;
-- authentication implementation;
-- upload/sync implementation;
-- per-user Trash;
-- admin UI;
-- categories/language migration;
+- public SSH or public FrameNest exposure;
+- Tailscale Funnel;
+- Secure Boot key enrollment;
+- forcing the paused fwupd rollout;
+- broad sysctl hardening lists;
+- full desktop installation;
+- upload/synchronization implementation;
+- per-user Trash implementation;
+- administrator UI;
+- category/language migration;
 - fullscreen/audio-track coding;
 - AI provider calls;
 - private-media enumeration;
-- production secrets;
+- production secret entry;
 - broad Gallery changes.
 
-These remain separate bounded decisions.
+## 35. Orchestrator Rotation Rule
 
-## 30. Fresh Orchestrator Bootstrap Behavior
+The current rotation is valid because:
 
-The fresh Orchestrator must:
+- no mutation is in progress;
+- the host rebooted successfully;
+- SSH and firewall access were independently reproven;
+- media mount and permissions survived reboot;
+- systemd is running with no failed units;
+- unresolved work is cleanly separated from accepted state.
 
-1. state that she is a fresh Orchestrator instance assigned to the persistent
-   `ORCHESTRATOR` role;
-2. communicate in Slovak using feminine self-reference;
-3. verify the enclosing `handout` commit and its exact parent/path;
-4. verify Worker closeout `ceaf76c4...`;
-5. verify raw public handoff files;
-6. verify latest product boundary `4a6dee4...`;
-7. recognize that no Worker is active;
-8. classify restoration as `PASS`, `PARTIAL`, or `BLOCKED`;
-9. not ask Michal to repeat the entire project history;
-10. remember that MacBook commands must be Fish-compatible;
-11. not assume the SSH key-install command succeeded or failed;
-12. start with the smallest read-only key-state check;
-13. preserve existing SSH recovery sessions;
-14. guide one host mutation at a time;
-15. use current official sources for security-sensitive Ubuntu details;
-16. delay Worker creation until a repository task actually exists;
-17. preserve the Ubuntu pivot and new product directions;
-18. avoid public IPs, private paths, fingerprints, secrets, or key contents in
-    repository files;
-19. never use loopback, IP, same-machine execution, cookies, or Tailscale as
-    administrator authorization;
-20. keep the visual Gallery/Details phase frozen.
+The next Orchestrator should rotate again after another coherent boundary, for
+example:
 
-## 31. Closure Summary
+- repository Ubuntu deployment-readiness task accepted;
+- backup strategy accepted;
+- first real FrameNest deployment accepted;
+- Tailscale access accepted;
+- authentication/capability architecture accepted.
+
+## 36. Closure Summary
 
 ```text
 project:
 FrameNest
 
-expected pre-handout Worker closeout:
-ceaf76c4e6f30450f0b7a9032d82377c4ecf4bfa
+expected pre-handout HEAD:
+867bd7a5dd088567d4cdfac2a6a7ad5d2154a61b
+
+expected new handoff subject:
+handout
+
+expected new handoff changed path:
+NEXT_ORCHESTRATOR.md only
 
 latest product implementation boundary:
 4a6dee4e7bb6af61d28855823a49fe40177e71ac
-
-latest implementation subject:
-fix: align Fedora service boundaries
-
-expected Orchestrator handoff subject:
-handout
-
-expected Orchestrator handoff parent:
-ceaf76c4e6f30450f0b7a9032d82377c4ecf4bfa
-
-expected Orchestrator handoff changed path:
-NEXT_ORCHESTRATOR.md only
 
 migration head:
 0007
@@ -1364,38 +1218,69 @@ ADR-0031
 active Worker:
 none
 
-previous Orchestrator closes with enclosing handout:
-yes
+completed logical boundary:
+Ubuntu NUC baseline hardening plus safe media-storage preparation
 
-immediate operational task:
-restore and complete SSH key bootstrap safely
+boundary status:
+DONE
+
+host OS:
+Ubuntu Server 24.04.4 LTS
+
+host shell:
+Bash
 
 MacBook shell:
 Fish
 
-test host:
-Intel NUC6i5SYH
+command block terminator:
+#------------------------------------------------------
 
-installed host OS:
-Ubuntu Server 24.04.4 LTS
+SSH:
+dedicated passphrase-protected key, working alias, key-only server policy
 
-host name:
-framenest-nuc
+firewall:
+UFW active, SSH limited to trusted wired LAN
 
-host role:
-test server and security-hardening laboratory
+AppArmor:
+active
 
-2 TB media mount direction:
-/srv/media
+unattended upgrades:
+active
 
-repository deployment target direction:
-Ubuntu, superseding Fedora for current planning
+persistent journal:
+yes
 
-future production platform:
-Ubuntu VPS
+Secure Boot:
+disabled and deferred
 
-Gallery and Details visual direction:
-frozen for MVP absent a concrete defect
+fwupd refresh timer:
+disabled temporarily because of phased package mismatch
+
+system SSD:
+SMART PASSED, monitor historical reallocated-block count
+
+media SSD:
+2 TB Samsung, SMART PASSED, ext4 clean
+
+media mount:
+/srv/media, UUID-backed, nofail,nodev,nosuid,noexec
+
+media ownership:
+root:framenest 2750
+
+media directories:
+memes, youtube, movies
+
+backup strategy:
+unresolved and required before important state
+
+preferred hosting direction:
+NUC personal production server, remote access through future Tailscale
+
+next repository direction:
+Ubuntu deployment ADR, secure Python 3.13 decision, auditable NUC-first deploy
+workflow
 
 private-media authority granted:
 no
@@ -1411,9 +1296,6 @@ no
 
 Worker-task authority granted:
 no
-
-long-term native client direction:
-Tauri v2
 ```
 
 This file restores context and grants no concrete task authority.
