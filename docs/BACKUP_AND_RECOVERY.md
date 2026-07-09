@@ -114,7 +114,9 @@ snapshot, records manifest metadata, and publishes a complete bundle only after
 validation.
 
 Limitation: create does not migrate, stop services, copy cache, copy media,
-include AI configuration, include secrets, or copy off-device.
+include AI configuration, include secrets, or copy off-device. It prioritizes
+no-overwrite publication; an interrupted final publication may leave a bundle
+directory that fails verification and must be treated as unusable.
 
 Preconditions:
 
@@ -145,6 +147,8 @@ Stop conditions:
 - Source is missing, a directory, or a symlink.
 - Output already exists.
 - Output parent is missing, invalid, or unsafe.
+- Permission restriction fails on a POSIX platform where restrictive file modes
+  are supported.
 - The command returns non-zero.
 
 Rollback or cleanup:
@@ -157,8 +161,7 @@ Verification evidence:
 
 - Exit code `0`.
 - Single JSON success line with `state` equal to `created`.
-- Manifest exists in the bundle.
-- Catalog artifact exists in the bundle.
+- Bundle contains exactly `manifest.json` and `catalog.sqlite3`.
 - Output does not disclose source or output paths.
 
 ## Verify
@@ -167,8 +170,8 @@ Threat: a bundle may be incomplete, tampered with, corrupted, or internally
 inconsistent even when files exist.
 
 Benefit: verify checks manifest structure, supported schema version, required
-files, symlink safety, byte size, SHA-256 digest, SQLite integrity, foreign-key
-check, and Alembic revision.
+files, absence of unexpected bundle entries, symlink safety, byte size,
+SHA-256 digest, SQLite integrity, foreign-key check, and Alembic revision.
 
 Limitation: verify does not prove media recovery, secret recovery, service
 readiness, or off-device copy success.
@@ -191,6 +194,8 @@ Stop conditions:
 - Verification returns non-zero.
 - Manifest is malformed or unsupported.
 - The catalog checksum, integrity, or revision check fails.
+- The bundle contains files, directories, symlinks, or secret-shaped artifacts
+  other than the two declared bundle artifacts.
 - The bundle contains temporary/incomplete state.
 
 Rollback or cleanup:
@@ -273,6 +278,8 @@ Stop conditions:
 
 - Destination exists or is a symlink.
 - Restore returns non-zero.
+- Permission restriction fails on a POSIX platform where restrictive file modes
+  are supported.
 - Post-restore checksum, integrity, or revision verification fails.
 
 Rollback or cleanup:

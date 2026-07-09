@@ -55,6 +55,10 @@ manifest.json
 catalog.sqlite3
 ```
 
+No other entries are valid in a version `1` bundle. Verification must reject
+unexpected files, directories, symlinks, secret-shaped artifacts, and temporary
+state rather than treating them as harmless extras.
+
 The manifest schema is versioned. Version `1` records only safe verification
 metadata: UTC creation time, application name/version when available, digest and
 integrity algorithm identifiers, catalog logical artifact name, byte size,
@@ -62,6 +66,11 @@ SHA-256 digest, Alembic revision, included state, and explicitly excluded
 state. It must not record source or destination paths, hostnames, usernames, IP
 addresses, environment variables, SQLite URLs, SQL text, media paths, media
 filenames, exception text, credentials, tokens, or operator comments.
+Manifest validation is intentionally strict for version `1`: timestamps must
+be canonical UTC seconds, algorithms must match the implemented algorithms,
+catalog size must be positive and bounded, SHA-256 values must be lowercase
+hex, Alembic revisions must match the current four-digit revision scheme, and
+unknown nested fields are rejected.
 
 The catalog snapshot must be created with the SQLite online backup mechanism as
 exposed by Python `sqlite3.Connection.backup()`. A naive byte copy of a live
@@ -71,16 +80,17 @@ inspection, size recording, and SHA-256 calculation before the bundle is
 published.
 
 `verify` is read-only. It must reject malformed manifests, unsupported manifest
-versions, missing artifacts, symlink substitution, incomplete temporary state,
-size mismatch, checksum mismatch, SQLite integrity failure, foreign-key failure,
-and recorded-versus-observed Alembic revision mismatch.
+versions, missing artifacts, unexpected bundle entries, symlink substitution,
+incomplete temporary state, size mismatch, checksum mismatch, SQLite integrity
+failure, foreign-key failure, and recorded-versus-observed Alembic revision
+mismatch.
 
 `restore` restores only to a new destination path. It verifies the whole bundle
 first, refuses an existing or symlink destination, copies the verified catalog
 through temporary state in the target directory, rechecks checksum, SQLite
-integrity, and Alembic revision, then publishes the new file. It does not
-migrate, replace production state, stop or start services, delete previous
-databases, or infer application readiness.
+integrity, and Alembic revision, then publishes the new file with no-overwrite
+semantics. It does not migrate, replace production state, stop or start
+services, delete previous databases, or infer application readiness.
 
 In-place production overwrite is not provided by the initial CLI because it is
 service-affecting and potentially destructive. Production replacement remains a
@@ -130,10 +140,18 @@ Backup output and failures must be sanitized deterministic JSON. Command output
 must not disclose paths, SQL, SQLite URLs, environment values, tracebacks, raw
 exception strings, host details, media names, or secrets.
 
-Temporary state must be unpublished until complete. Failure cleanup must remove
-only owned temporary artifacts and must not follow caller-controlled symlinks.
-Bundle directories and catalog/manifest files should use restrictive POSIX
-permissions where supported.
+Temporary state must remain outside the final bundle name until the snapshot
+and manifest pass verification. Final bundle publication must use a
+no-overwrite destination claim so a path created after the initial absence
+check is not replaced. Because no-overwrite safety is stronger than
+directory-level all-at-once replacement for this foundation, the final bundle
+directory may briefly exist before both hard-linked artifacts are present; such
+incomplete bundles fail verification. Restore file publication must also use
+no-overwrite semantics. Failure cleanup must remove only owned temporary or
+newly-created output artifacts and must not follow caller-controlled symlinks.
+Bundle directories and catalog/manifest files must use restrictive POSIX
+permissions where supported; on supported POSIX platforms, inability to apply
+those permissions is a backup or restore failure.
 
 Retention is operator policy. The minimum guidance is to keep more than one
 recent verified bundle, keep at least one off-device copy for important catalog
@@ -155,7 +173,10 @@ Research retrieval date: **2026-07-08**.
 | SQLite Online Backup API | https://www.sqlite.org/backup.html |
 | SQLite `PRAGMA integrity_check` and `foreign_key_check` | https://www.sqlite.org/pragma.html#pragma_integrity_check |
 | SQLite WAL behavior | https://www.sqlite.org/wal.html |
-| Python `os.replace()` atomic rename behavior | https://docs.python.org/3.13/library/os.html#os.replace |
+| SQLite URI filenames | https://www.sqlite.org/uri.html |
+| Python `pathlib.Path.as_uri()` | https://docs.python.org/3.13/library/pathlib.html#pathlib.Path.as_uri |
+| Python `os.rename()`, `os.replace()`, and `os.link()` behavior | https://docs.python.org/3.13/library/os.html |
+| Linux `rename(2)` directory replacement behavior | https://man7.org/linux/man-pages/man2/rename.2.html |
 | Python `hashlib.sha256()` | https://docs.python.org/3.13/library/hashlib.html |
 
 Design facts used:
@@ -170,8 +191,15 @@ Design facts used:
 - WAL allows concurrent readers and writers but has filesystem and operational
   constraints, so backup must use SQLite's backup API rather than copying only
   the main database file.
-- `os.replace()` is atomic on POSIX when successful, but it overwrites an
-  existing file, so restore must refuse existing destinations before publishing.
+- SQLite URI filenames treat `?` as the query delimiter and `#` as the fragment
+  delimiter, so FrameNest must generate a properly escaped file URI before
+  appending `mode=ro`.
+- `os.rename()` and `os.replace()` can overwrite existing files on POSIX, and a
+  directory rename can replace an existing empty directory. FrameNest therefore
+  cannot satisfy no-overwrite publication with a check-then-rename sequence.
+- A hard link to a verified temporary file provides same-filesystem
+  no-overwrite file publication because link creation fails if the destination
+  already exists.
 - SHA-256 is guaranteed by Python's `hashlib` constructors.
 
 ## Consequences

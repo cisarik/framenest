@@ -71,8 +71,12 @@ destination paths, usernames, hostnames, IP addresses, environment values, SQL,
 media paths, media filenames, raw exception text, credentials, tokens, cookies,
 authorization headers, private keys, or secret prefixes. The initial bundle
 excludes Gallery preview cache, original media, non-secret AI configuration,
-and secrets. Restore writes only to a new absent destination and does not
-replace production, run migrations, start services, or prove readiness.
+and secrets. A valid catalog backup bundle contains only the declared manifest
+and catalog artifact; unexpected files, directories, symlinks, and temporary
+state are rejected. Backup and restore publication must not overwrite a path
+that appears after an initial absence check. Restore writes only to a new
+absent destination and does not replace production, run migrations, start
+services, or prove readiness.
 
 Avoid exposing:
 

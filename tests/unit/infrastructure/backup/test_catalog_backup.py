@@ -115,6 +115,35 @@ def test_create_cleans_temporary_state_after_failure(tmp_path: Path, monkeypatch
     assert [path for path in tmp_path.iterdir() if path.name.startswith(".framenest-backup-")] == []
 
 
+def test_create_refuses_output_created_after_absence_check(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from framenest.infrastructure.persistence import catalog_backup as catalog
+    from framenest.infrastructure.persistence.catalog_backup import BackupError
+
+    database_path = _migrated_database(tmp_path / "catalog.sqlite3")
+    bundle = tmp_path / "bundle"
+    original_mkdir = catalog.os.mkdir
+
+    def racing_mkdir(path: Path | str, mode: int = 0o777, *, dir_fd: int | None = None) -> None:
+        if Path(path) == bundle:
+            if dir_fd is None:
+                original_mkdir(path, mode)
+                return original_mkdir(path, mode)
+            original_mkdir(path, mode, dir_fd=dir_fd)
+            return original_mkdir(path, mode, dir_fd=dir_fd)
+        if dir_fd is None:
+            return original_mkdir(path, mode)
+        return original_mkdir(path, mode, dir_fd=dir_fd)
+
+    monkeypatch.setattr(catalog.os, "mkdir", racing_mkdir)
+
+    with pytest.raises(BackupError, match="output"):
+        catalog.create_catalog_backup(database_path, bundle)
+
+    assert bundle.is_dir()
+    assert list(bundle.iterdir()) == []
+    assert [path for path in tmp_path.iterdir() if path.name.startswith(".framenest-backup-")] == []
+
+
 def test_verify_accepts_intact_bundle_and_rejects_tampering(tmp_path: Path) -> None:
     from framenest.infrastructure.persistence.catalog_backup import BackupError, create_catalog_backup, verify_catalog_backup
 
@@ -174,6 +203,32 @@ def test_verify_rejects_missing_catalog_catalog_symlink_and_incomplete_state(tmp
         verify_catalog_backup(incomplete)
 
 
+@pytest.mark.parametrize(
+    ("name", "kind"),
+    [
+        ("extra.txt", "file"),
+        ("nested", "directory"),
+        ("linked", "symlink"),
+        (".env", "file"),
+    ],
+)
+def test_verify_rejects_unexpected_bundle_entries(tmp_path: Path, name: str, kind: str) -> None:
+    from framenest.infrastructure.persistence.catalog_backup import BackupError, create_catalog_backup, verify_catalog_backup
+
+    bundle = tmp_path / "bundle"
+    create_catalog_backup(_migrated_database(tmp_path / "catalog.sqlite3"), bundle)
+    extra = bundle / name
+    if kind == "file":
+        extra.write_text("unexpected", encoding="utf-8")
+    elif kind == "directory":
+        extra.mkdir()
+    else:
+        extra.symlink_to(bundle / "catalog.sqlite3")
+
+    with pytest.raises(BackupError, match="unexpected"):
+        verify_catalog_backup(bundle)
+
+
 def test_manifest_rejects_unexpected_secret_shaped_fields_and_excludes_non_catalog_state(tmp_path: Path) -> None:
     from framenest.infrastructure.persistence.catalog_backup import BackupError, create_catalog_backup, verify_catalog_backup
 
@@ -192,6 +247,40 @@ def test_manifest_rejects_unexpected_secret_shaped_fields_and_excludes_non_catal
     manifest["token"] = "not-allowed"
     (bundle / "manifest.json").write_text(json.dumps(manifest, sort_keys=True), encoding="utf-8")
     with pytest.raises(BackupError, match="manifest"):
+        verify_catalog_backup(bundle)
+
+
+@pytest.mark.parametrize(
+    ("mutator", "message"),
+    [
+        (lambda manifest: manifest.update({"created_at_utc": "2026-07-09 10:00:00Z"}), "manifest"),
+        (lambda manifest: manifest["application"].update({"version": "../../0.1.0"}), "manifest"),
+        (lambda manifest: manifest["algorithms"].update({"digest": "md5"}), "manifest"),
+        (lambda manifest: manifest["catalog"].update({"size_bytes": 0}), "manifest"),
+        (
+            lambda manifest: manifest["catalog"].update({"size_bytes": 16 * 1024 * 1024 * 1024 * 1024 + 1}),
+            "manifest",
+        ),
+        (lambda manifest: manifest["catalog"].update({"sha256": "A" * 64}), "manifest"),
+        (lambda manifest: manifest["catalog"].update({"alembic_revision": "0007-extra"}), "manifest"),
+        (lambda manifest: manifest["catalog"].update({"unexpected": "field"}), "manifest"),
+    ],
+)
+def test_manifest_rejects_noncanonical_or_unsafe_metadata(
+    tmp_path: Path,
+    mutator: object,
+    message: str,
+) -> None:
+    from framenest.infrastructure.persistence.catalog_backup import BackupError, create_catalog_backup, verify_catalog_backup
+
+    bundle = tmp_path / "bundle"
+    create_catalog_backup(_migrated_database(tmp_path / "catalog.sqlite3"), bundle)
+    manifest = _manifest(bundle)
+    assert callable(mutator)
+    mutator(manifest)
+    (bundle / "manifest.json").write_text(json.dumps(manifest, sort_keys=True), encoding="utf-8")
+
+    with pytest.raises(BackupError, match=message):
         verify_catalog_backup(bundle)
 
 
@@ -291,6 +380,97 @@ def test_restore_cleans_temporary_destination_after_failure(
 
     restore_parent = tmp_path / "restored"
     assert not any(restore_parent.iterdir())
+
+
+def test_restore_refuses_destination_created_after_absence_check(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from framenest.infrastructure.persistence import catalog_backup as catalog
+    from framenest.infrastructure.persistence.catalog_backup import BackupError, create_catalog_backup
+
+    bundle = tmp_path / "bundle"
+    create_catalog_backup(_migrated_database(tmp_path / "catalog.sqlite3"), bundle)
+    destination = tmp_path / "restored.sqlite3"
+    original_link = catalog.os.link
+
+    def racing_link(source: Path | str, target: Path | str, *args: object, **kwargs: object) -> None:
+        if Path(target) == destination:
+            destination.write_text("racer", encoding="utf-8")
+        return original_link(source, target, *args, **kwargs)
+
+    monkeypatch.setattr(catalog.os, "link", racing_link)
+
+    with pytest.raises(BackupError, match="destination"):
+        catalog.restore_catalog_backup(bundle, destination)
+
+    assert destination.read_text(encoding="utf-8") == "racer"
+    assert [path for path in tmp_path.iterdir() if path.name.startswith(".restored.sqlite3.") and path.name.endswith(".tmp")] == []
+
+
+def test_create_verify_and_restore_handle_sqlite_paths_with_uri_reserved_characters(tmp_path: Path) -> None:
+    from framenest.infrastructure.persistence.catalog_backup import create_catalog_backup, restore_catalog_backup, verify_catalog_backup
+
+    database_path = _migrated_database(tmp_path / "space ? # percent% literal%2F" / "catalog ?.sqlite3")
+    bundle = tmp_path / "backup ? # percent%"
+    destination = tmp_path / "restore ? # percent%" / "restored%2F.sqlite3"
+
+    result = create_catalog_backup(database_path, bundle)
+    verified = verify_catalog_backup(bundle)
+    restored = restore_catalog_backup(bundle, destination)
+
+    assert result.alembic_revision == "0007"
+    assert verified.catalog_sha256 == result.catalog_sha256
+    assert restored.catalog_sha256 == result.catalog_sha256
+    with sqlite3.connect(destination) as connection:
+        revision = connection.execute("SELECT version_num FROM alembic_version").fetchone()
+    assert revision == ("0007",)
+
+
+def test_create_fails_if_private_permissions_cannot_be_set_where_supported(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from framenest.infrastructure.persistence import catalog_backup as catalog
+    from framenest.infrastructure.persistence.catalog_backup import BackupError
+
+    if os.name == "nt":
+        pytest.skip("POSIX chmod failure handling is not portable to Windows")
+
+    database_path = _migrated_database(tmp_path / "catalog.sqlite3")
+
+    def fail_chmod(path: Path | str, mode: int, *args: object, **kwargs: object) -> None:
+        raise OSError("chmod denied")
+
+    monkeypatch.setattr(catalog.os, "chmod", fail_chmod)
+
+    with pytest.raises(BackupError, match="permissions"):
+        catalog.create_catalog_backup(database_path, tmp_path / "bundle")
+
+    assert not (tmp_path / "bundle").exists()
+    assert [path for path in tmp_path.iterdir() if path.name.startswith(".framenest-backup-")] == []
+
+
+def test_restore_fails_if_private_permissions_cannot_be_set_where_supported(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from framenest.infrastructure.persistence import catalog_backup as catalog
+    from framenest.infrastructure.persistence.catalog_backup import BackupError, create_catalog_backup
+
+    if os.name == "nt":
+        pytest.skip("POSIX chmod failure handling is not portable to Windows")
+
+    bundle = tmp_path / "bundle"
+    create_catalog_backup(_migrated_database(tmp_path / "catalog.sqlite3"), bundle)
+
+    def fail_chmod(path: Path | str, mode: int, *args: object, **kwargs: object) -> None:
+        raise OSError("chmod denied")
+
+    monkeypatch.setattr(catalog.os, "chmod", fail_chmod)
+    destination = tmp_path / "restored.sqlite3"
+
+    with pytest.raises(BackupError, match="permissions"):
+        catalog.restore_catalog_backup(bundle, destination)
+
+    assert not destination.exists()
 
 
 def test_restrictive_file_permissions_where_supported(tmp_path: Path) -> None:

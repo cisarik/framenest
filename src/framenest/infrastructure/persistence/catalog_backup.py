@@ -8,6 +8,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import secrets
 import shutil
 import sqlite3
@@ -20,7 +21,11 @@ MANIFEST_NAME = "manifest.json"
 CATALOG_NAME = "catalog.sqlite3"
 FORMAT_VERSION = 1
 SHA256_PATTERN_LENGTH = 64
+MAX_CATALOG_SIZE_BYTES = 16 * 1024 * 1024 * 1024 * 1024
 TEMP_PREFIX = ".framenest-backup-"
+EXPECTED_BUNDLE_NAMES = frozenset({MANIFEST_NAME, CATALOG_NAME})
+APPLICATION_VERSION_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._+!-]{0,79}")
+ALEMBIC_REVISION_PATTERN = re.compile(r"[0-9]{4}")
 
 BackupState = Literal["created", "verified", "restored"]
 
@@ -68,9 +73,7 @@ def create_catalog_backup(source_database: Path | str, output_bundle: Path | str
         result = verify_catalog_backup(temp_bundle)
         if bundle.exists() or bundle.is_symlink():
             raise BackupError("Backup output already exists.", error_code="OUTPUT_EXISTS")
-        os.rename(temp_bundle, bundle)
-        temp_bundle = Path()
-        _private_directory(bundle)
+        _publish_bundle_no_replace(temp_bundle, bundle)
         return BackupResult(
             state="created",
             catalog_size_bytes=result.catalog_size_bytes,
@@ -89,7 +92,7 @@ def create_catalog_backup(source_database: Path | str, output_bundle: Path | str
 def verify_catalog_backup(bundle: Path | str) -> BackupResult:
     """Verify a catalog backup bundle without modifying it."""
     bundle_path = _existing_directory(bundle, description="backup bundle")
-    _reject_incomplete_state(bundle_path)
+    _reject_unexpected_bundle_state(bundle_path)
     manifest_path = _existing_regular_file(bundle_path / MANIFEST_NAME, description="manifest")
     catalog_path = _existing_regular_file(bundle_path / CATALOG_NAME, description="catalog artifact")
     manifest = _load_manifest(manifest_path)
@@ -135,7 +138,7 @@ def restore_catalog_backup(bundle: Path | str, destination_database: Path | str)
             dir=str(parent),
         )
         temp_path = Path(temp_name)
-        os.chmod(temp_path, 0o600)
+        _private_file(temp_path)
         with source_catalog.open("rb") as source, os.fdopen(fd, "wb") as target:
             fd = -1
             shutil.copyfileobj(source, target, length=1024 * 1024)
@@ -149,9 +152,8 @@ def restore_catalog_backup(bundle: Path | str, destination_database: Path | str)
             raise BackupError("Restored catalog revision mismatch.", error_code="RESTORE_REVISION_MISMATCH")
         if destination.exists() or destination.is_symlink():
             raise BackupError("Restore destination already exists.", error_code="DESTINATION_EXISTS")
-        os.replace(temp_path, destination)
+        _publish_file_no_replace(temp_path, destination)
         temp_path = None
-        _private_file(destination)
         return BackupResult(
             state="restored",
             catalog_size_bytes=verified.catalog_size_bytes,
@@ -180,7 +182,7 @@ def sha256_file(path: Path) -> str:
 
 def _sqlite_online_backup(source: Path, destination: Path) -> None:
     try:
-        with sqlite3.connect(f"file:{source}?mode=ro", uri=True) as source_connection:
+        with sqlite3.connect(_sqlite_readonly_uri(source), uri=True) as source_connection:
             with sqlite3.connect(destination) as destination_connection:
                 source_connection.backup(destination_connection, pages=128, sleep=0.050)
                 destination_connection.execute("PRAGMA wal_checkpoint(PASSIVE)")
@@ -190,7 +192,7 @@ def _sqlite_online_backup(source: Path, destination: Path) -> None:
 
 def _verify_sqlite_integrity(path: Path) -> None:
     try:
-        with sqlite3.connect(f"file:{path}?mode=ro", uri=True) as connection:
+        with sqlite3.connect(_sqlite_readonly_uri(path), uri=True) as connection:
             rows = connection.execute("PRAGMA integrity_check").fetchall()
             if rows != [("ok",)]:
                 raise BackupError("SQLite integrity check failed.", error_code="SQLITE_INTEGRITY_FAILED")
@@ -205,7 +207,7 @@ def _verify_sqlite_integrity(path: Path) -> None:
 
 def _catalog_revision(path: Path) -> str:
     try:
-        with sqlite3.connect(f"file:{path}?mode=ro", uri=True) as connection:
+        with sqlite3.connect(_sqlite_readonly_uri(path), uri=True) as connection:
             row = connection.execute("SELECT version_num FROM alembic_version").fetchone()
     except sqlite3.Error as exc:
         raise BackupError("Catalog revision is unavailable.", error_code="CATALOG_REVISION_UNAVAILABLE") from exc
@@ -256,7 +258,7 @@ def _atomic_write_manifest(path: Path, payload: dict[str, object]) -> None:
     try:
         fd, temp_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=str(path.parent))
         temp_path = Path(temp_name)
-        os.chmod(temp_path, 0o600)
+        _private_file(temp_path)
         with os.fdopen(fd, "wb") as handle:
             fd = -1
             handle.write(body)
@@ -296,9 +298,13 @@ def _validate_manifest(payload: dict[str, object]) -> None:
     }
     if set(payload) != expected_keys or payload.get("schema_version") != FORMAT_VERSION:
         raise BackupError("Backup manifest version is unsupported.", error_code="MANIFEST_UNSUPPORTED")
-    if not isinstance(payload["created_at_utc"], str) or not payload["created_at_utc"].endswith("Z"):
+    if not _is_canonical_utc_timestamp(payload["created_at_utc"]):
         raise BackupError("Backup manifest is malformed.", error_code="MANIFEST_MALFORMED")
     _validate_string_map(payload["application"], {"name": "framenest", "version": None})
+    application = payload["application"]
+    assert isinstance(application, dict)
+    if not _is_application_version(application["version"]):
+        raise BackupError("Backup manifest is malformed.", error_code="MANIFEST_MALFORMED")
     _validate_string_map(
         payload["algorithms"],
         {"digest": "sha256", "sqlite_integrity": "pragma_integrity_check"},
@@ -313,11 +319,17 @@ def _validate_manifest(payload: dict[str, object]) -> None:
         raise BackupError("Backup manifest is malformed.", error_code="MANIFEST_MALFORMED")
     if catalog["logical_name"] != CATALOG_NAME:
         raise BackupError("Backup manifest is malformed.", error_code="MANIFEST_MALFORMED")
-    if not isinstance(catalog["size_bytes"], int) or catalog["size_bytes"] <= 0:
+    if (
+        not isinstance(catalog["size_bytes"], int)
+        or catalog["size_bytes"] <= 0
+        or catalog["size_bytes"] > MAX_CATALOG_SIZE_BYTES
+    ):
         raise BackupError("Backup manifest is malformed.", error_code="MANIFEST_MALFORMED")
     if not _is_sha256(catalog["sha256"]):
         raise BackupError("Backup manifest is malformed.", error_code="MANIFEST_MALFORMED")
-    if not isinstance(catalog["alembic_revision"], str) or not catalog["alembic_revision"]:
+    if not isinstance(catalog["alembic_revision"], str) or not ALEMBIC_REVISION_PATTERN.fullmatch(
+        catalog["alembic_revision"],
+    ):
         raise BackupError("Backup manifest is malformed.", error_code="MANIFEST_MALFORMED")
     if payload["included_state"] != ["catalog_database"]:
         raise BackupError("Backup manifest is malformed.", error_code="MANIFEST_MALFORMED")
@@ -347,6 +359,24 @@ def _is_sha256(value: object) -> bool:
         and len(value) == SHA256_PATTERN_LENGTH
         and all(character in "0123456789abcdef" for character in value)
     )
+
+
+def _is_canonical_utc_timestamp(value: object) -> bool:
+    if not isinstance(value, str):
+        return False
+    try:
+        parsed = datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
+    except ValueError:
+        return False
+    return parsed.isoformat().replace("+00:00", "Z") == value
+
+
+def _is_application_version(value: object) -> bool:
+    return isinstance(value, str) and APPLICATION_VERSION_PATTERN.fullmatch(value) is not None
+
+
+def _sqlite_readonly_uri(path: Path) -> str:
+    return f"{path.as_uri()}?mode=ro"
 
 
 def _existing_regular_file(path_like: Path | str, *, description: str) -> Path:
@@ -404,22 +434,80 @@ def _absolute(path: Path, *, description: str) -> Path:
     return path.resolve(strict=False)
 
 
-def _reject_incomplete_state(bundle: Path) -> None:
-    for child in bundle.iterdir():
-        if child.name.startswith(TEMP_PREFIX) or child.name.endswith(".tmp"):
-            raise BackupError("Backup bundle contains incomplete state.", error_code="INCOMPLETE_BUNDLE")
+def _reject_unexpected_bundle_state(bundle: Path) -> None:
+    observed_names = {child.name for child in bundle.iterdir()}
+    if any(name.startswith(TEMP_PREFIX) or name.endswith(".tmp") for name in observed_names):
+        raise BackupError("Backup bundle contains incomplete state.", error_code="INCOMPLETE_BUNDLE")
+    if not observed_names.issubset(EXPECTED_BUNDLE_NAMES):
+        raise BackupError("Backup bundle contains unexpected state.", error_code="UNEXPECTED_BUNDLE_STATE")
 
 
 def _private_directory(path: Path) -> None:
     try:
         os.chmod(path, 0o700)
-    except OSError:
-        pass
+    except OSError as exc:
+        if os.name != "nt":
+            raise BackupError("Backup permissions could not be restricted.", error_code="PERMISSION_FAILED") from exc
 
 
 def _private_file(path: Path) -> None:
     try:
         os.chmod(path, 0o600)
+    except OSError as exc:
+        if os.name != "nt":
+            raise BackupError("Backup permissions could not be restricted.", error_code="PERMISSION_FAILED") from exc
+
+
+def _publish_bundle_no_replace(temp_bundle: Path, bundle: Path) -> None:
+    created_final = False
+    try:
+        os.mkdir(bundle, 0o700)
+        created_final = True
+        _private_directory(bundle)
+        _publish_file_no_replace(temp_bundle / MANIFEST_NAME, bundle / MANIFEST_NAME)
+        _publish_file_no_replace(temp_bundle / CATALOG_NAME, bundle / CATALOG_NAME)
+        verify_catalog_backup(bundle)
+    except FileExistsError as exc:
+        raise BackupError("Backup output already exists.", error_code="OUTPUT_EXISTS") from exc
+    except BackupError:
+        if created_final:
+            _remove_owned_final_bundle(bundle)
+        raise
+    except OSError as exc:
+        if created_final:
+            _remove_owned_final_bundle(bundle)
+        raise BackupError("Backup output could not be published.", error_code="OUTPUT_PUBLISH_FAILED") from exc
+    _remove_owned_temp_bundle(temp_bundle)
+
+
+def _publish_file_no_replace(source: Path, destination: Path) -> None:
+    try:
+        os.link(source, destination, follow_symlinks=False)
+        _private_file(destination)
+    except FileExistsError as exc:
+        raise BackupError("Restore destination already exists.", error_code="DESTINATION_EXISTS") from exc
+    except BackupError:
+        _unlink_created_output_file(destination)
+        raise
+    except OSError as exc:
+        _unlink_created_output_file(destination)
+        raise BackupError("Output file could not be published.", error_code="OUTPUT_PUBLISH_FAILED") from exc
+
+
+def _remove_owned_final_bundle(path: Path) -> None:
+    for name in EXPECTED_BUNDLE_NAMES:
+        child = path / name
+        _unlink_created_output_file(child)
+    try:
+        path.rmdir()
+    except OSError:
+        pass
+
+
+def _unlink_created_output_file(path: Path) -> None:
+    try:
+        if path.exists() or path.is_symlink():
+            path.unlink()
     except OSError:
         pass
 
@@ -427,7 +515,10 @@ def _private_file(path: Path) -> None:
 def _remove_owned_temp_bundle(path: Path) -> None:
     if not path.name.startswith(TEMP_PREFIX) or path.is_symlink() or not path.exists():
         return
-    shutil.rmtree(path)
+    try:
+        shutil.rmtree(path)
+    except OSError:
+        pass
 
 
 def _unlink_owned_temp_file(path: Path) -> None:
