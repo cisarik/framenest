@@ -101,6 +101,13 @@ FrameNest security work should follow these principles:
 - Require explicit confirmation for destructive actions.
 - Do not distribute provider secrets to ordinary client installations.
 
+The sanitized NUC baseline in [docs/NUC_HOST_BASELINE.md](docs/NUC_HOST_BASELINE.md)
+is evidence of accepted host preparation, not authority for future host
+mutation. The pinned AP integration in [AGENTS.md](AGENTS.md) and
+[ADR-0034](docs/adr/0034-canonical-analytic-programming-integration.md) defines
+task-authority boundaries; tool or credential availability is never permission
+by itself.
+
 ## Secure Media Content Endpoint
 
 The `GET /api/media/{media_id}/locations/{location_id}/content` endpoint serves registered local media content securely:

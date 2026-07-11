@@ -330,7 +330,10 @@ Open product questions include:
 
 This document complements the repository overview in [README.md](README.md).
 
-Agent and protocol behavior are defined in [AGENTS.md](AGENTS.md) and [AP.md](AP.md).
+Agent and protocol behavior is defined by [AGENTS.md](AGENTS.md) and the
+pinned canonical AP submodule beginning at [`.ap/AP.md`](.ap/AP.md).
+FrameNest's AP integration decision is recorded in
+[ADR-0034](docs/adr/0034-canonical-analytic-programming-integration.md).
 
 [SPEC.md](SPEC.md) defines normative product and system requirements.
 

@@ -10,6 +10,12 @@ service-replacement procedure, or deployment acceptance record.
 
 Authoritative decision: [ADR-0033](adr/0033-catalog-backup-and-recovery-foundation.md).
 
+The accepted sanitized NUC host baseline is recorded in
+[NUC_HOST_BASELINE.md](NUC_HOST_BASELINE.md). That baseline confirms the current
+media-storage preparation state but does not replace catalog backup, media
+second-copy planning, secret recovery, restore drills, or deployment
+acceptance.
+
 ## State Classes
 
 | State | Path | Backup treatment |

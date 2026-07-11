@@ -14,6 +14,19 @@ Supported runtime: CPython `>=3.13,<3.14`. Local development uses a uv-managed C
 
 ## Development Setup
 
+Preferred clone:
+
+```text
+git clone --recurse-submodules <repository>
+```
+
+If the repository was cloned without submodules:
+
+```text
+git submodule update --init --recursive
+./.ap/ap doctor
+```
+
 From the repository root on Apple Silicon macOS:
 
 ```text
@@ -267,7 +280,29 @@ Security decisions should favor least privilege, explicit confirmation for destr
 
 ## Development Methodology
 
-FrameNest development follows Analytic Programming and the Coordinator Protocol:
+FrameNest development follows Analytic Programming through the pinned `.ap/`
+Git submodule. The initial AP pin is:
+
+```text
+c4c69f52b9995c609248cee5d04223dbddd6da5f
+```
+
+Universal AP protocol files live under `.ap/`. FrameNest-specific operating
+rules live in [AGENTS.md](AGENTS.md) outside the managed AP block. Verify AP
+integration with:
+
+```text
+./.ap/ap doctor
+```
+
+AP updates are explicit, reviewed, and committed as `.ap` gitlink changes.
+FrameNest does not consume AP `main` dynamically. Permanent `BOOT_*` and
+`NEXT_*` files are not part of the current live repository model. Orchestrator
+rotation normally uses a generated professional restoration prompt. A repository
+handoff is exceptional context, not task authority, and Michal is not expected
+to manually create `handout` commits by default.
+
+Core working principles remain:
 
 - Inspect before changing.
 - Use the repository as the source of truth.
@@ -302,13 +337,10 @@ Current foundation files:
 - [`AI_WORKSPACE.md`](AI_WORKSPACE.md) records accepted manual-first metadata and multi-model AI workspace direction.
 - [`COVER_PIPELINE.md`](COVER_PIPELINE.md) records accepted Cover Studio and cover candidate direction.
 - [`AGENTS.md`](AGENTS.md) defines FrameNest-specific agent operating rules.
-- [`AP.md`](AP.md) defines the general Analytic Programming protocol.
-- [`AP_ORCHESTRATOR.md`](AP_ORCHESTRATOR.md) defines the Orchestrator operating handbook.
-- [`AP_WORKER.md`](AP_WORKER.md) defines the Worker operating handbook.
-- [`BOOT_ORCHESTRATOR.md`](BOOT_ORCHESTRATOR.md) defines the stable FrameNest Orchestrator bootstrap.
-- [`BOOT_WORKER.md`](BOOT_WORKER.md) defines the stable FrameNest Worker bootstrap.
-- [`NEXT_ORCHESTRATOR.md`](NEXT_ORCHESTRATOR.md) carries the current Orchestrator session handoff.
-- [`NEXT_WORKER.md`](NEXT_WORKER.md) carries the current Worker session handoff.
+- [`.ap/README.md`](.ap/README.md), [`.ap/INTEGRATION.md`](.ap/INTEGRATION.md), and [`.ap/AP.md`](.ap/AP.md) define the pinned canonical Analytic Programming protocol integration.
+- [`.ap/AP_ORCHESTRATOR.md`](.ap/AP_ORCHESTRATOR.md) defines the universal Orchestrator handbook.
+- [`.ap/AP_WORKER.md`](.ap/AP_WORKER.md) defines the universal Worker handbook.
+- [`docs/NUC_HOST_BASELINE.md`](docs/NUC_HOST_BASELINE.md) preserves sanitized command-observed NUC host baseline facts accepted before real FrameNest deployment.
 - [`docs/ARCHITECTURE_FOUNDATION_EVIDENCE.md`](docs/ARCHITECTURE_FOUNDATION_EVIDENCE.md) collects primary-source evidence for the first architecture decisions. It is not an ADR and does not approve any option.
 - [`docs/adr/README.md`](docs/adr/README.md) indexes accepted architecture decision records.
 - [`docs/adr/0001-supported-python-version.md`](docs/adr/0001-supported-python-version.md) records the accepted CPython 3.13 runtime decision.
@@ -341,6 +373,10 @@ Current foundation files:
 - [`docs/adr/0028-catalog-read-model-and-search-semantics.md`](docs/adr/0028-catalog-read-model-and-search-semantics.md) records the accepted catalog read model and search semantics decision.
 - [`docs/adr/0029-persistent-plain-text-media-description.md`](docs/adr/0029-persistent-plain-text-media-description.md) records the accepted persistent plain-text media description decision.
 - [`docs/adr/0030-automatic-processed-collection.md`](docs/adr/0030-automatic-processed-collection.md) records the accepted automatic built-in `Processed` workflow collection decision.
+- [`docs/adr/0031-fedora-systemd-service-foundation.md`](docs/adr/0031-fedora-systemd-service-foundation.md) records the historical Fedora systemd service foundation superseded by ADR-0032 for the active deployment target.
+- [`docs/adr/0032-ubuntu-nuc-deployment-foundation.md`](docs/adr/0032-ubuntu-nuc-deployment-foundation.md) records the accepted Ubuntu NUC deployment foundation.
+- [`docs/adr/0033-catalog-backup-and-recovery-foundation.md`](docs/adr/0033-catalog-backup-and-recovery-foundation.md) records the accepted catalog backup and recovery foundation.
+- [`docs/adr/0034-canonical-analytic-programming-integration.md`](docs/adr/0034-canonical-analytic-programming-integration.md) records the accepted pinned canonical AP submodule integration.
 
 ## Non-Goals for the Current Stage
 

@@ -21,9 +21,14 @@ task. Git history remains the archive.
 From the repository root:
 
 ```text
+git submodule update --init --recursive
+./.ap/ap doctor
 ./framenest setup
 ./framenest start
 ```
+
+The AP doctor validates the pinned canonical Analytic Programming submodule and
+the managed block in [AGENTS.md](AGENTS.md). It does not replace product tests.
 
 `setup` locates the uv-managed CPython `3.13.14`, installs it with `uv` if it is
 missing, configures Poetry to use that interpreter with `.venv/`, and runs

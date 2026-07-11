@@ -45,6 +45,9 @@ production database replacement, media backup, secret recovery, and
 authentication remain unimplemented. The minimum catalog backup and
 restore-to-new-destination foundation is documented in
 [docs/BACKUP_AND_RECOVERY.md](docs/BACKUP_AND_RECOVERY.md).
+Sanitized command-observed NUC hardening and media-storage baseline facts are
+preserved in [docs/NUC_HOST_BASELINE.md](docs/NUC_HOST_BASELINE.md); that
+baseline is not host mutation authority or FrameNest deployment acceptance.
 
 ## Same Core, Different Deployment Capabilities
 

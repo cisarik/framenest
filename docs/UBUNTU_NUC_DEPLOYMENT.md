@@ -18,8 +18,8 @@ reviewers.
 Retention: remains while Ubuntu NUC deployment is the current server workflow.
 
 Inbound links: [ADR-0032](adr/0032-ubuntu-nuc-deployment-foundation.md),
-[SERVER.md](../SERVER.md), [SECURITY.md](../SECURITY.md), and
-[ROADMAP.md](../ROADMAP.md).
+[NUC_HOST_BASELINE.md](NUC_HOST_BASELINE.md), [SERVER.md](../SERVER.md),
+[SECURITY.md](../SECURITY.md), and [ROADMAP.md](../ROADMAP.md).
 
 Cleanup/update owner: future explicitly authorized Worker under an Orchestrator
 task. Git history remains the archive.
@@ -44,11 +44,16 @@ deploy/systemd/framenest.env.example
 deploy/ubuntu/README.md
 docs/adr/0032-ubuntu-nuc-deployment-foundation.md
 docs/adr/0033-catalog-backup-and-recovery-foundation.md
+docs/NUC_HOST_BASELINE.md
 docs/BACKUP_AND_RECOVERY.md
 ```
 
 The service artifacts are source material. Committing them does not install,
 enable, start, stop, reload, or inspect a real service.
+
+[NUC_HOST_BASELINE.md](NUC_HOST_BASELINE.md) records the accepted sanitized
+host hardening and media-storage baseline. It does not grant mutation authority
+and does not prove that FrameNest has been deployed.
 
 ## Stable Service Contract
 

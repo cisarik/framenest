@@ -1,87 +1,147 @@
 # FrameNest Agent Instructions
 
-## Project Identity
+FrameNest is a local-first, privacy-conscious, cross-platform library for video
+and animated media. It is in foundation-stage pre-alpha development with a
+working loopback FastAPI server, SQLite/Alembic persistence, packaged local web
+shell, catalog and metadata foundations, server-side AI suggestion review, a
+catalog backup foundation, and repository-native systemd source material for an
+Ubuntu NUC deployment workflow.
 
-FrameNest is a local-first, privacy-conscious, cross-platform library for video and animated media. It is currently in a foundation-stage, pre-alpha state. A minimal Poetry package scaffold exists with centralized configuration, a FastAPI application factory, a Uvicorn loopback-first runtime wired through `framenest.server`, a typed health endpoint tested in-process and through a real local listener, a runnable development server command (`poetry run framenest-server`), a minimal SQLAlchemy Core/Alembic SQLite persistence foundation with explicit database commands (`poetry run framenest-db status` and `poetry run framenest-db migrate`), a development operator catalog command (`poetry run framenest-catalog`) for local device, library, scan-preview, analysis-preview, and suggestion-preview operations, a packaged same-origin local web shell with library listing, scan preview, local analysis preview, explicit scan-candidate import, imported-media catalog browsing with display-title search and canonical-tag AND filters, a manual `Current` metadata workspace for persistent display-title, optional plain-text description, and ordered canonical-tag assignment, an automatic built-in `Processed` workflow collection derived from durable metadata saves containing at least one canonical tag with a virtual `All media` Catalog scope and an optional `Processed` Catalog scope, non-persistent AI suggestion review, and a repository-native systemd service foundation with a non-secret environment template, read-only database-readiness gate, and Ubuntu NUC deployment-readiness workflow. Ubuntu Server 24.04 on the Intel NUC6i5SYH is the current concrete personal production server target; the prior Fedora service decision is historical and superseded for the active deployment target by ADR-0032. A minimal pure-domain identity package, pure-domain `Device`, `Library`, `LogicalMedia`, `MediaLocation`, display-title, and canonical-tag entities, application repository ports, an application scan-preview boundary with a standard-library filesystem scanner per [ADR-0014](docs/adr/0014-safe-library-scan-preview.md), an explicit idempotent scan import boundary per [ADR-0026](docs/adr/0026-explicit-idempotent-scan-candidate-import.md), a persistent display-title and canonical-tag core per [ADR-0027](docs/adr/0027-persistent-display-title-and-canonical-tags.md), a deterministic catalog read model and search semantics per [ADR-0028](docs/adr/0028-catalog-read-model-and-search-semantics.md), synchronous SQLAlchemy Core registry and media adapters, and Alembic migration revisions through `0007` for the current catalog schema exist, where revision `0007` adds the nullable `collection_key` and `processed_at_ms` columns for the automatic built-in `Processed` workflow collection. There is no completed end-user desktop application, storage-volume registration, arbitrary user-created collections, a general collection manager, suggested filenames, covers, thumbnails, persistent AI Drafts, persistent premium gallery, real host deployment, service user creation, release installation, systemd installation or activation, Tailscale integration, authentication, AppArmor/UFW policy, production provider-secret integration, or backup/restore yet.
+<!-- BEGIN MANAGED AP INTEGRATION -->
+## Analytic Programming
 
-## Roles
+This project uses Analytic Programming through the pinned Git submodule at `.ap/`.
+The exact AP version is the commit recorded by this repository's `.ap` gitlink.
 
-The COOPERATOR is the human project owner. The Cooperator owns strategic intent, approves important alternatives, performs physical-device and account-level actions, executes explicitly assigned human steps, and approves irreversible or security-sensitive operations.
+Required reading:
+- All participants read `.ap/AP.md`.
+- Orchestrators also read `.ap/AP_ORCHESTRATOR.md`.
+- Workers also read `.ap/AP_WORKER.md`.
+- Prompt structures are in `.ap/PROMPT_CONTRACTS.md`.
 
-The ORCHESTRATOR is the ChatGPT orchestration layer. The Orchestrator preserves project coherence, inspects evidence, shapes bounded Worker tasks, reviews Worker reports, verifies public commits, and decides whether to accept, correct, continue, pause, or close a session.
+Project-specific rules outside this managed block remain authoritative within
+their scope. Task authority comes only from the current authoritative
+Orchestrator prompt.
 
-The WORKER is the repository execution role. Any compatible Worker implementation may fulfill it, including an IDE-integrated agent, a command-line agent, a local or remote execution agent, or a multi-agent system exposed through one accountable Worker endpoint. The authoritative task and repository protocol remain unchanged regardless of implementation. Availability of tools does not grant permission. The Worker inspects before modification, executes only the authorized task, maintains task boundaries, verifies results, and reports evidence honestly.
+Treat `.ap/` as read-only during ordinary project work. Protocol updates require
+a separate explicit AP update task.
+<!-- END MANAGED AP INTEGRATION -->
 
-## Language Rules
+## Project Truth
 
-Repository documentation and code must be written in professional English unless a task explicitly says otherwise.
+Repository files, tests, Git history, public commits, ADRs, and current product
+documents are the source of truth. Worker reports are structured claims and must
+be verified against repository and public evidence when commits are involved.
 
-Worker prompts are English.
+Current product, system, and operational truth is distributed across:
 
-Worker reports are English and must begin with:
+- [README.md](README.md) for repository status and user-facing overview.
+- [PRODUCT.md](PRODUCT.md) for approved product direction.
+- [SPEC.md](SPEC.md) for normative product and system requirements.
+- [ROADMAP.md](ROADMAP.md) for staged development.
+- [SECURITY.md](SECURITY.md) for security policy and privacy boundaries.
+- [SERVER.md](SERVER.md) for optional server and NUC aggregation direction.
+- [docs/UBUNTU_NUC_DEPLOYMENT.md](docs/UBUNTU_NUC_DEPLOYMENT.md) for the
+  Ubuntu NUC deployment runbook.
+- [docs/BACKUP_AND_RECOVERY.md](docs/BACKUP_AND_RECOVERY.md) for the catalog
+  backup and recovery foundation.
+- [docs/NUC_HOST_BASELINE.md](docs/NUC_HOST_BASELINE.md) for sanitized,
+  command-observed NUC host baseline facts.
+- [docs/adr/README.md](docs/adr/README.md) for accepted architecture decisions.
 
-`### Report for ORCHESTRATOR_CHAT`
+When sources conflict, identify the exact conflict, determine whether a source
+is stale, incomplete, misunderstood, or intentionally superseded, and escalate
+strategic conflicts to Michal through the Orchestrator.
 
-Orchestrator communication with the Cooperator is Slovak.
+## Communication
 
-Do not use Czech in repository documents, Worker prompts, or Worker reports.
+The COOPERATOR is Michal. Orchestrator communication with Michal is in Slovak,
+addresses him with masculine grammatical forms, and uses feminine grammatical
+forms for Orchestrator self-reference.
 
-## Operating Rules
+Repository documentation, code documentation, Worker prompts, and Worker reports
+are written in professional English unless a task explicitly says otherwise. Do
+not use Czech in repository documents, Worker prompts, or Worker reports.
 
-- Inspect before changing.
-- Do not expand scope silently.
-- Do not access or print secrets.
-- Do not perform destructive actions without explicit authorization.
-- Do not perform Git write operations without task-specific permission.
-- Do not install dependencies unless explicitly authorized.
-- Do not choose frameworks, databases, or architecture details without an approved task or recorded decision.
+Worker reports begin exactly:
 
-## Public Commit Verification
+```markdown
+### Report for ORCHESTRATOR_CHAT
+```
 
-A Worker report is a structured claim. Public committed state is independently inspectable evidence.
+Human-facing command blocks for Michal's MacBook use Fish-compatible syntax and
+begin with:
 
-When commits are pushed, the Orchestrator should compare the public commit SHA, file tree, diff, and raw file content with the Worker report. Local uncommitted state and public committed state must not be conflated.
+```text
+# [MacBook / fish]
+```
 
-## Source-of-Truth Conflict Handling
+Human-facing command blocks for an already-open NUC session use Bash-compatible
+syntax and begin with:
 
-Repository files describe documented and implemented state. Tests describe verified behavior. Git history describes committed changes. Product foundation documents (`PRODUCT.md`, `SPEC.md`, and `ROADMAP.md`) are committed. The accepted architecture package includes [ADR-0001](docs/adr/0001-supported-python-version.md) (CPython 3.13), [ADR-0002](docs/adr/0002-python-environment-and-dependency-manager.md) (Poetry), [ADR-0003](docs/adr/0003-initial-server-api-framework.md) (FastAPI), [ADR-0004](docs/adr/0004-repository-layout.md) (hybrid staged repository layout), [ADR-0005](docs/adr/0005-configuration-strategy.md) (layered configuration strategy), [ADR-0006](docs/adr/0006-macos-python-interpreter-provider.md) (`uv` as the Apple Silicon macOS CPython 3.13.14 interpreter provider while Poetry remains dependency and virtual-environment authority), [ADR-0007](docs/adr/0007-settings-library.md) (`pydantic-settings` as the concrete settings adapter with domain independence from Pydantic), [ADR-0008](docs/adr/0008-asgi-runtime.md) (Uvicorn as the initial ASGI runtime, installed and wired as the loopback-first development server), [ADR-0009](docs/adr/0009-structured-logging-approach.md) (standard-library logging with a FrameNest-owned structured JSON formatter and centralized redaction boundary, implemented in `src/framenest/structured_logging.py`; Uvicorn uses explicit FrameNest `log_config`; access logs are initially disabled; no file logging, retention, or correlation middleware yet), [ADR-0010](docs/adr/0010-initial-persistence-foundation.md) (synchronous SQLAlchemy 2.x Core with Alembic for SQLite migrations and FrameNest-owned repository boundaries; no ORM, SQLModel, or async SQLite access for the initial foundation; a minimal explicit SQLite migration foundation exists), [ADR-0011](docs/adr/0011-stable-domain-identities.md) (application-owned UUIDv4 stable identities with category-specific pure-domain types for logical media, physical locations, devices, libraries, storage volumes, and series), [ADR-0012](docs/adr/0012-initial-device-registry.md) (minimal pure-domain `Device` entity, application `DeviceRepository` port, synchronous SQLAlchemy Core adapter, and Alembic revision `0002` for the initial local device registry), [ADR-0013](docs/adr/0013-initial-library-registry.md) (minimal pure-domain `Library` and `LibraryRoot` entities, application `LibraryRepository` port, synchronous SQLAlchemy Core adapter, and Alembic revision `0003` for the initial local library registry), [ADR-0014](docs/adr/0014-safe-library-scan-preview.md) (bounded deterministic read-only library scan preview), [ADR-0017](docs/adr/0017-initial-local-web-application-delivery.md) (packaged same-origin vanilla web shell), [ADR-0025](docs/adr/0025-minimum-persistent-media-catalog-foundation.md) (minimum logical-media and physical-location catalog foundation in revision `0004`), [ADR-0026](docs/adr/0026-explicit-idempotent-scan-candidate-import.md) (explicit idempotent import from selected scan candidates), [ADR-0027](docs/adr/0027-persistent-display-title-and-canonical-tags.md) (persistent display-title and canonical-tag core in revision `0005`), [ADR-0028](docs/adr/0028-catalog-read-model-and-search-semantics.md) (dedicated read-only catalog read model with display-title search, canonical-tag AND filters, deterministic ordering, and bounded offset pagination), [ADR-0030](docs/adr/0030-automatic-processed-collection.md) (automatic built-in `Processed` workflow collection derived from durable tag saves with migration `0007`, accepted and implemented for the bounded built-in Processed workflow, with one zero-or-one collection membership per medium and no arbitrary collection CRUD or general collection manager), [ADR-0031](docs/adr/0031-fedora-systemd-service-foundation.md) (historical repository-native Fedora systemd service foundation with stable service-owned state/cache/config/runtime boundaries and a read-only database-readiness gate; superseded by ADR-0032 for the active deployment target), and [ADR-0032](docs/adr/0032-ubuntu-nuc-deployment-foundation.md) (Ubuntu Server 24.04 on Intel NUC6i5SYH as the current personal production server target, secure isolated CPython 3.13 provisioning through verified `uv`, exact-release deployment workflow, platform-neutral systemd boundaries, `/srv/media` read-only original-media semantics, and no real host deployment or activation). Future accepted decisions require bounded tasks and ADRs recorded in [docs/adr/](docs/adr/README.md).
+```text
+# [NUC / bash]
+```
 
-Handoff files describe session state but do not independently redefine permanent strategy.
+Every human-facing command block for either environment ends with:
 
-When sources conflict, identify the exact conflict, determine whether a source is stale, incomplete, misunderstood, or intentionally superseded, and escalate strategic conflicts to the Cooperator through the Orchestrator.
+```text
+#------------------------------------------------------
+```
 
-## Product Invariants
+Do not mix MacBook and NUC commands in one unlabeled block.
 
-- FrameNest remains local-first.
-- A premium gallery is a flagship product invariant.
-- Server functionality must not replace local desktop functionality.
-- Backend services must not be publicly exposed by default.
-- Remote access direction is Tailscale-only unless explicitly superseded by an approved decision.
-- Provider secrets must not be distributed to ordinary client installations.
+## Security Boundaries
 
-## Handoff Model
+Private media access requires explicit task authority. Real provider calls
+require explicit task authority. Credentials, secret values, private keys,
+tokens, cookies, authorization headers, private media filenames, host-specific
+identifiers, disk serials, UUIDs, SSH fingerprints, and private network values
+must not be exposed in repository artifacts or reports.
 
-FrameNest uses exactly these four lifecycle files:
+NUC, SSH, sudo, firewall, storage, package-manager, deployment, systemd,
+AppArmor, UFW, Tailscale, and mount mutations require explicit bounded
+authority. Availability of a connection, credential, terminal, mounted disk, or
+tool is capability context, not authority.
 
-- `BOOT_ORCHESTRATOR.md`: one-time bootstrap for a new Orchestrator chat.
-- `BOOT_WORKER.md`: stable Worker bootstrap protocol.
-- `NEXT_ORCHESTRATOR.md`: session-close handoff for a future Orchestrator.
-- `NEXT_WORKER.md`: concise repository-local Worker handoff.
+FrameNest backend services must remain loopback-first by default. No router port
+forwarding is accepted for FrameNest. Remote access direction remains
+Tailscale-only unless a later accepted decision supersedes it. Tailscale
+membership is not application administrator authority.
 
-`BOOT_ORCHESTRATOR.md` is the stable Orchestrator bootstrap. `BOOT_WORKER.md` is stable Worker bootstrap protocol. `NEXT_ORCHESTRATOR.md` carries the latest Orchestrator-session handoff when an Orchestrator session is intentionally closed. `NEXT_WORKER.md` carries the latest Worker-session handoff when a Worker session is intentionally closed. Do not create `NEXT_AGENT.md`.
+Original server media under `/srv/media` is read-only to the service by default.
+Do not grant broad service write access to source media to implement upload or
+ingest. Ordinary clients must never receive provider secrets.
 
-General session rotation and context-pressure rules are in [AP.md](AP.md), section **Session Rotation and Context Pressure**.
+## Product Boundaries
 
-## Protocol Documents
+FrameNest remains local-first. Server functionality must not replace local
+desktop functionality. The premium gallery remains a flagship product invariant.
 
-- [AP.md](AP.md): general Analytic Programming protocol.
-- [AP_ORCHESTRATOR.md](AP_ORCHESTRATOR.md): operational handbook for Orchestrators.
-- [AP_WORKER.md](AP_WORKER.md): operational handbook for Workers.
-- [BOOT_ORCHESTRATOR.md](BOOT_ORCHESTRATOR.md): stable Orchestrator bootstrap.
-- [BOOT_WORKER.md](BOOT_WORKER.md): FrameNest-specific Worker bootstrap.
-- [NEXT_ORCHESTRATOR.md](NEXT_ORCHESTRATOR.md): current Orchestrator session handoff.
-- [PRODUCT.md](PRODUCT.md): approved product direction and experience principles.
-- [SPEC.md](SPEC.md): normative product and system requirements.
-- [ROADMAP.md](ROADMAP.md): staged, evidence-based development plan.
+Rendered UX acceptance belongs to Michal. The accepted Gallery and Details MVP
+visual behavior remains frozen unless a concrete defect is identified.
 
-The accepted architecture package is summarized under **Source-of-Truth Conflict Handling** above.
+Do not hide new product scope inside infrastructure, deployment, backup,
+protocol, or migration work. Do not claim desktop app, real host deployment,
+Tailscale, authentication, production provider-secret integration, arbitrary
+collection management, persistent AI Drafts, covers, thumbnails, upload,
+synchronization, or complete backup coverage until repository evidence proves
+it.
+
+## Git And Lifecycle
+
+Do not perform Git write operations without task-specific authority. When Git
+writes are authorized, stay within the exact branch, path, commit, push, and
+verification authority in the task.
+
+FrameNest uses the AP submodule at `.ap/` for universal protocol, role,
+authority, Worker lifecycle, diagnostic closeout, Git, verification, prompt,
+artifact, update, and exceptional handoff semantics. Do not duplicate universal
+AP protocol text in project-local files.
+
+Permanent `BOOT_*`, `NEXT_*`, `WORKERS.md`, `NEXT_AGENT.md`,
+`ORCHESTRATOR_HANDOFF.md`, and `WORKER_HANDOFF.md` files are not part of the
+current live repository model. Orchestrator rotation normally uses a generated
+professional restoration prompt. A repository handoff is exceptional context
+only and may be created or changed only by an explicitly authorized Worker task
+that names its exact path, consumer, lifecycle, validation, and Git authority.

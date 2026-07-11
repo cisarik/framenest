@@ -743,6 +743,6 @@ None of these may be silently selected during implementation.
 
 ## 32. Relationship to Other Documents
 
-This specification is grounded in [README.md](README.md), [PRODUCT.md](PRODUCT.md), [SECURITY.md](SECURITY.md), [AGENTS.md](AGENTS.md), [AP.md](AP.md), [AP_ORCHESTRATOR.md](AP_ORCHESTRATOR.md), and [AP_WORKER.md](AP_WORKER.md).
+This specification is grounded in [README.md](README.md), [PRODUCT.md](PRODUCT.md), [SECURITY.md](SECURITY.md), [AGENTS.md](AGENTS.md), and the pinned canonical AP protocol under [`.ap/`](.ap/). The FrameNest AP integration decision is recorded in [ADR-0034](docs/adr/0034-canonical-analytic-programming-integration.md).
 
 Future ADRs should record architecture decisions. This document does not create ADRs.

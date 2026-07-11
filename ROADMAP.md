@@ -45,7 +45,9 @@ Status: completed before this task.
 
 Goal: establish a safe public repository and working protocol.
 
-Key deliverables: public repository, safety perimeter, security policy, Analytic Programming protocol, Orchestrator and Worker handbooks, Worker bootstrap, and product foundation.
+Key deliverables: public repository, safety perimeter, security policy,
+canonical pinned Analytic Programming integration through `.ap/`, root
+[AGENTS.md](AGENTS.md) for FrameNest-specific rules, and product foundation.
 
 Entry conditions: empty verified repository.
 
@@ -100,6 +102,7 @@ Accepted so far:
 - Catalog read model and search semantics through [ADR-0028](docs/adr/0028-catalog-read-model-and-search-semantics.md); implementation complete for read-only imported-media listing, display-title search, canonical-tag AND filters, deterministic ordering, and bounded offset pagination.
 - Automatic built-in `Processed` workflow collection from durable tag saves through [ADR-0030](docs/adr/0030-automatic-processed-collection.md); accepted and implemented through migration `0007`, with one zero-or-one collection membership per medium, and no arbitrary collection CRUD or general collection manager.
 - Fedora systemd service foundation through [ADR-0031](docs/adr/0031-fedora-systemd-service-foundation.md), superseded for the active deployment target by the Ubuntu NUC deployment foundation through [ADR-0032](docs/adr/0032-ubuntu-nuc-deployment-foundation.md); accepted and implemented as repository-local service source material, a non-secret environment template, a read-only database-readiness gate, and an Ubuntu operator runbook. The catalog backup and restore-to-new-destination foundation is accepted through [ADR-0033](docs/adr/0033-catalog-backup-and-recovery-foundation.md). Real host installation, activation, NUC acceptance, AppArmor/UFW policy, Tailscale Serve, authentication, production database replacement, media backup, and secret recovery remain unimplemented.
+- Canonical Analytic Programming integration through a pinned `.ap/` Git submodule and managed `AGENTS.md` block through [ADR-0034](docs/adr/0034-canonical-analytic-programming-integration.md); accepted and implemented. Universal AP protocol files live under `.ap/`, FrameNest-specific rules live in `AGENTS.md`, and permanent BOOT/NEXT files are no longer live repository artifacts.
 
 The initial scaffold decision gate is complete. A Poetry package scaffold, centralized configuration boundary, FastAPI application factory, typed health endpoint, contract tests, Uvicorn runtime dependency, startup wiring, and a runnable loopback-only server command now exist.
 
