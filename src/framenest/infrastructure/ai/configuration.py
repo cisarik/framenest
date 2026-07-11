@@ -65,8 +65,8 @@ class AiTestState:
 class AiStatusSnapshot:
     """Safe network-free AI status snapshot."""
 
-    provider_id: str
-    model_id: str
+    provider_id: str | None
+    model_id: str | None
     configuration_state: str
     checked_at_ms: int
     schema_version: int = AI_STATUS_SNAPSHOT_SCHEMA_VERSION
@@ -235,12 +235,13 @@ def load_ai_status_snapshot(path: Path) -> AiStatusSnapshot | None:
         raise AiConfigurationError("AI status snapshot is malformed.") from None
     if not isinstance(payload, dict) or payload.get("schema_version") != AI_STATUS_SNAPSHOT_SCHEMA_VERSION:
         raise AiConfigurationError("AI status snapshot version is unsupported.")
-    provider_id = validate_provider_id(payload.get("provider_id"))
-    model_id = validate_model_id(payload.get("model_id"))
     configuration_state = payload.get("configuration_state")
+    provider_id, model_id = _validate_status_snapshot_identity(
+        provider_id=payload.get("provider_id"),
+        model_id=payload.get("model_id"),
+        configuration_state=configuration_state,
+    )
     checked_at_ms = payload.get("checked_at_ms")
-    if configuration_state not in {"configured", "not_configured"}:
-        raise AiConfigurationError("AI status snapshot is malformed.")
     if not isinstance(checked_at_ms, int) or checked_at_ms < 0:
         raise AiConfigurationError("AI status snapshot is malformed.")
     return AiStatusSnapshot(
@@ -253,16 +254,36 @@ def load_ai_status_snapshot(path: Path) -> AiStatusSnapshot | None:
 
 def write_ai_status_snapshot(snapshot: AiStatusSnapshot, path: Path) -> None:
     """Atomically write safe network-free AI status snapshot."""
+    provider_id, model_id = _validate_status_snapshot_identity(
+        provider_id=snapshot.provider_id,
+        model_id=snapshot.model_id,
+        configuration_state=snapshot.configuration_state,
+    )
     payload = {
         "schema_version": AI_STATUS_SNAPSHOT_SCHEMA_VERSION,
-        "provider_id": validate_provider_id(snapshot.provider_id),
-        "model_id": validate_model_id(snapshot.model_id),
+        "provider_id": provider_id,
+        "model_id": model_id,
         "configuration_state": snapshot.configuration_state,
         "checked_at_ms": snapshot.checked_at_ms,
     }
-    if snapshot.configuration_state not in {"configured", "not_configured"}:
-        raise AiConfigurationError("AI status snapshot is malformed.")
     _atomic_write_json(path, payload)
+
+
+def _validate_status_snapshot_identity(
+    *,
+    provider_id: object,
+    model_id: object,
+    configuration_state: object,
+) -> tuple[str | None, str | None]:
+    if configuration_state not in {"configured", "not_configured"}:
+        raise AiConfigurationError("AI status snapshot is malformed.")
+    if provider_id is None and model_id is None:
+        if configuration_state == "configured":
+            raise AiConfigurationError("AI status snapshot is malformed.")
+        return None, None
+    if provider_id is None or model_id is None:
+        raise AiConfigurationError("AI status snapshot is malformed.")
+    return validate_provider_id(provider_id), validate_model_id(model_id)
 
 
 def _validated_absolute_path(value: str | os.PathLike[str]) -> Path:

@@ -135,3 +135,76 @@ def test_safe_status_snapshot_contains_only_config_state_and_identity(tmp_path: 
         "provider_id",
         "schema_version",
     ]
+
+
+def test_safe_status_snapshot_round_trips_fully_unconfigured_state(tmp_path: Path) -> None:
+    path = tmp_path / "status-snapshot.json"
+
+    write_ai_status_snapshot(
+        AiStatusSnapshot(
+            provider_id=None,
+            model_id=None,
+            configuration_state="not_configured",
+            checked_at_ms=456,
+        ),
+        path,
+    )
+
+    assert load_ai_status_snapshot(path) == AiStatusSnapshot(
+        provider_id=None,
+        model_id=None,
+        configuration_state="not_configured",
+        checked_at_ms=456,
+    )
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    assert payload["provider_id"] is None
+    assert payload["model_id"] is None
+
+
+@pytest.mark.parametrize(
+    "snapshot",
+    [
+        AiStatusSnapshot(
+            provider_id=None,
+            model_id=VERCEL_AI_GATEWAY_DEFAULT_MODEL_ID,
+            configuration_state="not_configured",
+            checked_at_ms=456,
+        ),
+        AiStatusSnapshot(
+            provider_id="vercel-ai-gateway",
+            model_id=None,
+            configuration_state="not_configured",
+            checked_at_ms=456,
+        ),
+        AiStatusSnapshot(
+            provider_id=None,
+            model_id=None,
+            configuration_state="configured",
+            checked_at_ms=456,
+        ),
+        AiStatusSnapshot(
+            provider_id="unsupported",
+            model_id=VERCEL_AI_GATEWAY_DEFAULT_MODEL_ID,
+            configuration_state="not_configured",
+            checked_at_ms=456,
+        ),
+        AiStatusSnapshot(
+            provider_id="vercel-ai-gateway",
+            model_id="bad model",
+            configuration_state="not_configured",
+            checked_at_ms=456,
+        ),
+        AiStatusSnapshot(
+            provider_id="vercel-ai-gateway",
+            model_id=VERCEL_AI_GATEWAY_DEFAULT_MODEL_ID,
+            configuration_state="unknown",
+            checked_at_ms=456,
+        ),
+    ],
+)
+def test_safe_status_snapshot_rejects_invalid_identity_combinations(
+    tmp_path: Path,
+    snapshot: AiStatusSnapshot,
+) -> None:
+    with pytest.raises(AiConfigurationError):
+        write_ai_status_snapshot(snapshot, tmp_path / "status-snapshot.json")

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import stat
 
 import pytest
 
@@ -144,6 +145,97 @@ def test_configure_non_interactive_rejects_invalid_model(tmp_path: Path) -> None
     assert not config_path.exists()
 
 
+def test_status_fully_unconfigured_exits_zero_without_fabricated_provider(
+    tmp_path: Path,
+) -> None:
+    config_path = tmp_path / "ai" / "config.json"
+    lines: list[str] = []
+
+    assert ai.status_command(ai._CliContext(config_path=config_path), output=lines.append) == 0
+
+    output = "\n".join(lines)
+    assert "Active provider: none" in output
+    assert "Model: none" in output
+    assert "Configuration source: unconfigured" in output
+    assert "Credential available to this process: no" in output
+    assert "Analysis state: not configured" in output
+    assert "Last connection test: not tested" in output
+    assert "Vercel" not in output
+    assert "NVIDIA" not in output
+    snapshot = load_ai_status_snapshot(tmp_path / "ai" / "status-snapshot.json")
+    assert snapshot is not None
+    assert snapshot.provider_id is None
+    assert snapshot.model_id is None
+    assert snapshot.configuration_state == "not_configured"
+
+
+def test_status_no_write_parser_behavior(tmp_path: Path) -> None:
+    parser = ai.build_parser()
+
+    args = parser.parse_args(
+        [
+            "--config-path",
+            str(tmp_path / "config.json"),
+            "status",
+            "--no-write",
+        ]
+    )
+
+    assert args.command == "status"
+    assert args.no_write is True
+
+
+def test_status_no_write_fully_unconfigured_exits_zero_without_writes(
+    tmp_path: Path,
+) -> None:
+    config_path = tmp_path / "missing" / "config.json"
+    lines: list[str] = []
+
+    assert ai.status_command(ai._CliContext(config_path=config_path), output=lines.append, write_snapshot=False) == 0
+
+    output = "\n".join(lines)
+    assert "Active provider: none" in output
+    assert "Model: none" in output
+    assert "Analysis state: not configured" in output
+    assert not config_path.parent.exists()
+
+
+def test_status_no_write_does_not_modify_existing_snapshot(tmp_path: Path) -> None:
+    config_path = tmp_path / "ai" / "config.json"
+    snapshot_path = tmp_path / "ai" / "status-snapshot.json"
+    snapshot_path.parent.mkdir()
+    snapshot_path.write_text('{"existing":true}\n', encoding="utf-8")
+    before = snapshot_path.stat().st_mtime_ns
+
+    lines: list[str] = []
+
+    assert ai.status_command(ai._CliContext(config_path=config_path), output=lines.append, write_snapshot=False) == 0
+
+    assert snapshot_path.read_text(encoding="utf-8") == '{"existing":true}\n'
+    assert snapshot_path.stat().st_mtime_ns == before
+
+
+def test_status_no_write_works_with_unwritable_state_directory(tmp_path: Path) -> None:
+    config_path = tmp_path / "ai" / "config.json"
+    config_path.parent.mkdir()
+    config_path.parent.chmod(stat.S_IREAD | stat.S_IEXEC)
+
+    try:
+        lines: list[str] = []
+
+        assert ai.status_command(ai._CliContext(config_path=config_path), output=lines.append, write_snapshot=False) == 0
+    finally:
+        config_path.parent.chmod(stat.S_IREAD | stat.S_IWRITE | stat.S_IEXEC)
+
+
+def test_status_no_write_main_exits_zero_when_fully_unconfigured(tmp_path: Path) -> None:
+    config_path = tmp_path / "missing" / "config.json"
+
+    assert ai.main(["--config-path", str(config_path), "status", "--no-write"]) == 0
+
+    assert not config_path.parent.exists()
+
+
 def test_status_uses_resolver_without_provider_request(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -181,6 +273,36 @@ def test_status_uses_resolver_without_provider_request(
     assert snapshot.model_id == VERCEL_AI_GATEWAY_DEFAULT_MODEL_ID
     assert snapshot.configuration_state == "configured"
     assert not (tmp_path / "test-state.json").exists()
+
+
+def test_status_selected_provider_without_credential_writes_selected_identity(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    resolved = ai.ResolvedAiProvider(
+        provider_id="vercel-ai-gateway",
+        display_name="Vercel AI Gateway",
+        model_id=VERCEL_AI_GATEWAY_DEFAULT_MODEL_ID,
+        source="server config",
+        credential_environment_name="AI_GATEWAY_API_KEY",
+        credential_available=False,
+        provider=None,
+        last_test=None,
+        last_status=None,
+        config_path=tmp_path / "config.json",
+        test_state_path=tmp_path / "test-state.json",
+        status_snapshot_path=tmp_path / "status-snapshot.json",
+    )
+    monkeypatch.setattr(ai, "_resolve", lambda _context: resolved)
+    lines: list[str] = []
+
+    assert ai.status_command(ai._CliContext(config_path=tmp_path / "config.json"), output=lines.append) == 0
+
+    snapshot = load_ai_status_snapshot(tmp_path / "status-snapshot.json")
+    assert snapshot is not None
+    assert snapshot.provider_id == "vercel-ai-gateway"
+    assert snapshot.model_id == VERCEL_AI_GATEWAY_DEFAULT_MODEL_ID
+    assert snapshot.configuration_state == "not_configured"
 
 
 def test_test_command_performs_one_text_only_provider_request(

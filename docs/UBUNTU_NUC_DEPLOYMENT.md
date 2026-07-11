@@ -327,6 +327,16 @@ Read-only check:
 /opt/framenest/current/.venv/bin/framenest-production check-database-ready
 ```
 
+AI status preflight uses the network-free read-only form:
+
+```text
+/opt/framenest/current/.venv/bin/framenest-ai status --no-write
+```
+
+The ordinary `framenest-ai status` command may record a safe local status
+snapshot. Use `--no-write` when deployment preflight must avoid creating or
+modifying AI status files.
+
 Security control: read-only readiness gate.
 
 - Threat: starting against a missing, empty, behind, ahead, or unreadable

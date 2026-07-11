@@ -62,7 +62,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Override the non-secret server AI configuration path.",
     )
     subcommands = parser.add_subparsers(dest="command", required=True)
-    subcommands.add_parser("status", help="Show network-free AI configuration status.")
+    status = subcommands.add_parser("status", help="Show network-free AI configuration status.")
+    status.add_argument(
+        "--no-write",
+        action="store_true",
+        help="Resolve status without writing a local status snapshot.",
+    )
     configure = subcommands.add_parser(
         "configure",
         help="Configure non-secret AI provider state.",
@@ -85,7 +90,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     context = _CliContext(config_path=config_path)
     try:
         if args.command == "status":
-            return status_command(context)
+            return status_command(context, write_snapshot=not args.no_write)
         if args.command == "configure":
             if args.provider_id is not None or args.model_id is not None or args.yes:
                 if args.provider_id is None or args.model_id is None or not args.yes:
@@ -106,21 +111,27 @@ def main(argv: Sequence[str] | None = None) -> int:
     return 2
 
 
-def status_command(context: _CliContext, *, output: Output = print) -> int:
+def status_command(
+    context: _CliContext,
+    *,
+    output: Output = print,
+    write_snapshot: bool = True,
+) -> int:
     """Print sanitized network-free AI status."""
     resolved = _resolve(context)
-    write_ai_status_snapshot(
-        AiStatusSnapshot(
-            provider_id=resolved.provider_id,
-            model_id=resolved.model_id,
-            configuration_state="configured" if resolved.configured else "not_configured",
-            checked_at_ms=now_ms(),
-        ),
-        resolved.status_snapshot_path,
-    )
+    if write_snapshot:
+        write_ai_status_snapshot(
+            AiStatusSnapshot(
+                provider_id=resolved.provider_id,
+                model_id=resolved.model_id,
+                configuration_state="configured" if resolved.configured else "not_configured",
+                checked_at_ms=now_ms(),
+            ),
+            resolved.status_snapshot_path,
+        )
     output("AI status")
-    output(f"Active provider: {resolved.display_name}")
-    output(f"Model: {resolved.model_id}")
+    output(f"Active provider: {_optional_text(resolved.display_name)}")
+    output(f"Model: {_optional_text(resolved.model_id)}")
     output(f"Configuration source: {resolved.source}")
     output(f"Credential available to this process: {_yes_no(resolved.credential_available)}")
     output(f"Analysis state: {'configured' if resolved.configured else 'not configured'}")
@@ -288,6 +299,10 @@ def _selected_provider(selection: str, default_provider: str) -> str:
 
 def _yes_no(value: bool) -> str:
     return "yes" if value else "no"
+
+
+def _optional_text(value: str | None) -> str:
+    return "none" if value is None else value
 
 
 def _last_test_text(resolved: ResolvedAiProvider) -> str:
