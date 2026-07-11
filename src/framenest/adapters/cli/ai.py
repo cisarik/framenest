@@ -24,7 +24,6 @@ from framenest.infrastructure.ai.configuration import (
     AiStatusSnapshot,
     AiTestState,
     default_ai_config_path,
-    default_ai_test_state_path,
     load_ai_server_config,
     now_ms,
     provider_default_model,
@@ -64,7 +63,17 @@ def build_parser() -> argparse.ArgumentParser:
     )
     subcommands = parser.add_subparsers(dest="command", required=True)
     subcommands.add_parser("status", help="Show network-free AI configuration status.")
-    subcommands.add_parser("configure", help="Interactively configure non-secret AI provider state.")
+    configure = subcommands.add_parser(
+        "configure",
+        help="Configure non-secret AI provider state.",
+    )
+    configure.add_argument("--provider-id", default=None, help="Non-interactive provider ID.")
+    configure.add_argument("--model-id", default=None, help="Non-interactive model ID.")
+    configure.add_argument(
+        "--yes",
+        action="store_true",
+        help="Confirm a non-interactive provider/model configuration.",
+    )
     subcommands.add_parser("test", help="Run one explicit text-only provider connection test.")
     return parser
 
@@ -78,6 +87,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.command == "status":
             return status_command(context)
         if args.command == "configure":
+            if args.provider_id is not None or args.model_id is not None or args.yes:
+                if args.provider_id is None or args.model_id is None or not args.yes:
+                    raise AiConfigurationError(
+                        "Non-interactive AI configuration requires provider, model, and confirmation."
+                    )
+                return configure_non_interactive_command(
+                    context,
+                    provider_id=args.provider_id,
+                    model_id=args.model_id,
+                )
             return configure_command(context)
         if args.command == "test":
             return test_command(context)
@@ -159,6 +178,34 @@ def configure_command(
     return 0
 
 
+def configure_non_interactive_command(
+    context: _CliContext,
+    *,
+    provider_id: str,
+    model_id: str,
+    output: Output = print,
+) -> int:
+    """Write non-secret provider/model selection for automation."""
+    selected_provider_id = validate_provider_id(provider_id)
+    selected_model_id = validate_model_id(model_id)
+    existing = load_ai_server_config(context.config_path)
+    provider_models = {} if existing is None else dict(existing.provider_models)
+    provider_models[selected_provider_id] = selected_model_id
+    config = AiServerConfig(
+        active_provider_id=selected_provider_id,
+        provider_models=provider_models,
+        updated_at_ms=now_ms(),
+    )
+    write_ai_server_config(config, context.config_path)
+    definition = PROVIDER_DEFINITIONS[selected_provider_id]
+    output("AI configuration saved.")
+    output(f"Active provider: {definition.display_name}")
+    output(f"Model: {selected_model_id}")
+    output(f"Configuration path: {context.config_path}")
+    output(f"Required credential environment variable: {definition.credential_environment_name}")
+    return 0
+
+
 def test_command(context: _CliContext, *, output: Output = print) -> int:
     """Run one explicit text-only provider connection test."""
     resolved = _resolve(context)
@@ -168,7 +215,7 @@ def test_command(context: _CliContext, *, output: Output = print) -> int:
         return 2
     if not resolved.credential_available or resolved.provider is None:
         output("AI test: authentication_failed")
-        output(f"Credential available to this process: no")
+        output("Credential available to this process: no")
         output(f"Required credential environment variable: {resolved.credential_environment_name}")
         return 2
     lock_path = resolved.test_state_path.parent / ".test.lock"

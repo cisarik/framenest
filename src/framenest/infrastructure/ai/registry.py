@@ -116,8 +116,8 @@ def resolve_ai_provider(
     else:
         assert model_id is not None
         definition = PROVIDER_DEFINITIONS[provider_id]
-        credential_available = bool(source.get(definition.credential_environment_name, "").strip())
         provider = _build_provider(provider_id, model_id, source, transport=transport)
+        credential_available = provider is not None
     test_state_path = default_ai_test_state_path(resolved_config_path)
     status_snapshot_path = default_ai_status_snapshot_path(resolved_config_path)
     last_test = None

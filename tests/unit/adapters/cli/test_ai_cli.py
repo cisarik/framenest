@@ -60,6 +60,90 @@ def test_configure_persists_provider_model_but_no_secret(tmp_path: Path) -> None
     assert any("AI_GATEWAY_API_KEY" in line for line in lines)
 
 
+def test_configure_non_interactive_persists_provider_model_but_no_secret(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.json"
+    lines: list[str] = []
+
+    result = ai.configure_non_interactive_command(
+        ai._CliContext(config_path=config_path),
+        provider_id="vercel-ai-gateway",
+        model_id=VERCEL_AI_GATEWAY_DEFAULT_MODEL_ID,
+        output=lines.append,
+    )
+
+    assert result == 0
+    config = load_ai_server_config(config_path)
+    assert config is not None
+    assert config.active_provider_id == "vercel-ai-gateway"
+    assert config.provider_models["vercel-ai-gateway"] == VERCEL_AI_GATEWAY_DEFAULT_MODEL_ID
+    raw = config_path.read_text(encoding="utf-8")
+    assert "secret" not in raw
+    assert "API_KEY" not in raw
+    assert any("AI configuration saved" in line for line in lines)
+
+
+def test_configure_parser_accepts_explicit_non_interactive_provider_model(tmp_path: Path) -> None:
+    parser = ai.build_parser()
+
+    args = parser.parse_args(
+        [
+            "--config-path",
+            str(tmp_path / "config.json"),
+            "configure",
+            "--provider-id",
+            "vercel-ai-gateway",
+            "--model-id",
+            VERCEL_AI_GATEWAY_DEFAULT_MODEL_ID,
+            "--yes",
+        ]
+    )
+
+    assert args.command == "configure"
+    assert args.provider_id == "vercel-ai-gateway"
+    assert args.model_id == VERCEL_AI_GATEWAY_DEFAULT_MODEL_ID
+    assert args.yes is True
+
+
+def test_configure_non_interactive_requires_complete_arguments(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.json"
+
+    assert (
+        ai.main(
+            [
+                "--config-path",
+                str(config_path),
+                "configure",
+                "--provider-id",
+                "vercel-ai-gateway",
+                "--yes",
+            ]
+        )
+        == 2
+    )
+    assert not config_path.exists()
+
+
+def test_configure_non_interactive_rejects_invalid_model(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.json"
+
+    assert (
+        ai.main(
+            [
+                "--config-path",
+                str(config_path),
+                "configure",
+                "--provider-id",
+                "vercel-ai-gateway",
+                "--model-id",
+                "bad model",
+                "--yes",
+            ]
+        )
+        == 2
+    )
+    assert not config_path.exists()
+
+
 def test_status_uses_resolver_without_provider_request(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

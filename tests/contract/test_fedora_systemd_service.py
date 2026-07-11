@@ -10,6 +10,12 @@ from pathlib import Path
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 SERVICE_PATH = REPOSITORY_ROOT / "deploy" / "systemd" / "framenest.service"
 ENV_TEMPLATE_PATH = REPOSITORY_ROOT / "deploy" / "systemd" / "framenest.env.example"
+NVIDIA_CREDENTIAL_DROPIN_PATH = (
+    REPOSITORY_ROOT / "deploy" / "systemd" / "framenest-ai-credential-nvidia-nim.conf"
+)
+VERCEL_CREDENTIAL_DROPIN_PATH = (
+    REPOSITORY_ROOT / "deploy" / "systemd" / "framenest-ai-credential-vercel-ai-gateway.conf"
+)
 FEDORA_DOC_PATH = REPOSITORY_ROOT / "docs" / "FEDORA_SERVICE.md"
 UBUNTU_DOC_PATH = REPOSITORY_ROOT / "docs" / "UBUNTU_NUC_DEPLOYMENT.md"
 FEDORA_ADR_PATH = REPOSITORY_ROOT / "docs" / "adr" / "0031-fedora-systemd-service-foundation.md"
@@ -86,6 +92,7 @@ def test_systemd_environment_file_contract_contains_no_secret_file() -> None:
     text = _service_text()
 
     assert "EnvironmentFile=/etc/framenest/framenest.env" in text
+    assert "LoadCredential" not in text
     assert OPTIONAL_ENVIRONMENT_FILE_PREFIX not in text
     assert REMOVED_SECRET_ENVIRONMENT not in text
     assert "NVIDIA_API_KEY" not in text
@@ -185,6 +192,36 @@ def test_non_secret_environment_template_contains_no_secret_variables() -> None:
     for marker in forbidden:
         assert marker not in text
     assert re.search(r"YOUR|REPLACE|<redacted>|secret-value", text, re.IGNORECASE) is None
+
+
+def test_optional_systemd_ai_credential_dropins_are_provider_specific_and_secret_free() -> None:
+    dropins = {
+        NVIDIA_CREDENTIAL_DROPIN_PATH: (
+            "NVIDIA_API_KEY",
+            "/etc/framenest/credentials/NVIDIA_API_KEY",
+        ),
+        VERCEL_CREDENTIAL_DROPIN_PATH: (
+            "AI_GATEWAY_API_KEY",
+            "/etc/framenest/credentials/AI_GATEWAY_API_KEY",
+        ),
+    }
+
+    for path, (identity, credential_path) in dropins.items():
+        parser = configparser.ConfigParser(interpolation=None, strict=False)
+        parser.optionxform = str
+        assert parser.read(path, encoding="utf-8") == [str(path)]
+        service = parser["Service"]
+        text = path.read_text(encoding="utf-8")
+
+        assert service["LoadCredential"] == f"{identity}:{credential_path}"
+        assert "[Service]" in text
+        assert "Environment=" not in text
+        assert "EnvironmentFile" not in text
+        assert "YOUR" not in text
+        assert "secret-value" not in text
+        assert "0.0.0.0" not in text
+        assert "tailscale" not in text.lower()
+        assert "ufw" not in text.lower()
 
 
 def test_production_console_script_is_declared() -> None:
@@ -305,6 +342,7 @@ def test_ubuntu_support_map_makes_required_phases_discoverable() -> None:
 
     assert "docs/UBUNTU_NUC_DEPLOYMENT.md" in text
     assert "ADR-0032" in text
+    assert "fn-production-env-deploy" in text
     for phase in ["check", "plan", "apply", "verify", "rollback"]:
         assert f"| {phase} |" in text
-    assert "No executable helper is committed" in text
+    assert "must not be used as a general environment-file copier" in text

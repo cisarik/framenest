@@ -60,3 +60,4 @@ An accepted ADR may only be changed by a later ADR that supersedes it. Editing a
 | 0033 | Catalog Backup and Recovery Foundation | Accepted | 2026-07-08 | [0033-catalog-backup-and-recovery-foundation.md](0033-catalog-backup-and-recovery-foundation.md) |
 | 0034 | Canonical Analytic Programming Integration | Accepted | 2026-07-11 | [0034-canonical-analytic-programming-integration.md](0034-canonical-analytic-programming-integration.md) |
 | 0035 | Authoritative Server and Client State Model | Accepted | 2026-07-11 | [0035-authoritative-server-and-client-state-model.md](0035-authoritative-server-and-client-state-model.md) |
+| 0036 | Production AI Credentials via systemd Credentials | Accepted | 2026-07-11 | [0036-production-ai-credentials-via-systemd.md](0036-production-ai-credentials-via-systemd.md) |

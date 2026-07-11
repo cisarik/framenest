@@ -61,9 +61,11 @@ The ignored local-development file `.secrets/ai.env.fish` may export
 `NVIDIA_API_KEY` and/or `AI_GATEWAY_API_KEY` for the root launcher. The launcher
 must reject symlinks, non-private files, wrong ownership, and invalid Fish
 syntax before sourcing it, and must not print file contents or credential
-values. The Ubuntu systemd service foundation does not use this developer file and does
-not implement production provider-secret integration. That integration remains
-deferred to a later systemd credentials or service-secret adapter decision.
+values. Production AI credentials are repository-supported through optional
+systemd credential drop-ins and exact-name `CREDENTIALS_DIRECTORY` resolution.
+The base service remains credential-optional, `/etc/framenest/framenest.env`
+remains non-secret, and real host installation remains a separately authorized
+deployment task.
 
 The catalog backup foundation uses `framenest-backup` for the SQLite catalog
 only. Backup manifests and command output must not contain source paths,

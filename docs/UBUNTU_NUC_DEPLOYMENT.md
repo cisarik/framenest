@@ -41,9 +41,13 @@ deployment target.
 ```text
 deploy/systemd/framenest.service
 deploy/systemd/framenest.env.example
+deploy/systemd/framenest-ai-credential-nvidia-nim.conf
+deploy/systemd/framenest-ai-credential-vercel-ai-gateway.conf
+deploy/ubuntu/fn-production-env-deploy
 deploy/ubuntu/README.md
 docs/adr/0032-ubuntu-nuc-deployment-foundation.md
 docs/adr/0033-catalog-backup-and-recovery-foundation.md
+docs/adr/0036-production-ai-credentials-via-systemd.md
 docs/NUC_HOST_BASELINE.md
 docs/BACKUP_AND_RECOVERY.md
 ```
@@ -125,6 +129,9 @@ Read-only checks:
   `/srv/media/movies` are treated as source-media locations and are not
   service-writable by default.
 - Confirm the repository service artifact still binds to `127.0.0.1`.
+- Confirm any production AI credential plan uses optional systemd
+  `LoadCredential=` drop-ins and root-controlled files under
+  `/etc/framenest/credentials`, not `framenest.env` or command-line arguments.
 
 Security control: loopback binding.
 
@@ -258,6 +265,28 @@ Evidence:
 
 - Sanitized before/after diff for the exact changed host artifact.
 - Confirmation that no unrelated host control changed.
+
+### Production AI Credential Helper
+
+`deploy/ubuntu/fn-production-env-deploy` is repository-owned source
+material for a later explicitly authorized production AI credential task. Its
+documented entry point is:
+
+```text
+fn-production-env-deploy
+```
+
+The helper manages only one selected AI provider credential plus non-secret
+provider/model selection. It supports a non-mutating `--check` mode, accepts an
+explicit SSH target or non-secret operator environment default, transfers the
+credential over SSH stdin rather than argv, uses only `sudo -n` remotely,
+installs deployment-controlled files atomically, restarts and health-checks
+`framenest.service`, and rolls back deployment-controlled files on restart or
+health failure.
+
+The later operator may create a Fish wrapper or function that invokes the
+repository script, but this repository task does not install anything into
+`~/.config/fish`.
 
 ## 5. Migrate
 
@@ -446,7 +475,7 @@ Do not capture or share:
 - Real deployment acceptance.
 - Real-host backup/restore acceptance, off-device copies, retention policy, and
   production restore drills.
-- Production provider-secret integration.
+- Live production provider-secret deployment or provider testing.
 - Tailscale.
 - Application authentication or authorization.
 - AppArmor profile.

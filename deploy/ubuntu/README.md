@@ -24,8 +24,14 @@ catalog backup and recovery prerequisite is documented in
 
 ## Boundaries
 
-No executable helper is committed in this slice. Real host commands belong in a
-future bounded deployment task after the operator has exact host authority.
+`fn-production-env-deploy` is the repository-owned Fish entry point for the
+first production AI credential/configuration helper. It has a non-mutating check
+mode and is source material until a later bounded deployment task grants exact
+host authority.
+
+The helper manages only production AI provider configuration and the selected
+provider credential. It must not be used as a general environment-file copier
+or as authorization to run real NUC commands outside an explicit host task.
 
 This directory must not contain secrets, host UUIDs, disk serials, LAN IP
 addresses, SSH fingerprints, private media filenames, or generated deployment
