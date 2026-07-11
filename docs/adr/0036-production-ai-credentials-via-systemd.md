@@ -48,8 +48,12 @@ and one private local credential source. It supports a non-mutating check mode,
 uses SSH BatchMode-compatible command execution, uses only `sudo -n` remotely,
 installs deployment-controlled files atomically, restarts and health-checks the
 service, and rolls back deployment-controlled files on restart or health
-failure. This repository slice does not install the Fish function into a user
-configuration directory and does not execute a real NUC deployment.
+failure after a complete remote backup marker exists. The rollback contract
+restores the selected credential, systemd credential drop-in, and non-secret AI
+configuration present/absent state, then daemon-reloads, restarts, and
+health-checks the restored service. Recovery material is retained when rollback
+or cleanup fails. This repository slice does not install the Fish function into
+a user configuration directory and does not execute a real NUC deployment.
 
 Non-secret provider/model selection continues through the existing
 `framenest-ai configure` boundary, extended only with explicit non-interactive

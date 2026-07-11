@@ -34,6 +34,10 @@ class DeploymentCommandError(Exception):
     """Sanitized deployment command failure."""
 
 
+class DeploymentRollbackError(DeploymentCommandError):
+    """Sanitized rollback failure with recovery material retained."""
+
+
 @dataclass(frozen=True, slots=True)
 class LocalSecret:
     identity: str
@@ -125,6 +129,7 @@ def deploy(
     health_url: str,
     runner: Callable[[list[str], bytes | None], None],
 ) -> None:
+    transaction_active = False
     try:
         _ssh(
             target,
@@ -133,6 +138,7 @@ def deploy(
             input_bytes=None,
         )
         _ssh(target, _remote_backup(secret.identity), runner=runner, input_bytes=None)
+        transaction_active = True
         _ssh(
             target,
             _remote_install_credential(secret.identity),
@@ -153,13 +159,44 @@ def deploy(
         )
         _ssh(target, _remote_restart(), runner=runner, input_bytes=None)
         _ssh(target, _remote_health(health_url), runner=runner, input_bytes=None)
-        _ssh(target, _remote_cleanup(secret.identity), runner=runner, input_bytes=None)
     except DeploymentCommandError:
-        try:
-            _ssh(target, _remote_rollback(secret.identity), runner=runner, input_bytes=None)
-        finally:
-            _ssh(target, _remote_cleanup(secret.identity), runner=runner, input_bytes=None)
+        if transaction_active:
+            _rollback(
+                target=target,
+                identity=secret.identity,
+                health_url=health_url,
+                runner=runner,
+            )
         raise
+    try:
+        _ssh(target, _remote_cleanup(secret.identity), runner=runner, input_bytes=None)
+    except DeploymentCommandError as exc:
+        raise DeploymentCommandError(
+            f"cleanup failed; recovery material retained at {REMOTE_ROLLBACK_DIR}"
+        ) from exc
+
+
+def _rollback(
+    *,
+    target: str,
+    identity: str,
+    health_url: str,
+    runner: Callable[[list[str], bytes | None], None],
+) -> None:
+    phases = [
+        ("restore", _remote_restore(identity)),
+        ("daemon-reload", _remote_daemon_reload()),
+        ("restart", _remote_restart_service()),
+        ("health", _remote_health(health_url)),
+        ("cleanup", _remote_cleanup(identity)),
+    ]
+    for phase, command in phases:
+        try:
+            _ssh(target, command, runner=runner, input_bytes=None)
+        except DeploymentCommandError as exc:
+            raise DeploymentRollbackError(
+                f"rollback failed during {phase}; recovery material retained at {REMOTE_ROLLBACK_DIR}"
+            ) from exc
 
 
 def _subprocess_runner(argv: list[str], input_bytes: bytes | None) -> None:
@@ -290,8 +327,10 @@ def _remote_backup(identity: str) -> str:
             "set -e",
             f"sudo -n rm -rf {REMOTE_ROLLBACK_DIR}",
             f"sudo -n install -d -o root -g root -m 0700 {REMOTE_ROLLBACK_DIR}",
-            f"if sudo -n test -e {credential_path}; then sudo -n cp -a {credential_path} {REMOTE_ROLLBACK_DIR}/{identity}; sudo -n touch {REMOTE_ROLLBACK_DIR}/{identity}.present; fi",
-            f"if sudo -n test -e {REMOTE_DROPIN_PATH}; then sudo -n cp -a {REMOTE_DROPIN_PATH} {REMOTE_ROLLBACK_DIR}/20-ai-credential.conf; sudo -n touch {REMOTE_ROLLBACK_DIR}/20-ai-credential.conf.present; fi",
+            f"if sudo -n test -e {credential_path}; then sudo -n cp -a {credential_path} {REMOTE_ROLLBACK_DIR}/{identity}; sudo -n touch {REMOTE_ROLLBACK_DIR}/{identity}.present; else sudo -n touch {REMOTE_ROLLBACK_DIR}/{identity}.absent; fi",
+            f"if sudo -n test -e {REMOTE_DROPIN_PATH}; then sudo -n cp -a {REMOTE_DROPIN_PATH} {REMOTE_ROLLBACK_DIR}/20-ai-credential.conf; sudo -n touch {REMOTE_ROLLBACK_DIR}/20-ai-credential.conf.present; else sudo -n touch {REMOTE_ROLLBACK_DIR}/20-ai-credential.conf.absent; fi",
+            f"if sudo -n test -e {REMOTE_AI_CONFIG_PATH}; then sudo -n cp -a {REMOTE_AI_CONFIG_PATH} {REMOTE_ROLLBACK_DIR}/config.json; sudo -n touch {REMOTE_ROLLBACK_DIR}/config.json.present; else sudo -n touch {REMOTE_ROLLBACK_DIR}/config.json.absent; fi",
+            f"sudo -n touch {REMOTE_ROLLBACK_DIR}/transaction.complete",
         ]
     )
 
@@ -343,23 +382,34 @@ def _remote_health(health_url: str) -> str:
     return f"curl --fail --silent --show-error --max-time 5 {shlex.quote(health_url)} >/dev/null"
 
 
-def _remote_rollback(identity: str) -> str:
+def _remote_restore(identity: str) -> str:
     credential_path = f"{REMOTE_CREDENTIAL_DIR}/{identity}"
     return "\n".join(
         [
             "set -e",
             "# restore deployment-controlled files",
-            f"if sudo -n test -e {REMOTE_ROLLBACK_DIR}/{identity}.present; then sudo -n cp -a {REMOTE_ROLLBACK_DIR}/{identity} {credential_path}; else sudo -n rm -f {credential_path}; fi",
-            f"if sudo -n test -e {REMOTE_ROLLBACK_DIR}/20-ai-credential.conf.present; then sudo -n cp -a {REMOTE_ROLLBACK_DIR}/20-ai-credential.conf {REMOTE_DROPIN_PATH}; else sudo -n rm -f {REMOTE_DROPIN_PATH}; fi",
-            "sudo -n systemctl daemon-reload",
+            f"sudo -n test -e {REMOTE_ROLLBACK_DIR}/transaction.complete",
+            f"if sudo -n test -e {REMOTE_ROLLBACK_DIR}/{identity}.present; then sudo -n install -d -o root -g root -m 0700 {REMOTE_CREDENTIAL_DIR}; sudo -n cp -a {REMOTE_ROLLBACK_DIR}/{identity} {credential_path}; elif sudo -n test -e {REMOTE_ROLLBACK_DIR}/{identity}.absent; then sudo -n rm -f {credential_path}; else exit 42; fi",
+            f"if sudo -n test -e {REMOTE_ROLLBACK_DIR}/20-ai-credential.conf.present; then sudo -n install -d -o root -g root -m 0755 /etc/systemd/system/framenest.service.d; sudo -n cp -a {REMOTE_ROLLBACK_DIR}/20-ai-credential.conf {REMOTE_DROPIN_PATH}; elif sudo -n test -e {REMOTE_ROLLBACK_DIR}/20-ai-credential.conf.absent; then sudo -n rm -f {REMOTE_DROPIN_PATH}; else exit 42; fi",
+            f"if sudo -n test -e {REMOTE_ROLLBACK_DIR}/config.json.present; then sudo -n cp -a {REMOTE_ROLLBACK_DIR}/config.json {REMOTE_AI_CONFIG_PATH}; elif sudo -n test -e {REMOTE_ROLLBACK_DIR}/config.json.absent; then sudo -n rm -f {REMOTE_AI_CONFIG_PATH}; else exit 42; fi",
+            f"sudo -n rm -f {REMOTE_CREDENTIAL_DIR}/{identity}.next {REMOTE_DROPIN_PATH}.next {REMOTE_AI_CONFIG_PATH}.next",
         ]
     )
+
+
+def _remote_daemon_reload() -> str:
+    return "\n".join(["set -e", "sudo -n systemctl daemon-reload"])
+
+
+def _remote_restart_service() -> str:
+    return "\n".join(["set -e", f"sudo -n systemctl restart {SERVICE_NAME}"])
 
 
 def _remote_cleanup(identity: str) -> str:
     return "\n".join(
         [
-            f"sudo -n rm -f {REMOTE_CREDENTIAL_DIR}/{identity}.next {REMOTE_DROPIN_PATH}.next",
+            "set -e",
+            f"sudo -n rm -f {REMOTE_CREDENTIAL_DIR}/{identity}.next {REMOTE_DROPIN_PATH}.next {REMOTE_AI_CONFIG_PATH}.next",
             f"sudo -n rm -rf {REMOTE_ROLLBACK_DIR}",
         ]
     )

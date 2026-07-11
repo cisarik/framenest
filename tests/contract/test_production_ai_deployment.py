@@ -26,15 +26,29 @@ _SPEC.loader.exec_module(production_ai_deploy)
 
 
 class _Runner:
-    def __init__(self, *, fail_on: str | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        fail_on: str | None = None,
+        fail_on_occurrence: int = 1,
+        fail_plan: list[str] | None = None,
+    ) -> None:
         self.calls: list[tuple[list[str], bytes | None]] = []
         self.fail_on = fail_on
+        self.fail_on_occurrence = fail_on_occurrence
+        self.fail_plan = [] if fail_plan is None else list(fail_plan)
+        self._matches = 0
 
     def __call__(self, argv: list[str], input_bytes: bytes | None = None) -> None:
         self.calls.append((argv, input_bytes))
         combined = " ".join(argv)
-        if self.fail_on is not None and self.fail_on in combined:
+        if self.fail_plan and self.fail_plan[0] in combined:
+            self.fail_plan.pop(0)
             raise production_ai_deploy.DeploymentCommandError("simulated failure")
+        if self.fail_on is not None and self.fail_on in combined:
+            self._matches += 1
+            if self._matches == self.fail_on_occurrence:
+                raise production_ai_deploy.DeploymentCommandError("simulated failure")
 
 
 def _credential_file(tmp_path: Path) -> Path:
@@ -57,6 +71,10 @@ def _base_args(tmp_path: Path) -> list[str]:
         "--credential-file",
         str(_credential_file(tmp_path)),
     ]
+
+
+def _combined(runner: _Runner) -> str:
+    return "\n".join(" ".join(argv) for argv, _input in runner.calls)
 
 
 def test_fish_entrypoint_has_valid_syntax() -> None:
@@ -194,7 +212,7 @@ def test_deploy_sequences_atomic_installation_and_cleanup(tmp_path: Path) -> Non
 
     assert production_ai_deploy.main(_base_args(tmp_path), runner=runner) == 0
 
-    combined = "\n".join(" ".join(argv) for argv, _input in runner.calls)
+    combined = _combined(runner)
     assert "install -d -o root -g root -m 0700 /etc/framenest/credentials" in combined
     assert "mv /etc/framenest/credentials/AI_GATEWAY_API_KEY.next" in combined
     assert "mv /etc/systemd/system/framenest.service.d/20-ai-credential.conf.next" in combined
@@ -202,6 +220,40 @@ def test_deploy_sequences_atomic_installation_and_cleanup(tmp_path: Path) -> Non
     assert "rm -f /etc/framenest/credentials/AI_GATEWAY_API_KEY.next" in combined
     assert "rm -f /etc/framenest/credentials/AI_GATEWAY_API_KEY.next /etc/systemd/system/framenest.service.d/20-ai-credential.conf.next" in combined
     assert "rm -rf /run/framenest-ai-credential-deploy" in combined
+
+
+def test_identity_failure_performs_no_rollback_command(tmp_path: Path) -> None:
+    runner = _Runner(fail_on='test "$(hostname)"')
+
+    result = production_ai_deploy.main(_base_args(tmp_path), runner=runner)
+
+    combined = _combined(runner)
+    assert result == 1
+    assert "restore deployment-controlled files" not in combined
+    assert "rm -rf /run/framenest-ai-credential-deploy" not in combined
+
+
+def test_backup_failure_performs_no_production_state_rollback(tmp_path: Path) -> None:
+    runner = _Runner(fail_on="transaction.complete")
+
+    result = production_ai_deploy.main(_base_args(tmp_path), runner=runner)
+
+    combined = _combined(runner)
+    assert result == 1
+    assert "restore deployment-controlled files" not in combined
+
+
+def test_backup_records_credential_dropin_config_and_complete_marker() -> None:
+    command = production_ai_deploy._remote_backup("AI_GATEWAY_API_KEY")
+
+    assert "/run/framenest-ai-credential-deploy/AI_GATEWAY_API_KEY.present" in command
+    assert "/run/framenest-ai-credential-deploy/AI_GATEWAY_API_KEY.absent" in command
+    assert "/run/framenest-ai-credential-deploy/20-ai-credential.conf.present" in command
+    assert "/run/framenest-ai-credential-deploy/20-ai-credential.conf.absent" in command
+    assert "/run/framenest-ai-credential-deploy/config.json.present" in command
+    assert "/run/framenest-ai-credential-deploy/config.json.absent" in command
+    assert "/run/framenest-ai-credential-deploy/transaction.complete" in command
+    assert "/var/lib/framenest/ai/config.json" in command
 
 
 @pytest.mark.parametrize("failure", ["systemctl restart", "curl --fail"])
@@ -213,15 +265,98 @@ def test_deploy_rolls_back_on_restart_or_health_failure(
 
     result = production_ai_deploy.main(_base_args(tmp_path), runner=runner)
 
-    combined = "\n".join(" ".join(argv) for argv, _input in runner.calls)
+    combined = _combined(runner)
     assert result == 1
     assert "restore deployment-controlled files" in combined
     assert "/run/framenest-ai-credential-deploy/AI_GATEWAY_API_KEY.present" in combined
+    assert "/run/framenest-ai-credential-deploy/AI_GATEWAY_API_KEY.absent" in combined
     assert "rm -f /etc/framenest/credentials/AI_GATEWAY_API_KEY" in combined
     assert "/run/framenest-ai-credential-deploy/20-ai-credential.conf.present" in combined
+    assert "/run/framenest-ai-credential-deploy/20-ai-credential.conf.absent" in combined
     assert "rm -f /etc/systemd/system/framenest.service.d/20-ai-credential.conf" in combined
+    assert "/run/framenest-ai-credential-deploy/config.json.present" in combined
+    assert "/run/framenest-ai-credential-deploy/config.json.absent" in combined
+    assert "rm -f /var/lib/framenest/ai/config.json" in combined
     assert "systemctl daemon-reload" in combined
+    assert "systemctl restart framenest.service" in combined
+    assert "curl --fail --silent --show-error --max-time 5 http://127.0.0.1:8000/health" in combined
     assert "rm -f /etc/framenest/credentials/AI_GATEWAY_API_KEY.next /etc/systemd/system/framenest.service.d/20-ai-credential.conf.next" in combined
+    assert "rm -rf /run/framenest-ai-credential-deploy" in combined
+
+
+def test_rollback_restore_failure_preserves_recovery_directory(tmp_path: Path, capsys: Any) -> None:
+    runner = _Runner(
+        fail_plan=[
+            "systemctl restart framenest.service",
+            "restore deployment-controlled files",
+        ]
+    )
+
+    result = production_ai_deploy.main(_base_args(tmp_path), runner=runner)
+
+    combined = _combined(runner)
+    captured = capsys.readouterr()
+    assert result == 1
+    assert "rollback failed" in captured.err
+    assert "restore" in captured.err
+    assert "/run/framenest-ai-credential-deploy" in captured.err
+    assert combined.count("rm -rf /run/framenest-ai-credential-deploy") == 1
+
+
+def test_rollback_restart_failure_preserves_recovery_directory(tmp_path: Path, capsys: Any) -> None:
+    runner = _Runner(
+        fail_plan=[
+            "systemctl restart framenest.service",
+            "systemctl restart framenest.service",
+        ]
+    )
+
+    result = production_ai_deploy.main(_base_args(tmp_path), runner=runner)
+
+    combined = _combined(runner)
+    captured = capsys.readouterr()
+    assert result == 1
+    assert "rollback failed" in captured.err
+    assert "restart" in captured.err
+    assert "/run/framenest-ai-credential-deploy" in captured.err
+    assert combined.count("rm -rf /run/framenest-ai-credential-deploy") == 1
+
+
+def test_rollback_health_failure_preserves_recovery_directory(tmp_path: Path, capsys: Any) -> None:
+    runner = _Runner(fail_plan=["curl --fail", "curl --fail"])
+
+    result = production_ai_deploy.main(_base_args(tmp_path), runner=runner)
+
+    combined = _combined(runner)
+    captured = capsys.readouterr()
+    assert result == 1
+    assert "rollback failed" in captured.err
+    assert "health" in captured.err
+    assert "/run/framenest-ai-credential-deploy" in captured.err
+    assert combined.count("rm -rf /run/framenest-ai-credential-deploy") == 1
+
+
+def test_successful_deployment_cleanup_failure_reports_sanitized_failure(
+    tmp_path: Path,
+    capsys: Any,
+) -> None:
+    runner = _Runner(fail_on="rm -rf /run/framenest-ai-credential-deploy", fail_on_occurrence=2)
+
+    result = production_ai_deploy.main(_base_args(tmp_path), runner=runner)
+
+    captured = capsys.readouterr()
+    assert result == 1
+    assert "cleanup failed" in captured.err
+    assert "/run/framenest-ai-credential-deploy" in captured.err
+
+
+def test_successful_rollback_cleans_recovery_directory(tmp_path: Path) -> None:
+    runner = _Runner(fail_on="systemctl restart framenest.service")
+
+    result = production_ai_deploy.main(_base_args(tmp_path), runner=runner)
+
+    combined = _combined(runner)
+    assert result == 1
     assert "rm -rf /run/framenest-ai-credential-deploy" in combined
 
 

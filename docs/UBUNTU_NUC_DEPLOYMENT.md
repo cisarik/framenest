@@ -284,6 +284,15 @@ installs deployment-controlled files atomically, restarts and health-checks
 `framenest.service`, and rolls back deployment-controlled files on restart or
 health failure.
 
+The helper starts rollback only after a complete backup marker has been written.
+That backup records present/absent state for the selected credential, the
+systemd credential drop-in, and `/var/lib/framenest/ai/config.json`. Rollback
+restores those states, removes pending `.next` artifacts, daemon-reloads,
+restarts, and health-checks `framenest.service`. If restore, restart, health, or
+cleanup fails during rollback, recovery material remains under
+`/run/framenest-ai-credential-deploy` and the helper reports a sanitized failure
+phase.
+
 The later operator may create a Fish wrapper or function that invokes the
 repository script, but this repository task does not install anything into
 `~/.config/fish`.

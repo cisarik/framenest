@@ -32,6 +32,11 @@ host authority.
 The helper manages only production AI provider configuration and the selected
 provider credential. It must not be used as a general environment-file copier
 or as authorization to run real NUC commands outside an explicit host task.
+After a complete remote backup marker exists, failed deployment mutations roll
+back the selected credential, systemd drop-in, and non-secret AI configuration,
+then daemon-reload, restart, and health-check the restored service. If rollback
+or cleanup fails, the helper reports the sanitized phase and leaves recovery
+material under `/run/framenest-ai-credential-deploy` for operator recovery.
 
 This directory must not contain secrets, host UUIDs, disk serials, LAN IP
 addresses, SSH fingerprints, private media filenames, or generated deployment
