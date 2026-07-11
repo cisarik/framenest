@@ -46,7 +46,7 @@ An accepted ADR may only be changed by a later ADR that supersedes it. Editing a
 | 0019 | VLM Image Derivatives and NVIDIA Instruct Mode | Accepted | 2026-06-24 | [0019-vlm-image-derivatives-and-nvidia-instruct-mode.md](0019-vlm-image-derivatives-and-nvidia-instruct-mode.md) |
 | 0020 | On-Demand AI Suggestion Review | Accepted | 2026-06-25 | [0020-on-demand-ai-suggestion-review.md](0020-on-demand-ai-suggestion-review.md) |
 | 0021 | Tauri Desktop Shell | Accepted | 2026-06-25 | [0021-tauri-desktop-shell.md](0021-tauri-desktop-shell.md) |
-| 0022 | Selective Media Placement and Server Aggregation | Accepted | 2026-06-25 | [0022-selective-media-placement-and-server-aggregation.md](0022-selective-media-placement-and-server-aggregation.md) |
+| 0022 | Selective Media Placement and Server Aggregation | Accepted; server-authority portions superseded by [ADR-0035](0035-authoritative-server-and-client-state-model.md) | 2026-06-25 | [0022-selective-media-placement-and-server-aggregation.md](0022-selective-media-placement-and-server-aggregation.md) |
 | 0023 | Manual-First Metadata and Multi-Model AI Drafts | Accepted | 2026-06-25 | [0023-manual-first-metadata-and-multi-model-ai-drafts.md](0023-manual-first-metadata-and-multi-model-ai-drafts.md) |
 | 0024 | Cover Studio and AI Cover Candidates | Accepted | 2026-06-25 | [0024-cover-studio-and-ai-cover-candidates.md](0024-cover-studio-and-ai-cover-candidates.md) |
 | 0025 | Minimum Persistent Media Catalog Foundation | Accepted | 2026-06-25 | [0025-minimum-persistent-media-catalog-foundation.md](0025-minimum-persistent-media-catalog-foundation.md) |
@@ -59,3 +59,4 @@ An accepted ADR may only be changed by a later ADR that supersedes it. Editing a
 | 0032 | Ubuntu NUC Deployment Foundation | Accepted | 2026-07-08 | [0032-ubuntu-nuc-deployment-foundation.md](0032-ubuntu-nuc-deployment-foundation.md) |
 | 0033 | Catalog Backup and Recovery Foundation | Accepted | 2026-07-08 | [0033-catalog-backup-and-recovery-foundation.md](0033-catalog-backup-and-recovery-foundation.md) |
 | 0034 | Canonical Analytic Programming Integration | Accepted | 2026-07-11 | [0034-canonical-analytic-programming-integration.md](0034-canonical-analytic-programming-integration.md) |
+| 0035 | Authoritative Server and Client State Model | Accepted | 2026-07-11 | [0035-authoritative-server-and-client-state-model.md](0035-authoritative-server-and-client-state-model.md) |

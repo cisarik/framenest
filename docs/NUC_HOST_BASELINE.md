@@ -214,6 +214,12 @@ organization, not the only source of catalog category semantics.
 
 ## Not Completed
 
+Repository capability now exists for synthetic catalog backup creation,
+verification, and restore-to-new-destination through
+[ADR-0033](adr/0033-catalog-backup-and-recovery-foundation.md) and
+[Backup and recovery runbook](BACKUP_AND_RECOVERY.md). That capability does
+not prove production recovery on the NUC.
+
 The accepted baseline does not include:
 
 - FrameNest service user creation;
@@ -225,14 +231,20 @@ The accepted baseline does not include:
 - application authentication or administrator capability model;
 - complete media backup acceptance;
 - complete database production backup acceptance;
+- a real NUC catalog backup bundle;
+- an off-device backup copy;
+- a retention policy;
+- production database replacement;
+- a production restore drill;
 - router port forwarding;
 - host-level proof of FrameNest application health.
 
 The 2 TB media SSD is not a backup merely because it is separate from the system
-SSD. Before important catalog or media state is created, FrameNest still needs
-verified catalog backup, non-secret configuration recovery, service-secret
-recovery, media second-copy strategy or explicit loss-risk acceptance, and
-restore testing.
+SSD. Before important production catalog or media state is created, FrameNest
+still needs real-host catalog backup acceptance, non-secret configuration
+recovery, service-secret recovery, media second-copy strategy or explicit
+loss-risk acceptance, retention decisions, off-device copies, and restore
+testing.
 
 ## Future Work Boundaries
 

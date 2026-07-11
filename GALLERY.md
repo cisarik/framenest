@@ -14,6 +14,7 @@ Retention: remains while the gallery product subsystem exists.
 
 Inbound links: [README.md](README.md), [PRODUCT.md](PRODUCT.md),
 [SPEC.md](SPEC.md), [ROADMAP.md](ROADMAP.md), [ADR-0022](docs/adr/0022-selective-media-placement-and-server-aggregation.md),
+[ADR-0035](docs/adr/0035-authoritative-server-and-client-state-model.md),
 [ADR-0021](docs/adr/0021-tauri-desktop-shell.md),
 [AI_WORKSPACE.md](AI_WORKSPACE.md), [COVER_PIPELINE.md](COVER_PIPELINE.md),
 [ADR-0023](docs/adr/0023-manual-first-metadata-and-multi-model-ai-drafts.md),
@@ -134,9 +135,9 @@ navigation labels. The current browser omits visible `Catalog` and `Imported
 media` headings for compactness.
 
 Developer-oriented Library tools do not belong in the flagship Gallery
-surface. Future library selection belongs in `Settings > General`. Upload,
-central-server synchronization, server media storage, and download-on-demand
-remain unresolved separate product and architecture scope.
+surface. Future library selection belongs in `Settings > General`.
+Server-managed upload, catalog synchronization, server media storage, and
+download-on-demand remain unresolved separate product and architecture scope.
 Tag editing should support suggestions, keyboard and mouse navigation,
 rounded removable chips, an explicit `×` control, visible
 hover/focus/selected/AI-suggested/invalid states, case-insensitive duplicate

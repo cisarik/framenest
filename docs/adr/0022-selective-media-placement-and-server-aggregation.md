@@ -4,6 +4,12 @@
 
 `Accepted`
 
+Server-authority portions are superseded by
+[ADR-0035](0035-authoritative-server-and-client-state-model.md). This ADR
+remains accepted for selective media placement, remote-only visibility, explicit
+transfer/open/download semantics, final-copy safeguards, and application
+authorization above Tailscale.
+
 ## Decision Date
 
 `2026-06-25`
@@ -32,11 +38,15 @@ replication.
 
 ## Decision
 
-Each desktop installation owns a complete local catalog sufficient for local
-operation. A desktop remains usable without the Intel NUC, internet access,
-Tailscale, cloud AI, or another FrameNest device.
+Each desktop installation was originally described here as owning a complete
+local catalog sufficient for local operation. ADR-0035 supersedes that
+authority model: a FrameNest server process is authoritative for catalog and
+server-owned state, and browser, desktop, and remote interfaces are clients of
+that server API. The server process may run locally on the same device as the
+desktop client, so local-first operation and local ownership remain intact.
 
-The future Intel NUC is optional. It may act as:
+The future Intel NUC remains optional for local ownership and may host the
+authoritative FrameNest server once deployment is accepted. It may act as:
 
 - an aggregator;
 - an archive or storage node;
@@ -46,8 +56,10 @@ The future Intel NUC is optional. It may act as:
 - a later centralized AI-provider boundary;
 - a future backup participant.
 
-The NUC is not a replacement for local desktop catalogs. Server functionality
-must not turn desktop clients into unusable thin clients.
+The NUC is not mandatory public-cloud infrastructure and must not turn local
+FrameNest ownership into SaaS dependence. Server functionality must not make
+local desktop operation unusable when the needed local server process, cached
+records, and local media are available.
 
 FrameNest models one logical media item with zero or more known physical media
 locations. The gallery normally displays one logical media card, not one
@@ -187,6 +199,7 @@ ADR.
 - [ADR-0011](0011-stable-domain-identities.md)
 - [ADR-0013](0013-initial-library-registry.md)
 - [ADR-0021](0021-tauri-desktop-shell.md)
+- [ADR-0035](0035-authoritative-server-and-client-state-model.md)
 - [DESKTOP.md](../../DESKTOP.md)
 - [SERVER.md](../../SERVER.md)
 - [GALLERY.md](../../GALLERY.md)

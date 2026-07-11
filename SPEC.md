@@ -26,11 +26,15 @@ MAY means the behavior is optional.
 
 FrameNest MUST remain local-first.
 
-Local desktop gallery, metadata, search, and playback MUST remain usable without the server where their required files are locally available.
+Local desktop gallery, metadata, search, and playback MUST remain usable without
+a remote server where their required local server process, records, and media
+are available.
 
 The premium gallery and media-acquisition workflows MUST both remain flagship capabilities.
 
-A server MUST NOT replace complete local desktop operation.
+A remote server or public cloud service MUST NOT replace local ownership or
+make local desktop operation unusable when the needed local server process,
+local catalog/cache records, and local media are available.
 
 Remote FrameNest communication direction MUST remain Tailscale-only unless explicitly superseded by an approved decision.
 
@@ -73,9 +77,16 @@ A derived thumbnail is a reproducible cache artifact derived from a durable sour
 
 A sidecar manifest is portable durable metadata stored near media where feasible.
 
-A local catalog is a desktop-owned index/cache used for local operation.
+A FrameNest server process is the authoritative API and state boundary for the
+catalog and server-owned state. It may run locally on the same device as a
+desktop client or later on the Ubuntu NUC.
 
-A server aggregate catalog is an optional cross-device aggregation of logical media and known locations.
+A client is a browser, desktop shell, local NUC browser, or remote interface
+that requests state and actions from the FrameNest server API.
+
+A local catalog/cache is local server or client-side state used for local
+operation and offline visibility. Its exact authority, rebuild, and
+synchronization semantics remain governed by ADR-0035 and future decisions.
 
 A transfer is a copy, move, or related operation between locations.
 
@@ -379,25 +390,54 @@ An `InlinePreviewBackend` MUST remain separate from full playback.
 
 Domain logic MUST NOT hardcode VLC command construction.
 
+Future playback SHOULD support fullscreen and truthful audio-track selection
+where technically supported. Playback UI MUST use capability detection and
+fallback rather than fake controls. Subtitle support is not currently required.
+FrameNest MUST NOT silently transcode originals.
+
 This document does not define implementation syntax.
 
-## 18. Local Catalog and Server Aggregator
+## 18. Authoritative Server and Client State
 
-Each desktop MUST own a complete catalog for its local operation.
+The FrameNest server process MUST be authoritative for catalog records and
+server-owned state.
 
-The server MAY aggregate logical media and known locations.
+Server-owned state includes server media originals, canonical display title,
+description, canonical tags, future category and language metadata, per-user
+visibility state, upload and ingest state, server preview cache,
+authentication, and capability decisions.
 
-The server MAY support streaming, download, transfers, device state, centralized AI calls, and future backup.
+Browser, desktop, local NUC browser, and future remote interfaces MUST be
+clients of the server API. Clients MUST NOT infer administrator authority from
+loopback, source IP, hostname, Tailscale membership, cookies, or same-machine
+execution.
 
-The desktop MUST remain useful when the server is offline.
+The server MAY run locally on the same device as a desktop client or remotely
+on the Ubuntu NUC after deployment acceptance. Local-first operation MUST NOT
+require public cloud dependence.
 
-The server MUST NOT be required for local desktop gallery, metadata, search, or local playback where the required data and media are available locally.
+Local desktop operation SHOULD remain useful when the needed local server
+process, local catalog/cache records, and local media are available.
 
 Metadata, covers, availability state, and lightweight derived thumbnails MAY synchronize independently of full media bytes.
 
 FrameNest MUST NOT automatically replicate all media bytes to every device.
 
-Server aggregate state and local authoritative state need explicit conflict rules later.
+Explicit streaming, opening, or download of authorized media MAY be supported
+without registering trusted permanent client-local availability.
+
+Authenticated server-managed ingest/upload, catalog synchronization, explicit
+client cache/download, per-user visibility state, server deletion requests,
+global retirement, and physical purge of originals MUST remain distinct
+operations.
+
+Future upload MUST use server-selected placement and MUST include quarantine,
+validation, limits, safe filenames, duplicate detection, atomic publication,
+and cleanup after failure. Clients MUST NOT select arbitrary server filesystem
+paths.
+
+Per-user Trash MUST be server-persisted visibility state and MUST NOT delete
+the server original.
 
 The synchronization protocol remains unresolved.
 
@@ -442,6 +482,15 @@ Search and filtering SHOULD include canonical tags, platform, library, device, a
 The search engine remains unresolved.
 
 Title/name search SHOULD be supported by the first persistent gallery-capable catalog. The initial local SQLite catalog browser supports persisted display-title substring search and repeated canonical-tag filters with AND semantics as a bounded read-only slice. Multiple selected tags MUST use AND semantics by default. `All media` is a virtual Catalog scope and is not stored as a collection. An optional `collection=processed` query parameter restricts a catalog page to members of the built-in `Processed` workflow collection; All-media requests MUST omit it.
+
+Future first-class categories SHOULD include `memes`, `youtube`, and `movies`.
+Categories MUST be modeled as a dedicated facet rather than only canonical tags
+or directory names once category persistence is implemented.
+
+Movies MAY carry explicit language metadata such as English, Slovak, or Czech.
+Language metadata SHOULD prefer container or audio metadata and user editing
+before expensive AI analysis. FrameNest MUST NOT automatically upload audio to
+a cloud provider.
 
 ## 22. AI and Privacy
 
@@ -601,11 +650,19 @@ MacBook-first implementation is accepted, but platform-specific behavior MUST re
 
 ### Distributed Media Requirements
 
-Selective media placement and server aggregation direction is recorded in [ADR-0022](docs/adr/0022-selective-media-placement-and-server-aggregation.md).
+Selective media placement direction is recorded in
+[ADR-0022](docs/adr/0022-selective-media-placement-and-server-aggregation.md).
+The authoritative server/client state model is recorded in
+[ADR-0035](docs/adr/0035-authoritative-server-and-client-state-model.md).
 
-The optional Intel NUC server MAY act as archive, aggregator, remote streaming/download source, transfer receiver, later centralized AI-provider boundary, and future backup participant.
+The Intel NUC server MAY act as an authoritative FrameNest server, archive
+node, remote streaming/download source, transfer receiver, centralized
+AI-provider boundary, and future backup participant after deployment
+acceptance.
 
-The NUC MUST NOT replace local desktop catalogs or make local clients unusable thin clients.
+The NUC MUST NOT make FrameNest a public-cloud dependency or make local clients
+unusable when the needed local server process, local catalog/cache records, and
+local media are available.
 
 Remote-only media cards SHOULD be visible from metadata and covers without requiring full media download.
 
@@ -687,7 +744,7 @@ Tests MUST use deterministic, isolated configuration state and MUST NOT rely on 
 
 FrameNest MUST use FastAPI for the initial server HTTP API adapter per [ADR-0003](docs/adr/0003-initial-server-api-framework.md).
 
-FrameNest MUST use synchronous SQLAlchemy 2.x Core with Alembic for the initial local SQLite persistence and migration foundation per [ADR-0010](docs/adr/0010-initial-persistence-foundation.md). SQLAlchemy ORM mapped entities, SQLModel, and async SQLite access are not accepted for the initial foundation. A minimal migration foundation and explicit database command boundary exist. A minimal device domain entity and local device registry exist per [ADR-0012](docs/adr/0012-initial-device-registry.md). A minimal library domain entity, device-local root-locator model, and local library registry exist per [ADR-0013](docs/adr/0013-initial-library-registry.md), with canonical UUID text storage for catalog tables and lexical device-local root paths represented by explicit `posix` or `windows` flavor plus canonical absolute path text. A minimum persistent logical-media and physical-location foundation exists per [ADR-0025](docs/adr/0025-minimum-persistent-media-catalog-foundation.md), with canonical UUID text storage, explicit repository boundaries, migration `0004`, and no automatic migration. Persistent display title and canonical content tags exist per [ADR-0027](docs/adr/0027-persistent-display-title-and-canonical-tags.md), with migration `0005`, sparse metadata rows, ordered tag assignments, stable English tag keys, and no file mutation. A nullable plain-text description column is added in migration `0006`. An automatic built-in `Processed` workflow collection is added per [ADR-0030](docs/adr/0030-automatic-processed-collection.md), with nullable `collection_key` and `processed_at_ms` columns added in migration `0007`, one medium holding zero or one collection membership, the built-in `processed` key as the only supported collection key, and no arbitrary collection CRUD or general collection manager. A dedicated catalog read model exists per [ADR-0028](docs/adr/0028-catalog-read-model-and-search-semantics.md), with display-title substring search, repeated canonical-tag AND filters, deterministic ordering, bounded offset pagination, and catalog-safe location data. The packaged browser includes a manual `Current` metadata workspace that loads one imported medium by media ID, keeps persisted baseline values distinct from unsaved form state and filename fallback labels, edits or clears display title, edits or clears an optional plain-text description, locally searches existing canonical tags, selects, removes, and explicitly reorders up to 32 ordered tag assignments, explicitly creates canonical tag definitions, saves through the existing metadata API, refreshes the active catalog query after successful save, and does not rename, move, delete, analyze, upload, or mutate media files. A bounded, deterministic, read-only, non-persistent library scan preview exists per [ADR-0014](docs/adr/0014-safe-library-scan-preview.md); candidate classification is extension-hint based only. Explicit idempotent scan-candidate import exists per [ADR-0026](docs/adr/0026-explicit-idempotent-scan-candidate-import.md); it requires an explicit selected candidate, reruns the bounded scan, creates one logical media item plus one physical location atomically when absent, returns an existing location for repeated imports, and performs no filesystem mutation. A bounded, deterministic, read-only, provider-neutral local media-analysis preparation boundary exists per [ADR-0015](docs/adr/0015-deterministic-local-media-analysis-preparation.md); it inspects one explicit MP4 or GIF candidate through optional external `ffprobe` and `ffmpeg` executables, returns bounded technical metadata, prepares at most three exact-distinct representative PNG frames in memory only, and writes no media records. A bounded, explicit opt-in, non-persistent media suggestion preview exists per [ADR-0016](docs/adr/0016-provider-neutral-media-suggestions-and-nvidia-nim-prototype.md); it reuses local preparation, requires explicit cloud confirmation, derives bounded JPEG VLM images for NVIDIA NIM transport per [ADR-0019](docs/adr/0019-vlm-image-derivatives-and-nvidia-instruct-mode.md), validates one untrusted suggestion preview, and performs no catalog or filesystem mutation. An explicit same-origin browser AI suggestion review exists per [ADR-0020](docs/adr/0020-on-demand-ai-suggestion-review.md); capability discovery is sanitized and provider-free, suggestion requests require explicit confirmation, the browser receives no credential, raw prompt, raw provider response, frame payload, absolute media path, or database path, and accept/reject actions are session-only with no mutation endpoint. Durable sidecars, storage volumes, arbitrary user-created collections, a general collection manager, collection CRUD, manual collection assignment, suggested filenames, covers, thumbnails, persistent AI Drafts, gallery persistence, synchronization, and server aggregation remain unimplemented.
+FrameNest MUST use synchronous SQLAlchemy 2.x Core with Alembic for the initial local SQLite persistence and migration foundation per [ADR-0010](docs/adr/0010-initial-persistence-foundation.md). SQLAlchemy ORM mapped entities, SQLModel, and async SQLite access are not accepted for the initial foundation. A minimal migration foundation and explicit database command boundary exist. A minimal device domain entity and local device registry exist per [ADR-0012](docs/adr/0012-initial-device-registry.md). A minimal library domain entity, device-local root-locator model, and local library registry exist per [ADR-0013](docs/adr/0013-initial-library-registry.md), with canonical UUID text storage for catalog tables and lexical device-local root paths represented by explicit `posix` or `windows` flavor plus canonical absolute path text. A minimum persistent logical-media and physical-location foundation exists per [ADR-0025](docs/adr/0025-minimum-persistent-media-catalog-foundation.md), with canonical UUID text storage, explicit repository boundaries, migration `0004`, and no automatic migration. Persistent display title and canonical content tags exist per [ADR-0027](docs/adr/0027-persistent-display-title-and-canonical-tags.md), with migration `0005`, sparse metadata rows, ordered tag assignments, stable English tag keys, and no file mutation. A nullable plain-text description column is added in migration `0006`. An automatic built-in `Processed` workflow collection is added per [ADR-0030](docs/adr/0030-automatic-processed-collection.md), with nullable `collection_key` and `processed_at_ms` columns added in migration `0007`, one medium holding zero or one collection membership, the built-in `processed` key as the only supported collection key, and no arbitrary collection CRUD or general collection manager. A dedicated catalog read model exists per [ADR-0028](docs/adr/0028-catalog-read-model-and-search-semantics.md), with display-title substring search, repeated canonical-tag AND filters, deterministic ordering, bounded offset pagination, and catalog-safe location data. The packaged browser includes a manual `Current` metadata workspace that loads one imported medium by media ID, keeps persisted baseline values distinct from unsaved form state and filename fallback labels, edits or clears display title, edits or clears an optional plain-text description, locally searches existing canonical tags, selects, removes, and explicitly reorders up to 32 ordered tag assignments, explicitly creates canonical tag definitions, saves through the existing metadata API, refreshes the active catalog query after successful save, and does not rename, move, delete, analyze, upload, or mutate media files. A bounded, deterministic, read-only, non-persistent library scan preview exists per [ADR-0014](docs/adr/0014-safe-library-scan-preview.md); candidate classification is extension-hint based only. Explicit idempotent scan-candidate import exists per [ADR-0026](docs/adr/0026-explicit-idempotent-scan-candidate-import.md); it requires an explicit selected candidate, reruns the bounded scan, creates one logical media item plus one physical location atomically when absent, returns an existing location for repeated imports, and performs no filesystem mutation. A bounded, deterministic, read-only, provider-neutral local media-analysis preparation boundary exists per [ADR-0015](docs/adr/0015-deterministic-local-media-analysis-preparation.md); it inspects one explicit MP4 or GIF candidate through optional external `ffprobe` and `ffmpeg` executables, returns bounded technical metadata, prepares at most three exact-distinct representative PNG frames in memory only, and writes no media records. A bounded, explicit opt-in, non-persistent media suggestion preview exists per [ADR-0016](docs/adr/0016-provider-neutral-media-suggestions-and-nvidia-nim-prototype.md); it reuses local preparation, requires explicit cloud confirmation, derives bounded JPEG VLM images for NVIDIA NIM transport per [ADR-0019](docs/adr/0019-vlm-image-derivatives-and-nvidia-instruct-mode.md), validates one untrusted suggestion preview, and performs no catalog or filesystem mutation. An explicit same-origin browser AI suggestion review exists per [ADR-0020](docs/adr/0020-on-demand-ai-suggestion-review.md); capability discovery is sanitized and provider-free, suggestion requests require explicit confirmation, the browser receives no credential, raw prompt, raw provider response, frame payload, absolute media path, or database path, and accept/reject actions are session-only with no mutation endpoint. Durable sidecars, storage volumes, arbitrary user-created collections, a general collection manager, collection CRUD, manual collection assignment, suggested filenames, covers, thumbnails, persistent AI Drafts, gallery persistence, synchronization, upload, per-user visibility state, and multi-device server workflows remain unimplemented.
 
 Domain and application logic MUST remain independent of FastAPI and MUST be testable without starting an HTTP server.
 
@@ -735,9 +792,17 @@ Success MUST NOT be claimed without evidence.
 
 ## 31. Explicitly Deferred Decisions
 
-Deferred decisions include frontend framework, frontend workspace tooling, committed configuration file format, exact configuration schema, operating-system secret-store implementation, manifest format, schema, IPC, authentication above Tailscale, synchronization protocol, FFmpeg distribution, yt-dlp packaging/update strategy, player invocation, thumbnail formats and sizes, full-text search, packaging/signing/update mechanisms, telemetry, and license.
+Deferred decisions include frontend framework, frontend workspace tooling,
+committed configuration file format, exact configuration schema,
+operating-system secret-store implementation, manifest format, schema, IPC,
+authentication above Tailscale, synchronization protocol, offline client cache
+semantics, upload quarantine and publication design, per-user visibility state,
+category schema, language metadata schema, audio-track capability detection,
+FFmpeg distribution, yt-dlp packaging/update strategy, player invocation,
+thumbnail formats and sizes, full-text search, packaging/signing/update
+mechanisms, telemetry, and license.
 
-The supported Python minor version is recorded in [ADR-0001](docs/adr/0001-supported-python-version.md). Poetry dependency and environment management is recorded in [ADR-0002](docs/adr/0002-python-environment-and-dependency-manager.md). The initial server API framework is recorded in [ADR-0003](docs/adr/0003-initial-server-api-framework.md). Repository layout and Poetry package mode are recorded in [ADR-0004](docs/adr/0004-repository-layout.md). Configuration strategy is recorded in [ADR-0005](docs/adr/0005-configuration-strategy.md). The concrete settings library is recorded in [ADR-0007](docs/adr/0007-settings-library.md). The initial ASGI runtime is recorded in [ADR-0008](docs/adr/0008-asgi-runtime.md). The initial SQLite persistence and migration foundation is recorded in [ADR-0010](docs/adr/0010-initial-persistence-foundation.md). The stable entity identity format is recorded in [ADR-0011](docs/adr/0011-stable-domain-identities.md). Manual-first metadata and multi-model AI drafts are recorded in [ADR-0023](docs/adr/0023-manual-first-metadata-and-multi-model-ai-drafts.md). Cover Studio and AI cover candidates are recorded in [ADR-0024](docs/adr/0024-cover-studio-and-ai-cover-candidates.md). The minimum persistent media catalog foundation is recorded in [ADR-0025](docs/adr/0025-minimum-persistent-media-catalog-foundation.md). Explicit idempotent scan-candidate import is recorded in [ADR-0026](docs/adr/0026-explicit-idempotent-scan-candidate-import.md). Persistent display title and canonical tags are recorded in [ADR-0027](docs/adr/0027-persistent-display-title-and-canonical-tags.md). Catalog read model and search semantics are recorded in [ADR-0028](docs/adr/0028-catalog-read-model-and-search-semantics.md). The automatic built-in `Processed` workflow collection is recorded in [ADR-0030](docs/adr/0030-automatic-processed-collection.md). The Fedora systemd service foundation is recorded in [ADR-0031](docs/adr/0031-fedora-systemd-service-foundation.md) and superseded for the active deployment target by the Ubuntu NUC deployment foundation in [ADR-0032](docs/adr/0032-ubuntu-nuc-deployment-foundation.md). Arbitrary user-created collections, a general collection manager, suggested filenames, covers, thumbnails, and persistent AI drafts remain unresolved and unimplemented. Identity database encoding beyond canonical UUID text, sidecar manifest format, full-text search design, WAL and checkpoint details, backup and restore, remote aggregate database design, real Ubuntu NUC host acceptance, AppArmor/UFW policy, Tailscale Serve, systemd credentials, and authentication remain unresolved. Exact dependency versions, 3.13 patch pinning, Poetry virtual-environment location, Uvicorn version and extras, startup interface, process model, worker count, reload policy, trusted proxy configuration, structured logging, background jobs, authentication, and API versioning remain implementation concerns governed by those ADRs and later authorized tasks.
+The supported Python minor version is recorded in [ADR-0001](docs/adr/0001-supported-python-version.md). Poetry dependency and environment management is recorded in [ADR-0002](docs/adr/0002-python-environment-and-dependency-manager.md). The initial server API framework is recorded in [ADR-0003](docs/adr/0003-initial-server-api-framework.md). Repository layout and Poetry package mode are recorded in [ADR-0004](docs/adr/0004-repository-layout.md). Configuration strategy is recorded in [ADR-0005](docs/adr/0005-configuration-strategy.md). The concrete settings library is recorded in [ADR-0007](docs/adr/0007-settings-library.md). The initial ASGI runtime is recorded in [ADR-0008](docs/adr/0008-asgi-runtime.md). The initial SQLite persistence and migration foundation is recorded in [ADR-0010](docs/adr/0010-initial-persistence-foundation.md). The stable entity identity format is recorded in [ADR-0011](docs/adr/0011-stable-domain-identities.md). Selective media placement is recorded in [ADR-0022](docs/adr/0022-selective-media-placement-and-server-aggregation.md), with server-authority portions superseded by [ADR-0035](docs/adr/0035-authoritative-server-and-client-state-model.md). Manual-first metadata and multi-model AI drafts are recorded in [ADR-0023](docs/adr/0023-manual-first-metadata-and-multi-model-ai-drafts.md). Cover Studio and AI cover candidates are recorded in [ADR-0024](docs/adr/0024-cover-studio-and-ai-cover-candidates.md). The minimum persistent media catalog foundation is recorded in [ADR-0025](docs/adr/0025-minimum-persistent-media-catalog-foundation.md). Explicit idempotent scan-candidate import is recorded in [ADR-0026](docs/adr/0026-explicit-idempotent-scan-candidate-import.md). Persistent display title and canonical tags are recorded in [ADR-0027](docs/adr/0027-persistent-display-title-and-canonical-tags.md). Catalog read model and search semantics are recorded in [ADR-0028](docs/adr/0028-catalog-read-model-and-search-semantics.md). The automatic built-in `Processed` workflow collection is recorded in [ADR-0030](docs/adr/0030-automatic-processed-collection.md). The Fedora systemd service foundation is recorded in [ADR-0031](docs/adr/0031-fedora-systemd-service-foundation.md) and superseded for the active deployment target by the Ubuntu NUC deployment foundation in [ADR-0032](docs/adr/0032-ubuntu-nuc-deployment-foundation.md). Arbitrary user-created collections, a general collection manager, suggested filenames, covers, thumbnails, and persistent AI drafts remain unresolved and unimplemented. Identity database encoding beyond canonical UUID text, sidecar manifest format, full-text search design, WAL and checkpoint details, production backup and restore, remote server database design, real Ubuntu NUC host acceptance, AppArmor/UFW policy, Tailscale Serve, systemd credentials, and authentication remain unresolved. Exact dependency versions, 3.13 patch pinning, Poetry virtual-environment location, Uvicorn version and extras, startup interface, process model, worker count, reload policy, trusted proxy configuration, structured logging, background jobs, authentication, and API versioning remain implementation concerns governed by those ADRs and later authorized tasks.
 
 None of these may be silently selected during implementation.
 

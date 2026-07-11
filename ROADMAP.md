@@ -93,7 +93,7 @@ Accepted so far:
 - VLM JPEG derivatives and NVIDIA instruct mode through [ADR-0019](docs/adr/0019-vlm-image-derivatives-and-nvidia-instruct-mode.md); implementation complete for the prototype boundary.
 - On-demand editable AI suggestion review through [ADR-0020](docs/adr/0020-on-demand-ai-suggestion-review.md); implementation complete as a non-persistent pre-alpha review.
 - Tauri desktop shell direction through [ADR-0021](docs/adr/0021-tauri-desktop-shell.md); not implemented.
-- Selective media placement and optional server aggregation direction through [ADR-0022](docs/adr/0022-selective-media-placement-and-server-aggregation.md); not implemented.
+- Selective media placement direction through [ADR-0022](docs/adr/0022-selective-media-placement-and-server-aggregation.md), with server-authority portions superseded by [ADR-0035](docs/adr/0035-authoritative-server-and-client-state-model.md); not implemented beyond current local catalog foundations.
 - Manual-first metadata and multi-model AI draft direction through [ADR-0023](docs/adr/0023-manual-first-metadata-and-multi-model-ai-drafts.md); partially implemented for manual `Current` display title, plain-text description, and ordered canonical tags. Collection, suggested filename, persistent AI drafts, multi-model draft comparison, inline model picker, and draft promotion workflows remain unimplemented.
 - Cover Studio and AI cover candidate direction through [ADR-0024](docs/adr/0024-cover-studio-and-ai-cover-candidates.md); not implemented.
 - Minimum persistent media catalog foundation through [ADR-0025](docs/adr/0025-minimum-persistent-media-catalog-foundation.md); implementation complete for logical media and physical locations only.
@@ -103,10 +103,11 @@ Accepted so far:
 - Automatic built-in `Processed` workflow collection from durable tag saves through [ADR-0030](docs/adr/0030-automatic-processed-collection.md); accepted and implemented through migration `0007`, with one zero-or-one collection membership per medium, and no arbitrary collection CRUD or general collection manager.
 - Fedora systemd service foundation through [ADR-0031](docs/adr/0031-fedora-systemd-service-foundation.md), superseded for the active deployment target by the Ubuntu NUC deployment foundation through [ADR-0032](docs/adr/0032-ubuntu-nuc-deployment-foundation.md); accepted and implemented as repository-local service source material, a non-secret environment template, a read-only database-readiness gate, and an Ubuntu operator runbook. The catalog backup and restore-to-new-destination foundation is accepted through [ADR-0033](docs/adr/0033-catalog-backup-and-recovery-foundation.md). Real host installation, activation, NUC acceptance, AppArmor/UFW policy, Tailscale Serve, authentication, production database replacement, media backup, and secret recovery remain unimplemented.
 - Canonical Analytic Programming integration through a pinned `.ap/` Git submodule and managed `AGENTS.md` block through [ADR-0034](docs/adr/0034-canonical-analytic-programming-integration.md); accepted and implemented. Universal AP protocol files live under `.ap/`, FrameNest-specific rules live in `AGENTS.md`, and permanent BOOT/NEXT files are no longer live repository artifacts.
+- Authoritative server and client state model through [ADR-0035](docs/adr/0035-authoritative-server-and-client-state-model.md); accepted as product architecture direction. The server process is authoritative for catalog and server-owned state and may run locally or later on the NUC; browser, desktop, and remote interfaces are clients. Upload, synchronization, client cache/download, per-user Trash, categories, language metadata, and playback extensions remain unimplemented.
 
 The initial scaffold decision gate is complete. A Poetry package scaffold, centralized configuration boundary, FastAPI application factory, typed health endpoint, contract tests, Uvicorn runtime dependency, startup wiring, and a runnable loopback-only server command now exist.
 
-Broader architecture decisions still open include sidecar manifest format and versioning, metadata/tag/search schema, cover and thumbnail cache implementation details, desktop sidecar IPC, initial authentication boundary, media-tool distribution strategy, and Ubuntu NUC host-acceptance details beyond the initial systemd service foundation.
+Broader architecture decisions still open include sidecar manifest format and versioning, category and language metadata schema, metadata/tag/search schema, cover and thumbnail cache implementation details, desktop sidecar IPC, initial authentication boundary, offline client cache semantics, upload quarantine and publication design, media-tool distribution strategy, and Ubuntu NUC host-acceptance details beyond the initial systemd service foundation.
 
 Persistence strategy is accepted through [ADR-0010](docs/adr/0010-initial-persistence-foundation.md). The minimal SQLAlchemy/Alembic migration foundation is implemented. The current local catalog schema is implemented through revision `0007`, where revision `0007` adds the automatic built-in `Processed` collection columns for [ADR-0030](docs/adr/0030-automatic-processed-collection.md).
 
@@ -146,7 +147,7 @@ Entry conditions: relevant ADRs accepted.
 
 Exit evidence: tests proving domain rules, identity behavior, sidecar roundtrip, and no implementation claims without passing evidence.
 
-Boundaries: no gallery, downloader, playback, or server aggregation beyond what domain tests require.
+Boundaries: no gallery, downloader, playback, or multi-device server behavior beyond what domain tests require.
 
 ## Phase 4 — Server-First Development Skeleton on macOS
 
@@ -193,7 +194,7 @@ Entry conditions: server/API/database/repository-layout ADRs accepted.
 
 Exit evidence: local tests and command output showing loopback-only behavior and basic health/config/database boundaries.
 
-Boundaries: server-first implementation priority MUST NOT make the desktop product server-dependent.
+Boundaries: server-first implementation priority MUST NOT make the desktop product dependent on a remote NUC or public cloud service.
 
 ## Phase 5 — Local Catalog and Library Scanning
 
@@ -331,19 +332,26 @@ Exit evidence: verification that remote access is private, authorized, and not p
 
 Boundaries: no router port forwarding and no Tailscale Funnel in the approved direction.
 
-## Phase 13 — Aggregated Multi-Device Catalog
+## Phase 13 — Authoritative Multi-Device Catalog
 
 Status: planned.
 
-Goal: aggregate media and locations across devices.
+Goal: serve authoritative catalog and server-owned state to browser, desktop,
+and remote clients while preserving selective media placement.
 
-Key deliverables: device synchronization, global logical media visibility, remote-only cards backed by metadata/covers, global locations, offline state, conflict handling, and Android/PWA global view direction.
+Key deliverables: device synchronization, global logical media visibility,
+remote-only cards backed by metadata/covers, global locations, offline state,
+per-user visibility state, client cache/download semantics, conflict handling,
+and browser/PWA global view direction.
 
-Entry conditions: local catalogs, server aggregator, and synchronization decisions are ready.
+Entry conditions: local catalog foundations, authoritative server deployment,
+authentication/capability design, and synchronization decisions are ready.
 
 Exit evidence: tests proving known locations, offline state, and conflict behavior.
 
-Boundaries: automatic full-media replication is not the default; automatic global synchronization remains deferred until explicitly designed.
+Boundaries: automatic full-media replication is not the default; automatic
+global synchronization remains deferred until explicitly designed; per-user
+Trash must not delete server originals.
 
 ## Phase 14 — Streaming, Download, and Transfer
 
@@ -351,13 +359,20 @@ Status: planned.
 
 Goal: support safe remote media operations.
 
-Key deliverables: direct play first, explicit stream/download/archive actions, copy/move operations, verification, deduplication safeguards, remote download, `Download + Copy to Clipboard` through native desktop capability, truthful progress, cancellation, and partial-failure recovery.
+Key deliverables: direct play first, explicit stream/download/archive actions,
+explicit client cache/download, authenticated server-managed ingest/upload,
+copy/move operations, verification, deduplication safeguards, remote download,
+`Download + Copy to Clipboard` through native desktop capability, truthful
+progress, cancellation, and partial-failure recovery.
 
 Entry conditions: remote access, authorization, and transfer model are accepted.
 
 Exit evidence: tests and controlled transfer evidence showing destination verification and final-copy protection.
 
-Boundaries: no source deletion before verified destination success.
+Boundaries: no source deletion before verified destination success. Upload must
+use server-selected placement with quarantine, validation, limits, safe
+filenames, duplicate detection, atomic publication, and failure cleanup. Clients
+must not select arbitrary server filesystem paths.
 
 ## Phase 15 — AI-Assisted Workflows
 

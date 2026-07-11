@@ -92,6 +92,14 @@ must be migrated to the correct project-owned document before deletion. In this
 migration, accepted command-observed NUC host facts were preserved in
 [docs/NUC_HOST_BASELINE.md](../NUC_HOST_BASELINE.md).
 
+A follow-up diagnostic closeout found that some durable product and
+architecture direction from the deleted handoff required a live normative home.
+[ADR-0035](0035-authoritative-server-and-client-state-model.md) records the
+authoritative server/client state model and related future upload, cache,
+Trash, category, language, and playback directions preserved by that corrective
+work. ADR-0034 remains the AP integration decision and does not retroactively
+claim the first migration captured every durable architecture fact.
+
 Permanent repository BOOT and NEXT files are no longer the default lifecycle
 model. Orchestrator rotation normally uses a generated professional restoration
 prompt that contains the verified state needed by the fresh Orchestrator

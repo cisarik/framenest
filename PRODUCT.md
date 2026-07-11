@@ -12,7 +12,9 @@ FrameNest is not merely:
 - A basic media player.
 - A cloud-only media service.
 
-Downloading, cataloging, gallery presentation, metadata, storage awareness, transfer, playback, and optional server aggregation are parts of one product direction.
+Downloading, cataloging, gallery presentation, metadata, storage awareness,
+transfer, playback, and server/client coordination are parts of one product
+direction.
 
 ## 2. Current Product Status
 
@@ -20,13 +22,38 @@ FrameNest is currently in foundation-stage, pre-alpha development.
 
 A minimal Poetry package, runnable loopback FastAPI server, packaged local web shell, explicit SQLite migration foundation, local device and library registries, read-only library scan preview, explicit idempotent scan-candidate import into the minimum persistent media catalog, persistent display-title and canonical-tag core, local media-analysis preview, provider-neutral NVIDIA suggestion prototype, bounded JPEG VLM transport, and explicit editable browser AI suggestion review now exist. The browser review is pre-alpha, opt-in, non-persistent, and does not apply catalog or filesystem changes.
 
-There is still no completed media application, premium gallery, downloader, desktop shell, GUI Settings, automatic AI workflow, media mutation workflow, server aggregator, installer, deployment, or supported release. The persistent media catalog remains minimal: it can store logical media and physical locations from explicit scan-candidate import plus a user-editable display title and ordered canonical content tags. Canonical tag keys are stable English identifiers, and display titles remain separate from physical filenames. Display-title search and canonical-tag AND filtering exist in the catalog browser. A manual browser metadata workspace exists for display title, optional plain-text description, and ordered canonical tags. An automatic built-in `Processed` workflow collection is derived from durable metadata saves containing at least one canonical tag: the first such save records a `processed_at_ms` tagging timestamp, non-empty tag edits and title/description edits preserve it, and removing all tags clears Processed membership and the timestamp. The catalog does not yet include arbitrary user-created collections, a general collection manager, suggested filenames, covers, thumbnails, gallery data, or filesystem rename workflows. Tauri v2 is accepted as the future desktop shell, but no Tauri scaffold exists yet. Development remains MacBook-first; Ubuntu Server 24.04 on the Intel NUC6i5SYH is now the current personal production server preparation target for the optional aggregation and server phase, not a replacement for local desktop operation. This document defines approved product direction; it does not claim full product implementation.
+There is still no completed media application, premium gallery, downloader,
+desktop shell, GUI Settings, automatic AI workflow, media mutation workflow,
+deployed server, installer, or supported release. The persistent media catalog
+remains minimal: it can store logical media and physical locations from
+explicit scan-candidate import plus a user-editable display title and ordered
+canonical content tags. Canonical tag keys are stable English identifiers, and
+display titles remain separate from physical filenames. Display-title search
+and canonical-tag AND filtering exist in the catalog browser. A manual browser
+metadata workspace exists for display title, optional plain-text description,
+and ordered canonical tags. An automatic built-in `Processed` workflow
+collection is derived from durable metadata saves containing at least one
+canonical tag: the first such save records a `processed_at_ms` tagging
+timestamp, non-empty tag edits and title/description edits preserve it, and
+removing all tags clears Processed membership and the timestamp. The catalog
+does not yet include arbitrary user-created collections, a general collection
+manager, suggested filenames, covers, thumbnails, gallery data, or filesystem
+rename workflows. Tauri v2 is accepted as the future desktop shell, but no
+Tauri scaffold exists yet. Development remains MacBook-first; Ubuntu Server
+24.04 on the Intel NUC6i5SYH is now the current personal production server
+preparation target for a future authoritative FrameNest server. This document
+defines approved product direction; it does not claim full product
+implementation.
 
 ## 3. Product Vision
 
 The long-term goal is to provide a personal media library that can acquire media, organize it, present it through a premium gallery, preserve local ownership, and support multiple devices and storage locations.
 
-FrameNest should allow users to keep useful media under their own control, understand where each copy exists, and access the collection through local desktop catalogs. An optional server aggregator may later coordinate global views, remote access, transfers, and centralized provider integrations.
+FrameNest should allow users to keep useful media under their own control,
+understand where each copy exists, and access the collection through clients of
+an authoritative FrameNest server process. That server process may run locally
+on the same device as the desktop client or later on the Ubuntu NUC. This is
+not a public cloud or SaaS requirement.
 
 The normal user experience should be a native desktop application rather than a manually opened external browser. Browser mode remains useful for development and diagnostics.
 
@@ -62,11 +89,20 @@ FrameNest should support careful movement, copying, and remote playback of media
 
 Determinate operations such as downloads and transfers should eventually show real bytes, percentages, speed, ETA, and verification/finalization state when available. Indeterminate operations may use restrained premium animation but must not invent percentages or backend stages.
 
-### Optional Server Aggregation
+### Authoritative Server and Clients
 
-FrameNest may use an optional server to aggregate catalogs, coordinate transfers, provide remote streaming, run remote downloads, centralize AI provider access, and support future backup functionality.
+FrameNest uses a server/client architecture. The FrameNest server process is
+authoritative for catalog records and server-owned state. Browser, desktop, and
+remote interfaces are clients of that server API.
 
-The optional server may support global gallery visibility for remote-only media through metadata, covers, availability summaries, and derived thumbnails without requiring automatic full media-byte replication.
+The server may run locally for a desktop installation or later on the Intel NUC
+personal production server. It may coordinate catalog state, transfers, remote
+streaming, remote downloads, centralized AI provider access, and future backup
+functionality.
+
+The server may support global gallery visibility for remote-only media through
+metadata, covers, availability summaries, and derived thumbnails without
+requiring automatic full media-byte replication.
 
 ### Privacy-Aware AI Assistance
 
@@ -112,6 +148,7 @@ The intended media scope includes:
 - Standalone videos.
 - Series and episodes.
 - YouTube media.
+- Movies with explicit language metadata where useful.
 - Future downloader adapters.
 - Existing local video files.
 - GIF files.
@@ -122,17 +159,23 @@ The intended media scope includes:
 
 This scope describes product direction. It does not claim that all sources, formats, or workflows are currently supported.
 
+Future first-class categories include `memes`, `youtube`, and `movies`.
+Categories are a dedicated catalog facet rather than only tags or directory
+names. Movie language metadata should prefer container or audio metadata and
+user editing before expensive AI analysis, and FrameNest must not automatically
+upload audio to a cloud provider.
+
 ## 8. Local-First Invariants
 
 Desktop installations must remain useful without internet access.
 
-Local gallery and local playback must not require the server.
+Local gallery and local playback must remain useful when the needed local
+server process, local catalog/cache state, and local media are available.
 
-Local metadata must remain available when the server is offline.
+The Intel NUC server is optional for local ownership. A desktop client may use
+a local FrameNest server process rather than a remote NUC.
 
-The Intel NUC server is optional for desktop operation.
-
-Local clients must not become unusable thin clients.
+Local clients must not become unusable public-cloud thin clients.
 
 Durable metadata should remain portable where feasible.
 
@@ -140,7 +183,17 @@ The normal desktop experience must not require Chrome, Brave, Firefox, Safari, o
 
 ## 9. Server Role
 
-The optional Intel NUC server is an aggregator, not a replacement for local desktop catalogs.
+The FrameNest server process is authoritative for catalog records, server media
+originals, canonical title, description, and tags, future category and language
+metadata, per-user visibility state, upload and ingest state, server preview
+cache, authentication, and capability decisions.
+
+Browser, desktop, and remote interfaces are clients. They must not infer
+administrator authority from loopback, source IP, hostname, Tailscale
+membership, cookies, or same-machine execution.
+
+The Intel NUC may later host the authoritative server, but it is not required
+for local ownership and is not yet deployed.
 
 The server may later support:
 
@@ -152,7 +205,9 @@ The server may later support:
 - Centralized AI provider access.
 - Future backup functionality.
 
-Server functionality must not make local desktop use dependent on server availability.
+Server functionality must not make local ownership dependent on public cloud
+availability. Offline client caching and synchronization remain future design
+work.
 
 A priority future scenario is a NUC-hosted `Meme` archive where a desktop can browse and search remote-only GIF and short MP4 media through synchronized metadata and covers, then explicitly stream or download selected media.
 
@@ -165,6 +220,14 @@ One logical media item may have zero or more series relationships and may exist 
 One gallery item should normally represent the logical media item rather than displaying every duplicate independently. The user should still be able to inspect where each physical copy exists.
 
 FrameNest should use selective media placement. It must not automatically replicate all media bytes to every device.
+
+Future upload, catalog synchronization, explicit client cache/download,
+per-user Trash, server deletion requests, global retirement, and physical purge
+of originals are separate operations. Server-managed upload must quarantine,
+validate, limit, safely name, de-duplicate, atomically publish, clean up
+failures, and choose server placement; clients must not select arbitrary server
+filesystem paths. Per-user Trash is server-persisted visibility state and must
+not delete the server original.
 
 ## 11. Library and Storage Experience
 
@@ -244,6 +307,11 @@ Playback direction includes local file playback, remote stream playback, inline 
 
 Embedded libVLC is future roadmap scope, not an early-stage implemented capability.
 
+Future playback should support fullscreen and truthful audio-track selection
+where technically supported. FrameNest should use capability detection and
+fallback rather than fake controls. Subtitle support is not currently required,
+and FrameNest must not silently transcode originals.
+
 For GIF and short MP4 social-response workflows, FrameNest should later support `Download + Copy to Clipboard` through native desktop capabilities with clear fallback behavior when direct paste is unsupported.
 
 ## 17. Privacy and AI Assistance
@@ -253,6 +321,10 @@ AI features are optional.
 Cloud operations are opt-in, and users should understand what is sent before it is sent.
 
 Provider keys should remain on the server where possible. Ordinary clients should not receive provider secrets.
+
+Ordinary clients should not configure provider credentials or call providers
+directly. Browser status and results must be sanitized. Production
+provider-secret integration remains unresolved.
 
 Suspicious filenames may be manually analyzed, but AI suggestions require confirmation. Current pre-alpha AI suggestion review is editable, session-only, and not catalog truth.
 
@@ -344,11 +416,12 @@ This document defines product direction. `SPEC.md` defines normative requirement
 Permanent architecture and UX references:
 
 - [DESKTOP.md](DESKTOP.md) records accepted desktop shell direction.
-- [SERVER.md](SERVER.md) records accepted optional server and NUC aggregation direction.
+- [SERVER.md](SERVER.md) records accepted authoritative server/client and NUC direction.
 - [GALLERY.md](GALLERY.md) records accepted gallery product and UX direction.
 - [AI_WORKSPACE.md](AI_WORKSPACE.md) records accepted manual-first metadata and multi-model AI workspace direction.
 - [COVER_PIPELINE.md](COVER_PIPELINE.md) records accepted Cover Studio and cover candidate direction.
 - [ADR-0021](docs/adr/0021-tauri-desktop-shell.md) records the accepted Tauri desktop shell decision.
-- [ADR-0022](docs/adr/0022-selective-media-placement-and-server-aggregation.md) records selective placement and server aggregation decisions.
+- [ADR-0022](docs/adr/0022-selective-media-placement-and-server-aggregation.md) records selective placement decisions.
+- [ADR-0035](docs/adr/0035-authoritative-server-and-client-state-model.md) records the authoritative server/client state model.
 - [ADR-0023](docs/adr/0023-manual-first-metadata-and-multi-model-ai-drafts.md) records manual-first metadata and multi-model AI draft decisions.
 - [ADR-0024](docs/adr/0024-cover-studio-and-ai-cover-candidates.md) records Cover Studio and AI cover candidate decisions.

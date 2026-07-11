@@ -444,7 +444,8 @@ Do not capture or share:
 ## Not Implemented By This Runbook
 
 - Real deployment acceptance.
-- Backup/restore tooling.
+- Real-host backup/restore acceptance, off-device copies, retention policy, and
+  production restore drills.
 - Production provider-secret integration.
 - Tailscale.
 - Application authentication or authorization.

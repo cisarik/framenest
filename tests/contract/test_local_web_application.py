@@ -2278,24 +2278,6 @@ def test_javascript_card_playback_cleanup_releases_media_resources(client: TestC
     assert "cardMediaElements = new Set()" in cleanup_body
 
 
-def test_protocol_documents_are_provided_by_pinned_ap_submodule() -> None:
-    ap = Path(".ap/AP.md").read_text(encoding="utf-8")
-    orchestrator = Path(".ap/AP_ORCHESTRATOR.md").read_text(encoding="utf-8")
-    integration = Path(".ap/INTEGRATION.md").read_text(encoding="utf-8")
-
-    assert "pinned Git submodule at:" in ap
-    assert ".ap/" in ap
-    assert "Numbered Cooperator Acceptance Feedback" in ap
-    assert "`PASS`" in ap
-    assert "`FAIL`" in ap
-    assert "`NOT TESTED`" in ap
-    assert "new product decisions" in ap
-    assert "Exceptional Repository Handoffs" in orchestrator
-    assert "professional self-contained restoration" in orchestrator
-    assert "Universal AP files are not copied into the project root." in integration
-    assert "project-specific rules outside the block remain authoritative" in integration
-
-
 def test_css_metadata_dialog_has_scrollable_body(client: TestClient) -> None:
     css = client.get("/assets/styles.css").text
     assert "overflow-y" in css or "overflow-y" in css

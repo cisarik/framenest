@@ -225,10 +225,12 @@ The current approved product direction includes:
 
 - A visually premium gallery as a flagship experience.
 - Media acquisition through replaceable source adapters.
-- Local-first catalog ownership, with portable sidecar metadata and local indexes.
+- Local-first ownership through an authoritative FrameNest server process that
+  may run locally or later on the Ubuntu NUC.
 - Privacy-aware AI assistance later, after core library behavior and safety boundaries are established.
 - Multiple libraries, multiple devices, and one logical media item that may exist in multiple physical locations.
-- An optional Intel NUC server aggregator for cross-device library coordination.
+- An Intel NUC personal production server direction for future authoritative
+  server hosting, remote access, transfer, and archive workflows.
 
 ## Architectural Direction
 
@@ -238,11 +240,12 @@ The current conceptual direction is:
 - Tauri v2 as the accepted future desktop shell for normal local desktop operation.
 - Python for domain, filesystem, downloader, metadata, server, and media-processing capabilities.
 - PWA or browser access where appropriate.
-- Local desktop catalogs plus an optional server aggregator.
+- An authoritative FrameNest server process with browser, desktop, and remote
+  clients.
 - External VLC first for playback, with embedded libVLC considered later.
 - Remote access through Tailscale-only networking rather than public internet exposure.
 
-The accepted desktop and distributed-media direction is documentation only at this stage. No Tauri scaffold, installer, real NUC deployment, persistent gallery, transfer implementation, or server aggregation exists yet.
+The accepted desktop and distributed-media direction is documentation only at this stage. No Tauri scaffold, installer, real NUC deployment, persistent gallery, transfer implementation, or deployed authoritative server exists yet.
 
 Accepted implementation foundations so far:
 
@@ -258,7 +261,7 @@ Accepted implementation foundations so far:
 - VLM transport JPEG derivatives and NVIDIA documented instruct mode for the suggestion prototype ([ADR-0019](docs/adr/0019-vlm-image-derivatives-and-nvidia-instruct-mode.md))
 - Explicit on-demand editable AI suggestion review ([ADR-0020](docs/adr/0020-on-demand-ai-suggestion-review.md))
 - Tauri v2 desktop shell direction ([ADR-0021](docs/adr/0021-tauri-desktop-shell.md))
-- Selective media placement and optional server aggregation direction ([ADR-0022](docs/adr/0022-selective-media-placement-and-server-aggregation.md))
+- Selective media placement direction ([ADR-0022](docs/adr/0022-selective-media-placement-and-server-aggregation.md)); server-authority portions are superseded by the authoritative server/client state model ([ADR-0035](docs/adr/0035-authoritative-server-and-client-state-model.md))
 - Manual-first metadata and multi-model AI draft workspace direction ([ADR-0023](docs/adr/0023-manual-first-metadata-and-multi-model-ai-drafts.md), [AI_WORKSPACE.md](AI_WORKSPACE.md))
 - Manual Cover Studio and AI cover candidate direction ([ADR-0024](docs/adr/0024-cover-studio-and-ai-cover-candidates.md), [COVER_PIPELINE.md](COVER_PIPELINE.md))
 - Minimum persistent media catalog foundation ([ADR-0025](docs/adr/0025-minimum-persistent-media-catalog-foundation.md))
@@ -364,7 +367,7 @@ Current foundation files:
 - [`docs/adr/0019-vlm-image-derivatives-and-nvidia-instruct-mode.md`](docs/adr/0019-vlm-image-derivatives-and-nvidia-instruct-mode.md) records the accepted VLM JPEG derivative and NVIDIA instruct-mode decision.
 - [`docs/adr/0020-on-demand-ai-suggestion-review.md`](docs/adr/0020-on-demand-ai-suggestion-review.md) records the accepted on-demand editable AI suggestion review decision.
 - [`docs/adr/0021-tauri-desktop-shell.md`](docs/adr/0021-tauri-desktop-shell.md) records the accepted Tauri v2 desktop shell direction.
-- [`docs/adr/0022-selective-media-placement-and-server-aggregation.md`](docs/adr/0022-selective-media-placement-and-server-aggregation.md) records the accepted selective placement and optional server aggregation direction.
+- [`docs/adr/0022-selective-media-placement-and-server-aggregation.md`](docs/adr/0022-selective-media-placement-and-server-aggregation.md) records the accepted selective placement direction.
 - [`docs/adr/0023-manual-first-metadata-and-multi-model-ai-drafts.md`](docs/adr/0023-manual-first-metadata-and-multi-model-ai-drafts.md) records the accepted manual-first metadata and multi-model AI draft decision.
 - [`docs/adr/0024-cover-studio-and-ai-cover-candidates.md`](docs/adr/0024-cover-studio-and-ai-cover-candidates.md) records the accepted Cover Studio and AI cover candidate decision.
 - [`docs/adr/0025-minimum-persistent-media-catalog-foundation.md`](docs/adr/0025-minimum-persistent-media-catalog-foundation.md) records the accepted minimum persistent media catalog foundation decision.
@@ -377,6 +380,7 @@ Current foundation files:
 - [`docs/adr/0032-ubuntu-nuc-deployment-foundation.md`](docs/adr/0032-ubuntu-nuc-deployment-foundation.md) records the accepted Ubuntu NUC deployment foundation.
 - [`docs/adr/0033-catalog-backup-and-recovery-foundation.md`](docs/adr/0033-catalog-backup-and-recovery-foundation.md) records the accepted catalog backup and recovery foundation.
 - [`docs/adr/0034-canonical-analytic-programming-integration.md`](docs/adr/0034-canonical-analytic-programming-integration.md) records the accepted pinned canonical AP submodule integration.
+- [`docs/adr/0035-authoritative-server-and-client-state-model.md`](docs/adr/0035-authoritative-server-and-client-state-model.md) records the accepted authoritative server/client state model.
 
 ## Non-Goals for the Current Stage
 

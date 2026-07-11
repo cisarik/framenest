@@ -40,7 +40,7 @@ Current product, system, and operational truth is distributed across:
 - [SPEC.md](SPEC.md) for normative product and system requirements.
 - [ROADMAP.md](ROADMAP.md) for staged development.
 - [SECURITY.md](SECURITY.md) for security policy and privacy boundaries.
-- [SERVER.md](SERVER.md) for optional server and NUC aggregation direction.
+- [SERVER.md](SERVER.md) for authoritative server/client and NUC direction.
 - [docs/UBUNTU_NUC_DEPLOYMENT.md](docs/UBUNTU_NUC_DEPLOYMENT.md) for the
   Ubuntu NUC deployment runbook.
 - [docs/BACKUP_AND_RECOVERY.md](docs/BACKUP_AND_RECOVERY.md) for the catalog
@@ -115,8 +115,10 @@ ingest. Ordinary clients must never receive provider secrets.
 
 ## Product Boundaries
 
-FrameNest remains local-first. Server functionality must not replace local
-desktop functionality. The premium gallery remains a flagship product invariant.
+FrameNest remains local-first. A FrameNest server process is authoritative for
+catalog and server-owned state, but it may run locally and must not turn local
+ownership into public-cloud dependence. The premium gallery remains a flagship
+product invariant.
 
 Rendered UX acceptance belongs to Michal. The accepted Gallery and Details MVP
 visual behavior remains frozen unless a concrete defect is identified.
