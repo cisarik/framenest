@@ -383,6 +383,9 @@ def test_test_command_categorizes_safe_failures(
     assert ai.test_command(ai._CliContext(config_path=tmp_path / "config.json"), output=lines.append) == 2
 
     assert load_ai_test_state(tmp_path / "test-state.json").status == category  # type: ignore[union-attr]
+    raw_state = (tmp_path / "test-state.json").read_text(encoding="utf-8")
+    assert category in raw_state
+    assert "raw" not in raw_state
     output = "\n".join(lines)
     assert category in output
     assert "raw" not in output

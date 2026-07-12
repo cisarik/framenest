@@ -18,13 +18,18 @@ from framenest.application.media_suggestion import (
     MediaSuggestionProviderAuthError,
     MediaSuggestionProviderFailedError,
     MediaSuggestionProviderInvalidResponseError,
+    MediaSuggestionProviderModelUnavailableError,
     MediaSuggestionProviderRateLimitedError,
     MediaSuggestionProviderUnavailableError,
     MediaSuggestionRequest,
     PROMPT_VERSION,
-    SUGGESTION_PROVIDER_AUTH_MESSAGE,
 )
-from framenest.infrastructure.ai.constants import DEFAULT_MODEL_ID, NVIDIA_CHAT_COMPLETIONS_URL
+from framenest.infrastructure.ai.constants import (
+    DEFAULT_MODEL_ID,
+    NVIDIA_CHAT_COMPLETIONS_URL,
+    TEMPERATURE,
+    TOP_K,
+)
 from framenest.infrastructure.ai.credentials import NvidiaApiCredential
 from framenest.infrastructure.ai.image_derivative import (
     FrameNestImageDerivativeError,
@@ -32,6 +37,7 @@ from framenest.infrastructure.ai.image_derivative import (
 )
 from framenest.infrastructure.ai.nvidia_nim import (
     NvidiaNimMediaSuggestionProvider,
+    build_nvidia_connection_test_body,
     build_nvidia_request_body,
     extract_message_content,
     parse_suggestion_content_text,
@@ -40,6 +46,8 @@ from framenest.infrastructure.ai.transport import (
     HttpsJsonResponse,
     HttpsTransportError,
     TRANSPORT_AUTH_REJECTED_MESSAGE,
+    TRANSPORT_INVALID_RESPONSE_MESSAGE,
+    TRANSPORT_MODEL_UNAVAILABLE_MESSAGE,
     TRANSPORT_RATE_LIMITED_MESSAGE,
     TRANSPORT_UNAVAILABLE_MESSAGE,
 )
@@ -210,6 +218,55 @@ def test_build_request_uses_exact_endpoint_and_data_urls() -> None:
     ] == [f"data:image/jpeg;base64,{encoded}" for encoded in encoded_frames]
     assert "data:image/png" not in body_json
     assert len(encoder.calls) == 3
+
+
+def test_connection_test_uses_accepted_non_thinking_text_contract() -> None:
+    body = build_nvidia_connection_test_body(model_id=DEFAULT_MODEL_ID)
+
+    assert body == {
+        "model": DEFAULT_MODEL_ID,
+        "messages": [{"role": "user", "content": "Return the single word ok."}],
+        "stream": False,
+        "temperature": TEMPERATURE,
+        "top_k": TOP_K,
+        "max_tokens": 8,
+        "chat_template_kwargs": {"enable_thinking": False},
+    }
+    encoded = json.dumps(body)
+    assert "image_url" not in encoded
+    assert "data:" not in encoded
+    assert "audio" not in encoded
+    assert "video" not in encoded
+    assert "metadata" not in encoded
+    assert "filename" not in encoded
+    assert "catalog" not in encoded
+
+
+def test_connection_test_sends_text_only_body_without_media_fields() -> None:
+    transport = _FakeTransport(body=_provider_response_payload("ok"))
+    provider = NvidiaNimMediaSuggestionProvider(
+        NvidiaApiCredential(_SECRET),
+        transport,
+        model_id=DEFAULT_MODEL_ID,
+    )
+
+    provider.test_connection()
+
+    assert len(transport.post_calls) == 1
+    assert transport.get_calls == []
+    url, headers, raw_body = transport.post_calls[0]
+    assert url == NVIDIA_CHAT_COMPLETIONS_URL
+    assert headers["Authorization"] == f"Bearer {_SECRET}"
+    payload = json.loads(raw_body)
+    assert payload["model"] == DEFAULT_MODEL_ID
+    assert payload["messages"] == [{"role": "user", "content": "Return the single word ok."}]
+    assert payload["stream"] is False
+    assert payload["temperature"] == TEMPERATURE
+    assert payload["top_k"] == TOP_K
+    assert payload["max_tokens"] == 8
+    assert payload["chat_template_kwargs"] == {"enable_thinking": False}
+    assert "image_url" not in raw_body.decode("utf-8")
+    assert "data:" not in raw_body.decode("utf-8")
 
 
 def test_provider_uses_immediate_200_without_status_polling() -> None:
@@ -419,7 +476,15 @@ def test_provider_rejects_unknown_fields_and_wrong_extension() -> None:
     [
         (HttpsTransportError(TRANSPORT_AUTH_REJECTED_MESSAGE), MediaSuggestionProviderAuthError),
         (HttpsTransportError(TRANSPORT_RATE_LIMITED_MESSAGE), MediaSuggestionProviderRateLimitedError),
+        (
+            HttpsTransportError(TRANSPORT_MODEL_UNAVAILABLE_MESSAGE),
+            MediaSuggestionProviderModelUnavailableError,
+        ),
         (HttpsTransportError(TRANSPORT_UNAVAILABLE_MESSAGE), MediaSuggestionProviderUnavailableError),
+        (
+            HttpsTransportError(TRANSPORT_INVALID_RESPONSE_MESSAGE),
+            MediaSuggestionProviderInvalidResponseError,
+        ),
     ],
 )
 def test_provider_maps_transport_failures(error: Exception, expected: type[Exception]) -> None:
@@ -431,6 +496,68 @@ def test_provider_maps_transport_failures(error: Exception, expected: type[Excep
     )
     with pytest.raises(expected):
         provider.suggest(_sample_request())
+
+
+@pytest.mark.parametrize(
+    ("status_code", "expected"),
+    [
+        (401, MediaSuggestionProviderAuthError),
+        (403, MediaSuggestionProviderAuthError),
+        (404, MediaSuggestionProviderModelUnavailableError),
+        (429, MediaSuggestionProviderRateLimitedError),
+        (500, MediaSuggestionProviderUnavailableError),
+        (503, MediaSuggestionProviderUnavailableError),
+    ],
+)
+def test_connection_test_maps_http_statuses_without_raw_body(
+    status_code: int,
+    expected: type[Exception],
+) -> None:
+    transport = _FakeTransport(status_code=status_code, body=b'{"error":"raw provider body"}')
+    provider = NvidiaNimMediaSuggestionProvider(
+        NvidiaApiCredential(_SECRET),
+        transport,
+    )
+
+    with pytest.raises(expected) as exc_info:
+        provider.test_connection()
+
+    assert "raw provider body" not in str(exc_info.value)
+
+
+@pytest.mark.parametrize(
+    "transport_message",
+    [
+        pytest.param(TRANSPORT_UNAVAILABLE_MESSAGE, id="dns"),
+        pytest.param(TRANSPORT_UNAVAILABLE_MESSAGE, id="tcp"),
+        pytest.param(TRANSPORT_UNAVAILABLE_MESSAGE, id="tls"),
+        pytest.param(TRANSPORT_UNAVAILABLE_MESSAGE, id="timeout"),
+    ],
+)
+def test_connection_test_maps_dns_tcp_tls_and_timeout_unavailable_to_provider_unreachable(
+    transport_message: str,
+) -> None:
+    transport = _FakeTransport(error=HttpsTransportError(transport_message))
+    provider = NvidiaNimMediaSuggestionProvider(
+        NvidiaApiCredential(_SECRET),
+        transport,
+    )
+
+    with pytest.raises(MediaSuggestionProviderUnavailableError):
+        provider.test_connection()
+
+
+def test_connection_test_maps_invalid_transport_response_to_invalid_response() -> None:
+    transport = _FakeTransport(
+        error=HttpsTransportError(TRANSPORT_INVALID_RESPONSE_MESSAGE),
+    )
+    provider = NvidiaNimMediaSuggestionProvider(
+        NvidiaApiCredential(_SECRET),
+        transport,
+    )
+
+    with pytest.raises(MediaSuggestionProviderInvalidResponseError):
+        provider.test_connection()
 
 
 def test_extract_message_content_rejects_missing_choice() -> None:

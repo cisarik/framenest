@@ -10,7 +10,6 @@ from typing import Any, Callable, Protocol
 
 from framenest.application.media_suggestion import (
     FrameNestMediaSuggestionError,
-    INVALID_SUGGESTION_MESSAGE,
     MediaSuggestion,
     MediaSuggestionProviderAuthError,
     MediaSuggestionProviderFailedError,
@@ -203,7 +202,7 @@ def build_nvidia_connection_test_body(*, model_id: str) -> dict[str, Any]:
             {"role": "user", "content": "Return the single word ok."},
         ],
         "stream": False,
-        "temperature": 0,
+        "temperature": TEMPERATURE,
         "top_k": TOP_K,
         "max_tokens": 8,
         "chat_template_kwargs": {"enable_thinking": False},
@@ -384,11 +383,12 @@ def _map_transport_error(exc: HttpsTransportError) -> Exception:
         return MediaSuggestionProviderModelUnavailableError(
             SUGGESTION_PROVIDER_MODEL_UNAVAILABLE_MESSAGE
         )
-    if message in {
-        TRANSPORT_UNAVAILABLE_MESSAGE,
-        TRANSPORT_INVALID_RESPONSE_MESSAGE,
-    }:
+    if message == TRANSPORT_UNAVAILABLE_MESSAGE:
         return MediaSuggestionProviderUnavailableError(SUGGESTION_PROVIDER_UNAVAILABLE_MESSAGE)
+    if message == TRANSPORT_INVALID_RESPONSE_MESSAGE:
+        return MediaSuggestionProviderInvalidResponseError(
+            SUGGESTION_PROVIDER_INVALID_RESPONSE_MESSAGE
+        )
     return MediaSuggestionProviderFailedError(SUGGESTION_PROVIDER_FAILED_MESSAGE)
 
 
