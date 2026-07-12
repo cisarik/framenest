@@ -47,18 +47,33 @@ SSH target or non-secret environment default, explicit provider/model values,
 and one private local credential source. It supports a non-mutating check mode,
 uses SSH BatchMode-compatible command execution, uses only `sudo -n` remotely,
 atomically acquires `/run/framenest-ai-credential-deploy`, and fails closed when
-retained recovery material already exists. After the complete remote backup
-marker exists, the helper may transmit the credential over SSH stdin, install
-deployment-controlled files atomically, restart the service, and wait up to 30
-seconds for readiness. Deployment terminal service failure and readiness
-timeout both roll back deployment-controlled files. The rollback contract
-restores the selected credential, systemd credential drop-in, and non-secret AI
-configuration present/absent state, then daemon-reloads, restarts, and uses the
-same bounded readiness contract on the restored service. Recovery material is
-retained when rollback terminal failure, rollback readiness timeout, rollback
-restore/restart failure, or cleanup failure occurs. This repository slice does
-not install the Fish function into a user configuration directory and does not
-execute a real NUC deployment.
+retained recovery material already exists. Check mode and deployment both
+select only the provider-specific tracked drop-in template under
+`deploy/systemd/`, validate its exact two-line `LoadCredential=` contract
+locally, and never accept an operator-supplied template path.
+
+After the complete remote backup marker exists, the helper may transmit the
+credential over SSH stdin, install deployment-controlled files atomically, and
+write non-secret provider/model configuration. The selected credential and the
+selected drop-in template use separate stdin payloads. The remote drop-in
+installation consumes the exact tracked template bytes, verifies deterministic
+byte equivalence before and after atomic rename, and does not reconstruct line
+breaks through shell escaping. Before restart, the helper verifies systemd
+acceptance, daemon-reloads, confirms `framenest.service` remains enabled,
+confirms systemd loaded the intended drop-in and credential identity, and only
+then restarts `framenest.service`. After bounded readiness succeeds, it checks
+only the same loopback, provider-free capability endpoint used by the web
+status modal and requires the selected provider/model to be configured,
+available, and not connection-tested. Deployment terminal service failure,
+readiness timeout, systemd acceptance failure, byte-equivalence failure, and
+capability mismatch all roll back deployment-controlled files. The rollback
+contract restores the selected credential, systemd credential drop-in, and
+non-secret AI configuration present/absent state, then daemon-reloads, restarts,
+and uses the same bounded readiness contract on the restored service. Recovery
+material is retained when rollback terminal failure, rollback readiness
+timeout, rollback restore/restart failure, or cleanup failure occurs. This
+repository slice does not install the Fish function into a user configuration
+directory and does not execute a real NUC deployment.
 
 Non-secret provider/model selection continues through the existing
 `framenest-ai configure` boundary, extended only with explicit non-interactive

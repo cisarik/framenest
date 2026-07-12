@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import dataclass
+import hashlib
 import os
 from pathlib import Path
 import shlex
@@ -13,21 +14,41 @@ import sys
 from typing import Callable, Sequence
 
 AI_CREDENTIAL_MAX_BYTES = 4096
+AI_DROPIN_TEMPLATE_MAX_BYTES = 1024
 READINESS_DEADLINE_SECONDS = 30
 READINESS_POLL_INTERVAL_SECONDS = 1
 READINESS_TERMINAL_EXIT = 75
 READINESS_TIMEOUT_EXIT = 76
 RETAINED_RECOVERY_EXIT = 77
+DROPIN_BYTE_MISMATCH_EXIT = 78
+SYSTEMD_VERIFY_EXIT = 79
+DAEMON_RELOAD_EXIT = 80
+SERVICE_ENABLED_EXIT = 81
+LOADED_DROPIN_EXIT = 82
+LOADED_CREDENTIAL_EXIT = 83
+CAPABILITY_UNAVAILABLE_EXIT = 84
+CAPABILITY_MALFORMED_EXIT = 85
+CAPABILITY_VALIDATION_EXIT = 86
 SERVICE_NAME = "framenest.service"
 REMOTE_CREDENTIAL_DIR = "/etc/framenest/credentials"
 REMOTE_DROPIN_PATH = "/etc/systemd/system/framenest.service.d/20-ai-credential.conf"
 REMOTE_AI_CONFIG_PATH = "/var/lib/framenest/ai/config.json"
 REMOTE_AI_BIN = "/opt/framenest/current/.venv/bin/framenest-ai"
 REMOTE_ROLLBACK_DIR = "/run/framenest-ai-credential-deploy"
+HELPER_DIR = Path(__file__).resolve().parent
+DEPLOY_SYSTEMD_DIR = HELPER_DIR.parent / "systemd"
+REMOTE_SERVICE_UNIT_PATH = f"/etc/systemd/system/{SERVICE_NAME}"
+AI_CAPABILITY_URL = "http://127.0.0.1:8000/api/ai/media-suggestion-capability"
 
 PROVIDER_CREDENTIALS = {
     "nvidia-nim": "NVIDIA_API_KEY",
     "vercel-ai-gateway": "AI_GATEWAY_API_KEY",
+}
+
+PROVIDER_DROPIN_TEMPLATES = {
+    "nvidia-nim": DEPLOY_SYSTEMD_DIR / "framenest-ai-credential-nvidia-nim.conf",
+    "vercel-ai-gateway": DEPLOY_SYSTEMD_DIR
+    / "framenest-ai-credential-vercel-ai-gateway.conf",
 }
 
 
@@ -47,6 +68,15 @@ SANITIZED_COMMAND_ERRORS = {
     RETAINED_RECOVERY_EXIT: "retained recovery material exists; independent recovery is required",
     READINESS_TERMINAL_EXIT: "service entered terminal failed state",
     READINESS_TIMEOUT_EXIT: "service readiness deadline exceeded",
+    DROPIN_BYTE_MISMATCH_EXIT: "drop-in byte equivalence failed",
+    SYSTEMD_VERIFY_EXIT: "systemd drop-in verification failed",
+    DAEMON_RELOAD_EXIT: "daemon reload failed",
+    SERVICE_ENABLED_EXIT: "service enabled-state validation failed",
+    LOADED_DROPIN_EXIT: "loaded drop-in mismatch",
+    LOADED_CREDENTIAL_EXIT: "loaded credential identity mismatch",
+    CAPABILITY_UNAVAILABLE_EXIT: "running capability unavailable",
+    CAPABILITY_MALFORMED_EXIT: "running capability malformed",
+    CAPABILITY_VALIDATION_EXIT: "running capability validation failed",
 }
 
 
@@ -54,6 +84,15 @@ SANITIZED_COMMAND_ERRORS = {
 class LocalSecret:
     identity: str
     value: str
+
+
+@dataclass(frozen=True, slots=True)
+class DropinTemplate:
+    provider_id: str
+    identity: str
+    path: Path
+    payload: bytes
+    sha256: str
 
 
 Runner = Callable[[list[str], bytes | None], str]
@@ -77,6 +116,7 @@ def main(
             local_ai_env=args.local_ai_env,
         )
         _validate_model(args.model)
+        dropin = _load_provider_dropin_template(args.provider)
         _print_plan(args=args, target=target, secret=secret)
         if args.check:
             return 0
@@ -86,6 +126,7 @@ def main(
             provider_id=args.provider,
             model_id=args.model,
             secret=secret,
+            dropin=dropin,
             health_url=args.health_url,
             runner=command_runner,
         )
@@ -138,6 +179,7 @@ def deploy(
     provider_id: str,
     model_id: str,
     secret: LocalSecret,
+    dropin: DropinTemplate,
     health_url: str,
     runner: Callable[[list[str], bytes | None], None],
 ) -> None:
@@ -166,9 +208,9 @@ def deploy(
         )
         _ssh(
             target,
-            _remote_install_dropin(_dropin_text(secret.identity)),
+            _remote_install_dropin(dropin),
             runner=runner,
-            input_bytes=None,
+            input_bytes=dropin.payload,
         )
         _ssh(
             target,
@@ -176,8 +218,16 @@ def deploy(
             runner=runner,
             input_bytes=None,
         )
-        _ssh(target, _remote_restart(), runner=runner, input_bytes=None)
+        for command in _remote_systemd_acceptance_commands(dropin):
+            _ssh(target, command, runner=runner, input_bytes=None)
+        _ssh(target, _remote_restart_service(), runner=runner, input_bytes=None)
         _ssh(target, _remote_wait_ready(health_url), runner=runner, input_bytes=None)
+        _ssh(
+            target,
+            _remote_validate_capability(provider_id=provider_id, model_id=model_id),
+            runner=runner,
+            input_bytes=None,
+        )
     except DeploymentCommandError:
         if transaction_active:
             _rollback(
@@ -256,6 +306,64 @@ def _credential_identity(provider_id: str) -> str:
         return PROVIDER_CREDENTIALS[provider_id]
     except KeyError as exc:
         raise DeploymentInputError("Unsupported provider.") from exc
+
+
+def _load_provider_dropin_template(provider_id: str) -> DropinTemplate:
+    identity = _credential_identity(provider_id)
+    try:
+        template_path = PROVIDER_DROPIN_TEMPLATES[provider_id]
+    except KeyError as exc:
+        raise DeploymentInputError("Unsupported provider.") from exc
+    path = Path(template_path)
+    try:
+        metadata = path.lstat()
+    except OSError as exc:
+        raise DeploymentInputError("Template validation failed.") from exc
+    if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISREG(metadata.st_mode):
+        raise DeploymentInputError("Template validation failed.")
+    try:
+        resolved = path.resolve(strict=True)
+        boundary = DEPLOY_SYSTEMD_DIR.resolve(strict=True)
+    except OSError as exc:
+        raise DeploymentInputError("Template validation failed.") from exc
+    if resolved.parent != boundary:
+        raise DeploymentInputError("Template validation failed.")
+    if metadata.st_size < 1 or metadata.st_size > AI_DROPIN_TEMPLATE_MAX_BYTES:
+        raise DeploymentInputError("Template validation failed.")
+    try:
+        payload = path.read_bytes()
+    except OSError as exc:
+        raise DeploymentInputError("Template validation failed.") from exc
+    _validate_dropin_template_payload(payload=payload, identity=identity)
+    return DropinTemplate(
+        provider_id=provider_id,
+        identity=identity,
+        path=resolved,
+        payload=payload,
+        sha256=hashlib.sha256(payload).hexdigest(),
+    )
+
+
+def _validate_dropin_template_payload(*, payload: bytes, identity: str) -> None:
+    if len(payload) < 1 or len(payload) > AI_DROPIN_TEMPLATE_MAX_BYTES:
+        raise DeploymentInputError("Template validation failed.")
+    if b"\x00" in payload or b"\r" in payload or b"\\n" in payload:
+        raise DeploymentInputError("Template validation failed.")
+    if not payload.endswith(b"\n") or payload.endswith(b"\n\n"):
+        raise DeploymentInputError("Template validation failed.")
+    try:
+        text = payload.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise DeploymentInputError("Template validation failed.") from exc
+    if text.count("\n") != 2:
+        raise DeploymentInputError("Template validation failed.")
+    lines = text.splitlines()
+    expected = [
+        "[Service]",
+        f"LoadCredential={identity}:{REMOTE_CREDENTIAL_DIR}/{identity}",
+    ]
+    if lines != expected:
+        raise DeploymentInputError("Template validation failed.")
 
 
 def _validate_model(model_id: str) -> None:
@@ -384,18 +492,27 @@ def _remote_install_credential(identity: str) -> str:
     )
 
 
-def _dropin_text(identity: str) -> str:
-    return f"[Service]\\nLoadCredential={identity}:{REMOTE_CREDENTIAL_DIR}/{identity}\\n"
-
-
-def _remote_install_dropin(dropin: str) -> str:
-    escaped = dropin.replace("'", "'\"'\"'")
+def _remote_install_dropin(dropin: DropinTemplate) -> str:
     next_path = f"{REMOTE_DROPIN_PATH}.next"
+    quoted_sha = shlex.quote(dropin.sha256)
+    quoted_size = shlex.quote(str(len(dropin.payload)))
     return "\n".join(
         [
             "set -e",
             "sudo -n install -d -o root -g root -m 0755 /etc/systemd/system/framenest.service.d",
-            f"printf '%s' '{escaped}' | sudo -n sh -c 'umask 022; cat > {next_path}; chown root:root {next_path}; chmod 0644 {next_path}; mv {next_path} {REMOTE_DROPIN_PATH}'",
+            f"sudo -n sh -c 'umask 022; cat > {next_path}; chown root:root {next_path}; chmod 0644 {next_path}'",
+            f"sudo -n test -f {next_path}",
+            f"sudo -n test ! -L {next_path}",
+            f"test \"$(sudo -n stat -c '%U:%G:%a' {next_path})\" = root:root:644",
+            f"test \"$(sudo -n wc -c < {next_path})\" = {quoted_size} || exit {DROPIN_BYTE_MISMATCH_EXIT}",
+            "# drop-in byte equivalence failed",
+            f"test \"$(sudo -n sha256sum {next_path} | awk '{{print $1}}')\" = {quoted_sha} || exit {DROPIN_BYTE_MISMATCH_EXIT}",
+            f"sudo -n mv {next_path} {REMOTE_DROPIN_PATH}",
+            f"sudo -n test -f {REMOTE_DROPIN_PATH}",
+            f"sudo -n test ! -L {REMOTE_DROPIN_PATH}",
+            f"test \"$(sudo -n stat -c '%U:%G:%a' {REMOTE_DROPIN_PATH})\" = root:root:644",
+            f"test \"$(sudo -n wc -c < {REMOTE_DROPIN_PATH})\" = {quoted_size} || exit {DROPIN_BYTE_MISMATCH_EXIT}",
+            f"test \"$(sudo -n sha256sum {REMOTE_DROPIN_PATH} | awk '{{print $1}}')\" = {quoted_sha} || exit {DROPIN_BYTE_MISMATCH_EXIT}",
         ]
     )
 
@@ -411,8 +528,92 @@ def _remote_configure_ai(*, provider_id: str, model_id: str) -> str:
     )
 
 
-def _remote_restart() -> str:
-    return "\n".join(["set -e", "sudo -n systemctl daemon-reload", f"sudo -n systemctl restart {SERVICE_NAME}"])
+def _remote_systemd_acceptance_commands(dropin: DropinTemplate) -> list[str]:
+    quoted_dropin_path = shlex.quote(REMOTE_DROPIN_PATH)
+    expected_credential = f"{dropin.identity}:{REMOTE_CREDENTIAL_DIR}/{dropin.identity}"
+    quoted_expected_credential = shlex.quote(expected_credential)
+    return [
+        "\n".join(
+            [
+                "set -e",
+                f"sudo -n systemd-analyze verify {REMOTE_SERVICE_UNIT_PATH} >/dev/null 2>/dev/null || exit {SYSTEMD_VERIFY_EXIT}",
+            ]
+        ),
+        "\n".join(
+            [
+                "set -e",
+                f"sudo -n systemctl daemon-reload >/dev/null 2>/dev/null || exit {DAEMON_RELOAD_EXIT}",
+            ]
+        ),
+        "\n".join(
+            [
+                "set -e",
+                f"test \"$(sudo -n systemctl is-enabled {SERVICE_NAME} 2>/dev/null || true)\" = enabled || exit {SERVICE_ENABLED_EXIT}",
+            ]
+        ),
+        "\n".join(
+            [
+                "set -e",
+                f"test \"$(sudo -n systemctl show --property=FragmentPath --value {SERVICE_NAME} 2>/dev/null || true)\" = {shlex.quote(REMOTE_SERVICE_UNIT_PATH)} || exit {LOADED_DROPIN_EXIT}",
+                f"sudo -n systemctl show --property=DropInPaths --value {SERVICE_NAME} 2>/dev/null | tr ' ' '\\n' | grep -Fx -- {quoted_dropin_path} >/dev/null || exit {LOADED_DROPIN_EXIT}",
+            ]
+        ),
+        "\n".join(
+            [
+                "set -e",
+                f"sudo -n systemctl show --property=LoadCredential --value {SERVICE_NAME} 2>/dev/null | grep -Fx -- {quoted_expected_credential} >/dev/null || exit {LOADED_CREDENTIAL_EXIT}",
+            ]
+        ),
+    ]
+
+
+def _remote_validate_capability(*, provider_id: str, model_id: str) -> str:
+    return "\n".join(
+        [
+            "set -e",
+            "python3 - <<'PY'",
+            "import json",
+            "import sys",
+            "import urllib.error",
+            "import urllib.request",
+            f"url = {AI_CAPABILITY_URL!r}",
+            f"expected_provider = {provider_id!r}",
+            f"expected_model = {model_id!r}",
+            "try:",
+            "    with urllib.request.urlopen(url, timeout=5) as response:",
+            "        if response.status < 200 or response.status >= 300:",
+            f"            raise SystemExit({CAPABILITY_UNAVAILABLE_EXIT})",
+            "        raw = response.read(16384)",
+            "except (OSError, urllib.error.URLError):",
+            f"    raise SystemExit({CAPABILITY_UNAVAILABLE_EXIT})",
+            "try:",
+            "    payload = json.loads(raw.decode('utf-8'))",
+            "except (UnicodeDecodeError, json.JSONDecodeError):",
+            f"    raise SystemExit({CAPABILITY_MALFORMED_EXIT})",
+            "if not isinstance(payload, dict):",
+            f"    raise SystemExit({CAPABILITY_MALFORMED_EXIT})",
+            "raw_text = raw.decode('utf-8', errors='ignore')",
+            "for forbidden in ('/etc/framenest/credentials', 'Authorization', 'Bearer '):",
+            "    if forbidden in raw_text:",
+            f"        raise SystemExit({CAPABILITY_VALIDATION_EXIT})",
+            "if payload.get('provider_id') != expected_provider:",
+            f"    raise SystemExit({CAPABILITY_VALIDATION_EXIT})",
+            "if payload.get('model_id') != expected_model:",
+            f"    raise SystemExit({CAPABILITY_VALIDATION_EXIT})",
+            "if payload.get('configured') is not True:",
+            f"    raise SystemExit({CAPABILITY_VALIDATION_EXIT})",
+            "if payload.get('available') is not True:",
+            f"    raise SystemExit({CAPABILITY_VALIDATION_EXIT})",
+            "if payload.get('status') != 'configured_unverified':",
+            f"    raise SystemExit({CAPABILITY_VALIDATION_EXIT})",
+            "if payload.get('last_connection_test') is not None:",
+            f"    raise SystemExit({CAPABILITY_VALIDATION_EXIT})",
+            "last_status = payload.get('last_status_check')",
+            "if isinstance(last_status, dict) and last_status.get('provider_error'):",
+            f"    raise SystemExit({CAPABILITY_VALIDATION_EXIT})",
+            "PY",
+        ]
+    )
 
 
 def _remote_wait_ready(health_url: str) -> str:

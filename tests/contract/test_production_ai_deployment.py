@@ -31,12 +31,14 @@ class _Runner:
         *,
         fail_on: str | None = None,
         fail_on_occurrence: int = 1,
+        fail_message: str = "simulated failure",
         fail_plan: list[str] | None = None,
         readiness_plan: list[str] | None = None,
     ) -> None:
         self.calls: list[tuple[list[str], bytes | None]] = []
         self.fail_on = fail_on
         self.fail_on_occurrence = fail_on_occurrence
+        self.fail_message = fail_message
         self.fail_plan = [] if fail_plan is None else list(fail_plan)
         self.readiness_plan = [] if readiness_plan is None else list(readiness_plan)
         self._matches = 0
@@ -67,7 +69,7 @@ class _Runner:
                     raise production_ai_deploy.DeploymentCommandError(
                         "retained recovery material exists; independent recovery is required"
                     )
-                raise production_ai_deploy.DeploymentCommandError("simulated failure")
+                raise production_ai_deploy.DeploymentCommandError(self.fail_message)
         return ""
 
 
@@ -104,6 +106,19 @@ def _call_index(runner: _Runner, needle: str) -> int:
     raise AssertionError(f"missing command containing {needle!r}")
 
 
+def _template_bytes(provider_id: str) -> bytes:
+    return (
+        REPOSITORY_ROOT
+        / "deploy"
+        / "systemd"
+        / f"framenest-ai-credential-{provider_id}.conf"
+    ).read_bytes()
+
+
+def _stdin_payloads(runner: _Runner) -> list[bytes]:
+    return [input_bytes for _argv, input_bytes in runner.calls if input_bytes is not None]
+
+
 def test_fish_entrypoint_has_valid_syntax() -> None:
     first_line = FISH_ENTRYPOINT.read_text(encoding="utf-8").splitlines()[0]
 
@@ -135,6 +150,24 @@ def test_check_mode_validates_inputs_and_does_not_mutate(tmp_path: Path, capsys:
     assert SYNTHETIC_SECRET not in output
 
 
+def test_check_mode_validates_selected_template_before_remote_activity(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    missing_template = tmp_path / "missing.conf"
+    monkeypatch.setitem(
+        production_ai_deploy.PROVIDER_DROPIN_TEMPLATES,
+        "vercel-ai-gateway",
+        missing_template,
+    )
+    runner = _Runner()
+
+    result = production_ai_deploy.main([*_base_args(tmp_path), "--check"], runner=runner)
+
+    assert result == 1
+    assert runner.calls == []
+
+
 def test_exact_provider_to_credential_mapping(tmp_path: Path, capsys: Any) -> None:
     credential = _credential_file(tmp_path)
 
@@ -159,6 +192,110 @@ def test_exact_provider_to_credential_mapping(tmp_path: Path, capsys: Any) -> No
     )
 
     assert "Credential identity: NVIDIA_API_KEY" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    ("provider_id", "identity"),
+    [
+        ("nvidia-nim", "NVIDIA_API_KEY"),
+        ("vercel-ai-gateway", "AI_GATEWAY_API_KEY"),
+    ],
+)
+def test_provider_template_mapping_loads_exact_tracked_bytes(
+    provider_id: str,
+    identity: str,
+) -> None:
+    template = production_ai_deploy._load_provider_dropin_template(provider_id)
+
+    assert template.identity == identity
+    assert template.payload == _template_bytes(provider_id)
+    assert template.payload.endswith(b"\n")
+    assert b"\\n" not in template.payload
+
+
+def test_template_resolution_is_independent_of_current_working_directory(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+
+    template = production_ai_deploy._load_provider_dropin_template("nvidia-nim")
+
+    assert template.payload == _template_bytes("nvidia-nim")
+
+
+def test_unsupported_provider_cannot_select_a_template() -> None:
+    with pytest.raises(production_ai_deploy.DeploymentInputError):
+        production_ai_deploy._load_provider_dropin_template("untrusted-provider")
+
+
+@pytest.mark.parametrize(
+    ("payload", "reason"),
+    [
+        (b"[Service]\\nLoadCredential=AI_GATEWAY_API_KEY:/etc/framenest/credentials/AI_GATEWAY_API_KEY\\n", "literal"),
+        (b"[Service]\r\nLoadCredential=AI_GATEWAY_API_KEY:/etc/framenest/credentials/AI_GATEWAY_API_KEY\r\n", "crlf"),
+        (b"[Service]\nLoadCredential=AI_GATEWAY_API_KEY:/etc/framenest/credentials/AI_GATEWAY_API_KEY", "final"),
+        (b"[Service]\nLoadCredential=AI_GATEWAY_API_KEY:/etc/framenest/credentials/AI_GATEWAY_API_KEY\n\n", "blank"),
+        (b"[Service]\nLoadCredential=AI_GATEWAY_API_KEY:/etc/framenest/credentials/AI_GATEWAY_API_KEY\n[Install]\n", "section"),
+        (b"[Service]\nEnvironment=AI_GATEWAY_API_KEY=secret\n", "secret"),
+        (b"[Service]\nLoadCredential=UNKNOWN:/etc/framenest/credentials/UNKNOWN\n", "unknown"),
+        (b"[Service]\nLoadCredential=AI_GATEWAY_API_KEY:/etc/framenest/credentials/AI_GATEWAY_API_KEY\x00\n", "nul"),
+    ],
+)
+def test_template_validation_rejects_malformed_or_secret_bearing_payloads(
+    payload: bytes,
+    reason: str,
+) -> None:
+    with pytest.raises(production_ai_deploy.DeploymentInputError):
+        production_ai_deploy._validate_dropin_template_payload(
+            payload=payload,
+            identity="AI_GATEWAY_API_KEY",
+        )
+
+
+def test_template_validation_rejects_invalid_utf8() -> None:
+    with pytest.raises(production_ai_deploy.DeploymentInputError):
+        production_ai_deploy._validate_dropin_template_payload(
+            payload=b"\xff\n",
+            identity="AI_GATEWAY_API_KEY",
+        )
+
+
+def test_template_validation_rejects_non_regular_symlink_and_outside_boundary(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    directory = tmp_path / "directory.conf"
+    directory.mkdir()
+    monkeypatch.setitem(
+        production_ai_deploy.PROVIDER_DROPIN_TEMPLATES,
+        "vercel-ai-gateway",
+        directory,
+    )
+    with pytest.raises(production_ai_deploy.DeploymentInputError):
+        production_ai_deploy._load_provider_dropin_template("vercel-ai-gateway")
+
+    outside = tmp_path / "outside.conf"
+    outside.write_bytes(_template_bytes("vercel-ai-gateway"))
+    monkeypatch.setitem(
+        production_ai_deploy.PROVIDER_DROPIN_TEMPLATES,
+        "vercel-ai-gateway",
+        outside,
+    )
+    with pytest.raises(production_ai_deploy.DeploymentInputError):
+        production_ai_deploy._load_provider_dropin_template("vercel-ai-gateway")
+
+    target = tmp_path / "target.conf"
+    target.write_bytes(_template_bytes("vercel-ai-gateway"))
+    symlink = tmp_path / "linked.conf"
+    symlink.symlink_to(target)
+    monkeypatch.setitem(
+        production_ai_deploy.PROVIDER_DROPIN_TEMPLATES,
+        "vercel-ai-gateway",
+        symlink,
+    )
+    with pytest.raises(production_ai_deploy.DeploymentInputError):
+        production_ai_deploy._load_provider_dropin_template("vercel-ai-gateway")
 
 
 def test_model_punctuation_is_quoted_and_shell_metacharacters_are_rejected(
@@ -217,8 +354,45 @@ def test_deploy_never_places_secret_in_ssh_argv_or_output(tmp_path: Path, capsys
         command_text = " ".join(argv)
         assert argv[:4] == ["ssh", "-o", "BatchMode=yes", "--"]
         assert SYNTHETIC_SECRET not in command_text
-    assert any(input_bytes == SYNTHETIC_SECRET.encode("utf-8") for _, input_bytes in runner.calls)
+    assert SYNTHETIC_SECRET.encode("utf-8") in _stdin_payloads(runner)
     assert SYNTHETIC_SECRET not in captured.out + captured.err
+
+
+def test_secret_and_template_use_separate_exact_stdin_payloads(tmp_path: Path) -> None:
+    runner = _Runner()
+
+    assert production_ai_deploy.main(_base_args(tmp_path), runner=runner) == 0
+
+    payloads = _stdin_payloads(runner)
+    template = _template_bytes("vercel-ai-gateway")
+    secret = SYNTHETIC_SECRET.encode("utf-8")
+    assert payloads.count(secret) == 1
+    assert payloads.count(template) == 1
+    assert secret not in template
+    for argv, input_bytes in runner.calls:
+        command_text = " ".join(argv)
+        if input_bytes == secret:
+            assert template.decode("utf-8") not in command_text
+        if input_bytes == template:
+            assert SYNTHETIC_SECRET not in command_text
+            assert b"\\n" not in input_bytes
+
+
+def test_remote_command_text_contains_neither_secret_nor_reconstructed_template(
+    tmp_path: Path,
+) -> None:
+    runner = _Runner()
+
+    assert production_ai_deploy.main(_base_args(tmp_path), runner=runner) == 0
+
+    combined = _combined(runner)
+    template_text = _template_bytes("vercel-ai-gateway").decode("utf-8")
+    assert SYNTHETIC_SECRET not in combined
+    assert template_text not in combined
+    assert "LoadCredential=AI_GATEWAY_API_KEY:/etc/framenest/credentials/AI_GATEWAY_API_KEY" not in combined
+    assert "printf '%s' '[Service]\\\\n" not in combined
+    assert "printf %b" not in combined
+    assert "echo -e" not in combined
 
 
 def test_deploy_uses_sudo_n_only_and_no_remote_access_mutation_terms(tmp_path: Path) -> None:
@@ -242,11 +416,51 @@ def test_deploy_sequences_atomic_installation_and_cleanup(tmp_path: Path) -> Non
     combined = _combined(runner)
     assert "install -d -o root -g root -m 0700 /etc/framenest/credentials" in combined
     assert "mv /etc/framenest/credentials/AI_GATEWAY_API_KEY.next" in combined
+    assert "cat > /etc/systemd/system/framenest.service.d/20-ai-credential.conf.next" in combined
+    assert (
+        combined.index("cat > /etc/systemd/system/framenest.service.d/20-ai-credential.conf.next")
+        < combined.index("mv /etc/systemd/system/framenest.service.d/20-ai-credential.conf.next")
+    )
     assert "mv /etc/systemd/system/framenest.service.d/20-ai-credential.conf.next" in combined
-    assert "LoadCredential=AI_GATEWAY_API_KEY:/etc/framenest/credentials/AI_GATEWAY_API_KEY" in combined
+    assert "sha256sum /etc/systemd/system/framenest.service.d/20-ai-credential.conf.next" in combined
+    assert "sha256sum /etc/systemd/system/framenest.service.d/20-ai-credential.conf" in combined
     assert "rm -f /etc/framenest/credentials/AI_GATEWAY_API_KEY.next" in combined
     assert "rm -f /etc/framenest/credentials/AI_GATEWAY_API_KEY.next /etc/systemd/system/framenest.service.d/20-ai-credential.conf.next" in combined
     assert "rm -rf /run/framenest-ai-credential-deploy" in combined
+
+
+def test_systemd_acceptance_occurs_before_single_restart(tmp_path: Path) -> None:
+    runner = _Runner()
+
+    assert production_ai_deploy.main(_base_args(tmp_path), runner=runner) == 0
+
+    verify_index = _call_index(runner, "systemd-analyze verify")
+    daemon_index = _call_index(runner, "systemctl daemon-reload")
+    enabled_index = _call_index(runner, "systemctl is-enabled framenest.service")
+    dropin_index = _call_index(runner, "DropInPaths")
+    credential_index = _call_index(runner, "LoadCredential")
+    restart_index = _call_index(runner, "systemctl restart framenest.service")
+    assert verify_index < daemon_index < enabled_index < dropin_index < credential_index < restart_index
+    assert _combined(runner).count("systemctl restart framenest.service") == 1
+
+
+def test_successful_deployment_validates_running_capability_before_cleanup(
+    tmp_path: Path,
+) -> None:
+    runner = _Runner()
+
+    assert production_ai_deploy.main(_base_args(tmp_path), runner=runner) == 0
+
+    readiness_index = _call_index(runner, "FrameNest readiness probe")
+    capability_index = _call_index(runner, "/api/ai/media-suggestion-capability")
+    cleanup_index = _call_index(runner, "rm -rf /run/framenest-ai-credential-deploy")
+    capability_command = " ".join(runner.calls[capability_index][0])
+    assert readiness_index < capability_index < cleanup_index
+    assert "vercel-ai-gateway" in capability_command
+    assert "google/gemini-3.1-flash-lite" in capability_command
+    assert "configured_unverified" in capability_command
+    assert "last_connection_test" in capability_command
+    assert "framenest-ai test" not in capability_command
 
 
 def test_identity_failure_performs_no_rollback_command(tmp_path: Path) -> None:
@@ -363,6 +577,58 @@ def test_deploy_rolls_back_on_restart_or_health_failure(
     assert "FrameNest readiness probe" in combined
     assert "rm -f /etc/framenest/credentials/AI_GATEWAY_API_KEY.next /etc/systemd/system/framenest.service.d/20-ai-credential.conf.next" in combined
     assert "rm -rf /run/framenest-ai-credential-deploy" in combined
+
+
+@pytest.mark.parametrize(
+    ("failure", "message"),
+    [
+        ("drop-in byte equivalence failed", "drop-in byte equivalence failed"),
+        ("systemd-analyze verify", "systemd drop-in verification failed"),
+        ("systemctl daemon-reload", "daemon reload failed"),
+        ("systemctl is-enabled framenest.service", "service enabled-state validation failed"),
+        ("DropInPaths", "loaded drop-in mismatch"),
+        ("LoadCredential", "loaded credential identity mismatch"),
+        ("/api/ai/media-suggestion-capability", "running capability validation failed"),
+    ],
+)
+def test_deploy_rolls_back_when_acceptance_or_capability_gates_fail(
+    tmp_path: Path,
+    failure: str,
+    message: str,
+    capsys: Any,
+) -> None:
+    runner = _Runner(fail_on=failure, fail_message=message)
+
+    result = production_ai_deploy.main(_base_args(tmp_path), runner=runner)
+
+    combined = _combined(runner)
+    captured = capsys.readouterr()
+    assert result == 1
+    assert message in captured.err
+    assert "restore deployment-controlled files" in combined
+    assert "rm -rf /run/framenest-ai-credential-deploy" in combined
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "running capability validation failed",
+        "running capability unavailable",
+        "running capability malformed",
+    ],
+)
+def test_capability_failure_prevents_cleanup_until_rollback_succeeds(
+    tmp_path: Path,
+    message: str,
+) -> None:
+    runner = _Runner(fail_on="/api/ai/media-suggestion-capability", fail_message=message)
+
+    assert production_ai_deploy.main(_base_args(tmp_path), runner=runner) == 1
+
+    capability_index = _call_index(runner, "/api/ai/media-suggestion-capability")
+    rollback_index = _call_index(runner, "restore deployment-controlled files")
+    cleanup_index = _call_index(runner, "rm -rf /run/framenest-ai-credential-deploy")
+    assert capability_index < rollback_index < cleanup_index
 
 
 def test_deploy_readiness_timeout_is_distinct_and_rolls_back(

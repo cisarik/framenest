@@ -281,10 +281,27 @@ provider/model selection. It supports a non-mutating `--check` mode, accepts an
 explicit SSH target or non-secret operator environment default, transfers the
 credential over SSH stdin rather than argv, uses only `sudo -n` remotely,
 atomically acquires `/run/framenest-ai-credential-deploy` before production
-mutation, installs deployment-controlled files atomically, restarts
-`framenest.service`, and waits up to 30 seconds for bounded readiness. Existing
-recovery material causes a fail-closed stop before credential transmission,
-configuration, restart, health polling, or rollback.
+mutation, installs deployment-controlled files atomically, and waits up to 30
+seconds for bounded readiness. Existing recovery material causes a fail-closed
+stop before credential transmission, configuration, restart, health polling, or
+rollback. Check mode validates the selected private credential source and the
+selected tracked provider-specific drop-in template locally before any SSH
+activity.
+
+The systemd credential drop-in source is always the exact tracked template
+under `deploy/systemd/` for the selected provider. The helper validates the
+template's strict two-line `LoadCredential=` contract locally, transfers the
+template bytes as a non-secret stdin payload separate from the credential
+payload, installs them to a `.next` path, proves byte equivalence before and
+after atomic rename, and never reconstructs line breaks with shell escaping.
+After non-secret provider/model configuration is written, the helper verifies
+systemd acceptance before restart: `systemd-analyze verify`, daemon reload,
+enabled state, loaded drop-in path, loaded credential identity, and unchanged
+base service unit. Only after those gates pass may it restart
+`framenest.service`. After readiness succeeds, it calls only the loopback
+`/api/ai/media-suggestion-capability` endpoint and requires the selected
+provider/model to be configured, available, and still without a provider
+connection test.
 
 The helper starts rollback only after a complete backup marker has been written.
 That backup records present/absent state for the selected credential, the
