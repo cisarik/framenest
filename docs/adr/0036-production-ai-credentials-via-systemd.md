@@ -41,19 +41,24 @@ without exposing credential content or source paths. The bounded credential
 payload limit is 4096 bytes.
 
 The repository-owned production operator entry point is the Fish script
-`deploy/ubuntu/fn-production-env-deploy.fish`. It delegates implementation to
+`deploy/ubuntu/fn-production-env-deploy`. It delegates implementation to
 repository support code in the same directory. The helper accepts an explicit
 SSH target or non-secret environment default, explicit provider/model values,
 and one private local credential source. It supports a non-mutating check mode,
 uses SSH BatchMode-compatible command execution, uses only `sudo -n` remotely,
-installs deployment-controlled files atomically, restarts and health-checks the
-service, and rolls back deployment-controlled files on restart or health
-failure after a complete remote backup marker exists. The rollback contract
+atomically acquires `/run/framenest-ai-credential-deploy`, and fails closed when
+retained recovery material already exists. After the complete remote backup
+marker exists, the helper may transmit the credential over SSH stdin, install
+deployment-controlled files atomically, restart the service, and wait up to 30
+seconds for readiness. Deployment terminal service failure and readiness
+timeout both roll back deployment-controlled files. The rollback contract
 restores the selected credential, systemd credential drop-in, and non-secret AI
-configuration present/absent state, then daemon-reloads, restarts, and
-health-checks the restored service. Recovery material is retained when rollback
-or cleanup fails. This repository slice does not install the Fish function into
-a user configuration directory and does not execute a real NUC deployment.
+configuration present/absent state, then daemon-reloads, restarts, and uses the
+same bounded readiness contract on the restored service. Recovery material is
+retained when rollback terminal failure, rollback readiness timeout, rollback
+restore/restart failure, or cleanup failure occurs. This repository slice does
+not install the Fish function into a user configuration directory and does not
+execute a real NUC deployment.
 
 Non-secret provider/model selection continues through the existing
 `framenest-ai configure` boundary, extended only with explicit non-interactive

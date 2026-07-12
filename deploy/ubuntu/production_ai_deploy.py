@@ -13,6 +13,11 @@ import sys
 from typing import Callable, Sequence
 
 AI_CREDENTIAL_MAX_BYTES = 4096
+READINESS_DEADLINE_SECONDS = 30
+READINESS_POLL_INTERVAL_SECONDS = 1
+READINESS_TERMINAL_EXIT = 75
+READINESS_TIMEOUT_EXIT = 76
+RETAINED_RECOVERY_EXIT = 77
 SERVICE_NAME = "framenest.service"
 REMOTE_CREDENTIAL_DIR = "/etc/framenest/credentials"
 REMOTE_DROPIN_PATH = "/etc/systemd/system/framenest.service.d/20-ai-credential.conf"
@@ -38,13 +43,20 @@ class DeploymentRollbackError(DeploymentCommandError):
     """Sanitized rollback failure with recovery material retained."""
 
 
+SANITIZED_COMMAND_ERRORS = {
+    RETAINED_RECOVERY_EXIT: "retained recovery material exists; independent recovery is required",
+    READINESS_TERMINAL_EXIT: "service entered terminal failed state",
+    READINESS_TIMEOUT_EXIT: "service readiness deadline exceeded",
+}
+
+
 @dataclass(frozen=True, slots=True)
 class LocalSecret:
     identity: str
     value: str
 
 
-Runner = Callable[[list[str]], None]
+Runner = Callable[[list[str], bytes | None], str]
 
 
 def main(
@@ -137,7 +149,14 @@ def deploy(
             runner=runner,
             input_bytes=None,
         )
-        _ssh(target, _remote_backup(secret.identity), runner=runner, input_bytes=None)
+        try:
+            _ssh(target, _remote_backup(secret.identity), runner=runner, input_bytes=None)
+        except DeploymentCommandError as exc:
+            if str(exc) == SANITIZED_COMMAND_ERRORS[RETAINED_RECOVERY_EXIT]:
+                raise
+            raise DeploymentCommandError(
+                f"incomplete backup; recovery material retained at {REMOTE_ROLLBACK_DIR}"
+            ) from exc
         transaction_active = True
         _ssh(
             target,
@@ -158,7 +177,7 @@ def deploy(
             input_bytes=None,
         )
         _ssh(target, _remote_restart(), runner=runner, input_bytes=None)
-        _ssh(target, _remote_health(health_url), runner=runner, input_bytes=None)
+        _ssh(target, _remote_wait_ready(health_url), runner=runner, input_bytes=None)
     except DeploymentCommandError:
         if transaction_active:
             _rollback(
@@ -187,22 +206,33 @@ def _rollback(
         ("restore", _remote_restore(identity)),
         ("daemon-reload", _remote_daemon_reload()),
         ("restart", _remote_restart_service()),
-        ("health", _remote_health(health_url)),
+        ("readiness", _remote_wait_ready(health_url)),
         ("cleanup", _remote_cleanup(identity)),
     ]
     for phase, command in phases:
         try:
             _ssh(target, command, runner=runner, input_bytes=None)
         except DeploymentCommandError as exc:
+            if phase == "readiness" and str(exc) == SANITIZED_COMMAND_ERRORS[READINESS_TERMINAL_EXIT]:
+                raise DeploymentRollbackError(
+                    f"rollback failed during terminal service state; recovery material retained at {REMOTE_ROLLBACK_DIR}"
+                ) from exc
+            if phase == "readiness" and str(exc) == SANITIZED_COMMAND_ERRORS[READINESS_TIMEOUT_EXIT]:
+                raise DeploymentRollbackError(
+                    f"rollback readiness deadline exceeded; recovery material retained at {REMOTE_ROLLBACK_DIR}"
+                ) from exc
             raise DeploymentRollbackError(
                 f"rollback failed during {phase}; recovery material retained at {REMOTE_ROLLBACK_DIR}"
             ) from exc
 
 
-def _subprocess_runner(argv: list[str], input_bytes: bytes | None) -> None:
-    result = subprocess.run(argv, input=input_bytes, check=False)
+def _subprocess_runner(argv: list[str], input_bytes: bytes | None) -> str:
+    result = subprocess.run(argv, input=input_bytes, check=False, capture_output=True, text=False)
     if result.returncode != 0:
-        raise DeploymentCommandError("remote command failed")
+        raise DeploymentCommandError(
+            SANITIZED_COMMAND_ERRORS.get(result.returncode, "remote command failed")
+        )
+    return ""
 
 
 def _ssh(
@@ -211,8 +241,14 @@ def _ssh(
     *,
     runner: Callable[[list[str], bytes | None], None],
     input_bytes: bytes | None,
-) -> None:
-    runner(["ssh", "-o", "BatchMode=yes", "--", target, remote_command], input_bytes)
+) -> str:
+    try:
+        return runner(["ssh", "-o", "BatchMode=yes", "--", target, remote_command], input_bytes)
+    except DeploymentCommandError as exc:
+        message = str(exc)
+        if message in SANITIZED_COMMAND_ERRORS.values():
+            raise DeploymentCommandError(message) from exc
+        raise DeploymentCommandError("remote command failed") from exc
 
 
 def _credential_identity(provider_id: str) -> str:
@@ -325,8 +361,9 @@ def _remote_backup(identity: str) -> str:
     return "\n".join(
         [
             "set -e",
-            f"sudo -n rm -rf {REMOTE_ROLLBACK_DIR}",
-            f"sudo -n install -d -o root -g root -m 0700 {REMOTE_ROLLBACK_DIR}",
+            f"sudo -n mkdir -m 0700 {REMOTE_ROLLBACK_DIR} || exit {RETAINED_RECOVERY_EXIT}",
+            f"sudo -n chown root:root {REMOTE_ROLLBACK_DIR}",
+            f"sudo -n chmod 0700 {REMOTE_ROLLBACK_DIR}",
             f"if sudo -n test -e {credential_path}; then sudo -n cp -a {credential_path} {REMOTE_ROLLBACK_DIR}/{identity}; sudo -n touch {REMOTE_ROLLBACK_DIR}/{identity}.present; else sudo -n touch {REMOTE_ROLLBACK_DIR}/{identity}.absent; fi",
             f"if sudo -n test -e {REMOTE_DROPIN_PATH}; then sudo -n cp -a {REMOTE_DROPIN_PATH} {REMOTE_ROLLBACK_DIR}/20-ai-credential.conf; sudo -n touch {REMOTE_ROLLBACK_DIR}/20-ai-credential.conf.present; else sudo -n touch {REMOTE_ROLLBACK_DIR}/20-ai-credential.conf.absent; fi",
             f"if sudo -n test -e {REMOTE_AI_CONFIG_PATH}; then sudo -n cp -a {REMOTE_AI_CONFIG_PATH} {REMOTE_ROLLBACK_DIR}/config.json; sudo -n touch {REMOTE_ROLLBACK_DIR}/config.json.present; else sudo -n touch {REMOTE_ROLLBACK_DIR}/config.json.absent; fi",
@@ -378,8 +415,42 @@ def _remote_restart() -> str:
     return "\n".join(["set -e", "sudo -n systemctl daemon-reload", f"sudo -n systemctl restart {SERVICE_NAME}"])
 
 
-def _remote_health(health_url: str) -> str:
-    return f"curl --fail --silent --show-error --max-time 5 {shlex.quote(health_url)} >/dev/null"
+def _remote_wait_ready(health_url: str) -> str:
+    quoted_url = shlex.quote(health_url)
+    return "\n".join(
+        [
+            "set -e",
+            "# FrameNest readiness probe",
+            f"READINESS_DEADLINE_SECONDS={READINESS_DEADLINE_SECONDS}",
+            f"READINESS_POLL_INTERVAL_SECONDS={READINESS_POLL_INTERVAL_SECONDS}",
+            "deadline_epoch=$(($(date +%s) + READINESS_DEADLINE_SECONDS))",
+            "while :; do",
+            "  now_epoch=$(date +%s)",
+            "  remaining=$((deadline_epoch - now_epoch))",
+            f"  if [ \"$remaining\" -le 0 ]; then exit {READINESS_TIMEOUT_EXIT}; fi",
+            f"  active_state=$(sudo -n systemctl show --property=ActiveState --value {SERVICE_NAME} 2>/dev/null || true)",
+            f"  result_state=$(sudo -n systemctl show --property=Result --value {SERVICE_NAME} 2>/dev/null || true)",
+            '  if [ "$active_state" = "active" ]; then',
+            "    http_timeout=$remaining",
+            '    if [ "$http_timeout" -gt 1 ]; then http_timeout=1; fi',
+            f"    health_body=$(curl --silent --max-time \"$http_timeout\" {quoted_url} 2>/dev/null || true)",
+            "    if [ \"$health_body\" = '{\"status\":\"ok\"}' ]; then exit 0; fi",
+            "  fi",
+            '  if [ "$active_state" = "failed" ]; then',
+            f"    exit {READINESS_TERMINAL_EXIT}",
+            "  fi",
+            '  if [ "$active_state" != "active" ] && [ "$active_state" != "activating" ] && [ -n "$result_state" ] && [ "$result_state" != "success" ]; then',
+            f"    exit {READINESS_TERMINAL_EXIT}",
+            "  fi",
+            "  now_epoch=$(date +%s)",
+            "  remaining=$((deadline_epoch - now_epoch))",
+            f"  if [ \"$remaining\" -le 0 ]; then exit {READINESS_TIMEOUT_EXIT}; fi",
+            "  sleep_for=$READINESS_POLL_INTERVAL_SECONDS",
+            '  if [ "$remaining" -lt "$sleep_for" ]; then sleep_for=$remaining; fi',
+            '  sleep "$sleep_for"',
+            "done",
+        ]
+    )
 
 
 def _remote_restore(identity: str) -> str:

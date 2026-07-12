@@ -280,18 +280,21 @@ The helper manages only one selected AI provider credential plus non-secret
 provider/model selection. It supports a non-mutating `--check` mode, accepts an
 explicit SSH target or non-secret operator environment default, transfers the
 credential over SSH stdin rather than argv, uses only `sudo -n` remotely,
-installs deployment-controlled files atomically, restarts and health-checks
-`framenest.service`, and rolls back deployment-controlled files on restart or
-health failure.
+atomically acquires `/run/framenest-ai-credential-deploy` before production
+mutation, installs deployment-controlled files atomically, restarts
+`framenest.service`, and waits up to 30 seconds for bounded readiness. Existing
+recovery material causes a fail-closed stop before credential transmission,
+configuration, restart, health polling, or rollback.
 
 The helper starts rollback only after a complete backup marker has been written.
 That backup records present/absent state for the selected credential, the
 systemd credential drop-in, and `/var/lib/framenest/ai/config.json`. Rollback
 restores those states, removes pending `.next` artifacts, daemon-reloads,
-restarts, and health-checks `framenest.service`. If restore, restart, health, or
-cleanup fails during rollback, recovery material remains under
-`/run/framenest-ai-credential-deploy` and the helper reports a sanitized failure
-phase.
+restarts, and uses the same bounded readiness contract for `framenest.service`.
+Deployment terminal service failure and readiness timeout both trigger rollback.
+Rollback terminal service failure and rollback readiness timeout are reported as
+distinct sanitized outcomes, and recovery material remains under
+`/run/framenest-ai-credential-deploy` for operator recovery.
 
 The later operator may create a Fish wrapper or function that invokes the
 repository script, but this repository task does not install anything into
