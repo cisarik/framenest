@@ -37,6 +37,7 @@ from framenest.adapters.api.media_metadata_api import (
 )
 from framenest.adapters.api.media_suggestion_api import (
     MediaSuggestionApiDependencies,
+    MediaSuggestionStatusRead,
     create_media_suggestion_api_router,
 )
 from framenest.application.library_scan import PreviewLibraryScan
@@ -59,7 +60,7 @@ from framenest.adapters.api.library_api import (
 )
 import framenest.adapters.api.web as web_resources
 from framenest.configuration import FrameNestSettings, load_settings
-from framenest.infrastructure.ai.registry import resolve_ai_provider
+from framenest.infrastructure.ai.registry import ai_provider_persisted_status_reader, resolve_ai_provider
 from framenest.infrastructure.filesystem.library_scanner import LocalLibraryScanner
 from framenest.infrastructure.filesystem.media_content import LocalMediaContentReader
 from framenest.infrastructure.media_analysis import LocalMediaAnalysisAdapter
@@ -228,6 +229,7 @@ def create_app(
             provider_id=resolved_ai.provider_id,
             provider_display_name=resolved_ai.display_name,
             model_id=resolved_ai.model_id,
+            credential_available=resolved_ai.credential_available,
             status=_ai_status_from_last_test(
                 provider_selected=resolved_ai.provider_id is not None,
                 credential_available=resolved_ai.credential_available,
@@ -235,6 +237,7 @@ def create_app(
             ),
             last_status_check=_last_status_payload(resolved_ai.last_status),
             last_connection_test=_last_test_payload(resolved_ai.last_test),
+            read_status=_media_suggestion_status_reader(resolved_ai),
         )
 
     @asynccontextmanager
@@ -325,3 +328,21 @@ def _last_status_payload(last_status: object | None) -> dict[str, object] | None
         "configuration_state": getattr(last_status, "configuration_state"),
         "checked_at_ms": getattr(last_status, "checked_at_ms"),
     }
+
+
+def _media_suggestion_status_reader(resolved_ai: object):
+    read_persisted_status = ai_provider_persisted_status_reader(
+        provider_id=getattr(resolved_ai, "provider_id"),
+        model_id=getattr(resolved_ai, "model_id"),
+        test_state_path=getattr(resolved_ai, "test_state_path"),
+        status_snapshot_path=getattr(resolved_ai, "status_snapshot_path"),
+    )
+
+    def read_status() -> MediaSuggestionStatusRead:
+        persisted_status = read_persisted_status()
+        return MediaSuggestionStatusRead(
+            last_status_check=_last_status_payload(persisted_status.last_status),
+            last_connection_test=_last_test_payload(persisted_status.last_test),
+        )
+
+    return read_status

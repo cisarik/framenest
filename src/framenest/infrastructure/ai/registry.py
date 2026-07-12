@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from pathlib import Path
+from collections.abc import Callable
 from typing import Mapping
 
 from framenest.configuration import FrameNestSettings
@@ -61,6 +62,12 @@ class ResolvedAiProvider:
     @property
     def configured(self) -> bool:
         return self.provider is not None
+
+
+@dataclass(frozen=True, slots=True)
+class AiProviderPersistedStatus:
+    last_test: AiTestState | None
+    last_status: AiStatusSnapshot | None
 
 
 PROVIDER_DEFINITIONS = {
@@ -145,6 +152,34 @@ def resolve_ai_provider(
     )
 
 
+def ai_provider_persisted_status_reader(
+    *,
+    provider_id: str | None,
+    model_id: str | None,
+    test_state_path: Path,
+    status_snapshot_path: Path,
+) -> Callable[[], AiProviderPersistedStatus]:
+    """Build a network-free reader for current sanitized AI status state."""
+
+    def read_status() -> AiProviderPersistedStatus:
+        if provider_id is None or model_id is None:
+            return AiProviderPersistedStatus(last_test=None, last_status=None)
+        return AiProviderPersistedStatus(
+            last_test=_load_matching_test_state(
+                test_state_path,
+                provider_id=provider_id,
+                model_id=model_id,
+            ),
+            last_status=_load_matching_status_snapshot(
+                status_snapshot_path,
+                provider_id=provider_id,
+                model_id=model_id,
+            ),
+        )
+
+    return read_status
+
+
 def _build_provider(
     provider_id: str,
     model_id: str,
@@ -171,7 +206,10 @@ def _load_matching_test_state(
     provider_id: str,
     model_id: str,
 ) -> AiTestState | None:
-    state = load_ai_test_state(path)
+    try:
+        state = load_ai_test_state(path)
+    except AiConfigurationError:
+        return None
     if state is None:
         return None
     if state.provider_id != provider_id or state.model_id != model_id:
@@ -185,7 +223,10 @@ def _load_matching_status_snapshot(
     provider_id: str,
     model_id: str,
 ) -> AiStatusSnapshot | None:
-    snapshot = load_ai_status_snapshot(path)
+    try:
+        snapshot = load_ai_status_snapshot(path)
+    except AiConfigurationError:
+        return None
     if snapshot is None:
         return None
     if snapshot.provider_id != provider_id or snapshot.model_id != model_id:

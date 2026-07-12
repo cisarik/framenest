@@ -67,19 +67,31 @@
       </div>
       <div class="settings-dialog__body">
         <div id="status-panel-ai" class="settings-dialog__section" role="tabpanel" aria-labelledby="status-tab-ai" tabindex="0">
-          <h3 class="settings-dialog__section-title">Model</h3>
-          <div class="settings-ai-model">
-            <p id="settings-ai-provider" class="settings-ai-provider"></p>
-            <p id="settings-ai-model" class="settings-ai-model-id"></p>
-          </div>
+          <h3 class="settings-dialog__section-title">AI</h3>
           <dl class="settings-status-list">
-            <div id="settings-ai-server-row" hidden>
-              <dt>Last server check</dt>
-              <dd id="settings-ai-server-check"></dd>
+            <div>
+              <dt>Provider</dt>
+              <dd id="settings-ai-provider"></dd>
             </div>
-            <div id="settings-ai-test-row" hidden>
-              <dt>Last provider test</dt>
+            <div>
+              <dt>Model</dt>
+              <dd id="settings-ai-model"></dd>
+            </div>
+            <div>
+              <dt>Configuration</dt>
+              <dd id="settings-ai-configuration"></dd>
+            </div>
+            <div>
+              <dt>Credential</dt>
+              <dd id="settings-ai-credential"></dd>
+            </div>
+            <div>
+              <dt>Last connection test</dt>
               <dd id="settings-ai-test-result"></dd>
+            </div>
+            <div id="settings-ai-tested-at-row" hidden>
+              <dt>Tested at</dt>
+              <dd id="settings-ai-tested-at"></dd>
             </div>
           </dl>
         </div>

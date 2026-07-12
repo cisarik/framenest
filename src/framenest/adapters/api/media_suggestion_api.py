@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Literal
 
@@ -93,6 +94,7 @@ class MediaSuggestionCapabilityResponse(BaseModel):
     execution: str
     status: AiProviderStatus
     configured: bool
+    credential_available: bool
     last_status_check: dict[str, object] | None
     last_connection_test: dict[str, object] | None
     requires_explicit_confirmation: bool
@@ -139,6 +141,14 @@ class ImportedMediaSuggestionPreviewResponse(BaseModel):
 
 
 @dataclass(frozen=True, slots=True)
+class MediaSuggestionStatusRead:
+    """Current sanitized AI status payload read at request time."""
+
+    last_status_check: dict[str, object] | None = None
+    last_connection_test: dict[str, object] | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class MediaSuggestionApiDependencies:
     """Injected dependencies for explicit AI media suggestion API routes."""
 
@@ -148,10 +158,12 @@ class MediaSuggestionApiDependencies:
     provider_id: str | None = DEFAULT_PROVIDER_ID
     provider_display_name: str | None = "NVIDIA NIM"
     model_id: str | None = DEFAULT_MODEL_ID
+    credential_available: bool = False
     prompt_version: str = PROMPT_VERSION
     status: AiProviderStatus = "not_configured"
     last_status_check: dict[str, object] | None = None
     last_connection_test: dict[str, object] | None = None
+    read_status: Callable[[], MediaSuggestionStatusRead] | None = None
 
 
 def create_media_suggestion_api_router(dependencies: MediaSuggestionApiDependencies) -> APIRouter:
@@ -163,11 +175,16 @@ def create_media_suggestion_api_router(dependencies: MediaSuggestionApiDependenc
         response_model=MediaSuggestionCapabilityResponse,
     )
     def media_suggestion_capability() -> JSONResponse:
-        status = dependencies.status
-        if not dependencies.provider_configured:
-            status = status if status in {"not_configured", "credential_unavailable"} else "not_configured"
-        elif status == "not_configured":
-            status = "configured_unverified"
+        current_status = _current_status_payload(dependencies)
+        provider_selected = dependencies.provider_id is not None and dependencies.model_id is not None
+        credential_available = dependencies.credential_available or dependencies.provider_configured
+        status = _capability_status(
+            provider_selected=provider_selected,
+            credential_available=credential_available,
+            configured_status=dependencies.status,
+            last_connection_test=current_status.last_connection_test,
+            fresh_status_read=dependencies.read_status is not None,
+        )
         return _json_response(
             MediaSuggestionCapabilityResponse(
                 available=dependencies.provider_configured,
@@ -177,9 +194,10 @@ def create_media_suggestion_api_router(dependencies: MediaSuggestionApiDependenc
                 prompt_version=dependencies.prompt_version,
                 execution="server",
                 status=status,
-                configured=dependencies.provider_configured,
-                last_status_check=dependencies.last_status_check,
-                last_connection_test=dependencies.last_connection_test,
+                configured=provider_selected,
+                credential_available=credential_available,
+                last_status_check=current_status.last_status_check,
+                last_connection_test=current_status.last_connection_test,
                 requires_explicit_confirmation=True,
             )
         )
@@ -345,6 +363,49 @@ def create_media_suggestion_api_router(dependencies: MediaSuggestionApiDependenc
         return _json_response(_imported_preview_response(result))
 
     return router
+
+
+def _current_status_payload(dependencies: MediaSuggestionApiDependencies) -> MediaSuggestionStatusRead:
+    if dependencies.read_status is None:
+        return MediaSuggestionStatusRead(
+            last_status_check=dependencies.last_status_check,
+            last_connection_test=dependencies.last_connection_test,
+        )
+    try:
+        return dependencies.read_status()
+    except Exception:
+        return MediaSuggestionStatusRead()
+
+
+def _capability_status(
+    *,
+    provider_selected: bool,
+    credential_available: bool,
+    configured_status: AiProviderStatus,
+    last_connection_test: dict[str, object] | None,
+    fresh_status_read: bool,
+) -> AiProviderStatus:
+    if not provider_selected:
+        return "not_configured"
+    if not credential_available:
+        return "credential_unavailable"
+    if not fresh_status_read:
+        if configured_status == "not_configured":
+            return "configured_unverified"
+        return configured_status
+    status = last_connection_test.get("status") if last_connection_test is not None else None
+    if status == "success":
+        return "available"
+    if status in {
+        "authentication_failed",
+        "rate_limited_or_quota_exhausted",
+        "model_unavailable",
+        "provider_unreachable",
+    }:
+        return status
+    if status in {"invalid_response", "provider_error"}:
+        return "provider_error"
+    return "configured_unverified"
 
 
 def _media_relative_path_from_request(value: object) -> MediaRelativePath:

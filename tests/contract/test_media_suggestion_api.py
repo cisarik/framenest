@@ -226,6 +226,7 @@ def _client(
     catalog_available: bool = True,
     database_path: Path | None = None,
     last_status_check: dict[str, object] | None = None,
+    last_connection_test: dict[str, object] | None = None,
 ) -> tuple[TestClient, _FakeSuggestionPreview, _FakeImportedSuggestionPreview]:
     suggestion_preview = preview or _FakeSuggestionPreview()
     imported_suggestion_preview = imported_preview or _FakeImportedSuggestionPreview()
@@ -252,8 +253,10 @@ def _client(
             provider_id=provider_id,
             provider_display_name=provider_display_name,
             model_id=model_id,
+            credential_available=configured,
             status=status,
             last_status_check=last_status_check,
+            last_connection_test=last_connection_test,
         ),
     )
     return TestClient(app), suggestion_preview, imported_suggestion_preview
@@ -310,6 +313,7 @@ def test_capability_configured_and_unconfigured_are_sanitized_no_store() -> None
         "execution": "server",
         "status": "configured_unverified",
         "configured": True,
+        "credential_available": True,
         "requires_explicit_confirmation": True,
     }
     assert unconfigured.status_code == 200
@@ -320,6 +324,7 @@ def test_capability_configured_and_unconfigured_are_sanitized_no_store() -> None
         "execution": "server",
         "status": "not_configured",
         "configured": False,
+        "credential_available": False,
         "requires_explicit_confirmation": True,
     }
     combined = configured.text + unconfigured.text
@@ -352,9 +357,36 @@ def test_capability_selected_provider_without_credential_is_actionable_without_r
         "prompt_version": "framenest-media-suggestion-v3",
         "execution": "server",
         "status": "credential_unavailable",
-        "configured": False,
+        "configured": True,
+        "credential_available": False,
         "requires_explicit_confirmation": True,
     }
+    assert preview.calls == []
+    assert imported_preview.calls == []
+
+
+def test_capability_exposes_safe_last_connection_test_without_provider_request() -> None:
+    preview = _FakeSuggestionPreview()
+    imported_preview = _FakeImportedSuggestionPreview()
+    client, _, _ = _client(
+        preview=preview,
+        imported_preview=imported_preview,
+        status="provider_unreachable",
+        last_connection_test={
+            "status": "provider_unreachable",
+            "tested_at_ms": 1_725_000_000_000,
+        },
+    )
+
+    response = client.get("/api/ai/media-suggestion-capability")
+
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "no-store"
+    assert response.json()["last_connection_test"] == {
+        "status": "provider_unreachable",
+        "tested_at_ms": 1_725_000_000_000,
+    }
+    assert response.json()["credential_available"] is True
     assert preview.calls == []
     assert imported_preview.calls == []
 

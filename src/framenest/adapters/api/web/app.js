@@ -82,6 +82,7 @@ let aiCapability = {
   execution: "server",
   status: "not_configured",
   configured: false,
+  credential_available: false,
   last_connection_test: null,
   last_status_check: null,
   requires_explicit_confirmation: true,
@@ -119,10 +120,11 @@ const statusPanelAi = document.querySelector("#status-panel-ai");
 const statusPanelCloud = document.querySelector("#status-panel-cloud");
 const settingsAiProvider = document.querySelector("#settings-ai-provider");
 const settingsAiModel = document.querySelector("#settings-ai-model");
-const settingsAiServerRow = document.querySelector("#settings-ai-server-row");
-const settingsAiServerCheck = document.querySelector("#settings-ai-server-check");
-const settingsAiTestRow = document.querySelector("#settings-ai-test-row");
+const settingsAiConfiguration = document.querySelector("#settings-ai-configuration");
+const settingsAiCredential = document.querySelector("#settings-ai-credential");
 const settingsAiTestResult = document.querySelector("#settings-ai-test-result");
+const settingsAiTestedAtRow = document.querySelector("#settings-ai-tested-at-row");
+const settingsAiTestedAt = document.querySelector("#settings-ai-tested-at");
 const statusCloudServer = document.querySelector("#status-cloud-server");
 const statusCloudConnection = document.querySelector("#status-cloud-connection");
 const statusCloudRemoteRow = document.querySelector("#status-cloud-remote-row");
@@ -287,21 +289,23 @@ function setAiStatusClass(className) {
 }
 
 function updateSettingsAiStatus() {
-  const providerName = aiCapability.provider_display_name || aiCapability.provider_id || "";
-  const status = aiStatusInfo(aiCapability.status);
-  if (settingsAiProvider) settingsAiProvider.textContent = providerName ? `Provider: ${providerName}` : status.heading;
-  if (settingsAiModel) settingsAiModel.textContent = aiCapability.model_id ? `Model: ${aiCapability.model_id}` : status.reason;
+  const providerName = aiCapability.provider_display_name || aiCapability.provider_id || "Not configured";
+  if (settingsAiProvider) settingsAiProvider.textContent = providerName;
+  if (settingsAiModel) settingsAiModel.textContent = aiCapability.model_id || "Not configured";
+  if (settingsAiConfiguration) {
+    settingsAiConfiguration.textContent = aiCapability.configured ? "Configured" : "Not configured";
+  }
+  if (settingsAiCredential) {
+    settingsAiCredential.textContent = aiCapability.credential_available ? "Available to server" : "Unavailable";
+  }
+  if (settingsAiTestResult) {
+    settingsAiTestResult.textContent = providerTestStatusText(aiCapability.last_connection_test);
+  }
   renderOptionalStatusRow(
-    settingsAiServerRow,
-    settingsAiServerCheck,
-    aiCapability.last_status_check,
-    serverCheckText,
-  );
-  renderOptionalStatusRow(
-    settingsAiTestRow,
-    settingsAiTestResult,
+    settingsAiTestedAtRow,
+    settingsAiTestedAt,
     aiCapability.last_connection_test,
-    providerTestText,
+    providerTestTimestampText,
   );
 }
 
@@ -367,6 +371,12 @@ function aiStatusInfo(status) {
       reason: "The configured provider returned an unavailable or invalid response.",
     };
   }
+  if (status === "status_unavailable") {
+    return {
+      heading: "AI status unavailable",
+      reason: "The server capability endpoint did not return a usable status.",
+    };
+  }
   return {
     heading: "AI not configured",
     reason: "No server AI provider has been selected.",
@@ -393,18 +403,16 @@ function renderOptionalStatusRow(row, valueElement, payload, formatter) {
   valueElement.textContent = text;
 }
 
-function serverCheckText(payload) {
-  const checkedAt = formatLocalTimestamp(payload.checked_at_ms);
-  if (!checkedAt) return "";
-  const state = payload.configuration_state === "configured" ? "Configured" : "Unavailable";
-  return `${state} (${checkedAt})`;
+function providerTestStatusText(payload) {
+  if (!payload) return "Not tested";
+  const status = payload.status ? aiStatusLabel(String(payload.status)) : "";
+  if (!status || status === "Not configured") return "Not tested";
+  return status;
 }
 
-function providerTestText(payload) {
-  const testedAt = formatLocalTimestamp(payload.tested_at_ms);
-  const status = payload.status ? aiStatusLabel(String(payload.status)) : "";
-  if (!testedAt || !status || status === "Not configured") return "";
-  return `${status} (${testedAt})`;
+function providerTestTimestampText(payload) {
+  if (!payload) return "";
+  return formatLocalTimestamp(payload.tested_at_ms);
 }
 
 function renderAiCapability(payload) {
@@ -417,6 +425,7 @@ function renderAiCapability(payload) {
     execution: payload && payload.execution ? String(payload.execution) : "server",
     status: payload && payload.status ? String(payload.status) : "not_configured",
     configured: payload && payload.configured === true,
+    credential_available: payload && payload.credential_available === true,
     last_status_check: payload && payload.last_status_check ? payload.last_status_check : null,
     last_connection_test: payload && payload.last_connection_test ? payload.last_connection_test : null,
     requires_explicit_confirmation: !payload || payload.requires_explicit_confirmation !== false,
@@ -424,19 +433,25 @@ function renderAiCapability(payload) {
   const providerName = aiCapability.provider_display_name || aiCapability.provider_id;
   const providerInfo = aiCapability.model_id ? `${providerName} / ${aiCapability.model_id}` : providerName;
   const status = aiStatusInfo(aiCapability.status);
-  if (aiCapability.available) {
+  if (aiCapability.status === "available") {
     setAiStatusClass("status--healthy");
     aiStatusText.textContent = status.heading;
     aiStatusDetail.textContent =
       `${providerInfo}; ${status.reason}; ${aiCapability.execution}.`;
-    setAiStatusButtonState("healthy", "AI available");
+    setAiStatusButtonState("healthy", "AI test successful");
     updateSettingsAiStatus();
     return;
   }
-  setAiStatusClass("status--error");
+  setAiStatusClass(aiCapability.status === "configured_unverified" ? "status--loading" : "status--error");
   aiStatusText.textContent = status.heading;
   aiStatusDetail.textContent = status.reason;
-  setAiStatusButtonState("unhealthy", "AI unavailable");
+  if (aiCapability.status === "configured_unverified") {
+    setAiStatusButtonState("checking", "AI configured, untested");
+  } else if (aiCapability.configured && aiCapability.credential_available) {
+    setAiStatusButtonState("unhealthy", "AI test failed");
+  } else {
+    setAiStatusButtonState("unhealthy", "AI unavailable");
+  }
   updateSettingsAiStatus();
 }
 
@@ -452,12 +467,12 @@ async function loadAiCapability() {
       cache: "no-store",
     });
     if (!response.ok) {
-      renderAiCapability({ available: false });
+      renderAiCapability({ available: false, status: "status_unavailable" });
       return;
     }
     renderAiCapability(await response.json());
   } catch {
-    renderAiCapability({ available: false });
+    renderAiCapability({ available: false, status: "status_unavailable" });
   }
 }
 
@@ -3538,7 +3553,7 @@ metadataAiFilenameInput.addEventListener("input", () => {
   metadataWorkspace.suggestedFilename = metadataAiFilenameInput.value;
 });
 
-function setActiveStatusTab(tabName, { focusTab = false } = {}) {
+function setActiveStatusTab(tabName, { focusTab = false, refreshAiStatus = false } = {}) {
   const isCloud = tabName === "cloud";
   if (!statusTabAi || !statusTabCloud || !statusPanelAi || !statusPanelCloud) return;
   statusTabAi.classList.toggle("settings-dialog__tab--active", !isCloud);
@@ -3551,16 +3566,18 @@ function setActiveStatusTab(tabName, { focusTab = false } = {}) {
   statusPanelCloud.hidden = !isCloud;
   if (isCloud) {
     loadCloudStatus();
+  } else if (refreshAiStatus) {
+    loadAiCapability();
   }
   if (focusTab) {
     (isCloud ? statusTabCloud : statusTabAi).focus();
   }
 }
 
-function openStatusDialog(tabName = "ai") {
+function openStatusDialog(tabName = "ai", { refreshAiStatus = false } = {}) {
   if (!statusDialog) return;
   lastFocusedElementBeforeStatus = document.activeElement;
-  setActiveStatusTab(tabName);
+  setActiveStatusTab(tabName, { refreshAiStatus: tabName === "ai" && refreshAiStatus });
   if (typeof statusDialog.showModal === "function") {
     statusDialog.showModal();
   } else {
@@ -3589,13 +3606,13 @@ function handleStatusTabKeydown(event) {
   if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
   event.preventDefault();
   if (event.key === "Home") {
-    setActiveStatusTab("ai", { focusTab: true });
+    setActiveStatusTab("ai", { focusTab: true, refreshAiStatus: true });
   } else if (event.key === "End") {
     setActiveStatusTab("cloud", { focusTab: true });
   } else if (event.currentTarget === statusTabAi) {
     setActiveStatusTab("cloud", { focusTab: true });
   } else {
-    setActiveStatusTab("ai", { focusTab: true });
+    setActiveStatusTab("ai", { focusTab: true, refreshAiStatus: true });
   }
 }
 
@@ -3608,12 +3625,12 @@ if (serverHealthButton) {
 
 if (aiStatusButton) {
   aiStatusButton.addEventListener("click", () => {
-    openStatusDialog("ai");
+    openStatusDialog("ai", { refreshAiStatus: true });
   });
 }
 
 if (statusTabAi) {
-  statusTabAi.addEventListener("click", () => setActiveStatusTab("ai"));
+  statusTabAi.addEventListener("click", () => setActiveStatusTab("ai", { refreshAiStatus: true }));
   statusTabAi.addEventListener("keydown", handleStatusTabKeydown);
 }
 

@@ -556,10 +556,16 @@ def test_browser_presents_ai_capability_states_from_api(client: TestClient) -> N
     assert "provider_id" in script
     assert "provider_display_name" in script
     assert "model_id" in script
+    assert "credential_available" in script
+    assert "last_connection_test" in script
     assert "prompt_version" in script
     assert "execution" in script
+    assert ">Provider<" in html
     assert ">Model<" in html
-    assert "Last server check" in html
+    assert ">Configuration<" in html
+    assert ">Credential<" in html
+    assert ">Last connection test<" in html
+    assert ">Tested at<" in html
     assert "No server AI provider has been selected." in combined
     assert "The selected provider credential is not available" in combined
     assert "AI is configured by the FrameNest server operator" not in combined
@@ -999,7 +1005,7 @@ def test_header_statuses_keep_accessible_truth_and_state_coloring(client: TestCl
     assert "Local server healthy" in html
     assert "AI status" in html
     assert "setServerHealthButtonState(\"healthy\", \"Server healthy\")" in script
-    assert "setAiStatusButtonState(\"healthy\", \"AI available\")" in script
+    assert "setAiStatusButtonState(\"healthy\", \"AI test successful\")" in script
     assert ".status-button--checking .status-button__label" in css
     assert ".status-button--healthy .status-button__label" in css
     assert ".status-button--unhealthy .status-button__label" in css
@@ -1071,7 +1077,7 @@ def test_status_dialog_does_not_contain_provider_configuration_inputs(client: Te
     assert "api_key" not in status_section.lower()
     assert '<input' not in status_section
     assert "AI capability" not in status_section
-    assert "Last test" not in status_section
+    assert "AI Test" not in status_section
 
 
 def test_javascript_has_health_retry_logic(client: TestClient) -> None:
@@ -1087,9 +1093,11 @@ def test_javascript_status_buttons_open_status_tabs(client: TestClient) -> None:
 
     assert "ai-status-button" in script or "aiStatusButton" in script
     assert "status-dialog" in script or "statusDialog" in script
-    assert 'openStatusDialog("ai")' in script
+    assert 'openStatusDialog("ai"' in script
     assert 'openStatusDialog("cloud")' in script
     assert "loadCloudStatus()" in script
+    assert "loadAiCapability(" in set_tab_body
+    assert 'setActiveStatusTab("ai"' in script
     assert "handleStatusTabKeydown" in script
     assert "ArrowLeft" in script and "ArrowRight" in script
     assert "statusPanelAi.hidden = isCloud" in set_tab_body
@@ -1097,6 +1105,33 @@ def test_javascript_status_buttons_open_status_tabs(client: TestClient) -> None:
     assert 'statusTabAi.setAttribute("aria-selected", String(!isCloud))' in set_tab_body
     assert 'statusTabCloud.setAttribute("aria-selected", String(isCloud))' in set_tab_body
     assert "showModal" in script
+
+
+def test_javascript_ai_status_modal_refreshes_on_each_explicit_open(client: TestClient) -> None:
+    script = client.get("/assets/app.js").text
+    open_dialog_body = _javascript_function(script, "openStatusDialog")
+    ai_button_body = script[script.index("if (aiStatusButton)") : script.index("if (statusTabAi)")]
+
+    assert "refreshAiStatus" in script
+    assert "loadAiCapability(" in open_dialog_body or (
+        "loadAiCapability(" in _javascript_function(script, "setActiveStatusTab")
+    )
+    assert "refreshAiStatus: true" in ai_button_body
+    assert "statusDialog.showModal" in open_dialog_body
+    assert "setInterval" not in open_dialog_body
+    assert "setTimeout" not in open_dialog_body
+
+
+def test_javascript_ai_status_modal_failure_stays_sanitized(client: TestClient) -> None:
+    script = client.get("/assets/app.js").text
+    load_body = _javascript_function(script, "loadAiCapability")
+
+    assert "try {" in load_body
+    assert "catch" in load_body
+    assert "AI status unavailable" in script
+    assert "renderAiCapability({ available: false" in load_body
+    assert "Authorization" not in script
+    assert "NVIDIA_API_KEY" not in script
 
 
 def test_javascript_status_optional_rows_hide_complete_empty_rows(client: TestClient) -> None:
@@ -1562,7 +1597,7 @@ def test_catalog_card_unavailable_ai_opens_status_without_request(client: TestCl
         analyze_body.index("if (!aiCapability.available)") : analyze_body.index("cardAiAnalyzingMediaIds.add(item.media_id)")
     ]
 
-    assert 'openStatusDialog("ai")' in unavailable_section
+    assert 'openStatusDialog("ai"' in unavailable_section
     assert "fetch(" not in unavailable_section
     assert 'analyzeButton.setAttribute("aria-disabled", aiCapability.available ? "false" : "true")' in script
 
