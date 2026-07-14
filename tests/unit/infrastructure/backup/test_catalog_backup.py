@@ -38,7 +38,7 @@ def test_create_catalog_backup_from_migrated_database(tmp_path: Path) -> None:
     manifest = _manifest(bundle)
     assert manifest["schema_version"] == 1
     assert manifest["catalog"]["logical_name"] == "catalog.sqlite3"
-    assert manifest["catalog"]["alembic_revision"] == "0007"
+    assert manifest["catalog"]["alembic_revision"] == "0008"
     assert manifest["catalog"]["size_bytes"] == (bundle / "catalog.sqlite3").stat().st_size
     assert manifest["catalog"]["sha256"] == result.catalog_sha256
     assert "source" not in json.dumps(manifest)
@@ -54,7 +54,7 @@ def test_create_uses_sqlite_snapshot_while_source_connection_is_open(tmp_path: P
 
         result = create_catalog_backup(database_path, tmp_path / "bundle")
 
-    assert result.alembic_revision == "0007"
+    assert result.alembic_revision == "0008"
 
 
 def test_create_does_not_mutate_source_database(tmp_path: Path) -> None:
@@ -262,7 +262,7 @@ def test_manifest_rejects_unexpected_secret_shaped_fields_and_excludes_non_catal
             "manifest",
         ),
         (lambda manifest: manifest["catalog"].update({"sha256": "A" * 64}), "manifest"),
-        (lambda manifest: manifest["catalog"].update({"alembic_revision": "0007-extra"}), "manifest"),
+        (lambda manifest: manifest["catalog"].update({"alembic_revision": "0008-extra"}), "manifest"),
         (lambda manifest: manifest["catalog"].update({"unexpected": "field"}), "manifest"),
     ],
 )
@@ -328,7 +328,7 @@ def test_restore_verified_bundle_to_new_destination(tmp_path: Path) -> None:
     assert sha256_file(destination) == sha256_file(bundle / "catalog.sqlite3")
     with sqlite3.connect(destination) as connection:
         revision = connection.execute("SELECT version_num FROM alembic_version").fetchone()
-    assert revision == ("0007",)
+    assert revision == ("0008",)
 
 
 def test_restore_refuses_existing_or_symlink_destination_and_leaves_bundle_read_only(tmp_path: Path) -> None:
@@ -416,12 +416,12 @@ def test_create_verify_and_restore_handle_sqlite_paths_with_uri_reserved_charact
     verified = verify_catalog_backup(bundle)
     restored = restore_catalog_backup(bundle, destination)
 
-    assert result.alembic_revision == "0007"
+    assert result.alembic_revision == "0008"
     assert verified.catalog_sha256 == result.catalog_sha256
     assert restored.catalog_sha256 == result.catalog_sha256
     with sqlite3.connect(destination) as connection:
         revision = connection.execute("SELECT version_num FROM alembic_version").fetchone()
-    assert revision == ("0007",)
+    assert revision == ("0008",)
 
 
 def test_create_fails_if_private_permissions_cannot_be_set_where_supported(

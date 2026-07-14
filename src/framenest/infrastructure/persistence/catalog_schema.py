@@ -15,6 +15,8 @@ from sqlalchemy import (
     UniqueConstraint,
 )
 
+from framenest.infrastructure.persistence.upload_schema import define_upload_sessions_table
+
 metadata = MetaData()
 
 devices = Table(
@@ -272,3 +274,5 @@ media_canonical_tags = Table(
     PrimaryKeyConstraint("media_id", "tag_key", name="pk_media_canonical_tags"),
     UniqueConstraint("media_id", "position", name="uq_media_canonical_tags_media_position"),
 )
+
+upload_sessions = define_upload_sessions_table(metadata)

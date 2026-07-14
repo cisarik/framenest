@@ -1,0 +1,87 @@
+"""Application port for durable upload sessions."""
+
+from __future__ import annotations
+
+from typing import Protocol
+
+from framenest.domain.uploads import UploadSession, UploadSessionId, UploadSessionState
+
+
+class FrameNestUploadSessionRepositoryError(RuntimeError):
+    """Base sanitized upload-session repository error."""
+
+
+class UploadSessionAlreadyExistsError(FrameNestUploadSessionRepositoryError):
+    """Raised when an upload session identity already exists."""
+
+
+class UploadStorageKeyAlreadyExistsError(FrameNestUploadSessionRepositoryError):
+    """Raised when an upload storage key already exists."""
+
+
+class UploadSessionNotFoundError(FrameNestUploadSessionRepositoryError):
+    """Raised when an upload session does not exist."""
+
+
+class InvalidUploadSessionTransitionError(FrameNestUploadSessionRepositoryError):
+    """Raised when an upload session cannot enter the requested state."""
+
+
+class UploadOffsetConflictError(FrameNestUploadSessionRepositoryError):
+    """Raised when the expected byte offset is stale."""
+
+
+class UploadSizeLimitExceededError(FrameNestUploadSessionRepositoryError):
+    """Raised when accepted bytes would exceed the declared upload size."""
+
+
+class UploadSessionConcurrencyConflictError(FrameNestUploadSessionRepositoryError):
+    """Raised when an optimistic concurrency guard is stale."""
+
+
+class InvalidUploadChecksumError(FrameNestUploadSessionRepositoryError):
+    """Raised when upload checksum metadata is invalid or conflicting."""
+
+
+class UploadSessionRepository(Protocol):
+    """Persistence-independent durable upload-session contract."""
+
+    def create(self, session: UploadSession) -> None:
+        """Persist one new valid upload session."""
+
+    def get(self, session_id: UploadSessionId) -> UploadSession | None:
+        """Return one upload session by identity, or None when absent."""
+
+    def advance_received_offset(
+        self,
+        session_id: UploadSessionId,
+        *,
+        expected_received_size_bytes: int,
+        accepted_size_bytes: int,
+        expected_version: int,
+        updated_at_ms: int,
+    ) -> UploadSession:
+        """Atomically advance a receiving session's byte offset."""
+
+    def record_completed_checksum(
+        self,
+        session_id: UploadSessionId,
+        *,
+        expected_state: UploadSessionState,
+        expected_version: int,
+        checksum_hex: str,
+        updated_at_ms: int,
+    ) -> UploadSession:
+        """Record a validated completed checksum without calculating it."""
+
+    def transition_state(
+        self,
+        session_id: UploadSessionId,
+        *,
+        expected_state: UploadSessionState,
+        target_state: UploadSessionState,
+        expected_version: int,
+        updated_at_ms: int,
+        failure_code: str | None = None,
+    ) -> UploadSession:
+        """Atomically apply one valid guarded state transition."""

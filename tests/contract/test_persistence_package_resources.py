@@ -66,6 +66,9 @@ def test_migration_resources_are_discoverable_from_installed_wheel(
                 "    'revision_0003': root.joinpath('versions', '0003_library_registry.py').is_file(),\n"
                 "    'revision_0004': root.joinpath('versions', '0004_media_catalog_foundation.py').is_file(),\n"
                 "    'revision_0005': root.joinpath('versions', '0005_media_metadata_and_canonical_tags.py').is_file(),\n"
+                "    'revision_0006': root.joinpath('versions', '0006_persistent_media_description.py').is_file(),\n"
+                "    'revision_0007': root.joinpath('versions', '0007_automatic_processed_collection.py').is_file(),\n"
+                "    'revision_0008': root.joinpath('versions', '0008_upload_sessions.py').is_file(),\n"
                 "}, sort_keys=True))\n"
             ),
         ],
@@ -84,6 +87,9 @@ def test_migration_resources_are_discoverable_from_installed_wheel(
         "revision_0003": True,
         "revision_0004": True,
         "revision_0005": True,
+        "revision_0006": True,
+        "revision_0007": True,
+        "revision_0008": True,
         "template": True,
     }
     assert not (REPOSITORY_ROOT / "dist").exists()

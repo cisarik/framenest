@@ -13,7 +13,8 @@ from framenest.configuration import FrameNestSettings
 PRODUCTION_VERSIONS_PACKAGE = (
     "framenest.infrastructure.persistence.alembic_environment.versions"
 )
-CURRENT_HEAD_REVISION = "0007"
+CURRENT_HEAD_REVISION = "0008"
+TARGET_COLLECTION_REVISION = "0007"
 TARGET_PREVIOUS_REVISION = "0006"
 DEVICE_ID = "12345678-1234-4234-9234-123456789abc"
 LIBRARY_ID = "11111111-2222-4333-8444-555555555555"
@@ -151,18 +152,18 @@ def test_packaged_migration_resources_include_0007() -> None:
 
     from framenest.infrastructure.persistence.migrations import load_script_directory
 
-    revision = load_script_directory().get_revision(CURRENT_HEAD_REVISION)
+    revision = load_script_directory().get_revision(TARGET_COLLECTION_REVISION)
     assert revision is not None
     assert revision.down_revision == TARGET_PREVIOUS_REVISION
 
 
-def test_empty_database_upgrades_to_current_head_revision_0007(tmp_path: Path) -> None:
+def test_empty_database_upgrades_to_current_head_revision_0008(tmp_path: Path) -> None:
     from framenest.infrastructure.persistence.migrations import (
         inspect_database_migration_status,
         upgrade_database_to_head,
     )
 
-    settings = _settings_for(tmp_path / "head-0007.sqlite3")
+    settings = _settings_for(tmp_path / "head-0008.sqlite3")
     status = upgrade_database_to_head(settings)
 
     assert status.state == "at_head"
