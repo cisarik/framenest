@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import socket
 from pathlib import Path
@@ -117,6 +118,73 @@ def test_application_lifespan_owns_upload_validation_coordinator(tmp_path: Path)
 
     assert coordinator.runner_done
     assert not coordinator.executor_running
+
+
+def test_application_lifespan_shuts_down_owned_coordinator_before_database_disposal(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from framenest.adapters.api import application
+
+    events: list[str] = []
+    quarantine_root = tmp_path / "quarantine"
+    quarantine_root.mkdir()
+    settings = FrameNestSettings(
+        database_path=tmp_path / "catalog.sqlite3",
+        upload_quarantine_root=quarantine_root,
+        _env_file=None,
+    )
+    upgrade_database_to_head(settings)
+
+    original_dispose_engine = application.dispose_engine
+
+    def tracked_dispose_engine(engine: object) -> None:
+        events.append("dispose_engine")
+        original_dispose_engine(engine)
+
+    monkeypatch.setattr(application, "dispose_engine", tracked_dispose_engine)
+    app = create_app(settings=settings)
+    coordinator = app.state.upload_validation_coordinator
+    original_shutdown = coordinator.shutdown
+
+    async def tracked_shutdown() -> None:
+        events.append("coordinator_shutdown_start")
+        await original_shutdown()
+        events.append("coordinator_shutdown_end")
+
+    coordinator.shutdown = tracked_shutdown
+
+    with TestClient(app) as client:
+        assert client.get("/health").status_code == 200
+
+    assert events == [
+        "coordinator_shutdown_start",
+        "coordinator_shutdown_end",
+        "dispose_engine",
+    ]
+
+
+def test_application_lifespan_propagates_application_cancellation(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        quarantine_root = tmp_path / "quarantine"
+        quarantine_root.mkdir()
+        settings = FrameNestSettings(
+            database_path=tmp_path / "catalog.sqlite3",
+            upload_quarantine_root=quarantine_root,
+            _env_file=None,
+        )
+        upgrade_database_to_head(settings)
+        app = create_app(settings=settings)
+        coordinator = app.state.upload_validation_coordinator
+
+        with pytest.raises(asyncio.CancelledError):
+            async with app.router.lifespan_context(app):
+                raise asyncio.CancelledError
+
+        assert coordinator.runner_done
+        assert not coordinator.executor_running
+
+    asyncio.run(scenario())
 
 
 def test_application_lifespan_does_not_own_injected_upload_validation_coordinator() -> None:

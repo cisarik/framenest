@@ -6,6 +6,8 @@ import asyncio
 import threading
 from pathlib import Path
 
+import pytest
+
 from framenest.application.upload_transport import UploadSessionLockRegistry
 from framenest.application.upload_validation import UploadValidationResult
 from framenest.application.upload_validation_coordinator import UploadValidationCoordinator
@@ -243,6 +245,14 @@ async def _wait_until(condition) -> None:
         if asyncio.get_running_loop().time() >= deadline:
             raise TimeoutError("condition was not met")
         await asyncio.sleep(0.001)
+
+
+def _live_validation_threads() -> list[threading.Thread]:
+    return [
+        thread
+        for thread in threading.enumerate()
+        if thread.name.startswith("framenest-upload-validation") and thread.is_alive()
+    ]
 
 
 def test_drain_runs_blocking_validation_off_event_loop() -> None:
@@ -594,10 +604,118 @@ def test_shutdown_waits_for_owned_runner_without_orphaning_task_or_thread(tmp_pa
 
         assert coordinator.runner_done
         assert not coordinator.executor_running
-        assert not [
-            thread
-            for thread in threading.enumerate()
-            if thread.name.startswith("framenest-upload-validation") and thread.is_alive()
-        ]
+        assert not _live_validation_threads()
+
+    asyncio.run(scenario())
+
+
+def test_shutdown_after_runner_cancellation_cleans_owned_resources_and_reraises() -> None:
+    async def scenario() -> None:
+        session = _session()
+        validator = _BlockingValidator()
+        coordinator = UploadValidationCoordinator(
+            _Repository([(session,), ()]),
+            validator,
+            UploadSessionLockRegistry(),
+        )
+
+        await coordinator.start()
+        await asyncio.wait_for(asyncio.to_thread(validator.started.wait), timeout=1)
+        runner = coordinator._runner
+        assert runner is not None
+        assert coordinator._wake is not None
+        assert coordinator._executor is not None
+        assert _live_validation_threads()
+
+        runner.cancel()
+        validator.release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(coordinator.shutdown(), timeout=1)
+
+        assert coordinator._runner is None
+        assert coordinator._wake is None
+        assert coordinator._executor is None
+        assert coordinator.runner_done
+        assert not coordinator.executor_running
+        assert not _live_validation_threads()
+
+        await asyncio.wait_for(coordinator.shutdown(), timeout=1)
+        assert coordinator._runner is None
+        assert coordinator._wake is None
+        assert coordinator._executor is None
+        assert not _live_validation_threads()
+
+    asyncio.run(scenario())
+
+
+def test_caller_cancellation_during_shutdown_still_cleans_owned_resources() -> None:
+    async def scenario() -> None:
+        session = _session()
+        validator = _BlockingValidator()
+        coordinator = UploadValidationCoordinator(
+            _Repository([(session,), ()]),
+            validator,
+            UploadSessionLockRegistry(),
+        )
+
+        await coordinator.start()
+        await asyncio.wait_for(asyncio.to_thread(validator.started.wait), timeout=1)
+        assert coordinator._executor is not None
+        assert _live_validation_threads()
+
+        shutdown = asyncio.create_task(coordinator.shutdown())
+        await _wait_until(lambda: coordinator._stopping)
+        shutdown.cancel()
+        validator.release.set()
+        try:
+            with pytest.raises(asyncio.CancelledError):
+                await asyncio.wait_for(shutdown, timeout=1)
+        finally:
+            validator.release.set()
+            if coordinator._executor is not None:
+                coordinator._executor.shutdown(wait=True, cancel_futures=False)
+                coordinator._executor = None
+
+        assert coordinator._runner is None
+        assert coordinator._wake is None
+        assert coordinator._executor is None
+        assert coordinator.runner_done
+        assert not coordinator.executor_running
+        assert not _live_validation_threads()
+
+        await asyncio.wait_for(coordinator.shutdown(), timeout=1)
+        assert not _live_validation_threads()
+
+    asyncio.run(scenario())
+
+
+def test_shutdown_after_ordinary_runner_fault_cleans_owned_resources_and_is_idempotent() -> None:
+    async def scenario() -> None:
+        coordinator = UploadValidationCoordinator(
+            _Repository([]),
+            _ScriptedValidator(),
+            UploadSessionLockRegistry(),
+        )
+        executor = coordinator._ensure_executor()
+        await asyncio.get_running_loop().run_in_executor(executor, lambda: None)
+        assert _live_validation_threads()
+
+        async def fail_runner() -> None:
+            raise RuntimeError("synthetic runner fault")
+
+        coordinator._wake = asyncio.Event()
+        coordinator._runner = asyncio.create_task(fail_runner())
+        await asyncio.sleep(0)
+        await asyncio.wait_for(coordinator.shutdown(), timeout=1)
+
+        assert coordinator._runner is None
+        assert coordinator._wake is None
+        assert coordinator._executor is None
+        assert coordinator.runner_done
+        assert not coordinator.executor_running
+        assert not _live_validation_threads()
+
+        await asyncio.wait_for(coordinator.shutdown(), timeout=1)
+        assert not _live_validation_threads()
 
     asyncio.run(scenario())

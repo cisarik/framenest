@@ -98,6 +98,16 @@ ownership of the runner until it exits, and waits truthfully for an already
 running bounded synchronous validation operation instead of pretending Python
 can forcibly cancel an arbitrary running thread.
 
+Shutdown cleanup is unconditional after shutdown has been requested. If awaiting
+the runner observes cancellation, the coordinator still clears runner and wake
+state and releases its owned executor before re-raising `asyncio.CancelledError`
+to the caller. Ordinary runner faults during shutdown are logged and sanitized
+according to the coordinator lifecycle policy; an executor cleanup failure is
+not sanitized by that runner-fault policy and takes precedence over a sanitized
+ordinary runner fault. If executor cleanup itself fails after runner or caller
+cancellation has already been observed, the cleanup failure is logged and
+cancellation remains the caller-visible result.
+
 ## Non-Visibility
 
 Validation acceptance still stops at `publish_pending`. This decision creates:

@@ -162,27 +162,46 @@ class UploadValidationCoordinator:
         if wake is not None:
             wake.set()
         runner = self._runner
-        if runner is not None:
+        cancellation: asyncio.CancelledError | None = None
+        try:
+            if runner is not None:
+                try:
+                    await runner
+                except asyncio.CancelledError as exc:
+                    cancellation = exc
+                except Exception:
+                    _safe_log(
+                        level="WARNING",
+                        event="upload_validation_runner_shutdown_fault",
+                        operation="upload_validation_shutdown",
+                        error_code="UPLOAD_VALIDATION_RUNNER_SHUTDOWN_FAULT",
+                        retryable=False,
+                    )
+        finally:
+            self._runner = None
+            self._wake = None
+            self._active_upload_ids.clear()
+            self._current_discovery_retry_delay_seconds = (
+                self._discovery_retry_initial_delay_seconds
+            )
             try:
-                await runner
-            except asyncio.CancelledError:
-                raise
+                if self._executor is not None and self._owns_executor:
+                    self._executor.shutdown(wait=True, cancel_futures=False)
             except Exception:
+                if cancellation is None:
+                    raise
                 _safe_log(
-                    level="WARNING",
-                    event="upload_validation_runner_shutdown_fault",
+                    level="ERROR",
+                    event="upload_validation_executor_shutdown_fault",
                     operation="upload_validation_shutdown",
-                    error_code="UPLOAD_VALIDATION_RUNNER_SHUTDOWN_FAULT",
+                    error_code="UPLOAD_VALIDATION_EXECUTOR_SHUTDOWN_FAULT",
                     retryable=False,
                 )
-        self._runner = None
-        self._wake = None
-        try:
-            if self._executor is not None and self._owns_executor:
-                self._executor.shutdown(wait=True, cancel_futures=False)
-        finally:
-            if self._owns_executor:
-                self._executor = None
+            finally:
+                if self._owns_executor:
+                    self._executor = None
+        if cancellation is not None:
+            raise cancellation
 
     @property
     def runner_done(self) -> bool:
