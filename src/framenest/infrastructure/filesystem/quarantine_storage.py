@@ -93,6 +93,35 @@ class FilesystemQuarantineStorage:
         finally:
             _close_descriptor(root_fd)
 
+    def open_reader(
+        self,
+        storage_key: UploadStorageKey,
+        *,
+        expected_size_bytes: int,
+    ) -> "_QuarantineFileReader":
+        root_fd = self._open_root()
+        try:
+            fd = _open_file(
+                root_fd,
+                _filename(storage_key),
+                os.O_RDONLY,
+                exists_ok=True,
+            )
+        except (FileNotFoundError, OSError) as exc:
+            raise QuarantineStateInconsistentError("quarantine state inconsistent") from exc
+        finally:
+            _close_descriptor(root_fd)
+        try:
+            stat_result = os.fstat(fd)
+            _validate_regular_file(stat_result)
+            if stat_result.st_size != expected_size_bytes:
+                raise QuarantineStateInconsistentError("quarantine state inconsistent")
+            os.lseek(fd, 0, os.SEEK_SET)
+            return _QuarantineFileReader(fd, stat_result)
+        except (OSError, QuarantineStateInconsistentError):
+            _close_descriptor(fd)
+            raise
+
     def truncate(self, storage_key: UploadStorageKey, size: int) -> None:
         writer = self.open_writer(storage_key, offset=size, create=False)
         try:
@@ -172,6 +201,48 @@ class _QuarantineFileWriter:
             _close_descriptor(self._fd)
 
 
+class _QuarantineFileReader:
+    def __init__(self, fd: int, initial_stat: os.stat_result) -> None:
+        self._fd = fd
+        self._initial_fingerprint = _stat_fingerprint(initial_stat)
+        self._size_bytes = initial_stat.st_size
+        self._closed = False
+
+    @property
+    def size_bytes(self) -> int:
+        return self._size_bytes
+
+    @property
+    def file_descriptor(self) -> int:
+        return self._fd
+
+    def read(self, size: int) -> bytes:
+        try:
+            return os.read(self._fd, size)
+        except OSError as exc:
+            raise QuarantineStateInconsistentError("quarantine state inconsistent") from exc
+
+    def seek_start(self) -> None:
+        try:
+            os.lseek(self._fd, 0, os.SEEK_SET)
+        except OSError as exc:
+            raise QuarantineStateInconsistentError("quarantine state inconsistent") from exc
+
+    def verify_still_consistent(self) -> None:
+        try:
+            stat_result = os.fstat(self._fd)
+            _validate_regular_file(stat_result)
+        except OSError as exc:
+            raise QuarantineStateInconsistentError("quarantine state inconsistent") from exc
+        if _stat_fingerprint(stat_result) != self._initial_fingerprint:
+            raise QuarantineStateInconsistentError("quarantine state inconsistent")
+
+    def close(self) -> None:
+        if not self._closed:
+            self._closed = True
+            _close_descriptor(self._fd)
+
+
 def _filename(storage_key: UploadStorageKey) -> str:
     return f"{storage_key.value}{_PART_SUFFIX}"
 
@@ -191,6 +262,16 @@ def _open_file(root_fd: int, filename: str, flags: int, *, exists_ok: bool) -> i
 def _validate_regular_file(stat_result: os.stat_result) -> None:
     if not stat_module.S_ISREG(stat_result.st_mode):
         raise QuarantineStateInconsistentError("quarantine state inconsistent")
+
+
+def _stat_fingerprint(stat_result: os.stat_result) -> tuple[int, int, int, int, int]:
+    return (
+        stat_result.st_dev,
+        stat_result.st_ino,
+        stat_result.st_mode,
+        stat_result.st_size,
+        getattr(stat_result, "st_mtime_ns", int(stat_result.st_mtime * 1_000_000_000)),
+    )
 
 
 def _close_descriptor(fd: int) -> None:

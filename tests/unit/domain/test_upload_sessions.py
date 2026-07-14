@@ -16,17 +16,22 @@ from framenest.domain.uploads import (
     FrameNestUploadOffsetError,
     FrameNestUploadSessionError,
     FrameNestUploadSessionTransitionError,
+    FrameNestUploadValidationEvidenceError,
     TERMINAL_UPLOAD_SESSION_STATES,
     UploadDisplayFilename,
     UploadSession,
     UploadSessionId,
     UploadSessionState,
     UploadStorageKey,
+    UploadValidatedFormat,
+    UploadValidatedMediaKind,
+    VALIDATED_UPLOAD_SESSION_STATES,
     ensure_upload_session_can_transition,
     ensure_upload_session_transition_allowed,
     is_terminal_upload_session_state,
     validate_sha256_checksum_hex,
     validate_upload_offset_advance,
+    validate_upload_validation_evidence,
 )
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
@@ -50,6 +55,19 @@ def _session(**overrides: object) -> UploadSession:
         "version": 0,
     }
     values.update(overrides)
+    if values["state"] in VALIDATED_UPLOAD_SESSION_STATES:
+        values.setdefault("checksum_algorithm", "sha256")
+        values.setdefault("checksum_hex", "a" * 64)
+        values.setdefault("validated_media_kind", UploadValidatedMediaKind.VIDEO)
+        values.setdefault("validated_format", UploadValidatedFormat.MP4)
+        if values["checksum_algorithm"] is None:
+            values["checksum_algorithm"] = "sha256"
+        if values["checksum_hex"] is None:
+            values["checksum_hex"] = "a" * 64
+        if values.get("validated_media_kind") is None:
+            values["validated_media_kind"] = UploadValidatedMediaKind.VIDEO
+        if values.get("validated_format") is None:
+            values["validated_format"] = UploadValidatedFormat.MP4
     return UploadSession(**values)  # type: ignore[arg-type]
 
 
@@ -236,6 +254,54 @@ def test_checksum_pair_is_absent_before_known() -> None:
         _session(checksum_algorithm="sha256", checksum_hex=None)
     with pytest.raises(FrameNestUploadChecksumError):
         _session(checksum_algorithm=None, checksum_hex="a" * 64)
+
+
+def test_validation_evidence_accepts_only_approved_kind_format_pairs() -> None:
+    kind, media_format = validate_upload_validation_evidence(
+        media_kind="animated_image",
+        media_format="gif",
+    )
+
+    assert kind is UploadValidatedMediaKind.ANIMATED_IMAGE
+    assert media_format is UploadValidatedFormat.GIF
+    _session(
+        state=UploadSessionState.PUBLISH_PENDING,
+        received_size_bytes=100,
+        checksum_algorithm="sha256",
+        checksum_hex="a" * 64,
+        validated_media_kind=UploadValidatedMediaKind.VIDEO,
+        validated_format=UploadValidatedFormat.MP4,
+    )
+    with pytest.raises(FrameNestUploadValidationEvidenceError):
+        validate_upload_validation_evidence(media_kind="video", media_format="gif")
+    with pytest.raises(FrameNestUploadValidationEvidenceError):
+        _session(
+            state=UploadSessionState.REJECTED,
+            received_size_bytes=100,
+            validated_media_kind=UploadValidatedMediaKind.VIDEO,
+            validated_format=UploadValidatedFormat.GIF,
+        )
+
+
+def test_advanced_states_require_checksum_and_validation_evidence() -> None:
+    values: dict[str, object] = {
+        "id": UploadSessionId.new(),
+        "state": UploadSessionState.PUBLISH_PENDING,
+        "storage_key": UploadStorageKey("upload-session-0002"),
+        "display_filename": UploadDisplayFilename("example.mp4"),
+        "declared_size_bytes": 100,
+        "received_size_bytes": 100,
+        "checksum_algorithm": None,
+        "checksum_hex": None,
+        "created_at_ms": 10,
+        "updated_at_ms": 10,
+        "expires_at_ms": 20,
+        "failure_code": None,
+        "version": 0,
+    }
+
+    with pytest.raises(FrameNestUploadValidationEvidenceError):
+        UploadSession(**values)  # type: ignore[arg-type]
 
 
 def test_storage_key_is_opaque_and_display_filename_is_not_a_storage_path() -> None:

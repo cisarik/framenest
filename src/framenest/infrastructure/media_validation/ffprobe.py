@@ -1,0 +1,351 @@
+"""Bounded ffprobe-backed validation for quarantined uploads."""
+
+from __future__ import annotations
+
+import json
+from dataclasses import dataclass
+from decimal import Decimal, InvalidOperation
+from typing import Any
+
+from framenest.application.ports.quarantine_storage import QuarantineReader
+from framenest.application.ports.upload_media_validation import (
+    UploadMediaValidationEvidence,
+    UploadMediaValidationInfrastructureError,
+    UploadMediaValidationRejectedError,
+)
+from framenest.application.upload_validation import (
+    UPLOAD_VALIDATION_AMBIGUOUS_MEDIA_TYPE,
+    UPLOAD_VALIDATION_INTERNAL_ERROR,
+    UPLOAD_VALIDATION_INVALID_MEDIA,
+    UPLOAD_VALIDATION_MEDIA_POLICY_LIMIT,
+    UPLOAD_VALIDATION_OUTPUT_LIMIT,
+    UPLOAD_VALIDATION_TIMEOUT,
+    UPLOAD_VALIDATION_TOOL_UNAVAILABLE,
+    UPLOAD_VALIDATION_UNSUPPORTED_MEDIA_TYPE,
+)
+from framenest.domain.uploads import UploadValidatedFormat, UploadValidatedMediaKind
+from framenest.infrastructure.media_analysis.process import (
+    EXECUTABLE_NOT_FOUND_MESSAGE,
+    PROCESS_OUTPUT_LIMIT_MESSAGE,
+    PROCESS_TIMEOUT_MESSAGE,
+    PROCESS_FAILED_MESSAGE,
+    ProcessExecutionError,
+    ProcessRunner,
+    SubprocessRunner,
+)
+from framenest.infrastructure.media_analysis.tools import (
+    TOOL_NOT_AVAILABLE_MESSAGE,
+    resolve_ffprobe,
+)
+
+UPLOAD_VALIDATION_PROBE_TIMEOUT_SECONDS = 10.0
+UPLOAD_VALIDATION_PROBE_STDOUT_MAX_BYTES = 262_144
+UPLOAD_VALIDATION_PROBE_STDERR_MAX_BYTES = 32_768
+UPLOAD_VALIDATION_PREFIX_MAX_BYTES = 4096
+UPLOAD_VALIDATION_MAX_STREAMS = 16
+UPLOAD_VALIDATION_MAX_DIMENSION = 8192
+UPLOAD_VALIDATION_MAX_TOTAL_PIXELS = 33_177_600
+UPLOAD_VALIDATION_MAX_DURATION_MS = 21_600_000
+
+_GIF87A_SIGNATURE = b"GIF87a"
+_GIF89A_SIGNATURE = b"GIF89a"
+_MP4_ACCEPTED_BRANDS = frozenset(
+    {
+        "avc1",
+        "cmfc",
+        "dash",
+        "iso2",
+        "iso4",
+        "iso5",
+        "iso6",
+        "isom",
+        "mp41",
+        "mp42",
+    }
+)
+_MP4_ACCEPTED_CODECS = frozenset({"av1", "h264", "hevc", "mpeg4", "vp9"})
+
+
+@dataclass(frozen=True, slots=True)
+class _SignatureEvidence:
+    media_format: UploadValidatedFormat
+    width: int | None = None
+    height: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class _ProbeEvidence:
+    media_format: UploadValidatedFormat
+    media_kind: UploadValidatedMediaKind
+    width: int
+    height: int
+    duration_ms: int | None
+    video_codec: str
+
+
+class BoundedUploadMediaValidator:
+    """Validate GIF/MP4 content through prefix evidence and bounded ffprobe."""
+
+    def __init__(
+        self,
+        runner: ProcessRunner | None = None,
+        *,
+        ffprobe_executable: str | None = None,
+    ) -> None:
+        self._runner = runner or SubprocessRunner()
+        self._ffprobe_executable = ffprobe_executable
+
+    def validate(self, reader: QuarantineReader) -> UploadMediaValidationEvidence:
+        signature = _detect_signature(reader)
+        probe = self._probe(reader)
+        _ensure_signature_and_probe_agree(signature, probe)
+        return UploadMediaValidationEvidence(
+            media_kind=probe.media_kind,
+            media_format=probe.media_format,
+        )
+
+    def _probe(self, reader: QuarantineReader) -> _ProbeEvidence:
+        try:
+            executable = self._ffprobe_executable
+            if executable is None:
+                executable, _version = resolve_ffprobe(self._runner)
+            result = self._runner.run(
+                executable=executable,
+                argv=[
+                    "-v",
+                    "error",
+                    "-print_format",
+                    "json",
+                    "-show_format",
+                    "-show_streams",
+                    "-i",
+                    _fd_path(reader.file_descriptor),
+                ],
+                timeout_seconds=UPLOAD_VALIDATION_PROBE_TIMEOUT_SECONDS,
+                stdout_max_bytes=UPLOAD_VALIDATION_PROBE_STDOUT_MAX_BYTES,
+                stderr_max_bytes=UPLOAD_VALIDATION_PROBE_STDERR_MAX_BYTES,
+                pass_fds=(reader.file_descriptor,),
+            )
+        except ProcessExecutionError as exc:
+            _raise_process_error(exc)
+        if result.returncode != 0:
+            raise UploadMediaValidationRejectedError(UPLOAD_VALIDATION_INVALID_MEDIA)
+        try:
+            payload = json.loads(result.stdout.decode("utf-8"))
+        except (UnicodeError, json.JSONDecodeError):
+            raise UploadMediaValidationRejectedError(UPLOAD_VALIDATION_INVALID_MEDIA) from None
+        if not isinstance(payload, dict):
+            raise UploadMediaValidationRejectedError(UPLOAD_VALIDATION_INVALID_MEDIA)
+        return _parse_probe_payload(payload)
+
+
+def _detect_signature(reader: QuarantineReader) -> _SignatureEvidence:
+    reader.seek_start()
+    prefix = reader.read(UPLOAD_VALIDATION_PREFIX_MAX_BYTES)
+    reader.seek_start()
+    if prefix.startswith((_GIF87A_SIGNATURE, _GIF89A_SIGNATURE)):
+        if len(prefix) < 10:
+            raise UploadMediaValidationRejectedError(UPLOAD_VALIDATION_INVALID_MEDIA)
+        width = int.from_bytes(prefix[6:8], "little")
+        height = int.from_bytes(prefix[8:10], "little")
+        if width <= 0 or height <= 0:
+            raise UploadMediaValidationRejectedError(UPLOAD_VALIDATION_INVALID_MEDIA)
+        _validate_dimensions(width, height)
+        return _SignatureEvidence(UploadValidatedFormat.GIF, width=width, height=height)
+    if _has_mp4_ftyp(prefix):
+        return _SignatureEvidence(UploadValidatedFormat.MP4)
+    raise UploadMediaValidationRejectedError(UPLOAD_VALIDATION_UNSUPPORTED_MEDIA_TYPE)
+
+
+def _has_mp4_ftyp(prefix: bytes) -> bool:
+    if len(prefix) < 16:
+        return False
+    box_size = int.from_bytes(prefix[0:4], "big")
+    box_type = prefix[4:8]
+    if box_type != b"ftyp" or box_size < 16 or box_size > len(prefix):
+        return False
+    brand_bytes = prefix[8:box_size]
+    brands = {
+        brand_bytes[index : index + 4].decode("ascii", errors="ignore").strip()
+        for index in range(0, len(brand_bytes), 4)
+        if len(brand_bytes[index : index + 4]) == 4
+    }
+    return bool(brands & _MP4_ACCEPTED_BRANDS)
+
+
+def _parse_probe_payload(payload: dict[str, Any]) -> _ProbeEvidence:
+    streams = payload.get("streams")
+    if not isinstance(streams, list):
+        raise UploadMediaValidationRejectedError(UPLOAD_VALIDATION_INVALID_MEDIA)
+    if len(streams) > UPLOAD_VALIDATION_MAX_STREAMS:
+        raise UploadMediaValidationRejectedError(UPLOAD_VALIDATION_MEDIA_POLICY_LIMIT)
+    stream_dicts = [stream for stream in streams if isinstance(stream, dict)]
+    if len(stream_dicts) != len(streams):
+        raise UploadMediaValidationRejectedError(UPLOAD_VALIDATION_INVALID_MEDIA)
+    visual_streams = [
+        stream
+        for stream in stream_dicts
+        if stream.get("codec_type") == "video" and not _is_attached_picture(stream)
+    ]
+    if not visual_streams:
+        raise UploadMediaValidationRejectedError(UPLOAD_VALIDATION_INVALID_MEDIA)
+    if len(visual_streams) > 1:
+        raise UploadMediaValidationRejectedError(UPLOAD_VALIDATION_MEDIA_POLICY_LIMIT)
+    stream = visual_streams[0]
+    width = _positive_int(stream.get("width"))
+    height = _positive_int(stream.get("height"))
+    if width is None or height is None:
+        raise UploadMediaValidationRejectedError(UPLOAD_VALIDATION_INVALID_MEDIA)
+    _validate_dimensions(width, height)
+    codec = stream.get("codec_name")
+    if not isinstance(codec, str) or not codec:
+        raise UploadMediaValidationRejectedError(UPLOAD_VALIDATION_INVALID_MEDIA)
+    duration_ms = _duration_ms(stream.get("duration"))
+    format_block = payload.get("format")
+    format_names: tuple[str, ...] = ()
+    if isinstance(format_block, dict):
+        if duration_ms is None:
+            duration_ms = _duration_ms(format_block.get("duration"))
+        format_names = _format_names(format_block.get("format_name"))
+    _validate_duration(duration_ms)
+    return _probe_from_formats(
+        format_names=format_names,
+        width=width,
+        height=height,
+        duration_ms=duration_ms,
+        video_codec=codec.lower(),
+    )
+
+
+def _probe_from_formats(
+    *,
+    format_names: tuple[str, ...],
+    width: int,
+    height: int,
+    duration_ms: int | None,
+    video_codec: str,
+) -> _ProbeEvidence:
+    if "gif" in format_names:
+        if len(format_names) != 1 or video_codec != "gif":
+            raise UploadMediaValidationRejectedError(UPLOAD_VALIDATION_AMBIGUOUS_MEDIA_TYPE)
+        return _ProbeEvidence(
+            media_format=UploadValidatedFormat.GIF,
+            media_kind=UploadValidatedMediaKind.ANIMATED_IMAGE,
+            width=width,
+            height=height,
+            duration_ms=duration_ms,
+            video_codec=video_codec,
+        )
+    if "mp4" in format_names:
+        if {"gif", "matroska", "webm"} & set(format_names):
+            raise UploadMediaValidationRejectedError(UPLOAD_VALIDATION_AMBIGUOUS_MEDIA_TYPE)
+        if video_codec not in _MP4_ACCEPTED_CODECS:
+            raise UploadMediaValidationRejectedError(UPLOAD_VALIDATION_MEDIA_POLICY_LIMIT)
+        return _ProbeEvidence(
+            media_format=UploadValidatedFormat.MP4,
+            media_kind=UploadValidatedMediaKind.VIDEO,
+            width=width,
+            height=height,
+            duration_ms=duration_ms,
+            video_codec=video_codec,
+        )
+    raise UploadMediaValidationRejectedError(UPLOAD_VALIDATION_UNSUPPORTED_MEDIA_TYPE)
+
+
+def _ensure_signature_and_probe_agree(
+    signature: _SignatureEvidence,
+    probe: _ProbeEvidence,
+) -> None:
+    if signature.media_format is not probe.media_format:
+        raise UploadMediaValidationRejectedError(UPLOAD_VALIDATION_AMBIGUOUS_MEDIA_TYPE)
+    if signature.width is not None and signature.width != probe.width:
+        raise UploadMediaValidationRejectedError(UPLOAD_VALIDATION_AMBIGUOUS_MEDIA_TYPE)
+    if signature.height is not None and signature.height != probe.height:
+        raise UploadMediaValidationRejectedError(UPLOAD_VALIDATION_AMBIGUOUS_MEDIA_TYPE)
+
+
+def _is_attached_picture(stream: dict[str, Any]) -> bool:
+    disposition = stream.get("disposition")
+    if not isinstance(disposition, dict):
+        return False
+    return disposition.get("attached_pic") in (1, True, "1")
+
+
+def _positive_int(value: object) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value if value > 0 else None
+    if isinstance(value, str):
+        try:
+            parsed = int(value)
+        except ValueError:
+            return None
+        return parsed if parsed > 0 else None
+    return None
+
+
+def _duration_ms(value: object) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        if value < 0:
+            raise UploadMediaValidationRejectedError(UPLOAD_VALIDATION_INVALID_MEDIA)
+        return int(value * 1000)
+    if isinstance(value, str):
+        try:
+            seconds = Decimal(value)
+        except (InvalidOperation, ValueError):
+            raise UploadMediaValidationRejectedError(UPLOAD_VALIDATION_INVALID_MEDIA) from None
+        if seconds < 0:
+            raise UploadMediaValidationRejectedError(UPLOAD_VALIDATION_INVALID_MEDIA)
+        return int(seconds * 1000)
+    raise UploadMediaValidationRejectedError(UPLOAD_VALIDATION_INVALID_MEDIA)
+
+
+def _format_names(value: object) -> tuple[str, ...]:
+    if not isinstance(value, str) or not value:
+        raise UploadMediaValidationRejectedError(UPLOAD_VALIDATION_INVALID_MEDIA)
+    names = tuple(part.strip().lower() for part in value.split(",") if part.strip())
+    if not names:
+        raise UploadMediaValidationRejectedError(UPLOAD_VALIDATION_INVALID_MEDIA)
+    if any(len(name) > 64 for name in names):
+        raise UploadMediaValidationRejectedError(UPLOAD_VALIDATION_MEDIA_POLICY_LIMIT)
+    return names
+
+
+def _validate_dimensions(width: int, height: int) -> None:
+    if width > UPLOAD_VALIDATION_MAX_DIMENSION or height > UPLOAD_VALIDATION_MAX_DIMENSION:
+        raise UploadMediaValidationRejectedError(UPLOAD_VALIDATION_MEDIA_POLICY_LIMIT)
+    if width * height > UPLOAD_VALIDATION_MAX_TOTAL_PIXELS:
+        raise UploadMediaValidationRejectedError(UPLOAD_VALIDATION_MEDIA_POLICY_LIMIT)
+
+
+def _validate_duration(duration_ms: int | None) -> None:
+    if duration_ms is None:
+        return
+    if duration_ms > UPLOAD_VALIDATION_MAX_DURATION_MS:
+        raise UploadMediaValidationRejectedError(UPLOAD_VALIDATION_MEDIA_POLICY_LIMIT)
+
+
+def _raise_process_error(exc: ProcessExecutionError) -> None:
+    message = str(exc)
+    if message in {EXECUTABLE_NOT_FOUND_MESSAGE, TOOL_NOT_AVAILABLE_MESSAGE}:
+        raise UploadMediaValidationInfrastructureError(
+            UPLOAD_VALIDATION_TOOL_UNAVAILABLE
+        ) from None
+    if message == PROCESS_TIMEOUT_MESSAGE:
+        raise UploadMediaValidationRejectedError(UPLOAD_VALIDATION_TIMEOUT) from None
+    if message == PROCESS_OUTPUT_LIMIT_MESSAGE:
+        raise UploadMediaValidationRejectedError(UPLOAD_VALIDATION_OUTPUT_LIMIT) from None
+    if message == PROCESS_FAILED_MESSAGE:
+        raise UploadMediaValidationInfrastructureError(
+            UPLOAD_VALIDATION_INTERNAL_ERROR
+        ) from None
+    raise UploadMediaValidationInfrastructureError(UPLOAD_VALIDATION_INTERNAL_ERROR) from None
+
+
+def _fd_path(fd: int) -> str:
+    return f"/dev/fd/{fd}"

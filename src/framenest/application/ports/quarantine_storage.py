@@ -39,6 +39,30 @@ class QuarantineWriter(Protocol):
         """Close the writer."""
 
 
+class QuarantineReader(Protocol):
+    """Stable open quarantine reader for validation and hashing."""
+
+    @property
+    def size_bytes(self) -> int:
+        """Return the physical size observed for the stable object."""
+
+    @property
+    def file_descriptor(self) -> int:
+        """Return the stable open file descriptor for process-bound probes."""
+
+    def read(self, size: int) -> bytes:
+        """Read at most size bytes from the stable object."""
+
+    def seek_start(self) -> None:
+        """Rewind the stable object to its beginning."""
+
+    def verify_still_consistent(self) -> None:
+        """Raise when the stable object changed since opening."""
+
+    def close(self) -> None:
+        """Close the reader."""
+
+
 class QuarantineStorage(Protocol):
     """Filesystem-independent quarantine storage contract."""
 
@@ -60,6 +84,14 @@ class QuarantineStorage(Protocol):
         create: bool,
     ) -> QuarantineWriter:
         """Open a safe regular quarantine file for append at offset."""
+
+    def open_reader(
+        self,
+        storage_key: UploadStorageKey,
+        *,
+        expected_size_bytes: int,
+    ) -> QuarantineReader:
+        """Open a stable regular quarantine file for validation."""
 
     def truncate(self, storage_key: UploadStorageKey, size: int) -> None:
         """Durably truncate an existing quarantine file to size."""

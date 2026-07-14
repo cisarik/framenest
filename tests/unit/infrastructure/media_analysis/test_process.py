@@ -5,6 +5,7 @@ from __future__ import annotations
 import sys
 import threading
 import time
+import os
 from collections.abc import Sequence
 
 import pytest
@@ -116,6 +117,32 @@ def test_subprocess_runner_executes_without_shell() -> None:
     )
     assert result.returncode == 0
     assert result.stdout.strip() == b"ok"
+    assert _alive_media_analysis_reader_threads() == []
+
+
+def test_subprocess_runner_can_pass_stable_file_descriptor(tmp_path) -> None:
+    media = tmp_path / "private-name.mp4"
+    media.write_bytes(b"stable-bytes")
+    fd = os.open(media, os.O_RDONLY)
+    try:
+        runner = SubprocessRunner()
+        result = runner.run(
+            executable=sys.executable,
+            argv=[
+                "-c",
+                "import os, sys; fd = int(sys.argv[1]); sys.stdout.buffer.write(os.read(fd, 64))",
+                str(fd),
+            ],
+            timeout_seconds=5.0,
+            stdout_max_bytes=64,
+            stderr_max_bytes=64,
+            pass_fds=(fd,),
+        )
+    finally:
+        os.close(fd)
+
+    assert result.returncode == 0
+    assert result.stdout == b"stable-bytes"
     assert _alive_media_analysis_reader_threads() == []
 
 

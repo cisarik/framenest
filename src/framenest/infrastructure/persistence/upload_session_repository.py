@@ -13,6 +13,7 @@ from framenest.application.ports.upload_sessions import (
     IncompleteUploadSessionError,
     InvalidUploadChecksumError,
     InvalidUploadSessionTransitionError,
+    InvalidUploadValidationEvidenceError,
     UploadOffsetConflictError,
     UploadSessionAlreadyExistsError,
     UploadSessionConcurrencyConflictError,
@@ -26,15 +27,20 @@ from framenest.domain.uploads import (
     FrameNestUploadOffsetError,
     FrameNestUploadSessionError,
     FrameNestUploadSessionTransitionError,
+    FrameNestUploadValidationEvidenceError,
     UploadDisplayFilename,
     UploadSession,
     UploadSessionId,
     UploadSessionState,
     UploadStorageKey,
+    UploadValidatedFormat,
+    UploadValidatedMediaKind,
+    VALIDATED_UPLOAD_SESSION_STATES,
     ensure_upload_session_transition_allowed,
     validate_sha256_checksum_hex,
     validate_upload_failure_code,
     validate_upload_offset_advance,
+    validate_upload_validation_evidence,
 )
 from framenest.infrastructure.persistence.catalog_schema import upload_sessions
 from framenest.infrastructure.persistence.engine import run_in_transaction
@@ -253,6 +259,15 @@ class SqliteUploadSessionRepository:
                     upload_sessions.c.received_size_bytes
                     == upload_sessions.c.declared_size_bytes
                 )
+            if target_state in VALIDATED_UPLOAD_SESSION_STATES:
+                update_guards.extend(
+                    [
+                        upload_sessions.c.checksum_algorithm == "sha256",
+                        upload_sessions.c.checksum_hex.is_not(None),
+                        upload_sessions.c.validated_media_kind.is_not(None),
+                        upload_sessions.c.validated_format.is_not(None),
+                    ]
+                )
             result = connection.execute(
                 update(upload_sessions)
                 .where(and_(*update_guards))
@@ -280,6 +295,12 @@ class SqliteUploadSessionRepository:
                 row["received_size_bytes"]
             ) != int(row["declared_size_bytes"]):
                 raise IncompleteUploadSessionError("incomplete upload session")
+            if target_state in VALIDATED_UPLOAD_SESSION_STATES and not _row_has_validation_evidence(
+                row
+            ):
+                raise InvalidUploadValidationEvidenceError(
+                    "invalid upload validation evidence"
+                )
             raise UploadSessionConcurrencyConflictError(
                 "upload session concurrency conflict"
             )
@@ -289,6 +310,243 @@ class SqliteUploadSessionRepository:
         except (
             UploadSessionNotFoundError,
             IncompleteUploadSessionError,
+            InvalidUploadSessionTransitionError,
+            UploadSessionConcurrencyConflictError,
+            InvalidUploadValidationEvidenceError,
+        ):
+            raise
+        except SQLAlchemyError as exc:
+            raise FrameNestUploadSessionRepositoryError(_REPOSITORY_FAILURE_MESSAGE) from exc
+
+    def start_validation(
+        self,
+        session_id: UploadSessionId,
+        *,
+        expected_version: int,
+        updated_at_ms: int,
+    ) -> UploadSession:
+        """Atomically transition one received upload into validation."""
+        try:
+            _validate_non_negative(expected_version)
+            _validate_non_negative(updated_at_ms)
+        except FrameNestUploadSessionError as exc:
+            raise UploadSessionConcurrencyConflictError(
+                "upload session concurrency conflict"
+            ) from exc
+
+        def operation(connection: Connection) -> UploadSession:
+            result = connection.execute(
+                update(upload_sessions)
+                .where(
+                    and_(
+                        upload_sessions.c.id == session_id.to_string(),
+                        upload_sessions.c.state == UploadSessionState.RECEIVED.value,
+                        upload_sessions.c.version == expected_version,
+                        upload_sessions.c.received_size_bytes
+                        == upload_sessions.c.declared_size_bytes,
+                    )
+                )
+                .values(
+                    state=UploadSessionState.VALIDATING.value,
+                    updated_at_ms=updated_at_ms,
+                    version=upload_sessions.c.version + 1,
+                )
+            )
+            if result.rowcount == 1:
+                return _require_session(connection, session_id)
+            row = _row_by_id(connection, session_id)
+            if row is None:
+                raise UploadSessionNotFoundError("upload session not found")
+            if str(row["state"]) != UploadSessionState.RECEIVED.value:
+                raise InvalidUploadSessionTransitionError(
+                    "invalid upload session transition"
+                )
+            if int(row["version"]) != expected_version:
+                raise UploadSessionConcurrencyConflictError(
+                    "upload session concurrency conflict"
+                )
+            if int(row["received_size_bytes"]) != int(row["declared_size_bytes"]):
+                raise IncompleteUploadSessionError("incomplete upload session")
+            raise UploadSessionConcurrencyConflictError(
+                "upload session concurrency conflict"
+            )
+
+        try:
+            return run_in_transaction(self._engine, operation)
+        except (
+            UploadSessionNotFoundError,
+            IncompleteUploadSessionError,
+            InvalidUploadSessionTransitionError,
+            UploadSessionConcurrencyConflictError,
+        ):
+            raise
+        except SQLAlchemyError as exc:
+            raise FrameNestUploadSessionRepositoryError(_REPOSITORY_FAILURE_MESSAGE) from exc
+
+    def complete_validation_success(
+        self,
+        session_id: UploadSessionId,
+        *,
+        expected_version: int,
+        checksum_hex: str,
+        validated_media_kind: UploadValidatedMediaKind,
+        validated_format: UploadValidatedFormat,
+        updated_at_ms: int,
+    ) -> UploadSession:
+        """Atomically persist validation evidence and transition to publish_pending."""
+        try:
+            checksum = validate_sha256_checksum_hex(checksum_hex)
+            media_kind, media_format = validate_upload_validation_evidence(
+                media_kind=validated_media_kind,
+                media_format=validated_format,
+            )
+            _validate_non_negative(expected_version)
+            _validate_non_negative(updated_at_ms)
+        except FrameNestUploadChecksumError as exc:
+            raise InvalidUploadChecksumError("invalid upload checksum") from exc
+        except FrameNestUploadValidationEvidenceError as exc:
+            raise InvalidUploadValidationEvidenceError(
+                "invalid upload validation evidence"
+            ) from exc
+        except FrameNestUploadSessionError as exc:
+            raise UploadSessionConcurrencyConflictError(
+                "upload session concurrency conflict"
+            ) from exc
+
+        def operation(connection: Connection) -> UploadSession:
+            result = connection.execute(
+                update(upload_sessions)
+                .where(
+                    and_(
+                        upload_sessions.c.id == session_id.to_string(),
+                        upload_sessions.c.state == UploadSessionState.VALIDATING.value,
+                        upload_sessions.c.version == expected_version,
+                        upload_sessions.c.received_size_bytes
+                        == upload_sessions.c.declared_size_bytes,
+                        upload_sessions.c.checksum_algorithm.is_(None),
+                        upload_sessions.c.checksum_hex.is_(None),
+                        upload_sessions.c.validated_media_kind.is_(None),
+                        upload_sessions.c.validated_format.is_(None),
+                    )
+                )
+                .values(
+                    state=UploadSessionState.PUBLISH_PENDING.value,
+                    checksum_algorithm="sha256",
+                    checksum_hex=checksum,
+                    validated_media_kind=media_kind.value,
+                    validated_format=media_format.value,
+                    updated_at_ms=updated_at_ms,
+                    version=upload_sessions.c.version + 1,
+                )
+            )
+            if result.rowcount == 1:
+                return _require_session(connection, session_id)
+            row = _row_by_id(connection, session_id)
+            if row is None:
+                raise UploadSessionNotFoundError("upload session not found")
+            if _row_has_matching_publish_pending_evidence(
+                row,
+                checksum_hex=checksum,
+                validated_media_kind=media_kind,
+                validated_format=media_format,
+            ):
+                return _session_from_row(row)
+            if str(row["state"]) == UploadSessionState.PUBLISH_PENDING.value:
+                if row["checksum_algorithm"] != "sha256" or row["checksum_hex"] != checksum:
+                    raise InvalidUploadChecksumError("invalid upload checksum")
+                raise InvalidUploadValidationEvidenceError(
+                    "invalid upload validation evidence"
+                )
+            if str(row["state"]) != UploadSessionState.VALIDATING.value:
+                raise InvalidUploadSessionTransitionError(
+                    "invalid upload session transition"
+                )
+            if int(row["version"]) != expected_version:
+                raise UploadSessionConcurrencyConflictError(
+                    "upload session concurrency conflict"
+                )
+            if int(row["received_size_bytes"]) != int(row["declared_size_bytes"]):
+                raise IncompleteUploadSessionError("incomplete upload session")
+            if row["checksum_algorithm"] is not None or row["checksum_hex"] is not None:
+                raise InvalidUploadChecksumError("invalid upload checksum")
+            if row["validated_media_kind"] is not None or row["validated_format"] is not None:
+                raise InvalidUploadValidationEvidenceError(
+                    "invalid upload validation evidence"
+                )
+            raise UploadSessionConcurrencyConflictError(
+                "upload session concurrency conflict"
+            )
+
+        try:
+            return run_in_transaction(self._engine, operation)
+        except (
+            UploadSessionNotFoundError,
+            IncompleteUploadSessionError,
+            InvalidUploadSessionTransitionError,
+            UploadSessionConcurrencyConflictError,
+            InvalidUploadChecksumError,
+            InvalidUploadValidationEvidenceError,
+        ):
+            raise
+        except SQLAlchemyError as exc:
+            raise FrameNestUploadSessionRepositoryError(_REPOSITORY_FAILURE_MESSAGE) from exc
+
+    def reject_validation(
+        self,
+        session_id: UploadSessionId,
+        *,
+        expected_version: int,
+        failure_code: str,
+        updated_at_ms: int,
+    ) -> UploadSession:
+        """Atomically reject one validating upload with a sanitized code."""
+        try:
+            sanitized_failure_code = validate_upload_failure_code(failure_code)
+            _validate_non_negative(expected_version)
+            _validate_non_negative(updated_at_ms)
+        except FrameNestUploadSessionError as exc:
+            raise UploadSessionConcurrencyConflictError(
+                "upload session concurrency conflict"
+            ) from exc
+
+        def operation(connection: Connection) -> UploadSession:
+            result = connection.execute(
+                update(upload_sessions)
+                .where(
+                    and_(
+                        upload_sessions.c.id == session_id.to_string(),
+                        upload_sessions.c.state == UploadSessionState.VALIDATING.value,
+                        upload_sessions.c.version == expected_version,
+                    )
+                )
+                .values(
+                    state=UploadSessionState.REJECTED.value,
+                    failure_code=sanitized_failure_code,
+                    updated_at_ms=updated_at_ms,
+                    version=upload_sessions.c.version + 1,
+                )
+            )
+            if result.rowcount == 1:
+                return _require_session(connection, session_id)
+            row = _row_by_id(connection, session_id)
+            if row is None:
+                raise UploadSessionNotFoundError("upload session not found")
+            if str(row["state"]) != UploadSessionState.VALIDATING.value:
+                raise InvalidUploadSessionTransitionError(
+                    "invalid upload session transition"
+                )
+            if int(row["version"]) != expected_version:
+                raise UploadSessionConcurrencyConflictError(
+                    "upload session concurrency conflict"
+                )
+            raise UploadSessionConcurrencyConflictError(
+                "upload session concurrency conflict"
+            )
+
+        try:
+            return run_in_transaction(self._engine, operation)
+        except (
+            UploadSessionNotFoundError,
             InvalidUploadSessionTransitionError,
             UploadSessionConcurrencyConflictError,
         ):
@@ -330,6 +588,31 @@ def _require_session(connection: Connection, session_id: UploadSessionId) -> Upl
     return _session_from_row(row)
 
 
+def _row_has_matching_publish_pending_evidence(
+    row: Mapping[str, object],
+    *,
+    checksum_hex: str,
+    validated_media_kind: UploadValidatedMediaKind,
+    validated_format: UploadValidatedFormat,
+) -> bool:
+    return (
+        str(row["state"]) == UploadSessionState.PUBLISH_PENDING.value
+        and row["checksum_algorithm"] == "sha256"
+        and row["checksum_hex"] == checksum_hex
+        and row["validated_media_kind"] == validated_media_kind.value
+        and row["validated_format"] == validated_format.value
+    )
+
+
+def _row_has_validation_evidence(row: Mapping[str, object]) -> bool:
+    return (
+        row["checksum_algorithm"] == "sha256"
+        and row["checksum_hex"] is not None
+        and row["validated_media_kind"] is not None
+        and row["validated_format"] is not None
+    )
+
+
 def _raise_offset_guard_error(
     row: Mapping[str, object] | None,
     *,
@@ -360,6 +643,12 @@ def _values_from_session(session: UploadSession) -> dict[str, object]:
         "received_size_bytes": session.received_size_bytes,
         "checksum_algorithm": session.checksum_algorithm,
         "checksum_hex": session.checksum_hex,
+        "validated_media_kind": None
+        if session.validated_media_kind is None
+        else session.validated_media_kind.value,
+        "validated_format": None
+        if session.validated_format is None
+        else session.validated_format.value,
         "created_at_ms": session.created_at_ms,
         "updated_at_ms": session.updated_at_ms,
         "expires_at_ms": session.expires_at_ms,
@@ -381,6 +670,12 @@ def _session_from_row(row: Mapping[str, object]) -> UploadSession:
             if row["checksum_algorithm"] is None
             else str(row["checksum_algorithm"]),
             checksum_hex=None if row["checksum_hex"] is None else str(row["checksum_hex"]),
+            validated_media_kind=None
+            if row["validated_media_kind"] is None
+            else UploadValidatedMediaKind(str(row["validated_media_kind"])),
+            validated_format=None
+            if row["validated_format"] is None
+            else UploadValidatedFormat(str(row["validated_format"])),
             created_at_ms=int(row["created_at_ms"]),
             updated_at_ms=int(row["updated_at_ms"]),
             expires_at_ms=int(row["expires_at_ms"]),

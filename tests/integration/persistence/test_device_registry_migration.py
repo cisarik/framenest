@@ -15,7 +15,7 @@ PRODUCTION_VERSIONS_PACKAGE = (
     "framenest.infrastructure.persistence.alembic_environment.versions"
 )
 EXPECTED_HEAD_REVISION = "0002"
-CURRENT_HEAD_REVISION = "0009"
+CURRENT_HEAD_REVISION = "0010"
 
 
 def _upgrade_to_revision(database_path: Path, revision: str) -> None:

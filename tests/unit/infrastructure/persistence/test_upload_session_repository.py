@@ -13,6 +13,7 @@ from framenest.application.ports.upload_sessions import (
     IncompleteUploadSessionError,
     InvalidUploadChecksumError,
     InvalidUploadSessionTransitionError,
+    InvalidUploadValidationEvidenceError,
     UploadOffsetConflictError,
     UploadSessionAlreadyExistsError,
     UploadSessionConcurrencyConflictError,
@@ -27,6 +28,9 @@ from framenest.domain.uploads import (
     UploadSessionId,
     UploadSessionState,
     UploadStorageKey,
+    UploadValidatedFormat,
+    UploadValidatedMediaKind,
+    VALIDATED_UPLOAD_SESSION_STATES,
 )
 from framenest.infrastructure.persistence.engine import create_sqlite_engine
 from framenest.infrastructure.persistence.migrations import upgrade_database_to_head
@@ -65,6 +69,8 @@ def _session(
     declared_size_bytes: int = 100,
     checksum_hex: str | None = None,
     version: int = 0,
+    validated_media_kind: UploadValidatedMediaKind | None = None,
+    validated_format: UploadValidatedFormat | None = None,
 ) -> UploadSession:
     if state in {
         UploadSessionState.RECEIVED,
@@ -76,6 +82,10 @@ def _session(
         UploadSessionState.REJECTED,
     } and received_size_bytes == 0:
         received_size_bytes = declared_size_bytes
+    if state in VALIDATED_UPLOAD_SESSION_STATES:
+        checksum_hex = checksum_hex or "a" * 64
+        validated_media_kind = validated_media_kind or UploadValidatedMediaKind.VIDEO
+        validated_format = validated_format or UploadValidatedFormat.MP4
     return UploadSession(
         id=session_id or UploadSessionId.new(),
         state=state,
@@ -90,6 +100,8 @@ def _session(
         expires_at_ms=1000,
         failure_code=None,
         version=version,
+        validated_media_kind=validated_media_kind,
+        validated_format=validated_format,
     )
 
 
@@ -440,10 +452,18 @@ def test_valid_complete_rows_continue_through_transition_graph(
     target: UploadSessionState,
 ) -> None:
     repository, engine = _repository(tmp_path)
+    evidence_kwargs: dict[str, object] = {}
+    if target in VALIDATED_UPLOAD_SESSION_STATES:
+        evidence_kwargs = {
+            "checksum_hex": "a" * 64,
+            "validated_media_kind": UploadValidatedMediaKind.VIDEO,
+            "validated_format": UploadValidatedFormat.MP4,
+        }
     session = _session(
         storage_key=f"upload-session-valid-{source.value.replace('_', '-')}",
         state=source,
         received_size_bytes=100,
+        **evidence_kwargs,
     )
     try:
         repository.create(session)
@@ -460,6 +480,38 @@ def test_valid_complete_rows_continue_through_transition_graph(
     assert transitioned.state == target
     assert transitioned.received_size_bytes == transitioned.declared_size_bytes
     assert transitioned.version == 1
+
+
+@pytest.mark.parametrize(
+    ("source", "target"),
+    [
+        (UploadSessionState.VALIDATING, UploadSessionState.DUPLICATE_PENDING),
+        (UploadSessionState.VALIDATING, UploadSessionState.PUBLISH_PENDING),
+    ],
+)
+def test_transition_state_rejects_advanced_targets_without_validation_evidence(
+    tmp_path: Path,
+    source: UploadSessionState,
+    target: UploadSessionState,
+) -> None:
+    repository, engine = _repository(tmp_path)
+    session = _session(
+        storage_key=f"upload-session-missing-evidence-{target.value.replace('_', '-')}",
+        state=source,
+        received_size_bytes=100,
+    )
+    try:
+        repository.create(session)
+        with pytest.raises(InvalidUploadValidationEvidenceError):
+            repository.transition_state(
+                session.id,
+                expected_state=source,
+                target_state=target,
+                expected_version=0,
+                updated_at_ms=20,
+            )
+    finally:
+        engine.dispose()
 
 
 def test_record_completed_checksum_is_guarded_and_idempotent_for_same_digest(
@@ -534,6 +586,87 @@ def test_record_completed_checksum_rejects_invalid_state_version_and_digest(
             )
     finally:
         engine.dispose()
+
+
+def test_start_validation_transitions_received_to_validating(tmp_path: Path) -> None:
+    repository, engine = _repository(tmp_path)
+    session = _session(state=UploadSessionState.RECEIVED)
+    try:
+        repository.create(session)
+        validating = repository.start_validation(
+            session.id,
+            expected_version=0,
+            updated_at_ms=20,
+        )
+    finally:
+        engine.dispose()
+
+    assert validating.state is UploadSessionState.VALIDATING
+    assert validating.version == 1
+
+
+def test_complete_validation_success_commits_evidence_and_publish_state_atomically(
+    tmp_path: Path,
+) -> None:
+    repository, engine = _repository(tmp_path)
+    session = _session(state=UploadSessionState.VALIDATING)
+    digest = "b" * 64
+    try:
+        repository.create(session)
+        completed = repository.complete_validation_success(
+            session.id,
+            expected_version=0,
+            checksum_hex=digest,
+            validated_media_kind=UploadValidatedMediaKind.ANIMATED_IMAGE,
+            validated_format=UploadValidatedFormat.GIF,
+            updated_at_ms=20,
+        )
+        repeated = repository.complete_validation_success(
+            session.id,
+            expected_version=1,
+            checksum_hex=digest,
+            validated_media_kind=UploadValidatedMediaKind.ANIMATED_IMAGE,
+            validated_format=UploadValidatedFormat.GIF,
+            updated_at_ms=21,
+        )
+        with pytest.raises(InvalidUploadValidationEvidenceError):
+            repository.complete_validation_success(
+                session.id,
+                expected_version=1,
+                checksum_hex=digest,
+                validated_media_kind=UploadValidatedMediaKind.VIDEO,
+                validated_format=UploadValidatedFormat.MP4,
+                updated_at_ms=22,
+            )
+    finally:
+        engine.dispose()
+
+    assert completed.state is UploadSessionState.PUBLISH_PENDING
+    assert completed.checksum_algorithm == "sha256"
+    assert completed.checksum_hex == digest
+    assert completed.validated_media_kind is UploadValidatedMediaKind.ANIMATED_IMAGE
+    assert completed.validated_format is UploadValidatedFormat.GIF
+    assert repeated == completed
+
+
+def test_reject_validation_commits_sanitized_code_and_rejected_state(tmp_path: Path) -> None:
+    repository, engine = _repository(tmp_path)
+    session = _session(state=UploadSessionState.VALIDATING)
+    try:
+        repository.create(session)
+        rejected = repository.reject_validation(
+            session.id,
+            expected_version=0,
+            failure_code="UNSUPPORTED_MEDIA_TYPE",
+            updated_at_ms=20,
+        )
+    finally:
+        engine.dispose()
+
+    assert rejected.state is UploadSessionState.REJECTED
+    assert rejected.failure_code == "UNSUPPORTED_MEDIA_TYPE"
+    assert rejected.checksum_hex is None
+    assert rejected.validated_media_kind is None
 
 
 def test_failure_code_is_sanitized_and_only_allowed_for_failure_states(tmp_path: Path) -> None:

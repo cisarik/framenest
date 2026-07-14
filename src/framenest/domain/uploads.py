@@ -13,6 +13,7 @@ INVALID_UPLOAD_TRANSITION_MESSAGE = "Invalid upload session transition."
 INCOMPLETE_UPLOAD_SESSION_MESSAGE = "Incomplete upload session."
 INVALID_UPLOAD_OFFSET_MESSAGE = "Invalid upload offset."
 INVALID_UPLOAD_CHECKSUM_MESSAGE = "Invalid upload checksum."
+INVALID_UPLOAD_VALIDATION_EVIDENCE_MESSAGE = "Invalid upload validation evidence."
 
 _SHA256_HEX_PATTERN = re.compile(r"[0-9a-f]{64}")
 _STORAGE_KEY_PATTERN = re.compile(r"[a-z0-9][a-z0-9._-]{15,127}")
@@ -39,6 +40,10 @@ class FrameNestUploadChecksumError(FrameNestUploadSessionError):
     """Sanitized error raised when upload checksum metadata is invalid."""
 
 
+class FrameNestUploadValidationEvidenceError(FrameNestUploadSessionError):
+    """Sanitized error raised when upload validation evidence is invalid."""
+
+
 class UploadSessionState(StrEnum):
     """Canonical durable upload-session states."""
 
@@ -54,6 +59,20 @@ class UploadSessionState(StrEnum):
     CANCELLED = "cancelled"
     EXPIRED = "expired"
     FAILED = "failed"
+
+
+class UploadValidatedMediaKind(StrEnum):
+    """Durable normalized media kind assigned by upload validation."""
+
+    ANIMATED_IMAGE = "animated_image"
+    VIDEO = "video"
+
+
+class UploadValidatedFormat(StrEnum):
+    """Durable normalized media format assigned by upload validation."""
+
+    GIF = "gif"
+    MP4 = "mp4"
 
 
 TERMINAL_UPLOAD_SESSION_STATES = frozenset(
@@ -75,6 +94,22 @@ COMPLETE_UPLOAD_SESSION_STATES = frozenset(
         UploadSessionState.PUBLISHED,
         UploadSessionState.CATALOGED,
         UploadSessionState.REJECTED,
+    }
+)
+
+VALIDATED_UPLOAD_SESSION_STATES = frozenset(
+    {
+        UploadSessionState.DUPLICATE_PENDING,
+        UploadSessionState.PUBLISH_PENDING,
+        UploadSessionState.PUBLISHED,
+        UploadSessionState.CATALOGED,
+    }
+)
+
+ALLOWED_UPLOAD_VALIDATION_EVIDENCE_PAIRS = frozenset(
+    {
+        (UploadValidatedMediaKind.ANIMATED_IMAGE, UploadValidatedFormat.GIF),
+        (UploadValidatedMediaKind.VIDEO, UploadValidatedFormat.MP4),
     }
 )
 
@@ -239,6 +274,8 @@ class UploadSession:
     expires_at_ms: int
     failure_code: str | None
     version: int
+    validated_media_kind: UploadValidatedMediaKind | None = None
+    validated_format: UploadValidatedFormat | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.id, UploadSessionId):
@@ -271,6 +308,17 @@ class UploadSession:
         ):
             raise FrameNestUploadSessionError(INVALID_UPLOAD_SESSION_MESSAGE)
         _validate_non_negative_int(self.version)
+        _validate_validation_evidence_pair(
+            self.validated_media_kind,
+            self.validated_format,
+        )
+        if self.state in VALIDATED_UPLOAD_SESSION_STATES:
+            _validate_required_validation_evidence(
+                checksum_algorithm=self.checksum_algorithm,
+                checksum_hex=self.checksum_hex,
+                validated_media_kind=self.validated_media_kind,
+                validated_format=self.validated_format,
+            )
 
 
 def is_terminal_upload_session_state(state: UploadSessionState) -> bool:
@@ -329,6 +377,31 @@ def validate_upload_failure_code(value: object) -> str:
     return value
 
 
+def validate_upload_validation_evidence(
+    *,
+    media_kind: object,
+    media_format: object,
+) -> tuple[UploadValidatedMediaKind, UploadValidatedFormat]:
+    """Return a valid normalized upload media-kind/format evidence pair."""
+    try:
+        parsed_kind = (
+            media_kind
+            if isinstance(media_kind, UploadValidatedMediaKind)
+            else UploadValidatedMediaKind(media_kind)
+        )
+        parsed_format = (
+            media_format
+            if isinstance(media_format, UploadValidatedFormat)
+            else UploadValidatedFormat(media_format)
+        )
+    except (TypeError, ValueError):
+        raise FrameNestUploadValidationEvidenceError(
+            INVALID_UPLOAD_VALIDATION_EVIDENCE_MESSAGE
+        ) from None
+    _validate_validation_evidence_pair(parsed_kind, parsed_format)
+    return parsed_kind, parsed_format
+
+
 def _validate_upload_session_byte_state(
     *,
     state: UploadSessionState,
@@ -351,6 +424,44 @@ def _validate_checksum_pair(algorithm: object, checksum_hex: object) -> None:
     if algorithm != "sha256":
         raise FrameNestUploadChecksumError(INVALID_UPLOAD_CHECKSUM_MESSAGE)
     validate_sha256_checksum_hex(checksum_hex)
+
+
+def _validate_validation_evidence_pair(
+    media_kind: object,
+    media_format: object,
+) -> None:
+    if media_kind is None and media_format is None:
+        return
+    if not isinstance(media_kind, UploadValidatedMediaKind) or not isinstance(
+        media_format,
+        UploadValidatedFormat,
+    ):
+        raise FrameNestUploadValidationEvidenceError(
+            INVALID_UPLOAD_VALIDATION_EVIDENCE_MESSAGE
+        )
+    if (media_kind, media_format) not in ALLOWED_UPLOAD_VALIDATION_EVIDENCE_PAIRS:
+        raise FrameNestUploadValidationEvidenceError(
+            INVALID_UPLOAD_VALIDATION_EVIDENCE_MESSAGE
+        )
+
+
+def _validate_required_validation_evidence(
+    *,
+    checksum_algorithm: object,
+    checksum_hex: object,
+    validated_media_kind: object,
+    validated_format: object,
+) -> None:
+    _validate_checksum_pair(checksum_algorithm, checksum_hex)
+    if checksum_algorithm != "sha256" or checksum_hex is None:
+        raise FrameNestUploadValidationEvidenceError(
+            INVALID_UPLOAD_VALIDATION_EVIDENCE_MESSAGE
+        )
+    _validate_validation_evidence_pair(validated_media_kind, validated_format)
+    if validated_media_kind is None or validated_format is None:
+        raise FrameNestUploadValidationEvidenceError(
+            INVALID_UPLOAD_VALIDATION_EVIDENCE_MESSAGE
+        )
 
 
 def _validate_positive_int(

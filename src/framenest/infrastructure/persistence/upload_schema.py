@@ -40,6 +40,13 @@ COMPLETE_UPLOAD_SESSION_STATE_VALUES = (
     "rejected",
 )
 
+VALIDATED_UPLOAD_SESSION_STATE_VALUES = (
+    "duplicate_pending",
+    "publish_pending",
+    "published",
+    "cataloged",
+)
+
 
 def define_upload_sessions_table(metadata: MetaData) -> Table:
     """Define the upload_sessions table on the supplied metadata object."""
@@ -54,6 +61,8 @@ def define_upload_sessions_table(metadata: MetaData) -> Table:
         Column("received_size_bytes", Integer(), nullable=False),
         Column("checksum_algorithm", Text(), nullable=True),
         Column("checksum_hex", Text(), nullable=True),
+        Column("validated_media_kind", Text(), nullable=True),
+        Column("validated_format", Text(), nullable=True),
         Column("created_at_ms", Integer(), nullable=False),
         Column("updated_at_ms", Integer(), nullable=False),
         Column("expires_at_ms", Integer(), nullable=False),
@@ -119,6 +128,25 @@ def define_upload_sessions_table(metadata: MetaData) -> Table:
             "AND checksum_hex = lower(checksum_hex) "
             "AND checksum_hex NOT GLOB '*[^0-9a-f]*')",
             name="ck_upload_sessions_checksum_hex",
+        ),
+        CheckConstraint(
+            "(validated_media_kind IS NULL AND validated_format IS NULL) "
+            "OR (validated_media_kind = 'animated_image' AND validated_format = 'gif') "
+            "OR (validated_media_kind = 'video' AND validated_format = 'mp4')",
+            name="ck_upload_sessions_validation_evidence_pair",
+        ),
+        CheckConstraint(
+            or_(
+                ~column("state").in_(VALIDATED_UPLOAD_SESSION_STATE_VALUES),
+                (
+                    (column("received_size_bytes") == column("declared_size_bytes"))
+                    & (column("checksum_algorithm") == "sha256")
+                    & column("checksum_hex").is_not(None)
+                    & column("validated_media_kind").is_not(None)
+                    & column("validated_format").is_not(None)
+                ),
+            ),
+            name="ck_upload_sessions_validated_states_have_evidence",
         ),
         CheckConstraint(
             "created_at_ms >= 0",

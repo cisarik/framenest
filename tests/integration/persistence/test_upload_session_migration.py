@@ -14,7 +14,8 @@ from framenest.infrastructure.persistence.catalog_schema import upload_sessions
 PRODUCTION_VERSIONS_PACKAGE = (
     "framenest.infrastructure.persistence.alembic_environment.versions"
 )
-CURRENT_HEAD_REVISION = "0009"
+CURRENT_HEAD_REVISION = "0010"
+TARGET_VALIDATION_REVISION = "0010"
 TARGET_COMPLETENESS_REVISION = "0009"
 TARGET_UPLOAD_SESSION_REVISION = "0008"
 TARGET_PREVIOUS_REVISION = "0007"
@@ -121,6 +122,7 @@ def test_packaged_migration_resources_include_upload_session_revisions() -> None
     versions = importlib.resources.files(PRODUCTION_VERSIONS_PACKAGE)
     assert versions.joinpath("0008_upload_sessions.py").is_file()
     assert versions.joinpath("0009_upload_session_completeness.py").is_file()
+    assert versions.joinpath("0010_upload_validation_evidence.py").is_file()
 
     from framenest.infrastructure.persistence.migrations import load_script_directory
 
@@ -131,16 +133,19 @@ def test_packaged_migration_resources_include_upload_session_revisions() -> None
     completeness_revision = script.get_revision(TARGET_COMPLETENESS_REVISION)
     assert completeness_revision is not None
     assert completeness_revision.down_revision == TARGET_UPLOAD_SESSION_REVISION
+    validation_revision = script.get_revision(TARGET_VALIDATION_REVISION)
+    assert validation_revision is not None
+    assert validation_revision.down_revision == TARGET_COMPLETENESS_REVISION
     assert script.get_heads() == [CURRENT_HEAD_REVISION]
 
 
-def test_empty_database_upgrades_to_current_head_revision_0009(tmp_path: Path) -> None:
+def test_empty_database_upgrades_to_current_head_revision_0010(tmp_path: Path) -> None:
     from framenest.infrastructure.persistence.migrations import (
         inspect_database_migration_status,
         upgrade_database_to_head,
     )
 
-    settings = _settings_for(tmp_path / "head-0009.sqlite3")
+    settings = _settings_for(tmp_path / "head-0010.sqlite3")
     status = upgrade_database_to_head(settings)
 
     assert status.state == "at_head"
@@ -167,6 +172,8 @@ def test_upload_sessions_table_has_required_columns_constraints_and_indexes(
         "received_size_bytes",
         "checksum_algorithm",
         "checksum_hex",
+        "validated_media_kind",
+        "validated_format",
         "created_at_ms",
         "updated_at_ms",
         "expires_at_ms",
@@ -183,6 +190,8 @@ def test_upload_sessions_table_has_required_columns_constraints_and_indexes(
         "ck_upload_sessions_complete_states_received_size_exact",
         "ck_upload_sessions_checksum_pair",
         "ck_upload_sessions_checksum_hex",
+        "ck_upload_sessions_validation_evidence_pair",
+        "ck_upload_sessions_validated_states_have_evidence",
         "ck_upload_sessions_expires_after_created",
         "ck_upload_sessions_failure_code_sanitized",
         "ck_upload_sessions_version_non_negative",
@@ -256,6 +265,52 @@ def test_upload_session_constraints_reject_invalid_rows(tmp_path: Path) -> None:
                 pass
             else:
                 raise AssertionError(f"invalid row accepted: {overrides}")
+        invalid_validation_pair = valid | {
+            "id": "33333333-3333-4333-8333-333333333333",
+            "storage_key": "upload-session-invalid-validation",
+            "state": "received",
+            "validated_media_kind": "video",
+            "validated_format": "gif",
+        }
+        with pytest.raises(sqlite3.IntegrityError):
+            connection.execute(
+                """
+                INSERT INTO upload_sessions (
+                    id,
+                    state,
+                    storage_key,
+                    display_filename,
+                    declared_size_bytes,
+                    received_size_bytes,
+                    checksum_algorithm,
+                    checksum_hex,
+                    validated_media_kind,
+                    validated_format,
+                    created_at_ms,
+                    updated_at_ms,
+                    expires_at_ms,
+                    failure_code,
+                    version
+                ) VALUES (
+                    :id,
+                    :state,
+                    :storage_key,
+                    :display_filename,
+                    :declared_size_bytes,
+                    :received_size_bytes,
+                    :checksum_algorithm,
+                    :checksum_hex,
+                    :validated_media_kind,
+                    :validated_format,
+                    :created_at_ms,
+                    :updated_at_ms,
+                    :expires_at_ms,
+                    :failure_code,
+                    :version
+                )
+                """,
+                invalid_validation_pair,
+            )
     finally:
         connection.close()
 
@@ -386,6 +441,85 @@ def test_upgrade_from_0008_to_0009_fails_closed_for_incomplete_complete_state(
 
     with pytest.raises(Exception) as error:
         _upgrade_to_revision(settings.database_path, TARGET_COMPLETENESS_REVISION)
+
+    message = str(error.value)
+    assert "private-storage-key-0001" not in message
+    assert "Private Clip.mp4" not in message
+
+
+def test_upgrade_from_0009_to_0010_preserves_rows_that_do_not_require_validation_evidence(
+    tmp_path: Path,
+) -> None:
+    settings = _settings_for(tmp_path / "valid-validation-evidence.sqlite3")
+    _upgrade_to_revision(settings.database_path, TARGET_COMPLETENESS_REVISION)
+    rows = [
+        _valid_upload_session_values(
+            "11111111-1111-4111-8111-111111111111",
+            "upload-session-0001",
+            state="created",
+            received_size_bytes=0,
+        ),
+        _valid_upload_session_values(
+            "22222222-2222-4222-8222-222222222222",
+            "upload-session-0002",
+            state="received",
+            received_size_bytes=100,
+        ),
+        _valid_upload_session_values(
+            "33333333-3333-4333-8333-333333333333",
+            "upload-session-0003",
+            state="validating",
+            received_size_bytes=100,
+        ),
+        _valid_upload_session_values(
+            "44444444-4444-4444-8444-444444444444",
+            "upload-session-0004",
+            state="rejected",
+            received_size_bytes=100,
+        ),
+    ]
+    connection = _connect(settings.database_path)
+    try:
+        for row in rows:
+            _insert_upload_session(connection, row)
+        connection.commit()
+    finally:
+        connection.close()
+
+    _upgrade_to_revision(settings.database_path, TARGET_VALIDATION_REVISION)
+
+    assert _upload_session_rows(settings.database_path) == rows
+    columns = _columns(settings.database_path, "upload_sessions")
+    assert "validated_media_kind" in columns
+    assert "validated_format" in columns
+
+
+@pytest.mark.parametrize(
+    "state",
+    ("duplicate_pending", "publish_pending", "published", "cataloged"),
+)
+def test_upgrade_from_0009_to_0010_fails_closed_for_advanced_rows_without_evidence(
+    tmp_path: Path,
+    state: str,
+) -> None:
+    settings = _settings_for(tmp_path / f"invalid-validation-{state}.sqlite3")
+    _upgrade_to_revision(settings.database_path, TARGET_COMPLETENESS_REVISION)
+    invalid = _valid_upload_session_values(
+        "11111111-1111-4111-8111-111111111111",
+        "private-storage-key-0001",
+        state=state,
+        received_size_bytes=100,
+        display_filename="Private Clip.mp4",
+    )
+    connection = _connect(settings.database_path)
+    try:
+        _insert_upload_session(connection, invalid)
+        connection.commit()
+    finally:
+        connection.close()
+
+    with pytest.raises(Exception) as error:
+        _upgrade_to_revision(settings.database_path, TARGET_VALIDATION_REVISION)
 
     message = str(error.value)
     assert "private-storage-key-0001" not in message

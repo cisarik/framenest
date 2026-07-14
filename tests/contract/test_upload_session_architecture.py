@@ -47,6 +47,15 @@ def test_upload_transport_routes_exist_but_fail_closed_when_unconfigured() -> No
     assert response.json()["error"]["code"] == "UPLOAD_CAPABILITY_NOT_CONFIGURED"
 
 
+def test_upload_validation_adds_no_public_route() -> None:
+    app = create_app()
+    paths = {route.path for route in app.routes if hasattr(route, "path")}
+
+    assert "/api/uploads/{upload_id}/validate" not in paths
+    assert "/api/uploads/{upload_id}/validation" not in paths
+    assert "/api/upload-validation" not in paths
+
+
 def test_upload_session_foundation_contains_no_media_filesystem_or_provider_calls() -> None:
     forbidden_import_roots = {
         "openai",

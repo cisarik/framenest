@@ -59,6 +59,8 @@ from framenest.application.gallery_preview import GalleryPreviewService
 from framenest.application.media_suggestion import PreviewMediaSuggestion
 from framenest.application.media_suggestion import PreviewImportedMediaSuggestion
 from framenest.application.upload_transport import UploadTransportLimits, UploadTransportService
+from framenest.application.upload_transport import UploadSessionLockRegistry
+from framenest.application.upload_validation import ValidateReceivedUpload
 from framenest.adapters.api.library_api import (
     LibraryApiDependencies,
     create_library_api_router,
@@ -70,6 +72,7 @@ from framenest.infrastructure.filesystem.library_scanner import LocalLibraryScan
 from framenest.infrastructure.filesystem.media_content import LocalMediaContentReader
 from framenest.infrastructure.filesystem.quarantine_storage import FilesystemQuarantineStorage
 from framenest.infrastructure.media_analysis import LocalMediaAnalysisAdapter
+from framenest.infrastructure.media_validation import BoundedUploadMediaValidator
 from framenest.infrastructure.media_analysis.gallery_preview import (
     FilesystemGalleryPreviewCache,
     PillowGalleryPreviewEncoder,
@@ -130,6 +133,7 @@ def create_app(
     owned_media_catalog_repository = None
     owned_media_metadata_repository = None
     owned_upload_session_repository = None
+    owned_upload_validation = None
     if (
         library_api_dependencies is None
         or media_import_api_dependencies is None
@@ -255,6 +259,7 @@ def create_app(
     if upload_api_dependencies is None:
         assert owned_upload_session_repository is not None
         assert owned_library_repository is not None
+        upload_locks = UploadSessionLockRegistry()
         storage = (
             None
             if resolved_settings.upload_quarantine_root is None
@@ -275,8 +280,16 @@ def create_app(
                 ),
                 quarantine_root=resolved_settings.upload_quarantine_root,
                 preview_cache_root=resolved_settings.gallery_preview_cache_path,
+                locks=upload_locks,
             ),
         )
+        if storage is not None:
+            owned_upload_validation = ValidateReceivedUpload(
+                owned_upload_session_repository,
+                storage,
+                BoundedUploadMediaValidator(),
+                locks=upload_locks,
+            )
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
@@ -288,6 +301,7 @@ def create_app(
 
     app = FastAPI(lifespan=lifespan)
     app.state.settings = resolved_settings
+    app.state.upload_validation = owned_upload_validation
     app.include_router(create_library_api_router(library_api_dependencies))
     app.include_router(create_media_import_api_router(media_import_api_dependencies))
     app.include_router(create_media_catalog_api_router(media_catalog_api_dependencies))

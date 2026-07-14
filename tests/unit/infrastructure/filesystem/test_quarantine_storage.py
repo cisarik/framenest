@@ -82,6 +82,76 @@ def test_storage_key_cannot_select_path_or_client_filename(tmp_path: Path) -> No
     assert sorted(path.name for path in tmp_path.iterdir()) == [f"{key.value}.part"]
 
 
+def test_open_reader_reads_complete_regular_file_and_rejects_size_mismatch(
+    tmp_path: Path,
+) -> None:
+    storage = FilesystemQuarantineStorage(tmp_path)
+    key = _key("readeruploadkey0001")
+    path = tmp_path / f"{key.value}.part"
+    path.write_bytes(b"abcdef")
+
+    reader = storage.open_reader(key, expected_size_bytes=6)
+    try:
+        assert reader.size_bytes == 6
+        assert reader.read(3) == b"abc"
+        reader.seek_start()
+        assert reader.read(10) == b"abcdef"
+        reader.verify_still_consistent()
+    finally:
+        reader.close()
+
+    with pytest.raises(QuarantineStateInconsistentError):
+        storage.open_reader(key, expected_size_bytes=5)
+
+
+def test_open_reader_rejects_missing_and_non_regular_objects(tmp_path: Path) -> None:
+    storage = FilesystemQuarantineStorage(tmp_path)
+    with pytest.raises(QuarantineStateInconsistentError):
+        storage.open_reader(_key("missingreaderkey001"), expected_size_bytes=1)
+
+    directory_key = _key("directoryreaderkey1")
+    (tmp_path / f"{directory_key.value}.part").mkdir()
+    with pytest.raises(QuarantineStateInconsistentError):
+        storage.open_reader(directory_key, expected_size_bytes=0)
+
+
+def test_reader_keeps_stable_identity_after_path_replacement(tmp_path: Path) -> None:
+    storage = FilesystemQuarantineStorage(tmp_path)
+    key = _key("replacementreader001")
+    path = tmp_path / f"{key.value}.part"
+    path.write_bytes(b"original")
+
+    reader = storage.open_reader(key, expected_size_bytes=8)
+    try:
+        path.unlink()
+        path.write_bytes(b"replaced")
+
+        assert reader.read(100) == b"original"
+        reader.verify_still_consistent()
+        replacement_reader = storage.open_reader(key, expected_size_bytes=8)
+        try:
+            assert replacement_reader.read(100) == b"replaced"
+        finally:
+            replacement_reader.close()
+    finally:
+        reader.close()
+
+
+def test_reader_detects_mutation_before_success(tmp_path: Path) -> None:
+    storage = FilesystemQuarantineStorage(tmp_path)
+    key = _key("mutationreader0001")
+    path = tmp_path / f"{key.value}.part"
+    path.write_bytes(b"abcdef")
+
+    reader = storage.open_reader(key, expected_size_bytes=6)
+    try:
+        path.write_bytes(b"ABCDEF")
+        with pytest.raises(QuarantineStateInconsistentError):
+            reader.verify_still_consistent()
+    finally:
+        reader.close()
+
+
 @pytest.mark.skipif(not hasattr(os, "symlink"), reason="symlink unavailable")
 def test_symlink_file_is_rejected_without_following_target(tmp_path: Path) -> None:
     outside = tmp_path.parent / "outside-upload-target"
@@ -93,4 +163,6 @@ def test_symlink_file_is_rejected_without_following_target(tmp_path: Path) -> No
 
     with pytest.raises(QuarantineStateInconsistentError):
         storage.file_size(key)
+    with pytest.raises(QuarantineStateInconsistentError):
+        storage.open_reader(key, expected_size_bytes=7)
     assert outside.read_bytes() == b"outside"

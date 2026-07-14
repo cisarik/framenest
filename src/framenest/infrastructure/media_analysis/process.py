@@ -45,6 +45,7 @@ class ProcessRunner(Protocol):
         timeout_seconds: float,
         stdout_max_bytes: int,
         stderr_max_bytes: int,
+        pass_fds: Sequence[int] = (),
     ) -> ProcessRunResult:
         """Execute one argv-based process without a shell."""
 
@@ -196,6 +197,7 @@ class SubprocessRunner:
         timeout_seconds: float,
         stdout_max_bytes: int,
         stderr_max_bytes: int,
+        pass_fds: Sequence[int] = (),
     ) -> ProcessRunResult:
         if not executable or not argv:
             raise ProcessExecutionError(PROCESS_FAILED_MESSAGE)
@@ -206,6 +208,7 @@ class SubprocessRunner:
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
+                pass_fds=tuple(pass_fds),
             )
         except FileNotFoundError:
             raise ProcessExecutionError(EXECUTABLE_NOT_FOUND_MESSAGE) from None

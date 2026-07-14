@@ -4,7 +4,13 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from framenest.domain.uploads import UploadSession, UploadSessionId, UploadSessionState
+from framenest.domain.uploads import (
+    UploadSession,
+    UploadSessionId,
+    UploadSessionState,
+    UploadValidatedFormat,
+    UploadValidatedMediaKind,
+)
 
 
 class FrameNestUploadSessionRepositoryError(RuntimeError):
@@ -45,6 +51,10 @@ class UploadSessionConcurrencyConflictError(FrameNestUploadSessionRepositoryErro
 
 class InvalidUploadChecksumError(FrameNestUploadSessionRepositoryError):
     """Raised when upload checksum metadata is invalid or conflicting."""
+
+
+class InvalidUploadValidationEvidenceError(FrameNestUploadSessionRepositoryError):
+    """Raised when upload validation evidence is invalid or conflicting."""
 
 
 class UploadSessionRepository(Protocol):
@@ -89,3 +99,34 @@ class UploadSessionRepository(Protocol):
         failure_code: str | None = None,
     ) -> UploadSession:
         """Atomically apply one valid guarded state transition."""
+
+    def start_validation(
+        self,
+        session_id: UploadSessionId,
+        *,
+        expected_version: int,
+        updated_at_ms: int,
+    ) -> UploadSession:
+        """Atomically transition a received session to validating."""
+
+    def complete_validation_success(
+        self,
+        session_id: UploadSessionId,
+        *,
+        expected_version: int,
+        checksum_hex: str,
+        validated_media_kind: UploadValidatedMediaKind,
+        validated_format: UploadValidatedFormat,
+        updated_at_ms: int,
+    ) -> UploadSession:
+        """Atomically persist checksum, validation evidence, and publish_pending."""
+
+    def reject_validation(
+        self,
+        session_id: UploadSessionId,
+        *,
+        expected_version: int,
+        failure_code: str,
+        updated_at_ms: int,
+    ) -> UploadSession:
+        """Atomically persist sanitized validation rejection and rejected state."""
