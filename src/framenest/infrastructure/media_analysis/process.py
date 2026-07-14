@@ -72,37 +72,93 @@ def _close_pipe(pipe: IO[bytes] | None) -> None:
         pass
 
 
-def _terminate_process(process: subprocess.Popen[bytes]) -> None:
-    _signal_process_tree(process, signal.SIGTERM)
-    if process.poll() is None:
-        try:
-            process.wait(timeout=_TERMINATE_GRACE_SECONDS)
-        except subprocess.TimeoutExpired:
-            pass
-    _signal_process_tree(process, signal.SIGKILL)
-    if process.poll() is None:
-        try:
-            process.wait(timeout=_JOIN_TIMEOUT_SECONDS)
-        except subprocess.TimeoutExpired:
-            pass
-
-
-def _signal_process_tree(process: subprocess.Popen[bytes], sig: signal.Signals) -> None:
-    if hasattr(os, "killpg"):
-        try:
-            os.killpg(process.pid, sig)
-            return
-        except ProcessLookupError:
-            return
-        except OSError:
-            pass
+def _process_group_exists(pgid: int) -> bool:
     try:
-        if sig is signal.SIGTERM:
-            process.terminate()
-        else:
-            process.kill()
+        os.killpg(pgid, 0)
+    except ProcessLookupError:
+        return False
+    except OSError:
+        raise ProcessExecutionError(PROCESS_FAILED_MESSAGE) from None
+    return True
+
+
+def _signal_process_group(pgid: int, sig: signal.Signals) -> None:
+    try:
+        os.killpg(pgid, sig)
     except ProcessLookupError:
         return
+    except OSError:
+        raise ProcessExecutionError(PROCESS_FAILED_MESSAGE) from None
+
+
+def _wait_for_process_group_absence(pgid: int, *, timeout_seconds: float) -> bool:
+    deadline = time.monotonic() + timeout_seconds
+    while True:
+        if not _process_group_exists(pgid):
+            return True
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(_POLL_INTERVAL_SECONDS)
+
+
+def _wait_for_direct_child(process: subprocess.Popen[bytes], *, timeout_seconds: float) -> bool:
+    if process.poll() is not None:
+        return True
+    try:
+        process.wait(timeout=timeout_seconds)
+    except subprocess.TimeoutExpired:
+        return process.poll() is not None
+    return True
+
+
+def _poll_direct_child_without_reaping(process: subprocess.Popen[bytes]) -> int | None:
+    if process.returncode is not None:
+        return process.returncode
+    if not all(
+        hasattr(os, name)
+        for name in ("waitid", "P_PID", "WEXITED", "WNOHANG", "WNOWAIT")
+        + ("CLD_EXITED", "CLD_KILLED", "CLD_DUMPED")
+    ):
+        return process.poll()
+    try:
+        status = os.waitid(
+            os.P_PID,
+            process.pid,
+            os.WEXITED | os.WNOHANG | os.WNOWAIT,
+        )
+    except ChildProcessError:
+        return process.poll()
+    if status is None:
+        return None
+    if status.si_code == os.CLD_EXITED:
+        return int(status.si_status)
+    if status.si_code in {os.CLD_KILLED, os.CLD_DUMPED}:
+        return -int(status.si_status)
+    return process.poll()
+
+
+def _cleanup_owned_process_group(process: subprocess.Popen[bytes]) -> None:
+    pgid = process.pid
+    if pgid <= 0:
+        raise ProcessExecutionError(PROCESS_FAILED_MESSAGE)
+
+    group_exists = _process_group_exists(pgid)
+    if group_exists:
+        _signal_process_group(pgid, signal.SIGTERM)
+        _wait_for_direct_child(process, timeout_seconds=_TERMINATE_GRACE_SECONDS)
+        group_exists = not _wait_for_process_group_absence(
+            pgid,
+            timeout_seconds=_TERMINATE_GRACE_SECONDS,
+        )
+
+    if group_exists:
+        _signal_process_group(pgid, signal.SIGKILL)
+        _wait_for_direct_child(process, timeout_seconds=_JOIN_TIMEOUT_SECONDS)
+        if not _wait_for_process_group_absence(pgid, timeout_seconds=_JOIN_TIMEOUT_SECONDS):
+            raise ProcessExecutionError(PROCESS_FAILED_MESSAGE)
+
+    if not _wait_for_direct_child(process, timeout_seconds=_JOIN_TIMEOUT_SECONDS):
+        raise ProcessExecutionError(PROCESS_FAILED_MESSAGE)
 
 
 def _read_stdout_bounded(
@@ -206,6 +262,38 @@ def _finalize_readers(
     _raise_output_overflow(stdout_state, stderr_state)
 
 
+def _cleanup_owned_group_and_finalize_readers(
+    process: subprocess.Popen[bytes],
+    *,
+    stdout_thread: threading.Thread,
+    stderr_thread: threading.Thread,
+    stdout_state: _ReaderState,
+    stderr_state: _ReaderState,
+) -> None:
+    cleanup_error: ProcessExecutionError | None = None
+    try:
+        _cleanup_owned_process_group(process)
+    except ProcessExecutionError as exc:
+        cleanup_error = exc
+        _close_pipe(process.stdout)
+        _close_pipe(process.stderr)
+
+    try:
+        _finalize_readers(
+            stdout_thread=stdout_thread,
+            stderr_thread=stderr_thread,
+            stdout_state=stdout_state,
+            stderr_state=stderr_state,
+        )
+    except ProcessExecutionError:
+        if cleanup_error is not None:
+            raise cleanup_error
+        raise
+
+    if cleanup_error is not None:
+        raise cleanup_error
+
+
 def _handle_output_overflow(
     process: subprocess.Popen[bytes],
     *,
@@ -214,8 +302,8 @@ def _handle_output_overflow(
     stdout_state: _ReaderState,
     stderr_state: _ReaderState,
 ) -> None:
-    _terminate_process(process)
-    _finalize_readers(
+    _cleanup_owned_group_and_finalize_readers(
+        process,
         stdout_thread=stdout_thread,
         stderr_thread=stderr_thread,
         stdout_state=stdout_state,
@@ -255,7 +343,7 @@ class SubprocessRunner:
             raise ProcessExecutionError(PROCESS_FAILED_MESSAGE) from None
 
         if process.stdout is None or process.stderr is None:
-            _terminate_process(process)
+            _cleanup_owned_process_group(process)
             raise ProcessExecutionError(PROCESS_FAILED_MESSAGE)
 
         output_wake = threading.Event()
@@ -299,9 +387,10 @@ class SubprocessRunner:
                         stderr_state=stderr_state,
                     )
 
-                returncode = process.poll()
+                returncode = _poll_direct_child_without_reaping(process)
                 if returncode is not None:
-                    _finalize_readers(
+                    _cleanup_owned_group_and_finalize_readers(
+                        process,
                         stdout_thread=stdout_thread,
                         stderr_thread=stderr_thread,
                         stdout_state=stdout_state,
@@ -314,8 +403,8 @@ class SubprocessRunner:
                     )
 
                 if time.monotonic() >= deadline:
-                    _terminate_process(process)
-                    _finalize_readers(
+                    _cleanup_owned_group_and_finalize_readers(
+                        process,
                         stdout_thread=stdout_thread,
                         stderr_thread=stderr_thread,
                         stdout_state=stdout_state,
@@ -327,7 +416,10 @@ class SubprocessRunner:
         except ProcessExecutionError:
             raise
         except Exception:
-            _terminate_process(process)
+            try:
+                _cleanup_owned_process_group(process)
+            except ProcessExecutionError:
+                pass
             try:
                 _finalize_readers(
                     stdout_thread=stdout_thread,

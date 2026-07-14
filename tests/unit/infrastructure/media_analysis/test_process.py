@@ -58,6 +58,15 @@ _COMBINED_PRESSURE_SCRIPT = (
 )
 
 
+def _wait_for_file(path, *, timeout_seconds: float = 2.0) -> bool:
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        if path.exists():
+            return True
+        time.sleep(0.01)
+    return path.exists()
+
+
 class _FakeRunner:
     def __init__(self, result: ProcessRunResult | None = None, error: Exception | None = None) -> None:
         self.result = result
@@ -114,6 +123,13 @@ def _cleanup_pid(pid: int) -> None:
         return
 
 
+def _cleanup_process_group(pgid: int) -> None:
+    try:
+        os.killpg(pgid, signal.SIGKILL)
+    except ProcessLookupError:
+        return
+
+
 def _descendant_probe_script(
     *,
     pid_path: str,
@@ -146,6 +162,18 @@ def _descendant_probe_script(
             "while True:\n"
             "    sys.stderr.write('e' * 4096)\n"
             "    sys.stderr.flush()\n"
+        )
+    elif mode == "both":
+        pressure = (
+            "import threading\n"
+            "def write_stderr():\n"
+            "    while True:\n"
+            "        sys.stderr.write('e' * 4096)\n"
+            "        sys.stderr.flush()\n"
+            "threading.Thread(target=write_stderr, daemon=True).start()\n"
+            "while True:\n"
+            "    sys.stdout.write('x' * 4096)\n"
+            "    sys.stdout.flush()\n"
         )
     else:
         raise AssertionError(f"unknown descendant probe mode {mode}")
@@ -192,6 +220,161 @@ def _assert_descendant_is_terminated(
     finally:
         _cleanup_pid(descendant_pid)
     assert _alive_media_analysis_reader_threads() == []
+
+
+def _post_exit_descendant_script(
+    *,
+    direct_pid_path: str,
+    descendant_pid_path: str,
+    marker_path: str,
+    return_code: int = 0,
+    stdio: str = "devnull",
+    ignore_term: bool = False,
+    grandchild_pid_path: str | None = None,
+    descendant_count: int = 1,
+) -> str:
+    if stdio not in {"devnull", "stdout", "stderr", "both"}:
+        raise AssertionError(f"unknown stdio mode {stdio}")
+    descendant_pid_paths = [
+        descendant_pid_path if descendant_count == 1 else f"{descendant_pid_path}.{index}"
+        for index in range(descendant_count)
+    ]
+    grandchild_block = ""
+    if grandchild_pid_path is not None:
+        grandchild_code = (
+            "import os, pathlib, time\n"
+            f"pathlib.Path({grandchild_pid_path!r}).write_text(str(os.getpid()), encoding='utf-8')\n"
+            "time.sleep(5)\n"
+        )
+        grandchild_block = (
+            "subprocess.Popen([sys.executable, '-c', "
+            f"{grandchild_code!r}])\n"
+        )
+    term_block = "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n" if ignore_term else ""
+    descendant_code = (
+        "import os, pathlib, signal, subprocess, sys, time\n"
+        + term_block
+        + f"pathlib.Path(sys.argv[1]).write_text(str(os.getpid()), encoding='utf-8')\n"
+        + grandchild_block
+        + "time.sleep(0.6)\n"
+        + f"pathlib.Path({marker_path!r}).write_text('survived', encoding='utf-8')\n"
+        + "time.sleep(5)\n"
+    )
+    stdout_setting = "subprocess.DEVNULL" if stdio == "devnull" else "None"
+    stderr_setting = "subprocess.DEVNULL" if stdio == "devnull" else "None"
+    if stdio == "stdout":
+        stderr_setting = "subprocess.DEVNULL"
+    if stdio == "stderr":
+        stdout_setting = "subprocess.DEVNULL"
+    return (
+        "import os, pathlib, subprocess, sys, time\n"
+        f"direct_pid_path = pathlib.Path({direct_pid_path!r})\n"
+        "direct_pid_path.write_text(str(os.getpid()), encoding='utf-8')\n"
+        f"pid_paths = {descendant_pid_paths!r}\n"
+        "for pid_path in pid_paths:\n"
+        "    subprocess.Popen(\n"
+        "        [sys.executable, '-c', "
+        f"{descendant_code!r}"
+        ", pid_path],\n"
+        "        stdin=subprocess.DEVNULL,\n"
+        f"        stdout={stdout_setting},\n"
+        f"        stderr={stderr_setting},\n"
+        "    )\n"
+        "deadline = time.monotonic() + 2.0\n"
+        "while time.monotonic() < deadline:\n"
+        "    if all(pathlib.Path(path).exists() for path in pid_paths):\n"
+        "        break\n"
+        "    time.sleep(0.01)\n"
+        f"sys.exit({return_code})\n"
+    )
+
+
+def _run_post_exit_descendant_case(
+    tmp_path,
+    *,
+    stdio: str = "devnull",
+    return_code: int = 0,
+    ignore_term: bool = False,
+    grandchild: bool = False,
+    descendant_count: int = 1,
+) -> tuple[ProcessRunResult, int, list[int], int | None, object]:
+    direct_pid_path = tmp_path / f"{stdio}-{return_code}-direct.pid"
+    descendant_pid_path = tmp_path / f"{stdio}-{return_code}-descendant.pid"
+    grandchild_pid_path = tmp_path / f"{stdio}-{return_code}-grandchild.pid"
+    marker_path = tmp_path / f"{stdio}-{return_code}-survived.marker"
+    runner = SubprocessRunner()
+    try:
+        result = runner.run(
+            executable=sys.executable,
+            argv=[
+                "-c",
+                _post_exit_descendant_script(
+                    direct_pid_path=str(direct_pid_path),
+                    descendant_pid_path=str(descendant_pid_path),
+                    marker_path=str(marker_path),
+                    return_code=return_code,
+                    stdio=stdio,
+                    ignore_term=ignore_term,
+                    grandchild_pid_path=str(grandchild_pid_path) if grandchild else None,
+                    descendant_count=descendant_count,
+                ),
+            ],
+            timeout_seconds=5.0,
+            stdout_max_bytes=64,
+            stderr_max_bytes=64,
+        )
+    finally:
+        if direct_pid_path.exists():
+            _cleanup_process_group(int(direct_pid_path.read_text(encoding="utf-8")))
+
+    assert direct_pid_path.exists()
+    direct_pid = int(direct_pid_path.read_text(encoding="utf-8"))
+    descendant_paths = [
+        descendant_pid_path if descendant_count == 1 else tmp_path / f"{descendant_pid_path.name}.{index}"
+        for index in range(descendant_count)
+    ]
+    assert all(_wait_for_file(path) for path in descendant_paths)
+    descendant_pids = [int(path.read_text(encoding="utf-8")) for path in descendant_paths]
+    grandchild_pid = (
+        int(grandchild_pid_path.read_text(encoding="utf-8")) if grandchild_pid_path.exists() else None
+    )
+    return result, direct_pid, descendant_pids, grandchild_pid, marker_path
+
+
+def _assert_post_exit_descendants_absent(
+    tmp_path,
+    *,
+    stdio: str = "devnull",
+    return_code: int = 0,
+    ignore_term: bool = False,
+    grandchild: bool = False,
+    descendant_count: int = 1,
+) -> ProcessRunResult:
+    result, direct_pid, descendant_pids, grandchild_pid, marker_path = (
+        _run_post_exit_descendant_case(
+            tmp_path,
+            stdio=stdio,
+            return_code=return_code,
+            ignore_term=ignore_term,
+            grandchild=grandchild,
+            descendant_count=descendant_count,
+        )
+    )
+    try:
+        assert _wait_for_missing_process(direct_pid)
+        for pid in descendant_pids:
+            assert _wait_for_missing_process(pid)
+        if grandchild_pid is not None:
+            assert _wait_for_missing_process(grandchild_pid)
+        time.sleep(0.7)
+        assert not marker_path.exists()
+    finally:
+        for pid in descendant_pids:
+            _cleanup_pid(pid)
+        if grandchild_pid is not None:
+            _cleanup_pid(grandchild_pid)
+    assert _alive_media_analysis_reader_threads() == []
+    return result
 
 
 def test_fake_runner_records_argv_without_shell() -> None:
@@ -243,6 +426,115 @@ def test_subprocess_runner_can_pass_stable_file_descriptor(tmp_path) -> None:
 
     assert result.returncode == 0
     assert result.stdout == b"stable-bytes"
+    assert _alive_media_analysis_reader_threads() == []
+
+
+def test_subprocess_runner_cleans_successful_descendant_with_detached_stdio(tmp_path) -> None:
+    result = _assert_post_exit_descendants_absent(tmp_path, stdio="devnull")
+    assert result.returncode == 0
+
+
+@pytest.mark.parametrize("stdio", ["stdout", "stderr", "both"])
+def test_subprocess_runner_cleans_successful_descendant_holding_pipes(
+    tmp_path,
+    stdio: str,
+) -> None:
+    started = time.monotonic()
+    result = _assert_post_exit_descendants_absent(tmp_path, stdio=stdio)
+    assert result.returncode == 0
+    assert time.monotonic() - started < 2.0
+
+
+def test_subprocess_runner_cleans_nonzero_descendant_before_return(tmp_path) -> None:
+    result = _assert_post_exit_descendants_absent(
+        tmp_path,
+        stdio="devnull",
+        return_code=7,
+    )
+    assert result.returncode == 7
+
+
+def test_subprocess_runner_cleans_grandchild_remaining_in_owned_group(tmp_path) -> None:
+    result = _assert_post_exit_descendants_absent(
+        tmp_path,
+        stdio="devnull",
+        grandchild=True,
+    )
+    assert result.returncode == 0
+
+
+def test_subprocess_runner_escalates_post_exit_resistant_descendant(tmp_path) -> None:
+    result = _assert_post_exit_descendants_absent(
+        tmp_path,
+        stdio="devnull",
+        ignore_term=True,
+    )
+    assert result.returncode == 0
+
+
+def test_subprocess_runner_escalates_multiple_post_exit_resistant_descendants(tmp_path) -> None:
+    result = _assert_post_exit_descendants_absent(
+        tmp_path,
+        stdio="devnull",
+        ignore_term=True,
+        descendant_count=2,
+    )
+    assert result.returncode == 0
+
+
+def test_subprocess_runner_post_exit_cleanup_does_not_signal_unrelated_group(tmp_path) -> None:
+    unrelated = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(5)"],
+        start_new_session=True,
+    )
+    try:
+        result = _assert_post_exit_descendants_absent(tmp_path, stdio="devnull")
+        assert result.returncode == 0
+        assert unrelated.poll() is None
+    finally:
+        unrelated.kill()
+        unrelated.wait(timeout=5)
+
+
+def test_subprocess_runner_allows_successful_direct_child_with_group_already_gone() -> None:
+    runner = SubprocessRunner()
+    result = runner.run(
+        executable=sys.executable,
+        argv=["-c", "import sys; sys.stdout.write('ok')"],
+        timeout_seconds=5.0,
+        stdout_max_bytes=64,
+        stderr_max_bytes=64,
+    )
+    assert result.returncode == 0
+    assert result.stdout == b"ok"
+    assert _alive_media_analysis_reader_threads() == []
+
+
+def test_subprocess_runner_preserves_success_when_exit_is_near_timeout_boundary() -> None:
+    runner = SubprocessRunner()
+    result = runner.run(
+        executable=sys.executable,
+        argv=["-c", "import time; time.sleep(0.05)"],
+        timeout_seconds=1.0,
+        stdout_max_bytes=64,
+        stderr_max_bytes=64,
+    )
+    assert result.returncode == 0
+    assert _alive_media_analysis_reader_threads() == []
+
+
+def test_subprocess_runner_preserves_success_near_output_limit_boundary() -> None:
+    runner = SubprocessRunner()
+    result = runner.run(
+        executable=sys.executable,
+        argv=["-c", "import sys; sys.stdout.write('x' * 64); sys.stderr.write('e' * 64)"],
+        timeout_seconds=5.0,
+        stdout_max_bytes=64,
+        stderr_max_bytes=64,
+    )
+    assert result.returncode == 0
+    assert result.stdout == b"x" * 64
+    assert result.stderr == b"e" * 64
     assert _alive_media_analysis_reader_threads() == []
 
 
@@ -496,6 +788,14 @@ def test_subprocess_runner_stderr_overflow_terminates_descendant(tmp_path) -> No
     _assert_descendant_is_terminated(
         tmp_path,
         mode="stderr",
+        expected_message=PROCESS_OUTPUT_LIMIT_MESSAGE,
+    )
+
+
+def test_subprocess_runner_simultaneous_overflow_terminates_descendant(tmp_path) -> None:
+    _assert_descendant_is_terminated(
+        tmp_path,
+        mode="both",
         expected_message=PROCESS_OUTPUT_LIMIT_MESSAGE,
     )
 
