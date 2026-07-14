@@ -357,7 +357,14 @@ class UploadTransportService:
             try:
                 writer.close()
             except Exception as exc:
-                raise UploadQuarantineUnavailableError("upload storage unavailable") from exc
+                self._recover_failed_patch(
+                    storage,
+                    writer,
+                    session,
+                    original_offset,
+                    UploadQuarantineUnavailableError("upload storage unavailable"),
+                    writer_close_attempted=True,
+                )
             return _snapshot(updated)
 
     async def complete(self, session_id: UploadSessionId) -> UploadSessionSnapshot:
@@ -566,18 +573,51 @@ class UploadTransportService:
         original_error: UploadTransportError,
         *,
         allow_advanced_offset_conflict: bool = False,
+        writer_close_attempted: bool = False,
     ) -> None:
-        close_attempted = False
+        close_attempted = writer_close_attempted
         try:
             current = self._repository.get(session.id)
-            if current is None or current.storage_key != session.storage_key:
-                raise UploadQuarantineStateInconsistentError("quarantine state inconsistent")
+        except FrameNestUploadSessionRepositoryError as exc:
+            current = None
+            load_error: Exception | None = exc
+        else:
+            load_error = None
+
+        if current is not None and current.storage_key == session.storage_key:
+            if current.received_size_bytes > original_offset:
+                self._recover_advanced_patch(
+                    storage,
+                    writer,
+                    current,
+                    close_attempted=close_attempted,
+                )
             if current.received_size_bytes != original_offset:
-                close_attempted = True
-                _close_writer(writer)
-                if allow_advanced_offset_conflict:
-                    raise UploadOffsetConflictTransportError(current.received_size_bytes)
-                raise UploadQuarantineStateInconsistentError("quarantine state inconsistent")
+                try:
+                    if not close_attempted:
+                        close_attempted = True
+                        _close_writer(writer)
+                    if allow_advanced_offset_conflict:
+                        raise UploadOffsetConflictTransportError(current.received_size_bytes)
+                    raise UploadQuarantineStateInconsistentError(
+                        "quarantine state inconsistent"
+                    )
+                except UploadOffsetConflictTransportError:
+                    raise
+                except Exception as exc:
+                    self._fail_session_after_unverified_rollback(session.id)
+                    raise UploadQuarantineStateInconsistentError(
+                        "quarantine state inconsistent"
+                    ) from exc
+
+        try:
+            if current is None or current.storage_key != session.storage_key:
+                if not close_attempted:
+                    close_attempted = True
+                    _close_writer(writer)
+                raise UploadQuarantineStateInconsistentError(
+                    "quarantine state inconsistent"
+                )
 
             writer.truncate_and_fsync(original_offset)
             size = storage.file_size(session.storage_key)
@@ -599,8 +639,65 @@ class UploadTransportService:
             self._fail_session_after_unverified_rollback(session.id)
             raise UploadQuarantineStateInconsistentError(
                 "quarantine state inconsistent"
-            ) from exc
+            ) from load_error or exc
         raise original_error
+
+    def _recover_advanced_patch(
+        self,
+        storage: QuarantineStorage,
+        writer: object,
+        current: UploadSession,
+        *,
+        close_attempted: bool,
+    ) -> None:
+        close_error: Exception | None = None
+        if not close_attempted:
+            try:
+                _close_writer(writer)
+            except Exception as exc:
+                close_error = exc
+
+        try:
+            size = storage.file_size(current.storage_key)
+        except (QuarantineStateInconsistentError, QuarantineStorageUnavailableError) as exc:
+            raise UploadQuarantineStateInconsistentError(
+                "quarantine state inconsistent"
+            ) from close_error or exc
+
+        if size == current.received_size_bytes:
+            raise UploadOffsetConflictTransportError(current.received_size_bytes)
+        if size is None or size < current.received_size_bytes:
+            self._fail_authoritative_inconsistent_session(current)
+        if size > current.received_size_bytes:
+            try:
+                storage.truncate(current.storage_key, current.received_size_bytes)
+                verified_size = storage.file_size(current.storage_key)
+            except (
+                QuarantineWriteFailedError,
+                QuarantineStateInconsistentError,
+                QuarantineStorageUnavailableError,
+            ) as exc:
+                raise UploadQuarantineStateInconsistentError(
+                    "quarantine state inconsistent"
+                ) from close_error or exc
+            if verified_size != current.received_size_bytes:
+                raise UploadQuarantineStateInconsistentError(
+                    "quarantine state inconsistent"
+                )
+            raise UploadOffsetConflictTransportError(current.received_size_bytes)
+
+        raise UploadQuarantineStateInconsistentError("quarantine state inconsistent")
+
+    def _fail_authoritative_inconsistent_session(self, current: UploadSession) -> None:
+        try:
+            self._transition(
+                current,
+                UploadSessionState.FAILED,
+                failure_code=UPLOAD_FAILED_STORAGE_INCONSISTENT,
+            )
+        except UploadTransportError:
+            pass
+        raise UploadQuarantineStateInconsistentError("quarantine state inconsistent")
 
     def _fail_session_after_unverified_rollback(self, session_id: UploadSessionId) -> None:
         try:

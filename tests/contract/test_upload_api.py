@@ -9,7 +9,7 @@ from fastapi import Request
 from fastapi.testclient import TestClient
 
 from framenest.adapters.api.application import create_app
-from framenest.adapters.api.upload_api import _parse_content_length
+from framenest.adapters.api.upload_api import _parse_content_length, _parse_upload_offset
 from framenest.configuration import FrameNestSettings
 from framenest.domain import Device, DeviceId, Library, LibraryId, LibraryPathFlavor, LibraryRoot
 from framenest.infrastructure.persistence.device_repository import SqliteDeviceRepository
@@ -73,6 +73,18 @@ def _patch_with_content_length(
             "upload-offset": "0",
             "content-length": content_length,
         },
+    )
+
+
+def _raw_request(headers: list[tuple[bytes, bytes]]) -> Request:
+    return Request(
+        {
+            "type": "http",
+            "method": "PATCH",
+            "path": "/api/uploads/example",
+            "headers": headers,
+        },
+        receive=lambda: None,
     )
 
 
@@ -229,20 +241,78 @@ def test_patch_content_length_rejects_signed_whitespace_mixed_and_zero_values(
 
 
 def test_patch_content_length_rejects_non_ascii_decimal_text() -> None:
-    request = Request(
-        {
-            "type": "http",
-            "method": "PATCH",
-            "path": "/api/uploads/example",
-            "headers": [(b"content-length", "١".encode("utf-8"))],
-        },
-        receive=lambda: None,
-    )
+    request = _raw_request([(b"content-length", "١".encode("utf-8"))])
 
     response = _parse_content_length(request)
 
     assert not isinstance(response, int)
     assert response.status_code == 400
+
+
+def test_patch_content_length_raw_singleton_accepts_digits_and_leading_zero() -> None:
+    plain = _parse_content_length(_raw_request([(b"Content-Length", b"1")]))
+    leading_zero = _parse_content_length(_raw_request([(b"content-length", b"001")]))
+
+    assert plain == 1
+    assert leading_zero == 1
+
+
+def test_patch_content_length_raw_duplicates_and_combined_values_are_rejected() -> None:
+    cases = (
+        [(b"content-length", b"1"), (b"content-length", b"+1")],
+        [(b"content-length", b"+1"), (b"content-length", b"1")],
+        [(b"Content-Length", b"1"), (b"content-length", b"1")],
+        [(b"content-length", b"1,1")],
+        [(b"content-length", b"1, 1")],
+        [(b"content-length", b"1,+1")],
+    )
+
+    for headers in cases:
+        response = _parse_content_length(_raw_request(headers))
+
+        assert not isinstance(response, int)
+        assert response.status_code == 400
+        assert response.body == (
+            b'{"error":{"code":"INVALID_UPLOAD_CONTENT_LENGTH",'
+            b'"message":"Missing or invalid upload content length."}}'
+        )
+
+
+def test_patch_content_length_raw_rejects_signed_whitespace_mixed_zero_and_missing() -> None:
+    cases = (
+        [(b"content-length", b"+1")],
+        [(b"content-length", b"-1")],
+        [(b"content-length", b" 1")],
+        [(b"content-length", b"1 ")],
+        [(b"content-length", b"1x")],
+        [(b"content-length", "١".encode("utf-8"))],
+        [(b"content-length", b"0")],
+        [],
+    )
+
+    for headers in cases:
+        response = _parse_content_length(_raw_request(headers))
+
+        assert not isinstance(response, int)
+        assert response.status_code == 400
+
+
+def test_patch_upload_offset_raw_duplicates_are_rejected() -> None:
+    valid = _parse_upload_offset(_raw_request([(b"Upload-Offset", b"0")]))
+    duplicate_same = _parse_upload_offset(
+        _raw_request([(b"upload-offset", b"0"), (b"upload-offset", b"0")])
+    )
+    duplicate_mixed = _parse_upload_offset(
+        _raw_request([(b"upload-offset", b"0"), (b"upload-offset", b"1")])
+    )
+    duplicate_malformed = _parse_upload_offset(
+        _raw_request([(b"upload-offset", b"0"), (b"upload-offset", b"+0")])
+    )
+
+    assert valid == 0
+    for response in (duplicate_same, duplicate_mixed, duplicate_malformed):
+        assert not isinstance(response, int)
+        assert response.status_code == 400
 
 
 def test_file_ahead_is_truncated_and_file_behind_fails_closed(tmp_path: Path) -> None:

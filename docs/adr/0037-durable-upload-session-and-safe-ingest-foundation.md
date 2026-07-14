@@ -91,10 +91,14 @@ are truncated before accepting more data. If the file is behind the persisted
 offset, FrameNest fails closed and marks the session failed when the existing
 transition graph allows it. Disconnects, write failures, and repository
 conflicts roll the staged file back to the authoritative offset before returning
-a sanitized error. Failed-`PATCH` rollback is verified with durable truncation,
-an independent file-size check, persisted-offset agreement, and safe writer
-close; an unverifiable rollback fails closed as quarantined state inconsistency
-and marks the session failed when the repository state still permits it.
+a sanitized error when the persisted offset has not advanced. Once repository
+advancement is durable, the persisted offset is authoritative: response cleanup
+or writer-close failure does not invalidate acknowledged bytes, and a physically
+consistent advanced session remains resumable. Failed-`PATCH` rollback is
+verified with durable truncation, an independent file-size check,
+persisted-offset agreement, and safe writer close; an unverifiable rollback
+fails closed as quarantined state inconsistency and marks the session failed
+when the repository state still permits it.
 
 Current production configuration uses one Uvicorn worker. This slice serializes
 same-session upload writers with an in-process per-session lock while leaving

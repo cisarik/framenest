@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 import asyncio
 from pathlib import Path
 
@@ -28,6 +28,7 @@ from framenest.application.ports.quarantine_storage import (
     QuarantineWriteFailedError,
 )
 from framenest.application.ports.upload_sessions import (
+    FrameNestUploadSessionRepositoryError,
     UploadOffsetConflictError,
     UploadSessionConcurrencyConflictError,
 )
@@ -169,6 +170,8 @@ class _FaultyStorage:
         verification_size_delta: int | None = None,
         verification_size_fails: bool = False,
         close_fails: bool = False,
+        file_size_fails: bool = False,
+        truncate_fails: bool = False,
     ) -> None:
         self._inner = inner
         self.write_fails_after_accepting = write_fails_after_accepting
@@ -178,6 +181,8 @@ class _FaultyStorage:
         self.verification_size_delta = verification_size_delta
         self.verification_size_fails = verification_size_fails
         self.close_fails = close_fails
+        self.file_size_fails = file_size_fails
+        self.truncate_fails = truncate_fails
         self.rollback_attempted = False
         self.last_writer: _FaultyWriter | None = None
 
@@ -189,6 +194,8 @@ class _FaultyStorage:
         return self._inner.available_bytes()
 
     def file_size(self, storage_key):
+        if self.file_size_fails:
+            raise QuarantineStateInconsistentError("synthetic file size failure")
         if self.rollback_attempted and self.verification_size_fails:
             raise QuarantineStateInconsistentError("synthetic verification failure")
         size = self._inner.file_size(storage_key)
@@ -205,6 +212,8 @@ class _FaultyStorage:
         return writer
 
     def truncate(self, storage_key, size: int) -> None:
+        if self.truncate_fails:
+            raise QuarantineWriteFailedError("synthetic truncate failure")
         self._inner.truncate(storage_key, size)
 
     def remove(self, storage_key) -> None:
@@ -218,10 +227,12 @@ class _AdvanceFailureRepository:
         exc: Exception,
         *,
         advance_first: bool = False,
+        after_advance: Callable[[object], None] | None = None,
     ) -> None:
         self._inner = inner
         self._exc = exc
         self._advance_first = advance_first
+        self._after_advance = after_advance
 
     def create(self, session):
         return self._inner.create(session)
@@ -231,7 +242,9 @@ class _AdvanceFailureRepository:
 
     def advance_received_offset(self, session_id, **kwargs):
         if self._advance_first:
-            self._inner.advance_received_offset(session_id, **kwargs)
+            advanced = self._inner.advance_received_offset(session_id, **kwargs)
+            if self._after_advance is not None:
+                self._after_advance(advanced)
         raise self._exc
 
     def record_completed_checksum(self, session_id, **kwargs):
@@ -698,6 +711,506 @@ def test_persisted_offset_advanced_during_repository_error_is_not_truncated(
                 )
             )
         assert retry_conflict.value.current_offset == 2
+    finally:
+        dispose_engine(engine)
+
+
+def test_advanced_offset_with_writer_close_failure_remains_resumable(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "catalog.sqlite3"
+    quarantine_root = tmp_path / "quarantine"
+    quarantine_root.mkdir()
+    upgrade_database_to_head(FrameNestSettings(database_path=database_path, _env_file=None))
+    engine = create_sqlite_engine(database_path)
+    inner_repository = SqliteUploadSessionRepository(engine)
+    locks = UploadSessionLockRegistry()
+    storage = _FaultyStorage(
+        FilesystemQuarantineStorage(quarantine_root),
+        close_fails=True,
+    )
+    repository = _AdvanceFailureRepository(
+        inner_repository,
+        FrameNestUploadSessionRepositoryError("synthetic post-commit failure"),
+        advance_first=True,
+    )
+    service = UploadTransportService(
+        repository,
+        storage,
+        _LibraryRepository(),
+        UploadTransportLimits(100, 10, 60, 0),
+        quarantine_root=quarantine_root,
+        preview_cache_root=tmp_path / "preview-cache",
+        now_ms=lambda: 1_000,
+        locks=locks,
+    )
+    try:
+        created = service.create_session(display_filename="example.gif", declared_size_bytes=3)
+        session_id = UploadSessionId.from_string(created.id)
+        with pytest.raises(UploadOffsetConflictTransportError) as conflict:
+            asyncio.run(
+                service.receive_chunk(
+                    session_id,
+                    upload_offset=0,
+                    content_length=2,
+                    body=_chunks(b"ab"),
+                )
+            )
+
+        stored = inner_repository.get(session_id)
+        assert conflict.value.current_offset == 2
+        assert stored is not None
+        assert stored.state is UploadSessionState.RECEIVING
+        assert stored.received_size_bytes == 2
+        assert stored.failure_code is None
+        assert storage.last_writer is not None
+        assert storage.last_writer.close_calls == 1
+        assert locks.size() == 0
+        assert next(quarantine_root.iterdir()).read_bytes() == b"ab"
+
+        normal_service = UploadTransportService(
+            inner_repository,
+            FilesystemQuarantineStorage(quarantine_root),
+            _LibraryRepository(),
+            UploadTransportLimits(100, 10, 60, 0),
+            quarantine_root=quarantine_root,
+            preview_cache_root=tmp_path / "preview-cache",
+            now_ms=lambda: 1_000,
+        )
+        with pytest.raises(UploadOffsetConflictTransportError) as retry_conflict:
+            asyncio.run(
+                normal_service.receive_chunk(
+                    session_id,
+                    upload_offset=0,
+                    content_length=1,
+                    body=_chunks(b"x"),
+                )
+            )
+        assert retry_conflict.value.current_offset == 2
+
+        resumed = asyncio.run(
+            normal_service.receive_chunk(
+                session_id,
+                upload_offset=2,
+                content_length=1,
+                body=_chunks(b"c"),
+            )
+        )
+        completed = asyncio.run(normal_service.complete(session_id))
+
+        assert resumed.received_size_bytes == 3
+        assert completed.state == "received"
+        assert locks.size() == 0
+        assert next(quarantine_root.iterdir()).read_bytes() == b"abc"
+    finally:
+        dispose_engine(engine)
+
+
+def test_advanced_full_offset_can_complete_after_safe_conflict(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "catalog.sqlite3"
+    quarantine_root = tmp_path / "quarantine"
+    quarantine_root.mkdir()
+    upgrade_database_to_head(FrameNestSettings(database_path=database_path, _env_file=None))
+    engine = create_sqlite_engine(database_path)
+    inner_repository = SqliteUploadSessionRepository(engine)
+    repository = _AdvanceFailureRepository(
+        inner_repository,
+        FrameNestUploadSessionRepositoryError("synthetic post-commit failure"),
+        advance_first=True,
+    )
+    service = UploadTransportService(
+        repository,
+        FilesystemQuarantineStorage(quarantine_root),
+        _LibraryRepository(),
+        UploadTransportLimits(100, 10, 60, 0),
+        quarantine_root=quarantine_root,
+        preview_cache_root=tmp_path / "preview-cache",
+        now_ms=lambda: 1_000,
+    )
+    try:
+        created = service.create_session(display_filename="example.gif", declared_size_bytes=2)
+        session_id = UploadSessionId.from_string(created.id)
+        with pytest.raises(UploadOffsetConflictTransportError) as conflict:
+            asyncio.run(
+                service.receive_chunk(
+                    session_id,
+                    upload_offset=0,
+                    content_length=2,
+                    body=_chunks(b"ab"),
+                )
+            )
+
+        normal_service = UploadTransportService(
+            inner_repository,
+            FilesystemQuarantineStorage(quarantine_root),
+            _LibraryRepository(),
+            UploadTransportLimits(100, 10, 60, 0),
+            quarantine_root=quarantine_root,
+            preview_cache_root=tmp_path / "preview-cache",
+            now_ms=lambda: 1_000,
+        )
+        completed = asyncio.run(normal_service.complete(session_id))
+
+        assert conflict.value.current_offset == 2
+        assert completed.state == "received"
+        assert completed.received_size_bytes == 2
+        assert next(quarantine_root.iterdir()).read_bytes() == b"ab"
+    finally:
+        dispose_engine(engine)
+
+
+def test_advanced_offset_file_ahead_is_reconciled_to_persisted_offset(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "catalog.sqlite3"
+    quarantine_root = tmp_path / "quarantine"
+    quarantine_root.mkdir()
+    upgrade_database_to_head(FrameNestSettings(database_path=database_path, _env_file=None))
+    engine = create_sqlite_engine(database_path)
+    inner_repository = SqliteUploadSessionRepository(engine)
+
+    def leave_residue(advanced: object) -> None:
+        storage_key = advanced.storage_key  # type: ignore[attr-defined]
+        quarantine_root.joinpath(f"{storage_key.value}.part").write_bytes(b"abCRASH")
+
+    repository = _AdvanceFailureRepository(
+        inner_repository,
+        FrameNestUploadSessionRepositoryError("synthetic post-commit failure"),
+        advance_first=True,
+        after_advance=leave_residue,
+    )
+    service = UploadTransportService(
+        repository,
+        FilesystemQuarantineStorage(quarantine_root),
+        _LibraryRepository(),
+        UploadTransportLimits(100, 10, 60, 0),
+        quarantine_root=quarantine_root,
+        preview_cache_root=tmp_path / "preview-cache",
+        now_ms=lambda: 1_000,
+    )
+    try:
+        created = service.create_session(display_filename="example.gif", declared_size_bytes=3)
+        session_id = UploadSessionId.from_string(created.id)
+        with pytest.raises(UploadOffsetConflictTransportError) as conflict:
+            asyncio.run(
+                service.receive_chunk(
+                    session_id,
+                    upload_offset=0,
+                    content_length=2,
+                    body=_chunks(b"ab"),
+                )
+            )
+
+        stored = inner_repository.get(session_id)
+        assert conflict.value.current_offset == 2
+        assert stored is not None
+        assert stored.state is UploadSessionState.RECEIVING
+        assert stored.received_size_bytes == 2
+        assert stored.failure_code is None
+        assert next(quarantine_root.iterdir()).read_bytes() == b"ab"
+    finally:
+        dispose_engine(engine)
+
+
+def test_advanced_offset_file_ahead_reconciliation_failure_preserves_session(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "catalog.sqlite3"
+    quarantine_root = tmp_path / "quarantine"
+    quarantine_root.mkdir()
+    upgrade_database_to_head(FrameNestSettings(database_path=database_path, _env_file=None))
+    engine = create_sqlite_engine(database_path)
+    inner_repository = SqliteUploadSessionRepository(engine)
+    storage = _FaultyStorage(
+        FilesystemQuarantineStorage(quarantine_root),
+        truncate_fails=True,
+    )
+
+    def leave_residue(advanced: object) -> None:
+        storage_key = advanced.storage_key  # type: ignore[attr-defined]
+        quarantine_root.joinpath(f"{storage_key.value}.part").write_bytes(b"abCRASH")
+
+    repository = _AdvanceFailureRepository(
+        inner_repository,
+        FrameNestUploadSessionRepositoryError("synthetic post-commit failure"),
+        advance_first=True,
+        after_advance=leave_residue,
+    )
+    service = UploadTransportService(
+        repository,
+        storage,
+        _LibraryRepository(),
+        UploadTransportLimits(100, 10, 60, 0),
+        quarantine_root=quarantine_root,
+        preview_cache_root=tmp_path / "preview-cache",
+        now_ms=lambda: 1_000,
+    )
+    try:
+        created = service.create_session(display_filename="example.gif", declared_size_bytes=3)
+        session_id = UploadSessionId.from_string(created.id)
+        with pytest.raises(UploadQuarantineStateInconsistentError):
+            asyncio.run(
+                service.receive_chunk(
+                    session_id,
+                    upload_offset=0,
+                    content_length=2,
+                    body=_chunks(b"ab"),
+                )
+            )
+
+        stored = inner_repository.get(session_id)
+        assert stored is not None
+        assert stored.state is UploadSessionState.RECEIVING
+        assert stored.received_size_bytes == 2
+        assert stored.failure_code is None
+        assert next(quarantine_root.iterdir()).read_bytes() == b"abCRASH"
+    finally:
+        dispose_engine(engine)
+
+
+def test_advanced_offset_file_behind_fails_closed_without_lowering_offset(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "catalog.sqlite3"
+    quarantine_root = tmp_path / "quarantine"
+    quarantine_root.mkdir()
+    upgrade_database_to_head(FrameNestSettings(database_path=database_path, _env_file=None))
+    engine = create_sqlite_engine(database_path)
+    inner_repository = SqliteUploadSessionRepository(engine)
+
+    def lose_acknowledged_byte(advanced: object) -> None:
+        storage_key = advanced.storage_key  # type: ignore[attr-defined]
+        quarantine_root.joinpath(f"{storage_key.value}.part").write_bytes(b"a")
+
+    repository = _AdvanceFailureRepository(
+        inner_repository,
+        FrameNestUploadSessionRepositoryError("synthetic post-commit failure"),
+        advance_first=True,
+        after_advance=lose_acknowledged_byte,
+    )
+    service = UploadTransportService(
+        repository,
+        FilesystemQuarantineStorage(quarantine_root),
+        _LibraryRepository(),
+        UploadTransportLimits(100, 10, 60, 0),
+        quarantine_root=quarantine_root,
+        preview_cache_root=tmp_path / "preview-cache",
+        now_ms=lambda: 1_000,
+    )
+    try:
+        created = service.create_session(display_filename="example.gif", declared_size_bytes=3)
+        session_id = UploadSessionId.from_string(created.id)
+        with pytest.raises(UploadQuarantineStateInconsistentError):
+            asyncio.run(
+                service.receive_chunk(
+                    session_id,
+                    upload_offset=0,
+                    content_length=2,
+                    body=_chunks(b"ab"),
+                )
+            )
+
+        stored = inner_repository.get(session_id)
+        assert stored is not None
+        assert stored.state is UploadSessionState.FAILED
+        assert stored.received_size_bytes == 2
+        assert stored.failure_code == UPLOAD_FAILED_STORAGE_INCONSISTENT
+        assert next(quarantine_root.iterdir()).read_bytes() == b"a"
+        with pytest.raises(UploadSessionStateConflictError):
+            asyncio.run(
+                service.receive_chunk(
+                    session_id,
+                    upload_offset=2,
+                    content_length=1,
+                    body=_chunks(b"c"),
+                )
+            )
+        with pytest.raises(UploadSessionStateConflictError):
+            asyncio.run(service.complete(session_id))
+    finally:
+        dispose_engine(engine)
+
+
+def test_advanced_offset_file_behind_failed_transition_conflict_is_sanitized(
+    tmp_path: Path,
+) -> None:
+    class FailedTransitionConflictRepository:
+        def __init__(self, inner: SqliteUploadSessionRepository) -> None:
+            self._inner = inner
+
+        def create(self, session):
+            return self._inner.create(session)
+
+        def get(self, session_id):
+            return self._inner.get(session_id)
+
+        def advance_received_offset(self, session_id, **kwargs):
+            return self._inner.advance_received_offset(session_id, **kwargs)
+
+        def record_completed_checksum(self, session_id, **kwargs):
+            return self._inner.record_completed_checksum(session_id, **kwargs)
+
+        def transition_state(self, session_id, **kwargs):
+            if kwargs["target_state"] is UploadSessionState.FAILED:
+                raise UploadSessionConcurrencyConflictError("synthetic failed transition conflict")
+            return self._inner.transition_state(session_id, **kwargs)
+
+    database_path = tmp_path / "catalog.sqlite3"
+    quarantine_root = tmp_path / "quarantine"
+    quarantine_root.mkdir()
+    upgrade_database_to_head(FrameNestSettings(database_path=database_path, _env_file=None))
+    engine = create_sqlite_engine(database_path)
+    sqlite_repository = SqliteUploadSessionRepository(engine)
+    guarded_repository = FailedTransitionConflictRepository(sqlite_repository)
+
+    def lose_acknowledged_byte(advanced: object) -> None:
+        storage_key = advanced.storage_key  # type: ignore[attr-defined]
+        quarantine_root.joinpath(f"{storage_key.value}.part").write_bytes(b"a")
+
+    repository = _AdvanceFailureRepository(
+        guarded_repository,
+        FrameNestUploadSessionRepositoryError("synthetic post-commit failure"),
+        advance_first=True,
+        after_advance=lose_acknowledged_byte,
+    )
+    service = UploadTransportService(
+        repository,
+        FilesystemQuarantineStorage(quarantine_root),
+        _LibraryRepository(),
+        UploadTransportLimits(100, 10, 60, 0),
+        quarantine_root=quarantine_root,
+        preview_cache_root=tmp_path / "preview-cache",
+        now_ms=lambda: 1_000,
+    )
+    try:
+        created = service.create_session(display_filename="example.gif", declared_size_bytes=3)
+        session_id = UploadSessionId.from_string(created.id)
+        with pytest.raises(UploadQuarantineStateInconsistentError):
+            asyncio.run(
+                service.receive_chunk(
+                    session_id,
+                    upload_offset=0,
+                    content_length=2,
+                    body=_chunks(b"ab"),
+                )
+            )
+
+        stored = sqlite_repository.get(session_id)
+        assert stored is not None
+        assert stored.state is UploadSessionState.RECEIVING
+        assert stored.received_size_bytes == 2
+        assert stored.failure_code is None
+    finally:
+        dispose_engine(engine)
+
+
+def test_advanced_offset_file_size_inspection_failure_does_not_terminalize(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "catalog.sqlite3"
+    quarantine_root = tmp_path / "quarantine"
+    quarantine_root.mkdir()
+    upgrade_database_to_head(FrameNestSettings(database_path=database_path, _env_file=None))
+    engine = create_sqlite_engine(database_path)
+    inner_repository = SqliteUploadSessionRepository(engine)
+    storage = _FaultyStorage(FilesystemQuarantineStorage(quarantine_root))
+
+    def break_size_inspection(advanced: object) -> None:
+        storage.file_size_fails = True
+
+    repository = _AdvanceFailureRepository(
+        inner_repository,
+        FrameNestUploadSessionRepositoryError("synthetic post-commit failure"),
+        advance_first=True,
+        after_advance=break_size_inspection,
+    )
+    service = UploadTransportService(
+        repository,
+        storage,
+        _LibraryRepository(),
+        UploadTransportLimits(100, 10, 60, 0),
+        quarantine_root=quarantine_root,
+        preview_cache_root=tmp_path / "preview-cache",
+        now_ms=lambda: 1_000,
+    )
+    try:
+        created = service.create_session(display_filename="example.gif", declared_size_bytes=3)
+        session_id = UploadSessionId.from_string(created.id)
+        with pytest.raises(UploadQuarantineStateInconsistentError):
+            asyncio.run(
+                service.receive_chunk(
+                    session_id,
+                    upload_offset=0,
+                    content_length=2,
+                    body=_chunks(b"ab"),
+                )
+            )
+
+        stored = inner_repository.get(session_id)
+        assert stored is not None
+        assert stored.state is UploadSessionState.RECEIVING
+        assert stored.received_size_bytes == 2
+        assert stored.failure_code is None
+    finally:
+        dispose_engine(engine)
+
+
+def test_advanced_offset_concurrent_state_change_is_not_overwritten(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "catalog.sqlite3"
+    quarantine_root = tmp_path / "quarantine"
+    quarantine_root.mkdir()
+    upgrade_database_to_head(FrameNestSettings(database_path=database_path, _env_file=None))
+    engine = create_sqlite_engine(database_path)
+    inner_repository = SqliteUploadSessionRepository(engine)
+
+    def cancel_after_advance(advanced: object) -> None:
+        inner_repository.transition_state(
+            advanced.id,  # type: ignore[attr-defined]
+            expected_state=UploadSessionState.RECEIVING,
+            target_state=UploadSessionState.CANCELLED,
+            expected_version=advanced.version,  # type: ignore[attr-defined]
+            updated_at_ms=1_001,
+            failure_code=None,
+        )
+
+    repository = _AdvanceFailureRepository(
+        inner_repository,
+        FrameNestUploadSessionRepositoryError("synthetic post-commit failure"),
+        advance_first=True,
+        after_advance=cancel_after_advance,
+    )
+    service = UploadTransportService(
+        repository,
+        FilesystemQuarantineStorage(quarantine_root),
+        _LibraryRepository(),
+        UploadTransportLimits(100, 10, 60, 0),
+        quarantine_root=quarantine_root,
+        preview_cache_root=tmp_path / "preview-cache",
+        now_ms=lambda: 1_000,
+    )
+    try:
+        created = service.create_session(display_filename="example.gif", declared_size_bytes=3)
+        session_id = UploadSessionId.from_string(created.id)
+        with pytest.raises(UploadOffsetConflictTransportError) as conflict:
+            asyncio.run(
+                service.receive_chunk(
+                    session_id,
+                    upload_offset=0,
+                    content_length=2,
+                    body=_chunks(b"ab"),
+                )
+            )
+
+        stored = inner_repository.get(session_id)
+        assert conflict.value.current_offset == 2
+        assert stored is not None
+        assert stored.state is UploadSessionState.CANCELLED
+        assert stored.received_size_bytes == 2
+        assert stored.failure_code is None
     finally:
         dispose_engine(engine)
 

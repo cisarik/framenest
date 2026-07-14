@@ -267,8 +267,8 @@ def _session_id(upload_id: UUID4) -> UploadSessionId:
 
 
 def _parse_content_length(request: Request) -> int | JSONResponse:
-    raw = request.headers.get("content-length")
-    if raw is None or not raw.isascii() or not raw.isdecimal():
+    raw = _single_raw_header_value(request, b"content-length")
+    if raw is None or not _is_ascii_digit_sequence(raw):
         return _error_response(
             400,
             INVALID_UPLOAD_CONTENT_LENGTH,
@@ -285,10 +285,25 @@ def _parse_content_length(request: Request) -> int | JSONResponse:
 
 
 def _parse_upload_offset(request: Request) -> int | JSONResponse:
-    raw = request.headers.get("upload-offset")
-    if raw is None or not raw.isdecimal():
+    raw = _single_raw_header_value(request, b"upload-offset")
+    if raw is None or not _is_ascii_digit_sequence(raw):
         return _error_response(400, INVALID_UPLOAD_OFFSET, "Invalid upload offset.")
     return int(raw)
+
+
+def _single_raw_header_value(request: Request, name: bytes) -> bytes | None:
+    matches = [
+        value
+        for raw_name, value in request.scope.get("headers", ())
+        if raw_name.lower() == name
+    ]
+    if len(matches) != 1:
+        return None
+    return matches[0]
+
+
+def _is_ascii_digit_sequence(value: bytes) -> bool:
+    return bool(value) and all(ord("0") <= byte <= ord("9") for byte in value)
 
 
 def _reject_cross_origin_mutation(request: Request) -> JSONResponse | None:
