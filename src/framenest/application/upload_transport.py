@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncIterator, Callable
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from threading import Lock
@@ -124,6 +125,12 @@ class UploadSessionSnapshot:
     expires_at: int
 
 
+@dataclass(slots=True)
+class _SessionLockEntry:
+    lock: asyncio.Lock
+    references: int = 0
+
+
 def default_now_ms() -> int:
     """Return current wall-clock milliseconds for durable upload timestamps."""
     return int(time.time() * 1000)
@@ -133,24 +140,35 @@ class UploadSessionLockRegistry:
     """Bounded in-process per-session lock registry for one Uvicorn worker."""
 
     def __init__(self) -> None:
-        self._locks: dict[str, asyncio.Lock] = {}
+        self._locks: dict[str, _SessionLockEntry] = {}
         self._guard = Lock()
 
-    def lock_for(self, session_id: UploadSessionId) -> asyncio.Lock:
+    @asynccontextmanager
+    async def lease(self, session_id: UploadSessionId) -> AsyncIterator[None]:
         key = session_id.to_string()
         with self._guard:
-            lock = self._locks.get(key)
-            if lock is None:
-                lock = asyncio.Lock()
-                self._locks[key] = lock
-            return lock
+            entry = self._locks.get(key)
+            if entry is None:
+                entry = _SessionLockEntry(asyncio.Lock())
+                self._locks[key] = entry
+            entry.references += 1
+        acquired = False
+        try:
+            await entry.lock.acquire()
+            acquired = True
+            yield
+        finally:
+            if acquired:
+                entry.lock.release()
+            with self._guard:
+                entry.references -= 1
+                if entry.references == 0 and not entry.lock.locked():
+                    self._locks.pop(key, None)
 
-    def discard(self, session_id: UploadSessionId) -> None:
-        key = session_id.to_string()
+    def size(self) -> int:
+        """Return current registry entries for bounded diagnostics and tests."""
         with self._guard:
-            lock = self._locks.get(key)
-            if lock is not None and not lock.locked():
-                self._locks.pop(key, None)
+            return len(self._locks)
 
 
 class UploadTransportService:
@@ -239,8 +257,7 @@ class UploadTransportService:
             raise UploadChunkTooLargeError("upload chunk too large")
         self._ensure_space(content_length)
 
-        lock = self._locks.lock_for(session_id)
-        async with lock:
+        async with self._locks.lease(session_id):
             session = self._load(session_id)
             session = self._expire_if_needed(session)
             if session.received_size_bytes != upload_offset:
@@ -290,39 +307,62 @@ class UploadTransportService:
                 UploadBodyLengthMismatchError,
                 UploadQuarantineUnavailableError,
                 UploadChunkTooLargeError,
-            ):
-                _rollback_writer(writer, original_offset)
-                raise
+            ) as exc:
+                self._recover_failed_patch(storage, writer, session, original_offset, exc)
             except QuarantineWriteFailedError as exc:
-                _rollback_writer(writer, original_offset)
-                raise UploadQuarantineUnavailableError("upload storage unavailable") from exc
+                self._recover_failed_patch(
+                    storage,
+                    writer,
+                    session,
+                    original_offset,
+                    UploadQuarantineUnavailableError("upload storage unavailable"),
+                )
             except UploadOffsetConflictError as exc:
-                _rollback_writer(writer, original_offset)
-                current = self._repository.get(session.id)
-                raise UploadOffsetConflictTransportError(
-                    current.received_size_bytes if current is not None else original_offset
-                ) from exc
+                self._recover_failed_patch(
+                    storage,
+                    writer,
+                    session,
+                    original_offset,
+                    UploadOffsetConflictTransportError(original_offset),
+                    allow_advanced_offset_conflict=True,
+                )
             except UploadSizeLimitExceededError as exc:
-                _rollback_writer(writer, original_offset)
-                raise UploadChunkTooLargeError("upload chunk too large") from exc
+                self._recover_failed_patch(
+                    storage,
+                    writer,
+                    session,
+                    original_offset,
+                    UploadChunkTooLargeError("upload chunk too large"),
+                )
             except (
                 UploadSessionConcurrencyConflictError,
                 InvalidUploadSessionTransitionError,
                 FrameNestUploadSessionRepositoryError,
             ) as exc:
-                _rollback_writer(writer, original_offset)
-                raise UploadConcurrencyConflictError("upload concurrency conflict") from exc
+                self._recover_failed_patch(
+                    storage,
+                    writer,
+                    session,
+                    original_offset,
+                    UploadConcurrencyConflictError("upload concurrency conflict"),
+                )
             except Exception as exc:
-                _rollback_writer(writer, original_offset)
-                raise UploadBodyLengthMismatchError("upload body length mismatch") from exc
-            finally:
+                self._recover_failed_patch(
+                    storage,
+                    writer,
+                    session,
+                    original_offset,
+                    UploadBodyLengthMismatchError("upload body length mismatch"),
+                )
+            try:
                 writer.close()
+            except Exception as exc:
+                raise UploadQuarantineUnavailableError("upload storage unavailable") from exc
             return _snapshot(updated)
 
     async def complete(self, session_id: UploadSessionId) -> UploadSessionSnapshot:
         storage = self._require_storage()
-        lock = self._locks.lock_for(session_id)
-        async with lock:
+        async with self._locks.lease(session_id):
             session = self._load(session_id)
             session = self._expire_if_needed(session)
             if session.state is UploadSessionState.RECEIVED:
@@ -335,17 +375,14 @@ class UploadTransportService:
                 raise UploadSessionStateConflictError("upload session state conflict")
             self._ensure_complete_file(storage, session)
             updated = self._transition(session, UploadSessionState.RECEIVED, failure_code=None)
-            self._locks.discard(session.id)
             return _snapshot(updated)
 
     async def cancel(self, session_id: UploadSessionId) -> UploadSessionSnapshot:
         storage = self._require_storage()
-        lock = self._locks.lock_for(session_id)
-        async with lock:
+        async with self._locks.lease(session_id):
             session = self._load(session_id)
             if session.state is UploadSessionState.CANCELLED:
                 self._remove_cancelled_file(storage, session)
-                self._locks.discard(session.id)
                 return _snapshot(session)
             if session.state in {
                 UploadSessionState.EXPIRED,
@@ -356,7 +393,6 @@ class UploadTransportService:
                 raise UploadSessionStateConflictError("upload session state conflict")
             cancelled = self._transition(session, UploadSessionState.CANCELLED, failure_code=None)
             self._remove_cancelled_file(storage, cancelled)
-            self._locks.discard(cancelled.id)
             return _snapshot(cancelled)
 
     def _load(self, session_id: UploadSessionId) -> UploadSession:
@@ -521,6 +557,74 @@ class UploadTransportService:
         except QuarantineWriteFailedError as exc:
             raise UploadQuarantineUnavailableError("upload storage unavailable") from exc
 
+    def _recover_failed_patch(
+        self,
+        storage: QuarantineStorage,
+        writer: object,
+        session: UploadSession,
+        original_offset: int,
+        original_error: UploadTransportError,
+        *,
+        allow_advanced_offset_conflict: bool = False,
+    ) -> None:
+        close_attempted = False
+        try:
+            current = self._repository.get(session.id)
+            if current is None or current.storage_key != session.storage_key:
+                raise UploadQuarantineStateInconsistentError("quarantine state inconsistent")
+            if current.received_size_bytes != original_offset:
+                close_attempted = True
+                _close_writer(writer)
+                if allow_advanced_offset_conflict:
+                    raise UploadOffsetConflictTransportError(current.received_size_bytes)
+                raise UploadQuarantineStateInconsistentError("quarantine state inconsistent")
+
+            writer.truncate_and_fsync(original_offset)
+            size = storage.file_size(session.storage_key)
+            if size != original_offset:
+                raise UploadQuarantineStateInconsistentError("quarantine state inconsistent")
+            after = self._repository.get(session.id)
+            if after is None or after.received_size_bytes != original_offset:
+                raise UploadQuarantineStateInconsistentError("quarantine state inconsistent")
+            close_attempted = True
+            _close_writer(writer)
+        except UploadOffsetConflictTransportError:
+            raise
+        except Exception as exc:
+            if not close_attempted:
+                try:
+                    _close_writer(writer)
+                except Exception:
+                    pass
+            self._fail_session_after_unverified_rollback(session.id)
+            raise UploadQuarantineStateInconsistentError(
+                "quarantine state inconsistent"
+            ) from exc
+        raise original_error
+
+    def _fail_session_after_unverified_rollback(self, session_id: UploadSessionId) -> None:
+        try:
+            current = self._repository.get(session_id)
+        except FrameNestUploadSessionRepositoryError:
+            return
+        if current is None or current.state in {
+            UploadSessionState.CANCELLED,
+            UploadSessionState.EXPIRED,
+            UploadSessionState.FAILED,
+            UploadSessionState.CATALOGED,
+            UploadSessionState.REJECTED,
+            UploadSessionState.PUBLISHED,
+        }:
+            return
+        try:
+            self._transition(
+                current,
+                UploadSessionState.FAILED,
+                failure_code=UPLOAD_FAILED_STORAGE_INCONSISTENT,
+            )
+        except UploadTransportError:
+            pass
+
 
 def _snapshot(session: UploadSession) -> UploadSessionSnapshot:
     return UploadSessionSnapshot(
@@ -533,8 +637,5 @@ def _snapshot(session: UploadSession) -> UploadSessionSnapshot:
     )
 
 
-def _rollback_writer(writer: object, offset: int) -> None:
-    try:
-        writer.truncate_and_fsync(offset)
-    except Exception:
-        pass
+def _close_writer(writer: object) -> None:
+    writer.close()

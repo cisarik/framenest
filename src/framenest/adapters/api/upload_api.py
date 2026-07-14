@@ -268,20 +268,13 @@ def _session_id(upload_id: UUID4) -> UploadSessionId:
 
 def _parse_content_length(request: Request) -> int | JSONResponse:
     raw = request.headers.get("content-length")
-    if raw is None:
+    if raw is None or not raw.isascii() or not raw.isdecimal():
         return _error_response(
             400,
             INVALID_UPLOAD_CONTENT_LENGTH,
             "Missing or invalid upload content length.",
         )
-    try:
-        parsed = int(raw)
-    except ValueError:
-        return _error_response(
-            400,
-            INVALID_UPLOAD_CONTENT_LENGTH,
-            "Missing or invalid upload content length.",
-        )
+    parsed = int(raw)
     if parsed <= 0:
         return _error_response(
             400,

@@ -5,9 +5,11 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
+from fastapi import Request
 from fastapi.testclient import TestClient
 
 from framenest.adapters.api.application import create_app
+from framenest.adapters.api.upload_api import _parse_content_length
 from framenest.configuration import FrameNestSettings
 from framenest.domain import Device, DeviceId, Library, LibraryId, LibraryPathFlavor, LibraryRoot
 from framenest.infrastructure.persistence.device_repository import SqliteDeviceRepository
@@ -52,6 +54,24 @@ def _patch(client: TestClient, upload_id: str, offset: int, payload: bytes):
         headers={
             "content-type": "application/offset+octet-stream",
             "upload-offset": str(offset),
+        },
+    )
+
+
+def _patch_with_content_length(
+    client: TestClient,
+    upload_id: str,
+    *,
+    content_length: str,
+    payload: bytes = b"a",
+):
+    return client.patch(
+        f"/api/uploads/{upload_id}",
+        content=payload,
+        headers={
+            "content-type": "application/offset+octet-stream",
+            "upload-offset": "0",
+            "content-length": content_length,
         },
     )
 
@@ -171,6 +191,58 @@ def test_patch_rejects_header_errors_size_limits_wrong_state_and_offset_conflict
     assert first.status_code == 200
     assert conflict.status_code == 409
     assert conflict.json()["error"]["current_offset"] == 2
+
+
+def test_patch_content_length_accepts_ascii_digits_and_leading_zero(
+    tmp_path: Path,
+) -> None:
+    settings = _settings(tmp_path)
+    client = _migrated_client(settings)
+
+    plain_upload_id = _create(client, size=1).json()["id"]
+    plain = _patch_with_content_length(client, plain_upload_id, content_length="1")
+    leading_zero_upload_id = _create(client, size=1).json()["id"]
+    leading_zero = _patch_with_content_length(
+        client,
+        leading_zero_upload_id,
+        content_length="01",
+    )
+
+    assert plain.status_code == 200
+    assert plain.json()["received_size_bytes"] == 1
+    assert leading_zero.status_code == 200
+    assert leading_zero.json()["received_size_bytes"] == 1
+
+
+def test_patch_content_length_rejects_signed_whitespace_mixed_and_zero_values(
+    tmp_path: Path,
+) -> None:
+    for value in ("+1", "-1", " 1", "1 ", "1x", "0", ""):
+        settings = _settings(tmp_path / value.encode("utf-8").hex())
+        client = _migrated_client(settings)
+        upload_id = _create(client, size=1).json()["id"]
+
+        response = _patch_with_content_length(client, upload_id, content_length=value)
+
+        assert response.status_code == 400
+        assert response.json()["error"]["code"] == "INVALID_UPLOAD_CONTENT_LENGTH"
+
+
+def test_patch_content_length_rejects_non_ascii_decimal_text() -> None:
+    request = Request(
+        {
+            "type": "http",
+            "method": "PATCH",
+            "path": "/api/uploads/example",
+            "headers": [(b"content-length", "١".encode("utf-8"))],
+        },
+        receive=lambda: None,
+    )
+
+    response = _parse_content_length(request)
+
+    assert not isinstance(response, int)
+    assert response.status_code == 400
 
 
 def test_file_ahead_is_truncated_and_file_behind_fails_closed(tmp_path: Path) -> None:

@@ -91,12 +91,18 @@ are truncated before accepting more data. If the file is behind the persisted
 offset, FrameNest fails closed and marks the session failed when the existing
 transition graph allows it. Disconnects, write failures, and repository
 conflicts roll the staged file back to the authoritative offset before returning
-a sanitized error.
+a sanitized error. Failed-`PATCH` rollback is verified with durable truncation,
+an independent file-size check, persisted-offset agreement, and safe writer
+close; an unverifiable rollback fails closed as quarantined state inconsistency
+and marks the session failed when the repository state still permits it.
 
 Current production configuration uses one Uvicorn worker. This slice serializes
 same-session upload writers with an in-process per-session lock while leaving
-unrelated sessions independent. Multi-process concurrent upload writers are not
-enabled by this decision and require a later interprocess locking decision.
+unrelated sessions independent. The per-session lock registry uses a
+waiter-aware lifecycle so held or waiting operations cannot split across
+different locks and completed entries do not remain registered for process
+lifetime. Multi-process concurrent upload writers are not enabled by this
+decision and require a later interprocess locking decision.
 
 Browser-origin protection is bounded to current non-proxied loopback behavior:
 mutation requests with no `Origin` header are accepted for trusted local clients,
