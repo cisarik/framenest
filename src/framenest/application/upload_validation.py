@@ -188,6 +188,9 @@ class ValidateReceivedUpload:
             except UploadMediaValidationInfrastructureError as exc:
                 self._fail_if_possible(session, exc.failure_code)
                 raise _validation_infrastructure_error(exc.failure_code) from exc
+            except Exception:
+                self._fail_if_possible(session, UPLOAD_VALIDATION_INTERNAL_ERROR)
+                raise UploadValidationUnavailableError("upload validation unavailable") from None
             reader.verify_still_consistent()
             reader.seek_start()
             second_checksum_hex = _sha256(reader)
@@ -286,9 +289,9 @@ class ValidateReceivedUpload:
         except FrameNestUploadSessionRepositoryError as exc:
             raise UploadValidationUnavailableError("upload validation unavailable") from exc
 
-    def _fail_if_possible(self, session: UploadSession, failure_code: str) -> None:
+    def _fail_if_possible(self, session: UploadSession, failure_code: str) -> bool:
         if session.state is not UploadSessionState.VALIDATING:
-            return
+            return False
         try:
             self._repository.transition_state(
                 session.id,
@@ -298,8 +301,17 @@ class ValidateReceivedUpload:
                 updated_at_ms=self._now_ms(),
                 failure_code=failure_code,
             )
+            return True
         except FrameNestUploadSessionRepositoryError:
-            return
+            try:
+                current = self._repository.get(session.id)
+            except FrameNestUploadSessionRepositoryError:
+                return False
+            return (
+                current is not None
+                and current.state is UploadSessionState.FAILED
+                and current.failure_code == failure_code
+            )
 
 
 def _sha256(reader: QuarantineReader) -> str:

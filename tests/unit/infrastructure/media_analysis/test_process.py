@@ -6,6 +6,8 @@ import sys
 import threading
 import time
 import os
+import signal
+import subprocess
 from collections.abc import Sequence
 
 import pytest
@@ -94,6 +96,104 @@ def _alive_media_analysis_reader_threads() -> list[threading.Thread]:
     ]
 
 
+def _wait_for_missing_process(pid: int, *, timeout_seconds: float = 2.0) -> bool:
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return True
+        time.sleep(0.01)
+    return False
+
+
+def _cleanup_pid(pid: int) -> None:
+    try:
+        os.kill(pid, signal.SIGKILL)
+    except ProcessLookupError:
+        return
+
+
+def _descendant_probe_script(
+    *,
+    pid_path: str,
+    marker_path: str,
+    mode: str,
+    ignore_term: bool = False,
+) -> str:
+    child_code = (
+        "import signal, time, pathlib\n"
+        f"marker = pathlib.Path({marker_path!r})\n"
+        + (
+            "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+            if ignore_term
+            else ""
+        )
+        + "time.sleep(0.8)\n"
+        "marker.write_text('survived', encoding='utf-8')\n"
+        "time.sleep(5)\n"
+    )
+    if mode == "timeout":
+        pressure = "time.sleep(5)\n"
+    elif mode == "stdout":
+        pressure = (
+            "while True:\n"
+            "    sys.stdout.write('x' * 4096)\n"
+            "    sys.stdout.flush()\n"
+        )
+    elif mode == "stderr":
+        pressure = (
+            "while True:\n"
+            "    sys.stderr.write('e' * 4096)\n"
+            "    sys.stderr.flush()\n"
+        )
+    else:
+        raise AssertionError(f"unknown descendant probe mode {mode}")
+    return (
+        "import pathlib, subprocess, sys, time\n"
+        f"child = subprocess.Popen([sys.executable, '-c', {child_code!r}])\n"
+        f"pathlib.Path({pid_path!r}).write_text(str(child.pid), encoding='utf-8')\n"
+        + pressure
+    )
+
+
+def _assert_descendant_is_terminated(
+    tmp_path,
+    *,
+    mode: str,
+    expected_message: str,
+    ignore_term: bool = False,
+) -> None:
+    pid_path = tmp_path / f"{mode}-descendant.pid"
+    marker_path = tmp_path / f"{mode}-survived.marker"
+    runner = SubprocessRunner()
+    with pytest.raises(ProcessExecutionError, match=expected_message):
+        runner.run(
+            executable=sys.executable,
+            argv=[
+                "-c",
+                _descendant_probe_script(
+                    pid_path=str(pid_path),
+                    marker_path=str(marker_path),
+                    mode=mode,
+                    ignore_term=ignore_term,
+                ),
+            ],
+            timeout_seconds=0.2 if mode == "timeout" else 5.0,
+            stdout_max_bytes=64,
+            stderr_max_bytes=64,
+        )
+    assert pid_path.exists()
+    descendant_pid = int(pid_path.read_text(encoding="utf-8"))
+    try:
+        assert _wait_for_missing_process(descendant_pid)
+        time.sleep(0.9)
+        assert not marker_path.exists()
+    finally:
+        _cleanup_pid(descendant_pid)
+    assert _alive_media_analysis_reader_threads() == []
+
+
 def test_fake_runner_records_argv_without_shell() -> None:
     runner = _FakeRunner(ProcessRunResult(returncode=0, stdout=b"ok", stderr=b""))
     runner.run(
@@ -159,6 +259,14 @@ def test_subprocess_runner_timeout_terminates_process() -> None:
     assert _alive_media_analysis_reader_threads() == []
 
 
+def test_subprocess_runner_timeout_terminates_descendant(tmp_path) -> None:
+    _assert_descendant_is_terminated(
+        tmp_path,
+        mode="timeout",
+        expected_message=PROCESS_TIMEOUT_MESSAGE,
+    )
+
+
 def test_subprocess_runner_enforces_stdout_limit() -> None:
     runner = SubprocessRunner()
     with pytest.raises(ProcessExecutionError, match=PROCESS_OUTPUT_LIMIT_MESSAGE):
@@ -170,6 +278,14 @@ def test_subprocess_runner_enforces_stdout_limit() -> None:
             stderr_max_bytes=64,
         )
     assert _alive_media_analysis_reader_threads() == []
+
+
+def test_subprocess_runner_stdout_overflow_terminates_descendant(tmp_path) -> None:
+    _assert_descendant_is_terminated(
+        tmp_path,
+        mode="stdout",
+        expected_message=PROCESS_OUTPUT_LIMIT_MESSAGE,
+    )
 
 
 def test_subprocess_runner_rejects_finite_fast_oversized_stdout() -> None:
@@ -294,7 +410,7 @@ def test_subprocess_runner_drains_stderr_concurrently_without_deadlock() -> None
     runner = SubprocessRunner()
     result = runner.run(
         executable=sys.executable,
-        argv=["-c", _LARGE_STDERR_SCRIPT],
+        argv=["-c", "import sys; sys.stderr.write('e' * 32); sys.stdout.write('ok')"],
         timeout_seconds=5.0,
         stdout_max_bytes=64,
         stderr_max_bytes=32,
@@ -319,11 +435,24 @@ def test_subprocess_runner_handles_combined_stream_pressure_without_deadlock() -
     assert _alive_media_analysis_reader_threads() == []
 
 
-def test_subprocess_runner_retains_bounded_stderr() -> None:
+def test_subprocess_runner_allows_stderr_below_limit() -> None:
     runner = SubprocessRunner()
     result = runner.run(
         executable=sys.executable,
-        argv=["-c", "import sys; sys.stderr.write('e' * 200)"],
+        argv=["-c", "import sys; sys.stderr.write('e' * 31)"],
+        timeout_seconds=5.0,
+        stdout_max_bytes=64,
+        stderr_max_bytes=32,
+    )
+    assert len(result.stderr) == 31
+    assert _alive_media_analysis_reader_threads() == []
+
+
+def test_subprocess_runner_allows_stderr_at_limit() -> None:
+    runner = SubprocessRunner()
+    result = runner.run(
+        executable=sys.executable,
+        argv=["-c", "import sys; sys.stderr.write('e' * 32)"],
         timeout_seconds=5.0,
         stdout_max_bytes=64,
         stderr_max_bytes=32,
@@ -331,6 +460,70 @@ def test_subprocess_runner_retains_bounded_stderr() -> None:
     assert result.returncode == 0
     assert len(result.stderr) == 32
     assert _alive_media_analysis_reader_threads() == []
+
+
+@pytest.mark.parametrize("return_code", [0, 3])
+def test_subprocess_runner_enforces_stderr_one_byte_above_limit(return_code: int) -> None:
+    runner = SubprocessRunner()
+    with pytest.raises(ProcessExecutionError, match=PROCESS_OUTPUT_LIMIT_MESSAGE):
+        runner.run(
+            executable=sys.executable,
+            argv=[
+                "-c",
+                f"import sys; sys.stderr.write('e' * 33); sys.stderr.flush(); sys.exit({return_code})",
+            ],
+            timeout_seconds=5.0,
+            stdout_max_bytes=64,
+            stderr_max_bytes=32,
+        )
+    assert _alive_media_analysis_reader_threads() == []
+
+
+def test_subprocess_runner_enforces_large_stderr_flood() -> None:
+    runner = SubprocessRunner()
+    with pytest.raises(ProcessExecutionError, match=PROCESS_OUTPUT_LIMIT_MESSAGE):
+        runner.run(
+            executable=sys.executable,
+            argv=["-c", _LARGE_STDERR_SCRIPT],
+            timeout_seconds=5.0,
+            stdout_max_bytes=64,
+            stderr_max_bytes=32,
+        )
+    assert _alive_media_analysis_reader_threads() == []
+
+
+def test_subprocess_runner_stderr_overflow_terminates_descendant(tmp_path) -> None:
+    _assert_descendant_is_terminated(
+        tmp_path,
+        mode="stderr",
+        expected_message=PROCESS_OUTPUT_LIMIT_MESSAGE,
+    )
+
+
+def test_subprocess_runner_forced_escalation_terminates_resistant_descendant(tmp_path) -> None:
+    _assert_descendant_is_terminated(
+        tmp_path,
+        mode="timeout",
+        expected_message=PROCESS_TIMEOUT_MESSAGE,
+        ignore_term=True,
+    )
+
+
+def test_subprocess_runner_does_not_signal_unrelated_process(tmp_path) -> None:
+    unrelated = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(5)"],
+        start_new_session=True,
+    )
+    try:
+        _assert_descendant_is_terminated(
+            tmp_path,
+            mode="timeout",
+            expected_message=PROCESS_TIMEOUT_MESSAGE,
+        )
+        assert unrelated.poll() is None
+    finally:
+        unrelated.kill()
+        unrelated.wait(timeout=5)
 
 
 def test_subprocess_runner_preserves_bounded_nonzero_exit() -> None:

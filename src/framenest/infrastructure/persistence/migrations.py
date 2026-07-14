@@ -148,10 +148,12 @@ def _head_revision(migration_package: str) -> str:
 
 @contextmanager
 def _alembic_config(migration_package: str) -> Iterator[Config]:
+    manager = None
     try:
         traversable = resources.files(migration_package)
-        with resources.as_file(traversable) as migration_root:
-            yield _build_alembic_config(migration_root)
+        manager = resources.as_file(traversable)
+        migration_root = manager.__enter__()
+        config = _build_alembic_config(migration_root)
     except FrameNestMigrationError:
         raise
     except Exception as exc:
@@ -161,6 +163,11 @@ def _alembic_config(migration_package: str) -> Iterator[Config]:
             retryable=False,
             cause=exc,
         ) from exc
+    try:
+        yield config
+    finally:
+        if manager is not None:
+            manager.__exit__(None, None, None)
 
 
 def _build_alembic_config(migration_root: Path) -> Config:

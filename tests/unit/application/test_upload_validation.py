@@ -13,9 +13,11 @@ from framenest.application.ports.upload_media_validation import (
     UploadMediaValidationRejectedError,
 )
 from framenest.application.upload_validation import (
+    UPLOAD_VALIDATION_INTERNAL_ERROR,
     UPLOAD_VALIDATION_QUARANTINE_INCONSISTENT,
     UPLOAD_VALIDATION_UNSUPPORTED_MEDIA_TYPE,
     UploadValidationQuarantineInconsistentError,
+    UploadValidationUnavailableError,
     ValidateReceivedUpload,
 )
 from framenest.configuration import FrameNestSettings
@@ -34,6 +36,7 @@ from framenest.infrastructure.persistence.migrations import upgrade_database_to_
 from framenest.infrastructure.persistence.upload_session_repository import (
     SqliteUploadSessionRepository,
 )
+from framenest.application.ports.upload_sessions import FrameNestUploadSessionRepositoryError
 
 
 class _Validator:
@@ -203,3 +206,67 @@ def test_in_place_object_mutation_is_detected_before_success_persistence(
     assert stored is not None
     assert stored.state is UploadSessionState.FAILED
     assert stored.failure_code == UPLOAD_VALIDATION_QUARANTINE_INCONSISTENT
+
+
+@pytest.mark.parametrize(
+    "exception",
+    [
+        ValueError("raw-private-validator-detail /tmp/private"),
+        OverflowError("raw overflow detail"),
+        RuntimeError("raw arbitrary detail"),
+    ],
+)
+def test_unexpected_validator_exception_records_sanitized_internal_failure(
+    tmp_path: Path,
+    exception: Exception,
+) -> None:
+    def raise_unexpected(_reader) -> None:
+        raise exception
+
+    service, repository, engine, session, _path = _setup(
+        tmp_path,
+        validator=_Validator(on_validate=raise_unexpected),
+    )
+    try:
+        with pytest.raises(UploadValidationUnavailableError) as error:
+            asyncio.run(service.validate(session.id))
+        stored = repository.get(session.id)
+    finally:
+        dispose_engine(engine)
+
+    assert str(error.value) == "upload validation unavailable"
+    assert "raw" not in str(error.value)
+    assert error.value.__cause__ is None
+    assert stored is not None
+    assert stored.state is UploadSessionState.FAILED
+    assert stored.failure_code == UPLOAD_VALIDATION_INTERNAL_ERROR
+
+
+def test_unexpected_validator_failure_recording_failure_stays_sanitized_and_retryable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def raise_unexpected(_reader) -> None:
+        raise ValueError("raw-private-validator-detail")
+
+    service, repository, engine, session, _path = _setup(
+        tmp_path,
+        validator=_Validator(on_validate=raise_unexpected),
+    )
+
+    def fail_transition(*_args: object, **_kwargs: object) -> object:
+        raise FrameNestUploadSessionRepositoryError("raw repository detail")
+
+    monkeypatch.setattr(repository, "transition_state", fail_transition)
+    try:
+        with pytest.raises(UploadValidationUnavailableError) as error:
+            asyncio.run(service.validate(session.id))
+        stored = repository.get(session.id)
+    finally:
+        dispose_engine(engine)
+
+    assert str(error.value) == "upload validation unavailable"
+    assert error.value.__cause__ is None
+    assert stored is not None
+    assert stored.state is UploadSessionState.VALIDATING
+    assert stored.failure_code is None

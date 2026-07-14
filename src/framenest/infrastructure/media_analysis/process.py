@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+import signal
 import subprocess
 import threading
 import time
@@ -16,6 +18,7 @@ PROCESS_FAILED_MESSAGE = "External tool execution failed."
 
 _READ_CHUNK_SIZE = 8192
 _JOIN_TIMEOUT_SECONDS = 5.0
+_TERMINATE_GRACE_SECONDS = 0.2
 _POLL_INTERVAL_SECONDS = 0.01
 _STDOUT_READER_THREAD_NAME = "framenest-media-analysis-stdout-reader"
 _STDERR_READER_THREAD_NAME = "framenest-media-analysis-stderr-reader"
@@ -70,13 +73,36 @@ def _close_pipe(pipe: IO[bytes] | None) -> None:
 
 
 def _terminate_process(process: subprocess.Popen[bytes]) -> None:
-    if process.poll() is not None:
-        return
-    process.kill()
+    _signal_process_tree(process, signal.SIGTERM)
+    if process.poll() is None:
+        try:
+            process.wait(timeout=_TERMINATE_GRACE_SECONDS)
+        except subprocess.TimeoutExpired:
+            pass
+    _signal_process_tree(process, signal.SIGKILL)
+    if process.poll() is None:
+        try:
+            process.wait(timeout=_JOIN_TIMEOUT_SECONDS)
+        except subprocess.TimeoutExpired:
+            pass
+
+
+def _signal_process_tree(process: subprocess.Popen[bytes], sig: signal.Signals) -> None:
+    if hasattr(os, "killpg"):
+        try:
+            os.killpg(process.pid, sig)
+            return
+        except ProcessLookupError:
+            return
+        except OSError:
+            pass
     try:
-        process.wait(timeout=_JOIN_TIMEOUT_SECONDS)
-    except subprocess.TimeoutExpired:
-        pass
+        if sig is signal.SIGTERM:
+            process.terminate()
+        else:
+            process.kill()
+    except ProcessLookupError:
+        return
 
 
 def _read_stdout_bounded(
@@ -118,15 +144,27 @@ def _read_stderr_bounded(
     *,
     max_bytes: int,
     state: _ReaderState,
+    wake_event: threading.Event,
 ) -> None:
     buffer = bytearray()
+    discard_mode = False
     try:
         while True:
             chunk = pipe.read(_READ_CHUNK_SIZE)
             if not chunk:
                 break
-            if len(buffer) < max_bytes:
-                buffer.extend(chunk[: max_bytes - len(buffer)])
+            if discard_mode:
+                continue
+            next_length = len(buffer) + len(chunk)
+            if next_length <= max_bytes:
+                buffer.extend(chunk)
+                continue
+            discard_mode = True
+            state.overflow = True
+            wake_event.set()
+            remaining = max_bytes - len(buffer)
+            if remaining > 0:
+                buffer.extend(chunk[:remaining])
     except Exception as exc:
         state.error = exc
     finally:
@@ -150,8 +188,8 @@ def _raise_reader_error(state: _ReaderState) -> None:
         raise ProcessExecutionError(PROCESS_FAILED_MESSAGE)
 
 
-def _raise_stdout_overflow(state: _ReaderState) -> None:
-    if state.overflow:
+def _raise_output_overflow(*states: _ReaderState) -> None:
+    if any(state.overflow for state in states):
         raise ProcessExecutionError(PROCESS_OUTPUT_LIMIT_MESSAGE)
 
 
@@ -165,10 +203,10 @@ def _finalize_readers(
     _await_reader_threads(stdout_thread, stderr_thread)
     _raise_reader_error(stderr_state)
     _raise_reader_error(stdout_state)
-    _raise_stdout_overflow(stdout_state)
+    _raise_output_overflow(stdout_state, stderr_state)
 
 
-def _handle_stdout_overflow(
+def _handle_output_overflow(
     process: subprocess.Popen[bytes],
     *,
     stdout_thread: threading.Thread,
@@ -209,6 +247,7 @@ class SubprocessRunner:
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 pass_fds=tuple(pass_fds),
+                start_new_session=True,
             )
         except FileNotFoundError:
             raise ProcessExecutionError(EXECUTABLE_NOT_FOUND_MESSAGE) from None
@@ -219,7 +258,7 @@ class SubprocessRunner:
             _terminate_process(process)
             raise ProcessExecutionError(PROCESS_FAILED_MESSAGE)
 
-        stdout_wake = threading.Event()
+        output_wake = threading.Event()
         stdout_state = _ReaderState()
         stderr_state = _ReaderState()
 
@@ -229,7 +268,7 @@ class SubprocessRunner:
             kwargs={
                 "max_bytes": stdout_max_bytes,
                 "state": stdout_state,
-                "wake_event": stdout_wake,
+                "wake_event": output_wake,
             },
             name=_STDOUT_READER_THREAD_NAME,
             daemon=True,
@@ -240,6 +279,7 @@ class SubprocessRunner:
             kwargs={
                 "max_bytes": stderr_max_bytes,
                 "state": stderr_state,
+                "wake_event": output_wake,
             },
             name=_STDERR_READER_THREAD_NAME,
             daemon=True,
@@ -250,8 +290,8 @@ class SubprocessRunner:
         deadline = time.monotonic() + timeout_seconds
         try:
             while True:
-                if stdout_state.overflow or stdout_wake.is_set():
-                    _handle_stdout_overflow(
+                if stdout_state.overflow or stderr_state.overflow or output_wake.is_set():
+                    _handle_output_overflow(
                         process,
                         stdout_thread=stdout_thread,
                         stderr_thread=stderr_thread,
@@ -283,7 +323,7 @@ class SubprocessRunner:
                     )
                     raise ProcessExecutionError(PROCESS_TIMEOUT_MESSAGE)
 
-                stdout_wake.wait(timeout=_POLL_INTERVAL_SECONDS)
+                output_wake.wait(timeout=_POLL_INTERVAL_SECONDS)
         except ProcessExecutionError:
             raise
         except Exception:

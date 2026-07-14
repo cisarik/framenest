@@ -238,6 +238,7 @@ def test_failed_migration_is_sanitized_and_does_not_claim_head(
     with pytest.raises(FrameNestMigrationError) as exc_info:
         upgrade_database_to_head(settings, migration_package=package_name)
 
+    assert exc_info.value.error_code == "MIGRATION_FAILED"
     error_text = str(exc_info.value)
     assert "raw-private-migration-detail" not in error_text
     assert "/Users/agile" not in error_text
@@ -252,3 +253,17 @@ def test_failed_migration_is_sanitized_and_does_not_claim_head(
         .read_text(encoding="utf-8")
     )
     assert after_failure_revision == production_revision
+
+
+def test_missing_migration_resources_keep_resource_unavailable_classification(
+    tmp_path: Path,
+) -> None:
+    from framenest.infrastructure.persistence.errors import FrameNestMigrationError
+    from framenest.infrastructure.persistence.migrations import upgrade_database_to_head
+
+    settings = _settings_for(tmp_path / "missing-resources.sqlite3")
+    with pytest.raises(FrameNestMigrationError) as exc_info:
+        upgrade_database_to_head(settings, migration_package="missing_framenest_migrations")
+
+    assert exc_info.value.error_code == "MIGRATION_RESOURCES_UNAVAILABLE"
+    assert str(exc_info.value) == "Database migration resources are unavailable."

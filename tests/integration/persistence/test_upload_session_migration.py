@@ -526,6 +526,46 @@ def test_upgrade_from_0009_to_0010_fails_closed_for_advanced_rows_without_eviden
     assert "Private Clip.mp4" not in message
 
 
+@pytest.mark.parametrize("state", ("publish_pending", "published", "cataloged"))
+def test_upgrade_wrapper_reports_legacy_advanced_rows_as_migration_failure(
+    tmp_path: Path,
+    state: str,
+) -> None:
+    from framenest.infrastructure.persistence.errors import FrameNestMigrationError
+    from framenest.infrastructure.persistence.migrations import (
+        inspect_database_migration_status,
+        upgrade_database_to_head,
+    )
+
+    settings = _settings_for(tmp_path / f"wrapper-invalid-validation-{state}.sqlite3")
+    _upgrade_to_revision(settings.database_path, TARGET_COMPLETENESS_REVISION)
+    invalid = _valid_upload_session_values(
+        "11111111-1111-4111-8111-111111111111",
+        "private-storage-key-0001",
+        state=state,
+        received_size_bytes=100,
+        display_filename="Private Clip.mp4",
+    )
+    connection = _connect(settings.database_path)
+    try:
+        _insert_upload_session(connection, invalid)
+        connection.commit()
+    finally:
+        connection.close()
+
+    with pytest.raises(FrameNestMigrationError) as error:
+        upgrade_database_to_head(settings)
+
+    assert error.value.error_code == "MIGRATION_FAILED"
+    message = str(error.value)
+    assert message == "Database migration failed."
+    assert "private-storage-key-0001" not in message
+    assert "Private Clip.mp4" not in message
+    status = inspect_database_migration_status(settings)
+    assert status.current_revision == TARGET_COMPLETENESS_REVISION
+    assert status.head_revision == TARGET_VALIDATION_REVISION
+
+
 def test_downgrade_from_0009_to_0008_preserves_rows_and_upgrade_can_run_again(
     tmp_path: Path,
 ) -> None:

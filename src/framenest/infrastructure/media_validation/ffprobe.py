@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import json
+import math
+import re
 from dataclasses import dataclass
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal, DecimalException, InvalidOperation
 from typing import Any
 
 from framenest.application.ports.quarantine_storage import QuarantineReader
@@ -42,14 +44,20 @@ UPLOAD_VALIDATION_PROBE_TIMEOUT_SECONDS = 10.0
 UPLOAD_VALIDATION_PROBE_STDOUT_MAX_BYTES = 262_144
 UPLOAD_VALIDATION_PROBE_STDERR_MAX_BYTES = 32_768
 UPLOAD_VALIDATION_PREFIX_MAX_BYTES = 4096
+UPLOAD_VALIDATION_PROBE_MAX_NESTING_DEPTH = 48
 UPLOAD_VALIDATION_MAX_STREAMS = 16
 UPLOAD_VALIDATION_MAX_DIMENSION = 8192
 UPLOAD_VALIDATION_MAX_TOTAL_PIXELS = 33_177_600
 UPLOAD_VALIDATION_MAX_DURATION_MS = 21_600_000
+_UPLOAD_VALIDATION_MAX_DURATION_SECONDS = Decimal(UPLOAD_VALIDATION_MAX_DURATION_MS) / Decimal(
+    1000
+)
+_UPLOAD_VALIDATION_MAX_NUMERIC_STRING_LENGTH = 32
+_DECIMAL_SECONDS_PATTERN = re.compile(r"^(?:0|[1-9][0-9]*)(?:\.[0-9]{1,9})?$")
 
 _GIF87A_SIGNATURE = b"GIF87a"
 _GIF89A_SIGNATURE = b"GIF89a"
-_MP4_ACCEPTED_BRANDS = frozenset(
+_MP4_ACCEPTED_MAJOR_BRANDS = frozenset(
     {
         "avc1",
         "cmfc",
@@ -63,6 +71,21 @@ _MP4_ACCEPTED_BRANDS = frozenset(
         "mp42",
     }
 )
+_MP4_SUPPORTING_COMPATIBLE_BRANDS = frozenset({"iso2", "iso4", "iso5", "iso6", "isom"})
+_MP4_REJECTED_MAJOR_BRAND_PREFIXES = ("3gp", "3g2", "mj2")
+_MP4_REJECTED_MAJOR_BRANDS = frozenset(
+    {
+        "qt  ",
+        "M4A ",
+        "M4B ",
+        "M4P ",
+        "M4R ",
+        "M4A",
+        "M4B",
+        "M4P",
+        "M4R",
+    }
+)
 _MP4_ACCEPTED_CODECS = frozenset({"av1", "h264", "hevc", "mpeg4", "vp9"})
 
 
@@ -71,6 +94,8 @@ class _SignatureEvidence:
     media_format: UploadValidatedFormat
     width: int | None = None
     height: int | None = None
+    mp4_major_brand: str | None = None
+    mp4_compatible_brands: frozenset[str] = frozenset()
 
 
 @dataclass(frozen=True, slots=True)
@@ -131,8 +156,10 @@ class BoundedUploadMediaValidator:
         if result.returncode != 0:
             raise UploadMediaValidationRejectedError(UPLOAD_VALIDATION_INVALID_MEDIA)
         try:
-            payload = json.loads(result.stdout.decode("utf-8"))
-        except (UnicodeError, json.JSONDecodeError):
+            payload = _decode_probe_payload(result.stdout)
+        except UploadMediaValidationRejectedError:
+            raise
+        except Exception:
             raise UploadMediaValidationRejectedError(UPLOAD_VALIDATION_INVALID_MEDIA) from None
         if not isinstance(payload, dict):
             raise UploadMediaValidationRejectedError(UPLOAD_VALIDATION_INVALID_MEDIA)
@@ -152,25 +179,84 @@ def _detect_signature(reader: QuarantineReader) -> _SignatureEvidence:
             raise UploadMediaValidationRejectedError(UPLOAD_VALIDATION_INVALID_MEDIA)
         _validate_dimensions(width, height)
         return _SignatureEvidence(UploadValidatedFormat.GIF, width=width, height=height)
-    if _has_mp4_ftyp(prefix):
-        return _SignatureEvidence(UploadValidatedFormat.MP4)
+    ftyp = _mp4_ftyp_evidence(prefix)
+    if ftyp is not None:
+        major_brand, compatible_brands = ftyp
+        return _SignatureEvidence(
+            UploadValidatedFormat.MP4,
+            mp4_major_brand=major_brand,
+            mp4_compatible_brands=compatible_brands,
+        )
     raise UploadMediaValidationRejectedError(UPLOAD_VALIDATION_UNSUPPORTED_MEDIA_TYPE)
 
 
-def _has_mp4_ftyp(prefix: bytes) -> bool:
+def _mp4_ftyp_evidence(prefix: bytes) -> tuple[str, frozenset[str]] | None:
     if len(prefix) < 16:
-        return False
+        return None
     box_size = int.from_bytes(prefix[0:4], "big")
     box_type = prefix[4:8]
     if box_type != b"ftyp" or box_size < 16 or box_size > len(prefix):
-        return False
-    brand_bytes = prefix[8:box_size]
-    brands = {
-        brand_bytes[index : index + 4].decode("ascii", errors="ignore").strip()
-        for index in range(0, len(brand_bytes), 4)
-        if len(brand_bytes[index : index + 4]) == 4
-    }
-    return bool(brands & _MP4_ACCEPTED_BRANDS)
+        return None
+    body = prefix[8:box_size]
+    if len(body) < 8 or len(body) % 4 != 0:
+        return None
+    try:
+        major_brand = body[0:4].decode("ascii")
+        compatible_brands = frozenset(
+            body[index : index + 4].decode("ascii") for index in range(8, len(body), 4)
+        )
+    except UnicodeDecodeError:
+        return None
+    if _is_rejected_mp4_major_brand(major_brand):
+        return None
+    if major_brand not in _MP4_ACCEPTED_MAJOR_BRANDS:
+        return None
+    if compatible_brands and not (
+        compatible_brands & (_MP4_ACCEPTED_MAJOR_BRANDS | _MP4_SUPPORTING_COMPATIBLE_BRANDS)
+    ):
+        return None
+    return major_brand, compatible_brands
+
+
+def _is_rejected_mp4_major_brand(brand: str) -> bool:
+    return brand in _MP4_REJECTED_MAJOR_BRANDS or brand.startswith(
+        _MP4_REJECTED_MAJOR_BRAND_PREFIXES
+    )
+
+
+def _decode_probe_payload(stdout: bytes) -> object:
+    try:
+        text = stdout.decode("utf-8")
+        payload = json.loads(
+            text,
+            parse_constant=_reject_json_constant,
+        )
+        _validate_probe_nesting(payload)
+        return payload
+    except (
+        UnicodeError,
+        json.JSONDecodeError,
+        RecursionError,
+        ValueError,
+        TypeError,
+    ):
+        raise UploadMediaValidationRejectedError(UPLOAD_VALIDATION_INVALID_MEDIA) from None
+
+
+def _reject_json_constant(value: str) -> None:
+    raise ValueError("non-standard JSON numeric constant")
+
+
+def _validate_probe_nesting(payload: object) -> None:
+    stack: list[tuple[object, int]] = [(payload, 0)]
+    while stack:
+        value, depth = stack.pop()
+        if depth > UPLOAD_VALIDATION_PROBE_MAX_NESTING_DEPTH:
+            raise UploadMediaValidationRejectedError(UPLOAD_VALIDATION_INVALID_MEDIA)
+        if isinstance(value, dict):
+            stack.extend((item, depth + 1) for item in value.values())
+        elif isinstance(value, list):
+            stack.extend((item, depth + 1) for item in value)
 
 
 def _parse_probe_payload(payload: dict[str, Any]) -> _ProbeEvidence:
@@ -276,11 +362,18 @@ def _positive_int(value: object) -> int | None:
         return None
     if isinstance(value, int):
         return value if value > 0 else None
-    if isinstance(value, str):
-        try:
-            parsed = int(value)
-        except ValueError:
+    if isinstance(value, float):
+        if not math.isfinite(value) or not value.is_integer():
             return None
+        parsed = int(value)
+        return parsed if parsed > 0 else None
+    if isinstance(value, str):
+        if (
+            not value.isdecimal()
+            or len(value) > _UPLOAD_VALIDATION_MAX_NUMERIC_STRING_LENGTH
+        ):
+            return None
+        parsed = int(value)
         return parsed if parsed > 0 else None
     return None
 
@@ -291,18 +384,34 @@ def _duration_ms(value: object) -> int | None:
     if isinstance(value, bool):
         return None
     if isinstance(value, (int, float)):
-        if value < 0:
+        if not math.isfinite(value) or value < 0:
             raise UploadMediaValidationRejectedError(UPLOAD_VALIDATION_INVALID_MEDIA)
+        if value > float(_UPLOAD_VALIDATION_MAX_DURATION_SECONDS):
+            raise UploadMediaValidationRejectedError(UPLOAD_VALIDATION_MEDIA_POLICY_LIMIT)
         return int(value * 1000)
     if isinstance(value, str):
         try:
-            seconds = Decimal(value)
-        except (InvalidOperation, ValueError):
+            seconds = _bounded_decimal_seconds(value)
+        except (DecimalException, ValueError):
             raise UploadMediaValidationRejectedError(UPLOAD_VALIDATION_INVALID_MEDIA) from None
-        if seconds < 0:
+        if seconds < 0 or not seconds.is_finite():
             raise UploadMediaValidationRejectedError(UPLOAD_VALIDATION_INVALID_MEDIA)
+        if seconds > _UPLOAD_VALIDATION_MAX_DURATION_SECONDS:
+            raise UploadMediaValidationRejectedError(UPLOAD_VALIDATION_MEDIA_POLICY_LIMIT)
         return int(seconds * 1000)
     raise UploadMediaValidationRejectedError(UPLOAD_VALIDATION_INVALID_MEDIA)
+
+
+def _bounded_decimal_seconds(value: str) -> Decimal:
+    if (
+        len(value) > _UPLOAD_VALIDATION_MAX_NUMERIC_STRING_LENGTH
+        or not _DECIMAL_SECONDS_PATTERN.fullmatch(value)
+    ):
+        raise ValueError("unsupported numeric string")
+    seconds = Decimal(value)
+    if not seconds.is_finite():
+        raise InvalidOperation
+    return seconds
 
 
 def _format_names(value: object) -> tuple[str, ...]:

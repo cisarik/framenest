@@ -7,6 +7,7 @@ from collections.abc import Sequence
 
 import pytest
 
+import framenest.infrastructure.media_validation.ffprobe as ffprobe_module
 from framenest.application.ports.quarantine_storage import QuarantineStateInconsistentError
 from framenest.application.ports.upload_media_validation import (
     UploadMediaValidationInfrastructureError,
@@ -101,7 +102,16 @@ def _gif_bytes(signature: bytes = b"GIF89a", *, width: int = 1, height: int = 1)
 
 
 def _mp4_bytes() -> bytes:
-    return b"\x00\x00\x00\x14ftypisom\x00\x00\x02\x00mp42"
+    return _mp4_bytes_with_ftyp("isom", ["mp42"])
+
+
+def _mp4_bytes_with_ftyp(major_brand: str, compatible_brands: Sequence[str]) -> bytes:
+    body = (
+        major_brand.encode("ascii")
+        + b"\x00\x00\x02\x00"
+        + b"".join(brand.encode("ascii") for brand in compatible_brands)
+    )
+    return (len(body) + 8).to_bytes(4, "big") + b"ftyp" + body
 
 
 def _probe_payload(
@@ -132,6 +142,34 @@ def _probe_payload(
             "format": {"format_name": format_name, "duration": duration},
         }
     ).encode("utf-8")
+
+
+def _probe_payload_with_extra_format(extra: object) -> bytes:
+    return json.dumps(
+        {
+            "streams": [
+                {
+                    "codec_type": "video",
+                    "codec_name": "h264",
+                    "width": 1,
+                    "height": 1,
+                    "disposition": {"attached_pic": 0},
+                }
+            ],
+            "format": {
+                "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+                "duration": "1.0",
+                "tags": extra,
+            },
+        }
+    ).encode("utf-8")
+
+
+def _nested_payload(depth: int) -> object:
+    value: object = "leaf"
+    for _ in range(depth):
+        value = {"nested": value}
+    return value
 
 
 def _validator(stdout: bytes) -> tuple[BoundedUploadMediaValidator, _Runner]:
@@ -170,6 +208,86 @@ def test_valid_mp4_with_visual_stream_is_accepted() -> None:
 
 
 @pytest.mark.parametrize(
+    "major_brand",
+    [
+        "3gp4",
+        "3g2a",
+        "qt  ",
+        "M4A ",
+        "M4B ",
+        "M4P ",
+        "M4R ",
+        "mj2s",
+    ],
+)
+def test_excluded_mp4_family_major_brands_are_rejected_even_with_mp4_compatible_brands(
+    major_brand: str,
+) -> None:
+    validator, _runner = _validator(
+        _probe_payload(format_name="mov,mp4,m4a,3gp,3g2,mj2", codec="h264")
+    )
+
+    with pytest.raises(UploadMediaValidationRejectedError) as error:
+        validator.validate(_Reader(_mp4_bytes_with_ftyp(major_brand, ["isom", "iso2"])))
+
+    assert error.value.failure_code == UPLOAD_VALIDATION_UNSUPPORTED_MEDIA_TYPE
+
+
+def test_unknown_major_brand_is_not_promoted_by_compatible_mp4_brands() -> None:
+    validator, _runner = _validator(
+        _probe_payload(format_name="mov,mp4,m4a,3gp,3g2,mj2", codec="h264")
+    )
+
+    with pytest.raises(UploadMediaValidationRejectedError) as error:
+        validator.validate(_Reader(_mp4_bytes_with_ftyp("zzzz", ["isom", "iso2", "mp42"])))
+
+    assert error.value.failure_code == UPLOAD_VALIDATION_UNSUPPORTED_MEDIA_TYPE
+
+
+def test_audio_only_mp4_family_content_is_rejected_without_visual_stream() -> None:
+    validator, _runner = _validator(
+        _probe_payload(
+            format_name="mov,mp4,m4a,3gp,3g2,mj2",
+            codec="aac",
+            include_video=False,
+        )
+    )
+
+    with pytest.raises(UploadMediaValidationRejectedError) as error:
+        validator.validate(_Reader(_mp4_bytes_with_ftyp("mp42", ["isom", "iso2"])))
+
+    assert error.value.failure_code == UPLOAD_VALIDATION_INVALID_MEDIA
+
+
+def test_contradictory_ftyp_and_probe_evidence_is_rejected() -> None:
+    validator, _runner = _validator(_probe_payload(format_name="gif", codec="gif"))
+
+    with pytest.raises(UploadMediaValidationRejectedError) as error:
+        validator.validate(_Reader(_mp4_bytes_with_ftyp("mp42", ["isom"])))
+
+    assert error.value.failure_code == UPLOAD_VALIDATION_AMBIGUOUS_MEDIA_TYPE
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        b"\x00\x00\x00\x10ftyp",
+        b"\x00\x00\x00\x13ftypmp42\x00\x00\x02\x00mp4",
+        b"\x00\x00\x00\x14ftyp\xff\xff\xff\xff\x00\x00\x02\x00mp42",
+    ],
+)
+def test_truncated_or_malformed_ftyp_is_rejected(payload: bytes) -> None:
+    validator, _runner = _validator(
+        _probe_payload(format_name="mov,mp4,m4a,3gp,3g2,mj2", codec="h264")
+    )
+
+    with pytest.raises(UploadMediaValidationRejectedError) as error:
+        validator.validate(_Reader(payload))
+
+    assert error.value.failure_code == UPLOAD_VALIDATION_UNSUPPORTED_MEDIA_TYPE
+
+
+@pytest.mark.parametrize(
     ("payload", "stdout", "code"),
     [
         (b"not-media", _probe_payload(format_name="gif", codec="gif"), UPLOAD_VALIDATION_UNSUPPORTED_MEDIA_TYPE),
@@ -195,6 +313,70 @@ def test_invalid_or_unsupported_media_is_rejected_with_sanitized_code(
         validator.validate(_Reader(payload))
 
     assert error.value.failure_code == code
+
+
+@pytest.mark.parametrize("constant", ["NaN", "Infinity", "-Infinity"])
+def test_non_standard_json_numeric_constants_are_sanitized(constant: str) -> None:
+    stdout = (
+        b'{"streams":[{"codec_type":"video","codec_name":"h264","width":1,'
+        b'"height":1,"disposition":{"attached_pic":0}}],"format":'
+        + b'{"format_name":"mov,mp4,m4a","duration":'
+        + constant.encode("ascii")
+        + b"}}"
+    )
+    validator, _runner = _validator(stdout)
+
+    with pytest.raises(UploadMediaValidationRejectedError) as error:
+        validator.validate(_Reader(_mp4_bytes()))
+
+    assert error.value.failure_code == UPLOAD_VALIDATION_INVALID_MEDIA
+    assert constant not in str(error.value)
+
+
+@pytest.mark.parametrize("duration", ["1e1000000", "1e-1000000", "not-a-number"])
+def test_malformed_or_extreme_duration_strings_are_sanitized(duration: str) -> None:
+    validator, _runner = _validator(
+        _probe_payload(format_name="mov,mp4,m4a", codec="h264", duration=duration)
+    )
+
+    with pytest.raises(UploadMediaValidationRejectedError) as error:
+        validator.validate(_Reader(_mp4_bytes()))
+
+    assert error.value.failure_code == UPLOAD_VALIDATION_INVALID_MEDIA
+    assert duration not in str(error.value)
+
+
+def test_deep_probe_nesting_below_limit_is_accepted() -> None:
+    validator, _runner = _validator(_probe_payload_with_extra_format(_nested_payload(4)))
+
+    evidence = validator.validate(_Reader(_mp4_bytes()))
+
+    assert evidence.media_format is UploadValidatedFormat.MP4
+
+
+def test_deep_probe_nesting_above_limit_is_sanitized() -> None:
+    validator, _runner = _validator(_probe_payload_with_extra_format(_nested_payload(60)))
+
+    with pytest.raises(UploadMediaValidationRejectedError) as error:
+        validator.validate(_Reader(_mp4_bytes()))
+
+    assert error.value.failure_code == UPLOAD_VALIDATION_INVALID_MEDIA
+
+
+def test_probe_decoder_recursion_error_is_sanitized(monkeypatch: pytest.MonkeyPatch) -> None:
+    def raise_recursion(*_args: object, **_kwargs: object) -> object:
+        raise RecursionError("raw nested parser failure")
+
+    monkeypatch.setattr(ffprobe_module.json, "loads", raise_recursion)
+    validator, _runner = _validator(
+        _probe_payload(format_name="mov,mp4,m4a", codec="h264")
+    )
+
+    with pytest.raises(UploadMediaValidationRejectedError) as error:
+        validator.validate(_Reader(_mp4_bytes()))
+
+    assert error.value.failure_code == UPLOAD_VALIDATION_INVALID_MEDIA
+    assert "raw nested parser failure" not in str(error.value)
 
 
 @pytest.mark.parametrize(
