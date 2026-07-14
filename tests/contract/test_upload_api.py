@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
+import json
 import sqlite3
 from pathlib import Path
+from typing import Any
 
 from fastapi import Request
 from fastapi.testclient import TestClient
@@ -73,6 +76,79 @@ def _patch_with_content_length(
             "upload-offset": "0",
             "content-length": content_length,
         },
+    )
+
+
+async def _asgi_patch(
+    app: Any,
+    upload_id: str,
+    headers: list[tuple[bytes, bytes]],
+    body: bytes = b"a",
+) -> tuple[int, dict[str, object]]:
+    messages: list[dict[str, object]] = []
+    sent = False
+
+    async def receive() -> dict[str, object]:
+        nonlocal sent
+        if sent:
+            return {"type": "http.disconnect"}
+        sent = True
+        return {"type": "http.request", "body": body, "more_body": False}
+
+    async def send(message: dict[str, object]) -> None:
+        messages.append(message)
+
+    path = f"/api/uploads/{upload_id}"
+    await app(
+        {
+            "type": "http",
+            "asgi": {"version": "3.0", "spec_version": "2.3"},
+            "http_version": "1.1",
+            "method": "PATCH",
+            "scheme": "http",
+            "path": path,
+            "raw_path": path.encode("ascii"),
+            "query_string": b"",
+            "headers": headers,
+            "client": ("127.0.0.1", 12345),
+            "server": ("testserver", 80),
+        },
+        receive,
+        send,
+    )
+    status = next(
+        int(message["status"])
+        for message in messages
+        if message["type"] == "http.response.start"
+    )
+    response_body = b"".join(
+        message.get("body", b"")
+        for message in messages
+        if message["type"] == "http.response.body"
+    )
+    return status, json.loads(response_body)
+
+
+def _raw_patch(
+    app: Any,
+    upload_id: str,
+    headers: list[tuple[bytes, bytes]],
+    body: bytes = b"a",
+) -> tuple[int, dict[str, object]]:
+    return asyncio.run(_asgi_patch(app, upload_id, headers, body))
+
+
+def _raw_patch_headers(
+    *,
+    content_type_headers: list[tuple[bytes, bytes]],
+    content_length_headers: list[tuple[bytes, bytes]] | None = None,
+    upload_offset_headers: list[tuple[bytes, bytes]] | None = None,
+) -> list[tuple[bytes, bytes]]:
+    return (
+        [(b"host", b"testserver")]
+        + content_type_headers
+        + (content_length_headers or [(b"content-length", b"1")])
+        + (upload_offset_headers or [(b"upload-offset", b"0")])
     )
 
 
@@ -247,6 +323,120 @@ def test_patch_content_length_rejects_non_ascii_decimal_text() -> None:
 
     assert not isinstance(response, int)
     assert response.status_code == 400
+
+
+def test_patch_raw_content_type_single_valid_header_is_accepted_and_advances_offset(
+    tmp_path: Path,
+) -> None:
+    settings = _settings(tmp_path)
+    upgrade_database_to_head(settings)
+    app = create_app(settings=settings)
+    upload_id = _create(TestClient(app), size=2).json()["id"]
+
+    status, payload = _raw_patch(
+        app,
+        upload_id,
+        _raw_patch_headers(
+            content_type_headers=[(b"content-type", b"application/offset+octet-stream")]
+        ),
+    )
+
+    assert status == 200
+    assert payload["received_size_bytes"] == 1
+    assert _part_file(settings).read_bytes() == b"a"
+
+
+def test_patch_raw_content_type_rejects_ambiguous_or_invalid_values(
+    tmp_path: Path,
+) -> None:
+    cases = (
+        [
+            (b"content-type", b"application/offset+octet-stream"),
+            (b"content-type", b"application/offset+octet-stream"),
+        ],
+        [
+            (b"content-type", b"application/offset+octet-stream"),
+            (b"content-type", b"application/octet-stream"),
+        ],
+        [
+            (b"content-type", b"application/octet-stream"),
+            (b"content-type", b"application/offset+octet-stream"),
+        ],
+        [
+            (b"Content-Type", b"application/offset+octet-stream"),
+            (b"content-type", b"application/offset+octet-stream"),
+        ],
+        [(b"content-type", b"application/offset+octet-stream, application/octet-stream")],
+        [
+            (
+                b"content-type",
+                b"application/offset+octet-stream,application/offset+octet-stream",
+            )
+        ],
+        [],
+        [(b"content-type", b"application/octet-stream")],
+        [(b"content-type", b"")],
+        [(b"content-type", b"application/offset+octet-stream\xff")],
+    )
+
+    for index, content_type_headers in enumerate(cases):
+        settings = _settings(tmp_path / str(index))
+        upgrade_database_to_head(settings)
+        app = create_app(settings=settings)
+        upload_id = _create(TestClient(app), size=1).json()["id"]
+
+        status, payload = _raw_patch(
+            app,
+            upload_id,
+            _raw_patch_headers(content_type_headers=content_type_headers),
+        )
+
+        assert status == 400
+        assert payload == {
+            "error": {
+                "code": "INVALID_UPLOAD_CONTENT_TYPE",
+                "message": "Invalid upload content type.",
+            }
+        }
+
+
+def test_patch_raw_content_length_and_upload_offset_singleton_contract_remains(
+    tmp_path: Path,
+) -> None:
+    settings = _settings(tmp_path)
+    upgrade_database_to_head(settings)
+    app = create_app(settings=settings)
+    client = TestClient(app)
+
+    duplicate_content_length_id = _create(client, size=1).json()["id"]
+    duplicate_content_length = _raw_patch(
+        app,
+        duplicate_content_length_id,
+        _raw_patch_headers(
+            content_type_headers=[(b"content-type", b"application/offset+octet-stream")],
+            content_length_headers=[
+                (b"content-length", b"1"),
+                (b"content-length", b"1"),
+            ],
+        ),
+    )
+    duplicate_upload_offset_id = _create(client, size=1).json()["id"]
+    duplicate_upload_offset = _raw_patch(
+        app,
+        duplicate_upload_offset_id,
+        _raw_patch_headers(
+            content_type_headers=[(b"content-type", b"application/offset+octet-stream")],
+            upload_offset_headers=[
+                (b"upload-offset", b"0"),
+                (b"upload-offset", b"0"),
+            ],
+        ),
+    )
+
+    assert duplicate_content_length[0] == 400
+    assert duplicate_content_length[1]["error"]["code"] == "INVALID_UPLOAD_CONTENT_LENGTH"
+    assert duplicate_upload_offset[0] == 400
+    assert duplicate_upload_offset[1]["error"]["code"] == "INVALID_UPLOAD_OFFSET"
 
 
 def test_patch_content_length_raw_singleton_accepts_digits_and_leading_zero() -> None:

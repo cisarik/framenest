@@ -164,14 +164,9 @@ def create_upload_api_router(dependencies: UploadApiDependencies) -> APIRouter:
         origin_error = _reject_cross_origin_mutation(request)
         if origin_error is not None:
             return origin_error
-        if request.headers.get("content-type", "").split(";", 1)[0].strip().lower() != (
-            _PATCH_MEDIA_TYPE
-        ):
-            return _error_response(
-                400,
-                INVALID_UPLOAD_CONTENT_TYPE,
-                "Invalid upload content type.",
-            )
+        content_type = _parse_upload_content_type(request)
+        if isinstance(content_type, JSONResponse):
+            return content_type
         content_length = _parse_content_length(request)
         if isinstance(content_length, JSONResponse):
             return content_length
@@ -284,6 +279,19 @@ def _parse_content_length(request: Request) -> int | JSONResponse:
     return parsed
 
 
+def _parse_upload_content_type(request: Request) -> str | JSONResponse:
+    raw = _single_raw_header_value(request, b"content-type")
+    if raw is None:
+        return _invalid_upload_content_type_response()
+    try:
+        value = raw.decode("ascii").strip().lower()
+    except UnicodeDecodeError:
+        return _invalid_upload_content_type_response()
+    if value != _PATCH_MEDIA_TYPE:
+        return _invalid_upload_content_type_response()
+    return value
+
+
 def _parse_upload_offset(request: Request) -> int | JSONResponse:
     raw = _single_raw_header_value(request, b"upload-offset")
     if raw is None or not _is_ascii_digit_sequence(raw):
@@ -304,6 +312,14 @@ def _single_raw_header_value(request: Request, name: bytes) -> bytes | None:
 
 def _is_ascii_digit_sequence(value: bytes) -> bool:
     return bool(value) and all(ord("0") <= byte <= ord("9") for byte in value)
+
+
+def _invalid_upload_content_type_response() -> JSONResponse:
+    return _error_response(
+        400,
+        INVALID_UPLOAD_CONTENT_TYPE,
+        "Invalid upload content type.",
+    )
 
 
 def _reject_cross_origin_mutation(request: Request) -> JSONResponse | None:
