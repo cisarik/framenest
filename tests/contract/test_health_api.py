@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import socket
+from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -14,6 +15,7 @@ from pydantic import SecretStr
 
 from framenest.adapters.api.application import create_app
 from framenest.configuration import FrameNestSettings, load_settings
+from framenest.infrastructure.persistence.migrations import upgrade_database_to_head
 
 FRAMENEST_ENV_VARS = ("FRAMENEST_HOST", "FRAMENEST_PORT", "FRAMENEST_API_KEY")
 REPRESENTATIVE_SECRET = "contract-test-api-key-secret"
@@ -77,6 +79,27 @@ def test_health_endpoint_returns_ok_status(
     response = TestClient(app).get("/health")
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
+
+
+def test_application_lifespan_owns_upload_validation_coordinator(tmp_path: Path) -> None:
+    quarantine_root = tmp_path / "quarantine"
+    quarantine_root.mkdir()
+    settings = FrameNestSettings(
+        database_path=tmp_path / "catalog.sqlite3",
+        upload_quarantine_root=quarantine_root,
+        _env_file=None,
+    )
+    upgrade_database_to_head(settings)
+    app = create_app(settings=settings)
+    coordinator = app.state.upload_validation_coordinator
+
+    assert coordinator is not None
+    with TestClient(app) as client:
+        assert client.get("/health").status_code == 200
+        assert not coordinator.runner_done
+
+    assert coordinator.runner_done
+    assert not coordinator.executor_running
 
 
 def test_cloud_status_endpoint_reports_sanitized_loopback_status(

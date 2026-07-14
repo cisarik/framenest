@@ -89,6 +89,38 @@ class SqliteUploadSessionRepository:
         except SQLAlchemyError as exc:
             raise FrameNestUploadSessionRepositoryError(_REPOSITORY_FAILURE_MESSAGE) from exc
 
+    def list_validation_candidates(self, *, limit: int) -> tuple[UploadSession, ...]:
+        """Return bounded received and validating uploads in deterministic order."""
+        try:
+            _validate_positive(limit)
+        except FrameNestUploadSessionError as exc:
+            raise FrameNestUploadSessionRepositoryError(_REPOSITORY_FAILURE_MESSAGE) from exc
+
+        def operation(connection: Connection) -> tuple[UploadSession, ...]:
+            rows = (
+                connection.execute(
+                    select(upload_sessions)
+                    .where(
+                        upload_sessions.c.state.in_(
+                            (
+                                UploadSessionState.RECEIVED.value,
+                                UploadSessionState.VALIDATING.value,
+                            )
+                        )
+                    )
+                    .order_by(upload_sessions.c.updated_at_ms.asc(), upload_sessions.c.id.asc())
+                    .limit(limit)
+                )
+                .mappings()
+                .all()
+            )
+            return tuple(_session_from_row(row) for row in rows)
+
+        try:
+            return run_in_transaction(self._engine, operation)
+        except SQLAlchemyError as exc:
+            raise FrameNestUploadSessionRepositoryError(_REPOSITORY_FAILURE_MESSAGE) from exc
+
     def advance_received_offset(
         self,
         session_id: UploadSessionId,
@@ -693,3 +725,8 @@ def _target_requires_complete_upload(target_state: UploadSessionState) -> bool:
 def _validate_non_negative(value: object) -> None:
     if isinstance(value, bool) or not isinstance(value, int) or value < 0:
         raise FrameNestUploadSessionError("invalid concurrency guard")
+
+
+def _validate_positive(value: object) -> None:
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        raise FrameNestUploadSessionError("invalid bounded retrieval limit")

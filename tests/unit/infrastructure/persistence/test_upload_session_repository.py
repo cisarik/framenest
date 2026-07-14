@@ -605,6 +605,91 @@ def test_start_validation_transitions_received_to_validating(tmp_path: Path) -> 
     assert validating.version == 1
 
 
+def test_list_validation_candidates_is_bounded_ordered_and_read_only(tmp_path: Path) -> None:
+    repository, engine = _repository(tmp_path)
+    received_old = _session(
+        storage_key="upload-session-candidate-0001",
+        state=UploadSessionState.RECEIVED,
+    )
+    validating = _session(
+        storage_key="upload-session-candidate-0002",
+        state=UploadSessionState.VALIDATING,
+    )
+    received_new = _session(
+        storage_key="upload-session-candidate-0003",
+        state=UploadSessionState.RECEIVED,
+    )
+    excluded_states = [
+        UploadSessionState.CREATED,
+        UploadSessionState.RECEIVING,
+        UploadSessionState.DUPLICATE_PENDING,
+        UploadSessionState.PUBLISH_PENDING,
+        UploadSessionState.PUBLISHED,
+        UploadSessionState.CATALOGED,
+        UploadSessionState.REJECTED,
+        UploadSessionState.CANCELLED,
+        UploadSessionState.EXPIRED,
+        UploadSessionState.FAILED,
+    ]
+    try:
+        repository.create(received_new)
+        repository.create(validating)
+        repository.create(received_old)
+        with engine.begin() as connection:
+            connection.execute(
+                sa.text(
+                    "UPDATE upload_sessions SET updated_at_ms = :updated_at_ms "
+                    "WHERE id = :id"
+                ),
+                {"id": received_old.id.to_string(), "updated_at_ms": 10},
+            )
+            connection.execute(
+                sa.text(
+                    "UPDATE upload_sessions SET updated_at_ms = :updated_at_ms "
+                    "WHERE id = :id"
+                ),
+                {"id": validating.id.to_string(), "updated_at_ms": 20},
+            )
+            connection.execute(
+                sa.text(
+                    "UPDATE upload_sessions SET updated_at_ms = :updated_at_ms "
+                    "WHERE id = :id"
+                ),
+                {"id": received_new.id.to_string(), "updated_at_ms": 30},
+            )
+        for index, state in enumerate(excluded_states, start=4):
+            repository.create(
+                _session(
+                    storage_key=f"upload-session-candidate-{index:04d}",
+                    state=state,
+                    received_size_bytes=0
+                    if state is UploadSessionState.CREATED
+                    else 100,
+                )
+            )
+
+        before = {
+            session.id: repository.get(session.id)
+            for session in (received_old, validating, received_new)
+        }
+        first_two = repository.list_validation_candidates(limit=2)
+        all_candidates = repository.list_validation_candidates(limit=10)
+        after = {
+            session.id: repository.get(session.id)
+            for session in (received_old, validating, received_new)
+        }
+    finally:
+        engine.dispose()
+
+    assert [candidate.id for candidate in first_two] == [received_old.id, validating.id]
+    assert [candidate.id for candidate in all_candidates] == [
+        received_old.id,
+        validating.id,
+        received_new.id,
+    ]
+    assert after == before
+
+
 def test_complete_validation_success_commits_evidence_and_publish_state_atomically(
     tmp_path: Path,
 ) -> None:

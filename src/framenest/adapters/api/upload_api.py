@@ -26,6 +26,7 @@ from framenest.application.upload_transport import (
     UploadTooLargeError,
 )
 from framenest.domain.uploads import FrameNestUploadSessionError, UploadSessionId
+from framenest.structured_logging import get_logger
 
 UPLOAD_CAPABILITY_NOT_CONFIGURED = "UPLOAD_CAPABILITY_NOT_CONFIGURED"
 UPLOAD_SESSION_NOT_FOUND = "UPLOAD_SESSION_NOT_FOUND"
@@ -46,6 +47,7 @@ UPLOAD_CONCURRENCY_CONFLICT = "UPLOAD_CONCURRENCY_CONFLICT"
 UPLOAD_ORIGIN_FORBIDDEN = "UPLOAD_ORIGIN_FORBIDDEN"
 
 _PATCH_MEDIA_TYPE = "application/offset+octet-stream"
+LOGGER = get_logger("upload_api")
 
 
 class ErrorBody(BaseModel):
@@ -84,6 +86,7 @@ class UploadApiDependencies:
     """Injected dependencies for quarantine upload routes."""
 
     transport: object
+    validation_coordinator: object | None = None
 
 
 def create_upload_api_router(dependencies: UploadApiDependencies) -> APIRouter:
@@ -219,6 +222,8 @@ def create_upload_api_router(dependencies: UploadApiDependencies) -> APIRouter:
                 QUARANTINE_STORAGE_UNAVAILABLE,
                 "Quarantine storage is unavailable.",
             )
+        if snapshot.state == "received":
+            _notify_validation_coordinator(dependencies.validation_coordinator)
         return _snapshot_response(snapshot)
 
     @router.delete(
@@ -320,6 +325,22 @@ def _invalid_upload_content_type_response() -> JSONResponse:
         INVALID_UPLOAD_CONTENT_TYPE,
         "Invalid upload content type.",
     )
+
+
+def _notify_validation_coordinator(coordinator: object | None) -> None:
+    if coordinator is None:
+        return
+    try:
+        notify = getattr(coordinator, "notify")
+        notify()
+    except Exception:
+        LOGGER.emit(
+            level="WARNING",
+            event="upload_validation_notification_failed",
+            operation="complete_upload",
+            error_code="UPLOAD_VALIDATION_NOTIFICATION_FAILED",
+            retryable=True,
+        )
 
 
 def _reject_cross_origin_mutation(request: Request) -> JSONResponse | None:

@@ -61,6 +61,7 @@ from framenest.application.media_suggestion import PreviewImportedMediaSuggestio
 from framenest.application.upload_transport import UploadTransportLimits, UploadTransportService
 from framenest.application.upload_transport import UploadSessionLockRegistry
 from framenest.application.upload_validation import ValidateReceivedUpload
+from framenest.application.upload_validation_coordinator import UploadValidationCoordinator
 from framenest.adapters.api.library_api import (
     LibraryApiDependencies,
     create_library_api_router,
@@ -134,6 +135,7 @@ def create_app(
     owned_media_metadata_repository = None
     owned_upload_session_repository = None
     owned_upload_validation = None
+    owned_upload_validation_coordinator = None
     if (
         library_api_dependencies is None
         or media_import_api_dependencies is None
@@ -290,18 +292,37 @@ def create_app(
                 BoundedUploadMediaValidator(),
                 locks=upload_locks,
             )
+            owned_upload_validation_coordinator = UploadValidationCoordinator(
+                owned_upload_session_repository,
+                owned_upload_validation,
+                upload_locks,
+            )
+            upload_api_dependencies = UploadApiDependencies(
+                transport=upload_api_dependencies.transport,
+                validation_coordinator=owned_upload_validation_coordinator,
+            )
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+        coordinator = _upload_validation_coordinator(upload_api_dependencies)
+        if coordinator is not None:
+            await coordinator.start()
         try:
             yield
         finally:
+            if coordinator is not None:
+                await coordinator.shutdown()
             if owned_engine is not None:
                 dispose_engine(owned_engine)
 
     app = FastAPI(lifespan=lifespan)
     app.state.settings = resolved_settings
     app.state.upload_validation = owned_upload_validation
+    app.state.upload_validation_coordinator = (
+        owned_upload_validation_coordinator
+        if owned_upload_validation_coordinator is not None
+        else _upload_validation_coordinator(upload_api_dependencies)
+    )
     app.include_router(create_library_api_router(library_api_dependencies))
     app.include_router(create_media_import_api_router(media_import_api_dependencies))
     app.include_router(create_media_catalog_api_router(media_catalog_api_dependencies))
@@ -338,6 +359,10 @@ def create_app(
         return CloudStatusResponse(server="connected", connection="loopback", remote_access=None)
 
     return app
+
+
+def _upload_validation_coordinator(dependencies: UploadApiDependencies) -> object | None:
+    return dependencies.validation_coordinator
 
 
 def _ai_status_from_last_test(

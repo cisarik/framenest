@@ -113,16 +113,42 @@ class ValidateReceivedUpload:
     async def validate(self, session_id: UploadSessionId) -> UploadValidationResult:
         """Validate a received upload and return its internal durable state."""
         async with self._locks.lease(session_id):
-            session = self._load(session_id)
-            if session.state is UploadSessionState.PUBLISH_PENDING:
-                return _result(session)
-            if session.state is UploadSessionState.REJECTED:
-                return _result(session)
-            if session.state is UploadSessionState.RECEIVED:
-                session = self._start_validation(session)
-            if session.state is not UploadSessionState.VALIDATING:
-                raise UploadValidationStateConflictError("upload validation state conflict")
-            return self._validate_stable_quarantine_object(session)
+            return self.validate_owned_blocking(session_id)
+
+    def validate_owned_blocking(
+        self,
+        session_id: UploadSessionId,
+    ) -> UploadValidationResult:
+        """Validate a received upload while the caller owns the process-local lock."""
+        session = self._load(session_id)
+        if session.state is UploadSessionState.PUBLISH_PENDING:
+            return _result(session)
+        if session.state is UploadSessionState.REJECTED:
+            return _result(session)
+        if session.state is UploadSessionState.RECEIVED:
+            session = self._start_validation(session)
+        if session.state is not UploadSessionState.VALIDATING:
+            raise UploadValidationStateConflictError("upload validation state conflict")
+        return self._validate_stable_quarantine_object(session)
+
+    def recover_abandoned_validating_owned_blocking(
+        self,
+        session_id: UploadSessionId,
+    ) -> UploadValidationResult:
+        """Recover a startup-discovered abandoned validating upload.
+
+        This internal entry point deliberately does not run the received-to-validating
+        claim. It is safe only at coordinator startup, where the previous process-local
+        validation owner cannot still exist in this single-process orchestration model.
+        """
+        session = self._load(session_id)
+        if session.state is UploadSessionState.PUBLISH_PENDING:
+            return _result(session)
+        if session.state is UploadSessionState.REJECTED:
+            return _result(session)
+        if session.state is not UploadSessionState.VALIDATING:
+            raise UploadValidationStateConflictError("upload validation state conflict")
+        return self._validate_stable_quarantine_object(session)
 
     def _load(self, session_id: UploadSessionId) -> UploadSession:
         try:

@@ -66,6 +66,9 @@ class UploadSessionRepository(Protocol):
     def get(self, session_id: UploadSessionId) -> UploadSession | None:
         """Return one upload session by identity, or None when absent."""
 
+    def list_validation_candidates(self, *, limit: int) -> tuple[UploadSession, ...]:
+        """Return bounded received or validating uploads for internal validation."""
+
     def advance_received_offset(
         self,
         session_id: UploadSessionId,

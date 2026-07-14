@@ -12,13 +12,25 @@ from fastapi import Request
 from fastapi.testclient import TestClient
 
 from framenest.adapters.api.application import create_app
-from framenest.adapters.api.upload_api import _parse_content_length, _parse_upload_offset
+from framenest.adapters.api.upload_api import (
+    UploadApiDependencies,
+    _parse_content_length,
+    _parse_upload_offset,
+)
 from framenest.configuration import FrameNestSettings
 from framenest.domain import Device, DeviceId, Library, LibraryId, LibraryPathFlavor, LibraryRoot
 from framenest.infrastructure.persistence.device_repository import SqliteDeviceRepository
 from framenest.infrastructure.persistence.engine import create_sqlite_engine, dispose_engine
 from framenest.infrastructure.persistence.library_repository import SqliteLibraryRepository
 from framenest.infrastructure.persistence.migrations import upgrade_database_to_head
+from framenest.infrastructure.persistence.upload_session_repository import (
+    SqliteUploadSessionRepository,
+)
+from framenest.infrastructure.filesystem.quarantine_storage import FilesystemQuarantineStorage
+from framenest.application.upload_transport import (
+    UploadTransportLimits,
+    UploadTransportService,
+)
 
 
 def _settings(tmp_path: Path, *, quarantine: bool = True, reserve: int = 0) -> FrameNestSettings:
@@ -164,6 +176,30 @@ def _raw_request(headers: list[tuple[bytes, bytes]]) -> Request:
     )
 
 
+class _EmptyLibraryRepository:
+    def list_all(self) -> tuple[Library, ...]:
+        return ()
+
+
+class _RecordingCoordinator:
+    def __init__(self) -> None:
+        self.notifications = 0
+
+    async def start(self) -> None:
+        return None
+
+    async def shutdown(self) -> None:
+        return None
+
+    def notify(self) -> None:
+        self.notifications += 1
+
+
+class _FailingCoordinator(_RecordingCoordinator):
+    def notify(self) -> None:
+        raise RuntimeError("synthetic coordinator notification failure")
+
+
 def _part_file(settings: FrameNestSettings) -> Path:
     files = list(settings.upload_quarantine_root.glob("*.part"))  # type: ignore[union-attr]
     assert len(files) == 1
@@ -250,6 +286,106 @@ def test_patch_multiple_chunks_resume_after_app_reconstruction_and_complete(
     with sqlite3.connect(settings.database_path) as connection:
         assert connection.execute("SELECT COUNT(*) FROM logical_media").fetchone() == (0,)
         assert connection.execute("SELECT COUNT(*) FROM media_metadata").fetchone() == (0,)
+
+
+def test_complete_notifies_validation_after_received_response(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    upgrade_database_to_head(settings)
+    engine = create_sqlite_engine(settings.database_path)
+    coordinator = _RecordingCoordinator()
+    try:
+        transport = UploadTransportService(
+            SqliteUploadSessionRepository(engine),
+            FilesystemQuarantineStorage(settings.upload_quarantine_root),  # type: ignore[arg-type]
+            _EmptyLibraryRepository(),
+            UploadTransportLimits(16, 8, 60, 0),
+            quarantine_root=settings.upload_quarantine_root,
+            preview_cache_root=tmp_path / "preview-cache",
+        )
+        app = create_app(
+            settings=settings,
+            upload_api_dependencies=UploadApiDependencies(
+                transport=transport,
+                validation_coordinator=coordinator,
+            ),
+        )
+        client = TestClient(app)
+        created = _create(client).json()
+        assert _patch(client, created["id"], 0, b"abcde").status_code == 200
+
+        complete = client.post(f"/api/uploads/{created['id']}/complete")
+    finally:
+        dispose_engine(engine)
+
+    assert complete.status_code == 200
+    assert complete.json()["state"] == "received"
+    assert coordinator.notifications == 1
+
+
+def test_unsuccessful_complete_does_not_notify_validation(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    upgrade_database_to_head(settings)
+    engine = create_sqlite_engine(settings.database_path)
+    coordinator = _RecordingCoordinator()
+    try:
+        transport = UploadTransportService(
+            SqliteUploadSessionRepository(engine),
+            FilesystemQuarantineStorage(settings.upload_quarantine_root),  # type: ignore[arg-type]
+            _EmptyLibraryRepository(),
+            UploadTransportLimits(16, 8, 60, 0),
+            quarantine_root=settings.upload_quarantine_root,
+            preview_cache_root=tmp_path / "preview-cache",
+        )
+        app = create_app(
+            settings=settings,
+            upload_api_dependencies=UploadApiDependencies(
+                transport=transport,
+                validation_coordinator=coordinator,
+            ),
+        )
+        client = TestClient(app)
+        created = _create(client).json()
+
+        complete = client.post(f"/api/uploads/{created['id']}/complete")
+    finally:
+        dispose_engine(engine)
+
+    assert complete.status_code == 409
+    assert coordinator.notifications == 0
+
+
+def test_complete_response_survives_validation_notification_failure(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    upgrade_database_to_head(settings)
+    engine = create_sqlite_engine(settings.database_path)
+    try:
+        transport = UploadTransportService(
+            SqliteUploadSessionRepository(engine),
+            FilesystemQuarantineStorage(settings.upload_quarantine_root),  # type: ignore[arg-type]
+            _EmptyLibraryRepository(),
+            UploadTransportLimits(16, 8, 60, 0),
+            quarantine_root=settings.upload_quarantine_root,
+            preview_cache_root=tmp_path / "preview-cache",
+        )
+        app = create_app(
+            settings=settings,
+            upload_api_dependencies=UploadApiDependencies(
+                transport=transport,
+                validation_coordinator=_FailingCoordinator(),
+            ),
+        )
+        client = TestClient(app)
+        created = _create(client).json()
+        assert _patch(client, created["id"], 0, b"abcde").status_code == 200
+
+        complete = client.post(f"/api/uploads/{created['id']}/complete")
+        status = client.get(f"/api/uploads/{created['id']}")
+    finally:
+        dispose_engine(engine)
+
+    assert complete.status_code == 200
+    assert complete.json()["state"] == "received"
+    assert status.json()["state"] == "received"
 
 
 def test_patch_rejects_header_errors_size_limits_wrong_state_and_offset_conflict(

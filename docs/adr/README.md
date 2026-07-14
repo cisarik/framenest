@@ -63,3 +63,4 @@ An accepted ADR may only be changed by a later ADR that supersedes it. Editing a
 | 0036 | Production AI Credentials via systemd Credentials | Accepted | 2026-07-11 | [0036-production-ai-credentials-via-systemd.md](0036-production-ai-credentials-via-systemd.md) |
 | 0037 | Durable Upload Session and Safe Ingest Foundation | Accepted | 2026-07-14 | [0037-durable-upload-session-and-safe-ingest-foundation.md](0037-durable-upload-session-and-safe-ingest-foundation.md) |
 | 0038 | Bounded Upload Media Validation | Accepted | 2026-07-14 | [0038-bounded-upload-media-validation.md](0038-bounded-upload-media-validation.md) |
+| 0039 | Lifecycle-Owned Upload Validation Orchestration | Accepted | 2026-07-14 | [0039-lifecycle-owned-upload-validation-orchestration.md](0039-lifecycle-owned-upload-validation-orchestration.md) |

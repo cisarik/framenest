@@ -130,6 +130,98 @@ def test_success_persists_checksum_validation_evidence_and_no_catalog_visibility
     assert location_count == (0,)
 
 
+def test_abandoned_validating_recovery_completes_without_reclaiming(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service, repository, engine, session, _path = _setup(
+        tmp_path,
+        state=UploadSessionState.VALIDATING,
+    )
+
+    def fail_start_validation(*_args: object, **_kwargs: object) -> object:
+        raise AssertionError("validating recovery must not reclaim received state")
+
+    monkeypatch.setattr(repository, "start_validation", fail_start_validation)
+    try:
+        result = service.recover_abandoned_validating_owned_blocking(session.id)
+        stored = repository.get(session.id)
+    finally:
+        dispose_engine(engine)
+
+    assert result.state == UploadSessionState.PUBLISH_PENDING.value
+    assert stored is not None
+    assert stored.state is UploadSessionState.PUBLISH_PENDING
+
+
+def test_abandoned_validating_recovery_persists_rejected_and_failed_outcomes(
+    tmp_path: Path,
+) -> None:
+    rejected_root = tmp_path / "rejected"
+    failed_root = tmp_path / "failed"
+    rejected_root.mkdir()
+    failed_root.mkdir()
+    rejected_service, rejected_repository, rejected_engine, rejected_session, _path = _setup(
+        rejected_root,
+        state=UploadSessionState.VALIDATING,
+        validator=_Validator(rejection_code=UPLOAD_VALIDATION_UNSUPPORTED_MEDIA_TYPE),
+    )
+
+    def raise_unexpected(_reader) -> None:
+        raise RuntimeError("raw validator detail")
+
+    failed_service, failed_repository, failed_engine, failed_session, _path = _setup(
+        failed_root,
+        state=UploadSessionState.VALIDATING,
+        validator=_Validator(on_validate=raise_unexpected),
+    )
+    try:
+        rejected = rejected_service.recover_abandoned_validating_owned_blocking(
+            rejected_session.id
+        )
+        rejected_stored = rejected_repository.get(rejected_session.id)
+        with pytest.raises(UploadValidationUnavailableError):
+            failed_service.recover_abandoned_validating_owned_blocking(failed_session.id)
+        failed_stored = failed_repository.get(failed_session.id)
+    finally:
+        dispose_engine(rejected_engine)
+        dispose_engine(failed_engine)
+
+    assert rejected.state == UploadSessionState.REJECTED.value
+    assert rejected_stored is not None
+    assert rejected_stored.failure_code == UPLOAD_VALIDATION_UNSUPPORTED_MEDIA_TYPE
+    assert failed_stored is not None
+    assert failed_stored.state is UploadSessionState.FAILED
+    assert failed_stored.failure_code == UPLOAD_VALIDATION_INTERNAL_ERROR
+
+
+def test_abandoned_validating_inconsistent_object_persists_no_validation_evidence(
+    tmp_path: Path,
+) -> None:
+    def mutate_open_object(reader) -> None:
+        path.write_bytes(b"mutated-bytes")
+        reader.seek_start()
+
+    service, repository, engine, session, path = _setup(
+        tmp_path,
+        state=UploadSessionState.VALIDATING,
+        payload=b"original-bytes",
+        validator=_Validator(on_validate=mutate_open_object),
+    )
+    try:
+        with pytest.raises(UploadValidationQuarantineInconsistentError):
+            service.recover_abandoned_validating_owned_blocking(session.id)
+        stored = repository.get(session.id)
+    finally:
+        dispose_engine(engine)
+
+    assert stored is not None
+    assert stored.state is UploadSessionState.FAILED
+    assert stored.failure_code == UPLOAD_VALIDATION_QUARANTINE_INCONSISTENT
+    assert stored.checksum_hex is None
+    assert stored.validated_media_kind is None
+
+
 def test_permanent_policy_rejection_records_sanitized_code(tmp_path: Path) -> None:
     service, repository, engine, session, _path = _setup(
         tmp_path,
