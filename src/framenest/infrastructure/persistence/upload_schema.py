@@ -11,6 +11,8 @@ from sqlalchemy import (
     Table,
     Text,
     UniqueConstraint,
+    column,
+    or_,
 )
 
 UPLOAD_SESSION_STATE_VALUES = (
@@ -26,6 +28,16 @@ UPLOAD_SESSION_STATE_VALUES = (
     "cancelled",
     "expired",
     "failed",
+)
+
+COMPLETE_UPLOAD_SESSION_STATE_VALUES = (
+    "received",
+    "validating",
+    "duplicate_pending",
+    "publish_pending",
+    "published",
+    "cataloged",
+    "rejected",
 )
 
 
@@ -84,6 +96,17 @@ def define_upload_sessions_table(metadata: MetaData) -> Table:
         CheckConstraint(
             "received_size_bytes <= declared_size_bytes",
             name="ck_upload_sessions_received_size_not_over_declared",
+        ),
+        CheckConstraint(
+            or_(column("state") != "created", column("received_size_bytes") == 0),
+            name="ck_upload_sessions_created_received_size_zero",
+        ),
+        CheckConstraint(
+            or_(
+                ~column("state").in_(COMPLETE_UPLOAD_SESSION_STATE_VALUES),
+                column("received_size_bytes") == column("declared_size_bytes"),
+            ),
+            name="ck_upload_sessions_complete_states_received_size_exact",
         ),
         CheckConstraint(
             "(checksum_algorithm IS NULL AND checksum_hex IS NULL) "

@@ -54,7 +54,7 @@ def test_check_database_ready_succeeds_only_at_head(
     assert _payload(output.out) == {
         "operation": "check-database-ready",
         "state": "ready",
-        "current_revision": "0008",
+        "current_revision": "0009",
     }
     assert str(database_path) not in output.out
 
@@ -224,7 +224,7 @@ def test_check_database_ready_explicitly_disables_dotenv_loading(
         lambda settings: MigrationStatus(
             state="uninitialized",
             current_revision=None,
-            head_revision="0008",
+            head_revision="0009",
         ),
     )
 
@@ -258,7 +258,7 @@ def test_explicit_migrate_operation_remains_available(tmp_path: Path) -> None:
     status = upgrade_database_to_head(FrameNestSettings(database_path=database_path))
 
     assert status.state == "at_head"
-    assert status.current_revision == "0008"
+    assert status.current_revision == "0009"
 
 
 def test_serve_exists_and_runs_existing_server_runtime_with_no_dotenv(

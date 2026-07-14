@@ -10,6 +10,8 @@ import pytest
 
 from framenest.domain.uploads import (
     ALLOWED_UPLOAD_SESSION_TRANSITIONS,
+    COMPLETE_UPLOAD_SESSION_STATES,
+    FrameNestIncompleteUploadSessionError,
     FrameNestUploadChecksumError,
     FrameNestUploadOffsetError,
     FrameNestUploadSessionError,
@@ -20,6 +22,7 @@ from framenest.domain.uploads import (
     UploadSessionId,
     UploadSessionState,
     UploadStorageKey,
+    ensure_upload_session_can_transition,
     ensure_upload_session_transition_allowed,
     is_terminal_upload_session_state,
     validate_sha256_checksum_hex,
@@ -110,6 +113,67 @@ def test_published_transitions_only_to_cataloged_not_failed() -> None:
 def test_size_invariants_are_enforced(declared: Any, received: Any) -> None:
     with pytest.raises(FrameNestUploadSessionError):
         _session(declared_size_bytes=declared, received_size_bytes=received)
+
+
+def test_created_state_requires_zero_received_bytes() -> None:
+    assert _session(state=UploadSessionState.CREATED, received_size_bytes=0).state == (
+        UploadSessionState.CREATED
+    )
+    with pytest.raises(FrameNestUploadSessionError):
+        _session(state=UploadSessionState.CREATED, received_size_bytes=1)
+
+
+@pytest.mark.parametrize("state", sorted(COMPLETE_UPLOAD_SESSION_STATES, key=str))
+def test_complete_states_require_exact_declared_bytes(state: UploadSessionState) -> None:
+    assert (
+        _session(state=state, declared_size_bytes=100, received_size_bytes=100).state
+        == state
+    )
+    with pytest.raises(FrameNestIncompleteUploadSessionError):
+        _session(state=state, declared_size_bytes=100, received_size_bytes=99)
+
+
+@pytest.mark.parametrize(
+    "state",
+    [
+        UploadSessionState.RECEIVING,
+        UploadSessionState.CANCELLED,
+        UploadSessionState.EXPIRED,
+        UploadSessionState.FAILED,
+    ],
+)
+def test_partial_or_complete_progress_states_accept_truthful_offsets(
+    state: UploadSessionState,
+) -> None:
+    assert _session(state=state, received_size_bytes=50).received_size_bytes == 50
+    assert _session(state=state, received_size_bytes=100).received_size_bytes == 100
+
+
+def test_incomplete_receiving_cannot_transition_to_received() -> None:
+    with pytest.raises(FrameNestIncompleteUploadSessionError):
+        ensure_upload_session_can_transition(
+            _session(state=UploadSessionState.RECEIVING, received_size_bytes=99),
+            UploadSessionState.RECEIVED,
+        )
+
+
+def test_complete_receiving_can_transition_to_received_and_later_complete_states() -> None:
+    received = _session(state=UploadSessionState.RECEIVING, received_size_bytes=100)
+    ensure_upload_session_can_transition(received, UploadSessionState.RECEIVED)
+
+    for source, target in (
+        (UploadSessionState.RECEIVED, UploadSessionState.VALIDATING),
+        (UploadSessionState.VALIDATING, UploadSessionState.DUPLICATE_PENDING),
+        (UploadSessionState.VALIDATING, UploadSessionState.PUBLISH_PENDING),
+        (UploadSessionState.VALIDATING, UploadSessionState.REJECTED),
+        (UploadSessionState.DUPLICATE_PENDING, UploadSessionState.PUBLISH_PENDING),
+        (UploadSessionState.PUBLISH_PENDING, UploadSessionState.PUBLISHED),
+        (UploadSessionState.PUBLISHED, UploadSessionState.CATALOGED),
+    ):
+        ensure_upload_session_can_transition(
+            _session(state=source, received_size_bytes=100),
+            target,
+        )
 
 
 @pytest.mark.parametrize(

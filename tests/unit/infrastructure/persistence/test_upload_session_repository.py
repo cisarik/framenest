@@ -10,6 +10,7 @@ import pytest
 import sqlalchemy as sa
 
 from framenest.application.ports.upload_sessions import (
+    IncompleteUploadSessionError,
     InvalidUploadChecksumError,
     InvalidUploadSessionTransitionError,
     UploadOffsetConflictError,
@@ -65,6 +66,16 @@ def _session(
     checksum_hex: str | None = None,
     version: int = 0,
 ) -> UploadSession:
+    if state in {
+        UploadSessionState.RECEIVED,
+        UploadSessionState.VALIDATING,
+        UploadSessionState.DUPLICATE_PENDING,
+        UploadSessionState.PUBLISH_PENDING,
+        UploadSessionState.PUBLISHED,
+        UploadSessionState.CATALOGED,
+        UploadSessionState.REJECTED,
+    } and received_size_bytes == 0:
+        received_size_bytes = declared_size_bytes
     return UploadSession(
         id=session_id or UploadSessionId.new(),
         state=state,
@@ -214,7 +225,7 @@ def test_transition_state_persists_and_rejects_invalid_or_terminal_paths(
     tmp_path: Path,
 ) -> None:
     repository, engine = _repository(tmp_path)
-    session = _session(state=UploadSessionState.RECEIVING)
+    session = _session(state=UploadSessionState.RECEIVING, received_size_bytes=100)
     try:
         repository.create(session)
         received = repository.transition_state(
@@ -292,6 +303,163 @@ def test_transition_state_distinguishes_not_found_wrong_state_and_stale_version(
             )
     finally:
         engine.dispose()
+
+
+def test_incomplete_receiving_to_received_fails_without_mutating_row(tmp_path: Path) -> None:
+    repository, engine = _repository(tmp_path)
+    session = _session(state=UploadSessionState.RECEIVING, received_size_bytes=25, version=2)
+    try:
+        repository.create(session)
+        with pytest.raises(IncompleteUploadSessionError) as error:
+            repository.transition_state(
+                session.id,
+                expected_state=UploadSessionState.RECEIVING,
+                target_state=UploadSessionState.RECEIVED,
+                expected_version=2,
+                updated_at_ms=99,
+            )
+
+        loaded = repository.get(session.id)
+    finally:
+        engine.dispose()
+
+    assert loaded == session
+    assert str(error.value) == "incomplete upload session"
+
+
+def test_complete_receiving_to_received_succeeds(tmp_path: Path) -> None:
+    repository, engine = _repository(tmp_path)
+    session = _session(state=UploadSessionState.RECEIVING, received_size_bytes=100)
+    try:
+        repository.create(session)
+        received = repository.transition_state(
+            session.id,
+            expected_state=UploadSessionState.RECEIVING,
+            target_state=UploadSessionState.RECEIVED,
+            expected_version=0,
+            updated_at_ms=20,
+        )
+    finally:
+        engine.dispose()
+
+    assert received.state == UploadSessionState.RECEIVED
+    assert received.received_size_bytes == received.declared_size_bytes
+    assert received.version == 1
+
+
+def test_stale_version_takes_precedence_over_incomplete_upload(tmp_path: Path) -> None:
+    repository, engine = _repository(tmp_path)
+    session = _session(state=UploadSessionState.RECEIVING, received_size_bytes=25, version=2)
+    try:
+        repository.create(session)
+        with pytest.raises(UploadSessionConcurrencyConflictError):
+            repository.transition_state(
+                session.id,
+                expected_state=UploadSessionState.RECEIVING,
+                target_state=UploadSessionState.RECEIVED,
+                expected_version=1,
+                updated_at_ms=99,
+            )
+    finally:
+        engine.dispose()
+
+
+def test_wrong_state_takes_precedence_over_incomplete_upload(tmp_path: Path) -> None:
+    repository, engine = _repository(tmp_path)
+    session = _session(state=UploadSessionState.CANCELLED, received_size_bytes=25)
+    try:
+        repository.create(session)
+        with pytest.raises(InvalidUploadSessionTransitionError):
+            repository.transition_state(
+                session.id,
+                expected_state=UploadSessionState.RECEIVING,
+                target_state=UploadSessionState.RECEIVED,
+                expected_version=0,
+                updated_at_ms=99,
+            )
+    finally:
+        engine.dispose()
+
+
+@pytest.mark.parametrize(
+    ("source", "target"),
+    [
+        (UploadSessionState.RECEIVED, UploadSessionState.VALIDATING),
+        (UploadSessionState.VALIDATING, UploadSessionState.DUPLICATE_PENDING),
+        (UploadSessionState.VALIDATING, UploadSessionState.PUBLISH_PENDING),
+        (UploadSessionState.VALIDATING, UploadSessionState.REJECTED),
+        (UploadSessionState.DUPLICATE_PENDING, UploadSessionState.PUBLISH_PENDING),
+        (UploadSessionState.PUBLISH_PENDING, UploadSessionState.PUBLISHED),
+        (UploadSessionState.PUBLISHED, UploadSessionState.CATALOGED),
+    ],
+)
+def test_later_complete_target_transitions_reject_incomplete_persisted_rows(
+    tmp_path: Path,
+    source: UploadSessionState,
+    target: UploadSessionState,
+) -> None:
+    repository, engine = _repository(tmp_path)
+    session_id = UploadSessionId.new()
+    try:
+        _insert_raw_upload_session(
+            engine,
+            session_id=session_id,
+            storage_key=f"upload-session-{source.value.replace('_', '-')}",
+            state=source,
+            declared_size_bytes=100,
+            received_size_bytes=25,
+            version=0,
+        )
+        with pytest.raises(IncompleteUploadSessionError):
+            repository.transition_state(
+                session_id,
+                expected_state=source,
+                target_state=target,
+                expected_version=0,
+                updated_at_ms=99,
+            )
+    finally:
+        engine.dispose()
+
+
+@pytest.mark.parametrize(
+    ("source", "target"),
+    [
+        (UploadSessionState.RECEIVED, UploadSessionState.VALIDATING),
+        (UploadSessionState.VALIDATING, UploadSessionState.DUPLICATE_PENDING),
+        (UploadSessionState.VALIDATING, UploadSessionState.PUBLISH_PENDING),
+        (UploadSessionState.VALIDATING, UploadSessionState.REJECTED),
+        (UploadSessionState.DUPLICATE_PENDING, UploadSessionState.PUBLISH_PENDING),
+        (UploadSessionState.PUBLISH_PENDING, UploadSessionState.PUBLISHED),
+        (UploadSessionState.PUBLISHED, UploadSessionState.CATALOGED),
+    ],
+)
+def test_valid_complete_rows_continue_through_transition_graph(
+    tmp_path: Path,
+    source: UploadSessionState,
+    target: UploadSessionState,
+) -> None:
+    repository, engine = _repository(tmp_path)
+    session = _session(
+        storage_key=f"upload-session-valid-{source.value.replace('_', '-')}",
+        state=source,
+        received_size_bytes=100,
+    )
+    try:
+        repository.create(session)
+        transitioned = repository.transition_state(
+            session.id,
+            expected_state=source,
+            target_state=target,
+            expected_version=0,
+            updated_at_ms=20,
+        )
+    finally:
+        engine.dispose()
+
+    assert transitioned.state == target
+    assert transitioned.received_size_bytes == transitioned.declared_size_bytes
+    assert transitioned.version == 1
 
 
 def test_record_completed_checksum_is_guarded_and_idempotent_for_same_digest(
@@ -453,3 +621,61 @@ def _create_at_state(
     session = _session(storage_key=storage_key, state=state)
     repository.create(session)
     return session
+
+
+def _insert_raw_upload_session(
+    engine: sa.Engine,
+    *,
+    session_id: UploadSessionId,
+    storage_key: str,
+    state: UploadSessionState,
+    declared_size_bytes: int,
+    received_size_bytes: int,
+    version: int,
+) -> None:
+    with engine.begin() as connection:
+        connection.execute(sa.text("PRAGMA ignore_check_constraints=ON"))
+        connection.execute(
+            sa.text(
+                """
+                INSERT INTO upload_sessions (
+                    id,
+                    state,
+                    storage_key,
+                    display_filename,
+                    declared_size_bytes,
+                    received_size_bytes,
+                    checksum_algorithm,
+                    checksum_hex,
+                    created_at_ms,
+                    updated_at_ms,
+                    expires_at_ms,
+                    failure_code,
+                    version
+                ) VALUES (
+                    :id,
+                    :state,
+                    :storage_key,
+                    'example.mp4',
+                    :declared_size_bytes,
+                    :received_size_bytes,
+                    NULL,
+                    NULL,
+                    10,
+                    10,
+                    1000,
+                    NULL,
+                    :version
+                )
+                """
+            ),
+            {
+                "id": session_id.to_string(),
+                "state": state.value,
+                "storage_key": storage_key,
+                "declared_size_bytes": declared_size_bytes,
+                "received_size_bytes": received_size_bytes,
+                "version": version,
+            },
+        )
+        connection.execute(sa.text("PRAGMA ignore_check_constraints=OFF"))

@@ -14,7 +14,7 @@ PRODUCTION_VERSIONS_PACKAGE = (
     "framenest.infrastructure.persistence.alembic_environment.versions"
 )
 TARGET_MEDIA_CATALOG_REVISION = "0004"
-CURRENT_HEAD_REVISION = "0008"
+CURRENT_HEAD_REVISION = "0009"
 TARGET_PREVIOUS_REVISION = "0003"
 
 DEVICE_ID = "12345678-1234-4234-9234-123456789abc"
@@ -177,7 +177,7 @@ def test_packaged_migration_resources_include_0004() -> None:
     assert revision.down_revision == TARGET_PREVIOUS_REVISION
 
 
-def test_empty_database_upgrades_to_current_head_revision_0008(tmp_path: Path) -> None:
+def test_empty_database_upgrades_to_current_head_revision_0009(tmp_path: Path) -> None:
     from framenest.infrastructure.persistence.migrations import (
         inspect_database_migration_status,
         upgrade_database_to_head,

@@ -45,6 +45,15 @@ Upload, ingest publication, cataloging, and AI analysis are separate stages:
 - cataloging creates Gallery-visible catalog records;
 - AI analysis remains an explicit later request after successful publication.
 
+Upload-session byte progress is state-specific. A `created` session has zero
+received bytes. `received` and every validation, duplicate-review,
+publication, published, cataloged, and rejected state require
+`received_size_bytes` to equal `declared_size_bytes`. Partial uploads may remain
+in receiving, cancelled, expired, or failed states, but they cannot advance into
+validation, publication, or catalog-ready states. FrameNest enforces this
+invariant in the pure domain model, atomic repository state-transition guards,
+and the SQLite schema.
+
 Clients do not provide server filesystem paths. The server generates opaque
 storage keys and selects any eventual storage location. Display filenames are
 metadata only and are never interpreted as storage paths.

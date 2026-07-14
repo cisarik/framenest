@@ -10,6 +10,7 @@ from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from framenest.application.ports.upload_sessions import (
     FrameNestUploadSessionRepositoryError,
+    IncompleteUploadSessionError,
     InvalidUploadChecksumError,
     InvalidUploadSessionTransitionError,
     UploadOffsetConflictError,
@@ -20,6 +21,7 @@ from framenest.application.ports.upload_sessions import (
     UploadStorageKeyAlreadyExistsError,
 )
 from framenest.domain.uploads import (
+    COMPLETE_UPLOAD_SESSION_STATES,
     FrameNestUploadChecksumError,
     FrameNestUploadOffsetError,
     FrameNestUploadSessionError,
@@ -241,15 +243,19 @@ class SqliteUploadSessionRepository:
             ) from exc
 
         def operation(connection: Connection) -> UploadSession:
+            update_guards = [
+                upload_sessions.c.id == session_id.to_string(),
+                upload_sessions.c.state == expected_state.value,
+                upload_sessions.c.version == expected_version,
+            ]
+            if _target_requires_complete_upload(target_state):
+                update_guards.append(
+                    upload_sessions.c.received_size_bytes
+                    == upload_sessions.c.declared_size_bytes
+                )
             result = connection.execute(
                 update(upload_sessions)
-                .where(
-                    and_(
-                        upload_sessions.c.id == session_id.to_string(),
-                        upload_sessions.c.state == expected_state.value,
-                        upload_sessions.c.version == expected_version,
-                    )
-                )
+                .where(and_(*update_guards))
                 .values(
                     state=target_state.value,
                     updated_at_ms=updated_at_ms,
@@ -266,6 +272,14 @@ class SqliteUploadSessionRepository:
                 raise InvalidUploadSessionTransitionError(
                     "invalid upload session transition"
                 )
+            if int(row["version"]) != expected_version:
+                raise UploadSessionConcurrencyConflictError(
+                    "upload session concurrency conflict"
+                )
+            if _target_requires_complete_upload(target_state) and int(
+                row["received_size_bytes"]
+            ) != int(row["declared_size_bytes"]):
+                raise IncompleteUploadSessionError("incomplete upload session")
             raise UploadSessionConcurrencyConflictError(
                 "upload session concurrency conflict"
             )
@@ -274,6 +288,7 @@ class SqliteUploadSessionRepository:
             return run_in_transaction(self._engine, operation)
         except (
             UploadSessionNotFoundError,
+            IncompleteUploadSessionError,
             InvalidUploadSessionTransitionError,
             UploadSessionConcurrencyConflictError,
         ):
@@ -374,6 +389,10 @@ def _session_from_row(row: Mapping[str, object]) -> UploadSession:
         )
     except (FrameNestUploadSessionError, ValueError) as exc:
         raise FrameNestUploadSessionRepositoryError(_REPOSITORY_FAILURE_MESSAGE) from exc
+
+
+def _target_requires_complete_upload(target_state: UploadSessionState) -> bool:
+    return target_state in COMPLETE_UPLOAD_SESSION_STATES
 
 
 def _validate_non_negative(value: object) -> None:

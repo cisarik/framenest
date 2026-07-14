@@ -10,6 +10,7 @@ import uuid
 
 INVALID_UPLOAD_SESSION_MESSAGE = "Invalid FrameNest upload session."
 INVALID_UPLOAD_TRANSITION_MESSAGE = "Invalid upload session transition."
+INCOMPLETE_UPLOAD_SESSION_MESSAGE = "Incomplete upload session."
 INVALID_UPLOAD_OFFSET_MESSAGE = "Invalid upload offset."
 INVALID_UPLOAD_CHECKSUM_MESSAGE = "Invalid upload checksum."
 
@@ -24,6 +25,10 @@ class FrameNestUploadSessionError(ValueError):
 
 class FrameNestUploadSessionTransitionError(FrameNestUploadSessionError):
     """Sanitized error raised when an upload-session transition is invalid."""
+
+
+class FrameNestIncompleteUploadSessionError(FrameNestUploadSessionTransitionError):
+    """Sanitized error raised when a state requires complete received bytes."""
 
 
 class FrameNestUploadOffsetError(FrameNestUploadSessionError):
@@ -55,6 +60,27 @@ TERMINAL_UPLOAD_SESSION_STATES = frozenset(
     {
         UploadSessionState.CATALOGED,
         UploadSessionState.REJECTED,
+        UploadSessionState.CANCELLED,
+        UploadSessionState.EXPIRED,
+        UploadSessionState.FAILED,
+    }
+)
+
+COMPLETE_UPLOAD_SESSION_STATES = frozenset(
+    {
+        UploadSessionState.RECEIVED,
+        UploadSessionState.VALIDATING,
+        UploadSessionState.DUPLICATE_PENDING,
+        UploadSessionState.PUBLISH_PENDING,
+        UploadSessionState.PUBLISHED,
+        UploadSessionState.CATALOGED,
+        UploadSessionState.REJECTED,
+    }
+)
+
+PARTIAL_OR_COMPLETE_UPLOAD_SESSION_STATES = frozenset(
+    {
+        UploadSessionState.RECEIVING,
         UploadSessionState.CANCELLED,
         UploadSessionState.EXPIRED,
         UploadSessionState.FAILED,
@@ -225,6 +251,11 @@ class UploadSession:
         _validate_non_negative_int(self.received_size_bytes)
         if self.received_size_bytes > self.declared_size_bytes:
             raise FrameNestUploadSessionError(INVALID_UPLOAD_SESSION_MESSAGE)
+        _validate_upload_session_byte_state(
+            state=self.state,
+            declared_size_bytes=self.declared_size_bytes,
+            received_size_bytes=self.received_size_bytes,
+        )
         _validate_checksum_pair(self.checksum_algorithm, self.checksum_hex)
         _validate_non_negative_int(self.created_at_ms)
         _validate_non_negative_int(self.updated_at_ms)
@@ -252,6 +283,18 @@ def ensure_upload_session_transition_allowed(
     """Validate a state transition against the durable upload policy."""
     if target not in ALLOWED_UPLOAD_SESSION_TRANSITIONS[current]:
         raise FrameNestUploadSessionTransitionError(INVALID_UPLOAD_TRANSITION_MESSAGE)
+
+
+def ensure_upload_session_can_transition(
+    session: UploadSession,
+    target: UploadSessionState,
+) -> None:
+    """Validate a state transition and target-state byte completeness."""
+    ensure_upload_session_transition_allowed(session.state, target)
+    if _state_requires_complete_upload(target) and (
+        session.received_size_bytes != session.declared_size_bytes
+    ):
+        raise FrameNestIncompleteUploadSessionError(INCOMPLETE_UPLOAD_SESSION_MESSAGE)
 
 
 def validate_upload_offset_advance(
@@ -282,6 +325,22 @@ def validate_upload_failure_code(value: object) -> str:
     if not isinstance(value, str) or not _FAILURE_CODE_PATTERN.fullmatch(value):
         raise FrameNestUploadSessionError(INVALID_UPLOAD_SESSION_MESSAGE)
     return value
+
+
+def _validate_upload_session_byte_state(
+    *,
+    state: UploadSessionState,
+    declared_size_bytes: int,
+    received_size_bytes: int,
+) -> None:
+    if state is UploadSessionState.CREATED and received_size_bytes != 0:
+        raise FrameNestUploadSessionError(INVALID_UPLOAD_SESSION_MESSAGE)
+    if _state_requires_complete_upload(state) and received_size_bytes != declared_size_bytes:
+        raise FrameNestIncompleteUploadSessionError(INCOMPLETE_UPLOAD_SESSION_MESSAGE)
+
+
+def _state_requires_complete_upload(state: UploadSessionState) -> bool:
+    return state in COMPLETE_UPLOAD_SESSION_STATES
 
 
 def _validate_checksum_pair(algorithm: object, checksum_hex: object) -> None:

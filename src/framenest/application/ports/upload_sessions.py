@@ -27,6 +27,10 @@ class InvalidUploadSessionTransitionError(FrameNestUploadSessionRepositoryError)
     """Raised when an upload session cannot enter the requested state."""
 
 
+class IncompleteUploadSessionError(FrameNestUploadSessionRepositoryError):
+    """Raised when a state transition requires complete received bytes."""
+
+
 class UploadOffsetConflictError(FrameNestUploadSessionRepositoryError):
     """Raised when the expected byte offset is stale."""
 
