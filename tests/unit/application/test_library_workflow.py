@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from framenest.application.library_scan import (
     LibraryFilesystemScanResult,
     LibraryScanCandidate,
@@ -14,6 +16,7 @@ from framenest.application.library_workflow import (
     LibraryWorkflowDeviceSelectionRequiredError,
     LibraryWorkflowLibrarySelectionRequiredError,
     LibraryWorkflowNoLibraryError,
+    LibraryWorkflowReservedRootConflictError,
     ServerLibraryWorkflow,
 )
 from framenest.domain import Device, DeviceId, Library, LibraryId, LibraryPathFlavor, LibraryRoot, MediaId, MediaLocationId
@@ -154,13 +157,20 @@ def _workflow(
     libraries: tuple[Library, ...] = (),
     scanner: _Scanner | None = None,
     media: _MediaRepository | None = None,
+    reserved_roots: tuple[str, ...] = (),
 ) -> tuple[ServerLibraryWorkflow, _DeviceRepository, _LibraryRepository, _MediaRepository, _Scanner]:
     device_repository = _DeviceRepository(devices)
     library_repository = _LibraryRepository(libraries)
     media_repository = media or _MediaRepository()
     selected_scanner = scanner or _Scanner()
     return (
-        ServerLibraryWorkflow(device_repository, library_repository, media_repository, selected_scanner),
+        ServerLibraryWorkflow(
+            device_repository,
+            library_repository,
+            media_repository,
+            selected_scanner,
+            reserved_roots=tuple(Path(path) for path in reserved_roots),
+        ),
         device_repository,
         library_repository,
         media_repository,
@@ -251,6 +261,37 @@ def test_existing_canonical_root_is_reused_without_duplicate_library() -> None:
     assert plan.library.id == existing.id
     assert libraries.list_all() == (existing,)
     assert summary.library.id == existing.id
+
+
+def test_reserved_quarantine_root_overlap_rejects_future_library_registration() -> None:
+    workflow, _, _, _, scanner = _workflow(reserved_roots=("/tmp/library/quarantine",))
+
+    for root in (
+        _root("/tmp/library"),
+        _root("/tmp/library/quarantine"),
+        _root("/tmp/library/quarantine/nested"),
+    ):
+        try:
+            workflow.plan_add(root=root, display_name="Imported", limits=default_scan_limits())
+        except LibraryWorkflowReservedRootConflictError:
+            pass
+        else:
+            raise AssertionError("reserved root overlap must be rejected")
+
+    assert scanner.calls == 0
+
+
+def test_non_overlapping_reserved_root_preserves_valid_registration() -> None:
+    workflow, _, _, _, scanner = _workflow(reserved_roots=("/tmp/quarantine",))
+
+    plan = workflow.plan_add(
+        root=_root("/tmp/library"),
+        display_name="Imported",
+        limits=default_scan_limits(),
+    )
+
+    assert plan.library.root.path == "/tmp/library"
+    assert scanner.calls == 1
 
 
 def test_repeating_add_and_refresh_create_no_duplicates_and_refresh_imports_only_new_candidate() -> None:

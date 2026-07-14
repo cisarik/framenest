@@ -80,6 +80,18 @@ that appears after an initial absence check. Restore writes only to a new
 absent destination and does not replace production, run migrations, start
 services, or prove readiness.
 
+The resumable upload transport is trusted-loopback MVP functionality, not a
+public upload service. Upload endpoints are disabled until
+`FRAMENEST_UPLOAD_QUARANTINE_ROOT` points to a pre-existing absolute
+non-symlink quarantine directory. That directory must not overlap registered
+media library roots or the Gallery preview cache. Upload requests use
+server-generated session and storage identities, stream bytes directly to
+quarantine, expose no storage key or path, and stop at the durable `received`
+state. Uploaded bytes are untrusted and are not validated, published, cataloged,
+served, displayed, or sent to AI providers in this slice. Browser mutation
+requests with an `Origin` header must match the effective same origin; this is a
+bounded loopback protection and not authentication or authorization.
+
 Avoid exposing:
 
 - Home-directory paths when they are not necessary.

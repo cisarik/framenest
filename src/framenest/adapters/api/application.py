@@ -40,6 +40,10 @@ from framenest.adapters.api.media_suggestion_api import (
     MediaSuggestionStatusRead,
     create_media_suggestion_api_router,
 )
+from framenest.adapters.api.upload_api import (
+    UploadApiDependencies,
+    create_upload_api_router,
+)
 from framenest.application.library_scan import PreviewLibraryScan
 from framenest.application.media_catalog import ListMediaCatalog
 from framenest.application.media_import import ImportMediaFromScanCandidate
@@ -54,6 +58,7 @@ from framenest.application.media_content import ResolveMediaContent
 from framenest.application.gallery_preview import GalleryPreviewService
 from framenest.application.media_suggestion import PreviewMediaSuggestion
 from framenest.application.media_suggestion import PreviewImportedMediaSuggestion
+from framenest.application.upload_transport import UploadTransportLimits, UploadTransportService
 from framenest.adapters.api.library_api import (
     LibraryApiDependencies,
     create_library_api_router,
@@ -63,6 +68,7 @@ from framenest.configuration import FrameNestSettings, load_settings
 from framenest.infrastructure.ai.registry import ai_provider_persisted_status_reader, resolve_ai_provider
 from framenest.infrastructure.filesystem.library_scanner import LocalLibraryScanner
 from framenest.infrastructure.filesystem.media_content import LocalMediaContentReader
+from framenest.infrastructure.filesystem.quarantine_storage import FilesystemQuarantineStorage
 from framenest.infrastructure.media_analysis import LocalMediaAnalysisAdapter
 from framenest.infrastructure.media_analysis.gallery_preview import (
     FilesystemGalleryPreviewCache,
@@ -76,6 +82,9 @@ from framenest.infrastructure.persistence.media_catalog_repository import (
 )
 from framenest.infrastructure.persistence.media_metadata_repository import (
     SqliteMediaMetadataRepository,
+)
+from framenest.infrastructure.persistence.upload_session_repository import (
+    SqliteUploadSessionRepository,
 )
 
 
@@ -112,6 +121,7 @@ def create_app(
     media_content_api_dependencies: MediaContentApiDependencies | None = None,
     gallery_preview_api_dependencies: GalleryPreviewApiDependencies | None = None,
     media_suggestion_api_dependencies: MediaSuggestionApiDependencies | None = None,
+    upload_api_dependencies: UploadApiDependencies | None = None,
 ) -> FastAPI:
     resolved_settings = settings if settings is not None else load_settings()
     owned_engine = None
@@ -119,6 +129,7 @@ def create_app(
     owned_media_repository = None
     owned_media_catalog_repository = None
     owned_media_metadata_repository = None
+    owned_upload_session_repository = None
     if (
         library_api_dependencies is None
         or media_import_api_dependencies is None
@@ -128,12 +139,14 @@ def create_app(
         or media_content_api_dependencies is None
         or gallery_preview_api_dependencies is None
         or media_suggestion_api_dependencies is None
+        or upload_api_dependencies is None
     ):
         owned_engine = create_sqlite_engine(resolved_settings.database_path)
         owned_library_repository = SqliteLibraryRepository(owned_engine)
         owned_media_repository = SqliteMediaRepository(owned_engine)
         owned_media_catalog_repository = SqliteMediaCatalogRepository(owned_engine)
         owned_media_metadata_repository = SqliteMediaMetadataRepository(owned_engine)
+        owned_upload_session_repository = SqliteUploadSessionRepository(owned_engine)
     if library_api_dependencies is None:
         assert owned_library_repository is not None
         library_api_dependencies = LibraryApiDependencies(
@@ -239,6 +252,31 @@ def create_app(
             last_connection_test=_last_test_payload(resolved_ai.last_test),
             read_status=_media_suggestion_status_reader(resolved_ai),
         )
+    if upload_api_dependencies is None:
+        assert owned_upload_session_repository is not None
+        assert owned_library_repository is not None
+        storage = (
+            None
+            if resolved_settings.upload_quarantine_root is None
+            else FilesystemQuarantineStorage(resolved_settings.upload_quarantine_root)
+        )
+        upload_api_dependencies = UploadApiDependencies(
+            transport=UploadTransportService(
+                owned_upload_session_repository,
+                storage,
+                owned_library_repository,
+                UploadTransportLimits(
+                    max_total_bytes=resolved_settings.upload_max_total_bytes,
+                    max_patch_bytes=resolved_settings.upload_max_patch_bytes,
+                    session_ttl_seconds=resolved_settings.upload_session_ttl_seconds,
+                    min_free_space_reserve_bytes=(
+                        resolved_settings.upload_min_free_space_reserve_bytes
+                    ),
+                ),
+                quarantine_root=resolved_settings.upload_quarantine_root,
+                preview_cache_root=resolved_settings.gallery_preview_cache_path,
+            ),
+        )
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
@@ -258,6 +296,7 @@ def create_app(
     app.include_router(create_media_content_api_router(media_content_api_dependencies))
     app.include_router(create_gallery_preview_api_router(gallery_preview_api_dependencies))
     app.include_router(create_media_suggestion_api_router(media_suggestion_api_dependencies))
+    app.include_router(create_upload_api_router(upload_api_dependencies))
 
     @app.get("/", response_class=HTMLResponse)
     def root() -> HTMLResponse:

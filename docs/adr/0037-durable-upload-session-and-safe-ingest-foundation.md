@@ -29,9 +29,21 @@ upload endpoint, but it is not completed authentication or authorization.
 FrameNest will use FrameNest-owned durable upload sessions as the architecture
 for future media upload and safe ingest.
 
-The first small transfer may be a single request, but it must behave as one
-offset-checked session write. Later streamed and resumable transports will use
-the same durable session identity, offset, state, and concurrency guards.
+The first transport uses a FrameNest-owned offset protocol:
+
+```text
+POST /api/uploads
+PATCH /api/uploads/{upload_id}
+GET /api/uploads/{upload_id}
+POST /api/uploads/{upload_id}/complete
+DELETE /api/uploads/{upload_id}
+```
+
+`PATCH` requests use `application/offset+octet-stream`, `Upload-Offset`, and
+`Content-Length`. Request bytes are streamed into quarantine incrementally and
+the durable offset is advanced only after the intended bytes are flushed and
+fsynced. The client never selects session identity, storage identity, or a
+server path.
 
 `tus` is a useful design reference and possible future compatibility target.
 FrameNest will not add a tus server, sidecar, tus dependency, or external upload
@@ -58,18 +70,38 @@ Clients do not provide server filesystem paths. The server generates opaque
 storage keys and selects any eventual storage location. Display filenames are
 metadata only and are never interpreted as storage paths.
 
-Future quarantine storage must be outside served roots and outside authoritative
-media roots. A quarantined object is not Gallery-visible and is not available
-to provider-backed analysis.
+Quarantine storage is optional configuration. When it is absent or unsafe, the
+upload API fails closed. When configured, quarantine storage must be a
+pre-existing absolute non-symlink directory outside served roots, outside
+registered library roots, and outside the preview cache root. A quarantined
+object is not Gallery-visible and is not available to provider-backed analysis.
 
-The initial duplicate identity is SHA-256 plus exact byte size. This identity
-is sufficient for first duplicate review but does not decide publication,
-deduplication UI, or catalog merge policy by itself.
+The planned duplicate identity is SHA-256 plus exact byte size. That later
+identity is sufficient for first duplicate review but does not decide
+publication, deduplication UI, or catalog merge policy by itself.
 
 Filesystem mutation and SQLite mutation are not one atomic transaction.
 `published` is therefore a durable reconciliation boundary before `cataloged`.
 Once publication succeeds, a later cataloging failure must not be collapsed into
 a pre-publication failed upload. No Gallery visibility exists before cataloging.
+
+The quarantine transport uses an explicit file/database recovery policy. If a
+staged file is ahead of the persisted offset after a crash, unacknowledged bytes
+are truncated before accepting more data. If the file is behind the persisted
+offset, FrameNest fails closed and marks the session failed when the existing
+transition graph allows it. Disconnects, write failures, and repository
+conflicts roll the staged file back to the authoritative offset before returning
+a sanitized error.
+
+Current production configuration uses one Uvicorn worker. This slice serializes
+same-session upload writers with an in-process per-session lock while leaving
+unrelated sessions independent. Multi-process concurrent upload writers are not
+enabled by this decision and require a later interprocess locking decision.
+
+Browser-origin protection is bounded to current non-proxied loopback behavior:
+mutation requests with no `Origin` header are accepted for trusted local clients,
+and browser requests with an `Origin` header must match the effective same
+origin. This is not authentication or authorization.
 
 Provider access is forbidden before successful publication and an explicit
 analysis request.
@@ -78,12 +110,13 @@ analysis request.
 
 1. Add the durable upload-session schema, domain state machine, and SQLite
    repository.
-2. Add streamed small-file transport that writes through the same offset guard.
-3. Add quarantine filesystem storage and checksum calculation.
-4. Add duplicate review and publication staging.
+2. Add resumable streamed transport into quarantine through the same offset
+   guard.
+3. Add checksum calculation and duplicate review.
+4. Add duplicate review UX and publication staging.
 5. Add catalog creation from published objects.
 6. Add reconciliation for `published` records not yet `cataloged`.
-7. Add resumable transport compatibility and optional tus alignment if needed.
+7. Add optional tus alignment if needed.
 
 ## Consequences
 
@@ -97,8 +130,8 @@ analysis request.
 
 ### Costs And Limitations
 
-- The first slice stores upload-session state before any transport exists.
-- Filesystem cleanup and reconciliation are deferred.
+- The upload transport stops at the durable `received` boundary.
+- Scheduled abandoned-upload cleanup is deferred.
 - Duplicate review needs later product and UI decisions.
 - Authentication and authorization remain unresolved.
 
@@ -127,11 +160,8 @@ Rejected. Gallery visibility begins only after successful cataloging.
 
 This ADR does not implement or decide:
 
-- HTTP upload routes;
+- browser upload UI;
 - multipart parsing;
-- streaming or chunk transport;
-- quarantine directory layout;
-- filesystem writes;
 - checksum calculation from files;
 - duplicate review UX;
 - publication mechanics;

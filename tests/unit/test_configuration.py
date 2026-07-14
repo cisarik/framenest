@@ -20,6 +20,11 @@ FRAMENEST_ENV_VARS = (
     "FRAMENEST_PORT",
     "FRAMENEST_API_KEY",
     "FRAMENEST_DATABASE_PATH",
+    "FRAMENEST_UPLOAD_QUARANTINE_ROOT",
+    "FRAMENEST_UPLOAD_MAX_TOTAL_BYTES",
+    "FRAMENEST_UPLOAD_MAX_PATCH_BYTES",
+    "FRAMENEST_UPLOAD_SESSION_TTL_SECONDS",
+    "FRAMENEST_UPLOAD_MIN_FREE_SPACE_RESERVE_BYTES",
     "FRAMENEST_AI_PROVIDER_ID",
     "FRAMENEST_AI_MODEL_ID",
 )
@@ -126,6 +131,42 @@ def test_process_environment_overrides_temporary_env_file_database_path(
     settings = load_settings(env_file=env_file)
 
     assert settings.database_path == process_path
+
+
+def test_upload_quarantine_settings_are_optional_bounded_and_sanitized(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    root = tmp_path / "quarantine"
+    monkeypatch.setenv("FRAMENEST_UPLOAD_QUARANTINE_ROOT", str(root))
+    monkeypatch.setenv("FRAMENEST_UPLOAD_MAX_TOTAL_BYTES", "123")
+    monkeypatch.setenv("FRAMENEST_UPLOAD_MAX_PATCH_BYTES", "12")
+    monkeypatch.setenv("FRAMENEST_UPLOAD_SESSION_TTL_SECONDS", "30")
+    monkeypatch.setenv("FRAMENEST_UPLOAD_MIN_FREE_SPACE_RESERVE_BYTES", "7")
+
+    settings = load_settings(env_file=None)
+
+    assert settings.upload_quarantine_root == root
+    assert settings.upload_max_total_bytes == 123
+    assert settings.upload_max_patch_bytes == 12
+    assert settings.upload_session_ttl_seconds == 30
+    assert settings.upload_min_free_space_reserve_bytes == 7
+    assert str(root) not in f"{settings!r}{settings!s}"
+
+
+def test_relative_upload_quarantine_root_is_rejected_without_path_echo(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    supplied = "relative/private/quarantine"
+    monkeypatch.setenv("FRAMENEST_UPLOAD_QUARANTINE_ROOT", supplied)
+
+    with pytest.raises(ValidationError) as exc_info:
+        load_settings(env_file=None)
+
+    assert supplied not in str(exc_info.value)
 
 
 def test_database_path_expands_user_and_normalizes_to_absolute_path(

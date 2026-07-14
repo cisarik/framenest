@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 
 from framenest.application.library_scan import (
     LibraryScanLimits,
@@ -15,6 +16,7 @@ from framenest.application.ports.library_repository import LibraryRepository
 from framenest.application.ports.media_repository import MediaRepository
 from framenest.domain import Device, DeviceId, FrameNestDeviceError, FrameNestLibraryError, Library, LibraryId, LibraryRoot
 from framenest.domain.media import MediaLocationAvailability, MediaRelativePath
+from framenest.application.root_paths import roots_overlap
 
 SERVER_DEVICE_DISPLAY_NAME = "FrameNest Server"
 
@@ -25,6 +27,10 @@ class LibraryWorkflowError(RuntimeError):
 
 class LibraryWorkflowInvalidInputError(LibraryWorkflowError):
     """Raised when workflow input is invalid."""
+
+
+class LibraryWorkflowReservedRootConflictError(LibraryWorkflowError):
+    """Raised when a requested library root overlaps a reserved server root."""
 
 
 class LibraryWorkflowDeviceSelectionRequiredError(LibraryWorkflowError):
@@ -95,11 +101,13 @@ class ServerLibraryWorkflow:
         library_repository: LibraryRepository,
         media_repository: MediaRepository,
         scanner: object,
+        reserved_roots: tuple[Path, ...] = (),
     ) -> None:
         self._device_repository = device_repository
         self._library_repository = library_repository
         self._media_repository = media_repository
         self._scanner = scanner
+        self._reserved_roots = reserved_roots
 
     def status(self) -> LibraryWorkflowStatus:
         devices = self._device_repository.list_all()
@@ -207,10 +215,16 @@ class ServerLibraryWorkflow:
         raise LibraryWorkflowLibrarySelectionRequiredError()
 
     def _find_library_by_root(self, root: LibraryRoot) -> Library | None:
+        self._ensure_not_reserved_root(root)
         for library in self._library_repository.list_all():
             if library.root == root:
                 return library
         return None
+
+    def _ensure_not_reserved_root(self, root: LibraryRoot) -> None:
+        for reserved in self._reserved_roots:
+            if roots_overlap(Path(root.path), reserved):
+                raise LibraryWorkflowReservedRootConflictError()
 
     def _preview(self, library_id: LibraryId, limits: LibraryScanLimits) -> LibraryScanPreviewResult:
         return PreviewLibraryScan(self._library_repository, self._scanner).execute(library_id, limits)

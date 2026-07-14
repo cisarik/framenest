@@ -1,11 +1,12 @@
-"""Negative architecture contracts for the upload-session foundation."""
+"""Negative architecture contracts for quarantine upload transport."""
 
 from __future__ import annotations
 
 import ast
 from pathlib import Path
+import tomllib
 
-from fastapi.routing import APIRoute
+from fastapi.testclient import TestClient
 
 from framenest.adapters.api.application import create_app
 
@@ -21,14 +22,29 @@ UPLOAD_FOUNDATION_FILES = (
     / "upload_session_repository.py",
     REPOSITORY_ROOT / "src" / "framenest" / "infrastructure" / "persistence" / "upload_schema.py",
 )
+UPLOAD_TRANSPORT_FILES = (
+    REPOSITORY_ROOT / "src" / "framenest" / "application" / "upload_transport.py",
+    REPOSITORY_ROOT / "src" / "framenest" / "application" / "ports" / "quarantine_storage.py",
+    REPOSITORY_ROOT / "src" / "framenest" / "adapters" / "api" / "upload_api.py",
+    REPOSITORY_ROOT
+    / "src"
+    / "framenest"
+    / "infrastructure"
+    / "filesystem"
+    / "quarantine_storage.py",
+)
 
 
-def test_upload_session_foundation_exposes_no_upload_route() -> None:
-    app = create_app()
-    routes = [route for route in app.routes if isinstance(route, APIRoute)]
+def test_upload_transport_routes_exist_but_fail_closed_when_unconfigured() -> None:
+    client = TestClient(create_app())
 
-    assert all("upload" not in route.path.lower() for route in routes)
-    assert all("upload" not in route.name.lower() for route in routes)
+    response = client.post(
+        "/api/uploads",
+        json={"display_filename": "example.gif", "declared_size_bytes": 1},
+    )
+
+    assert response.status_code == 503
+    assert response.json()["error"]["code"] == "UPLOAD_CAPABILITY_NOT_CONFIGURED"
 
 
 def test_upload_session_foundation_contains_no_media_filesystem_or_provider_calls() -> None:
@@ -78,3 +94,39 @@ def test_upload_session_foundation_does_not_insert_catalog_or_analysis_state() -
     assert "media_analysis" not in combined
     assert "suggestion" not in combined
     assert "provider" not in combined
+
+
+def test_upload_transport_uses_no_multipart_body_buffering_or_media_parser() -> None:
+    combined = "\n".join(path.read_text(encoding="utf-8") for path in UPLOAD_TRANSPORT_FILES)
+
+    assert "multipart" not in combined.lower()
+    assert "request.body(" not in combined
+    assert "PIL" not in combined
+    assert "ffprobe" not in combined
+    assert "ffmpeg" not in combined
+    assert "hashlib" not in combined
+    assert "logical_media" not in combined
+    assert "physical_media_locations" not in combined
+    assert "media_metadata" not in combined
+    assert "provider" not in combined.lower()
+
+
+def test_upload_transport_adds_no_migration_or_dependency() -> None:
+    versions = (
+        REPOSITORY_ROOT
+        / "src"
+        / "framenest"
+        / "infrastructure"
+        / "persistence"
+        / "alembic_environment"
+        / "versions"
+    )
+
+    assert not versions.joinpath("0010_upload_transport.py").exists()
+    pyproject = tomllib.loads((REPOSITORY_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    dependencies = "\n".join(pyproject["project"]["dependencies"])
+    assert "python-multipart" not in dependencies
+
+    lock = tomllib.loads((REPOSITORY_ROOT / "poetry.lock").read_text(encoding="utf-8"))
+    package_names = {package["name"] for package in lock["package"]}
+    assert "python-multipart" not in package_names

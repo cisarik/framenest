@@ -14,6 +14,10 @@ DEFAULT_ENV_FILE = Path(".env")
 DEVELOPMENT_DATABASE_DIRECTORY = "framenest-development"
 DEVELOPMENT_DATABASE_FILENAME = "catalog.sqlite3"
 DEVELOPMENT_GALLERY_PREVIEW_DIRECTORY = "gallery-previews"
+DEFAULT_UPLOAD_MAX_TOTAL_BYTES = 1_073_741_824
+DEFAULT_UPLOAD_MAX_PATCH_BYTES = 8_388_608
+DEFAULT_UPLOAD_SESSION_TTL_SECONDS = 86_400
+DEFAULT_UPLOAD_MIN_FREE_SPACE_RESERVE_BYTES = 67_108_864
 SUPPORTED_AI_PROVIDER_IDS = frozenset({"nvidia-nim", "vercel-ai-gateway"})
 
 
@@ -71,6 +75,17 @@ class FrameNestSettings(BaseSettings):
         default_factory=_default_gallery_preview_cache_path,
         repr=False,
     )
+    upload_quarantine_root: Path | None = Field(default=None, repr=False)
+    upload_max_total_bytes: int = Field(default=DEFAULT_UPLOAD_MAX_TOTAL_BYTES, gt=0)
+    upload_max_patch_bytes: int = Field(default=DEFAULT_UPLOAD_MAX_PATCH_BYTES, gt=0)
+    upload_session_ttl_seconds: int = Field(
+        default=DEFAULT_UPLOAD_SESSION_TTL_SECONDS,
+        gt=0,
+    )
+    upload_min_free_space_reserve_bytes: int = Field(
+        default=DEFAULT_UPLOAD_MIN_FREE_SPACE_RESERVE_BYTES,
+        ge=0,
+    )
     ai_provider_id: str | None = Field(default=None)
     ai_model_id: str | None = Field(default=None)
 
@@ -95,6 +110,16 @@ class FrameNestSettings(BaseSettings):
             return _normalize_absolute_path(value)
         except ValueError as exc:
             raise ValueError("gallery preview cache path must be an absolute path") from exc
+
+    @field_validator("upload_quarantine_root", mode="before")
+    @classmethod
+    def validate_upload_quarantine_root(cls, value: Any) -> Path | None:
+        if value is None or value == "":
+            return None
+        try:
+            return _normalize_absolute_path(value)
+        except ValueError as exc:
+            raise ValueError("upload quarantine root must be an absolute path") from exc
 
     @field_validator("ai_provider_id")
     @classmethod

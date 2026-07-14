@@ -1,0 +1,401 @@
+"""FastAPI routes for resumable quarantine upload transport."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+from fastapi import APIRouter, Request
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, UUID4, field_validator
+
+from framenest.application.upload_transport import (
+    UploadBodyLengthMismatchError,
+    UploadCapabilityNotConfiguredError,
+    UploadChunkTooLargeError,
+    UploadConcurrencyConflictError,
+    UploadInsufficientStorageError,
+    UploadInvalidMetadataError,
+    UploadInvalidOffsetError,
+    UploadOffsetConflictTransportError,
+    UploadQuarantineStateInconsistentError,
+    UploadQuarantineUnavailableError,
+    UploadSessionExpiredError,
+    UploadSessionNotFoundTransportError,
+    UploadSessionSnapshot,
+    UploadSessionStateConflictError,
+    UploadTooLargeError,
+)
+from framenest.domain.uploads import FrameNestUploadSessionError, UploadSessionId
+
+UPLOAD_CAPABILITY_NOT_CONFIGURED = "UPLOAD_CAPABILITY_NOT_CONFIGURED"
+UPLOAD_SESSION_NOT_FOUND = "UPLOAD_SESSION_NOT_FOUND"
+INVALID_UPLOAD_METADATA = "INVALID_UPLOAD_METADATA"
+UPLOAD_TOO_LARGE = "UPLOAD_TOO_LARGE"
+UPLOAD_CHUNK_TOO_LARGE = "UPLOAD_CHUNK_TOO_LARGE"
+INVALID_UPLOAD_CONTENT_TYPE = "INVALID_UPLOAD_CONTENT_TYPE"
+INVALID_UPLOAD_CONTENT_LENGTH = "INVALID_UPLOAD_CONTENT_LENGTH"
+INVALID_UPLOAD_OFFSET = "INVALID_UPLOAD_OFFSET"
+UPLOAD_OFFSET_CONFLICT = "UPLOAD_OFFSET_CONFLICT"
+UPLOAD_SESSION_STATE_CONFLICT = "UPLOAD_SESSION_STATE_CONFLICT"
+UPLOAD_SESSION_EXPIRED = "UPLOAD_SESSION_EXPIRED"
+INSUFFICIENT_QUARANTINE_STORAGE = "INSUFFICIENT_QUARANTINE_STORAGE"
+UPLOAD_BODY_LENGTH_MISMATCH = "UPLOAD_BODY_LENGTH_MISMATCH"
+QUARANTINE_STORAGE_UNAVAILABLE = "QUARANTINE_STORAGE_UNAVAILABLE"
+QUARANTINE_STATE_INCONSISTENT = "QUARANTINE_STATE_INCONSISTENT"
+UPLOAD_CONCURRENCY_CONFLICT = "UPLOAD_CONCURRENCY_CONFLICT"
+UPLOAD_ORIGIN_FORBIDDEN = "UPLOAD_ORIGIN_FORBIDDEN"
+
+_PATCH_MEDIA_TYPE = "application/offset+octet-stream"
+
+
+class ErrorBody(BaseModel):
+    code: str
+    message: str
+    current_offset: int | None = None
+
+
+class ErrorResponse(BaseModel):
+    error: ErrorBody
+
+
+class UploadCreateRequest(BaseModel):
+    display_filename: str
+    declared_size_bytes: int
+
+    @field_validator("display_filename")
+    @classmethod
+    def validate_display_filename(cls, value: str) -> str:
+        if value != value.strip():
+            raise ValueError("invalid upload metadata")
+        return value
+
+
+class UploadSessionResponse(BaseModel):
+    id: str
+    state: str
+    display_filename: str
+    declared_size_bytes: int
+    received_size_bytes: int
+    expires_at: int
+
+
+@dataclass(frozen=True, slots=True)
+class UploadApiDependencies:
+    """Injected dependencies for quarantine upload routes."""
+
+    transport: object
+
+
+def create_upload_api_router(dependencies: UploadApiDependencies) -> APIRouter:
+    """Create the upload transport API router."""
+    router = APIRouter()
+
+    @router.post(
+        "/api/uploads",
+        response_model=UploadSessionResponse,
+        status_code=201,
+        responses={
+            400: {"model": ErrorResponse},
+            409: {"model": ErrorResponse},
+            413: {"model": ErrorResponse},
+            503: {"model": ErrorResponse},
+            507: {"model": ErrorResponse},
+        },
+    )
+    def create_upload(
+        request: Request,
+        payload: UploadCreateRequest,
+    ) -> UploadSessionResponse | JSONResponse:
+        origin_error = _reject_cross_origin_mutation(request)
+        if origin_error is not None:
+            return origin_error
+        try:
+            snapshot = dependencies.transport.create_session(
+                display_filename=payload.display_filename,
+                declared_size_bytes=payload.declared_size_bytes,
+            )
+        except Exception as exc:
+            mapped = _map_error(exc)
+            if mapped is not None:
+                return mapped
+            return _error_response(
+                503,
+                QUARANTINE_STORAGE_UNAVAILABLE,
+                "Quarantine storage is unavailable.",
+            )
+        return _snapshot_response(snapshot)
+
+    @router.get(
+        "/api/uploads/{upload_id}",
+        response_model=UploadSessionResponse,
+        responses={404: {"model": ErrorResponse}, 503: {"model": ErrorResponse}},
+    )
+    def upload_status(upload_id: UUID4) -> UploadSessionResponse | JSONResponse:
+        try:
+            snapshot = dependencies.transport.get_status(_session_id(upload_id))
+        except Exception as exc:
+            mapped = _map_error(exc)
+            if mapped is not None:
+                return mapped
+            return _error_response(
+                503,
+                QUARANTINE_STORAGE_UNAVAILABLE,
+                "Quarantine storage is unavailable.",
+            )
+        return _snapshot_response(snapshot)
+
+    @router.patch(
+        "/api/uploads/{upload_id}",
+        response_model=UploadSessionResponse,
+        responses={
+            400: {"model": ErrorResponse},
+            403: {"model": ErrorResponse},
+            404: {"model": ErrorResponse},
+            409: {"model": ErrorResponse},
+            413: {"model": ErrorResponse},
+            503: {"model": ErrorResponse},
+            507: {"model": ErrorResponse},
+        },
+    )
+    async def patch_upload(
+        upload_id: UUID4,
+        request: Request,
+    ) -> UploadSessionResponse | JSONResponse:
+        origin_error = _reject_cross_origin_mutation(request)
+        if origin_error is not None:
+            return origin_error
+        if request.headers.get("content-type", "").split(";", 1)[0].strip().lower() != (
+            _PATCH_MEDIA_TYPE
+        ):
+            return _error_response(
+                400,
+                INVALID_UPLOAD_CONTENT_TYPE,
+                "Invalid upload content type.",
+            )
+        content_length = _parse_content_length(request)
+        if isinstance(content_length, JSONResponse):
+            return content_length
+        upload_offset = _parse_upload_offset(request)
+        if isinstance(upload_offset, JSONResponse):
+            return upload_offset
+        try:
+            snapshot = await dependencies.transport.receive_chunk(
+                _session_id(upload_id),
+                upload_offset=upload_offset,
+                content_length=content_length,
+                body=request.stream(),
+            )
+        except Exception as exc:
+            mapped = _map_error(exc)
+            if mapped is not None:
+                return mapped
+            return _error_response(
+                503,
+                QUARANTINE_STORAGE_UNAVAILABLE,
+                "Quarantine storage is unavailable.",
+            )
+        return _snapshot_response(snapshot)
+
+    @router.post(
+        "/api/uploads/{upload_id}/complete",
+        response_model=UploadSessionResponse,
+        responses={
+            403: {"model": ErrorResponse},
+            404: {"model": ErrorResponse},
+            409: {"model": ErrorResponse},
+            503: {"model": ErrorResponse},
+        },
+    )
+    async def complete_upload(
+        upload_id: UUID4,
+        request: Request,
+    ) -> UploadSessionResponse | JSONResponse:
+        origin_error = _reject_cross_origin_mutation(request)
+        if origin_error is not None:
+            return origin_error
+        try:
+            snapshot = await dependencies.transport.complete(_session_id(upload_id))
+        except Exception as exc:
+            mapped = _map_error(exc)
+            if mapped is not None:
+                return mapped
+            return _error_response(
+                503,
+                QUARANTINE_STORAGE_UNAVAILABLE,
+                "Quarantine storage is unavailable.",
+            )
+        return _snapshot_response(snapshot)
+
+    @router.delete(
+        "/api/uploads/{upload_id}",
+        response_model=UploadSessionResponse,
+        responses={
+            403: {"model": ErrorResponse},
+            404: {"model": ErrorResponse},
+            409: {"model": ErrorResponse},
+            503: {"model": ErrorResponse},
+        },
+    )
+    async def cancel_upload(
+        upload_id: UUID4,
+        request: Request,
+    ) -> UploadSessionResponse | JSONResponse:
+        origin_error = _reject_cross_origin_mutation(request)
+        if origin_error is not None:
+            return origin_error
+        try:
+            snapshot = await dependencies.transport.cancel(_session_id(upload_id))
+        except Exception as exc:
+            mapped = _map_error(exc)
+            if mapped is not None:
+                return mapped
+            return _error_response(
+                503,
+                QUARANTINE_STORAGE_UNAVAILABLE,
+                "Quarantine storage is unavailable.",
+            )
+        return _snapshot_response(snapshot)
+
+    return router
+
+
+def _session_id(upload_id: UUID4) -> UploadSessionId:
+    try:
+        return UploadSessionId.from_string(str(upload_id))
+    except FrameNestUploadSessionError:
+        raise UploadSessionNotFoundTransportError("upload session not found") from None
+
+
+def _parse_content_length(request: Request) -> int | JSONResponse:
+    raw = request.headers.get("content-length")
+    if raw is None:
+        return _error_response(
+            400,
+            INVALID_UPLOAD_CONTENT_LENGTH,
+            "Missing or invalid upload content length.",
+        )
+    try:
+        parsed = int(raw)
+    except ValueError:
+        return _error_response(
+            400,
+            INVALID_UPLOAD_CONTENT_LENGTH,
+            "Missing or invalid upload content length.",
+        )
+    if parsed <= 0:
+        return _error_response(
+            400,
+            INVALID_UPLOAD_CONTENT_LENGTH,
+            "Missing or invalid upload content length.",
+        )
+    return parsed
+
+
+def _parse_upload_offset(request: Request) -> int | JSONResponse:
+    raw = request.headers.get("upload-offset")
+    if raw is None or not raw.isdecimal():
+        return _error_response(400, INVALID_UPLOAD_OFFSET, "Invalid upload offset.")
+    return int(raw)
+
+
+def _reject_cross_origin_mutation(request: Request) -> JSONResponse | None:
+    origin = request.headers.get("origin")
+    if origin is None:
+        return None
+    expected = f"{request.url.scheme}://{request.headers.get('host', request.url.netloc)}"
+    if origin == expected:
+        return None
+    return _error_response(
+        403,
+        UPLOAD_ORIGIN_FORBIDDEN,
+        "Cross-origin upload mutation is forbidden.",
+    )
+
+
+def _map_error(exc: Exception) -> JSONResponse | None:
+    if isinstance(exc, UploadCapabilityNotConfiguredError):
+        return _error_response(
+            503,
+            UPLOAD_CAPABILITY_NOT_CONFIGURED,
+            "Upload capability is not configured.",
+        )
+    if isinstance(exc, UploadSessionNotFoundTransportError):
+        return _error_response(404, UPLOAD_SESSION_NOT_FOUND, "Upload session not found.")
+    if isinstance(exc, UploadInvalidMetadataError):
+        return _error_response(400, INVALID_UPLOAD_METADATA, "Invalid upload metadata.")
+    if isinstance(exc, UploadTooLargeError):
+        return _error_response(413, UPLOAD_TOO_LARGE, "Upload is too large.")
+    if isinstance(exc, UploadChunkTooLargeError):
+        return _error_response(413, UPLOAD_CHUNK_TOO_LARGE, "Upload chunk is too large.")
+    if isinstance(exc, UploadInvalidOffsetError):
+        return _error_response(400, INVALID_UPLOAD_OFFSET, "Invalid upload offset.")
+    if isinstance(exc, UploadOffsetConflictTransportError):
+        return _error_response(
+            409,
+            UPLOAD_OFFSET_CONFLICT,
+            "Upload offset conflict.",
+            current_offset=exc.current_offset,
+        )
+    if isinstance(exc, UploadSessionStateConflictError):
+        return _error_response(
+            409,
+            UPLOAD_SESSION_STATE_CONFLICT,
+            "Upload session state conflict.",
+        )
+    if isinstance(exc, UploadSessionExpiredError):
+        return _error_response(409, UPLOAD_SESSION_EXPIRED, "Upload session expired.")
+    if isinstance(exc, UploadInsufficientStorageError):
+        return _error_response(
+            507,
+            INSUFFICIENT_QUARANTINE_STORAGE,
+            "Insufficient quarantine storage.",
+        )
+    if isinstance(exc, UploadBodyLengthMismatchError):
+        return _error_response(
+            400,
+            UPLOAD_BODY_LENGTH_MISMATCH,
+            "Upload body length mismatch.",
+        )
+    if isinstance(exc, UploadQuarantineStateInconsistentError):
+        return _error_response(
+            409,
+            QUARANTINE_STATE_INCONSISTENT,
+            "Quarantine state is inconsistent.",
+        )
+    if isinstance(exc, UploadConcurrencyConflictError):
+        return _error_response(
+            409,
+            UPLOAD_CONCURRENCY_CONFLICT,
+            "Upload concurrency conflict.",
+        )
+    if isinstance(exc, UploadQuarantineUnavailableError):
+        return _error_response(
+            503,
+            QUARANTINE_STORAGE_UNAVAILABLE,
+            "Quarantine storage is unavailable.",
+        )
+    return None
+
+
+def _error_response(
+    status_code: int,
+    code: str,
+    message: str,
+    *,
+    current_offset: int | None = None,
+) -> JSONResponse:
+    body: dict[str, object] = {"code": code, "message": message}
+    if current_offset is not None:
+        body["current_offset"] = current_offset
+    return JSONResponse(status_code=status_code, content={"error": body})
+
+
+def _snapshot_response(snapshot: UploadSessionSnapshot) -> UploadSessionResponse:
+    return UploadSessionResponse(
+        id=snapshot.id,
+        state=snapshot.state,
+        display_filename=snapshot.display_filename,
+        declared_size_bytes=snapshot.declared_size_bytes,
+        received_size_bytes=snapshot.received_size_bytes,
+        expires_at=snapshot.expires_at,
+    )

@@ -27,6 +27,7 @@ from framenest.application.library_workflow import (
     LibraryWorkflowLibraryNotFoundError,
     LibraryWorkflowLibrarySelectionRequiredError,
     LibraryWorkflowNoLibraryError,
+    LibraryWorkflowReservedRootConflictError,
     ServerLibraryWorkflow,
 )
 from framenest.configuration import FrameNestSettings, load_settings
@@ -106,6 +107,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     except LibraryWorkflowNoLibraryError:
         _write_error(NO_LIBRARY_MESSAGE)
         return 3
+    except LibraryWorkflowReservedRootConflictError:
+        _write_error(INVALID_INPUT_MESSAGE)
+        return 2
     except LibraryScanUnavailableError:
         _write_error(SCAN_UNAVAILABLE_MESSAGE)
         return 6
@@ -343,6 +347,11 @@ def _with_workflow(
             SqliteLibraryRepository(engine),
             SqliteMediaRepository(engine),
             LocalLibraryScanner(),
+            reserved_roots=(
+                ()
+                if settings.upload_quarantine_root is None
+                else (settings.upload_quarantine_root,)
+            ),
         )
         return callback(workflow)
     finally:

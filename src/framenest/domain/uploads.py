@@ -212,6 +212,8 @@ class UploadDisplayFilename:
             raise FrameNestUploadSessionError(INVALID_UPLOAD_SESSION_MESSAGE)
         if "\x00" in value or "/" in value or "\\" in value:
             raise FrameNestUploadSessionError(INVALID_UPLOAD_SESSION_MESSAGE)
+        if any(ord(character) <= 0x1F or ord(character) == 0x7F for character in value):
+            raise FrameNestUploadSessionError(INVALID_UPLOAD_SESSION_MESSAGE)
         if PurePosixPath(value).is_absolute() or PureWindowsPath(value).is_absolute():
             raise FrameNestUploadSessionError(INVALID_UPLOAD_SESSION_MESSAGE)
         object.__setattr__(self, "value", value)
