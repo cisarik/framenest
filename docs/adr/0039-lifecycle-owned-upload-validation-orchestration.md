@@ -45,6 +45,17 @@ single-process model: a new process begins with no previous process-local owner,
 so the same stable quarantine object can be revalidated and resolved to the
 existing terminal validation outcomes.
 
+Runtime notification discovery is narrower. Ordinary `/complete` notifications
+and runtime wakes discover `received` rows only. A `validating` row observed
+after startup is not treated as abandoned by the still-running process; if the
+process is later lost, the next process startup may recover it through startup
+reconciliation.
+
+The application lifecycle owns only the coordinator it constructs internally.
+An externally supplied upload-validation coordinator is a notification
+dependency owned by its caller. The application may call `notify()` through the
+upload API, but it does not start or shut down that injected coordinator.
+
 ## Boundary
 
 This orchestration is explicitly limited to:
@@ -68,6 +79,19 @@ A process crash after `/complete` persists `received` but before notification is
 repaired by startup discovery. A forced process termination during validation
 may leave `validating`; startup recovery revalidates that stable quarantine
 object without transitioning through `failed` or fabricating retry metadata.
+
+Candidate discovery failure does not consume reconciliation intent. The
+coordinator retries discovery with bounded, cancellation-aware backoff and
+resets the backoff after successful discovery. This is infrastructure recovery,
+not upload retry: durable `failed` rows remain terminal and are not
+rediscovered.
+
+Candidate processing accounts for durable progress. A candidate that remains
+unchanged cannot force immediate rediscovery forever or starve later candidates
+in the same bounded keyset pass. Ordinary unexpected per-candidate failures are
+contained so the runner remains available for later notifications; cancellation
+and process-control exceptions are not converted into normal validation
+outcomes.
 
 Graceful shutdown stops claiming new uploads, wakes the runner, retains
 ownership of the runner until it exits, and waits truthfully for an already

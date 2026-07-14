@@ -14,11 +14,28 @@ from fastapi.testclient import TestClient
 from pydantic import SecretStr
 
 from framenest.adapters.api.application import create_app
+from framenest.adapters.api.upload_api import UploadApiDependencies
 from framenest.configuration import FrameNestSettings, load_settings
 from framenest.infrastructure.persistence.migrations import upgrade_database_to_head
 
 FRAMENEST_ENV_VARS = ("FRAMENEST_HOST", "FRAMENEST_PORT", "FRAMENEST_API_KEY")
 REPRESENTATIVE_SECRET = "contract-test-api-key-secret"
+
+
+class _LifecycleCoordinator:
+    def __init__(self) -> None:
+        self.starts = 0
+        self.shutdowns = 0
+        self.notifications = 0
+
+    async def start(self) -> None:
+        self.starts += 1
+
+    async def shutdown(self) -> None:
+        self.shutdowns += 1
+
+    def notify(self) -> None:
+        self.notifications += 1
 
 
 @pytest.fixture(autouse=True)
@@ -100,6 +117,32 @@ def test_application_lifespan_owns_upload_validation_coordinator(tmp_path: Path)
 
     assert coordinator.runner_done
     assert not coordinator.executor_running
+
+
+def test_application_lifespan_does_not_own_injected_upload_validation_coordinator() -> None:
+    coordinator = _LifecycleCoordinator()
+    dependencies = UploadApiDependencies(
+        transport=object(),
+        validation_coordinator=coordinator,
+    )
+    first = create_app(
+        settings=FrameNestSettings(_env_file=None),
+        upload_api_dependencies=dependencies,
+    )
+    second = create_app(
+        settings=FrameNestSettings(_env_file=None),
+        upload_api_dependencies=dependencies,
+    )
+
+    assert first.state.upload_validation_coordinator is coordinator
+    assert second.state.upload_validation_coordinator is coordinator
+    with TestClient(first) as first_client:
+        assert first_client.get("/health").status_code == 200
+        with TestClient(second) as second_client:
+            assert second_client.get("/health").status_code == 200
+
+    assert coordinator.starts == 0
+    assert coordinator.shutdowns == 0
 
 
 def test_cloud_status_endpoint_reports_sanitized_loopback_status(

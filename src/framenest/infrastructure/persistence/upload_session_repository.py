@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
-from sqlalchemy import and_, insert, select, update
+from sqlalchemy import and_, insert, or_, select, update
 from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
@@ -89,25 +89,69 @@ class SqliteUploadSessionRepository:
         except SQLAlchemyError as exc:
             raise FrameNestUploadSessionRepositoryError(_REPOSITORY_FAILURE_MESSAGE) from exc
 
-    def list_validation_candidates(self, *, limit: int) -> tuple[UploadSession, ...]:
-        """Return bounded received and validating uploads in deterministic order."""
+    def list_startup_validation_candidates(
+        self,
+        *,
+        limit: int,
+        after_updated_at_ms: int | None = None,
+        after_id: str | None = None,
+    ) -> tuple[UploadSession, ...]:
+        """Return bounded received and startup-abandoned validating uploads."""
+        return self._list_validation_candidates(
+            states=(UploadSessionState.RECEIVED, UploadSessionState.VALIDATING),
+            limit=limit,
+            after_updated_at_ms=after_updated_at_ms,
+            after_id=after_id,
+        )
+
+    def list_runtime_validation_candidates(
+        self,
+        *,
+        limit: int,
+        after_updated_at_ms: int | None = None,
+        after_id: str | None = None,
+    ) -> tuple[UploadSession, ...]:
+        """Return bounded received uploads in deterministic order."""
+        return self._list_validation_candidates(
+            states=(UploadSessionState.RECEIVED,),
+            limit=limit,
+            after_updated_at_ms=after_updated_at_ms,
+            after_id=after_id,
+        )
+
+    def _list_validation_candidates(
+        self,
+        *,
+        states: tuple[UploadSessionState, ...],
+        limit: int,
+        after_updated_at_ms: int | None,
+        after_id: str | None,
+    ) -> tuple[UploadSession, ...]:
         try:
             _validate_positive(limit)
+            _validate_candidate_cursor(after_updated_at_ms, after_id)
         except FrameNestUploadSessionError as exc:
             raise FrameNestUploadSessionRepositoryError(_REPOSITORY_FAILURE_MESSAGE) from exc
 
         def operation(connection: Connection) -> tuple[UploadSession, ...]:
+            filters = [
+                upload_sessions.c.state.in_(tuple(state.value for state in states)),
+            ]
+            if after_updated_at_ms is not None:
+                assert after_id is not None
+                filters.append(
+                    or_(
+                        upload_sessions.c.updated_at_ms > after_updated_at_ms,
+                        and_(
+                            upload_sessions.c.updated_at_ms == after_updated_at_ms,
+                            upload_sessions.c.id > after_id,
+                        ),
+                    )
+                )
             rows = (
                 connection.execute(
                     select(upload_sessions)
-                    .where(
-                        upload_sessions.c.state.in_(
-                            (
-                                UploadSessionState.RECEIVED.value,
-                                UploadSessionState.VALIDATING.value,
-                            )
-                        )
-                    )
+                    .where(and_(*filters))
                     .order_by(upload_sessions.c.updated_at_ms.asc(), upload_sessions.c.id.asc())
                     .limit(limit)
                 )
@@ -730,3 +774,19 @@ def _validate_non_negative(value: object) -> None:
 def _validate_positive(value: object) -> None:
     if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
         raise FrameNestUploadSessionError("invalid bounded retrieval limit")
+
+
+def _validate_candidate_cursor(
+    after_updated_at_ms: object,
+    after_id: object,
+) -> None:
+    if after_updated_at_ms is None and after_id is None:
+        return
+    if (
+        isinstance(after_updated_at_ms, bool)
+        or not isinstance(after_updated_at_ms, int)
+        or after_updated_at_ms < 0
+        or not isinstance(after_id, str)
+        or not after_id
+    ):
+        raise FrameNestUploadSessionError("invalid validation candidate cursor")

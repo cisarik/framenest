@@ -605,7 +605,9 @@ def test_start_validation_transitions_received_to_validating(tmp_path: Path) -> 
     assert validating.version == 1
 
 
-def test_list_validation_candidates_is_bounded_ordered_and_read_only(tmp_path: Path) -> None:
+def test_list_startup_validation_candidates_is_bounded_ordered_and_read_only(
+    tmp_path: Path,
+) -> None:
     repository, engine = _repository(tmp_path)
     received_old = _session(
         storage_key="upload-session-candidate-0001",
@@ -672,8 +674,13 @@ def test_list_validation_candidates_is_bounded_ordered_and_read_only(tmp_path: P
             session.id: repository.get(session.id)
             for session in (received_old, validating, received_new)
         }
-        first_two = repository.list_validation_candidates(limit=2)
-        all_candidates = repository.list_validation_candidates(limit=10)
+        first_two = repository.list_startup_validation_candidates(limit=2)
+        all_candidates = repository.list_startup_validation_candidates(limit=10)
+        after_first = repository.list_startup_validation_candidates(
+            limit=10,
+            after_updated_at_ms=10,
+            after_id=received_old.id.to_string(),
+        )
         after = {
             session.id: repository.get(session.id)
             for session in (received_old, validating, received_new)
@@ -687,7 +694,64 @@ def test_list_validation_candidates_is_bounded_ordered_and_read_only(tmp_path: P
         validating.id,
         received_new.id,
     ]
+    assert [candidate.id for candidate in after_first] == [
+        validating.id,
+        received_new.id,
+    ]
     assert after == before
+
+
+def test_list_runtime_validation_candidates_excludes_validating_and_uses_cursor(
+    tmp_path: Path,
+) -> None:
+    repository, engine = _repository(tmp_path)
+    received_old = _session(
+        storage_key="upload-session-candidate-0001",
+        state=UploadSessionState.RECEIVED,
+    )
+    validating = _session(
+        storage_key="upload-session-candidate-0002",
+        state=UploadSessionState.VALIDATING,
+    )
+    received_new = _session(
+        storage_key="upload-session-candidate-0003",
+        state=UploadSessionState.RECEIVED,
+    )
+    failed = _session(
+        storage_key="upload-session-candidate-0004",
+        state=UploadSessionState.FAILED,
+    )
+    try:
+        repository.create(received_new)
+        repository.create(validating)
+        repository.create(failed)
+        repository.create(received_old)
+        with engine.begin() as connection:
+            for session, updated_at_ms in (
+                (received_old, 10),
+                (validating, 20),
+                (received_new, 30),
+                (failed, 40),
+            ):
+                connection.execute(
+                    sa.text(
+                        "UPDATE upload_sessions SET updated_at_ms = :updated_at_ms "
+                        "WHERE id = :id"
+                    ),
+                    {"id": session.id.to_string(), "updated_at_ms": updated_at_ms},
+                )
+
+        first = repository.list_runtime_validation_candidates(limit=1)
+        after_first = repository.list_runtime_validation_candidates(
+            limit=10,
+            after_updated_at_ms=10,
+            after_id=received_old.id.to_string(),
+        )
+    finally:
+        engine.dispose()
+
+    assert [candidate.id for candidate in first] == [received_old.id]
+    assert [candidate.id for candidate in after_first] == [received_new.id]
 
 
 def test_complete_validation_success_commits_evidence_and_publish_state_atomically(

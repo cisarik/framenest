@@ -304,7 +304,7 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
-        coordinator = _upload_validation_coordinator(upload_api_dependencies)
+        coordinator = owned_upload_validation_coordinator
         if coordinator is not None:
             await coordinator.start()
         try:

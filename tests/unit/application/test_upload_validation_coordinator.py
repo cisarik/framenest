@@ -22,6 +22,7 @@ def _session(
     state: UploadSessionState = UploadSessionState.RECEIVED,
     *,
     storage_key: str = "validation-candidate-0001",
+    updated_at_ms: int = 10,
 ) -> UploadSession:
     return UploadSession(
         id=UploadSessionId.new(),
@@ -33,7 +34,7 @@ def _session(
         checksum_algorithm=None,
         checksum_hex=None,
         created_at_ms=10,
-        updated_at_ms=10,
+        updated_at_ms=updated_at_ms,
         expires_at_ms=1000,
         failure_code=None,
         version=0,
@@ -46,12 +47,118 @@ class _Repository:
         self._guard = threading.Lock()
         self.limits: list[int] = []
 
-    def list_validation_candidates(self, *, limit: int) -> tuple[UploadSession, ...]:
+    def list_startup_validation_candidates(
+        self,
+        *,
+        limit: int,
+        after_updated_at_ms: int | None = None,
+        after_id: str | None = None,
+    ) -> tuple[UploadSession, ...]:
+        return self._list(limit=limit)
+
+    def list_runtime_validation_candidates(
+        self,
+        *,
+        limit: int,
+        after_updated_at_ms: int | None = None,
+        after_id: str | None = None,
+    ) -> tuple[UploadSession, ...]:
+        return self._list(limit=limit)
+
+    def _list(self, *, limit: int) -> tuple[UploadSession, ...]:
         with self._guard:
             self.limits.append(limit)
             if not self._batches:
                 return ()
             return self._batches.pop(0)[:limit]
+
+    def get(self, session_id: UploadSessionId) -> UploadSession | None:
+        return None
+
+
+class _CursorRepository:
+    def __init__(self, sessions: list[UploadSession]) -> None:
+        self.sessions = sessions
+        self.calls = 0
+        self.startup_calls = 0
+        self.runtime_calls = 0
+        self.fail_startup_once = False
+        self.fail_runtime_once = False
+
+    def list_startup_validation_candidates(
+        self,
+        *,
+        limit: int,
+        after_updated_at_ms: int | None = None,
+        after_id: str | None = None,
+    ) -> tuple[UploadSession, ...]:
+        self.calls += 1
+        self.startup_calls += 1
+        if self.fail_startup_once:
+            self.fail_startup_once = False
+            from framenest.application.ports.upload_sessions import (
+                FrameNestUploadSessionRepositoryError,
+            )
+
+            raise FrameNestUploadSessionRepositoryError("temporary")
+        return self._list(
+            states={UploadSessionState.RECEIVED, UploadSessionState.VALIDATING},
+            limit=limit,
+            after_updated_at_ms=after_updated_at_ms,
+            after_id=after_id,
+        )
+
+    def list_runtime_validation_candidates(
+        self,
+        *,
+        limit: int,
+        after_updated_at_ms: int | None = None,
+        after_id: str | None = None,
+    ) -> tuple[UploadSession, ...]:
+        self.calls += 1
+        self.runtime_calls += 1
+        if self.fail_runtime_once:
+            self.fail_runtime_once = False
+            from framenest.application.ports.upload_sessions import (
+                FrameNestUploadSessionRepositoryError,
+            )
+
+            raise FrameNestUploadSessionRepositoryError("temporary")
+        return self._list(
+            states={UploadSessionState.RECEIVED},
+            limit=limit,
+            after_updated_at_ms=after_updated_at_ms,
+            after_id=after_id,
+        )
+
+    def get(self, session_id: UploadSessionId) -> UploadSession | None:
+        for session in self.sessions:
+            if session.id == session_id:
+                return session
+        return None
+
+    def _list(
+        self,
+        *,
+        states: set[UploadSessionState],
+        limit: int,
+        after_updated_at_ms: int | None,
+        after_id: str | None,
+    ) -> tuple[UploadSession, ...]:
+        candidates = [
+            session
+            for session in sorted(
+                self.sessions,
+                key=lambda item: (item.updated_at_ms, item.id.to_string()),
+            )
+            if session.state in states
+            and (
+                after_updated_at_ms is None
+                or (session.updated_at_ms, session.id.to_string())
+                > (after_updated_at_ms, after_id or "")
+            )
+        ]
+        return tuple(candidates[:limit])
 
 
 class _BlockingValidator:
@@ -92,6 +199,50 @@ class _BlockingValidator:
         finally:
             with self._guard:
                 self.active -= 1
+
+
+class _ScriptedValidator:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, str]] = []
+        self.fail_next_received = False
+
+    def validate_owned_blocking(self, session_id: UploadSessionId) -> UploadValidationResult:
+        self.calls.append(("received", session_id.to_string()))
+        if self.fail_next_received:
+            self.fail_next_received = False
+            raise RuntimeError("unexpected validator failure")
+        return UploadValidationResult(
+            upload_id=session_id.to_string(),
+            state="publish_pending",
+            checksum_algorithm="sha256",
+            checksum_hex="a" * 64,
+            validated_media_kind="video",
+            validated_format="mp4",
+            failure_code=None,
+        )
+
+    def recover_abandoned_validating_owned_blocking(
+        self,
+        session_id: UploadSessionId,
+    ) -> UploadValidationResult:
+        self.calls.append(("validating", session_id.to_string()))
+        return UploadValidationResult(
+            upload_id=session_id.to_string(),
+            state="validating",
+            checksum_algorithm=None,
+            checksum_hex=None,
+            validated_media_kind=None,
+            validated_format=None,
+            failure_code=None,
+        )
+
+
+async def _wait_until(condition) -> None:
+    deadline = asyncio.get_running_loop().time() + 1
+    while not condition():
+        if asyncio.get_running_loop().time() >= deadline:
+            raise TimeoutError("condition was not met")
+        await asyncio.sleep(0.001)
 
 
 def test_drain_runs_blocking_validation_off_event_loop() -> None:
@@ -170,6 +321,228 @@ def test_startup_reconciles_received_and_abandoned_validating_without_claiming_v
             ("received", received.id.to_string()),
             ("validating", validating.id.to_string()),
         ]
+
+    asyncio.run(scenario())
+
+
+def test_unexpected_validator_exception_does_not_permanently_kill_runner() -> None:
+    async def scenario() -> None:
+        failed = _session(
+            UploadSessionState.RECEIVED,
+            storage_key="validation-candidate-0001",
+            updated_at_ms=10,
+        )
+        later = _session(
+            UploadSessionState.RECEIVED,
+            storage_key="validation-candidate-0002",
+            updated_at_ms=20,
+        )
+        repository = _CursorRepository([failed, later])
+        validator = _ScriptedValidator()
+        validator.fail_next_received = True
+        coordinator = UploadValidationCoordinator(
+            repository,
+            validator,
+            UploadSessionLockRegistry(),
+        )
+
+        await coordinator.start()
+        await _wait_until(lambda: len(validator.calls) >= 2)
+
+        assert not coordinator.runner_done
+        assert validator.calls == [
+            ("received", failed.id.to_string()),
+            ("received", later.id.to_string()),
+        ]
+
+        coordinator.notify()
+        await asyncio.sleep(0)
+        await asyncio.wait_for(coordinator.shutdown(), timeout=1)
+        assert coordinator.runner_done
+        assert not coordinator.executor_running
+        assert not [
+            thread
+            for thread in threading.enumerate()
+            if thread.name.startswith("framenest-upload-validation") and thread.is_alive()
+        ]
+
+    asyncio.run(scenario())
+
+
+def test_no_progress_candidate_does_not_spin_or_starve_later_candidates() -> None:
+    async def scenario() -> None:
+        no_progress = _session(
+            UploadSessionState.VALIDATING,
+            storage_key="validation-candidate-0001",
+            updated_at_ms=10,
+        )
+        later = _session(
+            UploadSessionState.RECEIVED,
+            storage_key="validation-candidate-0002",
+            updated_at_ms=20,
+        )
+        validator = _ScriptedValidator()
+        coordinator = UploadValidationCoordinator(
+            _CursorRepository([no_progress, later]),
+            validator,
+            UploadSessionLockRegistry(),
+            batch_size=1,
+        )
+
+        await coordinator.drain()
+        await coordinator.shutdown()
+
+        assert validator.calls == [
+            ("validating", no_progress.id.to_string()),
+            ("received", later.id.to_string()),
+        ]
+
+    asyncio.run(scenario())
+
+
+def test_startup_reconciliation_processes_multiple_batches_once() -> None:
+    async def scenario() -> None:
+        no_progress = _session(
+            UploadSessionState.VALIDATING,
+            storage_key="validation-candidate-0001",
+            updated_at_ms=10,
+        )
+        received = _session(
+            UploadSessionState.RECEIVED,
+            storage_key="validation-candidate-0002",
+            updated_at_ms=20,
+        )
+        abandoned = _session(
+            UploadSessionState.VALIDATING,
+            storage_key="validation-candidate-0003",
+            updated_at_ms=30,
+        )
+        failed = _session(
+            UploadSessionState.FAILED,
+            storage_key="validation-candidate-0004",
+            updated_at_ms=40,
+        )
+        validator = _ScriptedValidator()
+        repository = _CursorRepository([failed, no_progress, received, abandoned])
+        coordinator = UploadValidationCoordinator(
+            repository,
+            validator,
+            UploadSessionLockRegistry(),
+            batch_size=2,
+        )
+
+        await coordinator.drain()
+        await coordinator.shutdown()
+
+        assert validator.calls == [
+            ("validating", no_progress.id.to_string()),
+            ("received", received.id.to_string()),
+            ("validating", abandoned.id.to_string()),
+        ]
+        assert repository.startup_calls == 3
+
+    asyncio.run(scenario())
+
+
+def test_discovery_failure_retries_without_another_notification_and_resets() -> None:
+    async def scenario() -> None:
+        startup_candidate = _session(
+            UploadSessionState.RECEIVED,
+            storage_key="validation-candidate-0001",
+            updated_at_ms=10,
+        )
+        runtime_candidate = _session(
+            UploadSessionState.RECEIVED,
+            storage_key="validation-candidate-0002",
+            updated_at_ms=20,
+        )
+        repository = _CursorRepository([startup_candidate])
+        repository.fail_startup_once = True
+        validator = _ScriptedValidator()
+        coordinator = UploadValidationCoordinator(
+            repository,
+            validator,
+            UploadSessionLockRegistry(),
+            discovery_retry_initial_delay_seconds=0.001,
+            discovery_retry_max_delay_seconds=0.001,
+        )
+
+        await coordinator.start()
+        await _wait_until(
+            lambda: ("received", startup_candidate.id.to_string()) in validator.calls
+        )
+        repository.sessions.append(runtime_candidate)
+        repository.fail_runtime_once = True
+        coordinator.notify()
+        await _wait_until(
+            lambda: ("received", runtime_candidate.id.to_string()) in validator.calls
+        )
+
+        await asyncio.wait_for(coordinator.shutdown(), timeout=1)
+        assert repository.startup_calls >= 2
+        assert repository.runtime_calls >= 2
+
+    asyncio.run(scenario())
+
+
+def test_shutdown_interrupts_discovery_retry_delay() -> None:
+    async def scenario() -> None:
+        repository = _CursorRepository([])
+        repository.fail_startup_once = True
+        validator = _ScriptedValidator()
+        coordinator = UploadValidationCoordinator(
+            repository,
+            validator,
+            UploadSessionLockRegistry(),
+            discovery_retry_initial_delay_seconds=60,
+            discovery_retry_max_delay_seconds=60,
+        )
+
+        await coordinator.start()
+        await _wait_until(lambda: repository.startup_calls == 1)
+        await asyncio.wait_for(coordinator.shutdown(), timeout=1)
+
+        assert coordinator.runner_done
+        assert not coordinator.executor_running
+
+    asyncio.run(scenario())
+
+
+def test_runtime_notification_does_not_recover_preexisting_validating() -> None:
+    async def scenario() -> None:
+        validating = _session(
+            UploadSessionState.VALIDATING,
+            storage_key="validation-candidate-0001",
+            updated_at_ms=10,
+        )
+        repository = _CursorRepository([])
+        validator = _ScriptedValidator()
+        coordinator = UploadValidationCoordinator(
+            repository,
+            validator,
+            UploadSessionLockRegistry(),
+            discovery_retry_initial_delay_seconds=0.001,
+            discovery_retry_max_delay_seconds=0.001,
+        )
+
+        await coordinator.start()
+        await _wait_until(lambda: repository.startup_calls >= 1)
+        repository.sessions.append(validating)
+        coordinator.notify()
+        await asyncio.sleep(0.05)
+        await coordinator.shutdown()
+
+        assert validator.calls == []
+
+        fresh_validator = _ScriptedValidator()
+        fresh = UploadValidationCoordinator(
+            repository,
+            fresh_validator,
+            UploadSessionLockRegistry(),
+        )
+        await fresh.drain()
+        await fresh.shutdown()
+        assert fresh_validator.calls == [("validating", validating.id.to_string())]
 
     asyncio.run(scenario())
 
