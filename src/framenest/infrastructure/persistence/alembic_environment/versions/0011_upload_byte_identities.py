@@ -130,16 +130,21 @@ def _fail_if_incoherent_successful_upload_sessions_exist() -> None:
                 'published',
                 'cataloged'
             )
-            AND NOT (
-                checksum_algorithm = 'sha256'
-                AND checksum_hex IS NOT NULL
-                AND length(checksum_hex) = 64
-                AND checksum_hex = lower(checksum_hex)
-                AND checksum_hex NOT GLOB '*[^0-9a-f]*'
-                AND declared_size_bytes > 0
-                AND received_size_bytes > 0
-                AND declared_size_bytes = received_size_bytes
-                AND (
+            AND (
+                checksum_algorithm IS NULL
+                OR checksum_algorithm != 'sha256'
+                OR checksum_hex IS NULL
+                OR length(checksum_hex) != 64
+                OR checksum_hex != lower(checksum_hex)
+                OR checksum_hex GLOB '*[^0-9a-f]*'
+                OR declared_size_bytes IS NULL
+                OR declared_size_bytes <= 0
+                OR received_size_bytes IS NULL
+                OR received_size_bytes <= 0
+                OR declared_size_bytes != received_size_bytes
+                OR validated_media_kind IS NULL
+                OR validated_format IS NULL
+                OR NOT (
                     (validated_media_kind = 'animated_image' AND validated_format = 'gif')
                     OR (validated_media_kind = 'video' AND validated_format = 'mp4')
                 )
