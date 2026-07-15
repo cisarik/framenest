@@ -16,6 +16,30 @@ const UPLOAD_RECOVERY_STORAGE_KEY = "framenest.upload.recovery.v1";
 const CATALOG_PAGE_SIZE = 30;
 const DEFAULT_UPLOAD_CHUNK_BYTES = 1024 * 1024;
 const UPLOAD_POLL_INTERVAL_MS = 1200;
+const UPLOAD_POLL_RETRY_MAX_MS = 10000;
+const UPLOAD_PUBLIC_ID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const UPLOAD_KNOWN_STATES = new Set([
+  "created",
+  "receiving",
+  "received",
+  "validating",
+  "duplicate_pending",
+  "publish_pending",
+  "published",
+  "cataloged",
+  "rejected",
+  "failed",
+  "cancelled",
+  "expired",
+]);
+const UPLOAD_RECOVERY_CLEANUP_STATES = new Set([
+  "publish_pending",
+  "rejected",
+  "failed",
+  "cancelled",
+  "expired",
+]);
 const MAX_METADATA_TITLE_CODE_POINTS = 240;
 const MAX_METADATA_DESCRIPTION_CODE_POINTS = 10000;
 const MAX_METADATA_TAGS = 32;
@@ -67,19 +91,24 @@ let uploadCapability = {
   session_ttl_seconds: 0,
 };
 let uploadState = {
+  generation: 0,
   uploadId: null,
   file: null,
   fileNameHint: "",
   expectedSizeBytes: 0,
   lastModifiedHint: null,
   snapshot: null,
+  actionOwner: null,
+  preparing: false,
   running: false,
   paused: false,
   needsReselection: false,
   completing: false,
-  uploadLoopToken: 0,
-  pollToken: 0,
+  uploadLoopOwner: null,
+  completionOwner: null,
+  pollOwner: null,
   pollTimer: null,
+  pollRetryDelayMs: UPLOAD_POLL_INTERVAL_MS,
   message: "",
   failureMessage: "",
 };
@@ -806,6 +835,106 @@ function activeUploadSnapshot() {
   return uploadState.snapshot;
 }
 
+function nextUploadGeneration() {
+  uploadState.generation += 1;
+  return uploadState.generation;
+}
+
+function currentUploadContext({
+  uploadId = uploadState.uploadId,
+  file = uploadState.file,
+  generation = uploadState.generation,
+} = {}) {
+  return {
+    generation,
+    uploadId: uploadId || null,
+    file: file || null,
+  };
+}
+
+function uploadContextStillCurrent(context, { allowMissingUploadId = false } = {}) {
+  if (!context || uploadState.generation !== context.generation) {
+    return false;
+  }
+  if (context.file !== uploadState.file) {
+    return false;
+  }
+  if (context.uploadId) {
+    return uploadState.uploadId === context.uploadId;
+  }
+  return allowMissingUploadId ? !uploadState.uploadId : uploadState.uploadId === null;
+}
+
+function clearUploadRecovery() {
+  try {
+    window.localStorage.removeItem(UPLOAD_RECOVERY_STORAGE_KEY);
+  } catch {
+    // The in-memory upload state remains authoritative for this browser view.
+  }
+}
+
+function clearUploadPollTimer() {
+  if (uploadState.pollTimer) {
+    clearTimeout(uploadState.pollTimer);
+    uploadState.pollTimer = null;
+  }
+}
+
+function stopUploadPolling() {
+  clearUploadPollTimer();
+  uploadState.pollOwner = null;
+  uploadState.pollRetryDelayMs = UPLOAD_POLL_INTERVAL_MS;
+}
+
+function invalidateUploadOwnership() {
+  stopUploadPolling();
+  nextUploadGeneration();
+  uploadState.actionOwner = null;
+  uploadState.uploadLoopOwner = null;
+  uploadState.completionOwner = null;
+  uploadState.preparing = false;
+  uploadState.running = false;
+  uploadState.paused = false;
+  uploadState.completing = false;
+}
+
+function claimUploadAction(kind, { uploadId = uploadState.uploadId, file = uploadState.file } = {}, options = {}) {
+  if (uploadState.actionOwner && !options.supersede) {
+    return null;
+  }
+  stopUploadPolling();
+  const owner = currentUploadContext({
+    generation: nextUploadGeneration(),
+    uploadId,
+    file,
+  });
+  owner.kind = kind;
+  uploadState.actionOwner = owner;
+  return owner;
+}
+
+function releaseUploadAction(owner) {
+  if (uploadState.actionOwner === owner) {
+    uploadState.actionOwner = null;
+  }
+}
+
+function uploadStatusErrorCode(result) {
+  return result && result.payload && result.payload.error
+    ? String(result.payload.error.code || "")
+    : "";
+}
+
+function uploadStatusWasNotFound(result) {
+  return Boolean(
+    result
+      && (
+        result.status === 404
+        || uploadStatusErrorCode(result) === "UPLOAD_SESSION_NOT_FOUND"
+      ),
+  );
+}
+
 function uploadIsByteReceiving(snapshot) {
   return Boolean(
     snapshot
@@ -902,27 +1031,83 @@ function uploadStatusMessage(snapshot) {
 }
 
 function normalizeUploadSnapshot(payload) {
-  if (!payload || !payload.id) {
+  const uploadId = payload && payload.id ? String(payload.id) : "";
+  if (!UPLOAD_PUBLIC_ID_PATTERN.test(uploadId)) {
+    return null;
+  }
+  const declaredSize = Number(payload.declared_size_bytes);
+  const receivedSize = Number(payload.received_size_bytes);
+  const expiresAt = Number(payload.expires_at);
+  if (
+    !Number.isSafeInteger(declaredSize)
+    || declaredSize <= 0
+    || !Number.isSafeInteger(receivedSize)
+    || receivedSize < 0
+    || receivedSize > declaredSize
+  ) {
     return null;
   }
   return {
-    id: String(payload.id),
+    id: uploadId,
     state: String(payload.state || ""),
     display_filename: String(payload.display_filename || ""),
-    declared_size_bytes: Number(payload.declared_size_bytes || 0),
-    received_size_bytes: Number(payload.received_size_bytes || 0),
-    expires_at: Number(payload.expires_at || 0),
+    declared_size_bytes: declaredSize,
+    received_size_bytes: receivedSize,
+    expires_at: Number.isFinite(expiresAt) ? expiresAt : 0,
     failure_code: payload.failure_code ? String(payload.failure_code) : "",
   };
 }
 
+function uploadRecoveryStateCanPersist(snapshot) {
+  return Boolean(
+    snapshot
+      && UPLOAD_KNOWN_STATES.has(snapshot.state)
+      && !UPLOAD_RECOVERY_CLEANUP_STATES.has(snapshot.state),
+  );
+}
+
+function uploadRecoveryFileNameHint(value) {
+  if (typeof value !== "string") return null;
+  if (value.length > 255) return null;
+  if (/[\u0000-\u001f/\\]/u.test(value)) return null;
+  return value;
+}
+
+function uploadRecoverySize(value) {
+  const size = Number(value);
+  return Number.isSafeInteger(size) && size > 0 ? size : null;
+}
+
+function uploadRecoveryLastModified(value) {
+  if (value === undefined || value === null) return null;
+  const lastModified = Number(value);
+  return Number.isSafeInteger(lastModified) && lastModified >= 0 ? lastModified : undefined;
+}
+
 function saveUploadRecovery(snapshot = activeUploadSnapshot()) {
   if (!snapshot || !snapshot.id) return;
+  if (!uploadRecoveryStateCanPersist(snapshot)) {
+    clearUploadRecovery();
+    return;
+  }
+  const expectedSizeBytes = uploadRecoverySize(snapshot.declared_size_bytes);
+  if (expectedSizeBytes === null) {
+    clearUploadRecovery();
+    return;
+  }
+  const fileNameHint = uploadRecoveryFileNameHint(
+    snapshot.display_filename || uploadState.fileNameHint || "",
+  );
+  const lastModifiedHint = uploadRecoveryLastModified(uploadState.lastModifiedHint);
+  if (fileNameHint === null || lastModifiedHint === undefined) {
+    clearUploadRecovery();
+    return;
+  }
   const recovery = {
     upload_id: snapshot.id,
-    file_name_hint: snapshot.display_filename || uploadState.fileNameHint || "",
-    expected_size_bytes: snapshot.declared_size_bytes,
-    last_modified_hint: uploadState.lastModifiedHint,
+    file_name_hint: fileNameHint,
+    expected_size_bytes: expectedSizeBytes,
+    last_modified_hint: lastModifiedHint,
     last_known_state: snapshot.state,
   };
   try {
@@ -936,26 +1121,66 @@ function loadUploadRecovery() {
   try {
     const raw = window.localStorage.getItem(UPLOAD_RECOVERY_STORAGE_KEY);
     if (!raw) return null;
+    if (raw.length > 4096) {
+      clearUploadRecovery();
+      return null;
+    }
     const parsed = JSON.parse(raw);
-    if (!parsed || !parsed.upload_id || !parsed.expected_size_bytes) {
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      clearUploadRecovery();
+      return null;
+    }
+    const uploadId = typeof parsed.upload_id === "string" ? parsed.upload_id : "";
+    const fileNameHint = uploadRecoveryFileNameHint(parsed.file_name_hint || "");
+    const expectedSizeBytes = uploadRecoverySize(parsed.expected_size_bytes);
+    const lastModifiedHint = uploadRecoveryLastModified(parsed.last_modified_hint);
+    const lastKnownState = parsed.last_known_state === undefined || parsed.last_known_state === null
+      ? ""
+      : String(parsed.last_known_state);
+    if (
+      !UPLOAD_PUBLIC_ID_PATTERN.test(uploadId)
+      || fileNameHint === null
+      || expectedSizeBytes === null
+      || lastModifiedHint === undefined
+      || (lastKnownState && !UPLOAD_KNOWN_STATES.has(lastKnownState))
+    ) {
+      clearUploadRecovery();
+      return null;
+    }
+    if (lastKnownState && UPLOAD_RECOVERY_CLEANUP_STATES.has(lastKnownState)) {
+      clearUploadRecovery();
       return null;
     }
     return {
-      upload_id: String(parsed.upload_id),
-      file_name_hint: parsed.file_name_hint ? String(parsed.file_name_hint) : "",
-      expected_size_bytes: Number(parsed.expected_size_bytes),
-      last_modified_hint: Number.isFinite(Number(parsed.last_modified_hint))
-        ? Number(parsed.last_modified_hint)
-        : null,
-      last_known_state: parsed.last_known_state ? String(parsed.last_known_state) : "",
+      upload_id: uploadId,
+      file_name_hint: fileNameHint,
+      expected_size_bytes: expectedSizeBytes,
+      last_modified_hint: lastModifiedHint,
+      last_known_state: lastKnownState,
     };
   } catch {
+    clearUploadRecovery();
     return null;
   }
 }
 
-function applyUploadSnapshot(snapshot) {
+function applyUploadSnapshot(snapshot, owner = null, options = {}) {
   if (!snapshot) return false;
+  const context = owner || currentUploadContext({ uploadId: uploadState.uploadId });
+  const allowAdoptUploadId = options.allowAdoptUploadId === true;
+  if (!uploadContextStillCurrent(context, { allowMissingUploadId: allowAdoptUploadId })) {
+    return false;
+  }
+  const expectedUploadId = context.uploadId || uploadState.uploadId;
+  if (expectedUploadId && snapshot.id !== expectedUploadId) {
+    return false;
+  }
+  if (!expectedUploadId && !allowAdoptUploadId) {
+    return false;
+  }
+  if (allowAdoptUploadId && !context.uploadId && !uploadState.uploadId) {
+    context.uploadId = snapshot.id;
+  }
   uploadState.snapshot = snapshot;
   uploadState.uploadId = snapshot.id;
   uploadState.fileNameHint = snapshot.display_filename || uploadState.fileNameHint;
@@ -970,22 +1195,27 @@ function applyUploadSnapshot(snapshot) {
 }
 
 function resetUploadForFile(file) {
-  stopUploadPolling();
-  uploadState.uploadLoopToken += 1;
+  invalidateUploadOwnership();
+  clearUploadRecovery();
   uploadState = {
+    generation: uploadState.generation,
     uploadId: null,
     file,
     fileNameHint: file ? file.name : "",
     expectedSizeBytes: file ? file.size : 0,
     lastModifiedHint: file && Number.isFinite(file.lastModified) ? file.lastModified : null,
     snapshot: null,
+    actionOwner: null,
+    preparing: false,
     running: false,
     paused: false,
     needsReselection: false,
     completing: false,
-    uploadLoopToken: uploadState.uploadLoopToken,
-    pollToken: uploadState.pollToken,
+    uploadLoopOwner: null,
+    completionOwner: null,
+    pollOwner: null,
     pollTimer: null,
+    pollRetryDelayMs: UPLOAD_POLL_INTERVAL_MS,
     message: file ? "Ready to create an upload session." : "Select one local GIF or MP4.",
     failureMessage: "",
   };
@@ -1040,6 +1270,8 @@ function updateUploadActions() {
       || !hasFile
       || hasActiveSession
       || !fileWithinLimit
+      || Boolean(uploadState.actionOwner)
+      || uploadState.preparing
       || uploadState.running
       || uploadState.completing;
   }
@@ -1048,6 +1280,8 @@ function updateUploadActions() {
   }
   if (uploadResumeButton) {
     uploadResumeButton.disabled = !snapshot
+      || Boolean(uploadState.actionOwner)
+      || uploadState.preparing
       || uploadState.running
       || uploadState.completing
       || !uploadIsByteReceiving(snapshot)
@@ -1087,12 +1321,15 @@ function uploadErrorMessage(payload) {
   return "Upload failed with a sanitized local error.";
 }
 
-async function loadUploadCapability() {
+async function loadUploadCapability(owner = null) {
   try {
     const { response, payload } = await fetchUploadJson(UPLOAD_CAPABILITY_ENDPOINT, {
       headers: { Accept: "application/json" },
       cache: "no-store",
     });
+    if (owner && !uploadContextStillCurrent(owner, { allowMissingUploadId: true })) {
+      return null;
+    }
     if (!response.ok) {
       uploadCapability = {
         uploads_enabled: false,
@@ -1113,6 +1350,9 @@ async function loadUploadCapability() {
     renderUploadCockpit();
     return uploadCapability.uploads_enabled;
   } catch {
+    if (owner && !uploadContextStillCurrent(owner, { allowMissingUploadId: true })) {
+      return null;
+    }
     uploadCapability = {
       uploads_enabled: false,
       max_total_size_bytes: 0,
@@ -1125,26 +1365,82 @@ async function loadUploadCapability() {
   }
 }
 
-async function refreshUploadStatus(uploadId = uploadState.uploadId) {
-  if (!uploadId) return null;
+async function requestUploadStatus(uploadId) {
+  if (!uploadId || !UPLOAD_PUBLIC_ID_PATTERN.test(String(uploadId))) {
+    return {
+      ok: false,
+      status: 404,
+      payload: { error: { code: "UPLOAD_SESSION_NOT_FOUND" } },
+    };
+  }
   try {
     const { response, payload } = await fetchUploadJson(uploadEndpoint(uploadId), {
       headers: { Accept: "application/json" },
       cache: "no-store",
     });
     if (!response.ok) {
-      uploadState.message = uploadErrorMessage(payload);
-      renderUploadCockpit();
-      return null;
+      return {
+        ok: false,
+        status: response.status,
+        payload,
+      };
     }
     const snapshot = normalizeUploadSnapshot(payload);
-    applyUploadSnapshot(snapshot);
-    return snapshot;
-  } catch {
-    uploadState.message = "Upload status could not be loaded.";
+    if (!snapshot) {
+      return {
+        ok: false,
+        status: response.status,
+        payload,
+        parseFailed: true,
+      };
+    }
+    return { ok: true, snapshot };
+  } catch (error) {
+    return {
+      ok: false,
+      status: 0,
+      payload: null,
+      networkError: true,
+      error,
+    };
+  }
+}
+
+function uploadStatusResultMessage(result) {
+  if (result && result.payload) {
+    return uploadErrorMessage(result.payload);
+  }
+  if (result && result.parseFailed) {
+    return "Upload status response could not be parsed.";
+  }
+  return "Upload status could not be loaded.";
+}
+
+async function refreshUploadStatus(
+  uploadId = uploadState.uploadId,
+  owner = currentUploadContext({ uploadId }),
+  options = {},
+) {
+  if (!uploadId) return null;
+  const result = await requestUploadStatus(uploadId);
+  if (!uploadContextStillCurrent(owner)) {
+    return null;
+  }
+  if (result.ok) {
+    return applyUploadSnapshot(result.snapshot, owner) ? result.snapshot : null;
+  }
+  if (options.clearNotFound && uploadStatusWasNotFound(result)) {
+    clearUploadRecovery();
+    uploadState.uploadId = null;
+    uploadState.snapshot = null;
+    uploadState.needsReselection = false;
+    uploadState.message = "Saved upload session was not found on this server.";
     renderUploadCockpit();
     return null;
   }
+  uploadState.message = uploadStatusResultMessage(result);
+  renderUploadCockpit();
+  return null;
 }
 
 async function restoreUploadRecovery() {
@@ -1153,49 +1449,92 @@ async function restoreUploadRecovery() {
     renderUploadCockpit();
     return;
   }
+  invalidateUploadOwnership();
+  const owner = currentUploadContext({
+    generation: uploadState.generation,
+    uploadId: recovery.upload_id,
+    file: null,
+  });
   uploadState.uploadId = recovery.upload_id;
   uploadState.fileNameHint = recovery.file_name_hint;
   uploadState.expectedSizeBytes = recovery.expected_size_bytes;
   uploadState.lastModifiedHint = recovery.last_modified_hint;
   uploadState.message = "Recovering saved upload session...";
   renderUploadCockpit();
-  const snapshot = await refreshUploadStatus(recovery.upload_id);
-  if (!snapshot) return;
+  const result = await requestUploadStatus(recovery.upload_id);
+  if (!uploadContextStillCurrent(owner)) return;
+  if (!result.ok) {
+    if (uploadStatusWasNotFound(result)) {
+      clearUploadRecovery();
+      uploadState.uploadId = null;
+      uploadState.snapshot = null;
+      uploadState.fileNameHint = "";
+      uploadState.expectedSizeBytes = 0;
+      uploadState.lastModifiedHint = null;
+      uploadState.needsReselection = false;
+      uploadState.message = "Saved upload session was not found on this server.";
+    } else {
+      uploadState.message = uploadStatusResultMessage(result);
+    }
+    renderUploadCockpit();
+    return;
+  }
+  const snapshot = result.snapshot;
+  if (!applyUploadSnapshot(snapshot, owner)) return;
   if (uploadIsByteReceiving(snapshot)) {
     uploadState.needsReselection = true;
     uploadState.message = "Reselect the original file to resume this upload.";
     renderUploadCockpit();
   } else if (uploadShouldPoll(snapshot) && uploadDialog && uploadDialog.hasAttribute("open")) {
-    scheduleUploadPolling();
+    scheduleUploadPolling(currentUploadContext({ uploadId: snapshot.id }));
   }
 }
 
-function stopUploadPolling() {
-  uploadState.pollToken += 1;
-  if (uploadState.pollTimer) {
-    clearTimeout(uploadState.pollTimer);
-    uploadState.pollTimer = null;
-  }
-}
-
-function scheduleUploadPolling() {
-  stopUploadPolling();
+function scheduleUploadPolling(owner = currentUploadContext()) {
+  clearUploadPollTimer();
   const snapshot = activeUploadSnapshot();
   if (!uploadShouldPoll(snapshot)) return;
   if (uploadDialog && !uploadDialog.hasAttribute("open")) return;
-  const token = uploadState.pollToken;
+  if (!uploadContextStillCurrent(owner)) return;
+  owner.uploadId = snapshot.id;
+  uploadState.pollOwner = owner;
+  const retryDelayMs = Math.min(uploadState.pollRetryDelayMs, UPLOAD_POLL_RETRY_MAX_MS);
   uploadState.pollTimer = window.setTimeout(() => {
-    pollUploadStatus(token);
-  }, UPLOAD_POLL_INTERVAL_MS);
+    pollUploadStatus(owner);
+  }, retryDelayMs);
 }
 
-async function pollUploadStatus(token) {
-  if (token !== uploadState.pollToken) return;
-  const snapshot = await refreshUploadStatus();
-  if (token !== uploadState.pollToken) return;
-  if (uploadShouldPoll(snapshot)) {
-    scheduleUploadPolling();
-  } else if (uploadIsPollingStopState(snapshot)) {
+async function pollUploadStatus(owner = uploadState.pollOwner) {
+  if (owner !== uploadState.pollOwner || !uploadContextStillCurrent(owner)) return;
+  const result = await requestUploadStatus(owner.uploadId);
+  if (owner !== uploadState.pollOwner || !uploadContextStillCurrent(owner)) return;
+  if (result.ok) {
+    uploadState.pollRetryDelayMs = UPLOAD_POLL_INTERVAL_MS;
+    const snapshot = result.snapshot;
+    if (!applyUploadSnapshot(snapshot, owner)) return;
+    if (uploadShouldPoll(snapshot)) {
+      scheduleUploadPolling(currentUploadContext({ uploadId: snapshot.id }));
+    } else {
+      stopUploadPolling();
+    }
+    return;
+  }
+  if (uploadStatusWasNotFound(result)) {
+    stopUploadPolling();
+    clearUploadRecovery();
+    uploadState.message = "Upload session was not found on this server.";
+    renderUploadCockpit();
+    return;
+  }
+  uploadState.message = "Upload status is temporarily unavailable; retrying.";
+  renderUploadCockpit();
+  if (uploadShouldPoll(activeUploadSnapshot())) {
+    uploadState.pollRetryDelayMs = Math.min(
+      UPLOAD_POLL_RETRY_MAX_MS,
+      Math.max(UPLOAD_POLL_INTERVAL_MS, uploadState.pollRetryDelayMs * 2),
+    );
+    scheduleUploadPolling(owner);
+  } else {
     stopUploadPolling();
   }
 }
@@ -1205,11 +1544,20 @@ function selectedUploadChunkSize(remainingBytes) {
   return Math.max(1, Math.min(serverLimit, DEFAULT_UPLOAD_CHUNK_BYTES, remainingBytes));
 }
 
-async function completeUploadIfReady(token) {
+async function completeUploadIfReady(owner = currentUploadContext()) {
+  if (!uploadContextStillCurrent(owner)) return false;
   const snapshot = activeUploadSnapshot();
-  if (!snapshot || snapshot.received_size_bytes !== snapshot.declared_size_bytes) {
-    return;
+  if (
+    !snapshot
+    || snapshot.id !== owner.uploadId
+    || snapshot.received_size_bytes !== snapshot.declared_size_bytes
+  ) {
+    return false;
   }
+  if (uploadState.completionOwner) {
+    return false;
+  }
+  uploadState.completionOwner = owner;
   uploadState.completing = true;
   uploadState.message = "Completing byte reception.";
   renderUploadCockpit();
@@ -1219,42 +1567,50 @@ async function completeUploadIfReady(token) {
       headers: { Accept: "application/json" },
       cache: "no-store",
     });
-    if (token !== uploadState.uploadLoopToken) return;
+    if (!uploadContextStillCurrent(owner) || uploadState.completionOwner !== owner) return false;
     if (response.ok) {
-      applyUploadSnapshot(normalizeUploadSnapshot(payload));
+      const completed = normalizeUploadSnapshot(payload);
+      if (!applyUploadSnapshot(completed, owner)) return false;
       uploadState.message = "Bytes received. Waiting for server validation.";
-      scheduleUploadPolling();
-      return;
+      if (uploadShouldPoll(completed)) {
+        scheduleUploadPolling(currentUploadContext({ uploadId: completed.id }));
+      }
+      return true;
     }
     uploadState.message = uploadErrorMessage(payload);
-    await refreshUploadStatus(snapshot.id);
-    if (uploadShouldPoll(activeUploadSnapshot())) {
-      scheduleUploadPolling();
+    renderUploadCockpit();
+    const refreshed = await refreshUploadStatus(snapshot.id, owner);
+    if (uploadContextStillCurrent(owner) && uploadShouldPoll(refreshed)) {
+      scheduleUploadPolling(currentUploadContext({ uploadId: refreshed.id }));
     }
   } catch {
-    if (token === uploadState.uploadLoopToken) {
+    if (uploadContextStillCurrent(owner) && uploadState.completionOwner === owner) {
       uploadState.message = "Completion status could not be confirmed.";
-      await refreshUploadStatus(snapshot.id);
+      renderUploadCockpit();
+      await refreshUploadStatus(snapshot.id, owner);
     }
   } finally {
-    if (token === uploadState.uploadLoopToken) {
+    if (uploadState.completionOwner === owner) {
+      uploadState.completionOwner = null;
       uploadState.completing = false;
       uploadState.running = false;
       renderUploadCockpit();
     }
   }
+  return false;
 }
 
-async function runUploadLoop() {
-  const token = uploadState.uploadLoopToken + 1;
-  uploadState.uploadLoopToken = token;
+async function runUploadLoop(owner = currentUploadContext()) {
+  if (!uploadContextStillCurrent(owner)) return false;
+  if (uploadState.uploadLoopOwner && uploadState.uploadLoopOwner !== owner) return false;
+  uploadState.uploadLoopOwner = owner;
   uploadState.running = true;
   uploadState.paused = false;
   uploadState.message = "Uploading from server-confirmed offset.";
   renderUploadCockpit();
-  while (token === uploadState.uploadLoopToken) {
-    let snapshot = await refreshUploadStatus();
-    if (token !== uploadState.uploadLoopToken || !snapshot) break;
+  while (uploadState.uploadLoopOwner === owner && uploadContextStillCurrent(owner)) {
+    let snapshot = await refreshUploadStatus(owner.uploadId, owner);
+    if (uploadState.uploadLoopOwner !== owner || !uploadContextStillCurrent(owner) || !snapshot) break;
     if (!uploadIsByteReceiving(snapshot)) {
       if (
         uploadState.paused
@@ -1267,9 +1623,9 @@ async function runUploadLoop() {
         break;
       }
       if (snapshot.received_size_bytes === snapshot.declared_size_bytes && snapshot.state === "receiving") {
-        await completeUploadIfReady(token);
+        await completeUploadIfReady(owner);
       } else if (uploadShouldPoll(snapshot)) {
-        scheduleUploadPolling();
+        scheduleUploadPolling(currentUploadContext({ uploadId: snapshot.id }));
       }
       break;
     }
@@ -1279,14 +1635,14 @@ async function runUploadLoop() {
       renderUploadCockpit();
       break;
     }
-    if (!uploadState.file) {
+    if (!owner.file || uploadState.file !== owner.file) {
       uploadState.running = false;
       uploadState.needsReselection = true;
       uploadState.message = "Reselect the original local file to resume.";
       renderUploadCockpit();
       break;
     }
-    if (uploadState.file.size !== snapshot.declared_size_bytes) {
+    if (owner.file.size !== snapshot.declared_size_bytes) {
       uploadState.running = false;
       uploadState.needsReselection = true;
       uploadState.file = null;
@@ -1297,11 +1653,11 @@ async function runUploadLoop() {
     const serverOffset = snapshot.received_size_bytes;
     const remainingBytes = snapshot.declared_size_bytes - serverOffset;
     if (remainingBytes <= 0) {
-      await completeUploadIfReady(token);
+      await completeUploadIfReady(owner);
       break;
     }
     const chunkSize = selectedUploadChunkSize(remainingBytes);
-    const body = uploadState.file.slice(serverOffset, serverOffset + chunkSize);
+    const body = owner.file.slice(serverOffset, serverOffset + chunkSize);
     try {
       const { response, payload } = await fetchUploadJson(uploadEndpoint(snapshot.id), {
         method: "PATCH",
@@ -1313,17 +1669,19 @@ async function runUploadLoop() {
         body,
         cache: "no-store",
       });
-      if (token !== uploadState.uploadLoopToken) return;
+      if (!uploadContextStillCurrent(owner) || uploadState.uploadLoopOwner !== owner) return false;
       if (!response.ok) {
         uploadState.message = uploadErrorMessage(payload);
-        await refreshUploadStatus(snapshot.id);
+        renderUploadCockpit();
+        await refreshUploadStatus(snapshot.id, owner);
+        if (!uploadContextStillCurrent(owner) || uploadState.uploadLoopOwner !== owner) return false;
         if (payload && payload.error && payload.error.current_offset !== undefined) {
           continue;
         }
         break;
       }
       snapshot = normalizeUploadSnapshot(payload);
-      applyUploadSnapshot(snapshot);
+      if (!applyUploadSnapshot(snapshot, owner)) return false;
       if (uploadState.paused) {
         uploadState.running = false;
         uploadState.message = "Paused in this browser.";
@@ -1331,40 +1689,59 @@ async function runUploadLoop() {
         break;
       }
       if (snapshot.received_size_bytes === snapshot.declared_size_bytes) {
-        await completeUploadIfReady(token);
+        await completeUploadIfReady(owner);
         break;
       }
     } catch {
-      if (token === uploadState.uploadLoopToken) {
+      if (uploadContextStillCurrent(owner) && uploadState.uploadLoopOwner === owner) {
         uploadState.message = "Upload request failed before a local response was read.";
-        await refreshUploadStatus(snapshot.id);
+        renderUploadCockpit();
+        await refreshUploadStatus(snapshot.id, owner);
       }
       break;
     }
   }
-  if (token === uploadState.uploadLoopToken) {
+  if (uploadState.uploadLoopOwner === owner) {
+    uploadState.uploadLoopOwner = null;
     uploadState.running = false;
     renderUploadCockpit();
   }
+  return true;
 }
 
 async function handleStartUpload() {
   const file = uploadState.file;
-  if (!file || uploadState.running) return;
-  await loadUploadCapability();
-  if (!uploadCapability.uploads_enabled) {
-    uploadState.message = "Uploads are not configured on this local server.";
-    renderUploadCockpit();
-    return;
-  }
-  if (file.size > uploadCapability.max_total_size_bytes) {
-    uploadState.message = "Selected file exceeds the server upload limit.";
-    renderUploadCockpit();
-    return;
-  }
-  uploadState.message = "Creating upload session.";
+  if (
+    !file
+    || uploadState.snapshot
+    || uploadState.actionOwner
+    || uploadState.preparing
+    || uploadState.running
+    || uploadState.completing
+  ) return;
+  const owner = claimUploadAction("start", { uploadId: null, file });
+  if (!owner) return;
+  uploadState.preparing = true;
+  uploadState.paused = false;
+  uploadState.needsReselection = false;
+  uploadState.message = "Preparing upload session.";
   renderUploadCockpit();
   try {
+    const capabilityLoaded = await loadUploadCapability(owner);
+    if (!uploadContextStillCurrent(owner, { allowMissingUploadId: true })) return;
+    if (capabilityLoaded === null) return;
+    if (!uploadCapability.uploads_enabled) {
+      uploadState.message = "Uploads are not configured on this local server.";
+      renderUploadCockpit();
+      return;
+    }
+    if (file.size > uploadCapability.max_total_size_bytes) {
+      uploadState.message = "Selected file exceeds the server upload limit.";
+      renderUploadCockpit();
+      return;
+    }
+    uploadState.message = "Creating upload session.";
+    renderUploadCockpit();
     const { response, payload } = await fetchUploadJson(UPLOADS_ENDPOINT, {
       method: "POST",
       headers: {
@@ -1377,16 +1754,27 @@ async function handleStartUpload() {
       }),
       cache: "no-store",
     });
+    if (!uploadContextStillCurrent(owner, { allowMissingUploadId: true })) return;
     if (!response.ok) {
       uploadState.message = uploadErrorMessage(payload);
       renderUploadCockpit();
       return;
     }
-    applyUploadSnapshot(normalizeUploadSnapshot(payload));
-    await runUploadLoop();
+    const snapshot = normalizeUploadSnapshot(payload);
+    if (!applyUploadSnapshot(snapshot, owner, { allowAdoptUploadId: true })) return;
+    uploadState.preparing = false;
+    await runUploadLoop(owner);
   } catch {
-    uploadState.message = "Upload session could not be created.";
-    renderUploadCockpit();
+    if (uploadContextStillCurrent(owner, { allowMissingUploadId: true })) {
+      uploadState.message = "Upload session could not be created.";
+      renderUploadCockpit();
+    }
+  } finally {
+    if (uploadState.actionOwner === owner) {
+      uploadState.preparing = false;
+      releaseUploadAction(owner);
+      renderUploadCockpit();
+    }
   }
 }
 
@@ -1399,38 +1787,69 @@ function handlePauseUpload() {
 
 async function handleResumeUpload() {
   const snapshot = activeUploadSnapshot();
-  if (!snapshot || uploadState.running) return;
+  if (
+    !snapshot
+    || uploadState.actionOwner
+    || uploadState.preparing
+    || uploadState.running
+    || uploadState.completing
+  ) return;
   if (!uploadState.file) {
     uploadState.needsReselection = true;
     uploadState.message = "Reselect the original local file before resuming.";
     renderUploadCockpit();
     return;
   }
+  const owner = claimUploadAction("resume", { uploadId: snapshot.id, file: uploadState.file });
+  if (!owner) return;
+  uploadState.preparing = true;
   uploadState.message = "Refreshing server offset before resuming.";
   renderUploadCockpit();
-  const refreshed = await refreshUploadStatus(snapshot.id);
-  if (!refreshed) return;
-  if (!uploadIsByteReceiving(refreshed)) {
-    if (
-      refreshed.state === "receiving"
-      && refreshed.received_size_bytes === refreshed.declared_size_bytes
-    ) {
-      uploadState.paused = false;
-      uploadState.needsReselection = false;
-      await runUploadLoop();
+  try {
+    const refreshed = await refreshUploadStatus(snapshot.id, owner);
+    if (!uploadContextStillCurrent(owner) || !refreshed) return;
+    if (!uploadIsByteReceiving(refreshed)) {
+      if (
+        refreshed.state === "receiving"
+        && refreshed.received_size_bytes === refreshed.declared_size_bytes
+      ) {
+        uploadState.paused = false;
+        uploadState.needsReselection = false;
+        uploadState.preparing = false;
+        await runUploadLoop(owner);
+        return;
+      }
+      if (uploadShouldPoll(refreshed)) {
+        uploadState.preparing = false;
+        scheduleUploadPolling(currentUploadContext({ uploadId: refreshed.id }));
+      }
       return;
     }
-    if (uploadShouldPoll(refreshed)) scheduleUploadPolling();
-    return;
+    uploadState.paused = false;
+    uploadState.needsReselection = false;
+    uploadState.preparing = false;
+    await runUploadLoop(owner);
+  } finally {
+    if (uploadState.actionOwner === owner) {
+      uploadState.preparing = false;
+      releaseUploadAction(owner);
+      renderUploadCockpit();
+    }
   }
-  uploadState.paused = false;
-  uploadState.needsReselection = false;
-  await runUploadLoop();
 }
 
 async function handleCancelUpload() {
   const snapshot = activeUploadSnapshot();
   if (!snapshot || !uploadCancelPermitted(snapshot)) return;
+  if (uploadState.actionOwner && uploadState.actionOwner.kind === "cancel") return;
+  const owner = claimUploadAction("cancel", { uploadId: snapshot.id, file: uploadState.file }, { supersede: true });
+  if (!owner) return;
+  uploadState.uploadLoopOwner = null;
+  uploadState.completionOwner = null;
+  uploadState.preparing = false;
+  uploadState.running = false;
+  uploadState.paused = false;
+  uploadState.completing = false;
   uploadState.message = "Cancelling upload.";
   renderUploadCockpit();
   try {
@@ -1439,20 +1858,40 @@ async function handleCancelUpload() {
       headers: { Accept: "application/json" },
       cache: "no-store",
     });
+    if (!uploadContextStillCurrent(owner)) return;
     if (response.ok) {
-      applyUploadSnapshot(normalizeUploadSnapshot(payload));
-      uploadState.running = false;
-      uploadState.paused = false;
-      uploadState.needsReselection = false;
+      const cancelled = normalizeUploadSnapshot(payload);
+      if (!applyUploadSnapshot(cancelled, owner)) return;
       uploadState.message = "Cancelled by this browser.";
       renderUploadCockpit();
       return;
     }
+    if (uploadStatusWasNotFound({ status: response.status, payload })) {
+      clearUploadRecovery();
+      uploadState.uploadId = null;
+      uploadState.snapshot = null;
+      uploadState.needsReselection = false;
+      uploadState.message = "Upload session was not found on this server.";
+      renderUploadCockpit();
+      return;
+    }
     uploadState.message = uploadErrorMessage(payload);
-    await refreshUploadStatus(snapshot.id);
+    renderUploadCockpit();
+    const refreshed = await refreshUploadStatus(snapshot.id, owner);
+    if (uploadContextStillCurrent(owner) && uploadShouldPoll(refreshed)) {
+      scheduleUploadPolling(currentUploadContext({ uploadId: refreshed.id }));
+    }
   } catch {
-    uploadState.message = "Cancel request failed before the local response could be read.";
-    await refreshUploadStatus(snapshot.id);
+    if (uploadContextStillCurrent(owner)) {
+      uploadState.message = "Cancel request failed before the local response could be read.";
+      renderUploadCockpit();
+      await refreshUploadStatus(snapshot.id, owner);
+    }
+  } finally {
+    if (uploadState.actionOwner === owner) {
+      releaseUploadAction(owner);
+      renderUploadCockpit();
+    }
   }
 }
 
@@ -1461,7 +1900,11 @@ function handleUploadFileSelection() {
     ? uploadFileInput.files[0]
     : null;
   if (!file) {
+    invalidateUploadOwnership();
     uploadState.file = null;
+    if (uploadIsByteReceiving(activeUploadSnapshot())) {
+      uploadState.needsReselection = true;
+    }
     uploadState.message = "Select one local GIF or MP4.";
     renderUploadCockpit();
     return;
@@ -1472,6 +1915,7 @@ function handleUploadFileSelection() {
     return;
   }
   if (uploadIsByteReceiving(snapshot)) {
+    invalidateUploadOwnership();
     if (file.size !== snapshot.declared_size_bytes) {
       uploadState.file = null;
       uploadState.needsReselection = true;
@@ -1506,8 +1950,13 @@ function handleUploadFileSelection() {
     renderUploadCockpit();
     return;
   }
+  invalidateUploadOwnership();
+  uploadState.file = null;
   uploadState.message = "The current server state no longer needs the local file.";
   renderUploadCockpit();
+  if (uploadShouldPoll(snapshot) && uploadDialog && uploadDialog.hasAttribute("open")) {
+    scheduleUploadPolling(currentUploadContext({ uploadId: snapshot.id }));
+  }
 }
 
 function openUploadDialog() {
@@ -1520,9 +1969,10 @@ function openUploadDialog() {
   }
   loadUploadCapability();
   if (uploadState.uploadId) {
-    refreshUploadStatus(uploadState.uploadId).then((snapshot) => {
-      if (uploadShouldPoll(snapshot)) {
-        scheduleUploadPolling();
+    const owner = currentUploadContext({ uploadId: uploadState.uploadId });
+    refreshUploadStatus(uploadState.uploadId, owner).then((snapshot) => {
+      if (uploadContextStillCurrent(owner) && uploadShouldPoll(snapshot)) {
+        scheduleUploadPolling(currentUploadContext({ uploadId: snapshot.id }));
       }
     });
   } else {
@@ -1551,8 +2001,7 @@ function closeUploadDialog() {
 }
 
 function cleanupUploadRuntime() {
-  stopUploadPolling();
-  uploadState.uploadLoopToken += 1;
+  invalidateUploadOwnership();
   saveUploadRecovery();
 }
 

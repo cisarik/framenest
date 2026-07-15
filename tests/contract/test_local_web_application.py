@@ -2379,15 +2379,15 @@ def test_javascript_upload_loop_uses_server_confirmed_offsets_and_patch_framing(
     script = client.get("/assets/app.js").text
     loop_body = _javascript_function(script, "runUploadLoop")
 
-    assert "await refreshUploadStatus()" in loop_body
+    assert "await refreshUploadStatus(owner.uploadId, owner)" in loop_body
     assert "const serverOffset = snapshot.received_size_bytes;" in loop_body
     assert "selectedUploadChunkSize(remainingBytes)" in loop_body
-    assert "uploadState.file.slice(serverOffset, serverOffset + chunkSize)" in loop_body
+    assert "owner.file.slice(serverOffset, serverOffset + chunkSize)" in loop_body
     assert '"Content-Type": "application/offset+octet-stream"' in loop_body
     assert '"Upload-Offset": String(serverOffset)' in loop_body
     assert "Content-Length" not in script
     assert "payload.error.current_offset" in loop_body
-    assert "completeUploadIfReady(token)" in loop_body
+    assert "completeUploadIfReady(owner)" in loop_body
 
 
 def test_javascript_upload_pause_resume_refresh_reselection_and_mismatch_paths(
@@ -2401,7 +2401,7 @@ def test_javascript_upload_pause_resume_refresh_reselection_and_mismatch_paths(
     assert "Pausing after the active request settles." in pause_body
     assert "uploadState.paused = true" in pause_body
     assert "Refreshing server offset before resuming." in resume_body
-    assert "await refreshUploadStatus(snapshot.id)" in resume_body
+    assert "await refreshUploadStatus(snapshot.id, owner)" in resume_body
     assert "uploadState.needsReselection = true" in resume_body
     assert "file.size !== snapshot.declared_size_bytes" in selection_body
     assert "Selected file size does not match this upload session." in selection_body
