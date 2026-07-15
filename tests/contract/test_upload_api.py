@@ -232,6 +232,8 @@ def test_create_and_status_return_sanitized_snapshot_without_storage_details(
     assert payload["state"] == "created"
     assert payload["received_size_bytes"] == 0
     assert "storage_key" not in payload
+    assert "byte_identity_id" not in payload
+    assert "byte_identity" not in response.text + status.text
     assert ".part" not in response.text + status.text
     assert str(settings.upload_quarantine_root) not in response.text + status.text
 

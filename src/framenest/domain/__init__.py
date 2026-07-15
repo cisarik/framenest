@@ -5,6 +5,7 @@ from framenest.domain.identities import (
     DeviceId,
     FrameNestIdentityError,
     LibraryId,
+    MediaByteIdentityId,
     MediaId,
     MediaLocationId,
     SeriesId,
@@ -26,6 +27,11 @@ from framenest.domain.media import (
     MediaLocation,
     MediaLocationAvailability,
     MediaRelativePath,
+)
+from framenest.domain.media_byte_identities import (
+    FrameNestMediaByteIdentityError,
+    MediaByteIdentity,
+    validate_media_byte_identity_evidence,
 )
 from framenest.domain.media_metadata import (
     CanonicalTag,
@@ -49,6 +55,7 @@ __all__ = [
     "FrameNestLibraryError",
     "FrameNestLibraryRootError",
     "FrameNestMediaError",
+    "FrameNestMediaByteIdentityError",
     "FrameNestMediaLocationError",
     "FrameNestMediaMetadataError",
     "FrameNestMediaRelativePathError",
@@ -57,6 +64,8 @@ __all__ = [
     "LibraryPathFlavor",
     "LibraryRoot",
     "LogicalMedia",
+    "MediaByteIdentity",
+    "MediaByteIdentityId",
     "MediaId",
     "MediaKind",
     "MediaLocation",
@@ -75,4 +84,5 @@ __all__ = [
     "PROCESSED_COLLECTION_KEY",
     "SeriesId",
     "StorageVolumeId",
+    "validate_media_byte_identity_evidence",
 ]

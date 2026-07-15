@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ast
 import sqlite3
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
@@ -22,6 +23,7 @@ from framenest.application.ports.upload_sessions import (
     UploadStorageKeyAlreadyExistsError,
 )
 from framenest.configuration import FrameNestSettings
+from framenest.domain import MediaByteIdentity, MediaByteIdentityId
 from framenest.domain.uploads import (
     UploadDisplayFilename,
     UploadSession,
@@ -31,6 +33,10 @@ from framenest.domain.uploads import (
     UploadValidatedFormat,
     UploadValidatedMediaKind,
     VALIDATED_UPLOAD_SESSION_STATES,
+)
+from framenest.infrastructure.persistence.catalog_schema import (
+    media_byte_identities,
+    upload_sessions,
 )
 from framenest.infrastructure.persistence.engine import create_sqlite_engine
 from framenest.infrastructure.persistence.migrations import upgrade_database_to_head
@@ -71,6 +77,7 @@ def _session(
     version: int = 0,
     validated_media_kind: UploadValidatedMediaKind | None = None,
     validated_format: UploadValidatedFormat | None = None,
+    byte_identity_id: MediaByteIdentityId | None = None,
 ) -> UploadSession:
     if state in {
         UploadSessionState.RECEIVED,
@@ -86,6 +93,7 @@ def _session(
         checksum_hex = checksum_hex or "a" * 64
         validated_media_kind = validated_media_kind or UploadValidatedMediaKind.VIDEO
         validated_format = validated_format or UploadValidatedFormat.MP4
+        byte_identity_id = byte_identity_id or MediaByteIdentityId.new()
     return UploadSession(
         id=session_id or UploadSessionId.new(),
         state=state,
@@ -102,6 +110,7 @@ def _session(
         version=version,
         validated_media_kind=validated_media_kind,
         validated_format=validated_format,
+        byte_identity_id=byte_identity_id,
     )
 
 
@@ -458,6 +467,7 @@ def test_valid_complete_rows_continue_through_transition_graph(
             "checksum_hex": "a" * 64,
             "validated_media_kind": UploadValidatedMediaKind.VIDEO,
             "validated_format": UploadValidatedFormat.MP4,
+            "byte_identity_id": MediaByteIdentityId.new(),
         }
     session = _session(
         storage_key=f"upload-session-valid-{source.value.replace('_', '-')}",
@@ -795,7 +805,17 @@ def test_complete_validation_success_commits_evidence_and_publish_state_atomical
     assert completed.checksum_hex == digest
     assert completed.validated_media_kind is UploadValidatedMediaKind.ANIMATED_IMAGE
     assert completed.validated_format is UploadValidatedFormat.GIF
+    assert completed.byte_identity_id is not None
     assert repeated == completed
+    with engine.connect() as connection:
+        identity_row = connection.execute(
+            sa.select(media_byte_identities).where(
+                media_byte_identities.c.id == completed.byte_identity_id.to_string()
+            )
+        ).mappings().one()
+    assert identity_row["checksum_algorithm"] == "sha256"
+    assert identity_row["size_bytes"] == completed.declared_size_bytes
+    assert identity_row["checksum_hex"] == digest
 
 
 def test_reject_validation_commits_sanitized_code_and_rejected_state(tmp_path: Path) -> None:
@@ -816,6 +836,217 @@ def test_reject_validation_commits_sanitized_code_and_rejected_state(tmp_path: P
     assert rejected.failure_code == "UNSUPPORTED_MEDIA_TYPE"
     assert rejected.checksum_hex is None
     assert rejected.validated_media_kind is None
+    assert rejected.byte_identity_id is None
+
+
+def test_get_or_create_byte_identity_reuses_existing_and_separates_tuple_parts(
+    tmp_path: Path,
+) -> None:
+    repository, engine = _repository(tmp_path)
+    identity = MediaByteIdentity(
+        id=MediaByteIdentityId.new(),
+        checksum_algorithm="sha256",
+        size_bytes=100,
+        checksum_hex="a" * 64,
+        created_at_ms=10,
+    )
+    same_tuple = MediaByteIdentity(
+        id=MediaByteIdentityId.new(),
+        checksum_algorithm="sha256",
+        size_bytes=100,
+        checksum_hex="a" * 64,
+        created_at_ms=20,
+    )
+    different_digest = MediaByteIdentity(
+        id=MediaByteIdentityId.new(),
+        checksum_algorithm="sha256",
+        size_bytes=100,
+        checksum_hex="b" * 64,
+        created_at_ms=30,
+    )
+    different_size = MediaByteIdentity(
+        id=MediaByteIdentityId.new(),
+        checksum_algorithm="sha256",
+        size_bytes=101,
+        checksum_hex="a" * 64,
+        created_at_ms=40,
+    )
+    try:
+        created = repository.get_or_create_byte_identity(identity)
+        reused = repository.get_or_create_byte_identity(same_tuple)
+        digest_identity = repository.get_or_create_byte_identity(different_digest)
+        size_identity = repository.get_or_create_byte_identity(different_size)
+        with engine.connect() as connection:
+            count = connection.execute(
+                sa.select(sa.func.count()).select_from(media_byte_identities)
+            )
+            identity_count = count.scalar_one()
+    finally:
+        engine.dispose()
+
+    assert reused == created
+    assert digest_identity.id != created.id
+    assert size_identity.id != created.id
+    assert identity_count == 3
+
+
+def test_idempotent_success_rejects_mismatched_byte_identity_link(tmp_path: Path) -> None:
+    repository, engine = _repository(tmp_path)
+    session = _session(state=UploadSessionState.VALIDATING)
+    digest = "f" * 64
+    try:
+        repository.create(session)
+        completed = repository.complete_validation_success(
+            session.id,
+            expected_version=0,
+            checksum_hex=digest,
+            validated_media_kind=UploadValidatedMediaKind.VIDEO,
+            validated_format=UploadValidatedFormat.MP4,
+            updated_at_ms=20,
+        )
+        mismatched = repository.get_or_create_byte_identity(
+            MediaByteIdentity(
+                id=MediaByteIdentityId.new(),
+                checksum_algorithm="sha256",
+                size_bytes=completed.declared_size_bytes,
+                checksum_hex="0" * 64,
+                created_at_ms=21,
+            )
+        )
+        with engine.begin() as connection:
+            connection.execute(
+                sa.update(upload_sessions)
+                .where(upload_sessions.c.id == completed.id.to_string())
+                .values(byte_identity_id=mismatched.id.to_string())
+            )
+        with pytest.raises(InvalidUploadValidationEvidenceError):
+            repository.complete_validation_success(
+                session.id,
+                expected_version=1,
+                checksum_hex=digest,
+                validated_media_kind=UploadValidatedMediaKind.VIDEO,
+                validated_format=UploadValidatedFormat.MP4,
+                updated_at_ms=22,
+            )
+    finally:
+        engine.dispose()
+
+
+def test_two_successful_identical_uploads_link_to_one_byte_identity(tmp_path: Path) -> None:
+    repository, engine = _repository(tmp_path)
+    first = _session(state=UploadSessionState.VALIDATING, storage_key="upload-session-0100")
+    second = _session(state=UploadSessionState.VALIDATING, storage_key="upload-session-0101")
+    digest = "e" * 64
+    try:
+        repository.create(first)
+        repository.create(second)
+        first_completed = repository.complete_validation_success(
+            first.id,
+            expected_version=0,
+            checksum_hex=digest,
+            validated_media_kind=UploadValidatedMediaKind.VIDEO,
+            validated_format=UploadValidatedFormat.MP4,
+            updated_at_ms=20,
+        )
+        second_completed = repository.complete_validation_success(
+            second.id,
+            expected_version=0,
+            checksum_hex=digest,
+            validated_media_kind=UploadValidatedMediaKind.VIDEO,
+            validated_format=UploadValidatedFormat.MP4,
+            updated_at_ms=21,
+        )
+        with engine.connect() as connection:
+            identity_count = connection.execute(
+                sa.select(sa.func.count()).select_from(media_byte_identities)
+            ).scalar_one()
+    finally:
+        engine.dispose()
+
+    assert first_completed.byte_identity_id == second_completed.byte_identity_id
+    assert identity_count == 1
+
+
+def test_concurrent_get_or_create_byte_identity_converges_on_one_row(tmp_path: Path) -> None:
+    database_path = tmp_path / "concurrent.sqlite3"
+    upgrade_database_to_head(FrameNestSettings(database_path=database_path, _env_file=None))
+
+    def worker(created_at_ms: int) -> MediaByteIdentity:
+        engine = create_sqlite_engine(database_path, busy_timeout_seconds=5.0)
+        repository = SqliteUploadSessionRepository(engine)
+        try:
+            return repository.get_or_create_byte_identity(
+                MediaByteIdentity(
+                    id=MediaByteIdentityId.new(),
+                    checksum_algorithm="sha256",
+                    size_bytes=100,
+                    checksum_hex="c" * 64,
+                    created_at_ms=created_at_ms,
+                )
+            )
+        finally:
+            engine.dispose()
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        first, second = executor.map(worker, (10, 20))
+
+    engine = create_sqlite_engine(database_path)
+    try:
+        with engine.connect() as connection:
+            count = connection.execute(
+                sa.select(sa.func.count()).select_from(media_byte_identities)
+            )
+            identity_count = count.scalar_one()
+    finally:
+        engine.dispose()
+
+    assert first == second
+    assert identity_count == 1
+
+
+def test_validation_success_failure_rolls_back_new_identity_and_upload_link(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import framenest.infrastructure.persistence.upload_session_repository as module
+
+    repository, engine = _repository(tmp_path)
+    session = _session(state=UploadSessionState.VALIDATING)
+    digest = "d" * 64
+    original_require_session = module._require_session
+
+    def fail_after_update(connection, session_id):
+        loaded = original_require_session(connection, session_id)
+        assert loaded.state is UploadSessionState.PUBLISH_PENDING
+        raise RuntimeError("synthetic post-update failure")
+
+    try:
+        repository.create(session)
+        monkeypatch.setattr(module, "_require_session", fail_after_update)
+        with pytest.raises(RuntimeError):
+            repository.complete_validation_success(
+                session.id,
+                expected_version=0,
+                checksum_hex=digest,
+                validated_media_kind=UploadValidatedMediaKind.VIDEO,
+                validated_format=UploadValidatedFormat.MP4,
+                updated_at_ms=20,
+            )
+        monkeypatch.setattr(module, "_require_session", original_require_session)
+        stored = repository.get(session.id)
+        with engine.connect() as connection:
+            identity_count = connection.execute(
+                sa.select(sa.func.count()).select_from(media_byte_identities)
+            ).scalar_one()
+            raw_row = connection.execute(
+                sa.select(upload_sessions).where(upload_sessions.c.id == session.id.to_string())
+            ).mappings().one()
+    finally:
+        engine.dispose()
+
+    assert stored == session
+    assert raw_row["byte_identity_id"] is None
+    assert identity_count == 0
 
 
 def test_failure_code_is_sanitized_and_only_allowed_for_failure_states(tmp_path: Path) -> None:

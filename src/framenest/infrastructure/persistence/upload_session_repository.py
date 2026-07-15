@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 
 from sqlalchemy import and_, insert, or_, select, update
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
@@ -42,7 +43,16 @@ from framenest.domain.uploads import (
     validate_upload_offset_advance,
     validate_upload_validation_evidence,
 )
-from framenest.infrastructure.persistence.catalog_schema import upload_sessions
+from framenest.domain.identities import FrameNestIdentityError, MediaByteIdentityId
+from framenest.domain.media_byte_identities import (
+    FrameNestMediaByteIdentityError,
+    MediaByteIdentity,
+    validate_media_byte_identity_evidence,
+)
+from framenest.infrastructure.persistence.catalog_schema import (
+    media_byte_identities,
+    upload_sessions,
+)
 from framenest.infrastructure.persistence.engine import run_in_transaction
 
 _REPOSITORY_FAILURE_MESSAGE = "Upload session operation failed."
@@ -61,7 +71,20 @@ class SqliteUploadSessionRepository:
                 raise UploadSessionAlreadyExistsError("upload session already exists")
             if _row_by_storage_key(connection, session.storage_key.value) is not None:
                 raise UploadStorageKeyAlreadyExistsError("upload storage key already exists")
-            connection.execute(insert(upload_sessions).values(_values_from_session(session)))
+            values = _values_from_session(session)
+            if session.byte_identity_id is not None:
+                identity = _get_or_create_byte_identity(
+                    connection,
+                    MediaByteIdentity(
+                        id=session.byte_identity_id,
+                        checksum_algorithm=session.checksum_algorithm,
+                        size_bytes=session.declared_size_bytes,
+                        checksum_hex=session.checksum_hex,
+                        created_at_ms=session.updated_at_ms,
+                    ),
+                )
+                values["byte_identity_id"] = identity.id.to_string()
+            connection.execute(insert(upload_sessions).values(values))
 
         try:
             run_in_transaction(self._engine, operation)
@@ -342,6 +365,7 @@ class SqliteUploadSessionRepository:
                         upload_sessions.c.checksum_hex.is_not(None),
                         upload_sessions.c.validated_media_kind.is_not(None),
                         upload_sessions.c.validated_format.is_not(None),
+                        upload_sessions.c.byte_identity_id.is_not(None),
                     ]
                 )
             result = connection.execute(
@@ -469,7 +493,7 @@ class SqliteUploadSessionRepository:
         validated_format: UploadValidatedFormat,
         updated_at_ms: int,
     ) -> UploadSession:
-        """Atomically persist validation evidence and transition to publish_pending."""
+        """Atomically persist validation evidence, byte identity, and publish_pending."""
         try:
             checksum = validate_sha256_checksum_hex(checksum_hex)
             media_kind, media_format = validate_upload_validation_evidence(
@@ -490,33 +514,6 @@ class SqliteUploadSessionRepository:
             ) from exc
 
         def operation(connection: Connection) -> UploadSession:
-            result = connection.execute(
-                update(upload_sessions)
-                .where(
-                    and_(
-                        upload_sessions.c.id == session_id.to_string(),
-                        upload_sessions.c.state == UploadSessionState.VALIDATING.value,
-                        upload_sessions.c.version == expected_version,
-                        upload_sessions.c.received_size_bytes
-                        == upload_sessions.c.declared_size_bytes,
-                        upload_sessions.c.checksum_algorithm.is_(None),
-                        upload_sessions.c.checksum_hex.is_(None),
-                        upload_sessions.c.validated_media_kind.is_(None),
-                        upload_sessions.c.validated_format.is_(None),
-                    )
-                )
-                .values(
-                    state=UploadSessionState.PUBLISH_PENDING.value,
-                    checksum_algorithm="sha256",
-                    checksum_hex=checksum,
-                    validated_media_kind=media_kind.value,
-                    validated_format=media_format.value,
-                    updated_at_ms=updated_at_ms,
-                    version=upload_sessions.c.version + 1,
-                )
-            )
-            if result.rowcount == 1:
-                return _require_session(connection, session_id)
             row = _row_by_id(connection, session_id)
             if row is None:
                 raise UploadSessionNotFoundError("upload session not found")
@@ -526,6 +523,10 @@ class SqliteUploadSessionRepository:
                 validated_media_kind=media_kind,
                 validated_format=media_format,
             ):
+                if not _row_byte_identity_matches_upload_evidence(connection, row):
+                    raise InvalidUploadValidationEvidenceError(
+                        "invalid upload validation evidence"
+                    )
                 return _session_from_row(row)
             if str(row["state"]) == UploadSessionState.PUBLISH_PENDING.value:
                 if row["checksum_algorithm"] != "sha256" or row["checksum_hex"] != checksum:
@@ -549,6 +550,45 @@ class SqliteUploadSessionRepository:
                 raise InvalidUploadValidationEvidenceError(
                     "invalid upload validation evidence"
                 )
+            identity = _get_or_create_byte_identity(
+                connection,
+                MediaByteIdentity(
+                    id=MediaByteIdentityId.new(),
+                    checksum_algorithm="sha256",
+                    size_bytes=int(row["declared_size_bytes"]),
+                    checksum_hex=checksum,
+                    created_at_ms=updated_at_ms,
+                ),
+            )
+            result = connection.execute(
+                update(upload_sessions)
+                .where(
+                    and_(
+                        upload_sessions.c.id == session_id.to_string(),
+                        upload_sessions.c.state == UploadSessionState.VALIDATING.value,
+                        upload_sessions.c.version == expected_version,
+                        upload_sessions.c.received_size_bytes
+                        == upload_sessions.c.declared_size_bytes,
+                        upload_sessions.c.checksum_algorithm.is_(None),
+                        upload_sessions.c.checksum_hex.is_(None),
+                        upload_sessions.c.validated_media_kind.is_(None),
+                        upload_sessions.c.validated_format.is_(None),
+                        upload_sessions.c.byte_identity_id.is_(None),
+                    )
+                )
+                .values(
+                    state=UploadSessionState.PUBLISH_PENDING.value,
+                    checksum_algorithm="sha256",
+                    checksum_hex=checksum,
+                    validated_media_kind=media_kind.value,
+                    validated_format=media_format.value,
+                    byte_identity_id=identity.id.to_string(),
+                    updated_at_ms=updated_at_ms,
+                    version=upload_sessions.c.version + 1,
+                )
+            )
+            if result.rowcount == 1:
+                return _require_session(connection, session_id)
             raise UploadSessionConcurrencyConflictError(
                 "upload session concurrency conflict"
             )
@@ -564,6 +604,22 @@ class SqliteUploadSessionRepository:
             InvalidUploadValidationEvidenceError,
         ):
             raise
+        except SQLAlchemyError as exc:
+            raise FrameNestUploadSessionRepositoryError(_REPOSITORY_FAILURE_MESSAGE) from exc
+
+    def get_or_create_byte_identity(
+        self,
+        identity: MediaByteIdentity,
+    ) -> MediaByteIdentity:
+        """Race-safely return the canonical exact-byte identity for evidence."""
+
+        def operation(connection: Connection) -> MediaByteIdentity:
+            return _get_or_create_byte_identity(connection, identity)
+
+        try:
+            return run_in_transaction(self._engine, operation)
+        except FrameNestMediaByteIdentityError as exc:
+            raise InvalidUploadChecksumError("invalid upload checksum") from exc
         except SQLAlchemyError as exc:
             raise FrameNestUploadSessionRepositoryError(_REPOSITORY_FAILURE_MESSAGE) from exc
 
@@ -677,6 +733,7 @@ def _row_has_matching_publish_pending_evidence(
         and row["checksum_hex"] == checksum_hex
         and row["validated_media_kind"] == validated_media_kind.value
         and row["validated_format"] == validated_format.value
+        and row["byte_identity_id"] is not None
     )
 
 
@@ -686,6 +743,30 @@ def _row_has_validation_evidence(row: Mapping[str, object]) -> bool:
         and row["checksum_hex"] is not None
         and row["validated_media_kind"] is not None
         and row["validated_format"] is not None
+        and row["byte_identity_id"] is not None
+    )
+
+
+def _row_byte_identity_matches_upload_evidence(
+    connection: Connection,
+    row: Mapping[str, object],
+) -> bool:
+    if row["byte_identity_id"] is None:
+        return False
+    identity = (
+        connection.execute(
+            select(media_byte_identities).where(
+                media_byte_identities.c.id == str(row["byte_identity_id"])
+            )
+        )
+        .mappings()
+        .first()
+    )
+    return (
+        identity is not None
+        and identity["checksum_algorithm"] == row["checksum_algorithm"]
+        and int(identity["size_bytes"]) == int(row["declared_size_bytes"])
+        and identity["checksum_hex"] == row["checksum_hex"]
     )
 
 
@@ -725,6 +806,9 @@ def _values_from_session(session: UploadSession) -> dict[str, object]:
         "validated_format": None
         if session.validated_format is None
         else session.validated_format.value,
+        "byte_identity_id": None
+        if session.byte_identity_id is None
+        else session.byte_identity_id.to_string(),
         "created_at_ms": session.created_at_ms,
         "updated_at_ms": session.updated_at_ms,
         "expires_at_ms": session.expires_at_ms,
@@ -752,14 +836,67 @@ def _session_from_row(row: Mapping[str, object]) -> UploadSession:
             validated_format=None
             if row["validated_format"] is None
             else UploadValidatedFormat(str(row["validated_format"])),
+            byte_identity_id=None
+            if row["byte_identity_id"] is None
+            else MediaByteIdentityId.from_string(str(row["byte_identity_id"])),
             created_at_ms=int(row["created_at_ms"]),
             updated_at_ms=int(row["updated_at_ms"]),
             expires_at_ms=int(row["expires_at_ms"]),
             failure_code=None if row["failure_code"] is None else str(row["failure_code"]),
             version=int(row["version"]),
         )
-    except (FrameNestUploadSessionError, ValueError) as exc:
+    except (FrameNestIdentityError, FrameNestUploadSessionError, ValueError) as exc:
         raise FrameNestUploadSessionRepositoryError(_REPOSITORY_FAILURE_MESSAGE) from exc
+
+
+def _get_or_create_byte_identity(
+    connection: Connection,
+    identity: MediaByteIdentity,
+) -> MediaByteIdentity:
+    validate_media_byte_identity_evidence(
+        checksum_algorithm=identity.checksum_algorithm,
+        size_bytes=identity.size_bytes,
+        checksum_hex=identity.checksum_hex,
+    )
+    statement = (
+        sqlite_insert(media_byte_identities)
+        .values(
+            id=identity.id.to_string(),
+            checksum_algorithm=identity.checksum_algorithm,
+            size_bytes=identity.size_bytes,
+            checksum_hex=identity.checksum_hex,
+            created_at_ms=identity.created_at_ms,
+        )
+        .on_conflict_do_nothing(
+            index_elements=[
+                media_byte_identities.c.checksum_algorithm,
+                media_byte_identities.c.size_bytes,
+                media_byte_identities.c.checksum_hex,
+            ]
+        )
+    )
+    connection.execute(statement)
+    row = (
+        connection.execute(
+            select(media_byte_identities).where(
+                and_(
+                    media_byte_identities.c.checksum_algorithm
+                    == identity.checksum_algorithm,
+                    media_byte_identities.c.size_bytes == identity.size_bytes,
+                    media_byte_identities.c.checksum_hex == identity.checksum_hex,
+                )
+            )
+        )
+        .mappings()
+        .one()
+    )
+    return MediaByteIdentity(
+        id=MediaByteIdentityId.from_string(str(row["id"])),
+        checksum_algorithm=str(row["checksum_algorithm"]),
+        size_bytes=int(row["size_bytes"]),
+        checksum_hex=str(row["checksum_hex"]),
+        created_at_ms=int(row["created_at_ms"]),
+    )
 
 
 def _target_requires_complete_upload(target_state: UploadSessionState) -> bool:

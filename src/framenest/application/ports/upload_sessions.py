@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Protocol
 
+from framenest.domain.media_byte_identities import MediaByteIdentity
 from framenest.domain.uploads import (
     UploadSession,
     UploadSessionId,
@@ -138,6 +139,12 @@ class UploadSessionRepository(Protocol):
         updated_at_ms: int,
     ) -> UploadSession:
         """Atomically persist checksum, validation evidence, and publish_pending."""
+
+    def get_or_create_byte_identity(
+        self,
+        identity: MediaByteIdentity,
+    ) -> MediaByteIdentity:
+        """Race-safely return the canonical exact-byte identity for evidence."""
 
     def reject_validation(
         self,

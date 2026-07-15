@@ -8,6 +8,8 @@ from pathlib import PurePosixPath, PureWindowsPath
 import re
 import uuid
 
+from framenest.domain.identities import MediaByteIdentityId
+
 INVALID_UPLOAD_SESSION_MESSAGE = "Invalid FrameNest upload session."
 INVALID_UPLOAD_TRANSITION_MESSAGE = "Invalid upload session transition."
 INCOMPLETE_UPLOAD_SESSION_MESSAGE = "Incomplete upload session."
@@ -276,6 +278,7 @@ class UploadSession:
     version: int
     validated_media_kind: UploadValidatedMediaKind | None = None
     validated_format: UploadValidatedFormat | None = None
+    byte_identity_id: MediaByteIdentityId | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.id, UploadSessionId):
@@ -312,12 +315,18 @@ class UploadSession:
             self.validated_media_kind,
             self.validated_format,
         )
+        if self.byte_identity_id is not None and not isinstance(
+            self.byte_identity_id,
+            MediaByteIdentityId,
+        ):
+            raise FrameNestUploadSessionError(INVALID_UPLOAD_SESSION_MESSAGE)
         if self.state in VALIDATED_UPLOAD_SESSION_STATES:
             _validate_required_validation_evidence(
                 checksum_algorithm=self.checksum_algorithm,
                 checksum_hex=self.checksum_hex,
                 validated_media_kind=self.validated_media_kind,
                 validated_format=self.validated_format,
+                byte_identity_id=self.byte_identity_id,
             )
 
 
@@ -451,6 +460,7 @@ def _validate_required_validation_evidence(
     checksum_hex: object,
     validated_media_kind: object,
     validated_format: object,
+    byte_identity_id: object,
 ) -> None:
     _validate_checksum_pair(checksum_algorithm, checksum_hex)
     if checksum_algorithm != "sha256" or checksum_hex is None:
@@ -459,6 +469,10 @@ def _validate_required_validation_evidence(
         )
     _validate_validation_evidence_pair(validated_media_kind, validated_format)
     if validated_media_kind is None or validated_format is None:
+        raise FrameNestUploadValidationEvidenceError(
+            INVALID_UPLOAD_VALIDATION_EVIDENCE_MESSAGE
+        )
+    if not isinstance(byte_identity_id, MediaByteIdentityId):
         raise FrameNestUploadValidationEvidenceError(
             INVALID_UPLOAD_VALIDATION_EVIDENCE_MESSAGE
         )

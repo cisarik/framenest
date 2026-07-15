@@ -14,7 +14,8 @@ from framenest.infrastructure.persistence.catalog_schema import upload_sessions
 PRODUCTION_VERSIONS_PACKAGE = (
     "framenest.infrastructure.persistence.alembic_environment.versions"
 )
-CURRENT_HEAD_REVISION = "0010"
+CURRENT_HEAD_REVISION = "0011"
+TARGET_BYTE_IDENTITY_REVISION = "0011"
 TARGET_VALIDATION_REVISION = "0010"
 TARGET_COMPLETENESS_REVISION = "0009"
 TARGET_UPLOAD_SESSION_REVISION = "0008"
@@ -105,6 +106,14 @@ def _indexes(database_path: Path, table_name: str) -> dict[str, tuple[object, ..
         connection.close()
 
 
+def _foreign_keys(database_path: Path, table_name: str) -> list[tuple[object, ...]]:
+    connection = _connect(database_path)
+    try:
+        return connection.execute(f"PRAGMA foreign_key_list({table_name})").fetchall()
+    finally:
+        connection.close()
+
+
 def _table_sql(database_path: Path, table_name: str) -> str:
     connection = _connect(database_path)
     try:
@@ -123,6 +132,7 @@ def test_packaged_migration_resources_include_upload_session_revisions() -> None
     assert versions.joinpath("0008_upload_sessions.py").is_file()
     assert versions.joinpath("0009_upload_session_completeness.py").is_file()
     assert versions.joinpath("0010_upload_validation_evidence.py").is_file()
+    assert versions.joinpath("0011_upload_byte_identities.py").is_file()
 
     from framenest.infrastructure.persistence.migrations import load_script_directory
 
@@ -136,6 +146,9 @@ def test_packaged_migration_resources_include_upload_session_revisions() -> None
     validation_revision = script.get_revision(TARGET_VALIDATION_REVISION)
     assert validation_revision is not None
     assert validation_revision.down_revision == TARGET_COMPLETENESS_REVISION
+    identity_revision = script.get_revision(TARGET_BYTE_IDENTITY_REVISION)
+    assert identity_revision is not None
+    assert identity_revision.down_revision == TARGET_VALIDATION_REVISION
     assert script.get_heads() == [CURRENT_HEAD_REVISION]
 
 
@@ -174,6 +187,7 @@ def test_upload_sessions_table_has_required_columns_constraints_and_indexes(
         "checksum_hex",
         "validated_media_kind",
         "validated_format",
+        "byte_identity_id",
         "created_at_ms",
         "updated_at_ms",
         "expires_at_ms",
@@ -202,6 +216,17 @@ def test_upload_sessions_table_has_required_columns_constraints_and_indexes(
     assert "ix_upload_sessions_state" in indexes
     assert "ix_upload_sessions_expires_at_ms" in indexes
     assert "ix_upload_sessions_state_expires_at_ms" in indexes
+    assert "ix_upload_sessions_byte_identity_id" in indexes
+    foreign_keys = _foreign_keys(settings.database_path, "upload_sessions")
+    assert any(row[2] == "media_byte_identities" for row in foreign_keys)
+    identity_columns = _columns(settings.database_path, "media_byte_identities")
+    assert set(identity_columns) == {
+        "id",
+        "checksum_algorithm",
+        "size_bytes",
+        "checksum_hex",
+        "created_at_ms",
+    }
 
 
 def test_upload_session_constraints_reject_invalid_rows(tmp_path: Path) -> None:
@@ -327,7 +352,9 @@ def test_upgrade_from_0007_preserves_existing_catalog_rows_and_adds_empty_upload
     status = upgrade_database_to_head(settings)
 
     assert status.current_revision == CURRENT_HEAD_REVISION
-    assert before_tables | {"upload_sessions"} == _table_names(settings.database_path)
+    assert before_tables | {"upload_sessions", "media_byte_identities"} == _table_names(
+        settings.database_path
+    )
     connection = _connect(settings.database_path)
     try:
         assert connection.execute("SELECT COUNT(*) FROM upload_sessions").fetchone()[0] == 0
@@ -563,7 +590,173 @@ def test_upgrade_wrapper_reports_legacy_advanced_rows_as_migration_failure(
     assert "Private Clip.mp4" not in message
     status = inspect_database_migration_status(settings)
     assert status.current_revision == TARGET_COMPLETENESS_REVISION
-    assert status.head_revision == TARGET_VALIDATION_REVISION
+    assert status.head_revision == CURRENT_HEAD_REVISION
+
+
+def test_media_byte_identity_constraints_reject_invalid_rows(tmp_path: Path) -> None:
+    from framenest.infrastructure.persistence.migrations import upgrade_database_to_head
+
+    settings = _settings_for(tmp_path / "byte-identity-constraints.sqlite3")
+    upgrade_database_to_head(settings)
+    connection = _connect(settings.database_path)
+    try:
+        valid = {
+            "id": "11111111-1111-4111-8111-111111111111",
+            "checksum_algorithm": "sha256",
+            "size_bytes": 100,
+            "checksum_hex": "a" * 64,
+            "created_at_ms": 10,
+        }
+        _insert_byte_identity(connection, valid)
+        with pytest.raises(sqlite3.IntegrityError):
+            _insert_byte_identity(
+                connection,
+                valid
+                | {
+                    "id": "22222222-2222-4222-8222-222222222222",
+                },
+            )
+        for overrides in (
+            {"id": "33333333-3333-4333-8333-333333333333", "checksum_algorithm": "md5"},
+            {"id": "33333333-3333-4333-8333-333333333333", "size_bytes": 0},
+            {"id": "33333333-3333-4333-8333-333333333333", "size_bytes": -1},
+            {"id": "33333333-3333-4333-8333-333333333333", "checksum_hex": "A" * 64},
+            {"id": "33333333-3333-4333-8333-333333333333", "checksum_hex": "a" * 63},
+            {"id": "33333333-3333-4333-8333-333333333333", "checksum_hex": "g" * 64},
+        ):
+            with pytest.raises(sqlite3.IntegrityError):
+                _insert_byte_identity(connection, valid | overrides)
+    finally:
+        connection.close()
+
+
+def test_upgrade_from_0010_backfills_coherent_successful_byte_identities(
+    tmp_path: Path,
+) -> None:
+    settings = _settings_for(tmp_path / "backfill-byte-identities.sqlite3")
+    _upgrade_to_revision(settings.database_path, TARGET_VALIDATION_REVISION)
+    shared_digest = "a" * 64
+    other_digest = "b" * 64
+    connection = _connect(settings.database_path)
+    try:
+        _insert_upload_session_0010(
+            connection,
+            _valid_upload_session_values(
+                "11111111-1111-4111-8111-111111111111",
+                "upload-session-1001",
+                state="publish_pending",
+                received_size_bytes=100,
+            ),
+            checksum_hex=shared_digest,
+            validated_media_kind="video",
+            validated_format="mp4",
+        )
+        _insert_upload_session_0010(
+            connection,
+            _valid_upload_session_values(
+                "22222222-2222-4222-8222-222222222222",
+                "upload-session-1002",
+                state="published",
+                received_size_bytes=100,
+            ),
+            checksum_hex=shared_digest,
+            validated_media_kind="video",
+            validated_format="mp4",
+        )
+        _insert_upload_session_0010(
+            connection,
+            _valid_upload_session_values(
+                "33333333-3333-4333-8333-333333333333",
+                "upload-session-1003",
+                state="cataloged",
+                received_size_bytes=100,
+            ),
+            checksum_hex=other_digest,
+            validated_media_kind="animated_image",
+            validated_format="gif",
+        )
+        _insert_upload_session_0010(
+            connection,
+            _valid_upload_session_values(
+                "44444444-4444-4444-8444-444444444444",
+                "upload-session-1004",
+                state="received",
+                received_size_bytes=100,
+            ),
+            checksum_hex=shared_digest,
+            validated_media_kind=None,
+            validated_format=None,
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    _upgrade_to_revision(settings.database_path, TARGET_BYTE_IDENTITY_REVISION)
+
+    connection = _connect(settings.database_path)
+    try:
+        identity_rows = connection.execute(
+            """
+            SELECT checksum_algorithm, size_bytes, checksum_hex
+            FROM media_byte_identities
+            ORDER BY checksum_hex
+            """
+        ).fetchall()
+        links = connection.execute(
+            """
+            SELECT id, byte_identity_id
+            FROM upload_sessions
+            ORDER BY id
+            """
+        ).fetchall()
+    finally:
+        connection.close()
+
+    assert identity_rows == [
+        ("sha256", 100, shared_digest),
+        ("sha256", 100, other_digest),
+    ]
+    assert links[0][1] is not None
+    assert links[1][1] == links[0][1]
+    assert links[2][1] is not None
+    assert links[2][1] != links[0][1]
+    assert links[3][1] is None
+
+
+def test_upgrade_from_0010_fails_closed_for_incoherent_successful_byte_identity(
+    tmp_path: Path,
+) -> None:
+    settings = _settings_for(tmp_path / "invalid-byte-identity-backfill.sqlite3")
+    _upgrade_to_revision(settings.database_path, TARGET_VALIDATION_REVISION)
+    connection = _connect(settings.database_path)
+    try:
+        connection.execute("PRAGMA ignore_check_constraints=ON")
+        _insert_upload_session_0010(
+            connection,
+            _valid_upload_session_values(
+                "11111111-1111-4111-8111-111111111111",
+                "private-storage-key-0001",
+                state="publish_pending",
+                received_size_bytes=100,
+                display_filename="Private Clip.mp4",
+            ),
+            checksum_hex="A" * 64,
+            validated_media_kind="video",
+            validated_format="mp4",
+        )
+        connection.execute("PRAGMA ignore_check_constraints=OFF")
+        connection.commit()
+    finally:
+        connection.close()
+
+    with pytest.raises(Exception) as error:
+        _upgrade_to_revision(settings.database_path, TARGET_BYTE_IDENTITY_REVISION)
+
+    message = str(error.value)
+    assert "private-storage-key-0001" not in message
+    assert "Private Clip.mp4" not in message
+    assert "media_byte_identities" not in _table_names(settings.database_path)
+    assert "byte_identity_id" not in _columns(settings.database_path, "upload_sessions")
 
 
 def test_downgrade_from_0009_to_0008_preserves_rows_and_upgrade_can_run_again(
@@ -714,6 +907,81 @@ def _upload_session_rows(database_path: Path) -> list[dict[str, object]]:
         return [dict(zip(columns, row, strict=True)) for row in rows]
     finally:
         connection.close()
+
+
+def _insert_byte_identity(connection: sqlite3.Connection, values: dict[str, object]) -> None:
+    connection.execute(
+        """
+        INSERT INTO media_byte_identities (
+            id,
+            checksum_algorithm,
+            size_bytes,
+            checksum_hex,
+            created_at_ms
+        ) VALUES (
+            :id,
+            :checksum_algorithm,
+            :size_bytes,
+            :checksum_hex,
+            :created_at_ms
+        )
+        """,
+        values,
+    )
+
+
+def _insert_upload_session_0010(
+    connection: sqlite3.Connection,
+    values: dict[str, object],
+    *,
+    checksum_hex: str | None,
+    validated_media_kind: str | None,
+    validated_format: str | None,
+) -> None:
+    connection.execute(
+        """
+        INSERT INTO upload_sessions (
+            id,
+            state,
+            storage_key,
+            display_filename,
+            declared_size_bytes,
+            received_size_bytes,
+            checksum_algorithm,
+            checksum_hex,
+            validated_media_kind,
+            validated_format,
+            created_at_ms,
+            updated_at_ms,
+            expires_at_ms,
+            failure_code,
+            version
+        ) VALUES (
+            :id,
+            :state,
+            :storage_key,
+            :display_filename,
+            :declared_size_bytes,
+            :received_size_bytes,
+            :checksum_algorithm,
+            :checksum_hex,
+            :validated_media_kind,
+            :validated_format,
+            :created_at_ms,
+            :updated_at_ms,
+            :expires_at_ms,
+            :failure_code,
+            :version
+        )
+        """,
+        values
+        | {
+            "checksum_algorithm": None if checksum_hex is None else "sha256",
+            "checksum_hex": checksum_hex,
+            "validated_media_kind": validated_media_kind,
+            "validated_format": validated_format,
+        },
+    )
 
 
 def _insert_upload_session(connection: sqlite3.Connection, values: dict[str, object]) -> None:

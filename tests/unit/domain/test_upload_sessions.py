@@ -8,6 +8,7 @@ from typing import Any
 
 import pytest
 
+from framenest.domain import MediaByteIdentityId
 from framenest.domain.uploads import (
     ALLOWED_UPLOAD_SESSION_TRANSITIONS,
     COMPLETE_UPLOAD_SESSION_STATES,
@@ -53,6 +54,7 @@ def _session(**overrides: object) -> UploadSession:
         "expires_at_ms": 20,
         "failure_code": None,
         "version": 0,
+        "byte_identity_id": None,
     }
     values.update(overrides)
     if values["state"] in VALIDATED_UPLOAD_SESSION_STATES:
@@ -60,6 +62,7 @@ def _session(**overrides: object) -> UploadSession:
         values.setdefault("checksum_hex", "a" * 64)
         values.setdefault("validated_media_kind", UploadValidatedMediaKind.VIDEO)
         values.setdefault("validated_format", UploadValidatedFormat.MP4)
+        values.setdefault("byte_identity_id", MediaByteIdentityId.new())
         if values["checksum_algorithm"] is None:
             values["checksum_algorithm"] = "sha256"
         if values["checksum_hex"] is None:
@@ -68,6 +71,8 @@ def _session(**overrides: object) -> UploadSession:
             values["validated_media_kind"] = UploadValidatedMediaKind.VIDEO
         if values.get("validated_format") is None:
             values["validated_format"] = UploadValidatedFormat.MP4
+        if values.get("byte_identity_id") is None:
+            values["byte_identity_id"] = MediaByteIdentityId.new()
     return UploadSession(**values)  # type: ignore[arg-type]
 
 
@@ -302,6 +307,28 @@ def test_advanced_states_require_checksum_and_validation_evidence() -> None:
 
     with pytest.raises(FrameNestUploadValidationEvidenceError):
         UploadSession(**values)  # type: ignore[arg-type]
+
+
+def test_advanced_states_require_byte_identity_link() -> None:
+    with pytest.raises(FrameNestUploadValidationEvidenceError):
+        UploadSession(
+            id=UploadSessionId.new(),
+            state=UploadSessionState.PUBLISH_PENDING,
+            storage_key=UploadStorageKey("upload-session-0003"),
+            display_filename=UploadDisplayFilename("example.mp4"),
+            declared_size_bytes=100,
+            received_size_bytes=100,
+            checksum_algorithm="sha256",
+            checksum_hex="a" * 64,
+            created_at_ms=10,
+            updated_at_ms=10,
+            expires_at_ms=20,
+            failure_code=None,
+            version=0,
+            validated_media_kind=UploadValidatedMediaKind.VIDEO,
+            validated_format=UploadValidatedFormat.MP4,
+            byte_identity_id=None,
+        )
 
 
 def test_storage_key_is_opaque_and_display_filename_is_not_a_storage_path() -> None:

@@ -11,6 +11,7 @@ from framenest.domain import (
     DeviceId,
     FrameNestIdentityError,
     LibraryId,
+    MediaByteIdentityId,
     MediaId,
     MediaLocationId,
     SeriesId,
@@ -19,6 +20,7 @@ from framenest.domain import (
 
 IDENTITY_TYPES = (
     MediaId,
+    MediaByteIdentityId,
     MediaLocationId,
     DeviceId,
     LibraryId,

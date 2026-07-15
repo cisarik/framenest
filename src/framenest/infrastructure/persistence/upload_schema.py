@@ -5,6 +5,7 @@ from __future__ import annotations
 from sqlalchemy import (
     CheckConstraint,
     Column,
+    ForeignKey,
     Index,
     Integer,
     MetaData,
@@ -63,6 +64,12 @@ def define_upload_sessions_table(metadata: MetaData) -> Table:
         Column("checksum_hex", Text(), nullable=True),
         Column("validated_media_kind", Text(), nullable=True),
         Column("validated_format", Text(), nullable=True),
+        Column(
+            "byte_identity_id",
+            Text(),
+            ForeignKey("media_byte_identities.id", ondelete="RESTRICT"),
+            nullable=True,
+        ),
         Column("created_at_ms", Integer(), nullable=False),
         Column("updated_at_ms", Integer(), nullable=False),
         Column("expires_at_ms", Integer(), nullable=False),
@@ -144,6 +151,7 @@ def define_upload_sessions_table(metadata: MetaData) -> Table:
                     & column("checksum_hex").is_not(None)
                     & column("validated_media_kind").is_not(None)
                     & column("validated_format").is_not(None)
+                    & column("byte_identity_id").is_not(None)
                 ),
             ),
             name="ck_upload_sessions_validated_states_have_evidence",
@@ -176,4 +184,5 @@ def define_upload_sessions_table(metadata: MetaData) -> Table:
         Index("ix_upload_sessions_state", "state"),
         Index("ix_upload_sessions_expires_at_ms", "expires_at_ms"),
         Index("ix_upload_sessions_state_expires_at_ms", "state", "expires_at_ms"),
+        Index("ix_upload_sessions_byte_identity_id", "byte_identity_id"),
     )

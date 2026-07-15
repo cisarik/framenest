@@ -116,6 +116,19 @@ def test_success_persists_checksum_validation_evidence_and_no_catalog_visibility
             location_count = connection.execute(
                 "SELECT COUNT(*) FROM physical_media_locations"
             ).fetchone()
+            identity_row = connection.execute(
+                """
+                SELECT
+                    media_byte_identities.checksum_algorithm,
+                    media_byte_identities.size_bytes,
+                    media_byte_identities.checksum_hex
+                FROM upload_sessions
+                JOIN media_byte_identities
+                  ON media_byte_identities.id = upload_sessions.byte_identity_id
+                WHERE upload_sessions.id = ?
+                """,
+                (session.id.to_string(),),
+            ).fetchone()
     finally:
         dispose_engine(engine)
 
@@ -126,8 +139,34 @@ def test_success_persists_checksum_validation_evidence_and_no_catalog_visibility
     assert result.validated_format == "mp4"
     assert stored is not None
     assert stored.state is UploadSessionState.PUBLISH_PENDING
+    assert stored.byte_identity_id is not None
+    assert identity_row == ("sha256", len(b"uploaded-bytes"), result.checksum_hex)
     assert logical_count == (0,)
     assert location_count == (0,)
+
+
+def test_successful_gif_validation_creates_byte_identity(tmp_path: Path) -> None:
+    service, repository, engine, session, _path = _setup(
+        tmp_path,
+        payload=b"gif-bytes",
+        validator=_Validator(
+            UploadMediaValidationEvidence(
+                UploadValidatedMediaKind.ANIMATED_IMAGE,
+                UploadValidatedFormat.GIF,
+            )
+        ),
+    )
+    try:
+        result = asyncio.run(service.validate(session.id))
+        stored = repository.get(session.id)
+    finally:
+        dispose_engine(engine)
+
+    assert result.state == UploadSessionState.PUBLISH_PENDING.value
+    assert result.validated_media_kind == "animated_image"
+    assert result.validated_format == "gif"
+    assert stored is not None
+    assert stored.byte_identity_id is not None
 
 
 def test_abandoned_validating_recovery_completes_without_reclaiming(

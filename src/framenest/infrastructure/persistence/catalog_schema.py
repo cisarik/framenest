@@ -19,6 +19,38 @@ from framenest.infrastructure.persistence.upload_schema import define_upload_ses
 
 metadata = MetaData()
 
+media_byte_identities = Table(
+    "media_byte_identities",
+    metadata,
+    Column("id", Text(), primary_key=True, nullable=False),
+    Column("checksum_algorithm", Text(), nullable=False),
+    Column("size_bytes", Integer(), nullable=False),
+    Column("checksum_hex", Text(), nullable=False),
+    Column("created_at_ms", Integer(), nullable=False),
+    CheckConstraint("length(id) = 36", name="ck_media_byte_identities_id_length"),
+    CheckConstraint(
+        "checksum_algorithm = 'sha256'",
+        name="ck_media_byte_identities_algorithm_sha256",
+    ),
+    CheckConstraint("size_bytes > 0", name="ck_media_byte_identities_size_positive"),
+    CheckConstraint(
+        "length(checksum_hex) = 64 "
+        "AND checksum_hex = lower(checksum_hex) "
+        "AND checksum_hex NOT GLOB '*[^0-9a-f]*'",
+        name="ck_media_byte_identities_checksum_hex",
+    ),
+    CheckConstraint(
+        "created_at_ms >= 0",
+        name="ck_media_byte_identities_created_at_ms_non_negative",
+    ),
+    UniqueConstraint(
+        "checksum_algorithm",
+        "size_bytes",
+        "checksum_hex",
+        name="uq_media_byte_identities_tuple",
+    ),
+)
+
 devices = Table(
     "devices",
     metadata,

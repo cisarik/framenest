@@ -76,6 +76,12 @@ class MediaLocationId(_UuidIdentity):
     __slots__ = ()
 
 
+class MediaByteIdentityId(_UuidIdentity):
+    """Stable identity for one canonical exact-byte media identity."""
+
+    __slots__ = ()
+
+
 class DeviceId(_UuidIdentity):
     """Stable identity for one FrameNest device."""
 
