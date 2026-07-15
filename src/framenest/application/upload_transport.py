@@ -123,6 +123,15 @@ class UploadSessionSnapshot:
     declared_size_bytes: int
     received_size_bytes: int
     expires_at: int
+    failure_code: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class UploadCapabilitySnapshot:
+    uploads_enabled: bool
+    max_total_size_bytes: int
+    max_chunk_size_bytes: int
+    session_ttl_seconds: int
 
 
 @dataclass(slots=True)
@@ -235,6 +244,21 @@ class UploadTransportService:
         except FrameNestUploadSessionRepositoryError as exc:
             raise UploadQuarantineUnavailableError("upload storage unavailable") from exc
         return _snapshot(session)
+
+    def get_capability(self) -> UploadCapabilitySnapshot:
+        uploads_enabled = False
+        try:
+            self._require_storage()
+            self._ensure_root_separation()
+            uploads_enabled = True
+        except UploadTransportError:
+            uploads_enabled = False
+        return UploadCapabilitySnapshot(
+            uploads_enabled=uploads_enabled,
+            max_total_size_bytes=self._limits.max_total_bytes,
+            max_chunk_size_bytes=self._limits.max_patch_bytes,
+            session_ttl_seconds=self._limits.session_ttl_seconds,
+        )
 
     def get_status(self, session_id: UploadSessionId) -> UploadSessionSnapshot:
         session = self._load(session_id)
@@ -731,6 +755,7 @@ def _snapshot(session: UploadSession) -> UploadSessionSnapshot:
         declared_size_bytes=session.declared_size_bytes,
         received_size_bytes=session.received_size_bytes,
         expires_at=session.expires_at_ms,
+        failure_code=session.failure_code,
     )
 
 

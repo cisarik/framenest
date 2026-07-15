@@ -586,7 +586,13 @@ def test_browser_analyze_is_explicit_confirmed_and_cloud_disclosed(client: TestC
     assert "Cancel analysis" not in combined
     assert "Provider selection" not in combined
     assert "Model selection" not in combined
-    assert "progress" not in script.lower()
+    candidate_analyze_block = script[
+        script.index("async function handleAnalyzeClick") : script.index("async function handlePreviewClick")
+    ]
+    metadata_analyze_block = script[
+        script.index("async function handleAnalyzeMetadataByAi") : script.index("function aiSuggestionErrorMessage")
+    ]
+    assert "progress" not in (candidate_analyze_block + metadata_analyze_block).lower()
 
 
 def test_browser_analyze_appears_only_after_successful_local_inspection(
@@ -912,10 +918,11 @@ def test_browser_processed_time_helper_is_reusable_and_safe(client: TestClient) 
 def test_browser_processed_time_never_uses_filesystem_timestamps(client: TestClient) -> None:
     script = client.get("/assets/app.js").text
 
-    processed_time_section = script
-    for marker in ("processedAtMs", "processed_at_ms"):
-        if marker in processed_time_section:
-            break
+    processed_time_section = (
+        _javascript_function(script, "buildProcessedTimeElement")
+        + _javascript_function(script, "applyMetadataPayloadToWorkspace")
+        + _javascript_function(script, "renderMetadataWorkspace")
+    )
     forbidden = (
         "observed_mtime_ns",
         "mtime",
@@ -924,7 +931,7 @@ def test_browser_processed_time_never_uses_filesystem_timestamps(client: TestCli
         "lastModified",
     )
     for fragment in forbidden:
-        assert fragment not in script
+        assert fragment not in processed_time_section
 
 
 def test_browser_review_uses_no_persistence_or_hidden_complete_suggestion(
@@ -2317,3 +2324,118 @@ def test_css_metadata_dialog_has_scrollable_body(client: TestClient) -> None:
     css = client.get("/assets/styles.css").text
     assert "overflow-y" in css or "overflow-y" in css
     assert "dvh" in css or "vh" in css or "max-height" in css
+
+
+def test_web_shell_contains_local_upload_cockpit_without_gallery_publication_claim(
+    client: TestClient,
+) -> None:
+    html = client.get("/").text
+    header_section = html[html.index("app-header") : html.index("</header>")]
+    upload_dialog = html[html.index('id="upload-dialog"') : html.index('id="status-dialog"')]
+
+    assert "upload-open-button" in header_section
+    assert ">Upload<" in header_section
+    assert "upload-file-input" in upload_dialog
+    assert 'accept=".gif,.mp4,image/gif,video/mp4"' in upload_dialog
+    assert "upload-progress" in upload_dialog
+    assert "Start upload" in upload_dialog
+    assert "Pause" in upload_dialog
+    assert "Resume" in upload_dialog
+    assert "Cancel upload" in upload_dialog
+    assert "Uploads enter server quarantine for validation" in upload_dialog
+    assert "not yet available in Gallery" in upload_dialog
+    assert "published" not in upload_dialog.lower()
+    assert "saved to Gallery" not in upload_dialog
+
+
+def test_javascript_upload_uses_capability_registry_and_no_file_byte_persistence(
+    client: TestClient,
+) -> None:
+    script = client.get("/assets/app.js").text
+    upload_block = script[script.index("function uploadEndpoint") : script.index("function formatDuration")]
+
+    assert 'const UPLOADS_ENDPOINT = "/api/uploads";' in script
+    assert 'const UPLOAD_CAPABILITY_ENDPOINT = "/api/uploads/capability";' in script
+    assert "framenest.upload.recovery.v1" in script
+    assert "window.localStorage.setItem(UPLOAD_RECOVERY_STORAGE_KEY" in upload_block
+    assert "window.localStorage.getItem(UPLOAD_RECOVERY_STORAGE_KEY" in upload_block
+    for recovery_field in (
+        "upload_id",
+        "file_name_hint",
+        "expected_size_bytes",
+        "last_modified_hint",
+        "last_known_state",
+    ):
+        assert recovery_field in upload_block
+    assert "file_bytes" not in upload_block
+    assert "payload_base64" not in upload_block
+    assert "sessionStorage" not in script
+    assert "indexedDB" not in script
+
+
+def test_javascript_upload_loop_uses_server_confirmed_offsets_and_patch_framing(
+    client: TestClient,
+) -> None:
+    script = client.get("/assets/app.js").text
+    loop_body = _javascript_function(script, "runUploadLoop")
+
+    assert "await refreshUploadStatus()" in loop_body
+    assert "const serverOffset = snapshot.received_size_bytes;" in loop_body
+    assert "selectedUploadChunkSize(remainingBytes)" in loop_body
+    assert "uploadState.file.slice(serverOffset, serverOffset + chunkSize)" in loop_body
+    assert '"Content-Type": "application/offset+octet-stream"' in loop_body
+    assert '"Upload-Offset": String(serverOffset)' in loop_body
+    assert "Content-Length" not in script
+    assert "payload.error.current_offset" in loop_body
+    assert "completeUploadIfReady(token)" in loop_body
+
+
+def test_javascript_upload_pause_resume_refresh_reselection_and_mismatch_paths(
+    client: TestClient,
+) -> None:
+    script = client.get("/assets/app.js").text
+    pause_body = _javascript_function(script, "handlePauseUpload")
+    resume_body = _javascript_function(script, "handleResumeUpload")
+    selection_body = _javascript_function(script, "handleUploadFileSelection")
+
+    assert "Pausing after the active request settles." in pause_body
+    assert "uploadState.paused = true" in pause_body
+    assert "Refreshing server offset before resuming." in resume_body
+    assert "await refreshUploadStatus(snapshot.id)" in resume_body
+    assert "uploadState.needsReselection = true" in resume_body
+    assert "file.size !== snapshot.declared_size_bytes" in selection_body
+    assert "Selected file size does not match this upload session." in selection_body
+    assert "Source file reselected. Resume will use the latest server offset." in selection_body
+
+
+def test_javascript_upload_states_polling_cancel_and_gallery_boundaries_are_truthful(
+    client: TestClient,
+) -> None:
+    script = client.get("/assets/app.js").text
+    upload_block = script[script.index("function uploadEndpoint") : script.index("function formatDuration")]
+
+    for label in (
+        "Preparing",
+        "Uploading",
+        "Paused in browser",
+        "Reselect file to resume",
+        "Received",
+        "Validating",
+        "Validated, awaiting publication",
+        "Rejected",
+        "Failed",
+        "Cancelled",
+        "Expired",
+    ):
+        assert label in upload_block
+    assert "Validated. Awaiting publication. Not yet available in Gallery." in upload_block
+    assert "uploadShouldPoll(snapshot)" in upload_block
+    assert "publish_pending" in upload_block
+    assert "rejected" in upload_block
+    assert "failed" in upload_block
+    assert "cancelled" in upload_block
+    assert "expired" in upload_block
+    assert 'method: "DELETE"' in upload_block
+    assert "loadCatalog()" not in upload_block
+    assert "mediaContentUrl" not in upload_block
+    assert "gallery-preview" not in upload_block

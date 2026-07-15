@@ -79,6 +79,14 @@ class UploadSessionResponse(BaseModel):
     declared_size_bytes: int
     received_size_bytes: int
     expires_at: int
+    failure_code: str | None = None
+
+
+class UploadCapabilityResponse(BaseModel):
+    uploads_enabled: bool
+    max_total_size_bytes: int
+    max_chunk_size_bytes: int
+    session_ttl_seconds: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -127,6 +135,27 @@ def create_upload_api_router(dependencies: UploadApiDependencies) -> APIRouter:
                 "Quarantine storage is unavailable.",
             )
         return _snapshot_response(snapshot)
+
+    @router.get(
+        "/api/uploads/capability",
+        response_model=UploadCapabilityResponse,
+        responses={503: {"model": ErrorResponse}},
+    )
+    def upload_capability() -> UploadCapabilityResponse | JSONResponse:
+        try:
+            capability = dependencies.transport.get_capability()
+        except Exception:
+            return _error_response(
+                503,
+                QUARANTINE_STORAGE_UNAVAILABLE,
+                "Upload capability is unavailable.",
+            )
+        return UploadCapabilityResponse(
+            uploads_enabled=capability.uploads_enabled,
+            max_total_size_bytes=capability.max_total_size_bytes,
+            max_chunk_size_bytes=capability.max_chunk_size_bytes,
+            session_ttl_seconds=capability.session_ttl_seconds,
+        )
 
     @router.get(
         "/api/uploads/{upload_id}",
@@ -443,4 +472,5 @@ def _snapshot_response(snapshot: UploadSessionSnapshot) -> UploadSessionResponse
         declared_size_bytes=snapshot.declared_size_bytes,
         received_size_bytes=snapshot.received_size_bytes,
         expires_at=snapshot.expires_at,
+        failure_code=snapshot.failure_code,
     )

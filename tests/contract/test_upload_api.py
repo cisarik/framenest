@@ -217,6 +217,38 @@ def test_unconfigured_upload_capability_fails_closed(tmp_path: Path) -> None:
     assert str(tmp_path) not in response.text
 
 
+def test_upload_capability_exposes_enabled_limits_ttl_and_disabled_state(
+    tmp_path: Path,
+) -> None:
+    enabled_settings = _settings(tmp_path / "enabled")
+    disabled_settings = _settings(tmp_path / "disabled", quarantine=False)
+    enabled_client = _migrated_client(enabled_settings)
+    disabled_client = _migrated_client(disabled_settings)
+
+    enabled = enabled_client.get("/api/uploads/capability")
+    disabled = disabled_client.get("/api/uploads/capability")
+
+    assert enabled.status_code == 200
+    assert enabled.json() == {
+        "uploads_enabled": True,
+        "max_total_size_bytes": 16,
+        "max_chunk_size_bytes": 8,
+        "session_ttl_seconds": 60,
+    }
+    assert disabled.status_code == 200
+    assert disabled.json() == {
+        "uploads_enabled": False,
+        "max_total_size_bytes": 16,
+        "max_chunk_size_bytes": 8,
+        "session_ttl_seconds": 60,
+    }
+    combined = enabled.text + disabled.text
+    assert str(enabled_settings.upload_quarantine_root) not in combined
+    assert str(disabled_settings.database_path) not in combined
+    assert "storage_key" not in combined
+    assert "byte_identity" not in combined
+
+
 def test_create_and_status_return_sanitized_snapshot_without_storage_details(
     tmp_path: Path,
 ) -> None:
@@ -231,11 +263,38 @@ def test_create_and_status_return_sanitized_snapshot_without_storage_details(
     assert status.status_code == 200
     assert payload["state"] == "created"
     assert payload["received_size_bytes"] == 0
+    assert payload["failure_code"] is None
+    assert status.json()["failure_code"] is None
     assert "storage_key" not in payload
     assert "byte_identity_id" not in payload
     assert "byte_identity" not in response.text + status.text
     assert ".part" not in response.text + status.text
     assert str(settings.upload_quarantine_root) not in response.text + status.text
+
+
+def test_status_exposes_only_sanitized_failure_code_without_diagnostics(
+    tmp_path: Path,
+) -> None:
+    settings = _settings(tmp_path)
+    client = _migrated_client(settings)
+    created = _create(client).json()
+    assert _patch(client, created["id"], 0, b"abcde").status_code == 200
+    assert client.post(f"/api/uploads/{created['id']}/complete").status_code == 200
+    with sqlite3.connect(settings.database_path) as connection:
+        connection.execute(
+            "UPDATE upload_sessions SET state = 'rejected', failure_code = 'INVALID_MEDIA' WHERE id = ?",
+            (created["id"],),
+        )
+
+    status = client.get(f"/api/uploads/{created['id']}")
+
+    assert status.status_code == 200
+    assert status.json()["state"] == "rejected"
+    assert status.json()["failure_code"] == "INVALID_MEDIA"
+    assert "ffprobe" not in status.text.lower()
+    assert "traceback" not in status.text.lower()
+    assert str(settings.upload_quarantine_root) not in status.text
+    assert str(settings.database_path) not in status.text
 
 
 def test_create_rejects_invalid_metadata_size_limit_free_space_and_cross_origin(

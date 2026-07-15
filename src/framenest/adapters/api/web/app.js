@@ -7,10 +7,15 @@ const MEDIA_METADATA_ENDPOINT_PREFIX = "/api/media";
 const CANONICAL_TAGS_ENDPOINT = "/api/canonical-tags";
 const AI_CAPABILITY_ENDPOINT = "/api/ai/media-suggestion-capability";
 const CLOUD_STATUS_ENDPOINT = "/api/status/cloud";
+const UPLOADS_ENDPOINT = "/api/uploads";
+const UPLOAD_CAPABILITY_ENDPOINT = "/api/uploads/capability";
 const MEDIA_IMPORTS_ENDPOINT = "media-imports";
 const CATALOG_PAGE_SIZE_OPTIONS = [10, 30, 60, 90];
 const CATALOG_PAGE_SIZE_STORAGE_KEY = "framenest.catalog.pageSize";
+const UPLOAD_RECOVERY_STORAGE_KEY = "framenest.upload.recovery.v1";
 const CATALOG_PAGE_SIZE = 30;
+const DEFAULT_UPLOAD_CHUNK_BYTES = 1024 * 1024;
+const UPLOAD_POLL_INTERVAL_MS = 1200;
 const MAX_METADATA_TITLE_CODE_POINTS = 240;
 const MAX_METADATA_DESCRIPTION_CODE_POINTS = 10000;
 const MAX_METADATA_TAGS = 32;
@@ -54,6 +59,29 @@ let catalogState = {
   limit: CATALOG_PAGE_SIZE,
   offset: 0,
   total: 0,
+};
+let uploadCapability = {
+  uploads_enabled: false,
+  max_total_size_bytes: 0,
+  max_chunk_size_bytes: DEFAULT_UPLOAD_CHUNK_BYTES,
+  session_ttl_seconds: 0,
+};
+let uploadState = {
+  uploadId: null,
+  file: null,
+  fileNameHint: "",
+  expectedSizeBytes: 0,
+  lastModifiedHint: null,
+  snapshot: null,
+  running: false,
+  paused: false,
+  needsReselection: false,
+  completing: false,
+  uploadLoopToken: 0,
+  pollToken: 0,
+  pollTimer: null,
+  message: "",
+  failureMessage: "",
 };
 let metadataWorkspace = {
   openMediaId: null,
@@ -129,8 +157,27 @@ const statusCloudServer = document.querySelector("#status-cloud-server");
 const statusCloudConnection = document.querySelector("#status-cloud-connection");
 const statusCloudRemoteRow = document.querySelector("#status-cloud-remote-row");
 const statusCloudRemote = document.querySelector("#status-cloud-remote");
+const uploadOpenButton = document.querySelector("#upload-open-button");
+const uploadDialog = document.querySelector("#upload-dialog");
+const uploadDialogTitle = document.querySelector("#upload-dialog-title");
+const uploadCloseButton = document.querySelector("#upload-close-button");
+const uploadCapabilityStatus = document.querySelector("#upload-capability-status");
+const uploadFileInput = document.querySelector("#upload-file-input");
+const uploadRow = document.querySelector("#upload-row");
+const uploadFileName = document.querySelector("#upload-file-name");
+const uploadStateLabel = document.querySelector("#upload-state-label");
+const uploadProgress = document.querySelector("#upload-progress");
+const uploadByteCount = document.querySelector("#upload-byte-count");
+const uploadPercent = document.querySelector("#upload-percent");
+const uploadMessage = document.querySelector("#upload-message");
+const uploadFailure = document.querySelector("#upload-failure");
+const uploadStartButton = document.querySelector("#upload-start-button");
+const uploadPauseButton = document.querySelector("#upload-pause-button");
+const uploadResumeButton = document.querySelector("#upload-resume-button");
+const uploadCancelButton = document.querySelector("#upload-cancel-button");
 let healthCheckInFlight = false;
 let lastFocusedElementBeforeStatus = null;
+let uploadOpenerElement = null;
 const libraryList = document.querySelector("#library-list");
 const libraryStateLoading = document.querySelector("#library-state-loading");
 const libraryStateEmpty = document.querySelector("#library-state-empty");
@@ -745,6 +792,768 @@ function formatSize(sizeBytes) {
     return `${(sizeBytes / 1024).toFixed(1)} KiB`;
   }
   return `${(sizeBytes / (1024 * 1024)).toFixed(1)} MiB`;
+}
+
+function uploadEndpoint(uploadId) {
+  return `${UPLOADS_ENDPOINT}/${encodeURIComponent(uploadId)}`;
+}
+
+function uploadCompleteEndpoint(uploadId) {
+  return `${uploadEndpoint(uploadId)}/complete`;
+}
+
+function activeUploadSnapshot() {
+  return uploadState.snapshot;
+}
+
+function uploadIsByteReceiving(snapshot) {
+  return Boolean(
+    snapshot
+      && (snapshot.state === "created" || snapshot.state === "receiving")
+      && snapshot.received_size_bytes < snapshot.declared_size_bytes,
+  );
+}
+
+function uploadShouldPoll(snapshot) {
+  return Boolean(snapshot && (snapshot.state === "received" || snapshot.state === "validating"));
+}
+
+function uploadIsPollingStopState(snapshot) {
+  return Boolean(
+    snapshot
+      && ["publish_pending", "rejected", "failed", "cancelled", "expired"].includes(snapshot.state),
+  );
+}
+
+function uploadCancelPermitted(snapshot) {
+  return Boolean(
+    snapshot
+      && ["created", "receiving", "received", "duplicate_pending"].includes(snapshot.state),
+  );
+}
+
+function uploadDisplayState(snapshot) {
+  if (!snapshot) {
+    return "Preparing";
+  }
+  if (uploadState.needsReselection && uploadIsByteReceiving(snapshot)) {
+    return "Reselect file to resume";
+  }
+  if (uploadState.paused && uploadIsByteReceiving(snapshot)) {
+    return "Paused in browser";
+  }
+  if (uploadState.running && uploadIsByteReceiving(snapshot)) {
+    return "Uploading";
+  }
+  if (snapshot.state === "created") return "Preparing";
+  if (snapshot.state === "receiving") return "Uploading";
+  if (snapshot.state === "received") return "Received";
+  if (snapshot.state === "validating") return "Validating";
+  if (snapshot.state === "publish_pending") return "Validated, awaiting publication";
+  if (snapshot.state === "rejected") return "Rejected";
+  if (snapshot.state === "failed") return "Failed";
+  if (snapshot.state === "cancelled") return "Cancelled";
+  if (snapshot.state === "expired") return "Expired";
+  return "Server state";
+}
+
+function uploadFailureText(snapshot) {
+  if (!snapshot) return "";
+  if (snapshot.failure_code) {
+    return `Sanitized failure code: ${snapshot.failure_code}`;
+  }
+  if (snapshot.state === "rejected") {
+    return "The server rejected the uploaded media with sanitized failure information.";
+  }
+  if (snapshot.state === "failed") {
+    return "The upload failed with sanitized server failure information.";
+  }
+  return "";
+}
+
+function uploadProgressPercentValue(snapshot) {
+  if (!snapshot || snapshot.declared_size_bytes <= 0) return 0;
+  return Math.min(100, Math.floor((snapshot.received_size_bytes / snapshot.declared_size_bytes) * 100));
+}
+
+function uploadStatusMessage(snapshot) {
+  if (!snapshot) {
+    return uploadState.message || "Select one local GIF or MP4.";
+  }
+  if (snapshot.state === "publish_pending") {
+    return "Validated. Awaiting publication. Not yet available in Gallery.";
+  }
+  if (snapshot.state === "received") {
+    return "Bytes received. Waiting for server validation.";
+  }
+  if (snapshot.state === "validating") {
+    return "Server validation is running.";
+  }
+  if (uploadState.needsReselection && uploadIsByteReceiving(snapshot)) {
+    return "Reselect the original local file to resume from the server-confirmed offset.";
+  }
+  if (uploadState.paused && uploadIsByteReceiving(snapshot)) {
+    return "Paused in this browser after the current request settled.";
+  }
+  if (uploadState.message) {
+    return uploadState.message;
+  }
+  return "Server state is authoritative.";
+}
+
+function normalizeUploadSnapshot(payload) {
+  if (!payload || !payload.id) {
+    return null;
+  }
+  return {
+    id: String(payload.id),
+    state: String(payload.state || ""),
+    display_filename: String(payload.display_filename || ""),
+    declared_size_bytes: Number(payload.declared_size_bytes || 0),
+    received_size_bytes: Number(payload.received_size_bytes || 0),
+    expires_at: Number(payload.expires_at || 0),
+    failure_code: payload.failure_code ? String(payload.failure_code) : "",
+  };
+}
+
+function saveUploadRecovery(snapshot = activeUploadSnapshot()) {
+  if (!snapshot || !snapshot.id) return;
+  const recovery = {
+    upload_id: snapshot.id,
+    file_name_hint: snapshot.display_filename || uploadState.fileNameHint || "",
+    expected_size_bytes: snapshot.declared_size_bytes,
+    last_modified_hint: uploadState.lastModifiedHint,
+    last_known_state: snapshot.state,
+  };
+  try {
+    window.localStorage.setItem(UPLOAD_RECOVERY_STORAGE_KEY, JSON.stringify(recovery));
+  } catch {
+    uploadState.message = "Upload recovery could not be saved in this browser.";
+  }
+}
+
+function loadUploadRecovery() {
+  try {
+    const raw = window.localStorage.getItem(UPLOAD_RECOVERY_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || !parsed.upload_id || !parsed.expected_size_bytes) {
+      return null;
+    }
+    return {
+      upload_id: String(parsed.upload_id),
+      file_name_hint: parsed.file_name_hint ? String(parsed.file_name_hint) : "",
+      expected_size_bytes: Number(parsed.expected_size_bytes),
+      last_modified_hint: Number.isFinite(Number(parsed.last_modified_hint))
+        ? Number(parsed.last_modified_hint)
+        : null,
+      last_known_state: parsed.last_known_state ? String(parsed.last_known_state) : "",
+    };
+  } catch {
+    return null;
+  }
+}
+
+function applyUploadSnapshot(snapshot) {
+  if (!snapshot) return false;
+  uploadState.snapshot = snapshot;
+  uploadState.uploadId = snapshot.id;
+  uploadState.fileNameHint = snapshot.display_filename || uploadState.fileNameHint;
+  uploadState.expectedSizeBytes = snapshot.declared_size_bytes;
+  uploadState.failureMessage = uploadFailureText(snapshot);
+  if (!uploadIsByteReceiving(snapshot)) {
+    uploadState.needsReselection = false;
+  }
+  saveUploadRecovery(snapshot);
+  renderUploadCockpit();
+  return true;
+}
+
+function resetUploadForFile(file) {
+  stopUploadPolling();
+  uploadState.uploadLoopToken += 1;
+  uploadState = {
+    uploadId: null,
+    file,
+    fileNameHint: file ? file.name : "",
+    expectedSizeBytes: file ? file.size : 0,
+    lastModifiedHint: file && Number.isFinite(file.lastModified) ? file.lastModified : null,
+    snapshot: null,
+    running: false,
+    paused: false,
+    needsReselection: false,
+    completing: false,
+    uploadLoopToken: uploadState.uploadLoopToken,
+    pollToken: uploadState.pollToken,
+    pollTimer: null,
+    message: file ? "Ready to create an upload session." : "Select one local GIF or MP4.",
+    failureMessage: "",
+  };
+  renderUploadCockpit();
+}
+
+function renderUploadCapability() {
+  if (!uploadCapabilityStatus) return;
+  if (uploadCapability.uploads_enabled) {
+    uploadCapabilityStatus.textContent =
+      `Uploads enabled. Max file ${formatSize(uploadCapability.max_total_size_bytes)}; max chunk ${formatSize(uploadCapability.max_chunk_size_bytes)}; session TTL ${formatDuration(uploadCapability.session_ttl_seconds * 1000)}.`;
+  } else {
+    uploadCapabilityStatus.textContent = "Uploads are not configured on this local server.";
+  }
+}
+
+function renderUploadCockpit() {
+  const snapshot = activeUploadSnapshot();
+  const displayName = snapshot
+    ? snapshot.display_filename
+    : (uploadState.file ? uploadState.file.name : uploadState.fileNameHint);
+  const totalBytes = snapshot ? snapshot.declared_size_bytes : (uploadState.file ? uploadState.file.size : 0);
+  const receivedBytes = snapshot ? snapshot.received_size_bytes : 0;
+  const percent = uploadProgressPercentValue(snapshot);
+  if (uploadFileName) uploadFileName.textContent = displayName || "No file selected";
+  if (uploadStateLabel) uploadStateLabel.textContent = uploadDisplayState(snapshot);
+  if (uploadProgress) uploadProgress.value = percent;
+  if (uploadByteCount) uploadByteCount.textContent = `${formatSize(receivedBytes)} / ${formatSize(totalBytes)}`;
+  if (uploadPercent) uploadPercent.textContent = `${percent}%`;
+  if (uploadMessage) uploadMessage.textContent = uploadStatusMessage(snapshot);
+  if (uploadFailure) {
+    const failure = uploadState.failureMessage || uploadFailureText(snapshot);
+    uploadFailure.hidden = !failure;
+    uploadFailure.textContent = failure;
+  }
+  if (uploadRow) {
+    uploadRow.dataset.state = snapshot ? snapshot.state : "idle";
+  }
+  renderUploadCapability();
+  updateUploadActions();
+}
+
+function updateUploadActions() {
+  const snapshot = activeUploadSnapshot();
+  const hasFile = Boolean(uploadState.file);
+  const hasActiveSession = Boolean(snapshot);
+  const fileWithinLimit = hasFile
+    && uploadCapability.max_total_size_bytes > 0
+    && uploadState.file.size <= uploadCapability.max_total_size_bytes;
+  if (uploadStartButton) {
+    uploadStartButton.disabled = !uploadCapability.uploads_enabled
+      || !hasFile
+      || hasActiveSession
+      || !fileWithinLimit
+      || uploadState.running
+      || uploadState.completing;
+  }
+  if (uploadPauseButton) {
+    uploadPauseButton.disabled = !uploadState.running || uploadState.paused || !uploadIsByteReceiving(snapshot);
+  }
+  if (uploadResumeButton) {
+    uploadResumeButton.disabled = !snapshot
+      || uploadState.running
+      || uploadState.completing
+      || !uploadIsByteReceiving(snapshot)
+      || !hasFile
+      || uploadState.needsReselection;
+  }
+  if (uploadCancelButton) {
+    uploadCancelButton.disabled = !uploadCancelPermitted(snapshot) || uploadState.completing;
+  }
+}
+
+async function fetchUploadJson(url, options = {}) {
+  const response = await fetch(url, options);
+  let payload = null;
+  try {
+    payload = await response.json();
+  } catch {
+    payload = null;
+  }
+  return { response, payload };
+}
+
+function uploadErrorMessage(payload) {
+  const code = payload && payload.error ? String(payload.error.code || "") : "";
+  if (code === "UPLOAD_CAPABILITY_NOT_CONFIGURED") return "Upload capability is not configured.";
+  if (code === "UPLOAD_TOO_LARGE") return "Upload exceeds the server limit.";
+  if (code === "UPLOAD_CHUNK_TOO_LARGE") return "Upload chunk exceeded the server limit.";
+  if (code === "UPLOAD_OFFSET_CONFLICT") return "Server offset changed; refreshed from server truth.";
+  if (code === "UPLOAD_SESSION_STATE_CONFLICT") return "Upload state changed on the server.";
+  if (code === "UPLOAD_SESSION_EXPIRED") return "Upload session expired.";
+  if (code === "UPLOAD_SESSION_NOT_FOUND") return "Upload session was not found.";
+  if (code === "INSUFFICIENT_QUARANTINE_STORAGE") return "Insufficient quarantine storage.";
+  if (code === "UPLOAD_BODY_LENGTH_MISMATCH") return "Upload body length mismatch.";
+  if (code === "QUARANTINE_STATE_INCONSISTENT") return "Quarantine state is inconsistent.";
+  if (code === "UPLOAD_CONCURRENCY_CONFLICT") return "Upload concurrency conflict.";
+  if (code === "QUARANTINE_STORAGE_UNAVAILABLE") return "Quarantine storage is unavailable.";
+  return "Upload failed with a sanitized local error.";
+}
+
+async function loadUploadCapability() {
+  try {
+    const { response, payload } = await fetchUploadJson(UPLOAD_CAPABILITY_ENDPOINT, {
+      headers: { Accept: "application/json" },
+      cache: "no-store",
+    });
+    if (!response.ok) {
+      uploadCapability = {
+        uploads_enabled: false,
+        max_total_size_bytes: 0,
+        max_chunk_size_bytes: DEFAULT_UPLOAD_CHUNK_BYTES,
+        session_ttl_seconds: 0,
+      };
+      uploadState.message = uploadErrorMessage(payload);
+      renderUploadCockpit();
+      return false;
+    }
+    uploadCapability = {
+      uploads_enabled: payload && payload.uploads_enabled === true,
+      max_total_size_bytes: Number(payload && payload.max_total_size_bytes) || 0,
+      max_chunk_size_bytes: Number(payload && payload.max_chunk_size_bytes) || DEFAULT_UPLOAD_CHUNK_BYTES,
+      session_ttl_seconds: Number(payload && payload.session_ttl_seconds) || 0,
+    };
+    renderUploadCockpit();
+    return uploadCapability.uploads_enabled;
+  } catch {
+    uploadCapability = {
+      uploads_enabled: false,
+      max_total_size_bytes: 0,
+      max_chunk_size_bytes: DEFAULT_UPLOAD_CHUNK_BYTES,
+      session_ttl_seconds: 0,
+    };
+    uploadState.message = "Upload capability could not be loaded.";
+    renderUploadCockpit();
+    return false;
+  }
+}
+
+async function refreshUploadStatus(uploadId = uploadState.uploadId) {
+  if (!uploadId) return null;
+  try {
+    const { response, payload } = await fetchUploadJson(uploadEndpoint(uploadId), {
+      headers: { Accept: "application/json" },
+      cache: "no-store",
+    });
+    if (!response.ok) {
+      uploadState.message = uploadErrorMessage(payload);
+      renderUploadCockpit();
+      return null;
+    }
+    const snapshot = normalizeUploadSnapshot(payload);
+    applyUploadSnapshot(snapshot);
+    return snapshot;
+  } catch {
+    uploadState.message = "Upload status could not be loaded.";
+    renderUploadCockpit();
+    return null;
+  }
+}
+
+async function restoreUploadRecovery() {
+  const recovery = loadUploadRecovery();
+  if (!recovery || uploadState.uploadId) {
+    renderUploadCockpit();
+    return;
+  }
+  uploadState.uploadId = recovery.upload_id;
+  uploadState.fileNameHint = recovery.file_name_hint;
+  uploadState.expectedSizeBytes = recovery.expected_size_bytes;
+  uploadState.lastModifiedHint = recovery.last_modified_hint;
+  uploadState.message = "Recovering saved upload session...";
+  renderUploadCockpit();
+  const snapshot = await refreshUploadStatus(recovery.upload_id);
+  if (!snapshot) return;
+  if (uploadIsByteReceiving(snapshot)) {
+    uploadState.needsReselection = true;
+    uploadState.message = "Reselect the original file to resume this upload.";
+    renderUploadCockpit();
+  } else if (uploadShouldPoll(snapshot) && uploadDialog && uploadDialog.hasAttribute("open")) {
+    scheduleUploadPolling();
+  }
+}
+
+function stopUploadPolling() {
+  uploadState.pollToken += 1;
+  if (uploadState.pollTimer) {
+    clearTimeout(uploadState.pollTimer);
+    uploadState.pollTimer = null;
+  }
+}
+
+function scheduleUploadPolling() {
+  stopUploadPolling();
+  const snapshot = activeUploadSnapshot();
+  if (!uploadShouldPoll(snapshot)) return;
+  if (uploadDialog && !uploadDialog.hasAttribute("open")) return;
+  const token = uploadState.pollToken;
+  uploadState.pollTimer = window.setTimeout(() => {
+    pollUploadStatus(token);
+  }, UPLOAD_POLL_INTERVAL_MS);
+}
+
+async function pollUploadStatus(token) {
+  if (token !== uploadState.pollToken) return;
+  const snapshot = await refreshUploadStatus();
+  if (token !== uploadState.pollToken) return;
+  if (uploadShouldPoll(snapshot)) {
+    scheduleUploadPolling();
+  } else if (uploadIsPollingStopState(snapshot)) {
+    stopUploadPolling();
+  }
+}
+
+function selectedUploadChunkSize(remainingBytes) {
+  const serverLimit = Number(uploadCapability.max_chunk_size_bytes) || DEFAULT_UPLOAD_CHUNK_BYTES;
+  return Math.max(1, Math.min(serverLimit, DEFAULT_UPLOAD_CHUNK_BYTES, remainingBytes));
+}
+
+async function completeUploadIfReady(token) {
+  const snapshot = activeUploadSnapshot();
+  if (!snapshot || snapshot.received_size_bytes !== snapshot.declared_size_bytes) {
+    return;
+  }
+  uploadState.completing = true;
+  uploadState.message = "Completing byte reception.";
+  renderUploadCockpit();
+  try {
+    const { response, payload } = await fetchUploadJson(uploadCompleteEndpoint(snapshot.id), {
+      method: "POST",
+      headers: { Accept: "application/json" },
+      cache: "no-store",
+    });
+    if (token !== uploadState.uploadLoopToken) return;
+    if (response.ok) {
+      applyUploadSnapshot(normalizeUploadSnapshot(payload));
+      uploadState.message = "Bytes received. Waiting for server validation.";
+      scheduleUploadPolling();
+      return;
+    }
+    uploadState.message = uploadErrorMessage(payload);
+    await refreshUploadStatus(snapshot.id);
+    if (uploadShouldPoll(activeUploadSnapshot())) {
+      scheduleUploadPolling();
+    }
+  } catch {
+    if (token === uploadState.uploadLoopToken) {
+      uploadState.message = "Completion status could not be confirmed.";
+      await refreshUploadStatus(snapshot.id);
+    }
+  } finally {
+    if (token === uploadState.uploadLoopToken) {
+      uploadState.completing = false;
+      uploadState.running = false;
+      renderUploadCockpit();
+    }
+  }
+}
+
+async function runUploadLoop() {
+  const token = uploadState.uploadLoopToken + 1;
+  uploadState.uploadLoopToken = token;
+  uploadState.running = true;
+  uploadState.paused = false;
+  uploadState.message = "Uploading from server-confirmed offset.";
+  renderUploadCockpit();
+  while (token === uploadState.uploadLoopToken) {
+    let snapshot = await refreshUploadStatus();
+    if (token !== uploadState.uploadLoopToken || !snapshot) break;
+    if (!uploadIsByteReceiving(snapshot)) {
+      if (
+        uploadState.paused
+        && snapshot.state === "receiving"
+        && snapshot.received_size_bytes === snapshot.declared_size_bytes
+      ) {
+        uploadState.running = false;
+        uploadState.message = "Paused in this browser.";
+        renderUploadCockpit();
+        break;
+      }
+      if (snapshot.received_size_bytes === snapshot.declared_size_bytes && snapshot.state === "receiving") {
+        await completeUploadIfReady(token);
+      } else if (uploadShouldPoll(snapshot)) {
+        scheduleUploadPolling();
+      }
+      break;
+    }
+    if (uploadState.paused) {
+      uploadState.running = false;
+      uploadState.message = "Paused in this browser.";
+      renderUploadCockpit();
+      break;
+    }
+    if (!uploadState.file) {
+      uploadState.running = false;
+      uploadState.needsReselection = true;
+      uploadState.message = "Reselect the original local file to resume.";
+      renderUploadCockpit();
+      break;
+    }
+    if (uploadState.file.size !== snapshot.declared_size_bytes) {
+      uploadState.running = false;
+      uploadState.needsReselection = true;
+      uploadState.file = null;
+      uploadState.message = "Selected file size does not match this upload session.";
+      renderUploadCockpit();
+      break;
+    }
+    const serverOffset = snapshot.received_size_bytes;
+    const remainingBytes = snapshot.declared_size_bytes - serverOffset;
+    if (remainingBytes <= 0) {
+      await completeUploadIfReady(token);
+      break;
+    }
+    const chunkSize = selectedUploadChunkSize(remainingBytes);
+    const body = uploadState.file.slice(serverOffset, serverOffset + chunkSize);
+    try {
+      const { response, payload } = await fetchUploadJson(uploadEndpoint(snapshot.id), {
+        method: "PATCH",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/offset+octet-stream",
+          "Upload-Offset": String(serverOffset),
+        },
+        body,
+        cache: "no-store",
+      });
+      if (token !== uploadState.uploadLoopToken) return;
+      if (!response.ok) {
+        uploadState.message = uploadErrorMessage(payload);
+        await refreshUploadStatus(snapshot.id);
+        if (payload && payload.error && payload.error.current_offset !== undefined) {
+          continue;
+        }
+        break;
+      }
+      snapshot = normalizeUploadSnapshot(payload);
+      applyUploadSnapshot(snapshot);
+      if (uploadState.paused) {
+        uploadState.running = false;
+        uploadState.message = "Paused in this browser.";
+        renderUploadCockpit();
+        break;
+      }
+      if (snapshot.received_size_bytes === snapshot.declared_size_bytes) {
+        await completeUploadIfReady(token);
+        break;
+      }
+    } catch {
+      if (token === uploadState.uploadLoopToken) {
+        uploadState.message = "Upload request failed before a local response was read.";
+        await refreshUploadStatus(snapshot.id);
+      }
+      break;
+    }
+  }
+  if (token === uploadState.uploadLoopToken) {
+    uploadState.running = false;
+    renderUploadCockpit();
+  }
+}
+
+async function handleStartUpload() {
+  const file = uploadState.file;
+  if (!file || uploadState.running) return;
+  await loadUploadCapability();
+  if (!uploadCapability.uploads_enabled) {
+    uploadState.message = "Uploads are not configured on this local server.";
+    renderUploadCockpit();
+    return;
+  }
+  if (file.size > uploadCapability.max_total_size_bytes) {
+    uploadState.message = "Selected file exceeds the server upload limit.";
+    renderUploadCockpit();
+    return;
+  }
+  uploadState.message = "Creating upload session.";
+  renderUploadCockpit();
+  try {
+    const { response, payload } = await fetchUploadJson(UPLOADS_ENDPOINT, {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        display_filename: file.name,
+        declared_size_bytes: file.size,
+      }),
+      cache: "no-store",
+    });
+    if (!response.ok) {
+      uploadState.message = uploadErrorMessage(payload);
+      renderUploadCockpit();
+      return;
+    }
+    applyUploadSnapshot(normalizeUploadSnapshot(payload));
+    await runUploadLoop();
+  } catch {
+    uploadState.message = "Upload session could not be created.";
+    renderUploadCockpit();
+  }
+}
+
+function handlePauseUpload() {
+  if (!uploadState.running) return;
+  uploadState.paused = true;
+  uploadState.message = "Pausing after the active request settles.";
+  renderUploadCockpit();
+}
+
+async function handleResumeUpload() {
+  const snapshot = activeUploadSnapshot();
+  if (!snapshot || uploadState.running) return;
+  if (!uploadState.file) {
+    uploadState.needsReselection = true;
+    uploadState.message = "Reselect the original local file before resuming.";
+    renderUploadCockpit();
+    return;
+  }
+  uploadState.message = "Refreshing server offset before resuming.";
+  renderUploadCockpit();
+  const refreshed = await refreshUploadStatus(snapshot.id);
+  if (!refreshed) return;
+  if (!uploadIsByteReceiving(refreshed)) {
+    if (
+      refreshed.state === "receiving"
+      && refreshed.received_size_bytes === refreshed.declared_size_bytes
+    ) {
+      uploadState.paused = false;
+      uploadState.needsReselection = false;
+      await runUploadLoop();
+      return;
+    }
+    if (uploadShouldPoll(refreshed)) scheduleUploadPolling();
+    return;
+  }
+  uploadState.paused = false;
+  uploadState.needsReselection = false;
+  await runUploadLoop();
+}
+
+async function handleCancelUpload() {
+  const snapshot = activeUploadSnapshot();
+  if (!snapshot || !uploadCancelPermitted(snapshot)) return;
+  uploadState.message = "Cancelling upload.";
+  renderUploadCockpit();
+  try {
+    const { response, payload } = await fetchUploadJson(uploadEndpoint(snapshot.id), {
+      method: "DELETE",
+      headers: { Accept: "application/json" },
+      cache: "no-store",
+    });
+    if (response.ok) {
+      applyUploadSnapshot(normalizeUploadSnapshot(payload));
+      uploadState.running = false;
+      uploadState.paused = false;
+      uploadState.needsReselection = false;
+      uploadState.message = "Cancelled by this browser.";
+      renderUploadCockpit();
+      return;
+    }
+    uploadState.message = uploadErrorMessage(payload);
+    await refreshUploadStatus(snapshot.id);
+  } catch {
+    uploadState.message = "Cancel request failed before the local response could be read.";
+    await refreshUploadStatus(snapshot.id);
+  }
+}
+
+function handleUploadFileSelection() {
+  const file = uploadFileInput && uploadFileInput.files && uploadFileInput.files[0]
+    ? uploadFileInput.files[0]
+    : null;
+  if (!file) {
+    uploadState.file = null;
+    uploadState.message = "Select one local GIF or MP4.";
+    renderUploadCockpit();
+    return;
+  }
+  const snapshot = activeUploadSnapshot();
+  if (!snapshot || uploadIsPollingStopState(snapshot)) {
+    resetUploadForFile(file);
+    return;
+  }
+  if (uploadIsByteReceiving(snapshot)) {
+    if (file.size !== snapshot.declared_size_bytes) {
+      uploadState.file = null;
+      uploadState.needsReselection = true;
+      uploadState.message = "Selected file size does not match this upload session.";
+      renderUploadCockpit();
+      return;
+    }
+    const recovery = loadUploadRecovery();
+    const storedFileNameHint = recovery && recovery.file_name_hint
+      ? recovery.file_name_hint
+      : uploadState.fileNameHint;
+    const storedLastModifiedHint = recovery && recovery.last_modified_hint !== null
+      ? recovery.last_modified_hint
+      : uploadState.lastModifiedHint;
+    const nextLastModifiedHint = Number.isFinite(file.lastModified) ? file.lastModified : null;
+    const hintDiffers = Boolean(
+      (storedFileNameHint && file.name !== storedFileNameHint)
+        || (
+          storedLastModifiedHint !== null
+          && nextLastModifiedHint !== null
+          && nextLastModifiedHint !== storedLastModifiedHint
+        ),
+    );
+    uploadState.file = file;
+    uploadState.fileNameHint = file.name;
+    uploadState.lastModifiedHint = nextLastModifiedHint;
+    uploadState.needsReselection = false;
+    uploadState.message = hintDiffers
+      ? "File size matches. Name or modified-time hint differs; server validation remains authoritative."
+      : "Source file reselected. Resume will use the latest server offset.";
+    saveUploadRecovery(snapshot);
+    renderUploadCockpit();
+    return;
+  }
+  uploadState.message = "The current server state no longer needs the local file.";
+  renderUploadCockpit();
+}
+
+function openUploadDialog() {
+  if (!uploadDialog) return;
+  uploadOpenerElement = document.activeElement;
+  if (typeof uploadDialog.showModal === "function") {
+    uploadDialog.showModal();
+  } else {
+    uploadDialog.setAttribute("open", "");
+  }
+  loadUploadCapability();
+  if (uploadState.uploadId) {
+    refreshUploadStatus(uploadState.uploadId).then((snapshot) => {
+      if (uploadShouldPoll(snapshot)) {
+        scheduleUploadPolling();
+      }
+    });
+  } else {
+    restoreUploadRecovery();
+  }
+  renderUploadCockpit();
+  if (uploadDialogTitle) uploadDialogTitle.focus();
+}
+
+function closeUploadDialog() {
+  if (!uploadDialog) return;
+  if (uploadShouldPoll(activeUploadSnapshot())) {
+    stopUploadPolling();
+  }
+  if (typeof uploadDialog.close === "function") {
+    uploadDialog.close();
+  } else {
+    uploadDialog.removeAttribute("open");
+  }
+  if (uploadOpenerElement) {
+    uploadOpenerElement.focus();
+    uploadOpenerElement = null;
+  } else if (uploadOpenButton) {
+    uploadOpenButton.focus();
+  }
+}
+
+function cleanupUploadRuntime() {
+  stopUploadPolling();
+  uploadState.uploadLoopToken += 1;
+  saveUploadRecovery();
 }
 
 function formatDuration(durationMs) {
@@ -3659,6 +4468,48 @@ if (statusDialog) {
   });
 }
 
+if (uploadOpenButton) {
+  uploadOpenButton.addEventListener("click", openUploadDialog);
+}
+
+if (uploadCloseButton) {
+  uploadCloseButton.addEventListener("click", closeUploadDialog);
+}
+
+if (uploadDialog) {
+  uploadDialog.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      closeUploadDialog();
+    }
+  });
+  uploadDialog.addEventListener("click", (event) => {
+    if (event.target === uploadDialog) {
+      closeUploadDialog();
+    }
+  });
+}
+
+if (uploadFileInput) {
+  uploadFileInput.addEventListener("change", handleUploadFileSelection);
+}
+
+if (uploadStartButton) {
+  uploadStartButton.addEventListener("click", handleStartUpload);
+}
+
+if (uploadPauseButton) {
+  uploadPauseButton.addEventListener("click", handlePauseUpload);
+}
+
+if (uploadResumeButton) {
+  uploadResumeButton.addEventListener("click", handleResumeUpload);
+}
+
+if (uploadCancelButton) {
+  uploadCancelButton.addEventListener("click", handleCancelUpload);
+}
+
 if (detailsCloseButton) {
   detailsCloseButton.addEventListener("click", () => closeDetailsDialog());
 }
@@ -3707,6 +4558,8 @@ if (metadataCloseButton) {
 
 checkHealth();
 loadAiCapability();
+loadUploadCapability();
+restoreUploadRecovery();
 loadCatalogTags();
 loadCatalog();
 loadLibraries();
@@ -3714,3 +4567,4 @@ if (commandSearchInput) {
   commandSearchInput.focus({ preventScroll: true });
 }
 window.addEventListener("pagehide", revokePreviewObjectUrls);
+window.addEventListener("pagehide", cleanupUploadRuntime);
