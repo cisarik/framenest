@@ -2336,16 +2336,51 @@ def test_web_shell_contains_local_upload_cockpit_without_gallery_publication_cla
     assert "upload-open-button" in header_section
     assert ">Upload<" in header_section
     assert "upload-file-input" in upload_dialog
+    assert 'class="upload-file-input visually-hidden"' in upload_dialog
     assert 'accept=".gif,.mp4,image/gif,video/mp4"' in upload_dialog
+    assert 'aria-describedby="upload-file-name"' in upload_dialog
+    assert 'for="upload-file-input">Choose file</label>' in upload_dialog
+    assert upload_dialog.count('id="upload-file-name"') == 1
     assert "upload-progress" in upload_dialog
     assert "Start upload" in upload_dialog
     assert "Pause" in upload_dialog
     assert "Resume" in upload_dialog
-    assert "Cancel upload" in upload_dialog
+    assert ">Cancel</button>" in upload_dialog
+    assert "Cancel upload" not in upload_dialog
+    assert "danger-button" in upload_dialog
+    assert "upload-danger-callout" in upload_dialog
     assert "Uploads enter server quarantine for validation" in upload_dialog
     assert "not yet available in Gallery" in upload_dialog
     assert "published" not in upload_dialog.lower()
     assert "saved to Gallery" not in upload_dialog
+
+
+def test_upload_cockpit_capability_and_danger_presentation_hooks(
+    client: TestClient,
+) -> None:
+    html = client.get("/").text
+    script = client.get("/assets/app.js").text
+    css = client.get("/assets/styles.css").text
+    upload_dialog = html[html.index('id="upload-dialog"') : html.index('id="status-dialog"')]
+    capability_body = _javascript_function(script, "renderUploadCapability")
+    selection_limit_body = _javascript_function(script, "selectedUploadLimitMessage")
+
+    assert "Uploads ready." in capability_body
+    assert "max chunk" not in capability_body
+    assert "session TTL" not in capability_body
+    assert "formatDuration" not in capability_body
+    assert 'fetchUploadJson(UPLOAD_CAPABILITY_ENDPOINT' in script
+    assert "max_total_size_bytes" in script
+    assert "File is too large. Maximum size is" in selection_limit_body
+    assert "formatSize(uploadCapability.max_total_size_bytes)" in selection_limit_body
+
+    assert "upload-danger-callout" in upload_dialog
+    assert ".upload-dialog__footer .danger-button" in css
+    assert ".upload-row[data-state=\"cancelled\"]" in css
+    assert "--danger" in css
+    assert "--danger-border" in css
+    assert "--danger-glow" in css
+    assert "Cancelled: Upload was cancelled before Gallery publication." in script
 
 
 def test_javascript_upload_uses_capability_registry_and_no_file_byte_persistence(
@@ -2405,7 +2440,8 @@ def test_javascript_upload_pause_resume_refresh_reselection_and_mismatch_paths(
     assert "uploadState.needsReselection = true" in resume_body
     assert "file.size !== snapshot.declared_size_bytes" in selection_body
     assert "Selected file size does not match this upload session." in selection_body
-    assert "Source file reselected. Resume will use the latest server offset." in selection_body
+    assert "Ready to resume." in selection_body
+    assert "Source file reselected. Resume will use the latest server offset." not in script
 
 
 def test_javascript_upload_states_polling_cancel_and_gallery_boundaries_are_truthful(

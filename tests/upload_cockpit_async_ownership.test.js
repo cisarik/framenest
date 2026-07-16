@@ -245,13 +245,21 @@ function createElement(document, tagName = "div") {
   return element;
 }
 
+function applySelectorDefaults(selector, element) {
+  if (selector === "#upload-cancel-button") {
+    element.textContent = "Cancel";
+  }
+}
+
 function createDocument() {
   const elements = new Map();
   const document = {
     activeElement: null,
     querySelector(selector) {
       if (!elements.has(selector)) {
-        elements.set(selector, createElement(document));
+        const element = createElement(document);
+        applySelectorDefaults(selector, element);
+        elements.set(selector, element);
       }
       return elements.get(selector);
     },
@@ -379,6 +387,11 @@ function stateOf(harness) {
     hasPollTimer: Boolean(uploadState.pollTimer),
     pollRetryDelayMs: uploadState.pollRetryDelayMs,
     message: uploadState.message,
+    stateLabel: document.querySelector("#upload-state-label").textContent,
+    visibleMessage: document.querySelector("#upload-message").textContent,
+    byteCount: document.querySelector("#upload-byte-count").textContent,
+    resumeDisabled: document.querySelector("#upload-resume-button").disabled,
+    cancelLabel: document.querySelector("#upload-cancel-button").textContent,
     recovery: window.localStorage.getItem("${RECOVERY_KEY}"),
   })`);
 }
@@ -669,4 +682,56 @@ test("Recovery not-found is cleared and persisted recovery stores no private byt
   h.context.__terminal = snapshot(UPLOAD_A, "failed", 8);
   h.run("applyUploadSnapshot(__terminal, currentUploadContext({ uploadId: uploadState.uploadId, file: uploadState.file }))");
   assert.equal(h.context.localStorage.getItem(RECOVERY_KEY), null);
+});
+
+test("Recovered upload is ready after source reselection and waits for explicit Resume before PATCH", async () => {
+  const h = await createHarness();
+  h.context.localStorage.setItem(RECOVERY_KEY, JSON.stringify({
+    upload_id: UPLOAD_A,
+    file_name_hint: "sample.gif",
+    expected_size_bytes: 8,
+    last_modified_hint: 1234,
+    last_known_state: "receiving",
+  }));
+  enqueueStatus(h, UPLOAD_A, response(snapshot(UPLOAD_A, "receiving", 4)));
+
+  await h.run("restoreUploadRecovery()");
+  await h.flush();
+
+  assert.equal(stateOf(h).snapshotState, "receiving");
+  assert.equal(stateOf(h).received, 4);
+  assert.equal(stateOf(h).stateLabel, "Reselect file to resume");
+  assert.equal(stateOf(h).resumeDisabled, true);
+
+  h.context.__file = makeFile("sample.gif", 8, 1234);
+  h.run(`
+    const input = document.querySelector("#upload-file-input");
+    input.files = [__file];
+    handleUploadFileSelection();
+  `);
+  await h.flush();
+
+  const reselected = stateOf(h);
+  assert.equal(reselected.received, 4);
+  assert.equal(reselected.byteCount, "4 B / 8 B");
+  assert.equal(reselected.stateLabel, "Ready to resume");
+  assert.notEqual(reselected.stateLabel, "Uploading");
+  assert.equal(reselected.visibleMessage, "Ready to resume.");
+  assert.equal(reselected.visibleMessage.includes("Source file reselected"), false);
+  assert.equal(reselected.resumeDisabled, false);
+  assert.equal(reselected.cancelLabel, "Cancel");
+  assert.equal(h.fetchController.matching("PATCH", `/api/uploads/${UPLOAD_A}`).length, 0);
+
+  enqueueStatus(h, UPLOAD_A, response(snapshot(UPLOAD_A, "receiving", 4)));
+  enqueueStatus(h, UPLOAD_A, response(snapshot(UPLOAD_A, "receiving", 4)));
+  enqueue(h, "PATCH", `/api/uploads/${UPLOAD_A}`, response(snapshot(UPLOAD_A, "receiving", 8)));
+
+  await h.run("handleResumeUpload()");
+  await h.flush();
+
+  const patchCalls = h.fetchController.matching("PATCH", `/api/uploads/${UPLOAD_A}`);
+  assert.equal(patchCalls.length, 1);
+  assert.equal(patchCalls[0].options.headers["Upload-Offset"], "4");
+  assert.equal(patchCalls[0].options.body.start, 4);
+  assert.equal(patchCalls[0].options.body.end, 8);
 });

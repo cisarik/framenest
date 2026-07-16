@@ -67,10 +67,11 @@
       </div>
       <div class="upload-dialog__body">
         <p id="upload-capability-status" class="upload-status" role="status">Checking upload capability...</p>
-        <label class="upload-file-field" for="upload-file-input">
-          <span>Source file</span>
-          <input id="upload-file-input" type="file" accept=".gif,.mp4,image/gif,video/mp4">
-        </label>
+        <div class="upload-file-field">
+          <span id="upload-file-field-label">Source file</span>
+          <input id="upload-file-input" class="upload-file-input visually-hidden" type="file" accept=".gif,.mp4,image/gif,video/mp4" aria-labelledby="upload-file-field-label upload-file-trigger" aria-describedby="upload-file-name">
+          <label id="upload-file-trigger" class="upload-file-trigger" for="upload-file-input">Choose file</label>
+        </div>
         <div id="upload-row" class="upload-row" data-state="idle">
           <div class="upload-row__summary">
             <span id="upload-file-name" class="upload-row__name">No file selected</span>
@@ -82,7 +83,7 @@
             <span id="upload-percent">0%</span>
           </div>
           <p id="upload-message" class="upload-message"></p>
-          <p id="upload-failure" class="upload-failure" hidden></p>
+          <p id="upload-failure" class="upload-failure upload-danger-callout" hidden></p>
         </div>
         <p class="upload-boundary-note">Uploads enter server quarantine for validation. Validated uploads await publication and are not yet available in Gallery.</p>
       </div>
@@ -90,7 +91,7 @@
         <button id="upload-start-button" type="button" disabled>Start upload</button>
         <button id="upload-pause-button" type="button" disabled>Pause</button>
         <button id="upload-resume-button" type="button" disabled>Resume</button>
-        <button id="upload-cancel-button" type="button" disabled>Cancel upload</button>
+        <button id="upload-cancel-button" class="danger-button" type="button" disabled>Cancel</button>
       </div>
     </dialog>
 

@@ -974,8 +974,13 @@ function uploadDisplayState(snapshot) {
   if (uploadState.running && uploadIsByteReceiving(snapshot)) {
     return "Uploading";
   }
+  if (uploadState.preparing && uploadIsByteReceiving(snapshot)) {
+    return "Preparing";
+  }
   if (snapshot.state === "created") return "Preparing";
-  if (snapshot.state === "receiving") return "Uploading";
+  if (snapshot.state === "receiving") {
+    return uploadIsByteReceiving(snapshot) ? "Ready to resume" : "Received";
+  }
   if (snapshot.state === "received") return "Received";
   if (snapshot.state === "validating") return "Validating";
   if (snapshot.state === "publish_pending") return "Validated, awaiting publication";
@@ -989,13 +994,19 @@ function uploadDisplayState(snapshot) {
 function uploadFailureText(snapshot) {
   if (!snapshot) return "";
   if (snapshot.failure_code) {
-    return `Sanitized failure code: ${snapshot.failure_code}`;
+    return `Error: Sanitized failure code: ${snapshot.failure_code}`;
   }
   if (snapshot.state === "rejected") {
-    return "The server rejected the uploaded media with sanitized failure information.";
+    return "Rejected: The server rejected the uploaded media with sanitized failure information.";
   }
   if (snapshot.state === "failed") {
-    return "The upload failed with sanitized server failure information.";
+    return "Failed: The upload failed with sanitized server failure information.";
+  }
+  if (snapshot.state === "cancelled") {
+    return "Cancelled: Upload was cancelled before Gallery publication.";
+  }
+  if (snapshot.state === "expired") {
+    return "Expired: Upload session expired before completion.";
   }
   return "";
 }
@@ -1007,6 +1018,8 @@ function uploadProgressPercentValue(snapshot) {
 
 function uploadStatusMessage(snapshot) {
   if (!snapshot) {
+    const fileLimitMessage = selectedUploadLimitMessage();
+    if (fileLimitMessage) return fileLimitMessage;
     return uploadState.message || "Select one local GIF or MP4.";
   }
   if (snapshot.state === "publish_pending") {
@@ -1028,6 +1041,17 @@ function uploadStatusMessage(snapshot) {
     return uploadState.message;
   }
   return "Server state is authoritative.";
+}
+
+function selectedUploadLimitMessage() {
+  if (
+    uploadState.file
+    && uploadCapability.max_total_size_bytes > 0
+    && uploadState.file.size > uploadCapability.max_total_size_bytes
+  ) {
+    return `File is too large. Maximum size is ${formatSize(uploadCapability.max_total_size_bytes)}.`;
+  }
+  return "";
 }
 
 function normalizeUploadSnapshot(payload) {
@@ -1225,8 +1249,7 @@ function resetUploadForFile(file) {
 function renderUploadCapability() {
   if (!uploadCapabilityStatus) return;
   if (uploadCapability.uploads_enabled) {
-    uploadCapabilityStatus.textContent =
-      `Uploads enabled. Max file ${formatSize(uploadCapability.max_total_size_bytes)}; max chunk ${formatSize(uploadCapability.max_chunk_size_bytes)}; session TTL ${formatDuration(uploadCapability.session_ttl_seconds * 1000)}.`;
+    uploadCapabilityStatus.textContent = "Uploads ready.";
   } else {
     uploadCapabilityStatus.textContent = "Uploads are not configured on this local server.";
   }
@@ -1736,7 +1759,7 @@ async function handleStartUpload() {
       return;
     }
     if (file.size > uploadCapability.max_total_size_bytes) {
-      uploadState.message = "Selected file exceeds the server upload limit.";
+      uploadState.message = selectedUploadLimitMessage() || "File is too large for this local server.";
       renderUploadCockpit();
       return;
     }
@@ -1945,7 +1968,7 @@ function handleUploadFileSelection() {
     uploadState.needsReselection = false;
     uploadState.message = hintDiffers
       ? "File size matches. Name or modified-time hint differs; server validation remains authoritative."
-      : "Source file reselected. Resume will use the latest server offset.";
+      : "Ready to resume.";
     saveUploadRecovery(snapshot);
     renderUploadCockpit();
     return;
