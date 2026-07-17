@@ -1494,6 +1494,38 @@ h2 {
   pointer-events: none;
 }
 
+@media (hover: hover) and (pointer: fine) {
+  .catalog-card__actions--overlay {
+    opacity: 0;
+  }
+
+  .catalog-card__actions--overlay .catalog-card__action {
+    pointer-events: none;
+  }
+
+  .catalog-card:hover .catalog-card__actions--overlay,
+  .catalog-card:focus-within .catalog-card__actions--overlay,
+  .catalog-card--selected .catalog-card__actions--overlay {
+    opacity: 1;
+  }
+
+  .catalog-card:hover .catalog-card__action,
+  .catalog-card:focus-within .catalog-card__action,
+  .catalog-card--selected .catalog-card__action {
+    pointer-events: auto;
+  }
+}
+
+@media (hover: none), (pointer: coarse) {
+  .catalog-card__actions--overlay {
+    opacity: 1;
+  }
+
+  .catalog-card__actions--overlay .catalog-card__action {
+    pointer-events: auto;
+  }
+}
+
 .catalog-card__action {
   display: inline-flex;
   align-items: center;

@@ -1597,6 +1597,42 @@ def test_catalog_card_actions_are_compact_overlay_controls(client: TestClient) -
     assert "position:" not in analyze_css
 
 
+def test_catalog_card_actions_reveal_contextually_without_losing_keyboard_or_touch_access(
+    client: TestClient,
+) -> None:
+    script = client.get("/assets/app.js").text
+    styles = client.get("/assets/styles.css").text
+    card_body = _javascript_function(script, "renderCatalogCard")
+    desktop_css = styles[
+        styles.index("@media (hover: hover) and (pointer: fine)")
+        : styles.index("@media (hover: none), (pointer: coarse)")
+    ]
+    touch_start = styles.index("@media (hover: none), (pointer: coarse)")
+    touch_css = styles[touch_start : styles.index("\n.catalog-card__action {", touch_start)]
+    action_css = styles[
+        styles.index(".catalog-card__action {") : styles.index(".catalog-card__action svg")
+    ]
+
+    assert ".catalog-card__actions--overlay" in desktop_css
+    assert "opacity: 0;" in desktop_css
+    assert ".catalog-card:hover .catalog-card__actions--overlay" in desktop_css
+    assert ".catalog-card:focus-within .catalog-card__actions--overlay" in desktop_css
+    assert ".catalog-card--selected .catalog-card__actions--overlay" in desktop_css
+    assert "pointer-events: none;" in desktop_css
+    assert "pointer-events: auto;" in desktop_css
+    assert "opacity: 1;" in touch_css
+    assert "pointer-events: auto;" in touch_css
+    assert "display: none" not in desktop_css
+    assert "visibility: hidden" not in desktop_css
+    assert "transition:" not in desktop_css
+    assert "pointer-events: auto;" in action_css
+    assert ".catalog-card__action:focus-visible" in styles
+    assert 'titleButton.addEventListener("click", () => openDetailsDialog(item, titleButton))' in card_body
+    assert 'editButton.type = "button"' in card_body
+    assert 'editButton.setAttribute("aria-label", `Edit ${displayTitle}`)' in card_body
+    assert 'editButton.addEventListener("click", () => handleOpenMetadataWorkspace(item, editButton))' in card_body
+
+
 def test_catalog_card_unavailable_ai_opens_status_without_request(client: TestClient) -> None:
     script = client.get("/assets/app.js").text
     analyze_body = _javascript_function(script, "handleAnalyzeCatalogCard")
