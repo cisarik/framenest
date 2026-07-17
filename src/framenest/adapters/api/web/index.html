@@ -94,6 +94,26 @@
       </div>
     </dialog>
 
+    <dialog
+      id="confirmation-dialog"
+      class="upload-dialog confirmation-dialog"
+      role="alertdialog"
+      aria-modal="true"
+      aria-labelledby="confirmation-dialog-title"
+      aria-describedby="confirmation-dialog-message"
+    >
+      <div class="upload-dialog__header">
+        <h2 id="confirmation-dialog-title" class="upload-dialog__title"></h2>
+      </div>
+      <div class="upload-dialog__body confirmation-dialog__body">
+        <p id="confirmation-dialog-message" class="confirmation-dialog__message"></p>
+      </div>
+      <div class="upload-dialog__footer confirmation-dialog__footer">
+        <button id="confirmation-dismiss-button" type="button"></button>
+        <button id="confirmation-confirm-button" type="button"></button>
+      </div>
+    </dialog>
+
     <dialog id="status-dialog" class="settings-dialog" aria-label="Status">
       <div class="settings-dialog__header">
         <h2 id="status-dialog-title" class="settings-dialog__title">Status</h2>

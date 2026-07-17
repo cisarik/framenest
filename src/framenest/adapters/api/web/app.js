@@ -203,9 +203,16 @@ const uploadStartButton = document.querySelector("#upload-start-button");
 const uploadPauseButton = document.querySelector("#upload-pause-button");
 const uploadResumeButton = document.querySelector("#upload-resume-button");
 const uploadCancelButton = document.querySelector("#upload-cancel-button");
+const confirmationDialog = document.querySelector("#confirmation-dialog");
+const confirmationDialogTitle = document.querySelector("#confirmation-dialog-title");
+const confirmationDialogMessage = document.querySelector("#confirmation-dialog-message");
+const confirmationDismissButton = document.querySelector("#confirmation-dismiss-button");
+const confirmationConfirmButton = document.querySelector("#confirmation-confirm-button");
 let healthCheckInFlight = false;
 let lastFocusedElementBeforeStatus = null;
 let uploadOpenerElement = null;
+let confirmationRequestSequence = 0;
+let activeConfirmationRequest = null;
 const libraryList = document.querySelector("#library-list");
 const libraryStateLoading = document.querySelector("#library-state-loading");
 const libraryStateEmpty = document.querySelector("#library-state-empty");
@@ -266,6 +273,105 @@ let detailsMetadataToken = 0;
 let detailsPlayRequested = false;
 const metadataSaveButton = document.querySelector("#metadata-save-button");
 const metadataDiscardButton = document.querySelector("#metadata-discard-button");
+
+function resetConfirmationDialog() {
+  confirmationDialogTitle.textContent = "";
+  confirmationDialogMessage.textContent = "";
+  confirmationDismissButton.textContent = "";
+  confirmationConfirmButton.textContent = "";
+  confirmationConfirmButton.classList.remove("danger-button");
+}
+
+function restoreConfirmationFocus(target) {
+  if (target && typeof target.focus === "function" && !target.hidden && !target.disabled) {
+    target.focus();
+    if (document.activeElement === target) return;
+  }
+  if (uploadDialog && uploadDialog.hasAttribute("open") && uploadMessage) {
+    uploadMessage.focus();
+    return;
+  }
+  if (metadataDialog && metadataDialog.hasAttribute("open") && metadataWorkspaceTitle) {
+    metadataWorkspaceTitle.focus();
+    return;
+  }
+  if (detailsDialog && detailsDialog.hasAttribute("open") && detailsCloseButton) {
+    detailsCloseButton.focus();
+    return;
+  }
+  if (statusDialog && statusDialog.hasAttribute("open")) {
+    const activePanel = statusPanelCloud && !statusPanelCloud.hidden ? statusPanelCloud : statusPanelAi;
+    if (activePanel) activePanel.focus();
+  }
+}
+
+function settleConfirmation(request, accepted) {
+  if (!request || activeConfirmationRequest !== request || request.settled) return;
+  request.settled = true;
+  activeConfirmationRequest = null;
+  if (confirmationDialog.hasAttribute("open")) {
+    if (typeof confirmationDialog.close === "function") {
+      confirmationDialog.close();
+    } else {
+      confirmationDialog.removeAttribute("open");
+    }
+  }
+  resetConfirmationDialog();
+  restoreConfirmationFocus(request.focusReturn);
+  request.resolve(Boolean(accepted));
+}
+
+function requestConfirmation({
+  title,
+  message,
+  dismissLabel,
+  confirmLabel,
+  destructive = false,
+}) {
+  if (activeConfirmationRequest) {
+    return Promise.resolve(false);
+  }
+  const request = {
+    id: ++confirmationRequestSequence,
+    focusReturn: document.activeElement,
+    resolve: null,
+    settled: false,
+  };
+  const result = new Promise((resolve) => {
+    request.resolve = resolve;
+  });
+  activeConfirmationRequest = request;
+  confirmationDialogTitle.textContent = String(title || "");
+  confirmationDialogMessage.textContent = String(message || "");
+  confirmationDismissButton.textContent = String(dismissLabel || "Cancel");
+  confirmationConfirmButton.textContent = String(confirmLabel || "Confirm");
+  confirmationConfirmButton.classList.toggle("danger-button", Boolean(destructive));
+  if (typeof confirmationDialog.showModal === "function") {
+    confirmationDialog.showModal();
+  } else {
+    confirmationDialog.setAttribute("open", "");
+  }
+  confirmationDismissButton.focus();
+  return result;
+}
+
+function handleConfirmationKeydown(event) {
+  if (event.key !== "Tab" || !activeConfirmationRequest) return;
+  const focusableActions = [confirmationDismissButton, confirmationConfirmButton];
+  const activeIndex = focusableActions.indexOf(document.activeElement);
+  if (activeIndex === -1) {
+    event.preventDefault();
+    confirmationDismissButton.focus();
+    return;
+  }
+  if (event.shiftKey && activeIndex === 0) {
+    event.preventDefault();
+    confirmationConfirmButton.focus();
+  } else if (!event.shiftKey && activeIndex === focusableActions.length - 1) {
+    event.preventDefault();
+    confirmationDismissButton.focus();
+  }
+}
 
 function setStatusClass(className) {
   statusContainer.classList.remove("status--loading", "status--healthy", "status--error");
@@ -1893,8 +1999,22 @@ async function handleCancelUpload() {
   const snapshot = activeUploadSnapshot();
   if (!snapshot || !uploadCancelPermitted(snapshot)) return;
   if (uploadState.actionOwner && uploadState.actionOwner.kind === "cancel") return;
-  if (!window.confirm("Cancel this upload?")) return;
-  const owner = claimUploadAction("cancel", { uploadId: snapshot.id, file: uploadState.file }, { supersede: true });
+  const accepted = await requestConfirmation({
+    title: "Cancel upload?",
+    message: "Uploaded progress will be discarded.",
+    dismissLabel: "Keep upload",
+    confirmLabel: "Cancel upload",
+    destructive: true,
+  });
+  if (!accepted) return;
+  const currentSnapshot = activeUploadSnapshot();
+  if (
+    !currentSnapshot
+    || currentSnapshot.id !== snapshot.id
+    || !uploadCancelPermitted(currentSnapshot)
+    || (uploadState.actionOwner && uploadState.actionOwner.kind === "cancel")
+  ) return;
+  const owner = claimUploadAction("cancel", { uploadId: currentSnapshot.id, file: uploadState.file }, { supersede: true });
   if (!owner) return;
   uploadState.uploadLoopOwner = null;
   uploadState.completionOwner = null;
@@ -3245,11 +3365,17 @@ function describeCatalogItem(item) {
   return `${label}; ${formatCatalogKind(item.media_kind)}; ${location}; media ID ${item.media_id}`;
 }
 
-function confirmDiscardDirtyMetadata() {
+async function confirmDiscardDirtyMetadata() {
   if (!metadataDirtyForBeforeUnload()) {
     return true;
   }
-  return confirm("Discard unsaved metadata changes?");
+  return requestConfirmation({
+    title: "Discard changes?",
+    message: "Unsaved metadata changes will be discarded.",
+    dismissLabel: "Keep editing",
+    confirmLabel: "Discard changes",
+    destructive: true,
+  });
 }
 
 function updateMetadataControls() {
@@ -3448,9 +3574,13 @@ async function handleAnalyzeMetadataByAi() {
     metadataAiStatus.textContent = "AI analysis needs an available local GIF or MP4.";
     return;
   }
-  const accepted = confirm(
-    "FrameNest will send up to 3 optimized preview frames and bounded metadata to the configured server-side AI provider. The original file, local path, and API key are not uploaded. Returned values will replace the current unsaved Title, Description, and Tags in this editor. The result will not be saved automatically, and the physical file will not be renamed.",
-  );
+  const accepted = await requestConfirmation({
+    title: "Use AI analysis?",
+    message: "FrameNest will send up to 3 optimized preview frames and bounded metadata to the configured server-side AI provider. The original file, local path, and API key are not uploaded. Returned values will replace the current unsaved Title, Description, and Tags in this editor. The result will not be saved automatically, and the physical file will not be renamed.",
+    dismissLabel: "Not now",
+    confirmLabel: "Analyze by AI",
+    destructive: false,
+  });
   if (!accepted) {
     metadataAiStatus.textContent = "";
     return;
@@ -3577,11 +3707,11 @@ function applyMetadataPayloadToWorkspace(payload) {
   };
 }
 
-function openDetailsDialog(item, openerElement, { playWhenReady = false } = {}) {
+async function openDetailsDialog(item, openerElement, { playWhenReady = false } = {}) {
   if (!detailsDialog) return;
   if (metadataWorkspace.openMediaId !== null) {
-    if (!confirmDiscardDirtyMetadata()) return;
-    closeMetadataWorkspace();
+    if (!(await confirmDiscardDirtyMetadata())) return;
+    await closeMetadataWorkspace({ discardConfirmed: true });
   }
   stopCardPreviewTimer();
   cleanupDetailsMedia();
@@ -3680,8 +3810,11 @@ function closeDetailsDialog({ restoreFocus = true } = {}) {
 }
 
 async function handleOpenMetadataWorkspace(item, openerElement, { aiSuggestion = null } = {}) {
-  if (!confirmDiscardDirtyMetadata()) {
+  if (!(await confirmDiscardDirtyMetadata())) {
     return;
+  }
+  if (metadataWorkspace.openMediaId !== null) {
+    await closeMetadataWorkspace({ discardConfirmed: true });
   }
   if (detailsDialog && detailsDialog.hasAttribute("open")) {
     closeDetailsDialog();
@@ -3805,13 +3938,13 @@ function resetMetadataWorkspaceAfterDiscard() {
   renderMetadataWorkspace();
 }
 
-function handleDiscardMetadataChanges() {
-  closeMetadataWorkspace();
+async function handleDiscardMetadataChanges() {
+  await closeMetadataWorkspace();
 }
 
-function closeMetadataWorkspace() {
-  if (!confirmDiscardDirtyMetadata()) {
-    return;
+async function closeMetadataWorkspace({ discardConfirmed = false } = {}) {
+  if (!discardConfirmed && !(await confirmDiscardDirtyMetadata())) {
+    return false;
   }
   metadataRequestToken += 1;
   metadataAiRequestToken += 1;
@@ -3847,6 +3980,7 @@ function closeMetadataWorkspace() {
     metadataOpenerElement = null;
   }
   loadCatalog();
+  return true;
 }
 
 async function createAndSelectMetadataTag(displayName) {
@@ -4000,7 +4134,7 @@ async function handleSaveMetadata() {
       metadataWorkspace.aiSuggestionApplied = false;
       metadataWorkspace.suggestedFilename = "";
       await loadCatalog();
-      closeMetadataWorkspace();
+      await closeMetadataWorkspace();
       return;
     }
     const code = payload.error ? payload.error.code : "";
@@ -4548,22 +4682,22 @@ function setCatalogScope(collection) {
   loadCatalog();
 }
 
-document.querySelector("#catalog-scope-all").addEventListener("click", () => {
-  if (!confirmDiscardDirtyMetadata()) {
+document.querySelector("#catalog-scope-all").addEventListener("click", async () => {
+  if (!(await confirmDiscardDirtyMetadata())) {
     return;
   }
   if (metadataWorkspace.openMediaId !== null) {
-    closeMetadataWorkspace();
+    await closeMetadataWorkspace({ discardConfirmed: true });
   }
   setCatalogScope("");
 });
 
-document.querySelector("#catalog-scope-processed").addEventListener("click", () => {
-  if (!confirmDiscardDirtyMetadata()) {
+document.querySelector("#catalog-scope-processed").addEventListener("click", async () => {
+  if (!(await confirmDiscardDirtyMetadata())) {
     return;
   }
   if (metadataWorkspace.openMediaId !== null) {
-    closeMetadataWorkspace();
+    await closeMetadataWorkspace({ discardConfirmed: true });
   }
   setCatalogScope(PROCESSED_COLLECTION);
 });
@@ -5009,6 +5143,31 @@ if (uploadResumeButton) {
 
 if (uploadCancelButton) {
   uploadCancelButton.addEventListener("click", handleCancelUpload);
+}
+
+if (confirmationDialog) {
+  confirmationDialog.addEventListener("cancel", (event) => {
+    event.preventDefault();
+    settleConfirmation(activeConfirmationRequest, false);
+  });
+  confirmationDialog.addEventListener("keydown", handleConfirmationKeydown);
+  confirmationDialog.addEventListener("click", (event) => {
+    if (event.target === confirmationDialog) {
+      settleConfirmation(activeConfirmationRequest, false);
+    }
+  });
+}
+
+if (confirmationDismissButton) {
+  confirmationDismissButton.addEventListener("click", () => {
+    settleConfirmation(activeConfirmationRequest, false);
+  });
+}
+
+if (confirmationConfirmButton) {
+  confirmationConfirmButton.addEventListener("click", () => {
+    settleConfirmation(activeConfirmationRequest, true);
+  });
 }
 
 if (detailsCloseButton) {

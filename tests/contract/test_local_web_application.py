@@ -364,7 +364,11 @@ def test_javascript_metadata_workspace_tracks_sparse_baseline_dirty_and_discard(
     assert "hasControlCharacter(rawTitle)" in script
     assert "metadataSaveButton.disabled = metadataWorkspace.loading || metadataWorkspace.saving || !dirty || Boolean(validation);" in script
     assert "metadataDiscardButton.disabled = metadataWorkspace.saving;" in script
-    assert "confirm(\"Discard unsaved metadata changes?\")" in script
+    discard_body = _javascript_function(script, "confirmDiscardDirtyMetadata")
+    assert "requestConfirmation({" in discard_body
+    assert 'title: "Discard changes?"' in discard_body
+    assert 'dismissLabel: "Keep editing"' in discard_body
+    assert 'confirmLabel: "Discard changes"' in discard_body
     assert "handleDiscardMetadataChanges" in script
     assert "closeMetadataWorkspace();" in _javascript_function(script, "handleDiscardMetadataChanges")
     assert "metadataBeforeUnloadHandler" in script
@@ -1434,7 +1438,7 @@ def test_javascript_metadata_dialog_uses_show_modal(client: TestClient) -> None:
 def test_javascript_dialog_has_dirty_close_protection(client: TestClient) -> None:
     script = client.get("/assets/app.js").text
     assert "confirmDiscardDirtyMetadata" in script
-    assert "confirm(" in script
+    assert "requestConfirmation({" in script
 
 
 def test_javascript_dialog_has_focus_restoration(client: TestClient) -> None:
@@ -2313,7 +2317,10 @@ def test_javascript_metadata_ai_analysis_requires_confirmation_and_identity_url(
     assert "${mediaId}/locations/${locationId}/ai-suggestion-preview" in script
     assert "handleAnalyzeMetadataByAi" in script
     analyze_body = script[script.index("async function handleAnalyzeMetadataByAi") : script.index("function aiSuggestionErrorMessage")]
-    assert "confirm(" in analyze_body
+    assert "await requestConfirmation({" in analyze_body
+    assert 'title: "Use AI analysis?"' in analyze_body
+    assert 'dismissLabel: "Not now"' in analyze_body
+    assert 'confirmLabel: "Analyze by AI"' in analyze_body
     assert "confirm_cloud_upload: true" in script
     assert "metadataAiRequestToken" in script
     assert "token !== metadataAiRequestToken" in script
@@ -2475,8 +2482,90 @@ def test_upload_cockpit_capability_and_danger_presentation_hooks(
     assert "--danger" in css
     assert "--danger-border" in css
     assert "--danger-glow" in css
-    assert 'window.confirm("Cancel this upload?")' in script
+    cancel_body = _javascript_function(script, "handleCancelUpload")
+    assert "await requestConfirmation({" in cancel_body
+    assert 'title: "Cancel upload?"' in cancel_body
+    assert 'message: "Uploaded progress will be discarded."' in cancel_body
+    assert 'dismissLabel: "Keep upload"' in cancel_body
+    assert 'confirmLabel: "Cancel upload"' in cancel_body
+    assert "destructive: true" in cancel_body
     assert "Cancelled: Upload was cancelled before Gallery publication." in script
+
+
+def test_reusable_confirmation_dialog_is_single_closed_accessible_and_style_reusing(
+    client: TestClient,
+) -> None:
+    html = client.get("/").text
+    script = client.get("/assets/app.js").text
+    css = client.get("/assets/styles.css").text
+    start = html.index('id="confirmation-dialog"')
+    confirmation_dialog = html[html.rfind("<dialog", 0, start) : html.index("</dialog>", start)]
+    opening_tag = confirmation_dialog[: confirmation_dialog.index(">")]
+
+    assert html.count('id="confirmation-dialog"') == 1
+    assert " open" not in opening_tag
+    assert 'class="upload-dialog confirmation-dialog"' in confirmation_dialog
+    assert 'role="alertdialog"' in confirmation_dialog
+    assert 'aria-modal="true"' in confirmation_dialog
+    assert 'aria-labelledby="confirmation-dialog-title"' in confirmation_dialog
+    assert 'aria-describedby="confirmation-dialog-message"' in confirmation_dialog
+    assert confirmation_dialog.count('id="confirmation-dialog-title"') == 1
+    assert confirmation_dialog.count('id="confirmation-dialog-message"') == 1
+    assert 'id="confirmation-dismiss-button" type="button"' in confirmation_dialog
+    assert 'id="confirmation-confirm-button" type="button"' in confirmation_dialog
+    assert "upload-dialog__header" in confirmation_dialog
+    assert "upload-dialog__body" in confirmation_dialog
+    assert "upload-dialog__footer" in confirmation_dialog
+
+    request_body = _javascript_function(script, "requestConfirmation")
+    settle_body = _javascript_function(script, "settleConfirmation")
+    keydown_body = _javascript_function(script, "handleConfirmationKeydown")
+    assert "activeConfirmationRequest" in request_body
+    assert "Promise.resolve(false)" in request_body
+    assert "confirmationDialog.showModal()" in request_body
+    assert "confirmationDismissButton.focus()" in request_body
+    assert 'classList.toggle("danger-button", Boolean(destructive))' in request_body
+    assert "activeConfirmationRequest !== request" in settle_body
+    assert "request.settled" in settle_body
+    assert "resetConfirmationDialog()" in settle_body
+    assert "restoreConfirmationFocus(request.focusReturn)" in settle_body
+    assert 'event.key !== "Tab"' in keydown_body
+    assert "confirmationDismissButton.focus()" in keydown_body
+    assert "confirmationConfirmButton.focus()" in keydown_body
+    assert 'confirmationDialog.addEventListener("cancel"' in script
+    assert "event.preventDefault()" in script
+    assert "window.confirm" not in script
+    assert re.search(r"(?<![A-Za-z0-9_.])confirm\s*\(", script) is None
+    assert "window.alert" not in script
+    assert "window.prompt" not in script
+    assert "127.0.0.1:57087 says" not in html + script
+    assert ">OK<" not in confirmation_dialog
+
+    confirmation_css = css[
+        css.index("/* --- Reusable confirmation dialog") : css.index("/* --- Main shell --- */")
+    ]
+    assert ".confirmation-dialog" in confirmation_css
+    assert ".confirmation-dialog__message" in confirmation_css
+    assert "overflow-wrap: anywhere" in confirmation_css
+    assert "white-space: pre-wrap" in confirmation_css
+    assert "background: var(--surface-solid)" not in confirmation_css
+    assert "box-shadow: 0 24px 80px" not in confirmation_css
+    assert ".upload-dialog__footer .danger-button" in css
+
+
+def test_upload_confirmation_waits_before_claiming_and_revalidates_eligibility(
+    client: TestClient,
+) -> None:
+    script = client.get("/assets/app.js").text
+    cancel_body = _javascript_function(script, "handleCancelUpload")
+
+    assert cancel_body.index("await requestConfirmation({") < cancel_body.index("claimUploadAction(")
+    assert "const currentSnapshot = activeUploadSnapshot();" in cancel_body
+    assert "currentSnapshot.id !== snapshot.id" in cancel_body
+    assert "!uploadCancelPermitted(currentSnapshot)" in cancel_body
+    assert 'claimUploadAction("cancel"' in cancel_body
+    assert '{ supersede: true }' in cancel_body
+    assert 'method: "DELETE"' in cancel_body
 
 
 def test_javascript_upload_uses_capability_registry_and_no_file_byte_persistence(

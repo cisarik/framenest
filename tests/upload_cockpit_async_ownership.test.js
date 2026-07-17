@@ -210,6 +210,8 @@ function createElement(document, tagName = "div") {
       listeners.delete(type);
     },
     dispatchEvent(event) {
+      if (!event.target) event.target = this;
+      event.currentTarget = this;
       const listener = listeners.get(event.type);
       if (listener) listener(event);
     },
@@ -378,7 +380,7 @@ async function createHarness() {
       if (timer) timer.active = false;
     },
     confirm() {
-      return true;
+      throw new Error("native confirmation must not be invoked");
     },
     addEventListener() {},
     removeEventListener() {},
@@ -444,6 +446,48 @@ function stateOf(harness) {
     cancelLabel: document.querySelector("#upload-cancel-button").textContent,
     recovery: window.localStorage.getItem("${RECOVERY_KEY}"),
   })`);
+}
+
+function confirmationStateOf(harness) {
+  return JSON.parse(JSON.stringify(harness.run(`({
+    open: document.querySelector("#confirmation-dialog").hasAttribute("open"),
+    activeRequestId: activeConfirmationRequest ? activeConfirmationRequest.id : null,
+    title: document.querySelector("#confirmation-dialog-title").textContent,
+    message: document.querySelector("#confirmation-dialog-message").textContent,
+    dismissLabel: document.querySelector("#confirmation-dismiss-button").textContent,
+    confirmLabel: document.querySelector("#confirmation-confirm-button").textContent,
+    destructive: document.querySelector("#confirmation-confirm-button").classList.contains("danger-button"),
+    focusedDismiss: document.activeElement === document.querySelector("#confirmation-dismiss-button"),
+    focusedConfirm: document.activeElement === document.querySelector("#confirmation-confirm-button"),
+  })`)));
+}
+
+function dispatch(element, type, values = {}) {
+  const event = {
+    type,
+    defaultPrevented: false,
+    propagationStopped: false,
+    preventDefault() {
+      this.defaultPrevented = true;
+    },
+    stopPropagation() {
+      this.propagationStopped = true;
+    },
+    ...values,
+  };
+  element.dispatchEvent(event);
+  return event;
+}
+
+function activateConfirmation(harness, action) {
+  const selector = action === "confirm"
+    ? "#confirmation-confirm-button"
+    : "#confirmation-dismiss-button";
+  return dispatch(harness.document.querySelector(selector), "click");
+}
+
+function dismissConfirmationWithEscape(harness) {
+  return dispatch(harness.document.querySelector("#confirmation-dialog"), "cancel");
 }
 
 function setSelectedFile(harness, file = makeFile()) {
@@ -540,6 +584,11 @@ function assertExactUploadActions(harness, scenarioName, expectedActions) {
     `${scenarioName}: Pause and Resume must never be simultaneously available`,
   );
 }
+
+test("Production Upload cancellation contains no native browser confirmation", () => {
+  assert.equal(APP_SOURCE.includes("window.confirm"), false);
+  assert.equal(/(^|[^A-Za-z0-9_.])confirm\s*\(/m.test(APP_SOURCE), false);
+});
 
 test("Upload controls expose the exact action set for every accepted lifecycle state", async () => {
   const h = await createHarness();
@@ -651,42 +700,256 @@ test("Rendering without a disappearing focused action does not focus the upload 
   assert.equal(h.run('document.querySelector("#upload-message").focusCount'), 0);
 });
 
-test("Cancel uses native confirmation and keeps danger action semantics", async () => {
+test("Reusable confirmation populates, settles once, resets, and restores focus", async () => {
+  const h = await createHarness();
+  const trigger = h.document.querySelector("#upload-cancel-button");
+  trigger.hidden = false;
+  trigger.disabled = false;
+  trigger.focus();
+  h.context.__confirmationSettlements = 0;
+  const result = h.run(`requestConfirmation({
+    title: "Remove item?",
+    message: "This action cannot be undone.",
+    dismissLabel: "Keep item",
+    confirmLabel: "Remove item",
+    destructive: true,
+  }).then((accepted) => {
+    __confirmationSettlements += 1;
+    return accepted;
+  })`);
+
+  assert.deepEqual(confirmationStateOf(h), {
+    open: true,
+    activeRequestId: 1,
+    title: "Remove item?",
+    message: "This action cannot be undone.",
+    dismissLabel: "Keep item",
+    confirmLabel: "Remove item",
+    destructive: true,
+    focusedDismiss: true,
+    focusedConfirm: false,
+  });
+
+  activateConfirmation(h, "dismiss");
+  dismissConfirmationWithEscape(h);
+  assert.equal(await result, false);
+  await h.flush();
+  assert.equal(h.context.__confirmationSettlements, 1);
+  assert.deepEqual(confirmationStateOf(h), {
+    open: false,
+    activeRequestId: null,
+    title: "",
+    message: "",
+    dismissLabel: "",
+    confirmLabel: "",
+    destructive: false,
+    focusedDismiss: false,
+    focusedConfirm: false,
+  });
+  assert.equal(h.document.activeElement, trigger);
+});
+
+test("Reusable confirmation rejects overlap and stale settlement cannot affect a later request", async () => {
+  const h = await createHarness();
+  const first = h.run(`requestConfirmation({
+    title: "First request",
+    message: "First message",
+    dismissLabel: "Wait",
+    confirmLabel: "Continue",
+    destructive: true,
+  })`);
+  h.run("globalThis.__staleConfirmationRequest = activeConfirmationRequest");
+  const overlapping = h.run(`requestConfirmation({
+    title: "Overlapping request",
+    message: "Must not replace the active request",
+    dismissLabel: "No",
+    confirmLabel: "Yes",
+  })`);
+
+  assert.equal(await overlapping, false);
+  assert.equal(confirmationStateOf(h).title, "First request");
+  assert.equal(confirmationStateOf(h).activeRequestId, 1);
+  activateConfirmation(h, "confirm");
+  assert.equal(await first, true);
+
+  const later = h.run(`requestConfirmation({
+    title: "Later request",
+    message: "Later message",
+    dismissLabel: "Stay",
+    confirmLabel: "Proceed",
+    destructive: false,
+  })`);
+  h.run("settleConfirmation(__staleConfirmationRequest, true)");
+  assert.equal(confirmationStateOf(h).open, true);
+  assert.equal(confirmationStateOf(h).title, "Later request");
+  assert.equal(confirmationStateOf(h).destructive, false);
+  const escapeEvent = dismissConfirmationWithEscape(h);
+  assert.equal(escapeEvent.defaultPrevented, true);
+  assert.equal(await later, false);
+});
+
+test("Confirmation traps action focus and Escape leaves the parent Upload modal open", async () => {
+  const h = await createHarness();
+  h.run('document.querySelector("#upload-dialog").setAttribute("open", "")');
+  const result = h.run(`requestConfirmation({
+    title: "Cancel upload?",
+    message: "Uploaded progress will be discarded.",
+    dismissLabel: "Keep upload",
+    confirmLabel: "Cancel upload",
+    destructive: true,
+  })`);
+
+  assert.equal(confirmationStateOf(h).focusedDismiss, true);
+  const shiftTab = dispatch(h.document.querySelector("#confirmation-dialog"), "keydown", {
+    key: "Tab",
+    shiftKey: true,
+  });
+  assert.equal(shiftTab.defaultPrevented, true);
+  assert.equal(confirmationStateOf(h).focusedConfirm, true);
+  const tab = dispatch(h.document.querySelector("#confirmation-dialog"), "keydown", {
+    key: "Tab",
+    shiftKey: false,
+  });
+  assert.equal(tab.defaultPrevented, true);
+  assert.equal(confirmationStateOf(h).focusedDismiss, true);
+
+  dismissConfirmationWithEscape(h);
+  assert.equal(await result, false);
+  assert.equal(h.run('document.querySelector("#upload-dialog").hasAttribute("open")'), true);
+});
+
+test("Keep upload and Escape preserve upload ownership, offset, modal, and trigger focus", async () => {
   const h = await createHarness();
   setActiveUpload(h, { id: UPLOAD_A, state: "receiving", received: 4 });
-  let confirmations = 0;
-  h.context.confirm = () => {
-    confirmations += 1;
-    return false;
-  };
+  h.run(`
+    document.querySelector("#upload-dialog").setAttribute("open", "");
+    document.querySelector("#upload-cancel-button").focus();
+  `);
+  const initialGeneration = stateOf(h).generation;
+  const keepUpload = h.run("handleCancelUpload()");
 
-  await h.run("handleCancelUpload()");
-  assert.equal(confirmations, 1);
+  assert.deepEqual(
+    {
+      title: confirmationStateOf(h).title,
+      message: confirmationStateOf(h).message,
+      dismissLabel: confirmationStateOf(h).dismissLabel,
+      confirmLabel: confirmationStateOf(h).confirmLabel,
+      destructive: confirmationStateOf(h).destructive,
+    },
+    {
+      title: "Cancel upload?",
+      message: "Uploaded progress will be discarded.",
+      dismissLabel: "Keep upload",
+      confirmLabel: "Cancel upload",
+      destructive: true,
+    },
+  );
+  assert.equal(stateOf(h).actionKind, null);
+  assert.equal(stateOf(h).generation, initialGeneration);
   assert.equal(h.fetchController.matching("DELETE", `/api/uploads/${UPLOAD_A}`).length, 0);
-  assert.equal(stateOf(h).snapshotState, "receiving");
-  assert.equal(stateOf(h).cancelHidden, false);
-  assert.equal(stateOf(h).cancelLabel, "Cancel");
 
-  h.context.confirm = () => {
-    confirmations += 1;
-    return true;
-  };
+  activateConfirmation(h, "dismiss");
+  await keepUpload;
+  assert.equal(stateOf(h).snapshotState, "receiving");
+  assert.equal(stateOf(h).received, 4);
+  assert.equal(stateOf(h).generation, initialGeneration);
+  assert.equal(h.fetchController.matching("DELETE", `/api/uploads/${UPLOAD_A}`).length, 0);
+  assert.equal(h.run('document.querySelector("#upload-dialog").hasAttribute("open")'), true);
+  assert.equal(h.document.activeElement, h.document.querySelector("#upload-cancel-button"));
+
+  const escape = h.run("handleCancelUpload()");
+  dismissConfirmationWithEscape(h);
+  await escape;
+  assert.equal(stateOf(h).snapshotState, "receiving");
+  assert.equal(stateOf(h).received, 4);
+  assert.equal(stateOf(h).generation, initialGeneration);
+  assert.equal(h.fetchController.matching("DELETE", `/api/uploads/${UPLOAD_A}`).length, 0);
+  assert.equal(h.run('document.querySelector("#upload-dialog").hasAttribute("open")'), true);
+  assert.equal(h.document.activeElement, h.document.querySelector("#upload-cancel-button"));
+});
+
+test("Upload cancellation revalidates eligibility after asynchronous confirmation", async () => {
+  const h = await createHarness();
+  setActiveUpload(h, { id: UPLOAD_A, state: "receiving", received: 4 });
+  const cancellation = h.run("handleCancelUpload()");
+  h.context.__validatingSnapshot = snapshot(UPLOAD_A, "validating", 8);
+  h.run(`
+    uploadState.snapshot = __validatingSnapshot;
+    renderUploadCockpit();
+  `);
+
+  activateConfirmation(h, "confirm");
+  await cancellation;
+  await h.flush();
+
+  assert.equal(stateOf(h).snapshotState, "validating");
+  assert.equal(stateOf(h).received, 8);
+  assert.equal(stateOf(h).actionKind, null);
+  assert.equal(h.fetchController.matching("DELETE", `/api/uploads/${UPLOAD_A}`).length, 0);
+});
+
+test("Confirmation backdrop dismissal resolves false without closing the Upload modal", async () => {
+  const h = await createHarness();
+  h.run('document.querySelector("#upload-dialog").setAttribute("open", "")');
+  const result = h.run(`requestConfirmation({
+    title: "Leave upload?",
+    message: "The upload will remain available.",
+    dismissLabel: "Stay",
+    confirmLabel: "Leave",
+  })`);
+
+  const dialog = h.document.querySelector("#confirmation-dialog");
+  dispatch(dialog, "click", { target: dialog });
+  assert.equal(await result, false);
+  assert.equal(h.run('document.querySelector("#upload-dialog").hasAttribute("open")'), true);
+});
+
+test("Cancel upload confirms once, sends one DELETE, fences stale work, and focuses status", async () => {
+  const h = await createHarness();
+  setActiveUpload(h, { id: UPLOAD_A, state: "receiving", received: 4 });
+  h.run(`
+    document.querySelector("#upload-dialog").setAttribute("open", "");
+    document.querySelector("#upload-cancel-button").focus();
+  `);
   const cancellation = deferred();
   enqueue(h, "DELETE", `/api/uploads/${UPLOAD_A}`, cancellation.promise);
   const cancelPromise = h.run("handleCancelUpload()");
+  const duplicatePromise = h.run("handleCancelUpload()");
+  activateConfirmation(h, "confirm");
+  activateConfirmation(h, "confirm");
   await h.flush();
+
+  await duplicatePromise;
   assert.equal(stateOf(h).stateLabel, "Cancelling");
   assert.equal(stateOf(h).cancelHidden, true);
+  assert.equal(stateOf(h).focusedStatus, true);
+  assert.equal(h.fetchController.matching("DELETE", `/api/uploads/${UPLOAD_A}`).length, 1);
 
   cancellation.resolve(response(snapshot(UPLOAD_A, "cancelled", 4)));
   await cancelPromise;
   await h.flush();
 
-  assert.equal(confirmations, 2);
   assert.equal(h.fetchController.matching("DELETE", `/api/uploads/${UPLOAD_A}`).length, 1);
   assert.equal(stateOf(h).snapshotState, "cancelled");
   assert.equal(stateOf(h).stateLabel, "Cancelled");
   assert.equal(stateOf(h).cancelHidden, true);
+});
+
+test("Repeated destructive activation cannot send a second DELETE", async () => {
+  const h = await createHarness();
+  setActiveUpload(h, { id: UPLOAD_A, state: "receiving", received: 4 });
+  const cancellation = deferred();
+  enqueue(h, "DELETE", `/api/uploads/${UPLOAD_A}`, cancellation.promise);
+
+  const first = h.run("handleCancelUpload()");
+  const repeatedHandler = h.run("handleCancelUpload()");
+  activateConfirmation(h, "confirm");
+  activateConfirmation(h, "confirm");
+  await h.flush();
+
+  assert.equal(h.fetchController.matching("DELETE", `/api/uploads/${UPLOAD_A}`).length, 1);
+  cancellation.resolve(response(snapshot(UPLOAD_A, "cancelled", 4)));
+  await Promise.all([first, repeatedHandler]);
 });
 
 test("Start is synchronously fenced and stale create responses cannot replace newer state", async () => {
@@ -795,7 +1058,9 @@ test("Cancel invalidates a delayed PATCH and prevents another chunk from being s
   assert.equal(h.fetchController.matching("PATCH", `/api/uploads/${UPLOAD_A}`).length, 1);
 
   enqueue(h, "DELETE", `/api/uploads/${UPLOAD_A}`, response(snapshot(UPLOAD_A, "cancelled", 0)));
-  await h.run("handleCancelUpload()");
+  const cancellation = h.run("handleCancelUpload()");
+  activateConfirmation(h, "confirm");
+  await cancellation;
   await h.flush();
   assert.equal(stateOf(h).snapshotState, "cancelled");
 
