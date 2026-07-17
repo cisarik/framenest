@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from html.parser import HTMLParser
 from pathlib import Path
 
@@ -76,6 +77,26 @@ def _javascript_function(script: str, name: str) -> str:
             if depth == 0:
                 return script[start : index + 1]
     raise AssertionError(f"Could not find complete JavaScript function {name}")
+
+
+def _css_rule_declarations(css: str, selectors: tuple[str, ...]) -> dict[str, str]:
+    expected_selectors = {" ".join(selector.split()) for selector in selectors}
+    for selector_block, declaration_block in re.findall(r"([^{}]+)\{([^{}]*)\}", css):
+        actual_selectors = {
+            " ".join(selector.split()) for selector in selector_block.split(",")
+        }
+        if actual_selectors != expected_selectors:
+            continue
+
+        declarations = {}
+        for declaration in declaration_block.split(";"):
+            if not declaration.strip():
+                continue
+            property_name, value = declaration.split(":", 1)
+            declarations[property_name.strip()] = value.strip()
+        return declarations
+
+    raise AssertionError(f"Could not find CSS rule for selectors {selectors}")
 
 
 def test_root_serves_framenest_application_document(client: TestClient) -> None:
@@ -1612,16 +1633,33 @@ def test_catalog_card_actions_reveal_contextually_without_losing_keyboard_or_tou
     action_css = styles[
         styles.index(".catalog-card__action {") : styles.index(".catalog-card__action svg")
     ]
+    overlay_selector = (".catalog-card__actions--overlay",)
+    overlay_action_selector = (
+        ".catalog-card__actions--overlay .catalog-card__action",
+    )
+    revealed_overlay_selectors = (
+        ".catalog-card:hover .catalog-card__actions--overlay",
+        ".catalog-card:focus-within .catalog-card__actions--overlay",
+        ".catalog-card--selected .catalog-card__actions--overlay",
+    )
+    revealed_action_selectors = (
+        ".catalog-card:hover .catalog-card__action",
+        ".catalog-card:focus-within .catalog-card__action",
+        ".catalog-card--selected .catalog-card__action",
+    )
+    idle_overlay = _css_rule_declarations(desktop_css, overlay_selector)
+    idle_actions = _css_rule_declarations(desktop_css, overlay_action_selector)
+    revealed_overlay = _css_rule_declarations(desktop_css, revealed_overlay_selectors)
+    revealed_actions = _css_rule_declarations(desktop_css, revealed_action_selectors)
+    touch_overlay = _css_rule_declarations(touch_css, overlay_selector)
+    touch_actions = _css_rule_declarations(touch_css, overlay_action_selector)
 
-    assert ".catalog-card__actions--overlay" in desktop_css
-    assert "opacity: 0;" in desktop_css
-    assert ".catalog-card:hover .catalog-card__actions--overlay" in desktop_css
-    assert ".catalog-card:focus-within .catalog-card__actions--overlay" in desktop_css
-    assert ".catalog-card--selected .catalog-card__actions--overlay" in desktop_css
-    assert "pointer-events: none;" in desktop_css
-    assert "pointer-events: auto;" in desktop_css
-    assert "opacity: 1;" in touch_css
-    assert "pointer-events: auto;" in touch_css
+    assert idle_overlay["opacity"] == "0"
+    assert idle_actions["pointer-events"] == "none"
+    assert revealed_overlay["opacity"] == "1"
+    assert revealed_actions["pointer-events"] == "auto"
+    assert touch_overlay["opacity"] == "1"
+    assert touch_actions["pointer-events"] == "auto"
     assert "display: none" not in desktop_css
     assert "visibility: hidden" not in desktop_css
     assert "transition:" not in desktop_css
