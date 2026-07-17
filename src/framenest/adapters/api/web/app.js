@@ -277,6 +277,24 @@ let detailsMetadataToken = 0;
 let detailsPlayRequested = false;
 const metadataSaveButton = document.querySelector("#metadata-save-button");
 const metadataDiscardButton = document.querySelector("#metadata-discard-button");
+let confirmationEscapeDismissalInProgress = false;
+
+function confirmationOwnsTopmostModal() {
+  return Boolean(
+    activeConfirmationRequest
+    || confirmationEscapeDismissalInProgress
+    || (confirmationDialog && confirmationDialog.hasAttribute("open"))
+  );
+}
+
+function settleConfirmationEscape(request) {
+  if (!request || activeConfirmationRequest !== request || request.settled) return;
+  confirmationEscapeDismissalInProgress = true;
+  settleConfirmation(request, false);
+  Promise.resolve().then(() => {
+    confirmationEscapeDismissalInProgress = false;
+  });
+}
 
 function resetConfirmationDialog() {
   confirmationDialogTitle.textContent = "";
@@ -385,7 +403,14 @@ function requestConfirmation({
 }
 
 function handleConfirmationKeydown(event) {
-  if (event.key !== "Tab" || !activeConfirmationRequest) return;
+  if (!activeConfirmationRequest) return;
+  if (event.key === "Escape") {
+    event.preventDefault();
+    event.stopPropagation();
+    settleConfirmationEscape(activeConfirmationRequest);
+    return;
+  }
+  if (event.key !== "Tab") return;
   const focusableActions = [confirmationDismissButton, confirmationConfirmButton];
   const activeIndex = focusableActions.indexOf(document.activeElement);
   if (activeIndex === -1) {
@@ -400,6 +425,12 @@ function handleConfirmationKeydown(event) {
     event.preventDefault();
     confirmationDismissButton.focus();
   }
+}
+
+function handleParentDialogCancel(event, closeDialog) {
+  event.preventDefault();
+  if (confirmationOwnsTopmostModal()) return;
+  closeDialog();
 }
 
 function setStatusClass(className) {
@@ -3404,6 +3435,14 @@ function metadataOpenItemMediaId() {
   return metadataWorkspace.openItem ? metadataWorkspace.openItem.media_id : null;
 }
 
+function snapshotCatalogItemForMetadata(item) {
+  return {
+    ...item,
+    tags: (item.tags || []).map((tag) => ({ ...tag })),
+    locations: (item.locations || []).map((location) => ({ ...location })),
+  };
+}
+
 function captureMetadataDiscardContext({
   action = "close",
   targetMediaId = null,
@@ -4038,6 +4077,24 @@ function closeDetailsDialog({ restoreFocus = true } = {}) {
 
 async function handleOpenMetadataWorkspace(item, openerElement, { aiSuggestion = null } = {}) {
   const targetMediaId = item.media_id;
+  const reopensCurrentWorkspace = metadataWorkspace.openMediaId === targetMediaId
+    && metadataOpenItemMediaId() === targetMediaId;
+  if (reopensCurrentWorkspace) {
+    if (detailsDialog && detailsDialog.hasAttribute("open")) {
+      closeDetailsDialog();
+    }
+    metadataOpenerElement = openerElement || metadataOpenerElement || document.activeElement;
+    if (metadataDialog && !metadataDialog.hasAttribute("open")) {
+      if (typeof metadataDialog.showModal === "function") {
+        metadataDialog.showModal();
+      } else {
+        metadataDialog.setAttribute("open", "");
+      }
+    }
+    renderMetadataWorkspace();
+    (metadataWorkspace.loading ? metadataWorkspaceTitle : metadataTitleInput).focus();
+    return;
+  }
   const discardContext = await confirmDiscardDirtyMetadata({ action: "open-metadata", targetMediaId });
   if (!discardContext || !metadataDiscardContextIsCurrent(discardContext) || item.media_id !== targetMediaId) return;
   if (metadataWorkspace.openMediaId !== null) {
@@ -4052,7 +4109,7 @@ async function handleOpenMetadataWorkspace(item, openerElement, { aiSuggestion =
   advanceMetadataWorkspaceRevision();
   metadataWorkspace = {
     openMediaId: item.media_id,
-    openItem: item,
+    openItem: snapshotCatalogItemForMetadata(item),
     loading: true,
     saving: false,
     unavailable: false,
@@ -5349,8 +5406,12 @@ if (statusDialog) {
   statusDialog.addEventListener("keydown", (event) => {
     if (event.key === "Escape") {
       event.preventDefault();
+      if (confirmationOwnsTopmostModal()) return;
       closeStatusDialog();
     }
+  });
+  statusDialog.addEventListener("cancel", (event) => {
+    handleParentDialogCancel(event, closeStatusDialog);
   });
   statusDialog.addEventListener("click", (event) => {
     if (event.target === statusDialog) {
@@ -5371,8 +5432,12 @@ if (uploadDialog) {
   uploadDialog.addEventListener("keydown", (event) => {
     if (event.key === "Escape") {
       event.preventDefault();
+      if (confirmationOwnsTopmostModal()) return;
       closeUploadDialog();
     }
+  });
+  uploadDialog.addEventListener("cancel", (event) => {
+    handleParentDialogCancel(event, closeUploadDialog);
   });
   uploadDialog.addEventListener("click", (event) => {
     if (event.target === uploadDialog) {
@@ -5404,7 +5469,7 @@ if (uploadCancelButton) {
 if (confirmationDialog) {
   confirmationDialog.addEventListener("cancel", (event) => {
     event.preventDefault();
-    settleConfirmation(activeConfirmationRequest, false);
+    settleConfirmationEscape(activeConfirmationRequest);
   });
   confirmationDialog.addEventListener("keydown", handleConfirmationKeydown);
   confirmationDialog.addEventListener("click", (event) => {
@@ -5434,8 +5499,12 @@ if (detailsDialog) {
   detailsDialog.addEventListener("keydown", (event) => {
     if (event.key === "Escape") {
       event.preventDefault();
+      if (confirmationOwnsTopmostModal()) return;
       closeDetailsDialog();
     }
+  });
+  detailsDialog.addEventListener("cancel", (event) => {
+    handleParentDialogCancel(event, closeDetailsDialog);
   });
   detailsDialog.addEventListener("click", (event) => {
     if (event.target === detailsDialog) {
@@ -5458,8 +5527,12 @@ if (metadataDialog) {
   metadataDialog.addEventListener("keydown", (event) => {
     if (event.key === "Escape") {
       event.preventDefault();
+      if (confirmationOwnsTopmostModal()) return;
       closeMetadataWorkspace();
     }
+  });
+  metadataDialog.addEventListener("cancel", (event) => {
+    handleParentDialogCancel(event, closeMetadataWorkspace);
   });
   metadataDialog.addEventListener("click", (event) => {
     if (event.target === metadataDialog) {

@@ -270,6 +270,10 @@ function createElement(document, tagName = "div") {
       if (normalizedName === "disabled") this.disabled = true;
       if (normalizedName === "href") this.href = String(value);
       if (normalizedName === "type") this.type = String(value);
+      if (normalizedName === "open" && this.tagName === "DIALOG") {
+        document.__modalStack = document.__modalStack.filter((dialog) => dialog !== this);
+        document.__modalStack.push(this);
+      }
     },
     removeAttribute(name) {
       const normalizedName = String(name).toLowerCase();
@@ -277,6 +281,9 @@ function createElement(document, tagName = "div") {
       if (normalizedName === "hidden") this.hidden = false;
       if (normalizedName === "disabled") this.disabled = false;
       if (normalizedName === "href") this.href = "";
+      if (normalizedName === "open" && this.tagName === "DIALOG") {
+        document.__modalStack = document.__modalStack.filter((dialog) => dialog !== this);
+      }
     },
     hasAttribute(name) {
       return attributes.has(String(name).toLowerCase());
@@ -299,9 +306,12 @@ function createElement(document, tagName = "div") {
     },
     showModal() {
       attributes.set("open", "");
+      document.__modalStack = document.__modalStack.filter((dialog) => dialog !== this);
+      document.__modalStack.push(this);
     },
     close() {
       attributes.delete("open");
+      document.__modalStack = document.__modalStack.filter((dialog) => dialog !== this);
     },
     __listeners: listeners,
   };
@@ -326,14 +336,46 @@ function applySelectorDefaults(selector, element) {
 
 function createDocument() {
   const elements = new Map();
+  const listeners = new Map();
   const selectorParents = new Map([
     ["#confirmation-dialog-title", "#confirmation-dialog"],
     ["#confirmation-dialog-message", "#confirmation-dialog"],
     ["#confirmation-dismiss-button", "#confirmation-dialog"],
     ["#confirmation-confirm-button", "#confirmation-dialog"],
+    ["#upload-dialog-title", "#upload-dialog"],
+    ["#upload-close-button", "#upload-dialog"],
+    ["#upload-file-input", "#upload-dialog"],
+    ["#upload-message", "#upload-dialog"],
+    ["#upload-start-button", "#upload-dialog"],
+    ["#upload-pause-button", "#upload-dialog"],
+    ["#upload-resume-button", "#upload-dialog"],
+    ["#upload-cancel-button", "#upload-dialog"],
+    ["#metadata-workspace-title", "#metadata-dialog"],
+    ["#metadata-close-button", "#metadata-dialog"],
+    ["#metadata-title-input", "#metadata-dialog"],
+    ["#metadata-description-input", "#metadata-dialog"],
+    ["#metadata-tag-search-input", "#metadata-dialog"],
+    ["#metadata-save-button", "#metadata-dialog"],
+    ["#metadata-ai-analyze-button", "#metadata-dialog"],
+    ["#metadata-discard-button", "#metadata-dialog"],
+    ["#media-details-close", "#media-details-dialog"],
+    ["#media-details-edit", "#media-details-dialog"],
+    ["#status-close-button", "#status-dialog"],
   ]);
   const document = {
     activeElement: null,
+    parentNode: null,
+    __listeners: listeners,
+    __modalStack: [],
+    addEventListener(type, listener) {
+      if (!listeners.has(type)) listeners.set(type, []);
+      listeners.get(type).push(listener);
+    },
+    removeEventListener(type, listener) {
+      const retained = (listeners.get(type) || []).filter((candidate) => candidate !== listener);
+      if (retained.length > 0) listeners.set(type, retained);
+      else listeners.delete(type);
+    },
     querySelector(selector) {
       if (!elements.has(selector)) {
         const element = createElement(document);
@@ -342,6 +384,8 @@ function createDocument() {
         const parentSelector = selectorParents.get(selector);
         if (parentSelector) {
           element.parentNode = document.querySelector(parentSelector);
+        } else {
+          element.parentNode = document;
         }
       }
       return elements.get(selector);
@@ -388,6 +432,7 @@ async function createHarness() {
   const fetchController = createFetchController();
   const document = createDocument();
   const timers = [];
+  const windowListeners = new Map();
   const context = {
     console,
     document,
@@ -425,9 +470,26 @@ async function createHarness() {
     confirm() {
       throw new Error("native confirmation must not be invoked");
     },
-    addEventListener() {},
-    removeEventListener() {},
+    __listeners: windowListeners,
+    parentNode: null,
+    addEventListener(type, listener) {
+      if (!windowListeners.has(type)) windowListeners.set(type, []);
+      windowListeners.get(type).push(listener);
+    },
+    removeEventListener(type, listener) {
+      const retained = (windowListeners.get(type) || []).filter((candidate) => candidate !== listener);
+      if (retained.length > 0) windowListeners.set(type, retained);
+      else windowListeners.delete(type);
+    },
+    dispatchEvent(event) {
+      if (!event.target) event.target = context;
+      event.currentTarget = context;
+      for (const listener of [...(windowListeners.get(event.type) || [])]) listener(event);
+      event.currentTarget = null;
+      return !event.defaultPrevented;
+    },
   };
+  document.parentNode = context;
   context.window = context;
   context.self = context;
   context.globalThis = context;
@@ -540,6 +602,7 @@ function makeMetadataPayload({
 function setMetadataWorkspace(
   harness,
   {
+    item = null,
     mediaId = MEDIA_A,
     locationId = LOCATION_A,
     baselineTitle = "Persisted title",
@@ -551,7 +614,8 @@ function setMetadataWorkspace(
     scope = "",
   } = {},
 ) {
-  harness.context.__metadataItem = makeCatalogItem(mediaId, locationId);
+  harness.context.__metadataItem = item || makeCatalogItem(mediaId, locationId);
+  harness.context.__metadataItem.display_title = baselineTitle;
   harness.context.__metadataFixture = {
     baselineTitle,
     currentTitle,
@@ -565,7 +629,7 @@ function setMetadataWorkspace(
     catalogState.collection = __metadataFixture.scope;
     metadataWorkspace = {
       openMediaId: __metadataItem.media_id,
-      openItem: __metadataItem,
+      openItem: snapshotCatalogItemForMetadata(__metadataItem),
       loading: false,
       saving: false,
       unavailable: false,
@@ -622,6 +686,8 @@ function metadataStateOf(harness) {
     confirmationRequestId: activeConfirmationRequest ? activeConfirmationRequest.id : null,
     focusedClose: document.activeElement === document.querySelector("#metadata-close-button"),
     focusedAnalyze: document.activeElement === document.querySelector("#metadata-ai-analyze-button"),
+    focusedTitle: document.activeElement === document.querySelector("#metadata-title-input"),
+    beforeUnloadAttached: metadataBeforeUnloadAttached,
   })`)));
 }
 
@@ -681,6 +747,51 @@ function activateConfirmation(harness, action) {
 
 function dismissConfirmationWithEscape(harness) {
   return dispatch(harness.document.querySelector("#confirmation-dialog"), "cancel");
+}
+
+function pressEscapeInBrowserOrder(harness, target = harness.document.activeElement) {
+  const keydown = dispatch(target, "keydown", { key: "Escape" });
+  const cancelEvents = [];
+  if (!keydown.defaultPrevented) {
+    const openDialogs = [...harness.document.__modalStack].reverse();
+    for (const dialog of openDialogs) {
+      if (!dialog.hasAttribute("open")) continue;
+      const cancel = dispatch(dialog, "cancel", { bubbles: false });
+      cancelEvents.push({ dialog, event: cancel });
+      if (!cancel.defaultPrevented) dialog.close();
+    }
+  }
+  return { keydown, cancelEvents };
+}
+
+function dispatchBrowserCancelSequence(harness) {
+  const cancelEvents = [];
+  const openDialogs = [...harness.document.__modalStack].reverse();
+  for (const dialog of openDialogs) {
+    if (!dialog.hasAttribute("open")) continue;
+    const cancel = dispatch(dialog, "cancel", { bubbles: false });
+    cancelEvents.push({ dialog, event: cancel });
+    if (!cancel.defaultPrevented) dialog.close();
+  }
+  return cancelEvents;
+}
+
+function dispatchBeforeUnload(harness) {
+  const event = {
+    type: "beforeunload",
+    defaultPrevented: false,
+    returnValue: undefined,
+    preventDefault() {
+      this.defaultPrevented = true;
+    },
+  };
+  harness.context.dispatchEvent(event);
+  return event;
+}
+
+function galleryCardTitle(harness, index) {
+  const card = harness.document.querySelector("#catalog-results").children[index];
+  return card.children[1].children[0].children[0].textContent;
 }
 
 function setSelectedFile(harness, file = makeFile()) {
@@ -1507,6 +1618,328 @@ test("Metadata safe action, Escape, and backdrop preserve the dirty workspace an
       assert.equal(h.fetchController.matchingPrefix("GET", "/api/media?").length, 0);
     });
   }
+});
+
+test("Nested Escape ownership keeps dirty Metadata open through Chromium keydown and cancel ordering", async () => {
+  const h = await createHarness();
+  setMetadataWorkspace(h);
+  const closeButton = h.document.querySelector("#metadata-close-button");
+  closeButton.focus();
+  let settlements = 0;
+  const closing = h.run("closeMetadataWorkspace()").then((result) => {
+    settlements += 1;
+    return result;
+  });
+
+  const misplacedParentKeydown = dispatch(closeButton, "keydown", { key: "Escape" });
+  assert.equal(misplacedParentKeydown.defaultPrevented, true);
+  assert.equal(confirmationStateOf(h).open, true);
+  assert.equal(metadataStateOf(h).metadataOpen, true);
+
+  const browserEscape = pressEscapeInBrowserOrder(
+    h,
+    h.document.querySelector("#confirmation-dismiss-button"),
+  );
+  assert.equal(browserEscape.keydown.defaultPrevented, true);
+  assert.equal(browserEscape.keydown.propagationStopped, true);
+  assert.equal(browserEscape.cancelEvents.length, 0);
+  assert.equal(await closing, false);
+  await h.flush();
+
+  const afterKeydown = metadataStateOf(h);
+  assert.equal(settlements, 1);
+  assert.equal(afterKeydown.metadataOpen, true);
+  assert.equal(afterKeydown.currentTitle, "Unsaved title");
+  assert.equal(afterKeydown.currentDescription, "Unsaved description");
+  assert.deepEqual(afterKeydown.currentTags, ["persisted", "unsaved"]);
+  assert.equal(afterKeydown.dirty, true);
+  assert.equal(afterKeydown.focusedClose, true);
+  assert.equal(h.document.__modalStack.at(-1), h.document.querySelector("#metadata-dialog"));
+
+  const cancelFallback = h.run("closeMetadataWorkspace()");
+  const cancelEvents = dispatchBrowserCancelSequence(h);
+  assert.equal(cancelEvents.length, 2);
+  assert.equal(cancelEvents[0].dialog, h.document.querySelector("#confirmation-dialog"));
+  assert.equal(cancelEvents[1].dialog, h.document.querySelector("#metadata-dialog"));
+  assert.equal(cancelEvents[0].event.defaultPrevented, true);
+  assert.equal(cancelEvents[1].event.defaultPrevented, true);
+  assert.equal(await cancelFallback, false);
+  await h.flush();
+  assert.equal(metadataStateOf(h).metadataOpen, true);
+  assert.equal(metadataStateOf(h).dirty, true);
+});
+
+test("Nested Upload Escape dismisses only confirmation and sends zero DELETE requests", async () => {
+  const h = await createHarness();
+  setActiveUpload(h, { id: UPLOAD_A, state: "receiving", received: 4 });
+  h.run(`
+    document.querySelector("#upload-dialog").showModal();
+    document.querySelector("#upload-cancel-button").focus();
+  `);
+  const cancellation = h.run("handleCancelUpload()");
+
+  const browserEscape = pressEscapeInBrowserOrder(
+    h,
+    h.document.querySelector("#confirmation-dismiss-button"),
+  );
+  assert.equal(browserEscape.keydown.defaultPrevented, true);
+  assert.equal(browserEscape.cancelEvents.length, 0);
+  await cancellation;
+  await h.flush();
+
+  assert.equal(h.run('document.querySelector("#upload-dialog").hasAttribute("open")'), true);
+  assert.equal(h.fetchController.matching("DELETE", `/api/uploads/${UPLOAD_A}`).length, 0);
+  assert.equal(stateOf(h).snapshotState, "receiving");
+  assert.equal(stateOf(h).received, 4);
+  assert.equal(h.document.activeElement, h.document.querySelector("#upload-cancel-button"));
+});
+
+test("Ordinary Escape still closes active Details, Upload, and clean Metadata dialogs", async () => {
+  const h = await createHarness();
+  h.run(`
+    document.querySelector("#media-details-dialog").showModal();
+    document.querySelector("#media-details-close").focus();
+  `);
+  const detailsEscape = pressEscapeInBrowserOrder(h);
+  assert.equal(detailsEscape.keydown.defaultPrevented, true);
+  assert.equal(h.run('document.querySelector("#media-details-dialog").hasAttribute("open")'), false);
+
+  h.run(`
+    document.querySelector("#upload-dialog").showModal();
+    document.querySelector("#upload-close-button").focus();
+  `);
+  const uploadEscape = pressEscapeInBrowserOrder(h);
+  assert.equal(uploadEscape.keydown.defaultPrevented, true);
+  await h.flush();
+  assert.equal(h.run('document.querySelector("#upload-dialog").hasAttribute("open")'), false);
+
+  setMetadataWorkspace(h, {
+    currentTitle: "Persisted title",
+    currentDescription: "Persisted description",
+    currentTags: ["persisted"],
+  });
+  h.document.querySelector("#metadata-title-input").focus();
+  const metadataEscape = pressEscapeInBrowserOrder(h);
+  assert.equal(metadataEscape.keydown.defaultPrevented, true);
+  await h.flush();
+  assert.equal(metadataStateOf(h).mediaId, null);
+  assert.equal(metadataStateOf(h).metadataOpen, false);
+  assert.equal(confirmationStateOf(h).open, false);
+});
+
+test("Same-media hidden dirty workspace reopens without confirmation, reload, or field loss", async () => {
+  const h = await createHarness();
+  setMetadataWorkspace(h);
+  h.document.querySelector("#metadata-dialog").removeAttribute("open");
+  h.fetchController.clearCalls();
+
+  const reopening = h.run("handleOpenMetadataWorkspace(__metadataItem, document.querySelector('#metadata-close-button'))");
+  assert.equal(confirmationStateOf(h).open, false);
+  await reopening;
+
+  const state = metadataStateOf(h);
+  assert.equal(state.mediaId, MEDIA_A);
+  assert.equal(state.metadataOpen, true);
+  assert.equal(state.currentTitle, "Unsaved title");
+  assert.equal(state.currentDescription, "Unsaved description");
+  assert.deepEqual(state.currentTags, ["persisted", "unsaved"]);
+  assert.equal(state.dirty, true);
+  assert.equal(state.focusedTitle, true);
+  assert.equal(confirmationStateOf(h).open, false);
+  assert.equal(h.fetchController.matching("GET", metadataEndpoint(MEDIA_A)).length, 0);
+  assert.equal(h.fetchController.matching("PUT", metadataEndpoint(MEDIA_A)).length, 0);
+});
+
+test("Different-media dirty switch still requires current-context discard", async () => {
+  const h = await createHarness();
+  setMetadataWorkspace(h);
+  h.document.querySelector("#metadata-dialog").removeAttribute("open");
+  h.context.__mediaBItem = makeCatalogItem(MEDIA_B, LOCATION_B);
+  enqueue(h, "GET", metadataEndpoint(MEDIA_B), response(makeMetadataPayload({
+    mediaId: MEDIA_B,
+    title: "Persisted B",
+    description: "Description B",
+    tagKeys: ["persisted-b"],
+  })));
+
+  const safeSwitch = h.run("handleOpenMetadataWorkspace(__mediaBItem, null)");
+  assert.equal(confirmationStateOf(h).open, true);
+  activateConfirmation(h, "dismiss");
+  await safeSwitch;
+  assert.equal(metadataStateOf(h).mediaId, MEDIA_A);
+  assert.equal(metadataStateOf(h).currentTitle, "Unsaved title");
+  assert.equal(metadataStateOf(h).dirty, true);
+  assert.equal(h.fetchController.matching("GET", metadataEndpoint(MEDIA_B)).length, 0);
+
+  const confirmedSwitch = h.run("handleOpenMetadataWorkspace(__mediaBItem, null)");
+  assert.equal(confirmationStateOf(h).open, true);
+  activateConfirmation(h, "confirm");
+  await confirmedSwitch;
+  await h.flush();
+  assert.equal(metadataStateOf(h).mediaId, MEDIA_B);
+  assert.equal(metadataStateOf(h).currentTitle, "Persisted B");
+  assert.equal(metadataStateOf(h).metadataOpen, true);
+  assert.equal(h.fetchController.matching("GET", metadataEndpoint(MEDIA_B)).length, 1);
+  assert.equal(h.fetchController.matching("PUT", metadataEndpoint(MEDIA_A)).length, 0);
+});
+
+test("Gallery presentation remains persisted until Save and isolated to the intended card", async (t) => {
+  await t.test("safe dismissal, same-media reopen, and discard", async () => {
+    const h = await createHarness();
+    const itemA = makeCatalogItem(MEDIA_A, LOCATION_A);
+    const itemB = makeCatalogItem(MEDIA_B, LOCATION_B);
+    itemA.display_title = "Persisted A";
+    itemB.display_title = "Persisted B";
+    h.context.__galleryA = itemA;
+    h.context.__galleryB = itemB;
+    h.run("renderCatalogSuccess({ items: [__galleryA, __galleryB], total: 2, offset: 0, limit: 30, q: '' })");
+    setMetadataWorkspace(h, {
+      item: itemA,
+      baselineTitle: "Persisted A",
+      currentTitle: "Persisted A",
+      currentDescription: "Persisted description",
+      currentTags: ["persisted"],
+    });
+    const titleInput = h.document.querySelector("#metadata-title-input");
+    titleInput.value = "Persisted A TEMP";
+    dispatch(titleInput, "input");
+    h.run('metadataWorkspace.suggestedFilename = "temporary-name.mp4"; renderMetadataWorkspace()');
+
+    assert.equal(h.run("metadataWorkspace.openItem !== __galleryA"), true);
+    assert.equal(h.run("__galleryA.display_title"), "Persisted A");
+    assert.equal(galleryCardTitle(h, 0), "Persisted A");
+    assert.equal(galleryCardTitle(h, 1), "Persisted B");
+
+    const safeClose = h.run("closeMetadataWorkspace()");
+    activateConfirmation(h, "dismiss");
+    assert.equal(await safeClose, false);
+    assert.equal(galleryCardTitle(h, 0), "Persisted A");
+    h.document.querySelector("#metadata-dialog").removeAttribute("open");
+    await h.run("handleOpenMetadataWorkspace(__galleryA, null)");
+    assert.equal(metadataStateOf(h).currentTitle, "Persisted A TEMP");
+    assert.equal(galleryCardTitle(h, 0), "Persisted A");
+
+    h.fetchController.enqueue(
+      (call) => call.method === "GET" && call.url.startsWith("/api/media?"),
+      response({ items: [itemA, itemB], total: 2, offset: 0, limit: 30, q: "" }),
+    );
+    const discard = h.run("closeMetadataWorkspace()");
+    activateConfirmation(h, "confirm");
+    assert.equal(await discard, true);
+    await h.flush();
+    assert.equal(galleryCardTitle(h, 0), "Persisted A");
+    assert.equal(galleryCardTitle(h, 1), "Persisted B");
+  });
+
+  await t.test("successful Save updates A once and never changes B", async () => {
+    const h = await createHarness();
+    const itemA = makeCatalogItem(MEDIA_A, LOCATION_A);
+    const itemB = makeCatalogItem(MEDIA_B, LOCATION_B);
+    itemA.display_title = "Persisted A";
+    itemB.display_title = "Persisted B";
+    const savedA = { ...itemA, display_title: "Persisted A TEMP" };
+    h.context.__galleryA = itemA;
+    h.context.__galleryB = itemB;
+    h.run("renderCatalogSuccess({ items: [__galleryA, __galleryB], total: 2, offset: 0, limit: 30, q: '' })");
+    setMetadataWorkspace(h, {
+      item: itemA,
+      baselineTitle: "Persisted A",
+      currentTitle: "Persisted A",
+      baselineDescription: "Description A",
+      currentDescription: "Description A",
+      baselineTags: ["persisted"],
+      currentTags: ["persisted"],
+    });
+    const titleInput = h.document.querySelector("#metadata-title-input");
+    titleInput.value = "Persisted A TEMP";
+    dispatch(titleInput, "input");
+    const descriptionInput = h.document.querySelector("#metadata-description-input");
+    descriptionInput.value = "Description A TEMP";
+    dispatch(descriptionInput, "input");
+    h.run('metadataWorkspace.current.tagKeys = ["persisted", "temporary"]; advanceMetadataWorkspaceRevision(); updateMetadataControls()');
+    enqueue(h, "PUT", metadataEndpoint(MEDIA_A), response({
+      metadata: makeMetadataPayload({
+        mediaId: MEDIA_A,
+        title: "Persisted A TEMP",
+        description: "Description A TEMP",
+        tagKeys: ["persisted", "temporary"],
+      }),
+    }));
+    for (let index = 0; index < 2; index += 1) {
+      h.fetchController.enqueue(
+        (call) => call.method === "GET" && call.url.startsWith("/api/media?"),
+        response({ items: [savedA, itemB], total: 2, offset: 0, limit: 30, q: "" }),
+      );
+    }
+
+    assert.equal(galleryCardTitle(h, 0), "Persisted A");
+    await h.run("handleSaveMetadata()");
+    await h.flush();
+    assert.equal(h.fetchController.matching("PUT", metadataEndpoint(MEDIA_A)).length, 1);
+    assert.equal(galleryCardTitle(h, 0), "Persisted A TEMP");
+    assert.equal(galleryCardTitle(h, 1), "Persisted B");
+  });
+});
+
+test("Native beforeunload guard follows dirty, dismissal, reopen, Save, and Discard lifecycle", async (t) => {
+  await t.test("dirty and safe dismissal remain guarded without application confirmation", async () => {
+    const h = await createHarness();
+    setMetadataWorkspace(h);
+    assert.equal(metadataStateOf(h).beforeUnloadAttached, true);
+    const dirtyUnload = dispatchBeforeUnload(h);
+    assert.equal(dirtyUnload.defaultPrevented, true);
+    assert.equal(dirtyUnload.returnValue, "");
+    assert.equal(confirmationStateOf(h).open, false);
+
+    const closing = h.run("closeMetadataWorkspace()");
+    pressEscapeInBrowserOrder(h, h.document.querySelector("#confirmation-dismiss-button"));
+    assert.equal(await closing, false);
+    await h.flush();
+    assert.equal(metadataStateOf(h).beforeUnloadAttached, true);
+    h.document.querySelector("#metadata-dialog").removeAttribute("open");
+    await h.run("handleOpenMetadataWorkspace(__metadataItem, null)");
+    assert.equal(metadataStateOf(h).beforeUnloadAttached, true);
+    assert.equal(dispatchBeforeUnload(h).defaultPrevented, true);
+    assert.equal(confirmationStateOf(h).open, false);
+  });
+
+  await t.test("clean and saved workspaces are unguarded", async () => {
+    const clean = await createHarness();
+    setMetadataWorkspace(clean, {
+      currentTitle: "Persisted title",
+      currentDescription: "Persisted description",
+      currentTags: ["persisted"],
+    });
+    assert.equal(metadataStateOf(clean).beforeUnloadAttached, false);
+    assert.equal(dispatchBeforeUnload(clean).defaultPrevented, false);
+
+    const saved = await createHarness();
+    setMetadataWorkspace(saved);
+    enqueue(saved, "PUT", metadataEndpoint(), response({
+      metadata: makeMetadataPayload({
+        title: "Unsaved title",
+        description: "Unsaved description",
+        tagKeys: ["persisted", "unsaved"],
+      }),
+    }));
+    await saved.run("handleSaveMetadata()");
+    await saved.flush();
+    assert.equal(metadataStateOf(saved).beforeUnloadAttached, false);
+    assert.equal(dispatchBeforeUnload(saved).defaultPrevented, false);
+    assert.equal(confirmationStateOf(saved).open, false);
+  });
+
+  await t.test("confirmed Discard clears the guard", async () => {
+    const h = await createHarness();
+    setMetadataWorkspace(h);
+    const closing = h.run("closeMetadataWorkspace()");
+    activateConfirmation(h, "confirm");
+    assert.equal(await closing, true);
+    await h.flush();
+    assert.equal(metadataStateOf(h).beforeUnloadAttached, false);
+    assert.equal(dispatchBeforeUnload(h).defaultPrevented, false);
+    assert.equal(confirmationStateOf(h).open, false);
+  });
 });
 
 test("Metadata current affirmative discard closes exactly once despite repeated triggering", async () => {
