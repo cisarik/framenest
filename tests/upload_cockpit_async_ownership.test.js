@@ -5,7 +5,9 @@ const test = require("node:test");
 const vm = require("node:vm");
 
 const APP_PATH = path.resolve(__dirname, "../src/framenest/adapters/api/web/app.js");
+const INDEX_PATH = path.resolve(__dirname, "../src/framenest/adapters/api/web/index.html");
 const APP_SOURCE = fs.readFileSync(APP_PATH, "utf8");
+const INDEX_SOURCE = fs.readFileSync(INDEX_PATH, "utf8");
 const RECOVERY_KEY = "framenest.upload.recovery.v1";
 
 const UPLOAD_A = "11111111-1111-4111-8111-111111111111";
@@ -167,6 +169,19 @@ function createClassList() {
   };
 }
 
+function canReceiveProgrammaticFocus(element) {
+  if (element.hidden || element.disabled) return false;
+  if (element.hasAttribute("tabindex")) return true;
+  if (["BUTTON", "INPUT", "SELECT", "TEXTAREA"].includes(element.tagName)) return true;
+  return element.tagName === "A" && element.hasAttribute("href");
+}
+
+function isInNormalTabSequence(element) {
+  if (!canReceiveProgrammaticFocus(element)) return false;
+  const tabindex = element.getAttribute("tabindex");
+  return tabindex === null || Number(tabindex) >= 0;
+}
+
 function createElement(document, tagName = "div") {
   const attributes = new Map();
   const listeners = new Map();
@@ -187,6 +202,7 @@ function createElement(document, tagName = "div") {
     max: 100,
     href: "",
     src: "",
+    focusCount: 0,
     addEventListener(type, listener) {
       listeners.set(type, listener);
     },
@@ -209,19 +225,31 @@ function createElement(document, tagName = "div") {
     },
     remove() {},
     focus() {
+      if (!canReceiveProgrammaticFocus(this)) return;
       document.activeElement = this;
+      this.focusCount += 1;
     },
     setAttribute(name, value) {
-      attributes.set(name, String(value));
+      const normalizedName = String(name).toLowerCase();
+      attributes.set(normalizedName, String(value));
+      if (normalizedName === "hidden") this.hidden = true;
+      if (normalizedName === "disabled") this.disabled = true;
+      if (normalizedName === "href") this.href = String(value);
+      if (normalizedName === "type") this.type = String(value);
     },
     removeAttribute(name) {
-      attributes.delete(name);
+      const normalizedName = String(name).toLowerCase();
+      attributes.delete(normalizedName);
+      if (normalizedName === "hidden") this.hidden = false;
+      if (normalizedName === "disabled") this.disabled = false;
+      if (normalizedName === "href") this.href = "";
     },
     hasAttribute(name) {
-      return attributes.has(name);
+      return attributes.has(String(name).toLowerCase());
     },
     getAttribute(name) {
-      return attributes.get(name) || null;
+      const normalizedName = String(name).toLowerCase();
+      return attributes.has(normalizedName) ? attributes.get(normalizedName) : null;
     },
     querySelector() {
       return createElement(document);
@@ -246,6 +274,16 @@ function createElement(document, tagName = "div") {
 }
 
 function applySelectorDefaults(selector, element) {
+  if (selector.startsWith("#")) {
+    const id = selector.slice(1).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const markup = INDEX_SOURCE.match(new RegExp(`<([a-z][a-z0-9-]*)\\b([^>]*\\bid="${id}"[^>]*)>`, "i"));
+    if (markup) {
+      element.tagName = markup[1].toUpperCase();
+      for (const attribute of markup[2].matchAll(/([a-z][a-z0-9:-]*)(?:="([^"]*)")?/gi)) {
+        element.setAttribute(attribute[1], attribute[2] === undefined ? "" : attribute[2]);
+      }
+    }
+  }
   if (selector === "#upload-cancel-button") {
     element.textContent = "Cancel";
   }
@@ -449,75 +487,95 @@ function enqueueStatus(harness, uploadId, result) {
   enqueue(harness, "GET", `/api/uploads/${encodeURIComponent(uploadId)}`, result);
 }
 
-test("Upload controls follow the visible lifecycle and Pause and Resume share one slot", async () => {
-  const h = await createHarness();
+function configureControlScenario(harness, scenario) {
+  const file = scenario.hasFile === false ? null : makeFile("scenario.gif", 8);
+  const currentSnapshot = scenario.snapshotState
+    ? snapshot(
+      UPLOAD_A,
+      scenario.snapshotState,
+      scenario.received === undefined ? 8 : scenario.received,
+      8,
+      "scenario.gif",
+    )
+    : null;
+  harness.context.__controlScenario = {
+    file,
+    snapshot: currentSnapshot,
+    actionKind: scenario.actionKind || null,
+    preparing: Boolean(scenario.preparing),
+    running: Boolean(scenario.running),
+    paused: Boolean(scenario.paused),
+    needsReselection: Boolean(scenario.needsReselection),
+    completing: Boolean(scenario.completing),
+  };
+  harness.run(`
+    resetUploadForFile(__controlScenario.file);
+    uploadState.uploadId = __controlScenario.snapshot ? __controlScenario.snapshot.id : null;
+    uploadState.snapshot = __controlScenario.snapshot;
+    uploadState.fileNameHint = __controlScenario.snapshot ? __controlScenario.snapshot.display_filename : "";
+    uploadState.expectedSizeBytes = __controlScenario.snapshot ? __controlScenario.snapshot.declared_size_bytes : 0;
+    uploadState.preparing = __controlScenario.preparing;
+    uploadState.running = __controlScenario.running;
+    uploadState.paused = __controlScenario.paused;
+    uploadState.needsReselection = __controlScenario.needsReselection;
+    uploadState.completing = __controlScenario.completing;
+    uploadState.actionOwner = __controlScenario.actionKind
+      ? { ...currentUploadContext(), kind: __controlScenario.actionKind }
+      : null;
+    renderUploadCockpit();
+  `);
+}
 
-  assert.deepEqual(
-    {
-      start: stateOf(h).startHidden,
-      pause: stateOf(h).pauseHidden,
-      resume: stateOf(h).resumeHidden,
-      cancel: stateOf(h).cancelHidden,
-    },
-    { start: true, pause: true, resume: true, cancel: true },
+function assertExactUploadActions(harness, scenarioName, expectedActions) {
+  const state = stateOf(harness);
+  const expected = new Set(expectedActions);
+  for (const action of ["start", "pause", "resume", "cancel"]) {
+    const available = expected.has(action);
+    assert.equal(state[`${action}Hidden`], !available, `${scenarioName}: ${action} hidden`);
+    assert.equal(state[`${action}Disabled`], !available, `${scenarioName}: ${action} disabled`);
+  }
+  assert.equal(
+    expected.has("pause") && expected.has("resume"),
+    false,
+    `${scenarioName}: Pause and Resume must never be simultaneously available`,
   );
-  assert.equal(stateOf(h).stateLabel, "No file selected");
-  assert.equal(stateOf(h).fileName, "");
+}
 
-  setSelectedFile(h, makeFile("chosen.gif", 8));
-  let state = stateOf(h);
-  assert.equal(state.fileName, "chosen.gif");
-  assert.equal(state.stateLabel, "Ready");
-  assert.equal(state.startHidden, false);
-  assert.equal(state.startDisabled, false);
-  assert.equal(state.pauseHidden, true);
-  assert.equal(state.resumeHidden, true);
-  assert.equal(state.cancelHidden, true);
+test("Upload controls expose the exact action set for every accepted lifecycle state", async () => {
+  const h = await createHarness();
+  const scenarios = [
+    { name: "No file", hasFile: false, stateLabel: "No file selected", actions: [] },
+    { name: "Valid selected file", stateLabel: "Ready", actions: ["start"] },
+    { name: "Preparing before session creation", preparing: true, actionKind: "start", stateLabel: "Preparing", actions: [] },
+    { name: "Preparing after session creation", snapshotState: "created", received: 0, preparing: true, actionKind: "start", stateLabel: "Preparing", actions: ["cancel"] },
+    { name: "Uploading", snapshotState: "receiving", received: 4, running: true, stateLabel: "Uploading", actions: ["pause", "cancel"] },
+    { name: "Pausing", snapshotState: "receiving", received: 4, running: true, paused: true, stateLabel: "Pausing", actions: ["cancel"] },
+    { name: "Paused", snapshotState: "receiving", received: 4, paused: true, stateLabel: "Paused", actions: ["resume", "cancel"] },
+    { name: "Reselection required", hasFile: false, snapshotState: "receiving", received: 4, needsReselection: true, stateLabel: "Reselect file to resume", actions: ["cancel"] },
+    { name: "Compatible file reselected", snapshotState: "receiving", received: 4, stateLabel: "Ready to resume", actions: ["resume", "cancel"] },
+    { name: "Created session ready to resume", snapshotState: "created", received: 0, stateLabel: "Ready to resume", actions: ["resume", "cancel"] },
+    { name: "Received", snapshotState: "received", stateLabel: "Validating", actions: ["cancel"] },
+    { name: "Validating", snapshotState: "validating", stateLabel: "Validating", actions: [] },
+    { name: "Duplicate pending", snapshotState: "duplicate_pending", stateLabel: "Validating", actions: ["cancel"] },
+    { name: "Publish pending", snapshotState: "publish_pending", stateLabel: "Completed", actions: [] },
+    { name: "Published", snapshotState: "published", stateLabel: "Completed", actions: [] },
+    { name: "Cataloged", snapshotState: "cataloged", stateLabel: "Completed", actions: [] },
+    { name: "Rejected", snapshotState: "rejected", stateLabel: "Failed", actions: [] },
+    { name: "Failed", snapshotState: "failed", stateLabel: "Failed", actions: [] },
+    { name: "Expired", snapshotState: "expired", stateLabel: "Failed", actions: [] },
+    { name: "Cancelled", snapshotState: "cancelled", stateLabel: "Cancelled", actions: [] },
+    { name: "Cancelling", snapshotState: "received", actionKind: "cancel", stateLabel: "Cancelling", actions: [] },
+  ];
 
-  setActiveUpload(h, { state: "receiving", received: 4 });
-  h.run("uploadState.running = true; renderUploadCockpit()");
-  state = stateOf(h);
-  assert.equal(state.stateLabel, "Uploading");
-  assert.equal(state.startHidden, true);
-  assert.equal(state.pauseHidden, false);
-  assert.equal(state.pauseDisabled, false);
-  assert.equal(state.resumeHidden, true);
-  assert.equal(state.cancelHidden, false);
-  assert.equal(state.cancelDisabled, false);
+  for (const scenario of scenarios) {
+    configureControlScenario(h, scenario);
+    const state = stateOf(h);
+    assert.equal(state.stateLabel, scenario.stateLabel, `${scenario.name}: visible state`);
+    assertExactUploadActions(h, scenario.name, scenario.actions);
+  }
 
-  h.run("uploadState.running = false; uploadState.paused = true; renderUploadCockpit()");
-  state = stateOf(h);
-  assert.equal(state.stateLabel, "Paused");
-  assert.equal(state.startHidden, true);
-  assert.equal(state.pauseHidden, true);
-  assert.equal(state.resumeHidden, false);
-  assert.equal(state.resumeDisabled, false);
-  assert.equal(state.cancelHidden, false);
-
-  h.run("uploadState.paused = false; uploadState.file = null; uploadState.needsReselection = true; renderUploadCockpit()");
-  state = stateOf(h);
-  assert.equal(state.stateLabel, "Reselect file to resume");
-  assert.equal(state.pauseHidden, true);
-  assert.equal(state.resumeHidden, true);
-  assert.equal(state.cancelHidden, false);
-
-  h.context.__terminal = snapshot(UPLOAD_A, "validating", 8);
-  h.run("uploadState.snapshot = __terminal; uploadState.needsReselection = false; renderUploadCockpit()");
-  state = stateOf(h);
-  assert.equal(state.stateLabel, "Validating");
-  assert.equal(state.startHidden, true);
-  assert.equal(state.pauseHidden, true);
-  assert.equal(state.resumeHidden, true);
-  assert.equal(state.cancelHidden, true);
-
-  h.context.__terminal = snapshot(UPLOAD_A, "publish_pending", 8);
-  h.run("uploadState.snapshot = __terminal; renderUploadCockpit()");
-  state = stateOf(h);
-  assert.equal(state.stateLabel, "Completed");
-  assert.equal(state.startHidden, true);
-  assert.equal(state.pauseHidden, true);
-  assert.equal(state.resumeHidden, true);
-  assert.equal(state.cancelHidden, true);
+  configureControlScenario(h, scenarios[0]);
+  assert.equal(stateOf(h).fileName, "", "idle controls remain absent with no selected file");
 });
 
 test("A disappearing upload action moves focus to the live status", async () => {
@@ -527,6 +585,9 @@ test("A disappearing upload action moves focus to the live status", async () => 
     uploadState.running = true;
     renderUploadCockpit();
     document.querySelector("#upload-pause-button").focus();
+    if (document.activeElement !== document.querySelector("#upload-pause-button")) {
+      throw new Error("visible native Pause action should be focusable");
+    }
     handlePauseUpload();
   `);
 
@@ -534,6 +595,60 @@ test("A disappearing upload action moves focus to the live status", async () => 
   assert.equal(state.pauseHidden, true);
   assert.equal(state.focusedStatus, true);
   assert.equal(state.stateLabel, "Pausing");
+  assert.equal(h.run('document.querySelector("#upload-message").focusCount'), 1);
+  h.run("renderUploadCockpit(); renderUploadCockpit()");
+  assert.equal(h.run('document.querySelector("#upload-message").focusCount'), 1);
+});
+
+test("The centralized status is programmatically focusable but absent from the normal tab sequence", async () => {
+  const h = await createHarness();
+  assert.equal(h.run('document.querySelector("#upload-message").getAttribute("tabindex")'), "-1");
+  assert.equal(isInNormalTabSequence(h.document.querySelector("#upload-message")), false);
+  h.run('document.querySelector("#upload-message").focus()');
+  assert.equal(stateOf(h).focusedStatus, true);
+});
+
+test("Polling preserves unrelated focus and never repeatedly focuses the upload status", async () => {
+  const h = await createHarness();
+  setActiveUpload(h, { state: "received", received: 8 });
+  h.run(`
+    document.querySelector("#upload-dialog").setAttribute("open", "");
+    document.querySelector("#upload-close-button").focus();
+    scheduleUploadPolling(currentUploadContext({ uploadId: uploadState.uploadId, file: uploadState.file }));
+  `);
+  assert.equal(
+    h.run('document.activeElement === document.querySelector("#upload-close-button")'),
+    true,
+  );
+
+  enqueueStatus(h, UPLOAD_A, response(snapshot(UPLOAD_A, "received", 8)));
+  h.runNextTimer();
+  await h.flush();
+  enqueueStatus(h, UPLOAD_A, response(snapshot(UPLOAD_A, "validating", 8)));
+  h.runNextTimer();
+  await h.flush();
+
+  assert.equal(
+    h.run('document.activeElement === document.querySelector("#upload-close-button")'),
+    true,
+  );
+  assert.equal(h.run('document.querySelector("#upload-message").focusCount'), 0);
+});
+
+test("Rendering without a disappearing focused action does not focus the upload status", async () => {
+  const h = await createHarness();
+  setActiveUpload(h, { state: "receiving", received: 4 });
+  h.run(`
+    uploadState.running = true;
+    renderUploadCockpit();
+    document.querySelector("#upload-cancel-button").focus();
+    renderUploadCockpit();
+  `);
+  assert.equal(
+    h.run('document.activeElement === document.querySelector("#upload-cancel-button")'),
+    true,
+  );
+  assert.equal(h.run('document.querySelector("#upload-message").focusCount'), 0);
 });
 
 test("Cancel uses native confirmation and keeps danger action semantics", async () => {

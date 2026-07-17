@@ -2425,6 +2425,11 @@ def test_web_shell_contains_local_upload_cockpit_without_gallery_publication_cla
     assert 'role="status"' in upload_dialog
     assert 'aria-live="polite"' in upload_dialog
     assert 'aria-atomic="true"' in upload_dialog
+    assert (
+        '<p id="upload-message" class="upload-message" role="status" '
+        'aria-live="polite" aria-atomic="true" tabindex="-1"></p>'
+        in upload_dialog
+    )
     assert '>No file selected</span>' in upload_dialog
     assert ">Preparing</span>" not in upload_dialog
     assert "upload-progress" in upload_dialog
