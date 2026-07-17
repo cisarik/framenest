@@ -521,6 +521,22 @@ function makeCatalogItem(mediaId = MEDIA_A, locationId = LOCATION_A) {
   };
 }
 
+function makeMetadataPayload({
+  mediaId = MEDIA_A,
+  title = "Persisted title",
+  description = "Persisted description",
+  tagKeys = ["persisted"],
+} = {}) {
+  return {
+    media_id: mediaId,
+    display_title: title,
+    description,
+    tags: tagKeys.map((key) => ({ key, display_name: key })),
+    collection_key: null,
+    processed_at_ms: null,
+  };
+}
+
 function setMetadataWorkspace(
   harness,
   {
@@ -589,12 +605,21 @@ function metadataStateOf(harness) {
     currentTitle: metadataWorkspace.current.displayTitle,
     currentDescription: metadataWorkspace.current.description,
     currentTags: [...metadataWorkspace.current.tagKeys],
+    baselineTitle: metadataWorkspace.baseline.displayTitle,
+    baselineDescription: metadataWorkspace.baseline.description,
+    baselineTags: [...metadataWorkspace.baseline.tagKeys],
     suggestedFilename: metadataWorkspace.suggestedFilename,
     dirty: metadataWorkspace.openMediaId === null ? false : metadataIsDirty(),
+    saving: metadataWorkspace.saving,
     analyzing: metadataWorkspace.analyzing,
     aiSuggestionApplied: metadataWorkspace.aiSuggestionApplied,
     metadataOpen: document.querySelector("#metadata-dialog").hasAttribute("open"),
+    status: document.querySelector("#metadata-status").textContent,
     scope: catalogState.collection,
+    saveRequestToken: metadataSaveRequestToken,
+    saveOwnerToken: metadataSaveOwner ? metadataSaveOwner.token : null,
+    saveOwnerMediaId: metadataSaveOwner ? metadataSaveOwner.mediaId : null,
+    confirmationRequestId: activeConfirmationRequest ? activeConfirmationRequest.id : null,
     focusedClose: document.activeElement === document.querySelector("#metadata-close-button"),
     focusedAnalyze: document.activeElement === document.querySelector("#metadata-ai-analyze-button"),
   })`)));
@@ -618,6 +643,10 @@ function enableMetadataAi(harness) {
 
 function metadataAiEndpoint(mediaId = MEDIA_A, locationId = LOCATION_A) {
   return `/api/media/${mediaId}/locations/${locationId}/ai-suggestion-preview`;
+}
+
+function metadataEndpoint(mediaId = MEDIA_A) {
+  return `/api/media/${mediaId}/metadata`;
 }
 
 function dispatch(element, type, values = {}) {
@@ -1097,7 +1126,7 @@ test("Confirmation content click bubbles with a descendant target and does not d
   assert.equal(h.run('document.querySelector("#upload-dialog").hasAttribute("open")'), true);
 });
 
-test("Confirmation showModal failure fails closed, clears ownership and styling, and permits a later request", async () => {
+test("Confirmation throwing open and cleanup fail closed, release ownership, and permit a later request", async () => {
   const h = await createHarness();
   const trigger = h.document.querySelector("#upload-cancel-button");
   trigger.hidden = false;
@@ -1105,25 +1134,39 @@ test("Confirmation showModal failure fails closed, clears ownership and styling,
   trigger.focus();
   h.run(`
     globalThis.__workingShowModal = document.querySelector("#confirmation-dialog").showModal;
+    globalThis.__workingConfirmationClose = document.querySelector("#confirmation-dialog").close;
+    globalThis.__confirmationCloseAttempts = 0;
     document.querySelector("#confirmation-dialog").showModal = function showModalFailure() {
       this.setAttribute("open", "");
       throw new Error("synthetic showModal failure");
     };
+    document.querySelector("#confirmation-dialog").close = function closeFailure() {
+      globalThis.__failedConfirmationRequest = activeConfirmationRequest;
+      globalThis.__confirmationCloseAttempts += 1;
+      throw new Error("synthetic close failure");
+    };
   `);
 
-  const failed = h.run(`requestConfirmation({
-    title: "Dangerous request",
-    message: "This must fail closed.",
-    dismissLabel: "Stay",
-    confirmLabel: "Proceed",
-    destructive: true,
-  })`);
+  let failed;
+  assert.doesNotThrow(() => {
+    failed = h.run(`requestConfirmation({
+      title: "Dangerous request",
+      message: "This must fail closed.",
+      dismissLabel: "Stay",
+      confirmLabel: "Proceed",
+      destructive: true,
+    })`);
+  });
 
   assert.equal(await failed, false);
   const failedState = confirmationStateOf(h);
   const restoredTriggerFocus = h.document.activeElement === trigger;
+  assert.equal(h.run("__confirmationCloseAttempts"), 1);
 
-  h.run('document.querySelector("#confirmation-dialog").showModal = __workingShowModal');
+  h.run(`
+    document.querySelector("#confirmation-dialog").showModal = __workingShowModal;
+    document.querySelector("#confirmation-dialog").close = __workingConfirmationClose;
+  `);
   const later = h.run(`requestConfirmation({
     title: "Later request",
     message: "This request must own the dialog.",
@@ -1134,6 +1177,9 @@ test("Confirmation showModal failure fails closed, clears ownership and styling,
   assert.equal(confirmationStateOf(h).open, true);
   assert.equal(confirmationStateOf(h).activeRequestId, 2);
   assert.equal(confirmationStateOf(h).destructive, false);
+  h.run("settleConfirmation(__failedConfirmationRequest, true)");
+  assert.equal(confirmationStateOf(h).activeRequestId, 2);
+  assert.equal(confirmationStateOf(h).open, true);
 
   assert.deepEqual(failedState, {
     open: false,
@@ -1149,6 +1195,287 @@ test("Confirmation showModal failure fails closed, clears ownership and styling,
   assert.equal(restoredTriggerFocus, true);
   activateConfirmation(h, "confirm");
   assert.equal(await later, true);
+});
+
+test("Metadata current save owns its request, response, baseline, and one post-save close", async () => {
+  const h = await createHarness();
+  setMetadataWorkspace(h);
+  const saveResponse = deferred();
+  const catalogResponse = deferred();
+  enqueue(h, "PUT", metadataEndpoint(), saveResponse.promise);
+  h.fetchController.enqueue(
+    (call) => call.method === "GET" && call.url.startsWith("/api/media?"),
+    catalogResponse.promise,
+  );
+  const initialMetadataRequestToken = h.run("metadataRequestToken");
+
+  const saving = h.run("handleSaveMetadata()");
+  await h.flush();
+
+  const calls = h.fetchController.matching("PUT", metadataEndpoint());
+  assert.equal(calls.length, 1);
+  assert.deepEqual(JSON.parse(calls[0].options.body), {
+    display_title: "Unsaved title",
+    description: "Unsaved description",
+    tag_keys: ["persisted", "unsaved"],
+  });
+  assert.equal(metadataStateOf(h).saving, true);
+
+  saveResponse.resolve(response({
+    metadata: makeMetadataPayload({
+      title: "Unsaved title",
+      description: "Unsaved description",
+      tagKeys: ["persisted", "unsaved"],
+    }),
+  }));
+  await h.flush();
+
+  const applied = metadataStateOf(h);
+  assert.equal(applied.metadataOpen, true);
+  assert.equal(applied.saving, true);
+  assert.equal(applied.currentTitle, "Unsaved title");
+  assert.equal(applied.baselineTitle, "Unsaved title");
+  assert.equal(applied.baselineDescription, "Unsaved description");
+  assert.deepEqual(applied.baselineTags, ["persisted", "unsaved"]);
+  assert.equal(applied.dirty, false);
+
+  catalogResponse.resolve(response({ items: [], total: 0, offset: 0, limit: 30, q: "" }));
+  await saving;
+  await h.flush();
+
+  const closed = metadataStateOf(h);
+  assert.equal(closed.metadataOpen, false);
+  assert.equal(closed.mediaId, null);
+  assert.equal(closed.saving, false);
+  assert.equal(closed.saveOwnerToken, null);
+  assert.equal(h.run("metadataRequestToken"), initialMetadataRequestToken + 1);
+  assert.equal(h.fetchController.matching("PUT", metadataEndpoint()).length, 1);
+});
+
+test("Metadata stale cross-media save cannot mutate, report against, confirm, or close a newer workspace", async () => {
+  const h = await createHarness();
+  setMetadataWorkspace(h);
+  const saveResponse = deferred();
+  enqueue(h, "PUT", metadataEndpoint(MEDIA_A), saveResponse.promise);
+  const savingA = h.run("handleSaveMetadata()");
+  await h.flush();
+
+  const closingA = h.run("closeMetadataWorkspace()");
+  activateConfirmation(h, "confirm");
+  assert.equal(await closingA, true);
+  h.context.__mediaBItem = makeCatalogItem(MEDIA_B, LOCATION_B);
+  enqueue(h, "GET", metadataEndpoint(MEDIA_B), response(makeMetadataPayload({
+    mediaId: MEDIA_B,
+    title: "Persisted B",
+    description: "Description B",
+    tagKeys: ["persisted-b"],
+  })));
+  await h.run("handleOpenMetadataWorkspace(__mediaBItem, null)");
+  const titleInput = h.document.querySelector("#metadata-title-input");
+  titleInput.value = "Unsaved B";
+  dispatch(titleInput, "input");
+  const before = metadataStateOf(h);
+
+  saveResponse.resolve(response({
+    metadata: makeMetadataPayload({
+      mediaId: MEDIA_A,
+      title: "Saved A",
+      description: "Saved description A",
+      tagKeys: ["saved-a"],
+    }),
+  }));
+  await savingA;
+  await h.flush();
+
+  const after = metadataStateOf(h);
+  assert.equal(after.mediaId, MEDIA_B);
+  assert.equal(after.openItemMediaId, MEDIA_B);
+  assert.equal(after.locationId, LOCATION_B);
+  assert.equal(after.currentTitle, before.currentTitle);
+  assert.equal(after.currentDescription, before.currentDescription);
+  assert.deepEqual(after.currentTags, before.currentTags);
+  assert.equal(after.baselineTitle, before.baselineTitle);
+  assert.equal(after.dirty, true);
+  assert.equal(after.metadataOpen, true);
+  assert.equal(after.status, before.status);
+  assert.equal(after.confirmationRequestId, null);
+  assert.equal(after.saveOwnerToken, null);
+  assert.equal(h.document.activeElement, titleInput);
+});
+
+test("Metadata stale same-media save response preserves a newer edit and baseline", async () => {
+  const h = await createHarness();
+  setMetadataWorkspace(h);
+  const saveResponse = deferred();
+  enqueue(h, "PUT", metadataEndpoint(), saveResponse.promise);
+  const saving = h.run("handleSaveMetadata()");
+  await h.flush();
+
+  const titleInput = h.document.querySelector("#metadata-title-input");
+  titleInput.value = "Newer same-media edit";
+  dispatch(titleInput, "input");
+  saveResponse.resolve(response({
+    metadata: makeMetadataPayload({ title: "Stale saved title" }),
+  }));
+  await saving;
+  await h.flush();
+
+  const state = metadataStateOf(h);
+  assert.equal(state.currentTitle, "Newer same-media edit");
+  assert.equal(state.baselineTitle, "Persisted title");
+  assert.equal(state.dirty, true);
+  assert.equal(state.saving, false);
+  assert.equal(state.saveOwnerToken, null);
+  assert.equal(state.metadataOpen, true);
+});
+
+test("Metadata save response rejects a replaced media identity independently of revision", async () => {
+  const h = await createHarness();
+  setMetadataWorkspace(h);
+  const saveResponse = deferred();
+  enqueue(h, "PUT", metadataEndpoint(MEDIA_A), saveResponse.promise);
+  const saving = h.run("handleSaveMetadata()");
+  await h.flush();
+
+  h.context.__replacementItem = makeCatalogItem(MEDIA_B, LOCATION_A);
+  h.run(`
+    metadataWorkspace.openMediaId = __replacementItem.media_id;
+    metadataWorkspace.openItem = __replacementItem;
+    metadataWorkspace.current.displayTitle = "Replacement B";
+    metadataWorkspace.baseline.displayTitle = "Persisted B";
+  `);
+  saveResponse.resolve(response({
+    metadata: makeMetadataPayload({ mediaId: MEDIA_A, title: "Saved A" }),
+  }));
+  await saving;
+  await h.flush();
+
+  const state = metadataStateOf(h);
+  assert.equal(state.mediaId, MEDIA_B);
+  assert.equal(state.openItemMediaId, MEDIA_B);
+  assert.equal(state.locationId, LOCATION_A);
+  assert.equal(state.currentTitle, "Replacement B");
+  assert.equal(state.baselineTitle, "Persisted B");
+  assert.equal(state.metadataOpen, true);
+});
+
+test("Metadata post-save close cannot capture fresh authority after the saved workspace is replaced", async () => {
+  const h = await createHarness();
+  setMetadataWorkspace(h);
+  const saveResponse = deferred();
+  const catalogResponse = deferred();
+  enqueue(h, "PUT", metadataEndpoint(MEDIA_A), saveResponse.promise);
+  h.fetchController.enqueue(
+    (call) => call.method === "GET" && call.url.startsWith("/api/media?"),
+    catalogResponse.promise,
+  );
+  const savingA = h.run("handleSaveMetadata()");
+  await h.flush();
+  saveResponse.resolve(response({
+    metadata: makeMetadataPayload({
+      mediaId: MEDIA_A,
+      title: "Unsaved title",
+      description: "Unsaved description",
+      tagKeys: ["persisted", "unsaved"],
+    }),
+  }));
+  await h.flush();
+  assert.equal(metadataStateOf(h).dirty, false);
+
+  const closingA = h.run("closeMetadataWorkspace()");
+  assert.equal(await closingA, true);
+  h.context.__mediaBItem = makeCatalogItem(MEDIA_B, LOCATION_B);
+  enqueue(h, "GET", metadataEndpoint(MEDIA_B), response(makeMetadataPayload({
+    mediaId: MEDIA_B,
+    title: "Persisted B",
+    description: "Description B",
+    tagKeys: ["persisted-b"],
+  })));
+  await h.run("handleOpenMetadataWorkspace(__mediaBItem, null)");
+  const titleInput = h.document.querySelector("#metadata-title-input");
+  titleInput.value = "Unsaved B";
+  dispatch(titleInput, "input");
+  const before = metadataStateOf(h);
+
+  catalogResponse.resolve(response({ items: [], total: 0, offset: 0, limit: 30, q: "" }));
+  await savingA;
+  await h.flush();
+
+  const after = metadataStateOf(h);
+  assert.equal(after.mediaId, MEDIA_B);
+  assert.equal(after.currentTitle, before.currentTitle);
+  assert.equal(after.baselineTitle, before.baselineTitle);
+  assert.equal(after.dirty, true);
+  assert.equal(after.metadataOpen, true);
+  assert.equal(after.confirmationRequestId, null);
+  assert.equal(h.document.activeElement, titleInput);
+});
+
+test("Metadata stale save success, error, and finally cannot release a newer owner", async (t) => {
+  for (const staleOutcome of ["success", "error"]) {
+    await t.test(staleOutcome, async () => {
+      const h = await createHarness();
+      setMetadataWorkspace(h);
+      const saveAResponse = deferred();
+      enqueue(h, "PUT", metadataEndpoint(MEDIA_A), saveAResponse.promise);
+      const savingA = h.run("handleSaveMetadata()");
+      await h.flush();
+
+      const closingA = h.run("closeMetadataWorkspace()");
+      activateConfirmation(h, "confirm");
+      assert.equal(await closingA, true);
+      h.context.__mediaBItem = makeCatalogItem(MEDIA_B, LOCATION_B);
+      enqueue(h, "GET", metadataEndpoint(MEDIA_B), response(makeMetadataPayload({
+        mediaId: MEDIA_B,
+        title: "Persisted B",
+        description: "Description B",
+        tagKeys: ["persisted-b"],
+      })));
+      await h.run("handleOpenMetadataWorkspace(__mediaBItem, null)");
+      const titleInput = h.document.querySelector("#metadata-title-input");
+      titleInput.value = "Unsaved B";
+      dispatch(titleInput, "input");
+
+      const saveBResponse = deferred();
+      enqueue(h, "PUT", metadataEndpoint(MEDIA_B), saveBResponse.promise);
+      const savingB = h.run("handleSaveMetadata()");
+      await h.flush();
+      const ownerB = metadataStateOf(h).saveOwnerToken;
+      assert.ok(ownerB);
+
+      if (staleOutcome === "success") {
+        saveAResponse.resolve(response({
+          metadata: makeMetadataPayload({ mediaId: MEDIA_A, title: "Saved A" }),
+        }));
+      } else {
+        saveAResponse.reject(new Error("synthetic stale save failure"));
+      }
+      await savingA;
+      await h.flush();
+
+      const whileBIsSaving = metadataStateOf(h);
+      assert.equal(whileBIsSaving.mediaId, MEDIA_B);
+      assert.equal(whileBIsSaving.currentTitle, "Unsaved B");
+      assert.equal(whileBIsSaving.saving, true);
+      assert.equal(whileBIsSaving.status, "Saving...");
+      assert.equal(whileBIsSaving.saveOwnerToken, ownerB);
+      assert.equal(whileBIsSaving.saveOwnerMediaId, MEDIA_B);
+      assert.equal(whileBIsSaving.confirmationRequestId, null);
+
+      saveBResponse.resolve(response({
+        metadata: makeMetadataPayload({
+          mediaId: MEDIA_B,
+          title: "Unsaved B",
+          description: "Description B",
+          tagKeys: ["persisted-b"],
+        }),
+      }));
+      await savingB;
+      await h.flush();
+      assert.equal(metadataStateOf(h).mediaId, null);
+      assert.equal(metadataStateOf(h).saveOwnerToken, null);
+    });
+  }
 });
 
 test("Metadata safe action, Escape, and backdrop preserve the dirty workspace and focus", async (t) => {
@@ -1325,6 +1652,146 @@ test("Metadata AI uses one revalidated media-location identity and one request o
   assert.equal(state.currentTitle, "AI title");
   assert.equal(state.currentDescription, "AI description");
   assert.equal(state.suggestedFilename, "ai-title.mp4");
+});
+
+test("Metadata AI endpoint cannot mix live media with a captured location", async () => {
+  const h = await createHarness();
+  setMetadataWorkspace(h);
+  enableMetadataAi(h);
+  enqueue(h, "POST", metadataAiEndpoint(MEDIA_A, LOCATION_A), response({
+    suggestion: {
+      title: "Captured identity title",
+      description: "Captured identity description",
+      tags: [],
+      suggested_filename: "captured.mp4",
+    },
+  }));
+  const analysis = h.run("handleAnalyzeMetadataByAi()");
+  h.run(`
+    globalThis.__metadataMediaReads = 0;
+    Object.defineProperty(metadataWorkspace, "openMediaId", {
+      configurable: true,
+      get() {
+        globalThis.__metadataMediaReads += 1;
+        return globalThis.__metadataMediaReads === 1 ? ${MEDIA_A} : ${MEDIA_B};
+      },
+    });
+  `);
+
+  activateConfirmation(h, "confirm");
+  await analysis;
+  await h.flush();
+
+  assert.equal(h.fetchController.matching("POST", metadataAiEndpoint(MEDIA_A, LOCATION_A)).length, 1);
+  assert.equal(h.fetchController.matching("POST", metadataAiEndpoint(MEDIA_B, LOCATION_A)).length, 0);
+  assert.equal(h.fetchController.matchingPrefix("POST", "/api/media/").length, 1);
+});
+
+test("Metadata AI stale same-media error and finally cannot release a newer request owner", async () => {
+  const h = await createHarness();
+  setMetadataWorkspace(h);
+  enableMetadataAi(h);
+  const requestAResponse = deferred();
+  const requestBResponse = deferred();
+  enqueue(h, "POST", metadataAiEndpoint(), requestAResponse.promise);
+  enqueue(h, "POST", metadataAiEndpoint(), requestBResponse.promise);
+
+  const requestA = h.run("handleAnalyzeMetadataByAi()");
+  activateConfirmation(h, "confirm");
+  await h.flush();
+  h.run(`
+    metadataWorkspace.analyzing = false;
+    advanceMetadataWorkspaceRevision();
+    updateMetadataControls();
+  `);
+  const requestB = h.run("handleAnalyzeMetadataByAi()");
+  activateConfirmation(h, "confirm");
+  await h.flush();
+  const ownerB = h.run("metadataAiRequestToken");
+  assert.equal(h.fetchController.matching("POST", metadataAiEndpoint()).length, 2);
+  assert.equal(metadataStateOf(h).analyzing, true);
+
+  requestAResponse.reject(new Error("synthetic stale AI failure"));
+  await requestA;
+  await h.flush();
+
+  assert.equal(h.run("metadataAiRequestToken"), ownerB);
+  assert.equal(metadataStateOf(h).analyzing, true);
+  assert.equal(h.document.querySelector("#metadata-ai-status").textContent, "");
+
+  requestBResponse.resolve(response({
+    suggestion: {
+      title: "New owner title",
+      description: "New owner description",
+      tags: [],
+      suggested_filename: "new-owner.mp4",
+    },
+  }));
+  await requestB;
+  await h.flush();
+
+  const state = metadataStateOf(h);
+  assert.equal(state.analyzing, false);
+  assert.equal(state.aiSuggestionApplied, true);
+  assert.equal(state.currentTitle, "New owner title");
+  assert.equal(state.currentDescription, "New owner description");
+  assert.equal(state.suggestedFilename, "new-owner.mp4");
+});
+
+test("Metadata AI stale response media, location, and capability cannot apply", async (t) => {
+  for (const replacement of ["media", "location", "capability"]) {
+    await t.test(replacement, async () => {
+      const h = await createHarness();
+      setMetadataWorkspace(h);
+      enableMetadataAi(h);
+      const pendingResponse = deferred();
+      enqueue(h, "POST", metadataAiEndpoint(), pendingResponse.promise);
+      const analysis = h.run("handleAnalyzeMetadataByAi()");
+      activateConfirmation(h, "confirm");
+      await h.flush();
+
+      if (replacement === "media") {
+        h.context.__replacementItem = makeCatalogItem(MEDIA_B, LOCATION_B);
+        h.run(`
+          metadataWorkspace.openMediaId = __replacementItem.media_id;
+          metadataWorkspace.openItem = __replacementItem;
+          metadataWorkspace.current.displayTitle = "Replacement media title";
+          metadataWorkspace.analyzing = false;
+          advanceMetadataWorkspaceRevision();
+        `);
+      } else if (replacement === "location") {
+        h.context.__replacementItem = makeCatalogItem(MEDIA_A, LOCATION_B);
+        h.run("metadataWorkspace.openItem = __replacementItem");
+      } else {
+        h.run('renderAiCapability({ available: false, status: "not_configured" })');
+      }
+
+      pendingResponse.resolve(response({
+        suggestion: {
+          title: "Stale AI title",
+          description: "Stale AI description",
+          tags: [],
+          suggested_filename: "stale-ai.mp4",
+        },
+      }));
+      await analysis;
+      await h.flush();
+
+      const state = metadataStateOf(h);
+      assert.equal(state.aiSuggestionApplied, false);
+      assert.equal(state.suggestedFilename, "");
+      assert.notEqual(state.currentTitle, "Stale AI title");
+      assert.equal(state.analyzing, false);
+      if (replacement === "media") {
+        assert.equal(state.mediaId, MEDIA_B);
+        assert.equal(state.locationId, LOCATION_B);
+        assert.equal(state.currentTitle, "Replacement media title");
+      } else if (replacement === "location") {
+        assert.equal(state.mediaId, MEDIA_A);
+        assert.equal(state.locationId, LOCATION_B);
+      }
+    });
+  }
 });
 
 test("Metadata AI stale media or location context issues zero requests and preserves newer workspace", async (t) => {

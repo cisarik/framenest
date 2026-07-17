@@ -75,6 +75,8 @@ let detailsMediaElement = null;
 const prefersReducedMotion = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 let metadataBeforeUnloadAttached = false;
 let metadataAiRequestToken = 0;
+let metadataSaveRequestToken = 0;
+let metadataSaveOwner = null;
 let metadataWorkspaceRevision = 0;
 let aiCapabilityRevision = 0;
 let cardAiAnalyzingMediaIds = new Set();
@@ -311,16 +313,36 @@ function settleConfirmation(request, accepted) {
   if (!request || activeConfirmationRequest !== request || request.settled) return;
   request.settled = true;
   activeConfirmationRequest = null;
-  if (confirmationDialog.hasAttribute("open")) {
-    if (typeof confirmationDialog.close === "function") {
-      confirmationDialog.close();
-    } else {
+  try {
+    if (confirmationDialog.hasAttribute("open")) {
+      if (typeof confirmationDialog.close === "function") {
+        confirmationDialog.close();
+      } else {
+        confirmationDialog.removeAttribute("open");
+      }
+    }
+  } catch {
+    try {
       confirmationDialog.removeAttribute("open");
+    } catch {
+      // Confirmation ownership is already released; cleanup remains best-effort.
     }
   }
-  resetConfirmationDialog();
-  restoreConfirmationFocus(request.focusReturn);
-  request.resolve(Boolean(accepted));
+  try {
+    resetConfirmationDialog();
+  } catch {
+    // Continue settlement even if one dialog normalization operation fails.
+  }
+  try {
+    restoreConfirmationFocus(request.focusReturn);
+  } catch {
+    // Focus recovery must never prevent fail-closed settlement.
+  }
+  try {
+    request.resolve(Boolean(accepted));
+  } catch {
+    // A misbehaving resolver must not escape from confirmation cleanup.
+  }
 }
 
 function requestConfirmation({
@@ -3406,6 +3428,82 @@ function metadataDiscardContextIsCurrent(context) {
     && catalogState.collection === context.catalogScope;
 }
 
+function metadataSaveLocationId() {
+  const location = metadataAiLocation();
+  return location ? location.location_id : null;
+}
+
+function claimMetadataSaveOwner(normalized, { closeAfterSave = true } = {}) {
+  metadataWorkspace.saving = true;
+  advanceMetadataWorkspaceRevision();
+  const requestPayload = {
+    display_title: normalized.displayTitle,
+    description: normalized.description,
+    tag_keys: normalized.tagKeys,
+  };
+  Object.freeze(requestPayload.tag_keys);
+  Object.freeze(requestPayload);
+  const owner = Object.freeze({
+    token: ++metadataSaveRequestToken,
+    mediaId: metadataWorkspace.openMediaId,
+    openItemMediaId: metadataOpenItemMediaId(),
+    locationId: metadataSaveLocationId(),
+    catalogScope: catalogState.collection,
+    workspaceRevision: metadataWorkspaceRevision,
+    requestPayload,
+    closeAfterSave: Boolean(closeAfterSave),
+  });
+  metadataSaveOwner = owner;
+  return owner;
+}
+
+function metadataSaveOwnerOwnsWorkspace(owner) {
+  return Boolean(owner)
+    && metadataSaveOwner === owner
+    && metadataSaveRequestToken === owner.token
+    && metadataWorkspace.openMediaId === owner.mediaId
+    && metadataOpenItemMediaId() === owner.openItemMediaId
+    && metadataSaveLocationId() === owner.locationId
+    && catalogState.collection === owner.catalogScope;
+}
+
+function metadataSaveOwnerIsCurrent(owner, expectedRevision = owner ? owner.workspaceRevision : null) {
+  return metadataSaveOwnerOwnsWorkspace(owner)
+    && metadataWorkspaceRevision === expectedRevision
+    && metadataWorkspace.saving;
+}
+
+function releaseMetadataSaveOwner(owner) {
+  if (!owner || metadataSaveOwner !== owner || metadataSaveRequestToken !== owner.token) return false;
+  if (metadataWorkspace.openMediaId !== owner.mediaId) return false;
+  if (metadataOpenItemMediaId() !== owner.openItemMediaId) return false;
+  if (catalogState.collection !== owner.catalogScope) return false;
+  metadataSaveOwner = null;
+  if (metadataWorkspace.saving) {
+    metadataWorkspace.saving = false;
+    advanceMetadataWorkspaceRevision();
+    updateMetadataControls();
+  }
+  return true;
+}
+
+function closeMetadataWorkspaceAfterSave(owner, expectedRevision) {
+  if (!owner.closeAfterSave || !metadataSaveOwnerIsCurrent(owner, expectedRevision)) return false;
+  metadataWorkspace.saving = false;
+  metadataSaveOwner = null;
+  advanceMetadataWorkspaceRevision();
+  const closeContext = Object.freeze({
+    action: "close-after-save",
+    targetMediaId: null,
+    targetScope: null,
+    openMediaId: owner.mediaId,
+    openItemMediaId: owner.openItemMediaId,
+    workspaceRevision: metadataWorkspaceRevision,
+    catalogScope: owner.catalogScope,
+  });
+  return closeMetadataWorkspaceWithContext(closeContext);
+}
+
 async function confirmDiscardDirtyMetadata(intent = {}) {
   const context = captureMetadataDiscardContext(intent);
   if (!metadataDirtyForBeforeUnload()) {
@@ -4078,6 +4176,7 @@ async function handleDiscardMetadataChanges() {
 function closeMetadataWorkspaceWithContext(discardContext) {
   if (!metadataDiscardContextIsCurrent(discardContext)) return false;
   if (metadataWorkspace.openMediaId === null) return false;
+  metadataSaveOwner = null;
   metadataRequestToken += 1;
   metadataAiRequestToken += 1;
   advanceMetadataWorkspaceRevision();
@@ -4245,20 +4344,23 @@ function handleMetadataTagSearchKeydown(event) {
 }
 
 async function handleSaveMetadata() {
-  const normalized = normalizedMetadataFormState();
-  if (normalized.error || metadataWorkspace.openMediaId === null) {
+  const formState = normalizedMetadataFormState();
+  if (formState.error || metadataWorkspace.openMediaId === null || metadataWorkspace.saving) {
     updateMetadataControls();
     return;
   }
-  metadataWorkspace.saving = true;
-  advanceMetadataWorkspaceRevision();
+  const saveOwner = claimMetadataSaveOwner(formState, { closeAfterSave: true });
   metadataWorkspace.unavailable = false;
   metadataWorkspace.notFound = false;
   setMetadataStatus("saving", "Saving...");
   updateMetadataControls();
   try {
-    const mediaId = metadataWorkspace.openMediaId;
-    const response = await fetch(metadataEndpoint(mediaId), {
+    const normalized = Object.freeze({
+      displayTitle: saveOwner.requestPayload.display_title,
+      description: saveOwner.requestPayload.description,
+      tagKeys: saveOwner.requestPayload.tag_keys,
+    });
+    const response = await fetch(metadataEndpoint(saveOwner.mediaId), {
       method: "PUT",
       headers: {
         Accept: "application/json",
@@ -4268,19 +4370,21 @@ async function handleSaveMetadata() {
       cache: "no-store",
     });
     const payload = await response.json();
-    metadataWorkspace.saving = false;
-    advanceMetadataWorkspaceRevision();
+    if (!metadataSaveOwnerIsCurrent(saveOwner)) return;
     if (response.ok) {
       applyMetadataPayloadToWorkspace(payload.metadata);
       metadataWorkspace.aiSuggestionApplied = false;
       metadataWorkspace.suggestedFilename = "";
+      const responseRevision = metadataWorkspaceRevision;
       await loadCatalog();
-      await closeMetadataWorkspace();
+      const closeMetadataWorkspace = () => closeMetadataWorkspaceAfterSave(saveOwner, responseRevision);
+      closeMetadataWorkspace();
       return;
     }
     const code = payload.error ? payload.error.code : "";
     if (code === "CANONICAL_TAG_NOT_FOUND") {
       await loadCatalogTags();
+      if (!metadataSaveOwnerIsCurrent(saveOwner)) return;
       setMetadataStatus("validation", "One selected tag is no longer available. Update the tags before retrying.");
     } else if (code === "MEDIA_NOT_FOUND") {
       metadataWorkspace.notFound = true;
@@ -4292,12 +4396,12 @@ async function handleSaveMetadata() {
     } else {
       setMetadataStatus("error", "Save failed.");
     }
-    updateMetadataControls();
   } catch {
-    metadataWorkspace.saving = false;
-    advanceMetadataWorkspaceRevision();
-    setMetadataStatus("error", "Save failed.");
-    updateMetadataControls();
+    if (metadataSaveOwnerIsCurrent(saveOwner)) {
+      setMetadataStatus("error", "Save failed.");
+    }
+  } finally {
+    releaseMetadataSaveOwner(saveOwner);
   }
 }
 
