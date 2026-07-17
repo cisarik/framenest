@@ -190,7 +190,6 @@ const uploadOpenButton = document.querySelector("#upload-open-button");
 const uploadDialog = document.querySelector("#upload-dialog");
 const uploadDialogTitle = document.querySelector("#upload-dialog-title");
 const uploadCloseButton = document.querySelector("#upload-close-button");
-const uploadCapabilityStatus = document.querySelector("#upload-capability-status");
 const uploadFileInput = document.querySelector("#upload-file-input");
 const uploadRow = document.querySelector("#upload-row");
 const uploadFileName = document.querySelector("#upload-file-name");
@@ -963,32 +962,47 @@ function uploadCancelPermitted(snapshot) {
 
 function uploadDisplayState(snapshot) {
   if (!snapshot) {
-    return "Preparing";
+    if (uploadState.preparing) return "Preparing";
+    if (selectedUploadLimitMessage()) return "File too large";
+    return uploadState.file ? "Ready" : "No file selected";
+  }
+  if (
+    uploadState.actionOwner
+    && uploadState.actionOwner.kind === "cancel"
+    && uploadCancelPermitted(snapshot)
+  ) {
+    return "Cancelling";
   }
   if (uploadState.needsReselection && uploadIsByteReceiving(snapshot)) {
     return "Reselect file to resume";
   }
+  if (uploadState.preparing && uploadIsByteReceiving(snapshot)) {
+    return "Preparing";
+  }
+  if (uploadState.paused && uploadState.running && uploadIsByteReceiving(snapshot)) {
+    return "Pausing";
+  }
   if (uploadState.paused && uploadIsByteReceiving(snapshot)) {
-    return "Paused in browser";
+    return "Paused";
   }
   if (uploadState.running && uploadIsByteReceiving(snapshot)) {
     return "Uploading";
   }
-  if (uploadState.preparing && uploadIsByteReceiving(snapshot)) {
-    return "Preparing";
+  if (snapshot.state === "created") {
+    return uploadState.file ? "Ready to resume" : "Reselect file to resume";
   }
-  if (snapshot.state === "created") return "Preparing";
   if (snapshot.state === "receiving") {
-    return uploadIsByteReceiving(snapshot) ? "Ready to resume" : "Received";
+    return uploadIsByteReceiving(snapshot) ? "Ready to resume" : "Validating";
   }
-  if (snapshot.state === "received") return "Received";
+  if (snapshot.state === "received") return "Validating";
   if (snapshot.state === "validating") return "Validating";
-  if (snapshot.state === "publish_pending") return "Validated, awaiting publication";
-  if (snapshot.state === "rejected") return "Rejected";
+  if (snapshot.state === "duplicate_pending") return "Validating";
+  if (["publish_pending", "published", "cataloged"].includes(snapshot.state)) return "Completed";
+  if (snapshot.state === "rejected") return "Failed";
   if (snapshot.state === "failed") return "Failed";
   if (snapshot.state === "cancelled") return "Cancelled";
-  if (snapshot.state === "expired") return "Expired";
-  return "Server state";
+  if (snapshot.state === "expired") return "Failed";
+  return "Status unavailable";
 }
 
 function uploadFailureText(snapshot) {
@@ -1240,19 +1254,10 @@ function resetUploadForFile(file) {
     pollOwner: null,
     pollTimer: null,
     pollRetryDelayMs: UPLOAD_POLL_INTERVAL_MS,
-    message: file ? "Ready to create an upload session." : "Select one local GIF or MP4.",
+    message: file ? "Ready to upload." : "Select one local GIF or MP4.",
     failureMessage: "",
   };
   renderUploadCockpit();
-}
-
-function renderUploadCapability() {
-  if (!uploadCapabilityStatus) return;
-  if (uploadCapability.uploads_enabled) {
-    uploadCapabilityStatus.textContent = "Uploads ready.";
-  } else {
-    uploadCapabilityStatus.textContent = "Uploads are not configured on this local server.";
-  }
 }
 
 function renderUploadCockpit() {
@@ -1263,7 +1268,7 @@ function renderUploadCockpit() {
   const totalBytes = snapshot ? snapshot.declared_size_bytes : (uploadState.file ? uploadState.file.size : 0);
   const receivedBytes = snapshot ? snapshot.received_size_bytes : 0;
   const percent = uploadProgressPercentValue(snapshot);
-  if (uploadFileName) uploadFileName.textContent = displayName || "No file selected";
+  if (uploadFileName) uploadFileName.textContent = displayName || "";
   if (uploadStateLabel) uploadStateLabel.textContent = uploadDisplayState(snapshot);
   if (uploadProgress) uploadProgress.value = percent;
   if (uploadByteCount) uploadByteCount.textContent = `${formatSize(receivedBytes)} / ${formatSize(totalBytes)}`;
@@ -1277,7 +1282,6 @@ function renderUploadCockpit() {
   if (uploadRow) {
     uploadRow.dataset.state = snapshot ? snapshot.state : "idle";
   }
-  renderUploadCapability();
   updateUploadActions();
 }
 
@@ -1288,31 +1292,52 @@ function updateUploadActions() {
   const fileWithinLimit = hasFile
     && uploadCapability.max_total_size_bytes > 0
     && uploadState.file.size <= uploadCapability.max_total_size_bytes;
+  const startVisible = uploadCapability.uploads_enabled
+    && hasFile
+    && !hasActiveSession
+    && fileWithinLimit
+    && !uploadState.actionOwner
+    && !uploadState.preparing
+    && !uploadState.running
+    && !uploadState.completing;
+  const pauseVisible = uploadState.running
+    && !uploadState.paused
+    && uploadIsByteReceiving(snapshot);
+  const resumeVisible = Boolean(snapshot)
+    && !uploadState.actionOwner
+    && !uploadState.preparing
+    && !uploadState.running
+    && !uploadState.completing
+    && uploadIsByteReceiving(snapshot)
+    && hasFile
+    && !uploadState.needsReselection;
+  const cancelVisible = uploadCancelPermitted(snapshot)
+    && !uploadState.completing
+    && (!uploadState.actionOwner || uploadState.actionOwner.kind !== "cancel");
+  const focusedAction = [
+    uploadStartButton,
+    uploadPauseButton,
+    uploadResumeButton,
+    uploadCancelButton,
+  ].find((button) => button && document.activeElement === button);
   if (uploadStartButton) {
-    uploadStartButton.disabled = !uploadCapability.uploads_enabled
-      || !hasFile
-      || hasActiveSession
-      || !fileWithinLimit
-      || Boolean(uploadState.actionOwner)
-      || uploadState.preparing
-      || uploadState.running
-      || uploadState.completing;
+    uploadStartButton.hidden = !startVisible;
+    uploadStartButton.disabled = !startVisible;
   }
   if (uploadPauseButton) {
-    uploadPauseButton.disabled = !uploadState.running || uploadState.paused || !uploadIsByteReceiving(snapshot);
+    uploadPauseButton.hidden = !pauseVisible;
+    uploadPauseButton.disabled = !pauseVisible;
   }
   if (uploadResumeButton) {
-    uploadResumeButton.disabled = !snapshot
-      || Boolean(uploadState.actionOwner)
-      || uploadState.preparing
-      || uploadState.running
-      || uploadState.completing
-      || !uploadIsByteReceiving(snapshot)
-      || !hasFile
-      || uploadState.needsReselection;
+    uploadResumeButton.hidden = !resumeVisible;
+    uploadResumeButton.disabled = !resumeVisible;
   }
   if (uploadCancelButton) {
-    uploadCancelButton.disabled = !uploadCancelPermitted(snapshot) || uploadState.completing;
+    uploadCancelButton.hidden = !cancelVisible;
+    uploadCancelButton.disabled = !cancelVisible;
+  }
+  if (focusedAction && focusedAction.hidden && uploadMessage) {
+    uploadMessage.focus();
   }
 }
 
@@ -1370,6 +1395,9 @@ async function loadUploadCapability(owner = null) {
       max_chunk_size_bytes: Number(payload && payload.max_chunk_size_bytes) || DEFAULT_UPLOAD_CHUNK_BYTES,
       session_ttl_seconds: Number(payload && payload.session_ttl_seconds) || 0,
     };
+    if (!uploadCapability.uploads_enabled) {
+      uploadState.message = "Uploads are not configured on this local server.";
+    }
     renderUploadCockpit();
     return uploadCapability.uploads_enabled;
   } catch {
@@ -1865,6 +1893,7 @@ async function handleCancelUpload() {
   const snapshot = activeUploadSnapshot();
   if (!snapshot || !uploadCancelPermitted(snapshot)) return;
   if (uploadState.actionOwner && uploadState.actionOwner.kind === "cancel") return;
+  if (!window.confirm("Cancel this upload?")) return;
   const owner = claimUploadAction("cancel", { uploadId: snapshot.id, file: uploadState.file }, { supersede: true });
   if (!owner) return;
   uploadState.uploadLoopOwner = null;

@@ -2409,20 +2409,34 @@ def test_web_shell_contains_local_upload_cockpit_without_gallery_publication_cla
 
     assert "upload-open-button" in header_section
     assert ">Upload<" in header_section
+    assert 'aria-label="Upload"' in upload_dialog
+    assert '>Upload</h2>' in upload_dialog
+    assert "Upload media" not in upload_dialog
     assert "upload-file-input" in upload_dialog
     assert 'class="upload-file-input visually-hidden"' in upload_dialog
     assert 'accept=".gif,.mp4,image/gif,video/mp4"' in upload_dialog
+    assert 'id="upload-file-field-label" class="visually-hidden">Source file</span>' in upload_dialog
+    assert 'aria-labelledby="upload-file-field-label upload-file-trigger"' in upload_dialog
     assert 'aria-describedby="upload-file-name"' in upload_dialog
     assert 'for="upload-file-input">Choose file</label>' in upload_dialog
     assert upload_dialog.count('id="upload-file-name"') == 1
+    assert 'id="upload-state-label"' in upload_dialog
+    assert 'id="upload-message" class="upload-message" role="status"' in upload_dialog
+    assert 'role="status"' in upload_dialog
+    assert 'aria-live="polite"' in upload_dialog
+    assert 'aria-atomic="true"' in upload_dialog
+    assert '>No file selected</span>' in upload_dialog
+    assert ">Preparing</span>" not in upload_dialog
     assert "upload-progress" in upload_dialog
-    assert "Start upload" in upload_dialog
-    assert "Pause" in upload_dialog
-    assert "Resume" in upload_dialog
-    assert ">Cancel</button>" in upload_dialog
+    assert 'id="upload-start-button" type="button" hidden disabled>Start upload</button>' in upload_dialog
+    assert 'id="upload-pause-button" type="button" hidden disabled>Pause</button>' in upload_dialog
+    assert 'id="upload-resume-button" type="button" hidden disabled>Resume</button>' in upload_dialog
+    assert 'id="upload-cancel-button" class="danger-button" type="button" hidden disabled>Cancel</button>' in upload_dialog
     assert "Cancel upload" not in upload_dialog
     assert "danger-button" in upload_dialog
     assert "upload-danger-callout" in upload_dialog
+    assert "upload-capability-status" not in upload_dialog
+    assert "Uploads ready." not in upload_dialog
     assert "Uploads enter server quarantine for validation" in upload_dialog
     assert "not yet available in Gallery" in upload_dialog
     assert "published" not in upload_dialog.lower()
@@ -2436,13 +2450,15 @@ def test_upload_cockpit_capability_and_danger_presentation_hooks(
     script = client.get("/assets/app.js").text
     css = client.get("/assets/styles.css").text
     upload_dialog = html[html.index('id="upload-dialog"') : html.index('id="status-dialog"')]
-    capability_body = _javascript_function(script, "renderUploadCapability")
     selection_limit_body = _javascript_function(script, "selectedUploadLimitMessage")
+    display_state_body = _javascript_function(script, "uploadDisplayState")
+    action_body = _javascript_function(script, "updateUploadActions")
 
-    assert "Uploads ready." in capability_body
-    assert "max chunk" not in capability_body
-    assert "session TTL" not in capability_body
-    assert "formatDuration" not in capability_body
+    assert "Uploads ready." not in script
+    assert "Ready to create an upload session." not in script
+    assert 'return uploadState.file ? "Ready" : "No file selected";' in display_state_body
+    assert "focusedAction.hidden" in action_body
+    assert "uploadMessage.focus()" in action_body
     assert 'fetchUploadJson(UPLOAD_CAPABILITY_ENDPOINT' in script
     assert "max_total_size_bytes" in script
     assert "File is too large. Maximum size is" in selection_limit_body
@@ -2454,6 +2470,7 @@ def test_upload_cockpit_capability_and_danger_presentation_hooks(
     assert "--danger" in css
     assert "--danger-border" in css
     assert "--danger-glow" in css
+    assert 'window.confirm("Cancel this upload?")' in script
     assert "Cancelled: Upload was cancelled before Gallery publication." in script
 
 
@@ -2526,16 +2543,18 @@ def test_javascript_upload_states_polling_cancel_and_gallery_boundaries_are_trut
 
     for label in (
         "Preparing",
+        "No file selected",
+        "Ready",
         "Uploading",
-        "Paused in browser",
+        "Pausing",
+        "Paused",
+        "Cancelling",
         "Reselect file to resume",
-        "Received",
+        "Ready to resume",
         "Validating",
-        "Validated, awaiting publication",
-        "Rejected",
+        "Completed",
         "Failed",
         "Cancelled",
-        "Expired",
     ):
         assert label in upload_block
     assert "Validated. Awaiting publication. Not yet available in Gallery." in upload_block

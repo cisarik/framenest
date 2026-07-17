@@ -339,6 +339,9 @@ async function createHarness() {
     clearTimeout(timer) {
       if (timer) timer.active = false;
     },
+    confirm() {
+      return true;
+    },
     addEventListener() {},
     removeEventListener() {},
   };
@@ -390,7 +393,16 @@ function stateOf(harness) {
     stateLabel: document.querySelector("#upload-state-label").textContent,
     visibleMessage: document.querySelector("#upload-message").textContent,
     byteCount: document.querySelector("#upload-byte-count").textContent,
+    fileName: document.querySelector("#upload-file-name").textContent,
+    startHidden: document.querySelector("#upload-start-button").hidden,
+    pauseHidden: document.querySelector("#upload-pause-button").hidden,
+    resumeHidden: document.querySelector("#upload-resume-button").hidden,
+    cancelHidden: document.querySelector("#upload-cancel-button").hidden,
+    startDisabled: document.querySelector("#upload-start-button").disabled,
+    pauseDisabled: document.querySelector("#upload-pause-button").disabled,
     resumeDisabled: document.querySelector("#upload-resume-button").disabled,
+    cancelDisabled: document.querySelector("#upload-cancel-button").disabled,
+    focusedStatus: document.activeElement === document.querySelector("#upload-message"),
     cancelLabel: document.querySelector("#upload-cancel-button").textContent,
     recovery: window.localStorage.getItem("${RECOVERY_KEY}"),
   })`);
@@ -436,6 +448,131 @@ function enqueue(harness, method, url, result) {
 function enqueueStatus(harness, uploadId, result) {
   enqueue(harness, "GET", `/api/uploads/${encodeURIComponent(uploadId)}`, result);
 }
+
+test("Upload controls follow the visible lifecycle and Pause and Resume share one slot", async () => {
+  const h = await createHarness();
+
+  assert.deepEqual(
+    {
+      start: stateOf(h).startHidden,
+      pause: stateOf(h).pauseHidden,
+      resume: stateOf(h).resumeHidden,
+      cancel: stateOf(h).cancelHidden,
+    },
+    { start: true, pause: true, resume: true, cancel: true },
+  );
+  assert.equal(stateOf(h).stateLabel, "No file selected");
+  assert.equal(stateOf(h).fileName, "");
+
+  setSelectedFile(h, makeFile("chosen.gif", 8));
+  let state = stateOf(h);
+  assert.equal(state.fileName, "chosen.gif");
+  assert.equal(state.stateLabel, "Ready");
+  assert.equal(state.startHidden, false);
+  assert.equal(state.startDisabled, false);
+  assert.equal(state.pauseHidden, true);
+  assert.equal(state.resumeHidden, true);
+  assert.equal(state.cancelHidden, true);
+
+  setActiveUpload(h, { state: "receiving", received: 4 });
+  h.run("uploadState.running = true; renderUploadCockpit()");
+  state = stateOf(h);
+  assert.equal(state.stateLabel, "Uploading");
+  assert.equal(state.startHidden, true);
+  assert.equal(state.pauseHidden, false);
+  assert.equal(state.pauseDisabled, false);
+  assert.equal(state.resumeHidden, true);
+  assert.equal(state.cancelHidden, false);
+  assert.equal(state.cancelDisabled, false);
+
+  h.run("uploadState.running = false; uploadState.paused = true; renderUploadCockpit()");
+  state = stateOf(h);
+  assert.equal(state.stateLabel, "Paused");
+  assert.equal(state.startHidden, true);
+  assert.equal(state.pauseHidden, true);
+  assert.equal(state.resumeHidden, false);
+  assert.equal(state.resumeDisabled, false);
+  assert.equal(state.cancelHidden, false);
+
+  h.run("uploadState.paused = false; uploadState.file = null; uploadState.needsReselection = true; renderUploadCockpit()");
+  state = stateOf(h);
+  assert.equal(state.stateLabel, "Reselect file to resume");
+  assert.equal(state.pauseHidden, true);
+  assert.equal(state.resumeHidden, true);
+  assert.equal(state.cancelHidden, false);
+
+  h.context.__terminal = snapshot(UPLOAD_A, "validating", 8);
+  h.run("uploadState.snapshot = __terminal; uploadState.needsReselection = false; renderUploadCockpit()");
+  state = stateOf(h);
+  assert.equal(state.stateLabel, "Validating");
+  assert.equal(state.startHidden, true);
+  assert.equal(state.pauseHidden, true);
+  assert.equal(state.resumeHidden, true);
+  assert.equal(state.cancelHidden, true);
+
+  h.context.__terminal = snapshot(UPLOAD_A, "publish_pending", 8);
+  h.run("uploadState.snapshot = __terminal; renderUploadCockpit()");
+  state = stateOf(h);
+  assert.equal(state.stateLabel, "Completed");
+  assert.equal(state.startHidden, true);
+  assert.equal(state.pauseHidden, true);
+  assert.equal(state.resumeHidden, true);
+  assert.equal(state.cancelHidden, true);
+});
+
+test("A disappearing upload action moves focus to the live status", async () => {
+  const h = await createHarness();
+  setActiveUpload(h, { state: "receiving", received: 4 });
+  h.run(`
+    uploadState.running = true;
+    renderUploadCockpit();
+    document.querySelector("#upload-pause-button").focus();
+    handlePauseUpload();
+  `);
+
+  const state = stateOf(h);
+  assert.equal(state.pauseHidden, true);
+  assert.equal(state.focusedStatus, true);
+  assert.equal(state.stateLabel, "Pausing");
+});
+
+test("Cancel uses native confirmation and keeps danger action semantics", async () => {
+  const h = await createHarness();
+  setActiveUpload(h, { id: UPLOAD_A, state: "receiving", received: 4 });
+  let confirmations = 0;
+  h.context.confirm = () => {
+    confirmations += 1;
+    return false;
+  };
+
+  await h.run("handleCancelUpload()");
+  assert.equal(confirmations, 1);
+  assert.equal(h.fetchController.matching("DELETE", `/api/uploads/${UPLOAD_A}`).length, 0);
+  assert.equal(stateOf(h).snapshotState, "receiving");
+  assert.equal(stateOf(h).cancelHidden, false);
+  assert.equal(stateOf(h).cancelLabel, "Cancel");
+
+  h.context.confirm = () => {
+    confirmations += 1;
+    return true;
+  };
+  const cancellation = deferred();
+  enqueue(h, "DELETE", `/api/uploads/${UPLOAD_A}`, cancellation.promise);
+  const cancelPromise = h.run("handleCancelUpload()");
+  await h.flush();
+  assert.equal(stateOf(h).stateLabel, "Cancelling");
+  assert.equal(stateOf(h).cancelHidden, true);
+
+  cancellation.resolve(response(snapshot(UPLOAD_A, "cancelled", 4)));
+  await cancelPromise;
+  await h.flush();
+
+  assert.equal(confirmations, 2);
+  assert.equal(h.fetchController.matching("DELETE", `/api/uploads/${UPLOAD_A}`).length, 1);
+  assert.equal(stateOf(h).snapshotState, "cancelled");
+  assert.equal(stateOf(h).stateLabel, "Cancelled");
+  assert.equal(stateOf(h).cancelHidden, true);
+});
 
 test("Start is synchronously fenced and stale create responses cannot replace newer state", async () => {
   const h = await createHarness();
@@ -718,7 +855,10 @@ test("Recovered upload is ready after source reselection and waits for explicit 
   assert.notEqual(reselected.stateLabel, "Uploading");
   assert.equal(reselected.visibleMessage, "Ready to resume.");
   assert.equal(reselected.visibleMessage.includes("Source file reselected"), false);
+  assert.equal(reselected.pauseHidden, true);
+  assert.equal(reselected.resumeHidden, false);
   assert.equal(reselected.resumeDisabled, false);
+  assert.equal(reselected.cancelHidden, false);
   assert.equal(reselected.cancelLabel, "Cancel");
   assert.equal(h.fetchController.matching("PATCH", `/api/uploads/${UPLOAD_A}`).length, 0);
 
