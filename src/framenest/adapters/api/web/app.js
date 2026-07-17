@@ -75,6 +75,8 @@ let detailsMediaElement = null;
 const prefersReducedMotion = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 let metadataBeforeUnloadAttached = false;
 let metadataAiRequestToken = 0;
+let metadataWorkspaceRevision = 0;
+let aiCapabilityRevision = 0;
 let cardAiAnalyzingMediaIds = new Set();
 let catalogState = {
   q: "",
@@ -346,10 +348,15 @@ function requestConfirmation({
   confirmationDismissButton.textContent = String(dismissLabel || "Cancel");
   confirmationConfirmButton.textContent = String(confirmLabel || "Confirm");
   confirmationConfirmButton.classList.toggle("danger-button", Boolean(destructive));
-  if (typeof confirmationDialog.showModal === "function") {
-    confirmationDialog.showModal();
-  } else {
-    confirmationDialog.setAttribute("open", "");
+  try {
+    if (typeof confirmationDialog.showModal === "function") {
+      confirmationDialog.showModal();
+    } else {
+      confirmationDialog.setAttribute("open", "");
+    }
+  } catch {
+    settleConfirmation(request, false);
+    return result;
   }
   confirmationDismissButton.focus();
   return result;
@@ -611,6 +618,7 @@ function renderAiCapability(payload) {
     last_connection_test: payload && payload.last_connection_test ? payload.last_connection_test : null,
     requires_explicit_confirmation: !payload || payload.requires_explicit_confirmation !== false,
   };
+  aiCapabilityRevision += 1;
   const providerName = aiCapability.provider_display_name || aiCapability.provider_id;
   const providerInfo = aiCapability.model_id ? `${providerName} / ${aiCapability.model_id}` : providerName;
   const status = aiStatusInfo(aiCapability.status);
@@ -3098,6 +3106,7 @@ function applyResolvedAiSuggestionToMetadataWorkspace(suggestion, tagKeys) {
   metadataWorkspace.suggestedFilename = suggestion.suggestedFilename;
   metadataWorkspace.aiSuggestionApplied = true;
   metadataWorkspace.statusOverride = null;
+  advanceMetadataWorkspaceRevision();
   metadataAiStatus.textContent = "Review the updated fields, then Save.";
 }
 
@@ -3365,17 +3374,53 @@ function describeCatalogItem(item) {
   return `${label}; ${formatCatalogKind(item.media_kind)}; ${location}; media ID ${item.media_id}`;
 }
 
-async function confirmDiscardDirtyMetadata() {
+function advanceMetadataWorkspaceRevision() {
+  metadataWorkspaceRevision += 1;
+}
+
+function metadataOpenItemMediaId() {
+  return metadataWorkspace.openItem ? metadataWorkspace.openItem.media_id : null;
+}
+
+function captureMetadataDiscardContext({
+  action = "close",
+  targetMediaId = null,
+  targetScope = null,
+} = {}) {
+  return Object.freeze({
+    action,
+    targetMediaId,
+    targetScope,
+    openMediaId: metadataWorkspace.openMediaId,
+    openItemMediaId: metadataOpenItemMediaId(),
+    workspaceRevision: metadataWorkspaceRevision,
+    catalogScope: catalogState.collection,
+  });
+}
+
+function metadataDiscardContextIsCurrent(context) {
+  return Boolean(context)
+    && metadataWorkspaceRevision === context.workspaceRevision
+    && metadataWorkspace.openMediaId === context.openMediaId
+    && metadataOpenItemMediaId() === context.openItemMediaId
+    && catalogState.collection === context.catalogScope;
+}
+
+async function confirmDiscardDirtyMetadata(intent = {}) {
+  const context = captureMetadataDiscardContext(intent);
   if (!metadataDirtyForBeforeUnload()) {
-    return true;
+    return context;
   }
-  return requestConfirmation({
+  const accepted = await requestConfirmation({
     title: "Discard changes?",
     message: "Unsaved metadata changes will be discarded.",
     dismissLabel: "Keep editing",
     confirmLabel: "Discard changes",
     destructive: true,
   });
+  if (!accepted) return null;
+  if (!metadataDiscardContextIsCurrent(context)) return null;
+  return context;
 }
 
 function updateMetadataControls() {
@@ -3535,6 +3580,72 @@ function metadataAiLocation() {
   return selectPlaybackLocation(metadataWorkspace.openItem);
 }
 
+function captureMetadataAiConfirmationContext(location) {
+  return Object.freeze({
+    mediaId: metadataWorkspace.openMediaId,
+    openItemMediaId: metadataOpenItemMediaId(),
+    locationId: location.location_id,
+    workspaceRevision: metadataWorkspaceRevision,
+    capabilityRevision: aiCapabilityRevision,
+    requestToken: metadataAiRequestToken,
+    capabilityAvailable: aiCapability.available,
+    analyzing: metadataWorkspace.analyzing,
+    aiSuggestionApplied: metadataWorkspace.aiSuggestionApplied,
+    loading: metadataWorkspace.loading,
+    saving: metadataWorkspace.saving,
+  });
+}
+
+function metadataAiConfirmationContextIsCurrent(context) {
+  const location = metadataAiLocation();
+  return Boolean(context)
+    && context.mediaId !== null
+    && metadataWorkspace.openMediaId === context.mediaId
+    && metadataOpenItemMediaId() === context.openItemMediaId
+    && Boolean(location)
+    && location.location_id === context.locationId
+    && metadataWorkspaceRevision === context.workspaceRevision
+    && aiCapabilityRevision === context.capabilityRevision
+    && metadataAiRequestToken === context.requestToken
+    && context.capabilityAvailable
+    && aiCapability.available
+    && !context.analyzing
+    && !metadataWorkspace.analyzing
+    && !context.aiSuggestionApplied
+    && !metadataWorkspace.aiSuggestionApplied
+    && !context.loading
+    && !metadataWorkspace.loading
+    && !context.saving
+    && !metadataWorkspace.saving;
+}
+
+function metadataAiRequestContextIsCurrent(requestContext) {
+  if (!requestContext) return false;
+  const token = requestContext.token;
+  const location = metadataAiLocation();
+  return token === metadataAiRequestToken
+    && metadataWorkspace.openMediaId === requestContext.mediaId
+    && metadataOpenItemMediaId() === requestContext.openItemMediaId
+    && Boolean(location)
+    && location.location_id === requestContext.locationId
+    && metadataWorkspaceRevision === requestContext.workspaceRevision
+    && aiCapabilityRevision === requestContext.capabilityRevision
+    && metadataWorkspace.analyzing;
+}
+
+function releaseMetadataAiRequest(requestContext) {
+  if (!requestContext) return false;
+  const token = requestContext.token;
+  if (token !== metadataAiRequestToken) return false;
+  if (metadataWorkspace.openMediaId !== requestContext.mediaId) return false;
+  if (metadataOpenItemMediaId() !== requestContext.openItemMediaId) return false;
+  if (!metadataWorkspace.analyzing) return false;
+  metadataWorkspace.analyzing = false;
+  advanceMetadataWorkspaceRevision();
+  updateMetadataControls();
+  return true;
+}
+
 function renderMetadataAiPanel() {
   if (!metadataAiPanel) return;
   const location = metadataAiLocation();
@@ -3568,12 +3679,18 @@ async function handleAnalyzeMetadataByAi() {
     metadataAiStatus.textContent = "AI analysis is not configured.";
     return;
   }
+  if (
+    metadataWorkspace.openMediaId === null
+    || metadataWorkspace.loading
+    || metadataWorkspace.saving
+  ) return;
   if (metadataWorkspace.analyzing || metadataWorkspace.aiSuggestionApplied) return;
   const location = metadataAiLocation();
   if (!location) {
     metadataAiStatus.textContent = "AI analysis needs an available local GIF or MP4.";
     return;
   }
+  const confirmationContext = captureMetadataAiConfirmationContext(location);
   const accepted = await requestConfirmation({
     title: "Use AI analysis?",
     message: "FrameNest will send up to 3 optimized preview frames and bounded metadata to the configured server-side AI provider. The original file, local path, and API key are not uploaded. Returned values will replace the current unsaved Title, Description, and Tags in this editor. The result will not be saved automatically, and the physical file will not be renamed.",
@@ -3585,12 +3702,22 @@ async function handleAnalyzeMetadataByAi() {
     metadataAiStatus.textContent = "";
     return;
   }
+  if (!metadataAiConfirmationContextIsCurrent(confirmationContext)) return;
   const token = ++metadataAiRequestToken;
   metadataWorkspace.analyzing = true;
+  advanceMetadataWorkspaceRevision();
+  const requestContext = Object.freeze({
+    token,
+    mediaId: confirmationContext.mediaId,
+    openItemMediaId: confirmationContext.openItemMediaId,
+    locationId: confirmationContext.locationId,
+    workspaceRevision: metadataWorkspaceRevision,
+    capabilityRevision: aiCapabilityRevision,
+  });
   metadataAiStatus.textContent = "";
   updateMetadataControls();
   try {
-    const response = await fetch(mediaAiSuggestionEndpoint(metadataWorkspace.openMediaId, location.location_id), {
+    const response = await fetch(mediaAiSuggestionEndpoint(requestContext.mediaId, requestContext.locationId), {
       method: "POST",
       headers: {
         Accept: "application/json",
@@ -3600,30 +3727,29 @@ async function handleAnalyzeMetadataByAi() {
       cache: "no-store",
     });
     const payload = await response.json();
-    if (token !== metadataAiRequestToken || metadataWorkspace.openMediaId === null) {
-      metadataWorkspace.analyzing = false;
-      updateMetadataControls();
+    if (!metadataAiRequestContextIsCurrent(requestContext)) {
+      releaseMetadataAiRequest(requestContext);
       return;
     }
     if (!response.ok) {
-      metadataWorkspace.analyzing = false;
+      releaseMetadataAiRequest(requestContext);
       metadataAiStatus.textContent = aiSuggestionErrorMessage(payload);
       renderMetadataWorkspace();
       return;
     }
     const suggestion = aiSuggestionFromPayload(payload);
     const tagKeys = await metadataTagKeysFromSuggestion(suggestion.tags);
-    if (token !== metadataAiRequestToken || metadataWorkspace.openMediaId === null) {
-      metadataWorkspace.analyzing = false;
-      updateMetadataControls();
+    if (!metadataAiRequestContextIsCurrent(requestContext)) {
+      releaseMetadataAiRequest(requestContext);
       return;
     }
     metadataWorkspace.analyzing = false;
+    advanceMetadataWorkspaceRevision();
     applyResolvedAiSuggestionToMetadataWorkspace(suggestion, tagKeys);
     renderMetadataWorkspace();
   } catch {
-    if (token === metadataAiRequestToken) {
-      metadataWorkspace.analyzing = false;
+    const requestIsCurrent = metadataAiRequestContextIsCurrent(requestContext);
+    if (releaseMetadataAiRequest(requestContext) && requestIsCurrent) {
       metadataAiStatus.textContent = "AI analysis failed.";
       renderMetadataWorkspace();
     }
@@ -3705,13 +3831,16 @@ function applyMetadataPayloadToWorkspace(payload) {
     collectionKey,
     processedAtMs,
   };
+  advanceMetadataWorkspaceRevision();
 }
 
 async function openDetailsDialog(item, openerElement, { playWhenReady = false } = {}) {
   if (!detailsDialog) return;
   if (metadataWorkspace.openMediaId !== null) {
-    if (!(await confirmDiscardDirtyMetadata())) return;
-    await closeMetadataWorkspace({ discardConfirmed: true });
+    const targetMediaId = item.media_id;
+    const discardContext = await confirmDiscardDirtyMetadata({ action: "open-details", targetMediaId });
+    if (!discardContext || item.media_id !== targetMediaId) return;
+    if (!closeMetadataWorkspaceWithContext(discardContext)) return;
   }
   stopCardPreviewTimer();
   cleanupDetailsMedia();
@@ -3810,11 +3939,11 @@ function closeDetailsDialog({ restoreFocus = true } = {}) {
 }
 
 async function handleOpenMetadataWorkspace(item, openerElement, { aiSuggestion = null } = {}) {
-  if (!(await confirmDiscardDirtyMetadata())) {
-    return;
-  }
+  const targetMediaId = item.media_id;
+  const discardContext = await confirmDiscardDirtyMetadata({ action: "open-metadata", targetMediaId });
+  if (!discardContext || !metadataDiscardContextIsCurrent(discardContext) || item.media_id !== targetMediaId) return;
   if (metadataWorkspace.openMediaId !== null) {
-    await closeMetadataWorkspace({ discardConfirmed: true });
+    if (!closeMetadataWorkspaceWithContext(discardContext)) return;
   }
   if (detailsDialog && detailsDialog.hasAttribute("open")) {
     closeDetailsDialog();
@@ -3822,6 +3951,7 @@ async function handleOpenMetadataWorkspace(item, openerElement, { aiSuggestion =
   metadataOpenerElement = openerElement || document.activeElement;
   const token = metadataRequestToken + 1;
   metadataRequestToken = token;
+  advanceMetadataWorkspaceRevision();
   metadataWorkspace = {
     openMediaId: item.media_id,
     openItem: item,
@@ -3916,6 +4046,7 @@ function selectMetadataTag(key) {
   }
   metadataWorkspace.current.tagKeys = [...metadataWorkspace.current.tagKeys, key];
   metadataWorkspace.statusOverride = null;
+  advanceMetadataWorkspaceRevision();
   metadataTagSearchInput.value = "";
   renderMetadataWorkspace();
 }
@@ -3923,6 +4054,7 @@ function selectMetadataTag(key) {
 function removeSelectedMetadataTag(key) {
   metadataWorkspace.current.tagKeys = metadataWorkspace.current.tagKeys.filter((tagKey) => tagKey !== key);
   metadataWorkspace.statusOverride = null;
+  advanceMetadataWorkspaceRevision();
   renderMetadataWorkspace();
 }
 
@@ -3935,6 +4067,7 @@ function resetMetadataWorkspaceAfterDiscard() {
     processedAtMs: metadataWorkspace.baseline.processedAtMs,
   };
   metadataWorkspace.statusOverride = null;
+  advanceMetadataWorkspaceRevision();
   renderMetadataWorkspace();
 }
 
@@ -3942,12 +4075,12 @@ async function handleDiscardMetadataChanges() {
   await closeMetadataWorkspace();
 }
 
-async function closeMetadataWorkspace({ discardConfirmed = false } = {}) {
-  if (!discardConfirmed && !(await confirmDiscardDirtyMetadata())) {
-    return false;
-  }
+function closeMetadataWorkspaceWithContext(discardContext) {
+  if (!metadataDiscardContextIsCurrent(discardContext)) return false;
+  if (metadataWorkspace.openMediaId === null) return false;
   metadataRequestToken += 1;
   metadataAiRequestToken += 1;
+  advanceMetadataWorkspaceRevision();
   metadataWorkspace = {
     openMediaId: null,
     openItem: null,
@@ -3981,6 +4114,12 @@ async function closeMetadataWorkspace({ discardConfirmed = false } = {}) {
   }
   loadCatalog();
   return true;
+}
+
+async function closeMetadataWorkspace({ discardContext = null } = {}) {
+  const context = discardContext || await confirmDiscardDirtyMetadata({ action: "close" });
+  if (!context) return false;
+  return closeMetadataWorkspaceWithContext(context);
 }
 
 async function createAndSelectMetadataTag(displayName) {
@@ -4112,6 +4251,7 @@ async function handleSaveMetadata() {
     return;
   }
   metadataWorkspace.saving = true;
+  advanceMetadataWorkspaceRevision();
   metadataWorkspace.unavailable = false;
   metadataWorkspace.notFound = false;
   setMetadataStatus("saving", "Saving...");
@@ -4129,6 +4269,7 @@ async function handleSaveMetadata() {
     });
     const payload = await response.json();
     metadataWorkspace.saving = false;
+    advanceMetadataWorkspaceRevision();
     if (response.ok) {
       applyMetadataPayloadToWorkspace(payload.metadata);
       metadataWorkspace.aiSuggestionApplied = false;
@@ -4154,6 +4295,7 @@ async function handleSaveMetadata() {
     updateMetadataControls();
   } catch {
     metadataWorkspace.saving = false;
+    advanceMetadataWorkspaceRevision();
     setMetadataStatus("error", "Save failed.");
     updateMetadataControls();
   }
@@ -4671,6 +4813,9 @@ async function loadLibraries() {
 }
 
 function setCatalogScope(collection) {
+  if (catalogState.collection !== collection) {
+    advanceMetadataWorkspaceRevision();
+  }
   catalogState.collection = collection;
   catalogState.offset = 0;
   const allButton = document.querySelector("#catalog-scope-all");
@@ -4683,21 +4828,25 @@ function setCatalogScope(collection) {
 }
 
 document.querySelector("#catalog-scope-all").addEventListener("click", async () => {
-  if (!(await confirmDiscardDirtyMetadata())) {
-    return;
-  }
+  const targetScope = "";
+  const discardContext = await confirmDiscardDirtyMetadata({ action: "change-scope", targetScope });
+  if (!discardContext) return;
   if (metadataWorkspace.openMediaId !== null) {
-    await closeMetadataWorkspace({ discardConfirmed: true });
+    if (!closeMetadataWorkspaceWithContext(discardContext)) return;
+  } else if (!metadataDiscardContextIsCurrent(discardContext)) {
+    return;
   }
   setCatalogScope("");
 });
 
 document.querySelector("#catalog-scope-processed").addEventListener("click", async () => {
-  if (!(await confirmDiscardDirtyMetadata())) {
-    return;
-  }
+  const targetScope = PROCESSED_COLLECTION;
+  const discardContext = await confirmDiscardDirtyMetadata({ action: "change-scope", targetScope });
+  if (!discardContext) return;
   if (metadataWorkspace.openMediaId !== null) {
-    await closeMetadataWorkspace({ discardConfirmed: true });
+    if (!closeMetadataWorkspaceWithContext(discardContext)) return;
+  } else if (!metadataDiscardContextIsCurrent(discardContext)) {
+    return;
   }
   setCatalogScope(PROCESSED_COLLECTION);
 });
@@ -4969,6 +5118,7 @@ if (catalogPageSizeSelect) {
 metadataTitleInput.addEventListener("input", () => {
   metadataWorkspace.current.displayTitle = metadataTitleInput.value;
   metadataWorkspace.statusOverride = null;
+  advanceMetadataWorkspaceRevision();
   updateMetadataControls();
 });
 
@@ -4987,6 +5137,7 @@ metadataTagSearchInput.addEventListener("blur", () => {
 metadataDescriptionInput.addEventListener("input", () => {
   metadataWorkspace.current.description = metadataDescriptionInput.value;
   metadataWorkspace.statusOverride = null;
+  advanceMetadataWorkspaceRevision();
   updateDescriptionStatus();
   updateMetadataControls();
 });
@@ -4995,6 +5146,7 @@ metadataDiscardButton.addEventListener("click", handleDiscardMetadataChanges);
 metadataAiAnalyzeButton.addEventListener("click", handleAnalyzeMetadataByAi);
 metadataAiFilenameInput.addEventListener("input", () => {
   metadataWorkspace.suggestedFilename = metadataAiFilenameInput.value;
+  advanceMetadataWorkspaceRevision();
 });
 
 function setActiveStatusTab(tabName, { focusTab = false, refreshAiStatus = false } = {}) {
