@@ -3467,6 +3467,24 @@ function metadataDiscardContextIsCurrent(context) {
     && catalogState.collection === context.catalogScope;
 }
 
+function reopenMetadataWorkspaceAfterRejectedSwitch(context) {
+  if (
+    !metadataDiscardContextIsCurrent(context)
+    || !metadataDirtyForBeforeUnload()
+    || !metadataDialog
+    || metadataDialog.hasAttribute("open")
+  ) {
+    return false;
+  }
+  if (typeof metadataDialog.showModal === "function") {
+    metadataDialog.showModal();
+  } else {
+    metadataDialog.setAttribute("open", "");
+  }
+  (metadataWorkspace.loading ? metadataWorkspaceTitle : metadataTitleInput).focus();
+  return true;
+}
+
 function metadataSaveLocationId() {
   const location = metadataAiLocation();
   return location ? location.location_id : null;
@@ -4095,8 +4113,13 @@ async function handleOpenMetadataWorkspace(item, openerElement, { aiSuggestion =
     (metadataWorkspace.loading ? metadataWorkspaceTitle : metadataTitleInput).focus();
     return;
   }
+  const switchContext = captureMetadataDiscardContext({ action: "open-metadata", targetMediaId });
   const discardContext = await confirmDiscardDirtyMetadata({ action: "open-metadata", targetMediaId });
-  if (!discardContext || !metadataDiscardContextIsCurrent(discardContext) || item.media_id !== targetMediaId) return;
+  if (!discardContext) {
+    reopenMetadataWorkspaceAfterRejectedSwitch(switchContext);
+    return;
+  }
+  if (!metadataDiscardContextIsCurrent(discardContext) || item.media_id !== targetMediaId) return;
   if (metadataWorkspace.openMediaId !== null) {
     if (!closeMetadataWorkspaceWithContext(discardContext)) return;
   }

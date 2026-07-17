@@ -208,6 +208,7 @@ function createElement(document, tagName = "div") {
     href: "",
     src: "",
     focusCount: 0,
+    showModalCount: 0,
     addEventListener(type, listener) {
       if (!listeners.has(type)) listeners.set(type, []);
       listeners.get(type).push(listener);
@@ -305,6 +306,7 @@ function createElement(document, tagName = "div") {
       return createElement(document, tagName);
     },
     showModal() {
+      this.showModalCount += 1;
       attributes.set("open", "");
       document.__modalStack = document.__modalStack.filter((dialog) => dialog !== this);
       document.__modalStack.push(this);
@@ -792,6 +794,67 @@ function dispatchBeforeUnload(harness) {
 function galleryCardTitle(harness, index) {
   const card = harness.document.querySelector("#catalog-results").children[index];
   return card.children[1].children[0].children[0].textContent;
+}
+
+function prepareDirtyMetadataSwitch(harness, { hidden = true } = {}) {
+  const itemA = makeCatalogItem(MEDIA_A, LOCATION_A);
+  const itemB = makeCatalogItem(MEDIA_B, LOCATION_B);
+  itemA.display_title = "Persisted A";
+  itemB.display_title = "Persisted B";
+  harness.context.__galleryA = itemA;
+  harness.context.__mediaBItem = itemB;
+  harness.run("renderCatalogSuccess({ items: [__galleryA, __mediaBItem], total: 2, offset: 0, limit: 30, q: '' })");
+  setMetadataWorkspace(harness, {
+    item: itemA,
+    baselineTitle: "Persisted A",
+    currentTitle: "Unsaved A",
+    baselineDescription: "Persisted description A",
+    currentDescription: "Unsaved description A",
+    baselineTags: ["persisted"],
+    currentTags: ["persisted", "unsaved"],
+  });
+  harness.context.__metadataOpenerA = harness.document.createElement("button");
+  harness.context.__metadataOpenerB = harness.document.createElement("button");
+  harness.run(`
+    metadataWorkspace.suggestedFilename = "unsaved-a.mp4";
+    metadataWorkspace.aiSuggestionApplied = true;
+    advanceMetadataWorkspaceRevision();
+    renderMetadataWorkspace();
+    metadataOpenerElement = __metadataOpenerA;
+    globalThis.__workspaceA = metadataWorkspace;
+    globalThis.__openItemA = metadataWorkspace.openItem;
+    globalThis.__baselineA = metadataWorkspace.baseline;
+    globalThis.__currentA = metadataWorkspace.current;
+  `);
+  if (hidden) {
+    harness.document.querySelector("#metadata-dialog").removeAttribute("open");
+  }
+  harness.context.__metadataOpenerB.focus();
+  harness.fetchController.clearCalls();
+}
+
+function assertDirtyMetadataStatePreserved(before, after) {
+  for (const key of [
+    "mediaId",
+    "openItemMediaId",
+    "locationId",
+    "revision",
+    "currentTitle",
+    "currentDescription",
+    "currentTags",
+    "baselineTitle",
+    "baselineDescription",
+    "baselineTags",
+    "suggestedFilename",
+    "dirty",
+    "saving",
+    "analyzing",
+    "aiSuggestionApplied",
+    "scope",
+    "beforeUnloadAttached",
+  ]) {
+    assert.deepEqual(after[key], before[key], `expected preserved metadata field ${key}`);
+  }
 }
 
 function setSelectedFile(harness, file = makeFile()) {
@@ -1750,37 +1813,193 @@ test("Same-media hidden dirty workspace reopens without confirmation, reload, or
   assert.equal(h.fetchController.matching("PUT", metadataEndpoint(MEDIA_A)).length, 0);
 });
 
-test("Different-media dirty switch still requires current-context discard", async () => {
-  const h = await createHarness();
-  setMetadataWorkspace(h);
-  h.document.querySelector("#metadata-dialog").removeAttribute("open");
-  h.context.__mediaBItem = makeCatalogItem(MEDIA_B, LOCATION_B);
-  enqueue(h, "GET", metadataEndpoint(MEDIA_B), response(makeMetadataPayload({
-    mediaId: MEDIA_B,
-    title: "Persisted B",
-    description: "Description B",
-    tagKeys: ["persisted-b"],
-  })));
+test("Different-media dirty switch preserves lifecycle ownership across rejected and accepted outcomes", async (t) => {
+  for (const dismissal of ["Keep editing", "Escape", "backdrop"]) {
+    await t.test(`hidden A reopens after ${dismissal}`, async () => {
+      const h = await createHarness();
+      prepareDirtyMetadataSwitch(h);
+      const before = metadataStateOf(h);
+      const metadataDialog = h.document.querySelector("#metadata-dialog");
+      const initialShowModalCount = metadataDialog.showModalCount;
+      const switching = h.run("handleOpenMetadataWorkspace(__mediaBItem, __metadataOpenerB)");
+      assert.equal(confirmationStateOf(h).open, true);
 
-  const safeSwitch = h.run("handleOpenMetadataWorkspace(__mediaBItem, null)");
-  assert.equal(confirmationStateOf(h).open, true);
-  activateConfirmation(h, "dismiss");
-  await safeSwitch;
-  assert.equal(metadataStateOf(h).mediaId, MEDIA_A);
-  assert.equal(metadataStateOf(h).currentTitle, "Unsaved title");
-  assert.equal(metadataStateOf(h).dirty, true);
-  assert.equal(h.fetchController.matching("GET", metadataEndpoint(MEDIA_B)).length, 0);
+      if (dismissal === "Keep editing") {
+        activateConfirmation(h, "dismiss");
+      } else if (dismissal === "Escape") {
+        const escape = pressEscapeInBrowserOrder(
+          h,
+          h.document.querySelector("#confirmation-dismiss-button"),
+        );
+        assert.equal(escape.keydown.defaultPrevented, true);
+        assert.equal(escape.cancelEvents.length, 0);
+      } else {
+        dispatch(h.document.querySelector("#confirmation-dialog"), "click", {
+          target: h.document.querySelector("#confirmation-dialog"),
+        });
+      }
 
-  const confirmedSwitch = h.run("handleOpenMetadataWorkspace(__mediaBItem, null)");
-  assert.equal(confirmationStateOf(h).open, true);
-  activateConfirmation(h, "confirm");
-  await confirmedSwitch;
-  await h.flush();
-  assert.equal(metadataStateOf(h).mediaId, MEDIA_B);
-  assert.equal(metadataStateOf(h).currentTitle, "Persisted B");
-  assert.equal(metadataStateOf(h).metadataOpen, true);
-  assert.equal(h.fetchController.matching("GET", metadataEndpoint(MEDIA_B)).length, 1);
-  assert.equal(h.fetchController.matching("PUT", metadataEndpoint(MEDIA_A)).length, 0);
+      await switching;
+      await h.flush();
+      const after = metadataStateOf(h);
+      assertDirtyMetadataStatePreserved(before, after);
+      assert.equal(confirmationStateOf(h).open, false);
+      assert.equal(after.confirmationRequestId, null);
+      assert.equal(after.metadataOpen, true);
+      assert.equal(metadataDialog.showModalCount, initialShowModalCount + 1);
+      assert.equal(after.focusedTitle, true);
+      assert.equal(h.run("document.activeElement.parentNode === document.querySelector('#metadata-dialog')"), true);
+      assert.equal(h.run("metadataWorkspace === __workspaceA"), true);
+      assert.equal(h.run("metadataWorkspace.openItem === __openItemA"), true);
+      assert.equal(h.run("metadataWorkspace.baseline === __baselineA"), true);
+      assert.equal(h.run("metadataWorkspace.current === __currentA"), true);
+      assert.equal(h.run("metadataOpenerElement === __metadataOpenerA"), true);
+      assert.equal(h.fetchController.matching("GET", metadataEndpoint(MEDIA_B)).length, 0);
+      assert.equal(h.fetchController.matchingPrefix("PUT", "/api/media/").length, 0);
+      assert.equal(h.fetchController.matchingPrefix("GET", "/api/media?").length, 0);
+      assert.equal(h.run("__galleryA.display_title"), "Persisted A");
+      assert.equal(h.run("__mediaBItem.display_title"), "Persisted B");
+      assert.equal(galleryCardTitle(h, 0), "Persisted A");
+      assert.equal(galleryCardTitle(h, 1), "Persisted B");
+      const beforeUnload = dispatchBeforeUnload(h);
+      assert.equal(beforeUnload.defaultPrevented, true);
+      assert.equal(beforeUnload.returnValue, "");
+    });
+  }
+
+  await t.test("visible A is neither double-opened nor unnecessarily refocused or reset", async () => {
+    const h = await createHarness();
+    prepareDirtyMetadataSwitch(h, { hidden: false });
+    const before = metadataStateOf(h);
+    const metadataDialog = h.document.querySelector("#metadata-dialog");
+    const titleInput = h.document.querySelector("#metadata-title-input");
+    titleInput.focus();
+    const initialShowModalCount = metadataDialog.showModalCount;
+    const focusCountBeforeDismissal = titleInput.focusCount;
+    const switching = h.run("handleOpenMetadataWorkspace(__mediaBItem, __metadataOpenerB)");
+    activateConfirmation(h, "dismiss");
+    await switching;
+
+    const after = metadataStateOf(h);
+    assertDirtyMetadataStatePreserved(before, after);
+    assert.equal(after.metadataOpen, true);
+    assert.equal(metadataDialog.showModalCount, initialShowModalCount);
+    assert.equal(titleInput.focusCount, focusCountBeforeDismissal + 1);
+    assert.equal(h.run("metadataWorkspace === __workspaceA"), true);
+    assert.equal(h.run("metadataWorkspace.current === __currentA"), true);
+    assert.equal(h.run("metadataOpenerElement === __metadataOpenerA"), true);
+    assert.equal(h.fetchController.matching("GET", metadataEndpoint(MEDIA_B)).length, 0);
+  });
+
+  await t.test("stale rejected result cannot reopen A over a newer hidden workspace", async () => {
+    const h = await createHarness();
+    prepareDirtyMetadataSwitch(h);
+    const switching = h.run("handleOpenMetadataWorkspace(__mediaBItem, __metadataOpenerB)");
+    const itemC = makeCatalogItem(303, 3003);
+    setMetadataWorkspace(h, {
+      item: itemC,
+      baselineTitle: "Persisted C",
+      currentTitle: "Unsaved C",
+      baselineDescription: "Persisted description C",
+      currentDescription: "Unsaved description C",
+      baselineTags: ["persisted-c"],
+      currentTags: ["persisted-c", "unsaved-c"],
+    });
+    h.context.__metadataOpenerC = h.document.createElement("button");
+    h.run("metadataOpenerElement = __metadataOpenerC; globalThis.__workspaceC = metadataWorkspace");
+    h.document.querySelector("#metadata-dialog").removeAttribute("open");
+    const newerBefore = metadataStateOf(h);
+    const initialShowModalCount = h.document.querySelector("#metadata-dialog").showModalCount;
+
+    activateConfirmation(h, "dismiss");
+    await switching;
+
+    const after = metadataStateOf(h);
+    assertDirtyMetadataStatePreserved(newerBefore, after);
+    assert.equal(after.mediaId, 303);
+    assert.equal(after.metadataOpen, false);
+    assert.equal(h.document.querySelector("#metadata-dialog").showModalCount, initialShowModalCount);
+    assert.equal(h.run("metadataWorkspace === __workspaceC"), true);
+    assert.equal(h.run("metadataOpenerElement === __metadataOpenerC"), true);
+    assert.equal(h.fetchController.matching("GET", metadataEndpoint(MEDIA_B)).length, 0);
+  });
+
+  await t.test("stale rejected result cannot reopen A after its catalog scope changes", async () => {
+    const h = await createHarness();
+    prepareDirtyMetadataSwitch(h);
+    const switching = h.run("handleOpenMetadataWorkspace(__mediaBItem, __metadataOpenerB)");
+    h.run("catalogState.collection = PROCESSED_COLLECTION");
+    const newerBefore = metadataStateOf(h);
+    const initialShowModalCount = h.document.querySelector("#metadata-dialog").showModalCount;
+
+    activateConfirmation(h, "dismiss");
+    await switching;
+
+    const after = metadataStateOf(h);
+    assertDirtyMetadataStatePreserved(newerBefore, after);
+    assert.equal(after.mediaId, MEDIA_A);
+    assert.equal(after.scope, "processed");
+    assert.equal(after.metadataOpen, false);
+    assert.equal(h.document.querySelector("#metadata-dialog").showModalCount, initialShowModalCount);
+    assert.equal(h.run("metadataWorkspace === __workspaceA"), true);
+    assert.equal(h.run("metadataOpenerElement === __metadataOpenerA"), true);
+    assert.equal(h.fetchController.matching("GET", metadataEndpoint(MEDIA_B)).length, 0);
+  });
+
+  await t.test("affirmative current-context discard opens B exactly once", async () => {
+    const h = await createHarness();
+    prepareDirtyMetadataSwitch(h);
+    enqueue(h, "GET", metadataEndpoint(MEDIA_B), response(makeMetadataPayload({
+      mediaId: MEDIA_B,
+      title: "Persisted B",
+      description: "Description B",
+      tagKeys: ["persisted-b"],
+    })));
+
+    const switching = h.run("handleOpenMetadataWorkspace(__mediaBItem, __metadataOpenerB)");
+    assert.equal(confirmationStateOf(h).open, true);
+    activateConfirmation(h, "confirm");
+    await switching;
+    await h.flush();
+
+    const after = metadataStateOf(h);
+    assert.equal(after.mediaId, MEDIA_B);
+    assert.equal(after.openItemMediaId, MEDIA_B);
+    assert.equal(after.currentTitle, "Persisted B");
+    assert.equal(after.metadataOpen, true);
+    assert.equal(h.fetchController.matching("GET", metadataEndpoint(MEDIA_B)).length, 1);
+    assert.equal(h.fetchController.matching("PUT", metadataEndpoint(MEDIA_A)).length, 0);
+    assert.equal(h.run("metadataOpenerElement === __metadataOpenerB"), true);
+  });
+
+  await t.test("stale affirmative result cannot switch a newer hidden workspace to B", async () => {
+    const h = await createHarness();
+    prepareDirtyMetadataSwitch(h);
+    const switching = h.run("handleOpenMetadataWorkspace(__mediaBItem, __metadataOpenerB)");
+    const itemC = makeCatalogItem(303, 3003);
+    setMetadataWorkspace(h, {
+      item: itemC,
+      baselineTitle: "Persisted C",
+      currentTitle: "Newer unsaved C",
+      baselineDescription: "Persisted description C",
+      currentDescription: "Newer unsaved description C",
+      baselineTags: ["persisted-c"],
+      currentTags: ["persisted-c", "newer-c"],
+    });
+    h.run("globalThis.__workspaceC = metadataWorkspace");
+    h.document.querySelector("#metadata-dialog").removeAttribute("open");
+    const newerBefore = metadataStateOf(h);
+
+    activateConfirmation(h, "confirm");
+    await switching;
+
+    const after = metadataStateOf(h);
+    assertDirtyMetadataStatePreserved(newerBefore, after);
+    assert.equal(after.mediaId, 303);
+    assert.equal(after.metadataOpen, false);
+    assert.equal(h.run("metadataWorkspace === __workspaceC"), true);
+    assert.equal(h.fetchController.matching("GET", metadataEndpoint(MEDIA_B)).length, 0);
+  });
 });
 
 test("Gallery presentation remains persisted until Save and isolated to the intended card", async (t) => {
