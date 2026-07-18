@@ -3273,7 +3273,7 @@ function renderCatalogCardTags(item) {
     });
     button.addEventListener("click", (event) => {
       event.stopPropagation();
-      activateCatalogTagFilter(tag.key, { focusChip: catalogTagActivationShouldFocusChip(event) });
+      toggleCatalogCardTagFilter(tag.key, { focusChip: catalogTagActivationShouldFocusChip(event) });
     });
     tags.appendChild(button);
   });
@@ -3464,7 +3464,14 @@ function activateCatalogTagFilter(tagKey, { focusChip = false } = {}) {
   return !alreadyActive;
 }
 
-function removeCatalogTagFilter(tagKey) {
+function toggleCatalogCardTagFilter(tagKey, { focusChip = false } = {}) {
+  if (catalogState.tagKeys.includes(tagKey)) {
+    return removeCatalogTagFilter(tagKey, { restoreFocus: focusChip });
+  }
+  return activateCatalogTagFilter(tagKey, { focusChip });
+}
+
+function removeCatalogTagFilter(tagKey, { restoreFocus = true } = {}) {
   const removedIndex = catalogState.tagKeys.indexOf(tagKey);
   if (removedIndex === -1) return false;
   catalogState.tagKeys = catalogState.tagKeys.filter((activeKey) => activeKey !== tagKey);
@@ -3475,7 +3482,7 @@ function removeCatalogTagFilter(tagKey) {
   const focusTarget = remainingChips[removedIndex]
     || remainingChips[removedIndex - 1]
     || commandSearchInput;
-  if (focusTarget) focusTarget.focus();
+  if (restoreFocus && focusTarget) focusTarget.focus();
   loadCatalog();
   return true;
 }

@@ -6,8 +6,10 @@ const vm = require("node:vm");
 
 const APP_PATH = path.resolve(__dirname, "../src/framenest/adapters/api/web/app.js");
 const INDEX_PATH = path.resolve(__dirname, "../src/framenest/adapters/api/web/index.html");
+const STYLES_PATH = path.resolve(__dirname, "../src/framenest/adapters/api/web/styles.css");
 const APP_SOURCE = fs.readFileSync(APP_PATH, "utf8");
 const INDEX_SOURCE = fs.readFileSync(INDEX_PATH, "utf8");
+const STYLES_SOURCE = fs.readFileSync(STYLES_PATH, "utf8");
 const COMMAND_SEARCH_INPUT_SETUP_START = APP_SOURCE.indexOf("if (commandSearchInput) {");
 const COMMAND_SEARCH_INPUT_SETUP_END = APP_SOURCE.indexOf("\nif (commandSearchClear) {", COMMAND_SEARCH_INPUT_SETUP_START);
 assert.notEqual(COMMAND_SEARCH_INPUT_SETUP_START, -1, "missing command Search input setup");
@@ -210,7 +212,7 @@ class TestElement {
   }
 
   focus() {
-    if (!this.hidden && !this.disabled) {
+    if (!this.hidden && !this.disabled && this.ownerDocument.contains(this)) {
       this.focusCalls += 1;
       this.ownerDocument.activeElement = this;
     }
@@ -228,6 +230,9 @@ class TestElement {
 
   replaceChildren(...nodes) {
     this.children.forEach((node) => {
+      if (node.contains(this.ownerDocument.activeElement)) {
+        this.ownerDocument.activeElement = this.ownerDocument.body;
+      }
       node.parentNode = null;
     });
     this.children = [];
@@ -272,21 +277,30 @@ class TestElement {
 
 class TestDocument {
   constructor() {
-    this.activeElement = null;
+    this.body = new TestElement(this, "body");
+    this.activeElement = this.body;
   }
 
   createElement(tagName) {
     return new TestElement(this, tagName);
   }
+
+  contains(candidate) {
+    return this.body.contains(candidate);
+  }
 }
 
 function keyboardActivate(button, key) {
+  const initialScrollY = button.ownerDocument.scrollY || 0;
   const keydown = new TestEvent("keydown", { key });
   button.dispatchEvent(keydown);
   if (!keydown.defaultPrevented && key === "Enter") button.click();
   const keyup = new TestEvent("keyup", { key });
   button.dispatchEvent(keyup);
   if (!keyup.defaultPrevented && key === " ") button.click();
+  if (button.tagName !== "BUTTON" && key === " " && !keydown.defaultPrevented) {
+    button.ownerDocument.scrollY = initialScrollY + 100;
+  }
 }
 
 function pointerActivate(button, { detail = 1, pointerType = "mouse" } = {}) {
@@ -319,6 +333,7 @@ function createInteractionHarness() {
   const commandSearchClear = document.createElement("button");
   const commandSearchSuggestions = document.createElement("ul");
   const catalogStateEmpty = document.createElement("p");
+  document.body.append(catalogTagFilters, catalogResults, commandSearchInput, commandSearchClear, commandSearchSuggestions, catalogStateEmpty);
   const context = {
     console,
     document,
@@ -349,6 +364,7 @@ function createInteractionHarness() {
     "focusCatalogFilterChip",
     "catalogTagActivationShouldFocusChip",
     "activateCatalogTagFilter",
+    "toggleCatalogCardTagFilter",
     "removeCatalogTagFilter",
     "deriveCatalogFallbackTitle",
     "closeCommandSearchSuggestions",
@@ -386,13 +402,16 @@ function createInteractionHarness() {
 
 function createRequestHarness(fetch) {
   const document = new TestDocument();
+  const catalogTagFilters = document.createElement("div");
   const commandSearchInput = document.createElement("input");
+  document.body.append(catalogTagFilters, commandSearchInput);
   const pendingTimers = new Map();
   let nextTimerId = 1;
   const context = {
     console,
     fetch,
     URLSearchParams,
+    catalogTagFilters,
     commandSearchInput,
     commandSearchClear: null,
     setTimeout(callback, delay) {
@@ -415,6 +434,7 @@ function createRequestHarness(fetch) {
     "catalogRequestOwnerIsCurrent",
     "releaseCatalogRequest",
     "setCatalogSearchText",
+    "removeCatalogTagFilter",
     "loadCatalog",
   ].map(productionFunction).join("\n");
   vm.runInContext(`
@@ -433,6 +453,8 @@ function createRequestHarness(fetch) {
     const catalogPageSummary = { textContent: "" };
     let catalogVisibleState = "idle";
     let renderedPages = [];
+    function renderActiveCatalogTagFilters() {}
+    function renderCatalogTagFilterStates() {}
     function showCatalogState(state) { catalogVisibleState = state; }
     function renderCatalogSuccess(page) {
       renderedPages.push(page.marker);
@@ -464,6 +486,34 @@ test("Search markup keeps an exact prominent-purpose placeholder and an independ
   assert.match(INDEX_SOURCE, /id="catalog-tag-filters"[^>]*aria-label="Active tag filters"/);
 });
 
+test("Active filter chips share the unified Search control and use a bounded single-line rail", () => {
+  const controlStart = INDEX_SOURCE.indexOf('<div class="header-search__control">');
+  const filtersStart = INDEX_SOURCE.indexOf('id="catalog-tag-filters"');
+  const suggestionsEnd = INDEX_SOURCE.indexOf("</ul>", filtersStart);
+  const controlEnd = INDEX_SOURCE.indexOf("</div>", suggestionsEnd);
+  const railStart = STYLES_SOURCE.indexOf(".catalog-tag-filters {");
+  const railEnd = STYLES_SOURCE.indexOf(".catalog-filter-chip {", railStart);
+  const railRule = STYLES_SOURCE.slice(railStart, railEnd);
+
+  assert.ok(controlStart < filtersStart && filtersStart < suggestionsEnd && suggestionsEnd < controlEnd);
+  assert.match(railRule, /flex-wrap: nowrap/);
+  assert.match(railRule, /overflow-x: auto/);
+  assert.match(railRule, /max-width: 360px/);
+  assert.doesNotMatch(railRule, /flex-wrap: wrap/);
+});
+
+test("Terminal Search prompt uses a stable reduced-motion fallback", () => {
+  const promptStart = STYLES_SOURCE.indexOf(".header-search__prompt {");
+  const promptEnd = STYLES_SOURCE.indexOf(".header-search__input {", promptStart);
+  const promptRule = STYLES_SOURCE.slice(promptStart, promptEnd);
+  const reducedStart = STYLES_SOURCE.lastIndexOf("@media (prefers-reduced-motion: reduce)");
+  const reducedRule = STYLES_SOURCE.slice(reducedStart);
+
+  assert.match(promptRule, /font-weight: 900/);
+  assert.match(promptRule, /header-search-prompt-pulse 1s ease-in-out infinite alternate/);
+  assert.match(reducedRule, /\.header-search__prompt\s*{[^}]*animation: none;[^}]*opacity: 0\.82;/s);
+});
+
 test("Canonical card tags compose with text as ordered AND query parameters without duplicates", () => {
   const h = createInteractionHarness();
   h.run(`canonicalTagDefinitions = [
@@ -483,7 +533,7 @@ test("Canonical card tags compose with text as ordered AND query parameters with
   assert.equal(h.catalogTagFilters.children[0].getAttribute("aria-label"), "Remove Alpha tag filter");
 });
 
-test("Pointer Gallery tag activation filters without forcing chip focus for mouse, touch, or pen", () => {
+test("Pointer Gallery tag activation toggles without forcing chip focus or card actions", () => {
   const pointerCases = [
     { pointerType: "mouse", detail: 1 },
     { pointerType: "touch", detail: 0 },
@@ -503,10 +553,22 @@ test("Pointer Gallery tag activation filters without forcing chip focus for mous
     assert.equal(tagButton.getAttribute("aria-pressed"), "true");
     assert.equal(chip.focusCalls, 0, `${pointer.pointerType} activation must not focus the chip`);
     assert.equal(h.document.activeElement, tagButton);
+
+    h.run("catalogState.offset = 60");
+    pointerActivate(tagButton, pointer);
+
+    assert.deepEqual(activations, { card: 0, cardKeyboard: 0, details: 0, playback: 0, contextual: 0 });
+    assert.equal(h.run("catalogState.tagKeys.length"), 0);
+    assert.equal(h.run("catalogState.offset"), 0);
+    assert.equal(h.run("catalogLoadCalls"), 2);
+    assert.equal(tagButton.getAttribute("aria-pressed"), "false");
+    assert.equal(h.catalogTagFilters.hidden, true);
+    assert.equal(chip.focusCalls, 0, `${pointer.pointerType} removal must not focus a detached chip`);
+    assert.equal(h.document.activeElement, tagButton);
   });
 });
 
-test("Native keyboard tag activation is isolated from card actions and focuses the active chip", () => {
+test("Native keyboard tag addition is isolated from card actions and focuses the active chip", () => {
   const h = createInteractionHarness();
   const { tagRegion, activations } = mountCardTagInteractions(h, [{ key: "alpha", display_name: "Alpha" }]);
 
@@ -515,6 +577,7 @@ test("Native keyboard tag activation is isolated from card actions and focuses t
   assert.equal(tagRegion.getAttribute("aria-label"), "Media tags");
   assert.equal(tagButton.tagName, "BUTTON");
   assert.equal(tagButton.getAttribute("aria-label"), "Filter Gallery by Alpha");
+  assert.equal(tagButton.getAttribute("aria-pressed"), "false");
   keyboardActivate(tagButton, " ");
 
   assert.deepEqual(activations, { card: 0, cardKeyboard: 0, details: 0, playback: 0, contextual: 0 });
@@ -524,10 +587,60 @@ test("Native keyboard tag activation is isolated from card actions and focuses t
   assert.equal(h.catalogTagFilters.children[0].focusCalls, 1);
   assert.equal(h.catalogTagFilters.children[0].getAttribute("aria-label"), "Remove Alpha tag filter");
 
-  const secondRegion = h.run("renderCatalogCardTags(item)");
-  keyboardActivate(secondRegion.children[0], "Enter");
-  assert.equal(h.run("catalogState.tagKeys.length"), 1);
-  assert.equal(h.run("catalogLoadCalls"), 1);
+  assert.equal(h.document.scrollY || 0, 0);
+});
+
+test("Keyboard card-tag removal focuses next, previous, then Search without detached focus", () => {
+  const cases = [
+    { active: ["alpha", "beta", "gamma"], remove: "beta", expected: "gamma", key: " " },
+    { active: ["alpha", "beta"], remove: "beta", expected: "alpha", key: "Enter" },
+    { active: ["alpha"], remove: "alpha", expected: "search", key: "Enter" },
+  ];
+  cases.forEach(({ active, remove, expected, key }) => {
+    const h = createInteractionHarness();
+    h.run(`canonicalTagDefinitions = [
+      { key: "alpha", display_name: "Alpha" },
+      { key: "beta", display_name: "Beta" },
+      { key: "gamma", display_name: "Gamma" }
+    ]; ${active.map((key) => `activateCatalogTagFilter("${key}")`).join("; ")}`);
+    const { tagRegion, activations } = mountCardTagInteractions(h, [
+      { key: "alpha", display_name: "Alpha" },
+      { key: "beta", display_name: "Beta" },
+      { key: "gamma", display_name: "Gamma" },
+    ]);
+    const tagButton = tagRegion.children.find((button) => button.dataset.tagKey === remove);
+    assert.equal(tagButton.getAttribute("aria-pressed"), "true");
+    tagButton.focus();
+    h.run("catalogState.offset = 90");
+
+    keyboardActivate(tagButton, key);
+
+    assert.deepEqual(activations, { card: 0, cardKeyboard: 0, details: 0, playback: 0, contextual: 0 });
+    assert.equal(tagButton.getAttribute("aria-pressed"), "false");
+    assert.equal(h.run("catalogState.offset"), 0);
+    assert.equal(h.document.scrollY || 0, 0);
+    assert.ok(h.document.contains(h.document.activeElement), "focus must remain on an attached element");
+    if (expected === "search") {
+      assert.equal(h.document.activeElement, h.commandSearchInput);
+    } else {
+      assert.equal(h.document.activeElement.dataset.tagKey, expected);
+    }
+  });
+});
+
+test("Card-tag add remove add cycles stay duplicate-free and synchronize aria-pressed", () => {
+  const h = createInteractionHarness();
+  const { tagRegion } = mountCardTagInteractions(h, [{ key: "alpha", display_name: "Alpha" }]);
+  const tagButton = tagRegion.children[0];
+
+  pointerActivate(tagButton);
+  pointerActivate(tagButton);
+  pointerActivate(tagButton);
+
+  assert.equal(h.run("catalogState.tagKeys.join(',')"), "alpha");
+  assert.equal(h.catalogTagFilters.children.length, 1);
+  assert.equal(tagButton.getAttribute("aria-pressed"), "true");
+  assert.equal(h.run("catalogLoadCalls"), 3);
 });
 
 test("Pointer provenance and unrelated interrupted pointer events do not contaminate later keyboard activation", () => {
@@ -657,6 +770,32 @@ test("Catalog request owners reject stale success, error, and finally work under
   assert.deepEqual(JSON.parse(h.run("JSON.stringify(renderedPages)")), ["new", "current"]);
   assert.equal(h.run("catalogVisibleState"), "success");
   assert.notEqual(h.run("catalogPageSummary.textContent"), "Catalog page unavailable.");
+});
+
+test("A stale catalog response cannot restore results for a removed active tag", async () => {
+  const requests = [];
+  const h = createRequestHarness((url) => {
+    const pending = deferred();
+    requests.push({ url: String(url), pending });
+    return pending.promise;
+  });
+  h.run("catalogState.tagKeys = ['alpha']; catalogState.offset = 30");
+  const staleTaggedRequest = h.run("loadCatalog()");
+  assert.equal(requests[0].url, "/api/media?tag=alpha&limit=30&offset=30");
+
+  assert.equal(h.run("removeCatalogTagFilter('alpha')"), true);
+  assert.equal(h.run("catalogState.tagKeys.length"), 0);
+  assert.equal(h.run("catalogState.offset"), 0);
+  assert.equal(requests[1].url, "/api/media?limit=30&offset=0");
+
+  requests[0].pending.resolve(response({ marker: "stale tagged", items: [{ media_id: "old" }], total: 1, limit: 30, offset: 30 }));
+  await staleTaggedRequest;
+  assert.deepEqual(JSON.parse(h.run("JSON.stringify(renderedPages)")), []);
+  assert.equal(h.run("catalogState.tagKeys.length"), 0);
+
+  requests[1].pending.resolve(response({ marker: "current untagged", items: [], total: 0, limit: 30, offset: 0 }));
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(JSON.parse(h.run("JSON.stringify(renderedPages)")), ["current untagged"]);
 });
 
 test("Raw Search changes reject the current catalog owner before the debounce claims a successor", async () => {

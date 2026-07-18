@@ -1257,13 +1257,16 @@ def test_header_command_search_has_accessible_label(client: TestClient) -> None:
 def test_header_command_search_is_wider_with_restrained_green_focus(client: TestClient) -> None:
     css = client.get("/assets/styles.css").text
     search = css[css.index(".header-search {") : css.index(".header-search__control")]
+    search_control = css[css.index(".header-search__control {") : css.index(".header-search__prompt")]
     search_input = css[css.index(".header-search__input {") : css.index(".header-search__input::placeholder")]
-    search_focus = css[css.index(".header-search__input:focus-visible") : css.index(".header-search__clear")]
+    search_focus = css[css.index(".header-search__control:focus-within") : css.index(".header-search__prompt")]
 
     assert "flex: 1 1 680px" in search
     assert "max-width: 720px" in search
-    assert "rgba(0, 255, 65, 0.5)" in search_input
-    assert "0 0 14px rgba(0, 255, 65, 0.06)" in search_input
+    assert "rgba(0, 255, 65, 0.5)" in search_control
+    assert "0 0 14px rgba(0, 255, 65, 0.06)" in search_control
+    assert "border: 0" in search_input
+    assert "background: transparent" in search_input
     assert "outline" in search_focus
     assert "rgba(0, 255, 65, 0.82)" in search_focus
     assert "0 0 20px rgba(0, 255, 65, 0.13)" in search_focus
@@ -1303,12 +1306,56 @@ def test_catalog_has_single_tag_toggle_region(client: TestClient) -> None:
     assert "catalog-active-filters" not in html
 
 
+def test_active_tag_filters_are_an_inline_region_of_the_unified_search_control(client: TestClient) -> None:
+    html = client.get("/").text
+    css = client.get("/assets/styles.css").text
+    control_start = html.index('<div class="header-search__control">')
+    filters_start = html.index('id="catalog-tag-filters"')
+    suggestions_end = html.index("</ul>", filters_start)
+    control_end = html.index("</div>", suggestions_end)
+    search_css = css[css.index(".header-search {") : css.index(".header-search__control")]
+    control_css = css[css.index(".header-search__control {") : css.index(".header-search__control:focus-within")]
+    input_css = css[css.index(".header-search__input {") : css.index(".header-search__input::placeholder")]
+    filters_css = css[css.index(".catalog-tag-filters {") : css.index(".catalog-filter-chip {")]
+    mobile_css = css[css.index("@media (max-width: 620px)") : css.index("@keyframes ai-pending")]
+
+    assert control_start < filters_start < suggestions_end < control_end
+    assert "max-width: 720px" in search_css
+    assert "min-width: 0" in control_css
+    assert "height: 40px" in control_css
+    assert "min-width: 80px" in input_css
+    assert "flex-wrap: nowrap" in filters_css
+    assert "overflow-x: auto" in filters_css
+    assert "max-width: 360px" in filters_css
+    assert ".header-search" in mobile_css
+    assert "flex: 1 1 100%" in mobile_css
+    assert "max-width: 100%" in mobile_css
+    assert "max-width: 46%" in mobile_css
+
+
+def test_terminal_search_prompt_pulses_boldly_and_respects_reduced_motion(client: TestClient) -> None:
+    css = client.get("/assets/styles.css").text
+    prompt_css = css[css.index(".header-search__prompt {") : css.index(".header-search__input {")]
+    keyframes = css[css.index("@keyframes header-search-prompt-pulse") : css.index(".command-search-suggestions")]
+    reduced_motion = css[css.rindex("@media (prefers-reduced-motion: reduce)") :]
+
+    assert "font-weight: 900" in prompt_css
+    assert "header-search-prompt-pulse 1s" in prompt_css
+    assert "infinite alternate" in prompt_css
+    assert "opacity: 0.62" in keyframes
+    assert "opacity: 0.92" in keyframes
+    assert ".header-search__prompt" in reduced_motion
+    assert "animation: none" in reduced_motion
+    assert "opacity: 0.82" in reduced_motion
+
+
 def test_javascript_tag_filters_use_active_chip_and_card_pressed_semantics(client: TestClient) -> None:
     script = client.get("/assets/app.js").text
     assert "aria-pressed" in script
     assert "function renderActiveCatalogTagFilters" in script
     assert "function removeCatalogTagFilter" in script
     assert "function activateCatalogTagFilter" in script
+    assert "function toggleCatalogCardTagFilter" in script
     assert "catalog-card__tag" in script
     assert "Remove ${displayName} tag filter" in script
 
@@ -1481,7 +1528,7 @@ def test_javascript_card_renders_canonical_tag_buttons_without_hidden_counter(cl
     assert 'button.className = "catalog-card__tag"' in tags_body
     assert "button.dataset.tagKey = tag.key" in tags_body
     assert "button.textContent = tag.display_name" in tags_body
-    assert "activateCatalogTagFilter(tag.key" in tags_body
+    assert "toggleCatalogCardTagFilter(tag.key" in tags_body
     assert "catalog-card__tag-more" not in tags_body
     assert "maxVisible" not in tags_body
 
