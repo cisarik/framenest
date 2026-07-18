@@ -3273,7 +3273,7 @@ function renderCatalogCardTags(item) {
     });
     button.addEventListener("click", (event) => {
       event.stopPropagation();
-      activateCatalogTagFilter(tag.key, { focusChip: true });
+      activateCatalogTagFilter(tag.key, { focusChip: catalogTagActivationShouldFocusChip(event) });
     });
     tags.appendChild(button);
   });
@@ -3441,6 +3441,10 @@ function focusCatalogFilterChip(tagKey) {
   if (!chip) return false;
   chip.focus();
   return true;
+}
+
+function catalogTagActivationShouldFocusChip(event) {
+  return !event.pointerType && event.detail === 0;
 }
 
 function activateCatalogTagFilter(tagKey, { focusChip = false } = {}) {
@@ -5253,14 +5257,14 @@ function renderCommandSearchSuggestions(titleItems, tagMatches, fallbackItems) {
     labelSpan.textContent = tag.display_name;
     li.appendChild(typeSpan);
     li.appendChild(labelSpan);
-    li.addEventListener("click", () => {
+    li.addEventListener("click", (event) => {
       commandSearchRequestToken += 1;
       commandSearchInput.value = "";
       if (commandSearchClear) commandSearchClear.hidden = true;
       setCatalogSearchText("");
       catalogState.offset = 0;
       closeCommandSearchSuggestions();
-      if (!activateCatalogTagFilter(tag.key, { focusChip: true })) {
+      if (!activateCatalogTagFilter(tag.key, { focusChip: catalogTagActivationShouldFocusChip(event) })) {
         loadCatalog();
       }
     });
