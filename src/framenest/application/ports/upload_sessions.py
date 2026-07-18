@@ -138,7 +138,7 @@ class UploadSessionRepository(Protocol):
         validated_format: UploadValidatedFormat,
         updated_at_ms: int,
     ) -> UploadSession:
-        """Atomically persist checksum, validation evidence, and publish_pending."""
+        """Atomically persist validation evidence and exact-duplicate disposition."""
 
     def get_or_create_byte_identity(
         self,

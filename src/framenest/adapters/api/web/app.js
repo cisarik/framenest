@@ -207,6 +207,8 @@ const uploadFailure = document.querySelector("#upload-failure");
 const uploadStartButton = document.querySelector("#upload-start-button");
 const uploadPauseButton = document.querySelector("#upload-pause-button");
 const uploadResumeButton = document.querySelector("#upload-resume-button");
+const uploadDuplicateKeepButton = document.querySelector("#upload-duplicate-keep-button");
+const uploadDuplicateDiscardButton = document.querySelector("#upload-duplicate-discard-button");
 const uploadCancelButton = document.querySelector("#upload-cancel-button");
 const confirmationDialog = document.querySelector("#confirmation-dialog");
 const confirmationDialogTitle = document.querySelector("#confirmation-dialog-title");
@@ -998,6 +1000,10 @@ function uploadCompleteEndpoint(uploadId) {
   return `${uploadEndpoint(uploadId)}/complete`;
 }
 
+function uploadDuplicateResolutionEndpoint(uploadId) {
+  return `${uploadEndpoint(uploadId)}/duplicate-resolution`;
+}
+
 function activeUploadSnapshot() {
   return uploadState.snapshot;
 }
@@ -1124,7 +1130,7 @@ function uploadIsPollingStopState(snapshot) {
 function uploadCancelPermitted(snapshot) {
   return Boolean(
     snapshot
-      && ["created", "receiving", "received", "duplicate_pending"].includes(snapshot.state),
+      && ["created", "receiving", "received"].includes(snapshot.state),
   );
 }
 
@@ -1140,6 +1146,10 @@ function uploadDisplayState(snapshot) {
     && uploadCancelPermitted(snapshot)
   ) {
     return "Cancelling";
+  }
+  if (snapshot.state === "duplicate_pending" && uploadState.actionOwner) {
+    if (uploadState.actionOwner.kind === "duplicate-keep") return "Keeping duplicate";
+    if (uploadState.actionOwner.kind === "duplicate-discard") return "Discarding duplicate";
   }
   if (uploadState.needsReselection && uploadIsByteReceiving(snapshot)) {
     return "Reselect file to resume";
@@ -1164,7 +1174,7 @@ function uploadDisplayState(snapshot) {
   }
   if (snapshot.state === "received") return "Validating";
   if (snapshot.state === "validating") return "Validating";
-  if (snapshot.state === "duplicate_pending") return "Validating";
+  if (snapshot.state === "duplicate_pending") return "Duplicate found";
   if (["publish_pending", "published", "cataloged"].includes(snapshot.state)) return "Completed";
   if (snapshot.state === "rejected") return "Failed";
   if (snapshot.state === "failed") return "Failed";
@@ -1213,6 +1223,10 @@ function uploadStatusMessage(snapshot) {
   if (snapshot.state === "validating") {
     return "Server validation is running.";
   }
+  if (snapshot.state === "duplicate_pending") {
+    if (uploadState.actionOwner && uploadState.message) return uploadState.message;
+    return "Exact duplicate found.";
+  }
   if (uploadState.needsReselection && uploadIsByteReceiving(snapshot)) {
     return "Reselect the original local file to resume from the server-confirmed offset.";
   }
@@ -1256,7 +1270,13 @@ function normalizeUploadSnapshot(payload) {
   return {
     id: uploadId,
     state: String(payload.state || ""),
-    display_filename: String(payload.display_filename || ""),
+    display_filename: payload.display_filename === undefined
+      ? String(
+        activeUploadSnapshot() && activeUploadSnapshot().id === uploadId
+          ? activeUploadSnapshot().display_filename
+          : uploadState.fileNameHint,
+      )
+      : String(payload.display_filename || ""),
     declared_size_bytes: declaredSize,
     received_size_bytes: receivedSize,
     expires_at: Number.isFinite(expiresAt) ? expiresAt : 0,
@@ -1482,10 +1502,16 @@ function updateUploadActions() {
   const cancelVisible = uploadCancelPermitted(snapshot)
     && !uploadState.completing
     && (!uploadState.actionOwner || uploadState.actionOwner.kind !== "cancel");
+  const duplicateVisible = Boolean(snapshot && snapshot.state === "duplicate_pending");
+  const duplicateDisabled = !duplicateVisible
+    || Boolean(uploadState.actionOwner)
+    || uploadState.completing;
   const focusedAction = [
     uploadStartButton,
     uploadPauseButton,
     uploadResumeButton,
+    uploadDuplicateKeepButton,
+    uploadDuplicateDiscardButton,
     uploadCancelButton,
   ].find((button) => button && document.activeElement === button);
   if (uploadStartButton) {
@@ -1499,6 +1525,14 @@ function updateUploadActions() {
   if (uploadResumeButton) {
     uploadResumeButton.hidden = !resumeVisible;
     uploadResumeButton.disabled = !resumeVisible;
+  }
+  if (uploadDuplicateKeepButton) {
+    uploadDuplicateKeepButton.hidden = !duplicateVisible;
+    uploadDuplicateKeepButton.disabled = duplicateDisabled;
+  }
+  if (uploadDuplicateDiscardButton) {
+    uploadDuplicateDiscardButton.hidden = !duplicateVisible;
+    uploadDuplicateDiscardButton.disabled = duplicateDisabled;
   }
   if (uploadCancelButton) {
     uploadCancelButton.hidden = !cancelVisible;
@@ -2127,6 +2161,89 @@ async function handleCancelUpload() {
       renderUploadCockpit();
     }
   }
+}
+
+async function submitDuplicateResolution(owner, resolution) {
+  if (!uploadContextStillCurrent(owner) || uploadState.actionOwner !== owner) return false;
+  try {
+    const { response, payload } = await fetchUploadJson(
+      uploadDuplicateResolutionEndpoint(owner.uploadId),
+      {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ resolution }),
+        cache: "no-store",
+      },
+    );
+    if (!uploadContextStillCurrent(owner) || uploadState.actionOwner !== owner) return false;
+    if (response.ok) {
+      const resolved = normalizeUploadSnapshot(payload);
+      return applyUploadSnapshot(resolved, owner);
+    }
+    uploadState.message = uploadErrorMessage(payload);
+    renderUploadCockpit();
+    await refreshUploadStatus(owner.uploadId, owner);
+  } catch {
+    if (uploadContextStillCurrent(owner) && uploadState.actionOwner === owner) {
+      uploadState.message = "Duplicate resolution could not be confirmed.";
+      renderUploadCockpit();
+      await refreshUploadStatus(owner.uploadId, owner);
+    }
+  } finally {
+    if (uploadState.actionOwner === owner) {
+      releaseUploadAction(owner);
+      renderUploadCockpit();
+    }
+  }
+  return false;
+}
+
+async function handleKeepDuplicate() {
+  const snapshot = activeUploadSnapshot();
+  if (!snapshot || snapshot.state !== "duplicate_pending" || uploadState.actionOwner) return;
+  const owner = claimUploadAction("duplicate-keep", {
+    uploadId: snapshot.id,
+    file: uploadState.file,
+  });
+  if (!owner) return;
+  uploadState.message = "Keeping this upload as a separate future item.";
+  renderUploadCockpit();
+  await submitDuplicateResolution(owner, "keep_separate");
+}
+
+async function handleDiscardDuplicate() {
+  const snapshot = activeUploadSnapshot();
+  if (!snapshot || snapshot.state !== "duplicate_pending" || uploadState.actionOwner) return;
+  const confirmationContext = currentUploadContext({
+    uploadId: snapshot.id,
+    file: uploadState.file,
+  });
+  const accepted = await requestConfirmation({
+    title: "Discard duplicate?",
+    message: "This uploaded copy will be removed. The earlier upload is not affected.",
+    dismissLabel: "Keep reviewing",
+    confirmLabel: "Discard duplicate",
+    destructive: true,
+  });
+  if (!accepted || !uploadContextStillCurrent(confirmationContext)) return;
+  const currentSnapshot = activeUploadSnapshot();
+  if (
+    !currentSnapshot
+    || currentSnapshot.id !== snapshot.id
+    || currentSnapshot.state !== "duplicate_pending"
+    || uploadState.actionOwner
+  ) return;
+  const owner = claimUploadAction("duplicate-discard", {
+    uploadId: currentSnapshot.id,
+    file: uploadState.file,
+  });
+  if (!owner) return;
+  uploadState.message = "Discarding this duplicate upload.";
+  renderUploadCockpit();
+  await submitDuplicateResolution(owner, "discard");
 }
 
 function handleUploadFileSelection() {
@@ -5627,6 +5744,14 @@ if (uploadPauseButton) {
 
 if (uploadResumeButton) {
   uploadResumeButton.addEventListener("click", handleResumeUpload);
+}
+
+if (uploadDuplicateKeepButton) {
+  uploadDuplicateKeepButton.addEventListener("click", handleKeepDuplicate);
+}
+
+if (uploadDuplicateDiscardButton) {
+  uploadDuplicateDiscardButton.addEventListener("click", handleDiscardDuplicate);
 }
 
 if (uploadCancelButton) {

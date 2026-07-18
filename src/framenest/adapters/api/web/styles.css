@@ -727,6 +727,11 @@ button {
   background: var(--accent-soft);
 }
 
+.upload-row[data-state="duplicate_pending"] {
+  border-color: var(--warning);
+  background: rgba(255, 193, 7, 0.08);
+}
+
 .upload-row[data-state="rejected"],
 .upload-row[data-state="failed"],
 .upload-row[data-state="cancelled"],

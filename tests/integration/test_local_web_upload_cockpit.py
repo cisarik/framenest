@@ -188,6 +188,96 @@ def test_local_upload_api_flow_reaches_publish_pending_without_catalog_visibilit
     assert str(settings.database_path) not in str(status)
 
 
+def test_exact_duplicate_requires_resolution_without_catalog_visibility(
+    tmp_path: Path,
+) -> None:
+    client, settings, engine, coordinator = _client_with_upload_validation(tmp_path)
+    quarantine_root = settings.upload_quarantine_root
+    assert quarantine_root is not None
+    payload = b"GIF89a" + b"\x00" * 10
+    try:
+        canonical = _upload_and_validate(
+            client,
+            coordinator,
+            filename="canonical.gif",
+            payload=payload,
+        )
+        duplicate = _upload_and_validate(
+            client,
+            coordinator,
+            filename="different-name.gif",
+            payload=payload,
+        )
+
+        with sqlite3.connect(settings.database_path) as connection:
+            before_resolution = connection.execute(
+                "SELECT id, state, storage_key FROM upload_sessions ORDER BY created_at_ms, id"
+            ).fetchall()
+            logical_before = connection.execute(
+                "SELECT COUNT(*) FROM logical_media"
+            ).fetchone()
+            locations_before = connection.execute(
+                "SELECT COUNT(*) FROM physical_media_locations"
+            ).fetchone()
+
+        kept = client.post(
+            f"/api/uploads/{duplicate['id']}/duplicate-resolution",
+            json={"resolution": "keep_separate"},
+        )
+        later_duplicate = _upload_and_validate(
+            client,
+            coordinator,
+            filename="third-name.gif",
+            payload=payload,
+        )
+        with sqlite3.connect(settings.database_path) as connection:
+            later_storage_key = connection.execute(
+                "SELECT storage_key FROM upload_sessions WHERE id = ?",
+                (later_duplicate["id"],),
+            ).fetchone()
+        discarded = client.post(
+            f"/api/uploads/{later_duplicate['id']}/duplicate-resolution",
+            json={"resolution": "discard"},
+        )
+
+        with sqlite3.connect(settings.database_path) as connection:
+            final_states = dict(
+                connection.execute("SELECT id, state FROM upload_sessions").fetchall()
+            )
+            logical_after = connection.execute(
+                "SELECT COUNT(*) FROM logical_media"
+            ).fetchone()
+            locations_after = connection.execute(
+                "SELECT COUNT(*) FROM physical_media_locations"
+            ).fetchone()
+    finally:
+        asyncio.run(coordinator.shutdown())
+        dispose_engine(engine)
+
+    assert canonical["state"] == "publish_pending"
+    assert duplicate["state"] == "duplicate_pending"
+    assert sorted(row[1] for row in before_resolution) == [
+        "duplicate_pending",
+        "publish_pending",
+    ]
+    assert logical_before == logical_after == (0,)
+    assert locations_before == locations_after == (0,)
+    assert kept.status_code == 200
+    assert kept.json()["state"] == "publish_pending"
+    assert later_duplicate["state"] == "duplicate_pending"
+    assert discarded.status_code == 200
+    assert discarded.json()["state"] == "cancelled"
+    assert final_states[canonical["id"]] == "publish_pending"
+    assert final_states[duplicate["id"]] == "publish_pending"
+    assert final_states[later_duplicate["id"]] == "cancelled"
+    assert later_storage_key is not None
+    assert not (quarantine_root / f"{later_storage_key[0]}.part").exists()
+    for upload_id, _, storage_key in before_resolution:
+        assert upload_id in {canonical["id"], duplicate["id"]}
+        quarantine_path = quarantine_root / f"{storage_key}.part"
+        assert quarantine_path.read_bytes() == payload
+
+
 def test_local_upload_api_flow_rejects_invalid_content_with_sanitized_failure(
     tmp_path: Path,
 ) -> None:

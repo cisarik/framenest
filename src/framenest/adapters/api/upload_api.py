@@ -3,16 +3,18 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Literal
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, UUID4, field_validator
+from pydantic import BaseModel, ConfigDict, UUID4, field_validator
 
 from framenest.application.upload_transport import (
     UploadBodyLengthMismatchError,
     UploadCapabilityNotConfiguredError,
     UploadChunkTooLargeError,
     UploadConcurrencyConflictError,
+    UploadDuplicateResolution,
     UploadInsufficientStorageError,
     UploadInvalidMetadataError,
     UploadInvalidOffsetError,
@@ -80,6 +82,21 @@ class UploadSessionResponse(BaseModel):
     received_size_bytes: int
     expires_at: int
     failure_code: str | None = None
+
+
+class UploadDuplicateResolutionResponse(BaseModel):
+    id: str
+    state: str
+    declared_size_bytes: int
+    received_size_bytes: int
+    expires_at: int
+    failure_code: str | None = None
+
+
+class UploadDuplicateResolutionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    resolution: Literal["keep_separate", "discard"]
 
 
 class UploadCapabilityResponse(BaseModel):
@@ -254,6 +271,40 @@ def create_upload_api_router(dependencies: UploadApiDependencies) -> APIRouter:
         if snapshot.state == "received":
             _notify_validation_coordinator(dependencies.validation_coordinator)
         return _snapshot_response(snapshot)
+
+    @router.post(
+        "/api/uploads/{upload_id}/duplicate-resolution",
+        response_model=UploadDuplicateResolutionResponse,
+        responses={
+            403: {"model": ErrorResponse},
+            404: {"model": ErrorResponse},
+            409: {"model": ErrorResponse},
+            503: {"model": ErrorResponse},
+        },
+    )
+    async def resolve_upload_duplicate(
+        upload_id: UUID4,
+        request: Request,
+        payload: UploadDuplicateResolutionRequest,
+    ) -> UploadDuplicateResolutionResponse | JSONResponse:
+        origin_error = _reject_cross_origin_mutation(request)
+        if origin_error is not None:
+            return origin_error
+        try:
+            snapshot = await dependencies.transport.resolve_duplicate(
+                _session_id(upload_id),
+                UploadDuplicateResolution(payload.resolution),
+            )
+        except Exception as exc:
+            mapped = _map_error(exc)
+            if mapped is not None:
+                return mapped
+            return _error_response(
+                503,
+                QUARANTINE_STORAGE_UNAVAILABLE,
+                "Quarantine storage is unavailable.",
+            )
+        return _duplicate_resolution_response(snapshot)
 
     @router.delete(
         "/api/uploads/{upload_id}",
@@ -469,6 +520,19 @@ def _snapshot_response(snapshot: UploadSessionSnapshot) -> UploadSessionResponse
         id=snapshot.id,
         state=snapshot.state,
         display_filename=snapshot.display_filename,
+        declared_size_bytes=snapshot.declared_size_bytes,
+        received_size_bytes=snapshot.received_size_bytes,
+        expires_at=snapshot.expires_at,
+        failure_code=snapshot.failure_code,
+    )
+
+
+def _duplicate_resolution_response(
+    snapshot: UploadSessionSnapshot,
+) -> UploadDuplicateResolutionResponse:
+    return UploadDuplicateResolutionResponse(
+        id=snapshot.id,
+        state=snapshot.state,
         declared_size_bytes=snapshot.declared_size_bytes,
         received_size_bytes=snapshot.received_size_bytes,
         expires_at=snapshot.expires_at,

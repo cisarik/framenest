@@ -292,6 +292,51 @@ def test_matching_publish_pending_result_is_idempotent_without_reprobe(tmp_path:
     assert validator.calls == 1
 
 
+def test_later_byte_identical_validation_waits_for_explicit_duplicate_resolution(
+    tmp_path: Path,
+) -> None:
+    payload = b"same-authoritative-bytes"
+    validator = _Validator()
+    service, repository, engine, first, _path = _setup(
+        tmp_path,
+        payload=payload,
+        validator=validator,
+    )
+    second = UploadSession(
+        id=UploadSessionId.new(),
+        state=UploadSessionState.RECEIVED,
+        storage_key=UploadStorageKey("validationupload0002"),
+        display_filename=UploadDisplayFilename("different-client-name.gif"),
+        declared_size_bytes=len(payload),
+        received_size_bytes=len(payload),
+        checksum_algorithm=None,
+        checksum_hex=None,
+        created_at_ms=11,
+        updated_at_ms=11,
+        expires_at_ms=10_000,
+        failure_code=None,
+        version=0,
+    )
+    repository.create(second)
+    (tmp_path / "quarantine" / f"{second.storage_key.value}.part").write_bytes(payload)
+    try:
+        first_result = asyncio.run(service.validate(first.id))
+        second_result = asyncio.run(service.validate(second.id))
+        repeated = asyncio.run(service.validate(second.id))
+        first_stored = repository.get(first.id)
+        second_stored = repository.get(second.id)
+    finally:
+        dispose_engine(engine)
+
+    assert first_result.state == UploadSessionState.PUBLISH_PENDING.value
+    assert second_result.state == UploadSessionState.DUPLICATE_PENDING.value
+    assert repeated == second_result
+    assert first_stored is not None
+    assert second_stored is not None
+    assert first_stored.byte_identity_id == second_stored.byte_identity_id
+    assert validator.calls == 2
+
+
 def test_path_replacement_after_open_does_not_split_hash_and_probe_object(
     tmp_path: Path,
 ) -> None:

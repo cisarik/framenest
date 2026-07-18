@@ -6,6 +6,7 @@ import ast
 import sqlite3
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from threading import Barrier, Event
 
 import pytest
 import sqlalchemy as sa
@@ -74,6 +75,7 @@ def _session(
     received_size_bytes: int = 0,
     declared_size_bytes: int = 100,
     checksum_hex: str | None = None,
+    display_filename: str = "example.mp4",
     version: int = 0,
     validated_media_kind: UploadValidatedMediaKind | None = None,
     validated_format: UploadValidatedFormat | None = None,
@@ -98,7 +100,7 @@ def _session(
         id=session_id or UploadSessionId.new(),
         state=state,
         storage_key=UploadStorageKey(storage_key),
-        display_filename=UploadDisplayFilename("example.mp4"),
+        display_filename=UploadDisplayFilename(display_filename),
         declared_size_bytes=declared_size_bytes,
         received_size_bytes=received_size_bytes,
         checksum_algorithm=None if checksum_hex is None else "sha256",
@@ -963,7 +965,311 @@ def test_two_successful_identical_uploads_link_to_one_byte_identity(tmp_path: Pa
     finally:
         engine.dispose()
 
+    assert first_completed.state is UploadSessionState.PUBLISH_PENDING
+    assert second_completed.state is UploadSessionState.DUPLICATE_PENDING
     assert first_completed.byte_identity_id == second_completed.byte_identity_id
+    assert identity_count == 1
+
+
+def test_validation_completion_never_uses_the_current_session_as_its_own_duplicate(
+    tmp_path: Path,
+) -> None:
+    repository, engine = _repository(tmp_path)
+    session = _session(
+        storage_key="upload-session-self-duplicate-0001",
+        state=UploadSessionState.VALIDATING,
+    )
+    try:
+        repository.create(session)
+        completed = repository.complete_validation_success(
+            session.id,
+            expected_version=0,
+            checksum_hex="3" * 64,
+            validated_media_kind=UploadValidatedMediaKind.VIDEO,
+            validated_format=UploadValidatedFormat.MP4,
+            updated_at_ms=20,
+        )
+        repeated = repository.complete_validation_success(
+            session.id,
+            expected_version=completed.version,
+            checksum_hex="3" * 64,
+            validated_media_kind=UploadValidatedMediaKind.VIDEO,
+            validated_format=UploadValidatedFormat.MP4,
+            updated_at_ms=21,
+        )
+    finally:
+        engine.dispose()
+
+    assert completed.state is UploadSessionState.PUBLISH_PENDING
+    assert repeated == completed
+
+
+@pytest.mark.parametrize(
+    "qualifying_state",
+    (
+        UploadSessionState.PUBLISH_PENDING,
+        UploadSessionState.PUBLISHED,
+        UploadSessionState.CATALOGED,
+    ),
+)
+def test_each_approved_canonical_state_gates_a_later_exact_upload(
+    tmp_path: Path,
+    qualifying_state: UploadSessionState,
+) -> None:
+    repository, engine = _repository(tmp_path)
+    identity_id = MediaByteIdentityId.new()
+    digest = "2" * 64
+    prior = _session(
+        storage_key="upload-session-qualifying-0001",
+        state=qualifying_state,
+        received_size_bytes=100,
+        checksum_hex=digest,
+        validated_media_kind=UploadValidatedMediaKind.VIDEO,
+        validated_format=UploadValidatedFormat.MP4,
+        byte_identity_id=identity_id,
+    )
+    current = _session(
+        storage_key="upload-session-qualifying-0002",
+        state=UploadSessionState.VALIDATING,
+    )
+    try:
+        repository.create(prior)
+        repository.create(current)
+        completed = repository.complete_validation_success(
+            current.id,
+            expected_version=0,
+            checksum_hex=digest,
+            validated_media_kind=UploadValidatedMediaKind.ANIMATED_IMAGE,
+            validated_format=UploadValidatedFormat.GIF,
+            updated_at_ms=20,
+        )
+    finally:
+        engine.dispose()
+
+    assert completed.state is UploadSessionState.DUPLICATE_PENDING
+    assert completed.byte_identity_id == identity_id
+
+
+@pytest.mark.parametrize(
+    "nonqualifying_state",
+    (
+        UploadSessionState.REJECTED,
+        UploadSessionState.CANCELLED,
+        UploadSessionState.EXPIRED,
+        UploadSessionState.FAILED,
+    ),
+)
+def test_terminal_identity_does_not_block_later_valid_upload(
+    tmp_path: Path,
+    nonqualifying_state: UploadSessionState,
+) -> None:
+    repository, engine = _repository(tmp_path)
+    identity_id = MediaByteIdentityId.new()
+    digest = "4" * 64
+    prior = _session(
+        storage_key="upload-session-terminal-0001",
+        state=nonqualifying_state,
+        received_size_bytes=100,
+        checksum_hex=digest,
+        validated_media_kind=UploadValidatedMediaKind.VIDEO,
+        validated_format=UploadValidatedFormat.MP4,
+        byte_identity_id=identity_id,
+    )
+    current = _session(
+        storage_key="upload-session-terminal-0002",
+        state=UploadSessionState.VALIDATING,
+    )
+    try:
+        repository.create(prior)
+        repository.create(current)
+        completed = repository.complete_validation_success(
+            current.id,
+            expected_version=0,
+            checksum_hex=digest,
+            validated_media_kind=UploadValidatedMediaKind.VIDEO,
+            validated_format=UploadValidatedFormat.MP4,
+            updated_at_ms=20,
+        )
+    finally:
+        engine.dispose()
+
+    assert completed.state is UploadSessionState.PUBLISH_PENDING
+    assert completed.byte_identity_id == identity_id
+
+
+def test_duplicate_pending_identity_is_not_a_canonical_candidate(tmp_path: Path) -> None:
+    repository, engine = _repository(tmp_path)
+    identity_id = MediaByteIdentityId.new()
+    digest = "5" * 64
+    prior_duplicate = _session(
+        storage_key="upload-session-duplicate-0001",
+        state=UploadSessionState.DUPLICATE_PENDING,
+        checksum_hex=digest,
+        validated_media_kind=UploadValidatedMediaKind.VIDEO,
+        validated_format=UploadValidatedFormat.MP4,
+        byte_identity_id=identity_id,
+    )
+    current = _session(
+        storage_key="upload-session-duplicate-0002",
+        state=UploadSessionState.VALIDATING,
+    )
+    try:
+        repository.create(prior_duplicate)
+        repository.create(current)
+        completed = repository.complete_validation_success(
+            current.id,
+            expected_version=0,
+            checksum_hex=digest,
+            validated_media_kind=UploadValidatedMediaKind.VIDEO,
+            validated_format=UploadValidatedFormat.MP4,
+            updated_at_ms=20,
+        )
+    finally:
+        engine.dispose()
+
+    assert completed.state is UploadSessionState.PUBLISH_PENDING
+    assert completed.byte_identity_id == identity_id
+
+
+def test_duplicate_classification_ignores_filename_and_preserves_committed_outcome(
+    tmp_path: Path,
+) -> None:
+    repository, engine = _repository(tmp_path)
+    digest = "6" * 64
+    first = _session(
+        storage_key="upload-session-filename-0001",
+        state=UploadSessionState.VALIDATING,
+        display_filename="first-name.mp4",
+    )
+    second = _session(
+        storage_key="upload-session-filename-0002",
+        state=UploadSessionState.VALIDATING,
+        display_filename="unrelated-name.gif",
+    )
+    try:
+        repository.create(first)
+        repository.create(second)
+        first_result = repository.complete_validation_success(
+            first.id,
+            expected_version=0,
+            checksum_hex=digest,
+            validated_media_kind=UploadValidatedMediaKind.VIDEO,
+            validated_format=UploadValidatedFormat.MP4,
+            updated_at_ms=20,
+        )
+        second_result = repository.complete_validation_success(
+            second.id,
+            expected_version=0,
+            checksum_hex=digest,
+            validated_media_kind=UploadValidatedMediaKind.VIDEO,
+            validated_format=UploadValidatedFormat.MP4,
+            updated_at_ms=21,
+        )
+        repeated = repository.complete_validation_success(
+            second.id,
+            expected_version=second_result.version,
+            checksum_hex=digest,
+            validated_media_kind=UploadValidatedMediaKind.VIDEO,
+            validated_format=UploadValidatedFormat.MP4,
+            updated_at_ms=22,
+        )
+    finally:
+        engine.dispose()
+
+    assert first_result.state is UploadSessionState.PUBLISH_PENDING
+    assert second_result.state is UploadSessionState.DUPLICATE_PENDING
+    assert repeated == second_result
+
+
+def test_concurrent_identical_validation_serializes_before_canonical_lookup(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "concurrent-validation.sqlite3"
+    upgrade_database_to_head(FrameNestSettings(database_path=database_path, _env_file=None))
+    setup_engine = create_sqlite_engine(database_path)
+    setup_repository = SqliteUploadSessionRepository(setup_engine)
+    first = _session(
+        storage_key="upload-session-race-0001",
+        state=UploadSessionState.VALIDATING,
+    )
+    second = _session(
+        storage_key="upload-session-race-0002",
+        state=UploadSessionState.VALIDATING,
+    )
+    setup_repository.create(first)
+    setup_repository.create(second)
+    setup_engine.dispose()
+
+    engines = [
+        create_sqlite_engine(database_path, busy_timeout_seconds=5.0),
+        create_sqlite_engine(database_path, busy_timeout_seconds=5.0),
+    ]
+    begin_attempted = [Event(), Event()]
+    for engine, attempted in zip(engines, begin_attempted, strict=True):
+        def mark_begin(
+            _connection,
+            _cursor,
+            statement,
+            _parameters,
+            _context,
+            _executemany,
+            *,
+            marker=attempted,
+        ) -> None:
+            if statement.strip().upper() == "BEGIN IMMEDIATE":
+                marker.set()
+
+        sa.event.listen(engine, "before_cursor_execute", mark_begin)
+
+    start = Barrier(2)
+    digest = "7" * 64
+
+    def worker(index: int, session: UploadSession) -> UploadSession:
+        repository = SqliteUploadSessionRepository(engines[index])
+        start.wait(timeout=5)
+        return repository.complete_validation_success(
+            session.id,
+            expected_version=0,
+            checksum_hex=digest,
+            validated_media_kind=UploadValidatedMediaKind.VIDEO,
+            validated_format=UploadValidatedFormat.MP4,
+            updated_at_ms=20 + index,
+        )
+
+    blocker = sqlite3.connect(database_path, isolation_level=None)
+    blocker.execute("PRAGMA busy_timeout = 5000")
+    blocker.execute("BEGIN IMMEDIATE")
+    try:
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            futures = [
+                executor.submit(worker, 0, first),
+                executor.submit(worker, 1, second),
+            ]
+            assert begin_attempted[0].wait(timeout=5)
+            assert begin_attempted[1].wait(timeout=5)
+            blocker.commit()
+            results = [future.result(timeout=5) for future in futures]
+    finally:
+        if blocker.in_transaction:
+            blocker.rollback()
+        blocker.close()
+        for engine in engines:
+            engine.dispose()
+
+    verify_engine = create_sqlite_engine(database_path)
+    try:
+        with verify_engine.connect() as connection:
+            identity_count = connection.execute(
+                sa.select(sa.func.count()).select_from(media_byte_identities)
+            ).scalar_one()
+    finally:
+        verify_engine.dispose()
+
+    assert sorted(result.state.value for result in results) == [
+        UploadSessionState.DUPLICATE_PENDING.value,
+        UploadSessionState.PUBLISH_PENDING.value,
+    ]
+    assert results[0].byte_identity_id == results[1].byte_identity_id
     assert identity_count == 1
 
 

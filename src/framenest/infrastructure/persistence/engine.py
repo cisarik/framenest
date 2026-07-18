@@ -63,6 +63,22 @@ def run_in_transaction(
         return result
 
 
+def run_in_immediate_transaction(
+    engine: Engine,
+    operation: Callable[[Connection], T],
+) -> T:
+    """Run one SQLite write decision after acquiring the writer lock first."""
+    with engine.connect() as connection:
+        connection.exec_driver_sql("BEGIN IMMEDIATE")
+        try:
+            result = operation(connection)
+        except BaseException:
+            connection.rollback()
+            raise
+        connection.commit()
+        return result
+
+
 def dispose_engine(engine: Engine) -> None:
     """Dispose an engine at an explicit cleanup boundary."""
     engine.dispose()

@@ -334,6 +334,12 @@ function applySelectorDefaults(selector, element) {
   if (selector === "#upload-cancel-button") {
     element.textContent = "Cancel";
   }
+  if (selector === "#upload-duplicate-keep-button") {
+    element.textContent = "Keep as separate item";
+  }
+  if (selector === "#upload-duplicate-discard-button") {
+    element.textContent = "Discard duplicate";
+  }
 }
 
 function createDocument() {
@@ -351,6 +357,8 @@ function createDocument() {
     ["#upload-start-button", "#upload-dialog"],
     ["#upload-pause-button", "#upload-dialog"],
     ["#upload-resume-button", "#upload-dialog"],
+    ["#upload-duplicate-keep-button", "#upload-dialog"],
+    ["#upload-duplicate-discard-button", "#upload-dialog"],
     ["#upload-cancel-button", "#upload-dialog"],
     ["#metadata-workspace-title", "#metadata-dialog"],
     ["#metadata-close-button", "#metadata-dialog"],
@@ -544,13 +552,19 @@ function stateOf(harness) {
     startHidden: document.querySelector("#upload-start-button").hidden,
     pauseHidden: document.querySelector("#upload-pause-button").hidden,
     resumeHidden: document.querySelector("#upload-resume-button").hidden,
+    duplicateKeepHidden: document.querySelector("#upload-duplicate-keep-button").hidden,
+    duplicateDiscardHidden: document.querySelector("#upload-duplicate-discard-button").hidden,
     cancelHidden: document.querySelector("#upload-cancel-button").hidden,
     startDisabled: document.querySelector("#upload-start-button").disabled,
     pauseDisabled: document.querySelector("#upload-pause-button").disabled,
     resumeDisabled: document.querySelector("#upload-resume-button").disabled,
+    duplicateKeepDisabled: document.querySelector("#upload-duplicate-keep-button").disabled,
+    duplicateDiscardDisabled: document.querySelector("#upload-duplicate-discard-button").disabled,
     cancelDisabled: document.querySelector("#upload-cancel-button").disabled,
     focusedStatus: document.activeElement === document.querySelector("#upload-message"),
     cancelLabel: document.querySelector("#upload-cancel-button").textContent,
+    duplicateKeepLabel: document.querySelector("#upload-duplicate-keep-button").textContent,
+    duplicateDiscardLabel: document.querySelector("#upload-duplicate-discard-button").textContent,
     recovery: window.localStorage.getItem("${RECOVERY_KEY}"),
   })`);
 }
@@ -940,7 +954,14 @@ function configureControlScenario(harness, scenario) {
 function assertExactUploadActions(harness, scenarioName, expectedActions) {
   const state = stateOf(harness);
   const expected = new Set(expectedActions);
-  for (const action of ["start", "pause", "resume", "cancel"]) {
+  for (const action of [
+    "start",
+    "pause",
+    "resume",
+    "duplicateKeep",
+    "duplicateDiscard",
+    "cancel",
+  ]) {
     const available = expected.has(action);
     assert.equal(state[`${action}Hidden`], !available, `${scenarioName}: ${action} hidden`);
     assert.equal(state[`${action}Disabled`], !available, `${scenarioName}: ${action} disabled`);
@@ -972,7 +993,12 @@ test("Upload controls expose the exact action set for every accepted lifecycle s
     { name: "Created session ready to resume", snapshotState: "created", received: 0, stateLabel: "Ready to resume", actions: ["resume", "cancel"] },
     { name: "Received", snapshotState: "received", stateLabel: "Validating", actions: ["cancel"] },
     { name: "Validating", snapshotState: "validating", stateLabel: "Validating", actions: [] },
-    { name: "Duplicate pending", snapshotState: "duplicate_pending", stateLabel: "Validating", actions: ["cancel"] },
+    {
+      name: "Duplicate pending",
+      snapshotState: "duplicate_pending",
+      stateLabel: "Duplicate found",
+      actions: ["duplicateKeep", "duplicateDiscard"],
+    },
     { name: "Publish pending", snapshotState: "publish_pending", stateLabel: "Completed", actions: [] },
     { name: "Published", snapshotState: "published", stateLabel: "Completed", actions: [] },
     { name: "Cataloged", snapshotState: "cataloged", stateLabel: "Completed", actions: [] },
@@ -992,6 +1018,215 @@ test("Upload controls expose the exact action set for every accepted lifecycle s
 
   configureControlScenario(h, scenarios[0]);
   assert.equal(stateOf(h).fileName, "", "idle controls remain absent with no selected file");
+});
+
+test("Duplicate pending renders the approved copy and exactly two duplicate actions", async () => {
+  const h = await createHarness();
+  setActiveUpload(h, { state: "duplicate_pending", received: 8 });
+
+  const state = stateOf(h);
+  assert.equal(state.stateLabel, "Duplicate found");
+  assert.equal(state.visibleMessage, "Exact duplicate found.");
+  assert.equal(state.duplicateKeepLabel, "Keep as separate item");
+  assert.equal(state.duplicateDiscardLabel, "Discard duplicate");
+  assertExactUploadActions(h, "duplicate review", ["duplicateKeep", "duplicateDiscard"]);
+});
+
+test("Keep separate is single-owner, sends no bytes, and reaches awaiting publication", async () => {
+  const h = await createHarness();
+  setActiveUpload(h, { state: "duplicate_pending", received: 8 });
+  const resolution = deferred();
+  enqueue(h, "POST", `/api/uploads/${UPLOAD_A}/duplicate-resolution`, resolution.promise);
+  h.document.querySelector("#upload-duplicate-keep-button").focus();
+
+  const first = h.run("handleKeepDuplicate()");
+  const repeated = h.run("handleKeepDuplicate()");
+  await h.flush();
+
+  const pending = stateOf(h);
+  assert.equal(pending.actionKind, "duplicate-keep");
+  assert.equal(pending.duplicateKeepHidden, false);
+  assert.equal(pending.duplicateDiscardHidden, false);
+  assert.equal(pending.duplicateKeepDisabled, true);
+  assert.equal(pending.duplicateDiscardDisabled, true);
+  const calls = h.fetchController.matching(
+    "POST",
+    `/api/uploads/${UPLOAD_A}/duplicate-resolution`,
+  );
+  assert.equal(calls.length, 1);
+  assert.deepEqual(JSON.parse(calls[0].options.body), { resolution: "keep_separate" });
+  assert.equal(h.fetchController.matching("PATCH", `/api/uploads/${UPLOAD_A}`).length, 0);
+  assert.equal(h.fetchController.matching("DELETE", `/api/uploads/${UPLOAD_A}`).length, 0);
+
+  const kept = snapshot(UPLOAD_A, "publish_pending", 8);
+  delete kept.display_filename;
+  resolution.resolve(response(kept));
+  await Promise.all([first, repeated]);
+  await h.flush();
+
+  const settled = stateOf(h);
+  assert.equal(settled.snapshotState, "publish_pending");
+  assert.equal(settled.visibleMessage, "Validated. Awaiting publication. Not yet available in Gallery.");
+  assert.equal(settled.recovery, null);
+  assert.equal(settled.fileName, "sample.gif");
+  assert.equal(settled.focusedStatus, true);
+});
+
+test("Duplicate discard confirmation preserves review on dismissal and removes only after approval", async () => {
+  const h = await createHarness();
+  setActiveUpload(h, { state: "duplicate_pending", received: 8 });
+  h.run('document.querySelector("#upload-dialog").setAttribute("open", "")');
+  const trigger = h.document.querySelector("#upload-duplicate-discard-button");
+  trigger.focus();
+
+  const escaped = h.run("handleDiscardDuplicate()");
+  await h.flush();
+  let confirmation = confirmationStateOf(h);
+  assert.equal(confirmation.title, "Discard duplicate?");
+  assert.equal(
+    confirmation.message,
+    "This uploaded copy will be removed. The earlier upload is not affected.",
+  );
+  assert.equal(confirmation.dismissLabel, "Keep reviewing");
+  assert.equal(confirmation.confirmLabel, "Discard duplicate");
+  assert.equal(confirmation.destructive, true);
+  assert.equal(confirmation.focusedDismiss, true);
+  dismissConfirmationWithEscape(h);
+  await escaped;
+  assert.equal(stateOf(h).snapshotState, "duplicate_pending");
+  assert.equal(h.document.activeElement, trigger);
+  assert.equal(h.fetchController.matchingPrefix("POST", "/api/uploads/").length, 0);
+
+  const backdrop = h.run("handleDiscardDuplicate()");
+  await h.flush();
+  dispatch(h.document.querySelector("#confirmation-dialog"), "click", {
+    target: h.document.querySelector("#confirmation-dialog"),
+  });
+  await backdrop;
+  assert.equal(stateOf(h).snapshotState, "duplicate_pending");
+  assert.equal(h.document.activeElement, trigger);
+
+  const resolution = deferred();
+  enqueue(h, "POST", `/api/uploads/${UPLOAD_A}/duplicate-resolution`, resolution.promise);
+  const confirmed = h.run("handleDiscardDuplicate()");
+  await h.flush();
+  activateConfirmation(h, "confirm");
+  await h.flush();
+
+  confirmation = confirmationStateOf(h);
+  assert.equal(confirmation.open, false);
+  assert.equal(stateOf(h).actionKind, "duplicate-discard");
+  const calls = h.fetchController.matching(
+    "POST",
+    `/api/uploads/${UPLOAD_A}/duplicate-resolution`,
+  );
+  assert.equal(calls.length, 1);
+  assert.deepEqual(JSON.parse(calls[0].options.body), { resolution: "discard" });
+  assert.equal(h.fetchController.matching("PATCH", `/api/uploads/${UPLOAD_A}`).length, 0);
+  assert.equal(h.fetchController.matching("DELETE", `/api/uploads/${UPLOAD_A}`).length, 0);
+
+  const cancelled = snapshot(UPLOAD_A, "cancelled", 8);
+  delete cancelled.display_filename;
+  resolution.resolve(response(cancelled));
+  await confirmed;
+  await h.flush();
+
+  assert.equal(stateOf(h).snapshotState, "cancelled");
+  assert.equal(stateOf(h).recovery, null);
+  assert.equal(stateOf(h).focusedStatus, true);
+});
+
+test("Overlapping duplicate activation is fenced and server discard truth wins a delayed Keep conflict", async () => {
+  const h = await createHarness();
+  setActiveUpload(h, { state: "duplicate_pending", received: 8 });
+  const keepResponse = deferred();
+  enqueue(h, "POST", `/api/uploads/${UPLOAD_A}/duplicate-resolution`, keepResponse.promise);
+
+  const keep = h.run("handleKeepDuplicate()");
+  const discard = h.run("handleDiscardDuplicate()");
+  await h.flush();
+  assert.equal(confirmationStateOf(h).open, false);
+  assert.equal(
+    h.fetchController.matching("POST", `/api/uploads/${UPLOAD_A}/duplicate-resolution`).length,
+    1,
+  );
+
+  enqueueStatus(h, UPLOAD_A, response(snapshot(UPLOAD_A, "cancelled", 8)));
+  keepResponse.resolve(response({ error: { code: "UPLOAD_SESSION_STATE_CONFLICT" } }, 409));
+  await Promise.all([keep, discard]);
+  await h.flush();
+
+  assert.equal(stateOf(h).snapshotState, "cancelled");
+  assert.equal(stateOf(h).actionKind, null);
+  assert.equal(stateOf(h).recovery, null);
+});
+
+test("Stale duplicate Keep and Discard success, error, and finally cannot mutate a newer upload", async () => {
+  for (const operation of ["keep", "discard"]) {
+    for (const outcome of ["success", "error"]) {
+      const h = await createHarness();
+      setActiveUpload(h, { id: UPLOAD_A, state: "duplicate_pending", received: 8 });
+      const resolution = deferred();
+      enqueue(h, "POST", `/api/uploads/${UPLOAD_A}/duplicate-resolution`, resolution.promise);
+
+      let pending;
+      if (operation === "keep") {
+        pending = h.run("handleKeepDuplicate()");
+      } else {
+        pending = h.run("handleDiscardDuplicate()");
+        await h.flush();
+        activateConfirmation(h, "confirm");
+      }
+      await h.flush();
+      setActiveUpload(h, { id: UPLOAD_B, state: "receiving", received: 0 });
+      if (outcome === "success") {
+        resolution.resolve(response(snapshot(
+          UPLOAD_A,
+          operation === "keep" ? "publish_pending" : "cancelled",
+          8,
+        )));
+      } else {
+        resolution.reject(new Error("synthetic stale network failure"));
+      }
+      await pending;
+      await h.flush();
+
+      const state = stateOf(h);
+      const label = `${operation} ${outcome}`;
+      assert.equal(state.uploadId, UPLOAD_B, `${label}: newer upload identity`);
+      assert.equal(state.snapshotState, "receiving", `${label}: newer state`);
+      assert.equal(state.actionKind, null, `${label}: stale finally ownership`);
+      assert.match(state.recovery, new RegExp(UPLOAD_B), `${label}: newer recovery`);
+    }
+  }
+});
+
+test("Duplicate review is reconstructed from recovery without PATCH or re-upload", async () => {
+  const h = await createHarness();
+  h.context.localStorage.setItem(RECOVERY_KEY, JSON.stringify({
+    upload_id: UPLOAD_A,
+    file_name_hint: "recovered.gif",
+    expected_size_bytes: 8,
+    last_modified_hint: 1234,
+    last_known_state: "duplicate_pending",
+  }));
+  enqueueStatus(h, UPLOAD_A, response(snapshot(
+    UPLOAD_A,
+    "duplicate_pending",
+    8,
+    8,
+    "recovered.gif",
+  )));
+
+  await h.run("restoreUploadRecovery()");
+  await h.flush();
+
+  const state = stateOf(h);
+  assert.equal(state.snapshotState, "duplicate_pending");
+  assert.equal(state.visibleMessage, "Exact duplicate found.");
+  assertExactUploadActions(h, "recovered duplicate", ["duplicateKeep", "duplicateDiscard"]);
+  assert.equal(h.fetchController.matching("PATCH", `/api/uploads/${UPLOAD_A}`).length, 0);
+  assert.equal(h.fetchController.matching("POST", `/api/uploads/${UPLOAD_A}/complete`).length, 0);
 });
 
 test("A disappearing upload action moves focus to the live status", async () => {

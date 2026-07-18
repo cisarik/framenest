@@ -121,7 +121,10 @@ class ValidateReceivedUpload:
     ) -> UploadValidationResult:
         """Validate a received upload while the caller owns the process-local lock."""
         session = self._load(session_id)
-        if session.state is UploadSessionState.PUBLISH_PENDING:
+        if session.state in {
+            UploadSessionState.DUPLICATE_PENDING,
+            UploadSessionState.PUBLISH_PENDING,
+        }:
             return _result(session)
         if session.state is UploadSessionState.REJECTED:
             return _result(session)
@@ -142,7 +145,10 @@ class ValidateReceivedUpload:
         validation owner cannot still exist in this single-process orchestration model.
         """
         session = self._load(session_id)
-        if session.state is UploadSessionState.PUBLISH_PENDING:
+        if session.state in {
+            UploadSessionState.DUPLICATE_PENDING,
+            UploadSessionState.PUBLISH_PENDING,
+        }:
             return _result(session)
         if session.state is UploadSessionState.REJECTED:
             return _result(session)
@@ -177,6 +183,7 @@ class ValidateReceivedUpload:
             current = self._load(session.id)
             if current.state in {
                 UploadSessionState.VALIDATING,
+                UploadSessionState.DUPLICATE_PENDING,
                 UploadSessionState.PUBLISH_PENDING,
                 UploadSessionState.REJECTED,
             }:
@@ -186,6 +193,7 @@ class ValidateReceivedUpload:
             current = self._load(session.id)
             if current.state in {
                 UploadSessionState.VALIDATING,
+                UploadSessionState.DUPLICATE_PENDING,
                 UploadSessionState.PUBLISH_PENDING,
                 UploadSessionState.REJECTED,
             }:
@@ -372,7 +380,11 @@ def _matches_success(
     media_format: object,
 ) -> bool:
     return (
-        session.state is UploadSessionState.PUBLISH_PENDING
+        session.state
+        in {
+            UploadSessionState.DUPLICATE_PENDING,
+            UploadSessionState.PUBLISH_PENDING,
+        }
         and session.checksum_algorithm == "sha256"
         and session.checksum_hex == checksum_hex
         and session.validated_media_kind == media_kind

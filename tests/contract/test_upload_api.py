@@ -19,6 +19,13 @@ from framenest.adapters.api.upload_api import (
 )
 from framenest.configuration import FrameNestSettings
 from framenest.domain import Device, DeviceId, Library, LibraryId, LibraryPathFlavor, LibraryRoot
+from framenest.domain.uploads import (
+    UploadSession,
+    UploadSessionId,
+    UploadSessionState,
+    UploadValidatedFormat,
+    UploadValidatedMediaKind,
+)
 from framenest.infrastructure.persistence.device_repository import SqliteDeviceRepository
 from framenest.infrastructure.persistence.engine import create_sqlite_engine, dispose_engine
 from framenest.infrastructure.persistence.library_repository import SqliteLibraryRepository
@@ -204,6 +211,48 @@ def _part_file(settings: FrameNestSettings) -> Path:
     files = list(settings.upload_quarantine_root.glob("*.part"))  # type: ignore[union-attr]
     assert len(files) == 1
     return files[0]
+
+
+def _create_validated_duplicate_pair(
+    client: TestClient,
+    settings: FrameNestSettings,
+) -> tuple[UploadSession, UploadSession]:
+    upload_ids = []
+    for _ in range(2):
+        created = _create(client).json()
+        upload_ids.append(created["id"])
+        assert _patch(client, created["id"], 0, b"abcde").status_code == 200
+        assert client.post(f"/api/uploads/{created['id']}/complete").status_code == 200
+
+    engine = create_sqlite_engine(settings.database_path)
+    repository = SqliteUploadSessionRepository(engine)
+    completed = []
+    try:
+        for index, upload_id in enumerate(upload_ids):
+            session_id = UploadSessionId.from_string(upload_id)
+            session = repository.get(session_id)
+            assert session is not None
+            validating = repository.start_validation(
+                session_id,
+                expected_version=session.version,
+                updated_at_ms=session.updated_at_ms + 1,
+            )
+            completed.append(
+                repository.complete_validation_success(
+                    session_id,
+                    expected_version=validating.version,
+                    checksum_hex="9" * 64,
+                    validated_media_kind=UploadValidatedMediaKind.VIDEO,
+                    validated_format=UploadValidatedFormat.MP4,
+                    updated_at_ms=validating.updated_at_ms + 1,
+                )
+            )
+    finally:
+        dispose_engine(engine)
+
+    assert completed[0].state is UploadSessionState.PUBLISH_PENDING
+    assert completed[1].state is UploadSessionState.DUPLICATE_PENDING
+    return completed[0], completed[1]
 
 
 def test_unconfigured_upload_capability_fails_closed(tmp_path: Path) -> None:
@@ -737,6 +786,121 @@ def test_cancel_persists_cancelled_removes_file_and_is_idempotent(tmp_path: Path
     assert repeated.status_code == 200
     assert later_write.status_code == 409
     assert list(settings.upload_quarantine_root.glob("*.part")) == []  # type: ignore[union-attr]
+
+
+def test_duplicate_resolution_keep_is_idempotent_sanitized_and_origin_guarded(
+    tmp_path: Path,
+) -> None:
+    settings = _settings(tmp_path)
+    client = _migrated_client(settings)
+    canonical, duplicate = _create_validated_duplicate_pair(client, settings)
+    endpoint = f"/api/uploads/{duplicate.id.to_string()}/duplicate-resolution"
+
+    duplicate_status = client.get(f"/api/uploads/{duplicate.id.to_string()}")
+    kept = client.post(
+        endpoint,
+        json={"resolution": "keep_separate"},
+        headers={"origin": "http://testserver"},
+    )
+    repeated = client.post(endpoint, json={"resolution": "keep_separate"})
+    conflicting = client.post(endpoint, json={"resolution": "discard"})
+    canonical_status = client.get(f"/api/uploads/{canonical.id.to_string()}")
+
+    assert duplicate_status.status_code == 200
+    assert duplicate_status.json()["state"] == "duplicate_pending"
+    assert kept.status_code == 200
+    assert kept.json()["state"] == "publish_pending"
+    assert repeated.status_code == 200
+    assert repeated.json()["state"] == "publish_pending"
+    assert conflicting.status_code == 409
+    assert conflicting.json()["error"]["code"] == "UPLOAD_SESSION_STATE_CONFLICT"
+    assert canonical_status.json()["state"] == "publish_pending"
+    assert set(kept.json()) == {
+        "id",
+        "state",
+        "declared_size_bytes",
+        "received_size_bytes",
+        "expires_at",
+        "failure_code",
+    }
+    forbidden_values = (
+        canonical.id.to_string(),
+        canonical.storage_key.value,
+        duplicate.storage_key.value,
+        canonical.byte_identity_id.to_string(),
+        "9" * 64,
+        "example.gif",
+        str(settings.upload_quarantine_root),
+        str(settings.database_path),
+    )
+    for forbidden in forbidden_values:
+        assert forbidden not in kept.text
+
+
+def test_duplicate_resolution_discard_removes_only_duplicate_and_is_idempotent(
+    tmp_path: Path,
+) -> None:
+    settings = _settings(tmp_path)
+    client = _migrated_client(settings)
+    canonical, duplicate = _create_validated_duplicate_pair(client, settings)
+    endpoint = f"/api/uploads/{duplicate.id.to_string()}/duplicate-resolution"
+    canonical_path = settings.upload_quarantine_root / f"{canonical.storage_key.value}.part"  # type: ignore[operator]
+    duplicate_path = settings.upload_quarantine_root / f"{duplicate.storage_key.value}.part"  # type: ignore[operator]
+
+    discarded = client.post(endpoint, json={"resolution": "discard"})
+    repeated = client.post(endpoint, json={"resolution": "discard"})
+    conflicting = client.post(endpoint, json={"resolution": "keep_separate"})
+
+    assert discarded.status_code == 200
+    assert discarded.json()["state"] == "cancelled"
+    assert repeated.status_code == 200
+    assert repeated.json()["state"] == "cancelled"
+    assert conflicting.status_code == 409
+    assert canonical_path.read_bytes() == b"abcde"
+    assert not duplicate_path.exists()
+    assert client.get(f"/api/uploads/{canonical.id.to_string()}").json()["state"] == (
+        "publish_pending"
+    )
+
+
+def test_duplicate_resolution_rejects_invalid_state_body_identity_and_origin(
+    tmp_path: Path,
+) -> None:
+    settings = _settings(tmp_path)
+    client = _migrated_client(settings)
+    canonical, duplicate = _create_validated_duplicate_pair(client, settings)
+    duplicate_endpoint = f"/api/uploads/{duplicate.id.to_string()}/duplicate-resolution"
+    canonical_endpoint = f"/api/uploads/{canonical.id.to_string()}/duplicate-resolution"
+
+    unknown_resolution = client.post(duplicate_endpoint, json={"resolution": "merge"})
+    missing_resolution = client.post(duplicate_endpoint, json={})
+    extra_field = client.post(
+        duplicate_endpoint,
+        json={"resolution": "discard", "target": canonical.id.to_string()},
+    )
+    wrong_state = client.post(canonical_endpoint, json={"resolution": "discard"})
+    unknown_identity = client.post(
+        "/api/uploads/33333333-3333-4333-8333-333333333333/duplicate-resolution",
+        json={"resolution": "discard"},
+    )
+    cross_origin = client.post(
+        duplicate_endpoint,
+        json={"resolution": "discard"},
+        headers={"origin": "http://evil.example"},
+    )
+
+    assert unknown_resolution.status_code == 422
+    assert missing_resolution.status_code == 422
+    assert extra_field.status_code == 422
+    assert wrong_state.status_code == 409
+    assert wrong_state.json()["error"]["code"] == "UPLOAD_SESSION_STATE_CONFLICT"
+    assert unknown_identity.status_code == 404
+    assert unknown_identity.json()["error"]["code"] == "UPLOAD_SESSION_NOT_FOUND"
+    assert cross_origin.status_code == 403
+    assert cross_origin.json()["error"]["code"] == "UPLOAD_ORIGIN_FORBIDDEN"
+    assert client.get(f"/api/uploads/{duplicate.id.to_string()}").json()["state"] == (
+        "duplicate_pending"
+    )
 
 
 def test_quarantine_root_overlapping_registered_library_rejects_create(

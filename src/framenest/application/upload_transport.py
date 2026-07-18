@@ -6,6 +6,7 @@ import asyncio
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from enum import StrEnum
 from pathlib import Path
 from threading import Lock
 import time
@@ -105,6 +106,13 @@ class UploadQuarantineStateInconsistentError(UploadTransportError):
 
 class UploadConcurrencyConflictError(UploadTransportError):
     """Raised when optimistic repository guards reject a mutation."""
+
+
+class UploadDuplicateResolution(StrEnum):
+    """Explicit user dispositions for one exact-byte duplicate upload."""
+
+    KEEP_SEPARATE = "keep_separate"
+    DISCARD = "discard"
 
 
 @dataclass(frozen=True, slots=True)
@@ -412,19 +420,57 @@ class UploadTransportService:
         storage = self._require_storage()
         async with self._locks.lease(session_id):
             session = self._load(session_id)
-            if session.state is UploadSessionState.CANCELLED:
-                self._remove_cancelled_file(storage, session)
-                return _snapshot(session)
-            if session.state in {
-                UploadSessionState.EXPIRED,
-                UploadSessionState.FAILED,
-                UploadSessionState.CATALOGED,
-                UploadSessionState.REJECTED,
-            }:
-                raise UploadSessionStateConflictError("upload session state conflict")
-            cancelled = self._transition(session, UploadSessionState.CANCELLED, failure_code=None)
-            self._remove_cancelled_file(storage, cancelled)
-            return _snapshot(cancelled)
+            return _snapshot(self._cancel_owned(storage, session))
+
+    async def resolve_duplicate(
+        self,
+        session_id: UploadSessionId,
+        resolution: UploadDuplicateResolution,
+    ) -> UploadSessionSnapshot:
+        """Apply one explicit, idempotent disposition to a duplicate upload."""
+        storage = self._require_storage()
+        async with self._locks.lease(session_id):
+            session = self._load(session_id)
+            if resolution is UploadDuplicateResolution.KEEP_SEPARATE:
+                if session.state is UploadSessionState.PUBLISH_PENDING:
+                    return _snapshot(session)
+                if session.state is not UploadSessionState.DUPLICATE_PENDING:
+                    raise UploadSessionStateConflictError("upload session state conflict")
+                kept = self._transition(
+                    session,
+                    UploadSessionState.PUBLISH_PENDING,
+                    failure_code=None,
+                )
+                return _snapshot(kept)
+            if resolution is UploadDuplicateResolution.DISCARD:
+                if session.state is UploadSessionState.CANCELLED:
+                    if session.byte_identity_id is None:
+                        raise UploadSessionStateConflictError("upload session state conflict")
+                    self._remove_cancelled_file(storage, session)
+                    return _snapshot(session)
+                if session.state is not UploadSessionState.DUPLICATE_PENDING:
+                    raise UploadSessionStateConflictError("upload session state conflict")
+                return _snapshot(self._cancel_owned(storage, session))
+            raise UploadSessionStateConflictError("upload session state conflict")
+
+    def _cancel_owned(
+        self,
+        storage: QuarantineStorage,
+        session: UploadSession,
+    ) -> UploadSession:
+        if session.state is UploadSessionState.CANCELLED:
+            self._remove_cancelled_file(storage, session)
+            return session
+        if session.state in {
+            UploadSessionState.EXPIRED,
+            UploadSessionState.FAILED,
+            UploadSessionState.CATALOGED,
+            UploadSessionState.REJECTED,
+        }:
+            raise UploadSessionStateConflictError("upload session state conflict")
+        cancelled = self._transition(session, UploadSessionState.CANCELLED, failure_code=None)
+        self._remove_cancelled_file(storage, cancelled)
+        return cancelled
 
     def _load(self, session_id: UploadSessionId) -> UploadSession:
         try:

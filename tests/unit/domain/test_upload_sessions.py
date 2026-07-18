@@ -129,6 +129,32 @@ def test_published_transitions_only_to_cataloged_not_failed() -> None:
         )
 
 
+def test_duplicate_pending_has_only_the_approved_disposition_and_failure_transitions() -> None:
+    approved = frozenset(
+        {
+            UploadSessionState.PUBLISH_PENDING,
+            UploadSessionState.CANCELLED,
+            UploadSessionState.EXPIRED,
+            UploadSessionState.FAILED,
+        }
+    )
+
+    assert ALLOWED_UPLOAD_SESSION_TRANSITIONS[UploadSessionState.DUPLICATE_PENDING] == (
+        approved
+    )
+    for target in approved:
+        ensure_upload_session_transition_allowed(
+            UploadSessionState.DUPLICATE_PENDING,
+            target,
+        )
+    for target in set(UploadSessionState) - approved:
+        with pytest.raises(FrameNestUploadSessionTransitionError):
+            ensure_upload_session_transition_allowed(
+                UploadSessionState.DUPLICATE_PENDING,
+                target,
+            )
+
+
 @pytest.mark.parametrize(
     ("declared", "received"),
     [(0, 0), (-1, 0), (100, -1), (100, 101), (True, 0), (100, True)],

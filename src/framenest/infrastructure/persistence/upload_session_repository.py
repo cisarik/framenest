@@ -53,10 +53,18 @@ from framenest.infrastructure.persistence.catalog_schema import (
     media_byte_identities,
     upload_sessions,
 )
-from framenest.infrastructure.persistence.engine import run_in_transaction
+from framenest.infrastructure.persistence.engine import (
+    run_in_immediate_transaction,
+    run_in_transaction,
+)
 
 _REPOSITORY_FAILURE_MESSAGE = "Upload session operation failed."
 _FAILURE_STATES = frozenset({UploadSessionState.FAILED, UploadSessionState.REJECTED})
+_QUALIFYING_DUPLICATE_CANONICAL_STATES = (
+    UploadSessionState.PUBLISH_PENDING,
+    UploadSessionState.PUBLISHED,
+    UploadSessionState.CATALOGED,
+)
 
 
 class SqliteUploadSessionRepository:
@@ -493,7 +501,7 @@ class SqliteUploadSessionRepository:
         validated_format: UploadValidatedFormat,
         updated_at_ms: int,
     ) -> UploadSession:
-        """Atomically persist validation evidence, byte identity, and publish_pending."""
+        """Atomically persist validation evidence, identity, and duplicate disposition."""
         try:
             checksum = validate_sha256_checksum_hex(checksum_hex)
             media_kind, media_format = validate_upload_validation_evidence(
@@ -517,7 +525,7 @@ class SqliteUploadSessionRepository:
             row = _row_by_id(connection, session_id)
             if row is None:
                 raise UploadSessionNotFoundError("upload session not found")
-            if _row_has_matching_publish_pending_evidence(
+            if _row_has_matching_validation_success_evidence(
                 row,
                 checksum_hex=checksum,
                 validated_media_kind=media_kind,
@@ -528,7 +536,9 @@ class SqliteUploadSessionRepository:
                         "invalid upload validation evidence"
                     )
                 return _session_from_row(row)
-            if str(row["state"]) == UploadSessionState.PUBLISH_PENDING.value:
+            if str(row["state"]) in {
+                state.value for state in VALIDATED_UPLOAD_SESSION_STATES
+            }:
                 if row["checksum_algorithm"] != "sha256" or row["checksum_hex"] != checksum:
                     raise InvalidUploadChecksumError("invalid upload checksum")
                 raise InvalidUploadValidationEvidenceError(
@@ -560,6 +570,27 @@ class SqliteUploadSessionRepository:
                     created_at_ms=updated_at_ms,
                 ),
             )
+            canonical_exists = connection.execute(
+                select(upload_sessions.c.id)
+                .where(
+                    and_(
+                        upload_sessions.c.id != session_id.to_string(),
+                        upload_sessions.c.byte_identity_id == identity.id.to_string(),
+                        upload_sessions.c.state.in_(
+                            tuple(
+                                state.value
+                                for state in _QUALIFYING_DUPLICATE_CANONICAL_STATES
+                            )
+                        ),
+                    )
+                )
+                .limit(1)
+            ).first() is not None
+            target_state = (
+                UploadSessionState.DUPLICATE_PENDING
+                if canonical_exists
+                else UploadSessionState.PUBLISH_PENDING
+            )
             result = connection.execute(
                 update(upload_sessions)
                 .where(
@@ -577,7 +608,7 @@ class SqliteUploadSessionRepository:
                     )
                 )
                 .values(
-                    state=UploadSessionState.PUBLISH_PENDING.value,
+                    state=target_state.value,
                     checksum_algorithm="sha256",
                     checksum_hex=checksum,
                     validated_media_kind=media_kind.value,
@@ -594,7 +625,7 @@ class SqliteUploadSessionRepository:
             )
 
         try:
-            return run_in_transaction(self._engine, operation)
+            return run_in_immediate_transaction(self._engine, operation)
         except (
             UploadSessionNotFoundError,
             IncompleteUploadSessionError,
@@ -720,7 +751,7 @@ def _require_session(connection: Connection, session_id: UploadSessionId) -> Upl
     return _session_from_row(row)
 
 
-def _row_has_matching_publish_pending_evidence(
+def _row_has_matching_validation_success_evidence(
     row: Mapping[str, object],
     *,
     checksum_hex: str,
@@ -728,7 +759,8 @@ def _row_has_matching_publish_pending_evidence(
     validated_format: UploadValidatedFormat,
 ) -> bool:
     return (
-        str(row["state"]) == UploadSessionState.PUBLISH_PENDING.value
+        str(row["state"])
+        in {state.value for state in VALIDATED_UPLOAD_SESSION_STATES}
         and row["checksum_algorithm"] == "sha256"
         and row["checksum_hex"] == checksum_hex
         and row["validated_media_kind"] == validated_media_kind.value

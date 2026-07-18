@@ -85,12 +85,18 @@ public upload service. Upload endpoints are disabled until
 `FRAMENEST_UPLOAD_QUARANTINE_ROOT` points to a pre-existing absolute
 non-symlink quarantine directory. That directory must not overlap registered
 media library roots or the Gallery preview cache. Upload requests use
-server-generated session and storage identities, stream bytes directly to
-quarantine, expose no storage key or path, and stop at the durable `received`
-state. Uploaded bytes are untrusted and are not validated, published, cataloged,
-served, displayed, or sent to AI providers in this slice. Browser mutation
-requests with an `Origin` header must match the effective same origin; this is a
-bounded loopback protection and not authentication or authorization.
+server-generated session and storage identities and stream bytes directly to
+quarantine. Bounded validation derives size and SHA-256 evidence on the server;
+the first qualifying identity reaches `publish_pending`, while a later exact
+copy remains quarantined in `duplicate_pending` until explicitly kept or
+discarded. Discard durably cancels that selected session before removing only
+its quarantine object. Upload responses expose no storage key or path;
+duplicate-resolution responses additionally expose no matching session, byte
+identity, checksum, or filename. Uploaded bytes remain untrusted and are not
+published, cataloged, served, displayed, or sent to AI providers in this slice.
+Browser mutation requests with an `Origin` header must match the effective same
+origin; this is a bounded loopback protection and not authentication or
+authorization.
 
 Avoid exposing:
 
