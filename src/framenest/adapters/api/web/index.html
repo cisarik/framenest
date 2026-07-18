@@ -15,21 +15,24 @@
         <span class="brand-mark" aria-hidden="true">FN</span>
       </div>
       <div class="header-search" role="search" aria-label="Search catalog">
-        <span class="header-search__prompt" aria-hidden="true">&gt;</span>
-        <input
-          id="command-search-input"
-          class="header-search__input"
-          type="text"
-          autocomplete="off"
-          maxlength="240"
-          placeholder="search titles and tags"
-          aria-label="Search catalog by title or tag"
-          aria-expanded="false"
-          aria-controls="command-search-suggestions"
-          aria-autocomplete="list"
-        >
-        <button id="command-search-clear" class="header-search__clear" type="button" aria-label="Clear search" hidden>&times;</button>
-        <ul id="command-search-suggestions" class="command-search-suggestions" role="listbox" aria-label="Search suggestions" hidden></ul>
+        <div class="header-search__control">
+          <span class="header-search__prompt" aria-hidden="true">&gt;</span>
+          <input
+            id="command-search-input"
+            class="header-search__input"
+            type="text"
+            autocomplete="off"
+            maxlength="240"
+            placeholder="Search titles and tags"
+            aria-label="Search catalog by title or tag"
+            aria-expanded="false"
+            aria-controls="command-search-suggestions"
+            aria-autocomplete="list"
+          >
+          <button id="command-search-clear" class="header-search__clear" type="button" aria-label="Clear search" hidden>&times;</button>
+          <ul id="command-search-suggestions" class="command-search-suggestions" role="listbox" aria-label="Search suggestions" hidden></ul>
+        </div>
+        <div id="catalog-tag-filters" class="catalog-tag-filters" role="group" aria-label="Active tag filters" hidden></div>
       </div>
       <div class="header-status-group">
         <button id="upload-open-button" class="status-button upload-action-button" type="button" aria-label="Open upload cockpit" title="Upload GIF or MP4">
@@ -260,7 +263,6 @@
           <button id="catalog-scope-all" type="button" class="scope-active">All media</button>
           <button id="catalog-scope-processed" type="button">Processed</button>
         </div>
-        <div id="catalog-tag-filters" class="catalog-tag-filters" role="group" aria-label="Tag filters"></div>
         <p id="catalog-tags-state" class="catalog-tags-state" role="status" hidden></p>
         <div id="catalog-state-loading" class="library-state" role="status">
           Loading catalog media...

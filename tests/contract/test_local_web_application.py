@@ -829,11 +829,11 @@ def test_browser_catalog_scope_defaults_to_all_media_and_switching_is_well_forme
     assert "setCatalogScope(\"\")" in script or "setCatalogScope('')" in script
     assert "setCatalogScope(PROCESSED_COLLECTION)" in script
 
-    build_start = script.index("function buildCatalogQueryParams()")
+    build_start = script.index("function buildCatalogQueryParams(")
     build_end = script.index("}", script.index("return params;", build_start)) + 1
     build_body = script[build_start:build_end]
-    assert "if (catalogState.collection)" in build_body
-    assert "params.set(\"collection\", catalogState.collection)" in build_body
+    assert "if (snapshot.collection)" in build_body
+    assert "params.set(\"collection\", snapshot.collection)" in build_body
 
 
 def test_browser_metadata_editor_hides_processed_state_but_preserves_collection_state(
@@ -1050,7 +1050,7 @@ def test_status_and_gallery_filters_have_white_border_hover_focus(client: TestCl
     css = client.get("/assets/styles.css").text
 
     status_hover = css[css.index(".status-button:hover") : css.index(".status-button__dot")]
-    filter_hover = css[css.index(".catalog-filter-chip:hover") : css.index(".catalog-filter-chip[aria-pressed")]
+    filter_hover = css[css.index(".catalog-filter-chip:hover") : css.index(".catalog-filter-chip__remove")]
     scope_hover = css[css.index(".catalog-scope button:hover") : css.index(".catalog-scope .scope-active")]
     assert "border-color: rgba(255, 255, 255, 0.86)" in status_hover
     assert ".status-button:focus-visible" in status_hover
@@ -1242,13 +1242,31 @@ def test_header_contains_command_search_input(client: TestClient) -> None:
     html = client.get("/").text
     assert "command-search-input" in html
     assert "command-search" in html
+    assert 'placeholder="Search titles and tags"' in html
     assert "role=\"search\"" in html or 'role="search"' in html
 
 
 def test_header_command_search_has_accessible_label(client: TestClient) -> None:
     html = client.get("/").text
-    assert "aria-label" in html
-    assert "command-search" in html
+    search_start = html.index('id="command-search-input"')
+    search_input = html[search_start : html.index(">", search_start)]
+    assert 'aria-label="Search catalog by title or tag"' in search_input
+    assert 'placeholder="Search titles and tags"' in search_input
+
+
+def test_header_command_search_is_wider_with_restrained_green_focus(client: TestClient) -> None:
+    css = client.get("/assets/styles.css").text
+    search = css[css.index(".header-search {") : css.index(".header-search__control")]
+    search_input = css[css.index(".header-search__input {") : css.index(".header-search__input::placeholder")]
+    search_focus = css[css.index(".header-search__input:focus-visible") : css.index(".header-search__clear")]
+
+    assert "flex: 1 1 680px" in search
+    assert "max-width: 720px" in search
+    assert "rgba(0, 255, 65, 0.5)" in search_input
+    assert "0 0 14px rgba(0, 255, 65, 0.06)" in search_input
+    assert "outline" in search_focus
+    assert "rgba(0, 255, 65, 0.82)" in search_focus
+    assert "0 0 20px rgba(0, 255, 65, 0.13)" in search_focus
 
 
 def test_command_search_suggestion_panel_exists(client: TestClient) -> None:
@@ -1285,18 +1303,22 @@ def test_catalog_has_single_tag_toggle_region(client: TestClient) -> None:
     assert "catalog-active-filters" not in html
 
 
-def test_javascript_tag_filters_use_toggle_semantics(client: TestClient) -> None:
+def test_javascript_tag_filters_use_active_chip_and_card_pressed_semantics(client: TestClient) -> None:
     script = client.get("/assets/app.js").text
     assert "aria-pressed" in script
-    assert "toggle" in script.lower() or "includes(tag.key)" in script
-    assert "renderActiveCatalogFilters" not in script
-    assert "catalogActiveFilters" not in script
+    assert "function renderActiveCatalogTagFilters" in script
+    assert "function removeCatalogTagFilter" in script
+    assert "function activateCatalogTagFilter" in script
+    assert "catalog-card__tag" in script
+    assert "Remove ${displayName} tag filter" in script
 
 
 def test_javascript_tag_toggle_preserves_and_semantics(client: TestClient) -> None:
     script = client.get("/assets/app.js").text
     assert "catalogState.tagKeys" in script
-    assert "filter((activeKey)" in script or "filter(" in script
+    query_body = _javascript_function(script, "buildCatalogQueryParams")
+    assert 'params.append("tag", key)' in query_body
+    assert "snapshot.tagKeys.forEach" in query_body
 
 
 def test_catalog_does_not_contain_duplicate_filter_text(client: TestClient) -> None:
@@ -1451,16 +1473,17 @@ def test_javascript_dialog_has_escape_close(client: TestClient) -> None:
     assert "Escape" in script or "escape" in script
 
 
-def test_javascript_card_omits_tag_pills_and_hidden_tag_counter(client: TestClient) -> None:
+def test_javascript_card_renders_canonical_tag_buttons_without_hidden_counter(client: TestClient) -> None:
     script = client.get("/assets/app.js").text
-    start = script.index("function renderCatalogCard(item)")
-    end = script.index("\n}\n", start) + len("\n}\n")
-    card_body = script[start:end]
-    assert "catalog-card__tags" not in card_body
-    assert "catalog-card__tag" not in card_body
-    assert "catalog-card__tag-more" not in card_body
-    assert "maxVisible" not in card_body
-    assert "+${item.tags.length" not in card_body
+    card_body = _javascript_function(script, "renderCatalogCard")
+    tags_body = _javascript_function(script, "renderCatalogCardTags")
+    assert "renderCatalogCardTags(item)" in card_body
+    assert 'button.className = "catalog-card__tag"' in tags_body
+    assert "button.dataset.tagKey = tag.key" in tags_body
+    assert "button.textContent = tag.display_name" in tags_body
+    assert "activateCatalogTagFilter(tag.key" in tags_body
+    assert "catalog-card__tag-more" not in tags_body
+    assert "maxVisible" not in tags_body
 
 
 def test_javascript_card_has_status_row(client: TestClient) -> None:
@@ -1536,9 +1559,7 @@ def test_catalog_card_analyze_shortcut_only_for_untagged_supported_media(client:
     assert "(!item.tags || item.tags.length === 0)" in needs_body
     assert "actions.appendChild(analyzeButton)" in card_body
     assert "item.tags.length > 0" not in card_body
-    assert "catalog-card__tags" not in card_body
-    assert "catalog-card__tag" not in card_body
-    assert "catalog-card__tag-more" not in card_body
+    assert "renderCatalogCardTags(item)" in card_body
 
 
 def test_catalog_card_has_overlay_original_media_action_in_bottom_right(
@@ -1962,14 +1983,13 @@ def test_javascript_details_tags_filter_gallery_with_existing_state(client: Test
     assert 'pill.type = "button"' in populate_body
     assert 'pill.className = "media-details-dialog__tag"' in populate_body
     assert "activateDetailsTagFilter(tag.key)" in populate_body
-    assert "if (!catalogState.tagKeys.includes(tagKey))" in activate_body
-    assert "catalogState.tagKeys = [...catalogState.tagKeys, tagKey]" in activate_body
-    assert "catalogState.offset = 0" in activate_body
+    catalog_activation = _javascript_function(script, "activateCatalogTagFilter")
+    assert "if (!alreadyActive)" in catalog_activation
+    assert "catalogState.tagKeys = [...catalogState.tagKeys, tagKey]" in catalog_activation
+    assert "catalogState.offset = 0" in catalog_activation
     assert "catalogState.q" not in activate_body
     assert "closeDetailsDialog({ restoreFocus: false })" in activate_body
-    assert "renderCatalogTagFilterStates()" in activate_body
-    assert "loadCatalog()" in activate_body
-    assert "focusCatalogFilterRegion()" in activate_body
+    assert "activateCatalogTagFilter(tagKey, { focusChip: true })" in activate_body
 
 
 def test_javascript_details_description_replaces_prominent_processed_panel(client: TestClient) -> None:
@@ -2372,7 +2392,7 @@ def test_javascript_catalog_page_size_is_bounded_persisted_and_resets_page(clien
     assert "framenest.catalog.pageSize" in script
     assert "CATALOG_PAGE_SIZE_OPTIONS.includes(stored)" in script
     assert "catalogState.offset = 0;" in script[script.index("catalogPageSizeSelect.addEventListener"):]
-    assert 'params.set("limit", String(catalogState.limit));' in script
+    assert 'params.set("limit", String(snapshot.limit));' in script
 
 
 def test_css_details_dialog_uses_black_player_first_surfaces(client: TestClient) -> None:
