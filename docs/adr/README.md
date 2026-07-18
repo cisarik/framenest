@@ -66,3 +66,4 @@ An accepted ADR may only be changed by a later ADR that supersedes it. Editing a
 | 0039 | Lifecycle-Owned Upload Validation Orchestration | Accepted | 2026-07-14 | [0039-lifecycle-owned-upload-validation-orchestration.md](0039-lifecycle-owned-upload-validation-orchestration.md) |
 | 0040 | Canonical Upload Byte Identity Foundation | Accepted | 2026-07-15 | [0040-canonical-upload-byte-identity-foundation.md](0040-canonical-upload-byte-identity-foundation.md) |
 | 0041 | Exact-Byte Upload Duplicate Disposition | Accepted | 2026-07-18 | [0041-exact-byte-upload-duplicate-disposition.md](0041-exact-byte-upload-duplicate-disposition.md) |
+| 0042 | Atomic Upload Publication | Accepted | 2026-07-18 | [0042-atomic-upload-publication.md](0042-atomic-upload-publication.md) |

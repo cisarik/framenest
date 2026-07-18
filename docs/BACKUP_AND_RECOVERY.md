@@ -24,6 +24,7 @@ acceptance.
 | Non-secret AI configuration | `/var/lib/framenest/ai/config.json` | Manual recovery for now |
 | Gallery preview cache | `/var/cache/framenest/gallery-previews` | Excluded; regenerate |
 | Original media | `/srv/media` | Excluded; needs separate second copy |
+| Published upload originals | configured registered publication library | Excluded; needs separate media second copy |
 | Secrets | outside Git | Excluded; re-enter or rotate later |
 
 The catalog bundle contains only:
@@ -32,6 +33,11 @@ The catalog bundle contains only:
 manifest.json
 catalog.sqlite3
 ```
+
+Revision `0013` publication provenance is catalog data and is included in the
+SQLite artifact, but the published media bytes it describes are not. Restoring
+the catalog bundle alone therefore does not restore a published upload original
+or prove that its destination object is available.
 
 ## Check
 

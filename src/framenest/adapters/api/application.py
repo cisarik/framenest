@@ -5,6 +5,7 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 from collections.abc import AsyncIterator
 from importlib import resources
+from pathlib import Path
 from typing import Literal
 
 from fastapi import FastAPI, HTTPException
@@ -60,18 +61,26 @@ from framenest.application.media_suggestion import PreviewMediaSuggestion
 from framenest.application.media_suggestion import PreviewImportedMediaSuggestion
 from framenest.application.upload_transport import UploadTransportLimits, UploadTransportService
 from framenest.application.upload_transport import UploadSessionLockRegistry
+from framenest.application.upload_publication import PublishPendingUpload
+from framenest.application.upload_publication_coordinator import (
+    UploadPublicationCoordinator,
+)
 from framenest.application.upload_validation import ValidateReceivedUpload
 from framenest.application.upload_validation_coordinator import UploadValidationCoordinator
 from framenest.adapters.api.library_api import (
     LibraryApiDependencies,
     create_library_api_router,
 )
+from framenest.domain import LibraryId, LibraryPathFlavor
 import framenest.adapters.api.web as web_resources
 from framenest.configuration import FrameNestSettings, load_settings
 from framenest.infrastructure.ai.registry import ai_provider_persisted_status_reader, resolve_ai_provider
 from framenest.infrastructure.filesystem.library_scanner import LocalLibraryScanner
 from framenest.infrastructure.filesystem.media_content import LocalMediaContentReader
 from framenest.infrastructure.filesystem.quarantine_storage import FilesystemQuarantineStorage
+from framenest.infrastructure.filesystem.published_media_storage import (
+    FilesystemPublishedMediaStorage,
+)
 from framenest.infrastructure.media_analysis import LocalMediaAnalysisAdapter
 from framenest.infrastructure.media_validation import BoundedUploadMediaValidator
 from framenest.infrastructure.media_analysis.gallery_preview import (
@@ -89,6 +98,9 @@ from framenest.infrastructure.persistence.media_metadata_repository import (
 )
 from framenest.infrastructure.persistence.upload_session_repository import (
     SqliteUploadSessionRepository,
+)
+from framenest.infrastructure.persistence.upload_publication_repository import (
+    SqliteUploadPublicationRepository,
 )
 
 
@@ -136,6 +148,8 @@ def create_app(
     owned_upload_session_repository = None
     owned_upload_validation = None
     owned_upload_validation_coordinator = None
+    owned_upload_publication = None
+    owned_upload_publication_coordinator = None
     if (
         library_api_dependencies is None
         or media_import_api_dependencies is None
@@ -267,6 +281,27 @@ def create_app(
             if resolved_settings.upload_quarantine_root is None
             else FilesystemQuarantineStorage(resolved_settings.upload_quarantine_root)
         )
+        published_storage = _resolve_published_storage(
+            resolved_settings,
+            owned_library_repository,
+            quarantine_configured=storage is not None,
+        )
+        if published_storage is not None:
+            assert owned_engine is not None
+            assert storage is not None
+            owned_upload_publication_repository = SqliteUploadPublicationRepository(
+                owned_engine
+            )
+            owned_upload_publication = PublishPendingUpload(
+                owned_upload_publication_repository,
+                published_storage,
+                storage,
+            )
+            owned_upload_publication_coordinator = UploadPublicationCoordinator(
+                owned_upload_publication_repository,
+                owned_upload_publication,
+                upload_locks,
+            )
         upload_api_dependencies = UploadApiDependencies(
             transport=UploadTransportService(
                 owned_upload_session_repository,
@@ -296,24 +331,39 @@ def create_app(
                 owned_upload_session_repository,
                 owned_upload_validation,
                 upload_locks,
+                publication_coordinator=owned_upload_publication_coordinator,
             )
             upload_api_dependencies = UploadApiDependencies(
                 transport=upload_api_dependencies.transport,
                 validation_coordinator=owned_upload_validation_coordinator,
+                publication_coordinator=owned_upload_publication_coordinator,
             )
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
-        coordinator = owned_upload_validation_coordinator
-        if coordinator is not None:
-            await coordinator.start()
+        validation_coordinator = owned_upload_validation_coordinator
+        publication_coordinator = owned_upload_publication_coordinator
+        publication_started = False
+        validation_started = False
         try:
+            if publication_coordinator is not None:
+                await publication_coordinator.start()
+                publication_started = True
+            if validation_coordinator is not None:
+                await validation_coordinator.start()
+                validation_started = True
             yield
         finally:
-            if coordinator is not None:
-                await coordinator.shutdown()
-            if owned_engine is not None:
-                dispose_engine(owned_engine)
+            try:
+                if validation_started and validation_coordinator is not None:
+                    await validation_coordinator.shutdown()
+            finally:
+                try:
+                    if publication_started and publication_coordinator is not None:
+                        await publication_coordinator.shutdown()
+                finally:
+                    if owned_engine is not None:
+                        dispose_engine(owned_engine)
 
     app = FastAPI(lifespan=lifespan)
     app.state.settings = resolved_settings
@@ -322,6 +372,12 @@ def create_app(
         owned_upload_validation_coordinator
         if owned_upload_validation_coordinator is not None
         else _upload_validation_coordinator(upload_api_dependencies)
+    )
+    app.state.upload_publication = owned_upload_publication
+    app.state.upload_publication_coordinator = (
+        owned_upload_publication_coordinator
+        if owned_upload_publication_coordinator is not None
+        else _upload_publication_coordinator(upload_api_dependencies)
     )
     app.include_router(create_library_api_router(library_api_dependencies))
     app.include_router(create_media_import_api_router(media_import_api_dependencies))
@@ -363,6 +419,52 @@ def create_app(
 
 def _upload_validation_coordinator(dependencies: UploadApiDependencies) -> object | None:
     return dependencies.validation_coordinator
+
+
+def _upload_publication_coordinator(
+    dependencies: UploadApiDependencies,
+) -> object | None:
+    return dependencies.publication_coordinator
+
+
+def _resolve_published_storage(
+    settings: FrameNestSettings,
+    library_repository: SqliteLibraryRepository,
+    *,
+    quarantine_configured: bool,
+) -> FilesystemPublishedMediaStorage | None:
+    destination_text = settings.upload_publication_library_id
+    if destination_text is None:
+        return None
+    if not quarantine_configured or settings.upload_quarantine_root is None:
+        raise ValueError("Upload publication configuration is invalid.")
+    try:
+        destination_id = LibraryId.from_string(destination_text)
+        destination = library_repository.get(destination_id)
+        libraries = library_repository.list_all()
+    except Exception:
+        raise ValueError("Upload publication configuration is invalid.") from None
+    if destination is None or destination.root.flavor is not LibraryPathFlavor.POSIX:
+        raise ValueError("Upload publication configuration is invalid.")
+    forbidden_roots = [
+        settings.upload_quarantine_root,
+        settings.gallery_preview_cache_path,
+        settings.database_path.parent,
+    ]
+    forbidden_roots.extend(
+        Path(library.root.path)
+        for library in libraries
+        if library.id != destination_id
+        and library.root.flavor is LibraryPathFlavor.POSIX
+    )
+    storage = FilesystemPublishedMediaStorage(
+        destination_id,
+        Path(destination.root.path),
+        forbidden_roots=tuple(forbidden_roots),
+    )
+    if not storage.root_available:
+        raise ValueError("Upload publication configuration is invalid.")
+    return storage
 
 
 def _ai_status_from_last_test(

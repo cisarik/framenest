@@ -1,0 +1,351 @@
+"""Crash-safe filesystem adapter for server-owned published originals."""
+
+from __future__ import annotations
+
+import errno
+import hashlib
+import os
+from pathlib import Path
+import stat as stat_module
+
+from framenest.application.ports.published_media_storage import (
+    PublishedMediaStorageUnavailableError,
+    PublishedMediaTargetCollisionError,
+    PublishedMediaVerificationError,
+    PublishedMediaWriteError,
+)
+from framenest.application.ports.quarantine_storage import QuarantineReader
+from framenest.application.root_paths import roots_overlap
+from framenest.domain.identities import LibraryId
+from framenest.domain.upload_publications import UploadPublication
+
+_COPY_CHUNK_SIZE = 1024 * 1024
+_TEMP_SUFFIX = ".publish.tmp"
+
+
+class FilesystemPublishedMediaStorage:
+    """Publish into one pre-existing explicit non-symlink POSIX library root."""
+
+    def __init__(
+        self,
+        destination_id: LibraryId,
+        root: Path,
+        *,
+        forbidden_roots: tuple[Path, ...] = (),
+    ) -> None:
+        self._destination_id = destination_id
+        self._root = root
+        self._forbidden_roots = forbidden_roots
+
+    @property
+    def destination_id(self) -> LibraryId:
+        return self._destination_id
+
+    @property
+    def root(self) -> Path:
+        return self._root
+
+    @property
+    def root_available(self) -> bool:
+        try:
+            root_fd = self._open_root()
+        except PublishedMediaStorageUnavailableError:
+            return False
+        _close_descriptor(root_fd)
+        return True
+
+    def verify_target(self, publication: UploadPublication) -> bool:
+        self._require_destination(publication)
+        root_fd = self._open_root()
+        try:
+            return self._verify_final(root_fd, publication)
+        finally:
+            _close_descriptor(root_fd)
+
+    def publish_from_reader(
+        self,
+        publication: UploadPublication,
+        source: QuarantineReader,
+    ) -> None:
+        self._require_destination(publication)
+        root_fd = self._open_root()
+        temp_name = _temporary_name(publication)
+        try:
+            if self._verify_final(root_fd, publication):
+                _unlink_owned_temporary(root_fd, temp_name)
+                _fsync_directory(root_fd)
+                return
+            if source.size_bytes != publication.expected_size_bytes:
+                raise PublishedMediaVerificationError(
+                    "published media verification failed"
+                )
+            temp_fd = _open_owned_temporary(root_fd, temp_name)
+            try:
+                _copy_and_verify_source(temp_fd, source, publication)
+                _fsync_file(temp_fd)
+            finally:
+                _close_descriptor(temp_fd)
+            try:
+                os.link(
+                    temp_name,
+                    publication.relative_path.value,
+                    src_dir_fd=root_fd,
+                    dst_dir_fd=root_fd,
+                    follow_symlinks=False,
+                )
+            except FileExistsError:
+                if not self._verify_final(root_fd, publication):
+                    raise PublishedMediaTargetCollisionError(
+                        "published media target collision"
+                    )
+            except OSError as exc:
+                if exc.errno == errno.EEXIST:
+                    if not self._verify_final(root_fd, publication):
+                        raise PublishedMediaTargetCollisionError(
+                            "published media target collision"
+                        ) from exc
+                else:
+                    raise PublishedMediaWriteError(
+                        "published media write failed"
+                    ) from exc
+            _fsync_directory(root_fd)
+            if not self._verify_final(root_fd, publication):
+                raise PublishedMediaVerificationError(
+                    "published media verification failed"
+                )
+            _unlink_owned_temporary(root_fd, temp_name)
+            _fsync_directory(root_fd)
+        finally:
+            _close_descriptor(root_fd)
+
+    def _require_destination(self, publication: UploadPublication) -> None:
+        if publication.destination_id != self._destination_id:
+            raise PublishedMediaStorageUnavailableError(
+                "published media storage unavailable"
+            )
+
+    def _verify_final(
+        self,
+        root_fd: int,
+        publication: UploadPublication,
+    ) -> bool:
+        try:
+            fd = _open_readonly(root_fd, publication.relative_path.value)
+        except FileNotFoundError:
+            return False
+        except OSError as exc:
+            raise PublishedMediaTargetCollisionError(
+                "published media target collision"
+            ) from exc
+        try:
+            if not _descriptor_matches(fd, publication):
+                raise PublishedMediaTargetCollisionError(
+                    "published media target collision"
+                )
+            return True
+        finally:
+            _close_descriptor(fd)
+
+    def _open_root(self) -> int:
+        self._validate_root_path()
+        flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+        try:
+            fd = os.open(str(self._root), flags)
+        except OSError as exc:
+            raise PublishedMediaStorageUnavailableError(
+                "published media storage unavailable"
+            ) from exc
+        try:
+            stat_result = os.fstat(fd)
+            if not stat_module.S_ISDIR(stat_result.st_mode):
+                raise PublishedMediaStorageUnavailableError(
+                    "published media storage unavailable"
+                )
+        except Exception:
+            _close_descriptor(fd)
+            raise
+        return fd
+
+    def _validate_root_path(self) -> None:
+        if not isinstance(self._root, Path) or not self._root.is_absolute():
+            raise PublishedMediaStorageUnavailableError(
+                "published media storage unavailable"
+            )
+        try:
+            if (
+                self._root.is_symlink()
+                or not self._root.exists()
+                or not self._root.is_dir()
+                or self._root.resolve(strict=True) != self._root
+                or not os.access(self._root, os.W_OK | os.X_OK)
+            ):
+                raise PublishedMediaStorageUnavailableError(
+                    "published media storage unavailable"
+                )
+            if any(roots_overlap(self._root, other) for other in self._forbidden_roots):
+                raise PublishedMediaStorageUnavailableError(
+                    "published media storage unavailable"
+                )
+        except OSError as exc:
+            raise PublishedMediaStorageUnavailableError(
+                "published media storage unavailable"
+            ) from exc
+
+
+def _open_owned_temporary(root_fd: int, name: str) -> int:
+    flags = os.O_WRONLY | os.O_NOFOLLOW
+    try:
+        fd = os.open(name, flags | os.O_CREAT | os.O_EXCL, 0o600, dir_fd=root_fd)
+    except FileExistsError:
+        try:
+            fd = os.open(name, flags, dir_fd=root_fd)
+        except OSError as exc:
+            raise PublishedMediaWriteError("published media write failed") from exc
+    except OSError as exc:
+        raise PublishedMediaWriteError("published media write failed") from exc
+    try:
+        stat_result = os.fstat(fd)
+        if (
+            not stat_module.S_ISREG(stat_result.st_mode)
+            or stat_module.S_IMODE(stat_result.st_mode) != 0o600
+        ):
+            raise PublishedMediaWriteError("published media write failed")
+        os.ftruncate(fd, 0)
+        os.lseek(fd, 0, os.SEEK_SET)
+        return fd
+    except Exception:
+        _close_descriptor(fd)
+        raise
+
+
+def _copy_and_verify_source(
+    target_fd: int,
+    source: QuarantineReader,
+    publication: UploadPublication,
+) -> None:
+    digest = hashlib.sha256()
+    copied = 0
+    try:
+        source.seek_start()
+        while True:
+            chunk = source.read(_COPY_CHUNK_SIZE)
+            if not chunk:
+                break
+            copied += len(chunk)
+            if copied > publication.expected_size_bytes:
+                raise PublishedMediaVerificationError(
+                    "published media verification failed"
+                )
+            digest.update(chunk)
+            _write_all(target_fd, chunk)
+        source.verify_still_consistent()
+        stat_result = os.fstat(target_fd)
+    except PublishedMediaVerificationError:
+        raise
+    except Exception as exc:
+        raise PublishedMediaVerificationError(
+            "published media verification failed"
+        ) from exc
+    if (
+        copied != publication.expected_size_bytes
+        or stat_result.st_size != publication.expected_size_bytes
+        or digest.hexdigest() != publication.checksum_hex
+        or not stat_module.S_ISREG(stat_result.st_mode)
+    ):
+        raise PublishedMediaVerificationError("published media verification failed")
+
+
+def _descriptor_matches(fd: int, publication: UploadPublication) -> bool:
+    try:
+        initial = os.fstat(fd)
+        if (
+            not stat_module.S_ISREG(initial.st_mode)
+            or initial.st_size != publication.expected_size_bytes
+        ):
+            return False
+        os.lseek(fd, 0, os.SEEK_SET)
+        digest = hashlib.sha256()
+        size = 0
+        while True:
+            chunk = os.read(fd, _COPY_CHUNK_SIZE)
+            if not chunk:
+                break
+            size += len(chunk)
+            if size > publication.expected_size_bytes:
+                return False
+            digest.update(chunk)
+        final = os.fstat(fd)
+    except OSError as exc:
+        raise PublishedMediaVerificationError(
+            "published media verification failed"
+        ) from exc
+    return (
+        size == publication.expected_size_bytes
+        and digest.hexdigest() == publication.checksum_hex
+        and _stat_fingerprint(initial) == _stat_fingerprint(final)
+    )
+
+
+def _open_readonly(root_fd: int, name: str) -> int:
+    try:
+        return os.open(name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=root_fd)
+    except OSError as exc:
+        if exc.errno == errno.ENOENT:
+            raise FileNotFoundError(name) from exc
+        raise
+
+
+def _write_all(fd: int, data: bytes) -> None:
+    view = memoryview(data)
+    while view:
+        try:
+            written = os.write(fd, view)
+        except OSError as exc:
+            raise PublishedMediaWriteError("published media write failed") from exc
+        if written <= 0:
+            raise PublishedMediaWriteError("published media write failed")
+        view = view[written:]
+
+
+def _fsync_file(fd: int) -> None:
+    try:
+        os.fsync(fd)
+    except OSError as exc:
+        raise PublishedMediaWriteError("published media write failed") from exc
+
+
+def _fsync_directory(root_fd: int) -> None:
+    try:
+        os.fsync(root_fd)
+    except OSError as exc:
+        raise PublishedMediaWriteError("published media write failed") from exc
+
+
+def _unlink_owned_temporary(root_fd: int, name: str) -> None:
+    try:
+        os.unlink(name, dir_fd=root_fd)
+    except FileNotFoundError:
+        return
+    except OSError as exc:
+        raise PublishedMediaWriteError("published media write failed") from exc
+
+
+def _temporary_name(publication: UploadPublication) -> str:
+    return f".{publication.publication_id.value.hex}{_TEMP_SUFFIX}"
+
+
+def _stat_fingerprint(stat_result: os.stat_result) -> tuple[int, int, int, int, int]:
+    return (
+        stat_result.st_dev,
+        stat_result.st_ino,
+        stat_result.st_mode,
+        stat_result.st_size,
+        getattr(stat_result, "st_mtime_ns", int(stat_result.st_mtime * 1_000_000_000)),
+    )
+
+
+def _close_descriptor(fd: int) -> None:
+    try:
+        os.close(fd)
+    except OSError:
+        pass

@@ -544,6 +544,7 @@ function stateOf(harness) {
     hasPollOwner: Boolean(uploadState.pollOwner),
     hasPollTimer: Boolean(uploadState.pollTimer),
     pollRetryDelayMs: uploadState.pollRetryDelayMs,
+    publicationPollAttempts: uploadState.publicationPollAttempts,
     message: uploadState.message,
     stateLabel: document.querySelector("#upload-state-label").textContent,
     visibleMessage: document.querySelector("#upload-message").textContent,
@@ -999,8 +1000,8 @@ test("Upload controls expose the exact action set for every accepted lifecycle s
       stateLabel: "Duplicate found",
       actions: ["duplicateKeep", "duplicateDiscard"],
     },
-    { name: "Publish pending", snapshotState: "publish_pending", stateLabel: "Completed", actions: [] },
-    { name: "Published", snapshotState: "published", stateLabel: "Completed", actions: [] },
+    { name: "Publish pending", snapshotState: "publish_pending", stateLabel: "Publishing", actions: [] },
+    { name: "Published", snapshotState: "published", stateLabel: "Published", actions: [] },
     { name: "Cataloged", snapshotState: "cataloged", stateLabel: "Completed", actions: [] },
     { name: "Rejected", snapshotState: "rejected", stateLabel: "Failed", actions: [] },
     { name: "Failed", snapshotState: "failed", stateLabel: "Failed", actions: [] },
@@ -1067,7 +1068,7 @@ test("Keep separate is single-owner, sends no bytes, and reaches awaiting public
   const settled = stateOf(h);
   assert.equal(settled.snapshotState, "publish_pending");
   assert.equal(settled.visibleMessage, "Validated. Awaiting publication. Not yet available in Gallery.");
-  assert.equal(settled.recovery, null);
+  assert.equal(JSON.parse(settled.recovery).last_known_state, "publish_pending");
   assert.equal(settled.fileName, "sample.gif");
   assert.equal(settled.focusedStatus, true);
 });
@@ -3052,8 +3053,50 @@ test("Recovery parsing rejects malformed, invalid, unsafe, and terminal records"
     expected_size_bytes: 8,
     last_known_state: "publish_pending",
   }));
+  assert.equal(h.run("loadUploadRecovery().last_known_state"), "publish_pending");
+  assert.notEqual(h.context.localStorage.getItem(RECOVERY_KEY), null);
+
+  h.context.localStorage.setItem(RECOVERY_KEY, JSON.stringify({
+    upload_id: UPLOAD_A,
+    file_name_hint: "sample.gif",
+    expected_size_bytes: 8,
+    last_known_state: "published",
+  }));
   assert.equal(h.run("loadUploadRecovery()"), null);
   assert.equal(h.context.localStorage.getItem(RECOVERY_KEY), null);
+});
+
+test("Publication polling is bounded while pending and published clears recovery truthfully", async () => {
+  const h = await createHarness();
+  setActiveUpload(h, { id: UPLOAD_A, state: "publish_pending", received: 8 });
+  h.run('document.querySelector("#upload-dialog").setAttribute("open", "")');
+  h.run("scheduleUploadPolling(currentUploadContext({ uploadId: uploadState.uploadId }))");
+
+  for (let attempt = 1; attempt <= 25; attempt += 1) {
+    enqueueStatus(h, UPLOAD_A, response(snapshot(UPLOAD_A, "publish_pending", 8)));
+    assert.equal(h.runNextTimer(), 1200);
+    await h.flush();
+  }
+
+  let state = stateOf(h);
+  assert.equal(state.publicationPollAttempts, 25);
+  assert.equal(state.hasPollOwner, false);
+  assert.equal(state.hasPollTimer, false);
+  assert.match(state.visibleMessage, /Publication is still pending/);
+  assert.equal(JSON.parse(state.recovery).last_known_state, "publish_pending");
+
+  h.run("uploadState.publicationPollAttempts = 0; scheduleUploadPolling(currentUploadContext({ uploadId: uploadState.uploadId }))");
+  enqueueStatus(h, UPLOAD_A, response(snapshot(UPLOAD_A, "published", 8)));
+  h.runNextTimer();
+  await h.flush();
+
+  state = stateOf(h);
+  assert.equal(state.snapshotState, "published");
+  assert.equal(state.stateLabel, "Published");
+  assert.equal(state.visibleMessage, "Published. Awaiting cataloging. Not yet available in Gallery.");
+  assert.equal(state.hasPollOwner, false);
+  assert.equal(state.hasPollTimer, false);
+  assert.equal(state.recovery, null);
 });
 
 test("Recovery not-found is cleared and persisted recovery stores no private bytes, handles, paths, or raw errors", async () => {

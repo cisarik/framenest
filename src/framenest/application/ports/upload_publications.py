@@ -1,0 +1,97 @@
+"""Application port for durable upload publication provenance."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Protocol
+
+from framenest.domain.upload_publications import UploadPublication, UploadPublicationId
+from framenest.domain.uploads import UploadSession, UploadSessionId
+
+
+class FrameNestUploadPublicationRepositoryError(RuntimeError):
+    """Base sanitized upload-publication repository failure."""
+
+
+class UploadPublicationNotFoundError(FrameNestUploadPublicationRepositoryError):
+    """Raised when durable publication provenance is absent."""
+
+
+class UploadPublicationStateConflictError(FrameNestUploadPublicationRepositoryError):
+    """Raised when upload or publication state is incompatible."""
+
+
+class UploadPublicationConcurrencyConflictError(
+    FrameNestUploadPublicationRepositoryError
+):
+    """Raised when an optimistic upload or publication guard is stale."""
+
+
+class UploadPublicationEvidenceConflictError(FrameNestUploadPublicationRepositoryError):
+    """Raised when provenance disagrees with authoritative upload evidence."""
+
+
+class UploadPublicationTargetConflictError(FrameNestUploadPublicationRepositoryError):
+    """Raised when a reserved opaque target cannot be persisted uniquely."""
+
+
+class UnsupportedLegacyUploadPublicationStateError(
+    FrameNestUploadPublicationRepositoryError
+):
+    """Raised for legacy advanced upload state without publication provenance."""
+
+
+@dataclass(frozen=True, slots=True)
+class UploadPublicationCandidate:
+    """One bounded durable upload publication work item."""
+
+    upload: UploadSession
+    publication: UploadPublication | None
+
+
+class UploadPublicationRepository(Protocol):
+    """Persistence-independent atomic publication transaction contract."""
+
+    def get_candidate(
+        self,
+        upload_id: UploadSessionId,
+    ) -> UploadPublicationCandidate | None:
+        """Return authoritative upload and optional provenance, or None when absent."""
+
+    def list_candidates(
+        self,
+        *,
+        limit: int,
+        after_updated_at_ms: int | None = None,
+        after_id: str | None = None,
+    ) -> tuple[UploadPublicationCandidate, ...]:
+        """Return bounded pending publication or cleanup work."""
+
+    def get_or_create_reservation(
+        self,
+        reservation: UploadPublication,
+        *,
+        expected_upload_version: int,
+    ) -> UploadPublicationCandidate:
+        """Commit exactly one per-upload reservation before filesystem mutation."""
+
+    def commit_verified_publication(
+        self,
+        upload_id: UploadSessionId,
+        *,
+        publication_id: UploadPublicationId,
+        expected_upload_version: int,
+        expected_publication_version: int,
+        updated_at_ms: int,
+    ) -> UploadPublicationCandidate:
+        """Atomically persist verified provenance and transition to published."""
+
+    def mark_cleanup_complete(
+        self,
+        upload_id: UploadSessionId,
+        *,
+        publication_id: UploadPublicationId,
+        expected_publication_version: int,
+        updated_at_ms: int,
+    ) -> UploadPublicationCandidate:
+        """Idempotently persist exact quarantine cleanup completion."""

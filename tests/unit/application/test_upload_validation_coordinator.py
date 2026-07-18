@@ -239,6 +239,14 @@ class _ScriptedValidator:
         )
 
 
+class _PublicationNotifier:
+    def __init__(self) -> None:
+        self.notifications = 0
+
+    def notify(self) -> None:
+        self.notifications += 1
+
+
 async def _wait_until(condition) -> None:
     deadline = asyncio.get_running_loop().time() + 1
     while not condition():
@@ -253,6 +261,25 @@ def _live_validation_threads() -> list[threading.Thread]:
         for thread in threading.enumerate()
         if thread.name.startswith("framenest-upload-validation") and thread.is_alive()
     ]
+
+
+def test_validation_success_notifies_automatic_publication_after_publish_pending() -> None:
+    async def scenario() -> None:
+        session = _session()
+        notifier = _PublicationNotifier()
+        coordinator = UploadValidationCoordinator(
+            _Repository([(session,), ()]),
+            _ScriptedValidator(),
+            UploadSessionLockRegistry(),
+            publication_coordinator=notifier,
+        )
+
+        await coordinator.drain()
+        await coordinator.shutdown()
+
+        assert notifier.notifications == 1
+
+    asyncio.run(scenario())
 
 
 def test_drain_runs_blocking_validation_off_event_loop() -> None:

@@ -112,6 +112,7 @@ class UploadApiDependencies:
 
     transport: object
     validation_coordinator: object | None = None
+    publication_coordinator: object | None = None
 
 
 def create_upload_api_router(dependencies: UploadApiDependencies) -> APIRouter:
@@ -304,6 +305,8 @@ def create_upload_api_router(dependencies: UploadApiDependencies) -> APIRouter:
                 QUARANTINE_STORAGE_UNAVAILABLE,
                 "Quarantine storage is unavailable.",
             )
+        if snapshot.state == "publish_pending":
+            _notify_publication_coordinator(dependencies.publication_coordinator)
         return _duplicate_resolution_response(snapshot)
 
     @router.delete(
@@ -419,6 +422,22 @@ def _notify_validation_coordinator(coordinator: object | None) -> None:
             event="upload_validation_notification_failed",
             operation="complete_upload",
             error_code="UPLOAD_VALIDATION_NOTIFICATION_FAILED",
+            retryable=True,
+        )
+
+
+def _notify_publication_coordinator(coordinator: object | None) -> None:
+    if coordinator is None:
+        return
+    try:
+        notify = getattr(coordinator, "notify")
+        notify()
+    except Exception:
+        LOGGER.emit(
+            level="WARNING",
+            event="upload_publication_notification_failed",
+            operation="resolve_upload_duplicate",
+            error_code="UPLOAD_PUBLICATION_NOTIFICATION_FAILED",
             retryable=True,
         )
 

@@ -17,6 +17,7 @@ const CATALOG_PAGE_SIZE = 30;
 const DEFAULT_UPLOAD_CHUNK_BYTES = 1024 * 1024;
 const UPLOAD_POLL_INTERVAL_MS = 1200;
 const UPLOAD_POLL_RETRY_MAX_MS = 10000;
+const UPLOAD_PUBLICATION_POLL_MAX_ATTEMPTS = 25;
 const UPLOAD_PUBLIC_ID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const UPLOAD_KNOWN_STATES = new Set([
@@ -34,7 +35,8 @@ const UPLOAD_KNOWN_STATES = new Set([
   "expired",
 ]);
 const UPLOAD_RECOVERY_CLEANUP_STATES = new Set([
-  "publish_pending",
+  "published",
+  "cataloged",
   "rejected",
   "failed",
   "cancelled",
@@ -114,6 +116,7 @@ let uploadState = {
   pollOwner: null,
   pollTimer: null,
   pollRetryDelayMs: UPLOAD_POLL_INTERVAL_MS,
+  publicationPollAttempts: 0,
   message: "",
   failureMessage: "",
 };
@@ -1061,6 +1064,7 @@ function stopUploadPolling() {
 
 function invalidateUploadOwnership() {
   stopUploadPolling();
+  uploadState.publicationPollAttempts = 0;
   nextUploadGeneration();
   uploadState.actionOwner = null;
   uploadState.uploadLoopOwner = null;
@@ -1117,13 +1121,23 @@ function uploadIsByteReceiving(snapshot) {
 }
 
 function uploadShouldPoll(snapshot) {
-  return Boolean(snapshot && (snapshot.state === "received" || snapshot.state === "validating"));
+  return Boolean(
+    snapshot
+      && (
+        snapshot.state === "received"
+        || snapshot.state === "validating"
+        || (
+          snapshot.state === "publish_pending"
+          && uploadState.publicationPollAttempts < UPLOAD_PUBLICATION_POLL_MAX_ATTEMPTS
+        )
+      ),
+  );
 }
 
 function uploadIsPollingStopState(snapshot) {
   return Boolean(
     snapshot
-      && ["publish_pending", "rejected", "failed", "cancelled", "expired"].includes(snapshot.state),
+      && ["published", "cataloged", "rejected", "failed", "cancelled", "expired"].includes(snapshot.state),
   );
 }
 
@@ -1175,7 +1189,9 @@ function uploadDisplayState(snapshot) {
   if (snapshot.state === "received") return "Validating";
   if (snapshot.state === "validating") return "Validating";
   if (snapshot.state === "duplicate_pending") return "Duplicate found";
-  if (["publish_pending", "published", "cataloged"].includes(snapshot.state)) return "Completed";
+  if (snapshot.state === "publish_pending") return "Publishing";
+  if (snapshot.state === "published") return "Published";
+  if (snapshot.state === "cataloged") return "Completed";
   if (snapshot.state === "rejected") return "Failed";
   if (snapshot.state === "failed") return "Failed";
   if (snapshot.state === "cancelled") return "Cancelled";
@@ -1215,7 +1231,13 @@ function uploadStatusMessage(snapshot) {
     return uploadState.message || "Select one local GIF or MP4.";
   }
   if (snapshot.state === "publish_pending") {
+    if (uploadState.publicationPollAttempts >= UPLOAD_PUBLICATION_POLL_MAX_ATTEMPTS) {
+      return "Validated. Publication is still pending. Reload to check again. Not yet available in Gallery.";
+    }
     return "Validated. Awaiting publication. Not yet available in Gallery.";
+  }
+  if (snapshot.state === "published") {
+    return "Published. Awaiting cataloging. Not yet available in Gallery.";
   }
   if (snapshot.state === "received") {
     return "Bytes received. Waiting for server validation.";
@@ -1407,6 +1429,16 @@ function applyUploadSnapshot(snapshot, owner = null, options = {}) {
   if (allowAdoptUploadId && !context.uploadId && !uploadState.uploadId) {
     context.uploadId = snapshot.id;
   }
+  const previousSnapshot = uploadState.snapshot;
+  if (snapshot.state === "publish_pending") {
+    uploadState.publicationPollAttempts = (
+      previousSnapshot
+      && previousSnapshot.id === snapshot.id
+      && previousSnapshot.state === "publish_pending"
+    ) ? uploadState.publicationPollAttempts + 1 : 0;
+  } else {
+    uploadState.publicationPollAttempts = 0;
+  }
   uploadState.snapshot = snapshot;
   uploadState.uploadId = snapshot.id;
   uploadState.fileNameHint = snapshot.display_filename || uploadState.fileNameHint;
@@ -1442,6 +1474,7 @@ function resetUploadForFile(file) {
     pollOwner: null,
     pollTimer: null,
     pollRetryDelayMs: UPLOAD_POLL_INTERVAL_MS,
+    publicationPollAttempts: 0,
     message: file ? "Ready to upload." : "Select one local GIF or MP4.",
     failureMessage: "",
   };
@@ -2181,7 +2214,11 @@ async function submitDuplicateResolution(owner, resolution) {
     if (!uploadContextStillCurrent(owner) || uploadState.actionOwner !== owner) return false;
     if (response.ok) {
       const resolved = normalizeUploadSnapshot(payload);
-      return applyUploadSnapshot(resolved, owner);
+      const applied = applyUploadSnapshot(resolved, owner);
+      if (applied && uploadShouldPoll(resolved)) {
+        scheduleUploadPolling(currentUploadContext({ uploadId: resolved.id }));
+      }
+      return applied;
     }
     uploadState.message = uploadErrorMessage(payload);
     renderUploadCockpit();

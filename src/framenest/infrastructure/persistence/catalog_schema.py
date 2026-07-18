@@ -308,3 +308,137 @@ media_canonical_tags = Table(
 )
 
 upload_sessions = define_upload_sessions_table(metadata)
+
+upload_publications = Table(
+    "upload_publications",
+    metadata,
+    Column(
+        "upload_id",
+        Text(),
+        ForeignKey("upload_sessions.id", ondelete="RESTRICT"),
+        primary_key=True,
+        nullable=False,
+    ),
+    Column("publication_id", Text(), nullable=False),
+    Column(
+        "destination_id",
+        Text(),
+        ForeignKey("libraries.id", ondelete="RESTRICT"),
+        nullable=False,
+    ),
+    Column("relative_target", Text(), nullable=False),
+    Column(
+        "byte_identity_id",
+        Text(),
+        ForeignKey("media_byte_identities.id", ondelete="RESTRICT"),
+        nullable=False,
+    ),
+    Column("expected_size_bytes", Integer(), nullable=False),
+    Column("checksum_algorithm", Text(), nullable=False),
+    Column("checksum_hex", Text(), nullable=False),
+    Column("validated_media_kind", Text(), nullable=False),
+    Column("validated_format", Text(), nullable=False),
+    Column("state", Text(), nullable=False),
+    Column("cleanup_state", Text(), nullable=False),
+    Column("created_at_ms", Integer(), nullable=False),
+    Column("updated_at_ms", Integer(), nullable=False),
+    Column("verified_at_ms", Integer(), nullable=True),
+    Column("cleanup_completed_at_ms", Integer(), nullable=True),
+    Column("version", Integer(), nullable=False),
+    CheckConstraint(
+        "length(upload_id) = 36",
+        name="ck_upload_publications_upload_id_length",
+    ),
+    CheckConstraint(
+        "length(publication_id) = 36",
+        name="ck_upload_publications_publication_id_length",
+    ),
+    CheckConstraint(
+        "length(destination_id) = 36",
+        name="ck_upload_publications_destination_id_length",
+    ),
+    CheckConstraint(
+        "length(byte_identity_id) = 36",
+        name="ck_upload_publications_byte_identity_id_length",
+    ),
+    CheckConstraint(
+        "length(relative_target) = 36 "
+        "AND relative_target = lower(relative_target) "
+        "AND substr(relative_target, 1, 32) NOT GLOB '*[^0-9a-f]*' "
+        "AND relative_target NOT GLOB '*/*' "
+        "AND relative_target NOT GLOB '*\\*' "
+        "AND substr(relative_target, 1, 32) = replace(publication_id, '-', '') "
+        "AND ((validated_format = 'gif' AND substr(relative_target, 33) = '.gif') "
+        "OR (validated_format = 'mp4' AND substr(relative_target, 33) = '.mp4'))",
+        name="ck_upload_publications_relative_target_opaque",
+    ),
+    CheckConstraint(
+        "expected_size_bytes > 0",
+        name="ck_upload_publications_expected_size_positive",
+    ),
+    CheckConstraint(
+        "checksum_algorithm = 'sha256'",
+        name="ck_upload_publications_checksum_algorithm",
+    ),
+    CheckConstraint(
+        "length(checksum_hex) = 64 "
+        "AND checksum_hex = lower(checksum_hex) "
+        "AND checksum_hex NOT GLOB '*[^0-9a-f]*'",
+        name="ck_upload_publications_checksum_hex",
+    ),
+    CheckConstraint(
+        "(validated_media_kind = 'animated_image' AND validated_format = 'gif') "
+        "OR (validated_media_kind = 'video' AND validated_format = 'mp4')",
+        name="ck_upload_publications_validation_evidence_pair",
+    ),
+    CheckConstraint(
+        "state IN ('reserved', 'verified')",
+        name="ck_upload_publications_state",
+    ),
+    CheckConstraint(
+        "cleanup_state IN ('pending', 'complete')",
+        name="ck_upload_publications_cleanup_state",
+    ),
+    CheckConstraint(
+        "(state = 'reserved' AND cleanup_state = 'pending' "
+        "AND verified_at_ms IS NULL AND cleanup_completed_at_ms IS NULL) "
+        "OR (state = 'verified' AND verified_at_ms IS NOT NULL "
+        "AND ((cleanup_state = 'pending' AND cleanup_completed_at_ms IS NULL) "
+        "OR (cleanup_state = 'complete' AND cleanup_completed_at_ms IS NOT NULL)))",
+        name="ck_upload_publications_progress",
+    ),
+    CheckConstraint(
+        "created_at_ms >= 0 AND updated_at_ms >= created_at_ms",
+        name="ck_upload_publications_timestamps",
+    ),
+    CheckConstraint(
+        "verified_at_ms IS NULL OR verified_at_ms >= created_at_ms",
+        name="ck_upload_publications_verified_at_ms",
+    ),
+    CheckConstraint(
+        "cleanup_completed_at_ms IS NULL "
+        "OR cleanup_completed_at_ms >= verified_at_ms",
+        name="ck_upload_publications_cleanup_completed_at_ms",
+    ),
+    CheckConstraint(
+        "version >= 0",
+        name="ck_upload_publications_version_non_negative",
+    ),
+    UniqueConstraint(
+        "publication_id",
+        name="uq_upload_publications_publication_id",
+    ),
+    UniqueConstraint(
+        "destination_id",
+        "relative_target",
+        name="uq_upload_publications_destination_target",
+    ),
+    Index(
+        "ix_upload_publications_state_cleanup",
+        "state",
+        "cleanup_state",
+        "updated_at_ms",
+        "upload_id",
+    ),
+    Index("ix_upload_publications_byte_identity_id", "byte_identity_id"),
+)

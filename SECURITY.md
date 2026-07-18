@@ -72,8 +72,8 @@ only. Backup manifests and command output must not contain source paths,
 destination paths, usernames, hostnames, IP addresses, environment values, SQL,
 media paths, media filenames, raw exception text, credentials, tokens, cookies,
 authorization headers, private keys, or secret prefixes. The initial bundle
-excludes Gallery preview cache, original media, non-secret AI configuration,
-and secrets. A valid catalog backup bundle contains only the declared manifest
+excludes Gallery preview cache, scan-imported originals, published upload
+originals, non-secret AI configuration, and secrets. A valid catalog backup bundle contains only the declared manifest
 and catalog artifact; unexpected files, directories, symlinks, and temporary
 state are rejected. Backup and restore publication must not overwrite a path
 that appears after an initial absence check. Restore writes only to a new
@@ -90,10 +90,19 @@ quarantine. Bounded validation derives size and SHA-256 evidence on the server;
 the first qualifying identity reaches `publish_pending`, while a later exact
 copy remains quarantined in `duplicate_pending` until explicitly kept or
 discarded. Discard durably cancels that selected session before removing only
-its quarantine object. Upload responses expose no storage key or path;
-duplicate-resolution responses additionally expose no matching session, byte
-identity, checksum, or filename. Uploaded bytes remain untrusted and are not
-published, cataloged, served, displayed, or sent to AI providers in this slice.
+its quarantine object. Optional publication requires the server-controlled
+`FRAMENEST_UPLOAD_PUBLICATION_LIBRARY_ID` to resolve one existing writable
+registered POSIX library whose native non-symlink root is disjoint from
+quarantine, cache, database state, and other registered POSIX roots. Publication
+uses an opaque per-upload target, verifies exact size and SHA-256 evidence, and
+atomically creates the final name without replacing an existing object. Only
+after durable publication provenance and `published` commit together may the
+exact quarantine object be removed; failed cleanup remains retryable. Upload
+responses expose no storage key, publication identity, destination, target,
+path, cleanup state, byte identity, or checksum; duplicate-resolution responses
+additionally expose no matching session or filename. Published uploads remain
+uncataloged, unserved, absent from Gallery, and never sent to AI providers by
+this workflow.
 Browser mutation requests with an `Origin` header must match the effective same
 origin; this is a bounded loopback protection and not authentication or
 authorization.

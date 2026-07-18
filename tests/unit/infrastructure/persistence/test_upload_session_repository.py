@@ -206,7 +206,7 @@ def test_duplicate_disposition_update_rolls_back_state_and_provenance_together(
     assert stored.duplicate_disposition is None
 
 
-def test_generic_state_transition_preserves_kept_duplicate_provenance(
+def test_generic_state_transition_cannot_publish_kept_duplicate(
     tmp_path: Path,
 ) -> None:
     repository, engine = _repository(tmp_path)
@@ -219,26 +219,20 @@ def test_generic_state_transition_preserves_kept_duplicate_provenance(
             disposition=UploadDuplicateDisposition.KEEP_SEPARATE,
             updated_at_ms=20,
         )
-        published = repository.transition_state(
-            kept.id,
-            expected_state=UploadSessionState.PUBLISH_PENDING,
-            target_state=UploadSessionState.PUBLISHED,
-            expected_version=kept.version,
-            updated_at_ms=21,
-        )
-        cataloged = repository.transition_state(
-            published.id,
-            expected_state=UploadSessionState.PUBLISHED,
-            target_state=UploadSessionState.CATALOGED,
-            expected_version=published.version,
-            updated_at_ms=22,
-        )
+        with pytest.raises(InvalidUploadSessionTransitionError):
+            repository.transition_state(
+                kept.id,
+                expected_state=UploadSessionState.PUBLISH_PENDING,
+                target_state=UploadSessionState.PUBLISHED,
+                expected_version=kept.version,
+                updated_at_ms=21,
+            )
+        stored = repository.get(kept.id)
     finally:
         engine.dispose()
 
     assert kept.duplicate_disposition is UploadDuplicateDisposition.KEEP_SEPARATE
-    assert published.duplicate_disposition is UploadDuplicateDisposition.KEEP_SEPARATE
-    assert cataloged.duplicate_disposition is UploadDuplicateDisposition.KEEP_SEPARATE
+    assert stored == kept
 
 
 def test_invalid_persisted_duplicate_disposition_fails_safely(tmp_path: Path) -> None:
@@ -401,31 +395,26 @@ def test_transition_state_persists_and_rejects_invalid_or_terminal_paths(
                 expected_version=1,
                 updated_at_ms=21,
             )
-        cataloged = repository.transition_state(
-            _create_at_state(
-                repository,
-                storage_key="upload-session-0004",
-                state=UploadSessionState.PUBLISHED,
-            ).id,
-            expected_state=UploadSessionState.PUBLISHED,
-            target_state=UploadSessionState.CATALOGED,
-            expected_version=0,
-            updated_at_ms=22,
+        published = _create_at_state(
+            repository,
+            storage_key="upload-session-0004",
+            state=UploadSessionState.PUBLISHED,
         )
         with pytest.raises(InvalidUploadSessionTransitionError):
             repository.transition_state(
-                cataloged.id,
-                expected_state=UploadSessionState.CATALOGED,
-                target_state=UploadSessionState.FAILED,
-                expected_version=1,
-                updated_at_ms=23,
+                published.id,
+                expected_state=UploadSessionState.PUBLISHED,
+                target_state=UploadSessionState.CATALOGED,
+                expected_version=0,
+                updated_at_ms=22,
             )
+        stored_published = repository.get(published.id)
     finally:
         engine.dispose()
 
     assert received.state == UploadSessionState.RECEIVED
     assert received.version == 1
-    assert cataloged.state == UploadSessionState.CATALOGED
+    assert stored_published == published
 
 
 def test_transition_state_distinguishes_not_found_wrong_state_and_stale_version(
@@ -547,8 +536,6 @@ def test_wrong_state_takes_precedence_over_incomplete_upload(tmp_path: Path) -> 
         (UploadSessionState.VALIDATING, UploadSessionState.PUBLISH_PENDING),
         (UploadSessionState.VALIDATING, UploadSessionState.REJECTED),
         (UploadSessionState.DUPLICATE_PENDING, UploadSessionState.PUBLISH_PENDING),
-        (UploadSessionState.PUBLISH_PENDING, UploadSessionState.PUBLISHED),
-        (UploadSessionState.PUBLISHED, UploadSessionState.CATALOGED),
     ],
 )
 def test_later_complete_target_transitions_reject_incomplete_persisted_rows(
@@ -588,8 +575,6 @@ def test_later_complete_target_transitions_reject_incomplete_persisted_rows(
         (UploadSessionState.VALIDATING, UploadSessionState.PUBLISH_PENDING),
         (UploadSessionState.VALIDATING, UploadSessionState.REJECTED),
         (UploadSessionState.DUPLICATE_PENDING, UploadSessionState.PUBLISH_PENDING),
-        (UploadSessionState.PUBLISH_PENDING, UploadSessionState.PUBLISHED),
-        (UploadSessionState.PUBLISHED, UploadSessionState.CATALOGED),
     ],
 )
 def test_valid_complete_rows_continue_through_transition_graph(

@@ -85,6 +85,7 @@ class UploadValidationCoordinator:
             DEFAULT_DISCOVERY_RETRY_INITIAL_DELAY_SECONDS
         ),
         discovery_retry_max_delay_seconds: float = DEFAULT_DISCOVERY_RETRY_MAX_DELAY_SECONDS,
+        publication_coordinator: object | None = None,
     ) -> None:
         if isinstance(batch_size, bool) or batch_size <= 0:
             raise ValueError("upload validation batch size must be positive")
@@ -106,6 +107,7 @@ class UploadValidationCoordinator:
         self._owns_executor = executor is None
         self._discovery_retry_initial_delay_seconds = discovery_retry_initial_delay_seconds
         self._discovery_retry_max_delay_seconds = discovery_retry_max_delay_seconds
+        self._publication_coordinator = publication_coordinator
         self._current_discovery_retry_delay_seconds = (
             discovery_retry_initial_delay_seconds
         )
@@ -349,6 +351,8 @@ class UploadValidationCoordinator:
                         self._validator.validate_owned_blocking,
                         candidate.id,
                     )
+            if result.state == UploadSessionState.PUBLISH_PENDING.value:
+                _notify_publication_coordinator(self._publication_coordinator)
             return _classify_validation_result(candidate, result)
         except (
             UploadValidationConcurrencyError,
@@ -456,3 +460,19 @@ def _safe_log(**fields: object) -> None:
         LOGGER.emit(**fields)
     except Exception:
         return
+
+
+def _notify_publication_coordinator(coordinator: object | None) -> None:
+    if coordinator is None:
+        return
+    try:
+        notify = getattr(coordinator, "notify")
+        notify()
+    except Exception:
+        _safe_log(
+            level="WARNING",
+            event="upload_publication_notification_failed",
+            operation="upload_validation_candidate",
+            error_code="UPLOAD_PUBLICATION_NOTIFICATION_FAILED",
+            retryable=True,
+        )

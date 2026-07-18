@@ -119,15 +119,21 @@ def test_terminal_states_have_no_outgoing_transitions(terminal: UploadSessionSta
             ensure_upload_session_transition_allowed(terminal, target)
 
 
-def test_published_transitions_only_to_cataloged_not_failed() -> None:
-    ensure_upload_session_transition_allowed(
-        UploadSessionState.PUBLISHED,
-        UploadSessionState.CATALOGED,
-    )
+@pytest.mark.parametrize(
+    ("source", "target"),
+    [
+        (UploadSessionState.PUBLISH_PENDING, UploadSessionState.PUBLISHED),
+        (UploadSessionState.PUBLISHED, UploadSessionState.CATALOGED),
+    ],
+)
+def test_external_effect_owned_transitions_are_not_generic(
+    source: UploadSessionState,
+    target: UploadSessionState,
+) -> None:
     with pytest.raises(FrameNestUploadSessionTransitionError):
         ensure_upload_session_transition_allowed(
-            UploadSessionState.PUBLISHED,
-            UploadSessionState.FAILED,
+            source,
+            target,
         )
 
 
@@ -218,8 +224,6 @@ def test_complete_receiving_can_transition_to_received_and_later_complete_states
         (UploadSessionState.VALIDATING, UploadSessionState.PUBLISH_PENDING),
         (UploadSessionState.VALIDATING, UploadSessionState.REJECTED),
         (UploadSessionState.DUPLICATE_PENDING, UploadSessionState.PUBLISH_PENDING),
-        (UploadSessionState.PUBLISH_PENDING, UploadSessionState.PUBLISHED),
-        (UploadSessionState.PUBLISHED, UploadSessionState.CATALOGED),
     ):
         ensure_upload_session_can_transition(
             _session(state=source, received_size_bytes=100),

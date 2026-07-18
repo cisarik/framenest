@@ -174,11 +174,10 @@ ALLOWED_UPLOAD_SESSION_TRANSITIONS = {
     ),
     UploadSessionState.PUBLISH_PENDING: frozenset(
         {
-            UploadSessionState.PUBLISHED,
             UploadSessionState.FAILED,
         }
     ),
-    UploadSessionState.PUBLISHED: frozenset({UploadSessionState.CATALOGED}),
+    UploadSessionState.PUBLISHED: frozenset(),
     UploadSessionState.CATALOGED: frozenset(),
     UploadSessionState.REJECTED: frozenset(),
     UploadSessionState.CANCELLED: frozenset(),

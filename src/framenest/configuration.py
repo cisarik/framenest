@@ -6,6 +6,7 @@ from ipaddress import ip_address
 from pathlib import Path
 import tempfile
 from typing import Any
+import uuid
 
 from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -76,6 +77,7 @@ class FrameNestSettings(BaseSettings):
         repr=False,
     )
     upload_quarantine_root: Path | None = Field(default=None, repr=False)
+    upload_publication_library_id: str | None = Field(default=None, repr=False)
     upload_max_total_bytes: int = Field(default=DEFAULT_UPLOAD_MAX_TOTAL_BYTES, gt=0)
     upload_max_patch_bytes: int = Field(default=DEFAULT_UPLOAD_MAX_PATCH_BYTES, gt=0)
     upload_session_ttl_seconds: int = Field(
@@ -120,6 +122,25 @@ class FrameNestSettings(BaseSettings):
             return _normalize_absolute_path(value)
         except ValueError as exc:
             raise ValueError("upload quarantine root must be an absolute path") from exc
+
+    @field_validator("upload_publication_library_id", mode="before")
+    @classmethod
+    def validate_upload_publication_library_id(cls, value: Any) -> str | None:
+        if value is None or value == "":
+            return None
+        if not isinstance(value, str):
+            raise ValueError("upload publication library id must be a UUIDv4")
+        try:
+            parsed = uuid.UUID(value)
+        except (AttributeError, TypeError, ValueError) as exc:
+            raise ValueError("upload publication library id must be a UUIDv4") from exc
+        if (
+            str(parsed) != value
+            or parsed.variant != uuid.RFC_4122
+            or parsed.version != 4
+        ):
+            raise ValueError("upload publication library id must be a UUIDv4")
+        return value
 
     @field_validator("ai_provider_id")
     @classmethod
