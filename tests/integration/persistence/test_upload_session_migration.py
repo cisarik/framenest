@@ -14,7 +14,8 @@ from framenest.infrastructure.persistence.catalog_schema import upload_sessions
 PRODUCTION_VERSIONS_PACKAGE = (
     "framenest.infrastructure.persistence.alembic_environment.versions"
 )
-CURRENT_HEAD_REVISION = "0011"
+CURRENT_HEAD_REVISION = "0012"
+TARGET_DUPLICATE_DISPOSITION_REVISION = "0012"
 TARGET_BYTE_IDENTITY_REVISION = "0011"
 TARGET_VALIDATION_REVISION = "0010"
 TARGET_COMPLETENESS_REVISION = "0009"
@@ -139,6 +140,7 @@ def test_packaged_migration_resources_include_upload_session_revisions() -> None
     assert versions.joinpath("0009_upload_session_completeness.py").is_file()
     assert versions.joinpath("0010_upload_validation_evidence.py").is_file()
     assert versions.joinpath("0011_upload_byte_identities.py").is_file()
+    assert versions.joinpath("0012_upload_duplicate_disposition.py").is_file()
 
     from framenest.infrastructure.persistence.migrations import load_script_directory
 
@@ -155,16 +157,19 @@ def test_packaged_migration_resources_include_upload_session_revisions() -> None
     identity_revision = script.get_revision(TARGET_BYTE_IDENTITY_REVISION)
     assert identity_revision is not None
     assert identity_revision.down_revision == TARGET_VALIDATION_REVISION
+    disposition_revision = script.get_revision(TARGET_DUPLICATE_DISPOSITION_REVISION)
+    assert disposition_revision is not None
+    assert disposition_revision.down_revision == TARGET_BYTE_IDENTITY_REVISION
     assert script.get_heads() == [CURRENT_HEAD_REVISION]
 
 
-def test_empty_database_upgrades_to_current_head_revision_0010(tmp_path: Path) -> None:
+def test_empty_database_upgrades_to_current_head_revision_0012(tmp_path: Path) -> None:
     from framenest.infrastructure.persistence.migrations import (
         inspect_database_migration_status,
         upgrade_database_to_head,
     )
 
-    settings = _settings_for(tmp_path / "head-0010.sqlite3")
+    settings = _settings_for(tmp_path / "head-0012.sqlite3")
     status = upgrade_database_to_head(settings)
 
     assert status.state == "at_head"
@@ -194,6 +199,7 @@ def test_upload_sessions_table_has_required_columns_constraints_and_indexes(
         "validated_media_kind",
         "validated_format",
         "byte_identity_id",
+        "duplicate_disposition",
         "created_at_ms",
         "updated_at_ms",
         "expires_at_ms",
@@ -212,6 +218,7 @@ def test_upload_sessions_table_has_required_columns_constraints_and_indexes(
         "ck_upload_sessions_checksum_hex",
         "ck_upload_sessions_validation_evidence_pair",
         "ck_upload_sessions_validated_states_have_evidence",
+        "ck_upload_sessions_duplicate_disposition",
         "ck_upload_sessions_expires_after_created",
         "ck_upload_sessions_failure_code_sanitized",
         "ck_upload_sessions_version_non_negative",
@@ -634,6 +641,120 @@ def test_media_byte_identity_constraints_reject_invalid_rows(tmp_path: Path) -> 
                 _insert_byte_identity(connection, valid | overrides)
     finally:
         connection.close()
+
+
+def test_upgrade_0011_to_0012_preserves_rows_and_constrains_disposition(
+    tmp_path: Path,
+) -> None:
+    settings = _settings_for(tmp_path / "duplicate-disposition.sqlite3")
+    _upgrade_to_revision(settings.database_path, TARGET_BYTE_IDENTITY_REVISION)
+    identity_id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+    rows = (
+        (
+            "11111111-1111-4111-8111-111111111111",
+            "publish_pending",
+            "upload-session-1201",
+        ),
+        (
+            "22222222-2222-4222-8222-222222222222",
+            "duplicate_pending",
+            "upload-session-1202",
+        ),
+    )
+    connection = _connect(settings.database_path)
+    try:
+        _insert_byte_identity(
+            connection,
+            {
+                "id": identity_id,
+                "checksum_algorithm": "sha256",
+                "size_bytes": 100,
+                "checksum_hex": "a" * 64,
+                "created_at_ms": 10,
+            },
+        )
+        connection.executemany(
+            """
+            INSERT INTO upload_sessions (
+                id, state, storage_key, display_filename,
+                declared_size_bytes, received_size_bytes,
+                checksum_algorithm, checksum_hex,
+                validated_media_kind, validated_format, byte_identity_id,
+                created_at_ms, updated_at_ms, expires_at_ms,
+                failure_code, version
+            ) VALUES (?, ?, ?, 'example.mp4', 100, 100,
+                      'sha256', ?, 'video', 'mp4', ?,
+                      10, 10, 1000, NULL, 0)
+            """,
+            tuple(
+                (row_id, state, storage_key, "a" * 64, identity_id)
+                for row_id, state, storage_key in rows
+            ),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    _upgrade_to_revision(settings.database_path, TARGET_DUPLICATE_DISPOSITION_REVISION)
+
+    connection = _connect(settings.database_path)
+    try:
+        migrated = connection.execute(
+            """
+            SELECT id, state, checksum_hex, byte_identity_id, duplicate_disposition
+            FROM upload_sessions ORDER BY id
+            """
+        ).fetchall()
+        assert migrated == [
+            (rows[0][0], rows[0][1], "a" * 64, identity_id, None),
+            (rows[1][0], rows[1][1], "a" * 64, identity_id, None),
+        ]
+        connection.execute(
+            "UPDATE upload_sessions SET duplicate_disposition = 'keep_separate' WHERE id = ?",
+            (rows[0][0],),
+        )
+        connection.execute(
+            "UPDATE upload_sessions SET state = 'cancelled', duplicate_disposition = 'discard' WHERE id = ?",
+            (rows[1][0],),
+        )
+        connection.commit()
+        with pytest.raises(sqlite3.IntegrityError):
+            connection.execute(
+                "UPDATE upload_sessions SET duplicate_disposition = 'merge' WHERE id = ?",
+                (rows[0][0],),
+            )
+    finally:
+        connection.close()
+
+    assert _alembic_revision(settings.database_path) == TARGET_DUPLICATE_DISPOSITION_REVISION
+    _downgrade_to_revision(settings.database_path, TARGET_BYTE_IDENTITY_REVISION)
+
+    assert "duplicate_disposition" not in _columns(settings.database_path, "upload_sessions")
+    connection = _connect(settings.database_path)
+    try:
+        downgraded = connection.execute(
+            "SELECT id, state, checksum_hex, byte_identity_id FROM upload_sessions ORDER BY id"
+        ).fetchall()
+        identities = connection.execute(
+            "SELECT id, checksum_hex FROM media_byte_identities"
+        ).fetchall()
+    finally:
+        connection.close()
+    assert downgraded == [
+        (rows[0][0], "publish_pending", "a" * 64, identity_id),
+        (rows[1][0], "cancelled", "a" * 64, identity_id),
+    ]
+    assert identities == [(identity_id, "a" * 64)]
+
+    _upgrade_to_revision(settings.database_path, TARGET_DUPLICATE_DISPOSITION_REVISION)
+    connection = _connect(settings.database_path)
+    try:
+        dispositions = connection.execute(
+            "SELECT duplicate_disposition FROM upload_sessions ORDER BY id"
+        ).fetchall()
+    finally:
+        connection.close()
+    assert dispositions == [(None,), (None,)]
 
 
 def test_upgrade_from_0010_backfills_coherent_successful_byte_identities(

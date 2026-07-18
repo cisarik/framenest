@@ -37,15 +37,28 @@ validation through distinct connections has one commit-ordered winner.
 A `duplicate_pending` session remains in quarantine until one explicit
 resolution:
 
-- `Keep as separate item` moves only that session to `publish_pending` and
-  retains its quarantine object.
-- `Discard duplicate` durably cancels only that session and then removes only
-  its quarantine object. If removal fails, the session remains cancelled and a
-  sanitized failure is reported.
+- `Keep as separate item` atomically moves only that session to
+  `publish_pending` and records the internal `keep_separate` disposition while
+  retaining its quarantine object.
+- `Discard duplicate` atomically moves only that session to `cancelled` and
+  records the internal `discard` disposition, then removes only its quarantine
+  object. If removal fails, the durable state and disposition remain
+  non-publishable and a sanitized failure is reported.
 
-Repeated identical resolutions are idempotent. A later conflicting resolution
-fails without changing state or storage. State version ownership makes
-concurrent keep and discard operations produce exactly one durable winner.
+The nullable disposition is authorization provenance, not public state. `NULL`
+means that no duplicate resolution has been proven. In particular, an original
+canonical upload at `publish_pending + NULL` is distinct from a kept duplicate
+at `publish_pending + keep_separate`; only the latter permits an idempotent Keep
+receipt. Likewise, only `cancelled + discard` permits idempotent Discard cleanup,
+while ordinary `cancelled + NULL` does not.
+
+Migration `0012` leaves every existing row at `NULL`. It does not infer history
+from state or backfill existing `publish_pending` rows, so pre-migration rows are
+handled conservatively. Future valid state changes retain recorded provenance.
+Repeated identical resolutions are idempotent only when that provenance agrees.
+A later conflicting resolution fails without changing state, disposition, or
+storage. State version ownership makes concurrent Keep and Discard operations
+produce exactly one durable state-plus-disposition winner.
 
 ## Identity and Privacy Boundaries
 
@@ -57,7 +70,8 @@ compared.
 The resolution API uses only the opaque upload-session identity and exposes a
 sanitized state snapshot. It does not reveal the matching session, byte identity,
 checksum, storage key, path, original filename, library location, or canonical
-target details.
+target details. The internal duplicate disposition is also excluded from upload
+status, duplicate-resolution, capability, and frontend response models.
 
 ## Non-Visibility
 

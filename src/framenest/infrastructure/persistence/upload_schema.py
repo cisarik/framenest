@@ -70,6 +70,7 @@ def define_upload_sessions_table(metadata: MetaData) -> Table:
             ForeignKey("media_byte_identities.id", ondelete="RESTRICT"),
             nullable=True,
         ),
+        Column("duplicate_disposition", Text(), nullable=True),
         Column("created_at_ms", Integer(), nullable=False),
         Column("updated_at_ms", Integer(), nullable=False),
         Column("expires_at_ms", Integer(), nullable=False),
@@ -155,6 +156,18 @@ def define_upload_sessions_table(metadata: MetaData) -> Table:
                 ),
             ),
             name="ck_upload_sessions_validated_states_have_evidence",
+        ),
+        CheckConstraint(
+            "duplicate_disposition IS NULL OR ("
+            "checksum_algorithm = 'sha256' "
+            "AND checksum_hex IS NOT NULL "
+            "AND validated_media_kind IS NOT NULL "
+            "AND validated_format IS NOT NULL "
+            "AND byte_identity_id IS NOT NULL "
+            "AND ((duplicate_disposition = 'keep_separate' "
+            "AND state IN ('publish_pending', 'published', 'cataloged', 'failed')) "
+            "OR (duplicate_disposition = 'discard' AND state = 'cancelled')))",
+            name="ck_upload_sessions_duplicate_disposition",
         ),
         CheckConstraint(
             "created_at_ms >= 0",

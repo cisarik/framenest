@@ -6,6 +6,7 @@ from typing import Protocol
 
 from framenest.domain.media_byte_identities import MediaByteIdentity
 from framenest.domain.uploads import (
+    UploadDuplicateDisposition,
     UploadSession,
     UploadSessionId,
     UploadSessionState,
@@ -139,6 +140,16 @@ class UploadSessionRepository(Protocol):
         updated_at_ms: int,
     ) -> UploadSession:
         """Atomically persist validation evidence and exact-duplicate disposition."""
+
+    def record_duplicate_disposition(
+        self,
+        session_id: UploadSessionId,
+        *,
+        expected_version: int,
+        disposition: UploadDuplicateDisposition,
+        updated_at_ms: int,
+    ) -> UploadSession:
+        """Atomically persist one explicit duplicate state and disposition."""
 
     def get_or_create_byte_identity(
         self,

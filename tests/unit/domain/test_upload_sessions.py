@@ -19,6 +19,7 @@ from framenest.domain.uploads import (
     FrameNestUploadSessionTransitionError,
     FrameNestUploadValidationEvidenceError,
     TERMINAL_UPLOAD_SESSION_STATES,
+    UploadDuplicateDisposition,
     UploadDisplayFilename,
     UploadSession,
     UploadSessionId,
@@ -55,6 +56,7 @@ def _session(**overrides: object) -> UploadSession:
         "failure_code": None,
         "version": 0,
         "byte_identity_id": None,
+        "duplicate_disposition": None,
     }
     values.update(overrides)
     if values["state"] in VALIDATED_UPLOAD_SESSION_STATES:
@@ -354,6 +356,72 @@ def test_advanced_states_require_byte_identity_link() -> None:
             validated_media_kind=UploadValidatedMediaKind.VIDEO,
             validated_format=UploadValidatedFormat.MP4,
             byte_identity_id=None,
+        )
+
+
+@pytest.mark.parametrize(
+    ("state", "disposition"),
+    [
+        (UploadSessionState.PUBLISH_PENDING, UploadDuplicateDisposition.KEEP_SEPARATE),
+        (UploadSessionState.PUBLISHED, UploadDuplicateDisposition.KEEP_SEPARATE),
+        (UploadSessionState.CATALOGED, UploadDuplicateDisposition.KEEP_SEPARATE),
+        (UploadSessionState.FAILED, UploadDuplicateDisposition.KEEP_SEPARATE),
+        (UploadSessionState.CANCELLED, UploadDuplicateDisposition.DISCARD),
+    ],
+)
+def test_duplicate_disposition_requires_compatible_state_and_validation_evidence(
+    state: UploadSessionState,
+    disposition: UploadDuplicateDisposition,
+) -> None:
+    evidence = {
+        "checksum_algorithm": "sha256",
+        "checksum_hex": "a" * 64,
+        "validated_media_kind": UploadValidatedMediaKind.VIDEO,
+        "validated_format": UploadValidatedFormat.MP4,
+        "byte_identity_id": MediaByteIdentityId.new(),
+    }
+
+    session = _session(
+        state=state,
+        received_size_bytes=100,
+        duplicate_disposition=disposition,
+        **evidence,
+    )
+
+    assert session.duplicate_disposition is disposition
+
+
+@pytest.mark.parametrize(
+    ("state", "disposition"),
+    [
+        (UploadSessionState.DUPLICATE_PENDING, UploadDuplicateDisposition.KEEP_SEPARATE),
+        (UploadSessionState.PUBLISH_PENDING, UploadDuplicateDisposition.DISCARD),
+        (UploadSessionState.CANCELLED, UploadDuplicateDisposition.KEEP_SEPARATE),
+    ],
+)
+def test_duplicate_disposition_rejects_incompatible_state(
+    state: UploadSessionState,
+    disposition: UploadDuplicateDisposition,
+) -> None:
+    with pytest.raises(FrameNestUploadSessionError):
+        _session(
+            state=state,
+            received_size_bytes=100,
+            duplicate_disposition=disposition,
+            checksum_algorithm="sha256",
+            checksum_hex="a" * 64,
+            validated_media_kind=UploadValidatedMediaKind.VIDEO,
+            validated_format=UploadValidatedFormat.MP4,
+            byte_identity_id=MediaByteIdentityId.new(),
+        )
+
+
+def test_duplicate_disposition_rejects_missing_validation_evidence() -> None:
+    with pytest.raises(FrameNestUploadValidationEvidenceError):
+        _session(
+            state=UploadSessionState.CANCELLED,
+            received_size_bytes=100,
+            duplicate_disposition=UploadDuplicateDisposition.DISCARD,
         )
 
 

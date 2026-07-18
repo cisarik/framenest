@@ -63,6 +63,13 @@ class UploadSessionState(StrEnum):
     FAILED = "failed"
 
 
+class UploadDuplicateDisposition(StrEnum):
+    """Durable provenance for one explicit exact-duplicate decision."""
+
+    KEEP_SEPARATE = "keep_separate"
+    DISCARD = "discard"
+
+
 class UploadValidatedMediaKind(StrEnum):
     """Durable normalized media kind assigned by upload validation."""
 
@@ -279,6 +286,7 @@ class UploadSession:
     validated_media_kind: UploadValidatedMediaKind | None = None
     validated_format: UploadValidatedFormat | None = None
     byte_identity_id: MediaByteIdentityId | None = None
+    duplicate_disposition: UploadDuplicateDisposition | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.id, UploadSessionId):
@@ -328,6 +336,15 @@ class UploadSession:
                 validated_format=self.validated_format,
                 byte_identity_id=self.byte_identity_id,
             )
+        _validate_duplicate_disposition(
+            state=self.state,
+            disposition=self.duplicate_disposition,
+            checksum_algorithm=self.checksum_algorithm,
+            checksum_hex=self.checksum_hex,
+            validated_media_kind=self.validated_media_kind,
+            validated_format=self.validated_format,
+            byte_identity_id=self.byte_identity_id,
+        )
 
 
 def is_terminal_upload_session_state(state: UploadSessionState) -> bool:
@@ -476,6 +493,40 @@ def _validate_required_validation_evidence(
         raise FrameNestUploadValidationEvidenceError(
             INVALID_UPLOAD_VALIDATION_EVIDENCE_MESSAGE
         )
+
+
+def _validate_duplicate_disposition(
+    *,
+    state: UploadSessionState,
+    disposition: UploadDuplicateDisposition | None,
+    checksum_algorithm: str | None,
+    checksum_hex: str | None,
+    validated_media_kind: UploadValidatedMediaKind | None,
+    validated_format: UploadValidatedFormat | None,
+    byte_identity_id: MediaByteIdentityId | None,
+) -> None:
+    if disposition is None:
+        return
+    if not isinstance(disposition, UploadDuplicateDisposition):
+        raise FrameNestUploadSessionError(INVALID_UPLOAD_SESSION_MESSAGE)
+    allowed_states = {
+        UploadDuplicateDisposition.KEEP_SEPARATE: {
+            UploadSessionState.PUBLISH_PENDING,
+            UploadSessionState.PUBLISHED,
+            UploadSessionState.CATALOGED,
+            UploadSessionState.FAILED,
+        },
+        UploadDuplicateDisposition.DISCARD: {UploadSessionState.CANCELLED},
+    }
+    if state not in allowed_states[disposition]:
+        raise FrameNestUploadSessionError(INVALID_UPLOAD_SESSION_MESSAGE)
+    _validate_required_validation_evidence(
+        checksum_algorithm=checksum_algorithm,
+        checksum_hex=checksum_hex,
+        validated_media_kind=validated_media_kind,
+        validated_format=validated_format,
+        byte_identity_id=byte_identity_id,
+    )
 
 
 def _validate_positive_int(

@@ -879,6 +879,10 @@ def test_duplicate_resolution_rejects_invalid_state_body_identity_and_origin(
         json={"resolution": "discard", "target": canonical.id.to_string()},
     )
     wrong_state = client.post(canonical_endpoint, json={"resolution": "discard"})
+    canonical_keep = client.post(
+        canonical_endpoint,
+        json={"resolution": "keep_separate"},
+    )
     unknown_identity = client.post(
         "/api/uploads/33333333-3333-4333-8333-333333333333/duplicate-resolution",
         json={"resolution": "discard"},
@@ -894,6 +898,13 @@ def test_duplicate_resolution_rejects_invalid_state_body_identity_and_origin(
     assert extra_field.status_code == 422
     assert wrong_state.status_code == 409
     assert wrong_state.json()["error"]["code"] == "UPLOAD_SESSION_STATE_CONFLICT"
+    assert canonical_keep.status_code == 409
+    assert canonical_keep.json() == {
+        "error": {
+            "code": "UPLOAD_SESSION_STATE_CONFLICT",
+            "message": "Upload session state conflict.",
+        }
+    }
     assert unknown_identity.status_code == 404
     assert unknown_identity.json()["error"]["code"] == "UPLOAD_SESSION_NOT_FOUND"
     assert cross_origin.status_code == 403
@@ -901,6 +912,18 @@ def test_duplicate_resolution_rejects_invalid_state_body_identity_and_origin(
     assert client.get(f"/api/uploads/{duplicate.id.to_string()}").json()["state"] == (
         "duplicate_pending"
     )
+    engine = create_sqlite_engine(settings.database_path)
+    try:
+        canonical_after = SqliteUploadSessionRepository(engine).get(canonical.id)
+    finally:
+        dispose_engine(engine)
+    assert canonical_after is not None
+    assert canonical_after.state is UploadSessionState.PUBLISH_PENDING
+    assert canonical_after.version == canonical.version
+    assert canonical_after.duplicate_disposition is None
+    assert settings.upload_quarantine_root.joinpath(  # type: ignore[union-attr]
+        f"{canonical.storage_key.value}.part"
+    ).read_bytes() == b"abcde"
 
 
 def test_quarantine_root_overlapping_registered_library_rejects_create(

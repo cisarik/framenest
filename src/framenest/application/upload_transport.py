@@ -34,6 +34,7 @@ from framenest.application.root_paths import roots_overlap
 from framenest.domain import LibraryPathFlavor
 from framenest.domain.uploads import (
     FrameNestUploadSessionError,
+    UploadDuplicateDisposition,
     UploadDisplayFilename,
     UploadSession,
     UploadSessionId,
@@ -432,25 +433,46 @@ class UploadTransportService:
         async with self._locks.lease(session_id):
             session = self._load(session_id)
             if resolution is UploadDuplicateResolution.KEEP_SEPARATE:
-                if session.state is UploadSessionState.PUBLISH_PENDING:
+                if (
+                    session.duplicate_disposition
+                    is UploadDuplicateDisposition.KEEP_SEPARATE
+                    and session.state
+                    in {
+                        UploadSessionState.PUBLISH_PENDING,
+                        UploadSessionState.PUBLISHED,
+                        UploadSessionState.CATALOGED,
+                    }
+                ):
                     return _snapshot(session)
-                if session.state is not UploadSessionState.DUPLICATE_PENDING:
+                if (
+                    session.state is not UploadSessionState.DUPLICATE_PENDING
+                    or session.duplicate_disposition is not None
+                ):
                     raise UploadSessionStateConflictError("upload session state conflict")
-                kept = self._transition(
+                kept = self._record_duplicate_disposition(
                     session,
-                    UploadSessionState.PUBLISH_PENDING,
-                    failure_code=None,
+                    UploadDuplicateDisposition.KEEP_SEPARATE,
                 )
                 return _snapshot(kept)
             if resolution is UploadDuplicateResolution.DISCARD:
-                if session.state is UploadSessionState.CANCELLED:
-                    if session.byte_identity_id is None:
-                        raise UploadSessionStateConflictError("upload session state conflict")
+                if (
+                    session.state is UploadSessionState.CANCELLED
+                    and session.duplicate_disposition
+                    is UploadDuplicateDisposition.DISCARD
+                ):
                     self._remove_cancelled_file(storage, session)
                     return _snapshot(session)
-                if session.state is not UploadSessionState.DUPLICATE_PENDING:
+                if (
+                    session.state is not UploadSessionState.DUPLICATE_PENDING
+                    or session.duplicate_disposition is not None
+                ):
                     raise UploadSessionStateConflictError("upload session state conflict")
-                return _snapshot(self._cancel_owned(storage, session))
+                discarded = self._record_duplicate_disposition(
+                    session,
+                    UploadDuplicateDisposition.DISCARD,
+                )
+                self._remove_cancelled_file(storage, discarded)
+                return _snapshot(discarded)
             raise UploadSessionStateConflictError("upload session state conflict")
 
     def _cancel_owned(
@@ -549,6 +571,27 @@ class UploadTransportService:
             raise UploadSessionNotFoundTransportError("upload session not found") from exc
         except IncompleteUploadSessionError as exc:
             raise UploadQuarantineStateInconsistentError("quarantine state inconsistent") from exc
+        except InvalidUploadSessionTransitionError as exc:
+            raise UploadSessionStateConflictError("upload session state conflict") from exc
+        except UploadSessionConcurrencyConflictError as exc:
+            raise UploadConcurrencyConflictError("upload concurrency conflict") from exc
+        except FrameNestUploadSessionRepositoryError as exc:
+            raise UploadQuarantineUnavailableError("upload storage unavailable") from exc
+
+    def _record_duplicate_disposition(
+        self,
+        session: UploadSession,
+        disposition: UploadDuplicateDisposition,
+    ) -> UploadSession:
+        try:
+            return self._repository.record_duplicate_disposition(
+                session.id,
+                expected_version=session.version,
+                disposition=disposition,
+                updated_at_ms=self._now_ms(),
+            )
+        except UploadSessionNotFoundError as exc:
+            raise UploadSessionNotFoundTransportError("upload session not found") from exc
         except InvalidUploadSessionTransitionError as exc:
             raise UploadSessionStateConflictError("upload session state conflict") from exc
         except UploadSessionConcurrencyConflictError as exc:

@@ -29,6 +29,7 @@ from framenest.domain.uploads import (
     FrameNestUploadSessionError,
     FrameNestUploadSessionTransitionError,
     FrameNestUploadValidationEvidenceError,
+    UploadDuplicateDisposition,
     UploadDisplayFilename,
     UploadSession,
     UploadSessionId,
@@ -638,6 +639,87 @@ class SqliteUploadSessionRepository:
         except SQLAlchemyError as exc:
             raise FrameNestUploadSessionRepositoryError(_REPOSITORY_FAILURE_MESSAGE) from exc
 
+    def record_duplicate_disposition(
+        self,
+        session_id: UploadSessionId,
+        *,
+        expected_version: int,
+        disposition: UploadDuplicateDisposition,
+        updated_at_ms: int,
+    ) -> UploadSession:
+        """Atomically persist one explicit duplicate disposition and target state."""
+        try:
+            if not isinstance(disposition, UploadDuplicateDisposition):
+                raise FrameNestUploadSessionTransitionError(
+                    "invalid upload session transition"
+                )
+            _validate_non_negative(expected_version)
+            _validate_non_negative(updated_at_ms)
+        except FrameNestUploadSessionTransitionError as exc:
+            raise InvalidUploadSessionTransitionError(
+                "invalid upload session transition"
+            ) from exc
+        except FrameNestUploadSessionError as exc:
+            raise UploadSessionConcurrencyConflictError(
+                "upload session concurrency conflict"
+            ) from exc
+
+        target_state = (
+            UploadSessionState.PUBLISH_PENDING
+            if disposition is UploadDuplicateDisposition.KEEP_SEPARATE
+            else UploadSessionState.CANCELLED
+        )
+
+        def operation(connection: Connection) -> UploadSession:
+            result = connection.execute(
+                update(upload_sessions)
+                .where(
+                    and_(
+                        upload_sessions.c.id == session_id.to_string(),
+                        upload_sessions.c.state == UploadSessionState.DUPLICATE_PENDING.value,
+                        upload_sessions.c.version == expected_version,
+                        upload_sessions.c.duplicate_disposition.is_(None),
+                    )
+                )
+                .values(
+                    state=target_state.value,
+                    duplicate_disposition=disposition.value,
+                    updated_at_ms=updated_at_ms,
+                    version=upload_sessions.c.version + 1,
+                )
+            )
+            if result.rowcount == 1:
+                return _require_session(connection, session_id)
+            row = _row_by_id(connection, session_id)
+            if row is None:
+                raise UploadSessionNotFoundError("upload session not found")
+            if str(row["state"]) != UploadSessionState.DUPLICATE_PENDING.value:
+                raise InvalidUploadSessionTransitionError(
+                    "invalid upload session transition"
+                )
+            if row["duplicate_disposition"] is not None:
+                raise InvalidUploadSessionTransitionError(
+                    "invalid upload session transition"
+                )
+            if int(row["version"]) != expected_version:
+                raise UploadSessionConcurrencyConflictError(
+                    "upload session concurrency conflict"
+                )
+            raise UploadSessionConcurrencyConflictError(
+                "upload session concurrency conflict"
+            )
+
+        try:
+            return run_in_transaction(self._engine, operation)
+        except (
+            UploadSessionNotFoundError,
+            InvalidUploadSessionTransitionError,
+            UploadSessionConcurrencyConflictError,
+        ):
+            raise
+        except SQLAlchemyError as exc:
+            raise FrameNestUploadSessionRepositoryError(_REPOSITORY_FAILURE_MESSAGE) from exc
+
     def get_or_create_byte_identity(
         self,
         identity: MediaByteIdentity,
@@ -841,6 +923,9 @@ def _values_from_session(session: UploadSession) -> dict[str, object]:
         "byte_identity_id": None
         if session.byte_identity_id is None
         else session.byte_identity_id.to_string(),
+        "duplicate_disposition": None
+        if session.duplicate_disposition is None
+        else session.duplicate_disposition.value,
         "created_at_ms": session.created_at_ms,
         "updated_at_ms": session.updated_at_ms,
         "expires_at_ms": session.expires_at_ms,
@@ -871,6 +956,9 @@ def _session_from_row(row: Mapping[str, object]) -> UploadSession:
             byte_identity_id=None
             if row["byte_identity_id"] is None
             else MediaByteIdentityId.from_string(str(row["byte_identity_id"])),
+            duplicate_disposition=None
+            if row["duplicate_disposition"] is None
+            else UploadDuplicateDisposition(str(row["duplicate_disposition"])),
             created_at_ms=int(row["created_at_ms"]),
             updated_at_ms=int(row["updated_at_ms"]),
             expires_at_ms=int(row["expires_at_ms"]),

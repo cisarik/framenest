@@ -12,6 +12,7 @@ import pytest
 import sqlalchemy as sa
 
 from framenest.application.ports.upload_sessions import (
+    FrameNestUploadSessionRepositoryError,
     IncompleteUploadSessionError,
     InvalidUploadChecksumError,
     InvalidUploadSessionTransitionError,
@@ -26,6 +27,7 @@ from framenest.application.ports.upload_sessions import (
 from framenest.configuration import FrameNestSettings
 from framenest.domain import MediaByteIdentity, MediaByteIdentityId
 from framenest.domain.uploads import (
+    UploadDuplicateDisposition,
     UploadDisplayFilename,
     UploadSession,
     UploadSessionId,
@@ -80,6 +82,7 @@ def _session(
     validated_media_kind: UploadValidatedMediaKind | None = None,
     validated_format: UploadValidatedFormat | None = None,
     byte_identity_id: MediaByteIdentityId | None = None,
+    duplicate_disposition: UploadDuplicateDisposition | None = None,
 ) -> UploadSession:
     if state in {
         UploadSessionState.RECEIVED,
@@ -113,6 +116,7 @@ def _session(
         validated_media_kind=validated_media_kind,
         validated_format=validated_format,
         byte_identity_id=byte_identity_id,
+        duplicate_disposition=duplicate_disposition,
     )
 
 
@@ -127,6 +131,137 @@ def test_create_and_get_round_trip(tmp_path: Path) -> None:
         engine.dispose()
 
     assert loaded == session
+    assert loaded.duplicate_disposition is None
+
+
+@pytest.mark.parametrize(
+    ("disposition", "target_state"),
+    [
+        (UploadDuplicateDisposition.KEEP_SEPARATE, UploadSessionState.PUBLISH_PENDING),
+        (UploadDuplicateDisposition.DISCARD, UploadSessionState.CANCELLED),
+    ],
+)
+def test_record_duplicate_disposition_atomically_persists_state_and_provenance(
+    tmp_path: Path,
+    disposition: UploadDuplicateDisposition,
+    target_state: UploadSessionState,
+) -> None:
+    repository, engine = _repository(tmp_path)
+    session = _session(state=UploadSessionState.DUPLICATE_PENDING)
+    try:
+        repository.create(session)
+        resolved = repository.record_duplicate_disposition(
+            session.id,
+            expected_version=0,
+            disposition=disposition,
+            updated_at_ms=20,
+        )
+        reconstructed = SqliteUploadSessionRepository(engine).get(session.id)
+    finally:
+        engine.dispose()
+
+    assert resolved.state is target_state
+    assert resolved.duplicate_disposition is disposition
+    assert resolved.version == 1
+    assert resolved.updated_at_ms == 20
+    assert reconstructed == resolved
+
+
+def test_duplicate_disposition_update_rolls_back_state_and_provenance_together(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import framenest.infrastructure.persistence.upload_session_repository as module
+
+    repository, engine = _repository(tmp_path)
+    session = _session(state=UploadSessionState.DUPLICATE_PENDING)
+    original_require_session = module._require_session
+
+    def fail_after_update(connection, session_id):
+        loaded = original_require_session(connection, session_id)
+        assert loaded.state is UploadSessionState.PUBLISH_PENDING
+        assert (
+            loaded.duplicate_disposition
+            is UploadDuplicateDisposition.KEEP_SEPARATE
+        )
+        raise RuntimeError("synthetic post-update failure")
+
+    try:
+        repository.create(session)
+        monkeypatch.setattr(module, "_require_session", fail_after_update)
+        with pytest.raises(RuntimeError):
+            repository.record_duplicate_disposition(
+                session.id,
+                expected_version=0,
+                disposition=UploadDuplicateDisposition.KEEP_SEPARATE,
+                updated_at_ms=20,
+            )
+        monkeypatch.setattr(module, "_require_session", original_require_session)
+        stored = repository.get(session.id)
+    finally:
+        engine.dispose()
+
+    assert stored == session
+    assert stored.state is UploadSessionState.DUPLICATE_PENDING
+    assert stored.duplicate_disposition is None
+
+
+def test_generic_state_transition_preserves_kept_duplicate_provenance(
+    tmp_path: Path,
+) -> None:
+    repository, engine = _repository(tmp_path)
+    session = _session(state=UploadSessionState.DUPLICATE_PENDING)
+    try:
+        repository.create(session)
+        kept = repository.record_duplicate_disposition(
+            session.id,
+            expected_version=0,
+            disposition=UploadDuplicateDisposition.KEEP_SEPARATE,
+            updated_at_ms=20,
+        )
+        published = repository.transition_state(
+            kept.id,
+            expected_state=UploadSessionState.PUBLISH_PENDING,
+            target_state=UploadSessionState.PUBLISHED,
+            expected_version=kept.version,
+            updated_at_ms=21,
+        )
+        cataloged = repository.transition_state(
+            published.id,
+            expected_state=UploadSessionState.PUBLISHED,
+            target_state=UploadSessionState.CATALOGED,
+            expected_version=published.version,
+            updated_at_ms=22,
+        )
+    finally:
+        engine.dispose()
+
+    assert kept.duplicate_disposition is UploadDuplicateDisposition.KEEP_SEPARATE
+    assert published.duplicate_disposition is UploadDuplicateDisposition.KEEP_SEPARATE
+    assert cataloged.duplicate_disposition is UploadDuplicateDisposition.KEEP_SEPARATE
+
+
+def test_invalid_persisted_duplicate_disposition_fails_safely(tmp_path: Path) -> None:
+    repository, engine = _repository(tmp_path)
+    session = _session(state=UploadSessionState.PUBLISH_PENDING)
+    try:
+        repository.create(session)
+        with engine.begin() as connection:
+            connection.execute(sa.text("PRAGMA ignore_check_constraints=ON"))
+            connection.execute(
+                sa.text(
+                    "UPDATE upload_sessions SET duplicate_disposition = 'unknown' "
+                    "WHERE id = :id"
+                ),
+                {"id": session.id.to_string()},
+            )
+            connection.execute(sa.text("PRAGMA ignore_check_constraints=OFF"))
+        with pytest.raises(FrameNestUploadSessionRepositoryError) as error:
+            repository.get(session.id)
+    finally:
+        engine.dispose()
+
+    assert str(error.value) == "Upload session operation failed."
 
 
 def test_create_rejects_duplicate_session_id_and_storage_key(tmp_path: Path) -> None:
@@ -967,6 +1102,8 @@ def test_two_successful_identical_uploads_link_to_one_byte_identity(tmp_path: Pa
 
     assert first_completed.state is UploadSessionState.PUBLISH_PENDING
     assert second_completed.state is UploadSessionState.DUPLICATE_PENDING
+    assert first_completed.duplicate_disposition is None
+    assert second_completed.duplicate_disposition is None
     assert first_completed.byte_identity_id == second_completed.byte_identity_id
     assert identity_count == 1
 

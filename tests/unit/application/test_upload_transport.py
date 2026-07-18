@@ -38,6 +38,7 @@ from framenest.application.ports.upload_sessions import (
 from framenest.domain import Library, LibraryId, LibraryPathFlavor, LibraryRoot
 from framenest.domain.identities import DeviceId
 from framenest.domain.uploads import (
+    UploadDuplicateDisposition,
     UploadDisplayFilename,
     UploadSession,
     UploadSessionId,
@@ -473,6 +474,9 @@ def test_duplicate_keep_and_discard_are_isolated_idempotent_and_conflicting(
 
     assert kept.state == UploadSessionState.PUBLISH_PENDING.value
     assert repeated_keep.state == UploadSessionState.PUBLISH_PENDING.value
+    assert keep_repository.get(duplicate.id).duplicate_disposition is (
+        UploadDuplicateDisposition.KEEP_SEPARATE
+    )
     assert keep_quarantine.joinpath(f"{canonical.storage_key.value}.part").read_bytes() == b"same"
     assert keep_quarantine.joinpath(f"{duplicate.storage_key.value}.part").read_bytes() == b"same"
 
@@ -511,6 +515,7 @@ def test_duplicate_keep_and_discard_are_isolated_idempotent_and_conflicting(
     assert canonical_stored.state is UploadSessionState.PUBLISH_PENDING
     assert duplicate_stored is not None
     assert duplicate_stored.state is UploadSessionState.CANCELLED
+    assert duplicate_stored.duplicate_disposition is UploadDuplicateDisposition.DISCARD
     assert discard_quarantine.joinpath(f"{canonical.storage_key.value}.part").read_bytes() == b"same"
     assert not discard_quarantine.joinpath(f"{duplicate.storage_key.value}.part").exists()
 
@@ -554,6 +559,7 @@ def test_duplicate_discard_deletion_failure_preserves_cancelled_fail_safe_state(
     assert str(error.value) == "upload storage unavailable"
     assert duplicate_stored is not None
     assert duplicate_stored.state is UploadSessionState.CANCELLED
+    assert duplicate_stored.duplicate_disposition is UploadDuplicateDisposition.DISCARD
     assert canonical_stored is not None
     assert canonical_stored.state is UploadSessionState.PUBLISH_PENDING
     assert quarantine_root.joinpath(f"{duplicate.storage_key.value}.part").exists()
@@ -615,6 +621,12 @@ def test_concurrent_duplicate_keep_versus_discard_has_one_durable_winner(
         UploadSessionState.PUBLISH_PENDING,
         UploadSessionState.CANCELLED,
     }
+    expected_disposition = (
+        UploadDuplicateDisposition.KEEP_SEPARATE
+        if duplicate_stored.state is UploadSessionState.PUBLISH_PENDING
+        else UploadDuplicateDisposition.DISCARD
+    )
+    assert duplicate_stored.duplicate_disposition is expected_disposition
     assert canonical_stored is not None
     assert canonical_stored.state is UploadSessionState.PUBLISH_PENDING
     assert quarantine_root.joinpath(f"{canonical.storage_key.value}.part").read_bytes() == b"same"
@@ -622,6 +634,116 @@ def test_concurrent_duplicate_keep_versus_discard_has_one_durable_winner(
     assert duplicate_path.exists() is (
         duplicate_stored.state is UploadSessionState.PUBLISH_PENDING
     )
+
+
+def test_canonical_keep_and_ordinary_cancelled_discard_require_durable_provenance(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "provenance"
+    service, repository, engine = _service_with(root)
+    quarantine = root / "quarantine"
+    canonical, _duplicate = _create_duplicate_pair(repository, quarantine)
+    ordinary_cancelled = UploadSession(
+        id=UploadSessionId.new(),
+        state=UploadSessionState.CANCELLED,
+        storage_key=UploadStorageKey("ordinary-cancelled-0001"),
+        display_filename=UploadDisplayFilename("cancelled.mp4"),
+        declared_size_bytes=4,
+        received_size_bytes=4,
+        checksum_algorithm=None,
+        checksum_hex=None,
+        created_at_ms=10,
+        updated_at_ms=10,
+        expires_at_ms=10_000,
+        failure_code=None,
+        version=3,
+    )
+    repository.create(ordinary_cancelled)
+    ordinary_path = quarantine / f"{ordinary_cancelled.storage_key.value}.part"
+    ordinary_path.write_bytes(b"data")
+    canonical_before = repository.get(canonical.id)
+    try:
+        with pytest.raises(UploadSessionStateConflictError):
+            asyncio.run(
+                service.resolve_duplicate(
+                    canonical.id,
+                    UploadDuplicateResolution.KEEP_SEPARATE,
+                )
+            )
+        with pytest.raises(UploadSessionStateConflictError):
+            asyncio.run(
+                service.resolve_duplicate(
+                    ordinary_cancelled.id,
+                    UploadDuplicateResolution.DISCARD,
+                )
+            )
+        canonical_after = repository.get(canonical.id)
+        ordinary_after = repository.get(ordinary_cancelled.id)
+    finally:
+        dispose_engine(engine)
+
+    assert canonical_after == canonical_before
+    assert canonical_after.duplicate_disposition is None
+    assert ordinary_after == ordinary_cancelled
+    assert ordinary_after.duplicate_disposition is None
+    assert quarantine.joinpath(f"{canonical.storage_key.value}.part").read_bytes() == b"same"
+    assert ordinary_path.read_bytes() == b"data"
+
+
+def test_repeated_duplicate_resolutions_survive_service_reconstruction(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "catalog.sqlite3"
+    quarantine = tmp_path / "quarantine"
+    quarantine.mkdir()
+    upgrade_database_to_head(FrameNestSettings(database_path=database_path, _env_file=None))
+    first_engine = create_sqlite_engine(database_path)
+    first_repository = SqliteUploadSessionRepository(first_engine)
+    _canonical, duplicate = _create_duplicate_pair(first_repository, quarantine)
+    first_service = UploadTransportService(
+        first_repository,
+        FilesystemQuarantineStorage(quarantine),
+        _LibraryRepository(),
+        UploadTransportLimits(100, 10, 60, 0),
+        quarantine_root=quarantine,
+        preview_cache_root=tmp_path / "preview-cache",
+        now_ms=lambda: 1_000,
+    )
+    asyncio.run(
+        first_service.resolve_duplicate(
+            duplicate.id,
+            UploadDuplicateResolution.KEEP_SEPARATE,
+        )
+    )
+    first_resolved = first_repository.get(duplicate.id)
+    assert first_resolved is not None
+    first_engine.dispose()
+
+    second_engine = create_sqlite_engine(database_path)
+    second_service = UploadTransportService(
+        SqliteUploadSessionRepository(second_engine),
+        FilesystemQuarantineStorage(quarantine),
+        _LibraryRepository(),
+        UploadTransportLimits(100, 10, 60, 0),
+        quarantine_root=quarantine,
+        preview_cache_root=tmp_path / "preview-cache",
+        now_ms=lambda: 2_000,
+    )
+    try:
+        repeated = asyncio.run(
+            second_service.resolve_duplicate(
+                duplicate.id,
+                UploadDuplicateResolution.KEEP_SEPARATE,
+            )
+        )
+        stored = SqliteUploadSessionRepository(second_engine).get(duplicate.id)
+    finally:
+        second_engine.dispose()
+
+    assert repeated.state == UploadSessionState.PUBLISH_PENDING.value
+    assert stored is not None
+    assert stored.version == first_resolved.version
+    assert stored.duplicate_disposition is UploadDuplicateDisposition.KEEP_SEPARATE
 
 
 def test_body_mismatch_rolls_file_back_to_authoritative_offset(tmp_path: Path) -> None:
