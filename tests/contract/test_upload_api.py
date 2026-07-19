@@ -12,31 +12,44 @@ from fastapi import Request
 from fastapi.testclient import TestClient
 
 from framenest.adapters.api.application import create_app
+from sqlalchemy import insert, text
+
 from framenest.adapters.api.upload_api import (
     UploadApiDependencies,
+    _catalog_media_id,
     _parse_content_length,
     _parse_upload_offset,
 )
+from framenest.application.upload_catalog import CatalogPublishedUpload
+from framenest.application.upload_transport import (
+    UploadSessionSnapshot,
+    UploadTransportLimits,
+    UploadTransportService,
+)
 from framenest.configuration import FrameNestSettings
 from framenest.domain import Device, DeviceId, Library, LibraryId, LibraryPathFlavor, LibraryRoot
+from framenest.domain.identities import MediaByteIdentityId
+from framenest.domain.upload_publications import new_upload_publication_reservation
 from framenest.domain.uploads import (
+    UploadDisplayFilename,
     UploadSession,
     UploadSessionId,
     UploadSessionState,
+    UploadStorageKey,
     UploadValidatedFormat,
     UploadValidatedMediaKind,
 )
+from framenest.infrastructure.filesystem.quarantine_storage import FilesystemQuarantineStorage
+from framenest.infrastructure.persistence.catalog_schema import devices, libraries, media_byte_identities
 from framenest.infrastructure.persistence.device_repository import SqliteDeviceRepository
 from framenest.infrastructure.persistence.engine import create_sqlite_engine, dispose_engine
 from framenest.infrastructure.persistence.library_repository import SqliteLibraryRepository
 from framenest.infrastructure.persistence.migrations import upgrade_database_to_head
+from framenest.infrastructure.persistence.upload_publication_repository import (
+    SqliteUploadPublicationRepository,
+)
 from framenest.infrastructure.persistence.upload_session_repository import (
     SqliteUploadSessionRepository,
-)
-from framenest.infrastructure.filesystem.quarantine_storage import FilesystemQuarantineStorage
-from framenest.application.upload_transport import (
-    UploadTransportLimits,
-    UploadTransportService,
 )
 
 
@@ -924,6 +937,193 @@ def test_duplicate_resolution_rejects_invalid_state_body_identity_and_origin(
     assert settings.upload_quarantine_root.joinpath(  # type: ignore[union-attr]
         f"{canonical.storage_key.value}.part"
     ).read_bytes() == b"abcde"
+
+
+def test_status_media_id_absent_until_cataloged_and_gates_published_disclosure(
+    tmp_path: Path,
+) -> None:
+    destination_id = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+    upload_id = "11111111-1111-4111-8111-111111111111"
+    identity_id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+    settings = FrameNestSettings(
+        database_path=tmp_path / "catalog.sqlite3",
+        upload_quarantine_root=tmp_path / "quarantine",
+        upload_max_total_bytes=16,
+        upload_max_patch_bytes=8,
+        upload_session_ttl_seconds=60,
+        upload_min_free_space_reserve_bytes=0,
+        upload_publication_library_id=destination_id,
+        _env_file=None,
+    )
+    settings.upload_quarantine_root.mkdir(parents=True)  # type: ignore[union-attr]
+    upgrade_database_to_head(settings)
+    engine = create_sqlite_engine(settings.database_path)
+    try:
+        with engine.begin() as connection:
+            connection.execute(
+                insert(devices).values(
+                    id="dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+                    display_name="Synthetic device",
+                )
+            )
+            connection.execute(
+                insert(libraries).values(
+                    id=destination_id,
+                    device_id="dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+                    display_name="Published originals",
+                    path_flavor="posix",
+                    root_path=str(tmp_path / "published"),
+                )
+            )
+            connection.execute(
+                insert(media_byte_identities).values(
+                    id=identity_id,
+                    checksum_algorithm="sha256",
+                    size_bytes=8,
+                    checksum_hex="a" * 64,
+                    created_at_ms=10,
+                )
+            )
+        uploads = SqliteUploadSessionRepository(engine)
+        publications = SqliteUploadPublicationRepository(engine)
+        uploads.create(
+            UploadSession(
+                id=UploadSessionId.from_string(upload_id),
+                state=UploadSessionState.PUBLISH_PENDING,
+                storage_key=UploadStorageKey(upload_id.replace("-", "")),
+                display_filename=UploadDisplayFilename("synthetic.mp4"),
+                declared_size_bytes=8,
+                received_size_bytes=8,
+                checksum_algorithm="sha256",
+                checksum_hex="a" * 64,
+                validated_media_kind=UploadValidatedMediaKind.VIDEO,
+                validated_format=UploadValidatedFormat.MP4,
+                byte_identity_id=MediaByteIdentityId.from_string(identity_id),
+                duplicate_disposition=None,
+                created_at_ms=10,
+                updated_at_ms=20,
+                expires_at_ms=100,
+                failure_code=None,
+                version=4,
+            )
+        )
+        upload = uploads.get(UploadSessionId.from_string(upload_id))
+        assert upload is not None
+        reservation = new_upload_publication_reservation(
+            upload,
+            destination_id=LibraryId.from_string(destination_id),
+            now_ms=21,
+        )
+        reserved = publications.get_or_create_reservation(
+            reservation,
+            expected_upload_version=upload.version,
+        )
+        assert reserved.publication is not None
+        published = publications.commit_verified_publication(
+            upload.id,
+            publication_id=reserved.publication.publication_id,
+            expected_upload_version=upload.version,
+            expected_publication_version=reserved.publication.version,
+            updated_at_ms=30,
+        )
+        assert published.publication is not None
+        completed = publications.mark_cleanup_complete(
+            upload.id,
+            publication_id=published.publication.publication_id,
+            expected_publication_version=published.publication.version,
+            updated_at_ms=31,
+        )
+        assert completed.upload.state is UploadSessionState.PUBLISHED
+        assert completed.publication is not None
+        assert completed.publication.media_id is None
+
+        transport = UploadTransportService(
+            uploads,
+            FilesystemQuarantineStorage(settings.upload_quarantine_root),  # type: ignore[arg-type]
+            _EmptyLibraryRepository(),
+            UploadTransportLimits(16, 8, 60, 0),
+            quarantine_root=settings.upload_quarantine_root,
+            preview_cache_root=tmp_path / "preview-cache",
+        )
+        dependencies = UploadApiDependencies(
+            transport=transport,
+            publication_repository=publications,
+        )
+        app = create_app(settings=settings, upload_api_dependencies=dependencies)
+        client = TestClient(app)
+
+        published_status = client.get(f"/api/uploads/{upload_id}")
+        assert published_status.status_code == 200
+        published_payload = published_status.json()
+        assert published_payload["state"] == "published"
+        assert published_payload["media_id"] is None
+        assert set(published_payload) == {
+            "id",
+            "state",
+            "display_filename",
+            "declared_size_bytes",
+            "received_size_bytes",
+            "expires_at",
+            "failure_code",
+            "media_id",
+        }
+        assert "checksum" not in published_payload
+        assert "publication_id" not in published_payload
+        assert "relative_target" not in published_payload
+        assert "cleanup_state" not in published_payload
+        assert "storage_key" not in published_payload
+        assert str(tmp_path / "published") not in published_status.text
+        assert str(settings.database_path) not in published_status.text
+
+        cataloged = CatalogPublishedUpload(publications, now_ms=lambda: 40)
+        catalog_result = cataloged.catalog_owned_blocking(
+            UploadSessionId.from_string(upload_id)
+        )
+        assert catalog_result.state == "cataloged"
+        assert catalog_result.media_id is not None
+
+        cataloged_status = client.get(f"/api/uploads/{upload_id}")
+        assert cataloged_status.status_code == 200
+        cataloged_payload = cataloged_status.json()
+        assert cataloged_payload["state"] == "cataloged"
+        assert cataloged_payload["media_id"] == catalog_result.media_id
+        assert set(cataloged_payload) == set(published_payload)
+        assert "checksum" not in cataloged_payload
+        assert "publication_id" not in cataloged_payload
+        assert str(tmp_path / "published") not in cataloged_status.text
+
+        linked = publications.get_candidate(UploadSessionId.from_string(upload_id))
+        assert linked is not None and linked.publication is not None
+        assert linked.publication.media_id is not None
+        assert linked.publication.media_location_id is not None
+        with engine.begin() as connection:
+            connection.execute(
+                text("UPDATE upload_sessions SET state = 'published' WHERE id = :id"),
+                {"id": upload_id},
+            )
+
+        contradictory = client.get(f"/api/uploads/{upload_id}")
+        assert contradictory.status_code == 200
+        contradictory_payload = contradictory.json()
+        assert contradictory_payload["state"] == "published"
+        assert contradictory_payload["media_id"] is None
+        assert (
+            _catalog_media_id(
+                dependencies,
+                UploadSessionSnapshot(
+                    id=upload_id,
+                    state="published",
+                    display_filename="synthetic.mp4",
+                    declared_size_bytes=8,
+                    received_size_bytes=8,
+                    expires_at=100,
+                    failure_code=None,
+                ),
+            )
+            is None
+        )
+    finally:
+        dispose_engine(engine)
 
 
 def test_quarantine_root_overlapping_registered_library_rejects_create(

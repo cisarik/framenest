@@ -3066,7 +3066,7 @@ test("Recovery parsing rejects malformed, invalid, unsafe, and terminal records"
   assert.equal(h.context.localStorage.getItem(RECOVERY_KEY), null);
 });
 
-test("Publication polling is bounded while pending and published clears recovery truthfully", async () => {
+test("Publication polling is bounded while pending; published keeps polling until cataloged", async () => {
   const h = await createHarness();
   setActiveUpload(h, { id: UPLOAD_A, state: "publish_pending", received: 8 });
   h.run('document.querySelector("#upload-dialog").setAttribute("open", "")');
@@ -3094,9 +3094,60 @@ test("Publication polling is bounded while pending and published clears recovery
   assert.equal(state.snapshotState, "published");
   assert.equal(state.stateLabel, "Published");
   assert.equal(state.visibleMessage, "Published. Awaiting cataloging. Not yet available in Gallery.");
+  assert.equal(state.hasPollOwner, true);
+  assert.equal(state.hasPollTimer, true);
+  assert.equal(state.recovery, null);
+  assert.equal(
+    h.run("uploadShouldPoll(uploadState.snapshot)"),
+    true,
+  );
+  h.fetchController.clearCalls();
+  assert.equal(h.fetchController.matchingPrefix("GET", "/api/media?").length, 0);
+
+  enqueueStatus(h, UPLOAD_A, response(snapshot(UPLOAD_A, "cataloged", 8)));
+  h.runNextTimer();
+  await h.flush();
+
+  state = stateOf(h);
+  assert.equal(state.snapshotState, "cataloged");
+  assert.equal(state.stateLabel, "Completed");
+  assert.equal(state.visibleMessage, "Cataloged. Available in Gallery.");
   assert.equal(state.hasPollOwner, false);
   assert.equal(state.hasPollTimer, false);
   assert.equal(state.recovery, null);
+  assert.equal(
+    h.run("uploadShouldPoll(uploadState.snapshot)"),
+    false,
+  );
+  assert.equal(
+    h.run("uploadState.galleryCatalogRefreshUploadId"),
+    UPLOAD_A,
+  );
+  assert.equal(h.fetchController.matchingPrefix("GET", "/api/media?").length, 1);
+
+  h.run("applyUploadSnapshot(uploadState.snapshot, currentUploadContext({ uploadId: uploadState.uploadId }))");
+  await h.flush();
+  assert.equal(h.fetchController.matchingPrefix("GET", "/api/media?").length, 1);
+
+  for (const terminalState of ["rejected", "failed", "cancelled", "expired"]) {
+    const terminalHarness = await createHarness();
+    setActiveUpload(terminalHarness, { id: UPLOAD_A, state: "publish_pending", received: 8 });
+    terminalHarness.run('document.querySelector("#upload-dialog").setAttribute("open", "")');
+    terminalHarness.run(
+      "scheduleUploadPolling(currentUploadContext({ uploadId: uploadState.uploadId }))",
+    );
+    enqueueStatus(terminalHarness, UPLOAD_A, response(snapshot(UPLOAD_A, terminalState, 8)));
+    terminalHarness.runNextTimer();
+    await terminalHarness.flush();
+    const terminal = stateOf(terminalHarness);
+    assert.equal(terminal.snapshotState, terminalState);
+    assert.equal(terminal.hasPollOwner, false);
+    assert.equal(terminal.hasPollTimer, false);
+    assert.equal(
+      terminalHarness.run("uploadShouldPoll(uploadState.snapshot)"),
+      false,
+    );
+  }
 });
 
 test("Recovery not-found is cleared and persisted recovery stores no private bytes, handles, paths, or raw errors", async () => {

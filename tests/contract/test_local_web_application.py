@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 import re
+import subprocess
 from html.parser import HTMLParser
 from pathlib import Path
 
@@ -77,6 +79,36 @@ def _javascript_function(script: str, name: str) -> str:
             if depth == 0:
                 return script[start : index + 1]
     raise AssertionError(f"Could not find complete JavaScript function {name}")
+
+
+def _evaluate_upload_should_poll(
+    script: str,
+    *,
+    state: str | None,
+    publication_poll_attempts: int = 0,
+) -> bool:
+    """Execute the real uploadShouldPoll body against lifecycle snapshots."""
+    function_body = _javascript_function(script, "uploadShouldPoll")
+    max_attempts_match = re.search(
+        r"const UPLOAD_PUBLICATION_POLL_MAX_ATTEMPTS = (\d+);",
+        script,
+    )
+    assert max_attempts_match is not None
+    max_attempts = int(max_attempts_match.group(1))
+    snapshot_literal = "null" if state is None else json.dumps({"state": state})
+    program = (
+        f"const UPLOAD_PUBLICATION_POLL_MAX_ATTEMPTS = {max_attempts};\n"
+        f"const uploadState = {{ publicationPollAttempts: {publication_poll_attempts} }};\n"
+        f"{function_body}\n"
+        f"process.stdout.write(JSON.stringify(uploadShouldPoll({snapshot_literal})));\n"
+    )
+    result = subprocess.run(
+        ["node", "-e", program],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return json.loads(result.stdout)
 
 
 def _css_rule_declarations(css: str, selectors: tuple[str, ...]) -> dict[str, str]:
@@ -2721,7 +2753,6 @@ def test_javascript_upload_states_polling_cancel_and_gallery_boundaries_are_trut
     assert "Validated. Awaiting publication. Not yet available in Gallery." in upload_block
     assert "Published. Awaiting cataloging. Not yet available in Gallery." in upload_block
     assert "Cataloged. Available in Gallery." in upload_block
-    assert 'snapshot.state === "published"' in upload_block
     assert "uploadShouldPoll(snapshot)" in upload_block
     assert "refreshGalleryAfterCataloged" in upload_block
     assert "publish_pending" in upload_block
@@ -2733,3 +2764,24 @@ def test_javascript_upload_states_polling_cancel_and_gallery_boundaries_are_trut
     assert "loadCatalog()" in upload_block
     assert "mediaContentUrl" not in upload_block
     assert "gallery-preview" not in upload_block
+
+    should_poll_body = _javascript_function(script, "uploadShouldPoll")
+    assert 'snapshot.state === "published"' in should_poll_body
+    assert _evaluate_upload_should_poll(script, state="published") is True
+    assert _evaluate_upload_should_poll(script, state="received") is True
+    assert _evaluate_upload_should_poll(script, state="validating") is True
+    assert _evaluate_upload_should_poll(script, state="publish_pending") is True
+    assert (
+        _evaluate_upload_should_poll(
+            script,
+            state="publish_pending",
+            publication_poll_attempts=25,
+        )
+        is False
+    )
+    assert _evaluate_upload_should_poll(script, state="cataloged") is False
+    assert _evaluate_upload_should_poll(script, state="rejected") is False
+    assert _evaluate_upload_should_poll(script, state="failed") is False
+    assert _evaluate_upload_should_poll(script, state="cancelled") is False
+    assert _evaluate_upload_should_poll(script, state="expired") is False
+    assert _evaluate_upload_should_poll(script, state=None) is False
