@@ -234,14 +234,16 @@ def test_overlapping_publication_and_quarantine_roots_fail_closed(tmp_path: Path
 
 def test_publication_modules_contain_no_catalog_creation_provider_or_public_route_code() -> None:
     root = Path(__file__).resolve().parents[2]
-    paths = (
+    publication_only_paths = (
         root / "src/framenest/domain/upload_publications.py",
         root / "src/framenest/application/upload_publication.py",
         root / "src/framenest/application/upload_publication_coordinator.py",
         root / "src/framenest/infrastructure/filesystem/published_media_storage.py",
-        root / "src/framenest/infrastructure/persistence/upload_publication_repository.py",
     )
-    combined = "\n".join(path.read_text(encoding="utf-8") for path in paths)
+    repository_path = (
+        root / "src/framenest/infrastructure/persistence/upload_publication_repository.py"
+    )
+    combined = "\n".join(path.read_text(encoding="utf-8") for path in publication_only_paths)
     forbidden = (
         "logical_media",
         "physical_media_locations",
@@ -254,5 +256,8 @@ def test_publication_modules_contain_no_catalog_creation_provider_or_public_rout
     )
 
     assert all(fragment not in combined.lower() for fragment in forbidden)
-    for path in paths:
+    repository_text = repository_path.read_text(encoding="utf-8")
+    assert "commit_cataloged_publication" in repository_text
+    assert "def publish_from_reader" not in repository_text
+    for path in (*publication_only_paths, repository_path):
         ast.parse(path.read_text(encoding="utf-8"), filename=str(path))

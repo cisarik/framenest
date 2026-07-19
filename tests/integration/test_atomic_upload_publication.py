@@ -490,15 +490,16 @@ def test_full_application_lifecycle_automatically_publishes_valid_synthetic_gif(
         completed = client.post(f"/api/uploads/{upload_id}/complete")
         assert completed.status_code == 200
         status = completed.json()
-        for _ in range(200):
+        for _ in range(400):
             status_response = client.get(f"/api/uploads/{upload_id}")
             assert status_response.status_code == 200
             status = status_response.json()
-            if status["state"] == "published":
+            if status["state"] == "cataloged":
                 break
             time.sleep(0.01)
 
-    assert status["state"] == "published"
+    assert status["state"] == "cataloged"
+    assert status["media_id"]
     assert set(status) == {
         "id",
         "state",
@@ -507,11 +508,14 @@ def test_full_application_lifecycle_automatically_publishes_valid_synthetic_gif(
         "received_size_bytes",
         "expires_at",
         "failure_code",
+        "media_id",
     }
+    assert "checksum" not in status
+    assert "publication" not in str(status).lower() or "publication" not in status
     with sqlite3.connect(database_path) as connection:
         publication = connection.execute(
             """
-            SELECT relative_target, cleanup_state
+            SELECT relative_target, cleanup_state, media_id, media_location_id
             FROM upload_publications WHERE upload_id = ?
             """,
             (upload_id,),
@@ -522,7 +526,9 @@ def test_full_application_lifecycle_automatically_publishes_valid_synthetic_gif(
         ).fetchone()
     assert publication is not None
     assert publication[1] == "complete"
+    assert publication[2] == status["media_id"]
+    assert publication[3] is not None
     assert (published_root / publication[0]).read_bytes() == payload
     assert list(quarantine_root.iterdir()) == []
-    assert logical_count == (0,)
-    assert location_count == (0,)
+    assert logical_count == (1,)
+    assert location_count == (1,)

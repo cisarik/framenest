@@ -27,7 +27,11 @@ from framenest.application.upload_transport import (
     UploadSessionStateConflictError,
     UploadTooLargeError,
 )
-from framenest.domain.uploads import FrameNestUploadSessionError, UploadSessionId
+from framenest.domain.uploads import (
+    FrameNestUploadSessionError,
+    UploadSessionId,
+    UploadSessionState,
+)
 from framenest.structured_logging import get_logger
 
 UPLOAD_CAPABILITY_NOT_CONFIGURED = "UPLOAD_CAPABILITY_NOT_CONFIGURED"
@@ -82,6 +86,7 @@ class UploadSessionResponse(BaseModel):
     received_size_bytes: int
     expires_at: int
     failure_code: str | None = None
+    media_id: str | None = None
 
 
 class UploadDuplicateResolutionResponse(BaseModel):
@@ -113,6 +118,7 @@ class UploadApiDependencies:
     transport: object
     validation_coordinator: object | None = None
     publication_coordinator: object | None = None
+    publication_repository: object | None = None
 
 
 def create_upload_api_router(dependencies: UploadApiDependencies) -> APIRouter:
@@ -152,7 +158,7 @@ def create_upload_api_router(dependencies: UploadApiDependencies) -> APIRouter:
                 QUARANTINE_STORAGE_UNAVAILABLE,
                 "Quarantine storage is unavailable.",
             )
-        return _snapshot_response(snapshot)
+        return _enriched_snapshot_response(dependencies, snapshot)
 
     @router.get(
         "/api/uploads/capability",
@@ -192,7 +198,7 @@ def create_upload_api_router(dependencies: UploadApiDependencies) -> APIRouter:
                 QUARANTINE_STORAGE_UNAVAILABLE,
                 "Quarantine storage is unavailable.",
             )
-        return _snapshot_response(snapshot)
+        return _enriched_snapshot_response(dependencies, snapshot)
 
     @router.patch(
         "/api/uploads/{upload_id}",
@@ -239,7 +245,7 @@ def create_upload_api_router(dependencies: UploadApiDependencies) -> APIRouter:
                 QUARANTINE_STORAGE_UNAVAILABLE,
                 "Quarantine storage is unavailable.",
             )
-        return _snapshot_response(snapshot)
+        return _enriched_snapshot_response(dependencies, snapshot)
 
     @router.post(
         "/api/uploads/{upload_id}/complete",
@@ -271,7 +277,7 @@ def create_upload_api_router(dependencies: UploadApiDependencies) -> APIRouter:
             )
         if snapshot.state == "received":
             _notify_validation_coordinator(dependencies.validation_coordinator)
-        return _snapshot_response(snapshot)
+        return _enriched_snapshot_response(dependencies, snapshot)
 
     @router.post(
         "/api/uploads/{upload_id}/duplicate-resolution",
@@ -337,7 +343,7 @@ def create_upload_api_router(dependencies: UploadApiDependencies) -> APIRouter:
                 QUARANTINE_STORAGE_UNAVAILABLE,
                 "Quarantine storage is unavailable.",
             )
-        return _snapshot_response(snapshot)
+        return _enriched_snapshot_response(dependencies, snapshot)
 
     return router
 
@@ -534,7 +540,45 @@ def _error_response(
     return JSONResponse(status_code=status_code, content={"error": body})
 
 
-def _snapshot_response(snapshot: UploadSessionSnapshot) -> UploadSessionResponse:
+def _enriched_snapshot_response(
+    dependencies: UploadApiDependencies,
+    snapshot: UploadSessionSnapshot,
+) -> UploadSessionResponse:
+    return _snapshot_response(
+        snapshot,
+        media_id=_catalog_media_id(dependencies, snapshot),
+    )
+
+
+def _catalog_media_id(
+    dependencies: UploadApiDependencies,
+    snapshot: UploadSessionSnapshot,
+) -> str | None:
+    if snapshot.state != UploadSessionState.CATALOGED.value:
+        return None
+    repository = dependencies.publication_repository
+    if repository is None:
+        return None
+    try:
+        candidate = repository.get_candidate(
+            UploadSessionId.from_string(snapshot.id)
+        )
+    except Exception:
+        return None
+    if (
+        candidate is None
+        or candidate.publication is None
+        or candidate.publication.media_id is None
+    ):
+        return None
+    return candidate.publication.media_id.to_string()
+
+
+def _snapshot_response(
+    snapshot: UploadSessionSnapshot,
+    *,
+    media_id: str | None = None,
+) -> UploadSessionResponse:
     return UploadSessionResponse(
         id=snapshot.id,
         state=snapshot.state,
@@ -543,6 +587,7 @@ def _snapshot_response(snapshot: UploadSessionSnapshot) -> UploadSessionResponse
         received_size_bytes=snapshot.received_size_bytes,
         expires_at=snapshot.expires_at,
         failure_code=snapshot.failure_code,
+        media_id=media_id if snapshot.state == "cataloged" else None,
     )
 
 

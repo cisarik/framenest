@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol
 
+from framenest.domain.media import LogicalMedia, MediaLocation
 from framenest.domain.upload_publications import UploadPublication, UploadPublicationId
 from framenest.domain.uploads import UploadSession, UploadSessionId
 
@@ -39,6 +40,14 @@ class UnsupportedLegacyUploadPublicationStateError(
     FrameNestUploadPublicationRepositoryError
 ):
     """Raised for legacy advanced upload state without publication provenance."""
+
+
+class UploadCatalogStateConflictError(FrameNestUploadPublicationRepositoryError):
+    """Raised when upload or catalog linkage is incompatible with cataloging."""
+
+
+class UploadCatalogInconsistencyError(FrameNestUploadPublicationRepositoryError):
+    """Raised when durable catalog linkage disagrees with upload state."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -95,3 +104,24 @@ class UploadPublicationRepository(Protocol):
         updated_at_ms: int,
     ) -> UploadPublicationCandidate:
         """Idempotently persist exact quarantine cleanup completion."""
+
+    def list_catalog_candidates(
+        self,
+        *,
+        limit: int,
+        after_updated_at_ms: int | None = None,
+        after_id: str | None = None,
+    ) -> tuple[UploadPublicationCandidate, ...]:
+        """Return bounded published uploads eligible for catalog creation."""
+
+    def commit_cataloged_publication(
+        self,
+        upload_id: UploadSessionId,
+        *,
+        media: LogicalMedia,
+        location: MediaLocation,
+        expected_upload_version: int,
+        expected_publication_version: int,
+        updated_at_ms: int,
+    ) -> UploadPublicationCandidate:
+        """Atomically create catalog rows, link provenance, and set cataloged."""

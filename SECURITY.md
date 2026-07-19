@@ -100,9 +100,12 @@ after durable publication provenance and `published` commit together may the
 exact quarantine object be removed; failed cleanup remains retryable. Upload
 responses expose no storage key, publication identity, destination, target,
 path, cleanup state, byte identity, or checksum; duplicate-resolution responses
-additionally expose no matching session or filename. Published uploads remain
-uncataloged, unserved, absent from Gallery, and never sent to AI providers by
-this workflow.
+additionally expose no matching session or filename. An optional opaque
+`media_id` may appear only after successful `cataloged`. Merely `published`
+uploads remain uncataloged, unserved, absent from Gallery, and never sent to AI
+providers by this workflow. Catalog persistence failure leaves the durable
+published file untouched under the trusted-loopback single-tenant boundary;
+multi-user ownership remains deferred.
 Browser mutation requests with an `Origin` header must match the effective same
 origin; this is a bounded loopback protection and not authentication or
 authorization.

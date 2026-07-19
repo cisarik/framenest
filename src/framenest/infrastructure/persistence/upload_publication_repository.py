@@ -8,9 +8,18 @@ from sqlalchemy import and_, insert, or_, select, update
 from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
+from framenest.application.ports.media_repository import (
+    FrameNestMediaRepositoryError,
+    MediaAlreadyExistsError,
+    MediaLocationAlreadyExistsError,
+    MediaLocationNotUniqueError,
+    MediaLocationReferenceNotFoundError,
+)
 from framenest.application.ports.upload_publications import (
     FrameNestUploadPublicationRepositoryError,
     UnsupportedLegacyUploadPublicationStateError,
+    UploadCatalogInconsistencyError,
+    UploadCatalogStateConflictError,
     UploadPublicationCandidate,
     UploadPublicationConcurrencyConflictError,
     UploadPublicationEvidenceConflictError,
@@ -22,7 +31,10 @@ from framenest.domain.identities import (
     FrameNestIdentityError,
     LibraryId,
     MediaByteIdentityId,
+    MediaId,
+    MediaLocationId,
 )
+from framenest.domain.media import LogicalMedia, MediaLocation
 from framenest.domain.upload_publications import (
     FrameNestUploadPublicationError,
     UploadPublication,
@@ -45,12 +57,18 @@ from framenest.domain.uploads import (
     UploadValidatedMediaKind,
 )
 from framenest.infrastructure.persistence.catalog_schema import (
+    logical_media,
+    physical_media_locations,
     upload_publications,
     upload_sessions,
 )
 from framenest.infrastructure.persistence.engine import (
     run_in_immediate_transaction,
     run_in_transaction,
+)
+from framenest.infrastructure.persistence.media_repository import (
+    _insert_location,
+    _insert_media,
 )
 
 _REPOSITORY_FAILURE_MESSAGE = "Upload publication operation failed."
@@ -396,6 +414,209 @@ class SqliteUploadPublicationRepository:
                 _REPOSITORY_FAILURE_MESSAGE
             ) from exc
 
+    def list_catalog_candidates(
+        self,
+        *,
+        limit: int,
+        after_updated_at_ms: int | None = None,
+        after_id: str | None = None,
+    ) -> tuple[UploadPublicationCandidate, ...]:
+        _validate_limit_and_cursor(limit, after_updated_at_ms, after_id)
+
+        def operation(connection: Connection) -> tuple[UploadPublicationCandidate, ...]:
+            joined = upload_sessions.join(
+                upload_publications,
+                upload_publications.c.upload_id == upload_sessions.c.id,
+            )
+            filters = [
+                upload_sessions.c.state == UploadSessionState.PUBLISHED.value,
+                upload_publications.c.state == UploadPublicationState.VERIFIED.value,
+                upload_publications.c.cleanup_state
+                == UploadPublicationCleanupState.COMPLETE.value,
+                upload_publications.c.media_id.is_(None),
+                upload_publications.c.media_location_id.is_(None),
+            ]
+            if after_updated_at_ms is not None:
+                assert after_id is not None
+                filters.append(
+                    or_(
+                        upload_sessions.c.updated_at_ms > after_updated_at_ms,
+                        and_(
+                            upload_sessions.c.updated_at_ms == after_updated_at_ms,
+                            upload_sessions.c.id > after_id,
+                        ),
+                    )
+                )
+            ids = connection.execute(
+                select(upload_sessions.c.id)
+                .select_from(joined)
+                .where(and_(*filters))
+                .order_by(
+                    upload_sessions.c.updated_at_ms.asc(),
+                    upload_sessions.c.id.asc(),
+                )
+                .limit(limit)
+            ).scalars()
+            candidates: list[UploadPublicationCandidate] = []
+            for upload_id_text in ids:
+                loaded_id = UploadSessionId.from_string(str(upload_id_text))
+                upload_row = _upload_row(connection, loaded_id)
+                assert upload_row is not None
+                candidates.append(
+                    _candidate_from_rows(
+                        upload_row,
+                        _publication_row(connection, loaded_id),
+                    )
+                )
+            return tuple(candidates)
+
+        try:
+            return run_in_transaction(self._engine, operation)
+        except FrameNestUploadPublicationRepositoryError:
+            raise
+        except (FrameNestIdentityError, FrameNestUploadSessionError, SQLAlchemyError) as exc:
+            raise FrameNestUploadPublicationRepositoryError(
+                _REPOSITORY_FAILURE_MESSAGE
+            ) from exc
+
+    def commit_cataloged_publication(
+        self,
+        upload_id: UploadSessionId,
+        *,
+        media: LogicalMedia,
+        location: MediaLocation,
+        expected_upload_version: int,
+        expected_publication_version: int,
+        updated_at_ms: int,
+    ) -> UploadPublicationCandidate:
+        _validate_non_negative(expected_upload_version)
+        _validate_non_negative(expected_publication_version)
+        _validate_non_negative(updated_at_ms)
+        if location.media_id != media.id:
+            raise UploadCatalogStateConflictError("upload catalog state conflict")
+
+        def operation(connection: Connection) -> UploadPublicationCandidate:
+            candidate = _require_candidate(connection, upload_id)
+            publication = candidate.publication
+            if publication is None:
+                raise UploadPublicationNotFoundError("upload publication not found")
+            _require_matching_evidence(publication, candidate.upload)
+            if (publication.media_id is None) != (publication.media_location_id is None):
+                raise UploadCatalogInconsistencyError(
+                    "upload catalog linkage inconsistent"
+                )
+            if (
+                candidate.upload.state is UploadSessionState.CATALOGED
+                and publication.media_id is not None
+                and publication.media_location_id is not None
+            ):
+                if not _catalog_links_resolve(connection, publication):
+                    raise UploadCatalogInconsistencyError(
+                        "upload catalog linkage inconsistent"
+                    )
+                return candidate
+            if (
+                candidate.upload.state is UploadSessionState.CATALOGED
+                or publication.media_id is not None
+                or publication.media_location_id is not None
+            ):
+                raise UploadCatalogInconsistencyError(
+                    "upload catalog linkage inconsistent"
+                )
+            if (
+                candidate.upload.state is not UploadSessionState.PUBLISHED
+                or publication.state is not UploadPublicationState.VERIFIED
+                or publication.cleanup_state
+                is not UploadPublicationCleanupState.COMPLETE
+            ):
+                raise UploadCatalogStateConflictError("upload catalog state conflict")
+            if (
+                location.library_id != publication.destination_id
+                or location.relative_path.value != publication.relative_path.value
+                or location.observed_size_bytes != publication.expected_size_bytes
+            ):
+                raise UploadCatalogStateConflictError("upload catalog state conflict")
+            if (
+                candidate.upload.version != expected_upload_version
+                or publication.version != expected_publication_version
+            ):
+                raise UploadPublicationConcurrencyConflictError(
+                    "upload publication concurrency conflict"
+                )
+            try:
+                _insert_media(connection, media)
+                _insert_location(connection, location)
+            except (
+                MediaAlreadyExistsError,
+                MediaLocationAlreadyExistsError,
+                MediaLocationNotUniqueError,
+                MediaLocationReferenceNotFoundError,
+                FrameNestMediaRepositoryError,
+            ) as exc:
+                raise FrameNestUploadPublicationRepositoryError(
+                    _REPOSITORY_FAILURE_MESSAGE
+                ) from exc
+            publication_result = connection.execute(
+                update(upload_publications)
+                .where(
+                    and_(
+                        upload_publications.c.upload_id == upload_id.to_string(),
+                        upload_publications.c.state
+                        == UploadPublicationState.VERIFIED.value,
+                        upload_publications.c.cleanup_state
+                        == UploadPublicationCleanupState.COMPLETE.value,
+                        upload_publications.c.media_id.is_(None),
+                        upload_publications.c.media_location_id.is_(None),
+                        upload_publications.c.version == expected_publication_version,
+                    )
+                )
+                .values(
+                    media_id=media.id.to_string(),
+                    media_location_id=location.id.to_string(),
+                    updated_at_ms=updated_at_ms,
+                    version=upload_publications.c.version + 1,
+                )
+            )
+            if publication_result.rowcount != 1:
+                raise UploadPublicationConcurrencyConflictError(
+                    "upload publication concurrency conflict"
+                )
+            upload_result = connection.execute(
+                update(upload_sessions)
+                .where(
+                    and_(
+                        upload_sessions.c.id == upload_id.to_string(),
+                        upload_sessions.c.state
+                        == UploadSessionState.PUBLISHED.value,
+                        upload_sessions.c.version == expected_upload_version,
+                    )
+                )
+                .values(
+                    state=UploadSessionState.CATALOGED.value,
+                    updated_at_ms=updated_at_ms,
+                    failure_code=None,
+                    version=upload_sessions.c.version + 1,
+                )
+            )
+            if upload_result.rowcount != 1:
+                raise UploadPublicationConcurrencyConflictError(
+                    "upload publication concurrency conflict"
+                )
+            return _require_candidate(connection, upload_id)
+
+        try:
+            return run_in_immediate_transaction(self._engine, operation)
+        except FrameNestUploadPublicationRepositoryError:
+            raise
+        except IntegrityError as exc:
+            raise FrameNestUploadPublicationRepositoryError(
+                _REPOSITORY_FAILURE_MESSAGE
+            ) from exc
+        except SQLAlchemyError as exc:
+            raise FrameNestUploadPublicationRepositoryError(
+                _REPOSITORY_FAILURE_MESSAGE
+            ) from exc
+
 
 def _require_candidate(
     connection: Connection,
@@ -466,6 +687,12 @@ def _publication_values(publication: UploadPublication) -> dict[str, object]:
         "verified_at_ms": publication.verified_at_ms,
         "cleanup_completed_at_ms": publication.cleanup_completed_at_ms,
         "version": publication.version,
+        "media_id": None
+        if publication.media_id is None
+        else publication.media_id.to_string(),
+        "media_location_id": None
+        if publication.media_location_id is None
+        else publication.media_location_id.to_string(),
     }
 
 
@@ -497,6 +724,12 @@ def _publication_from_row(row: Mapping[str, object]) -> UploadPublication:
             if row["cleanup_completed_at_ms"] is None
             else int(row["cleanup_completed_at_ms"]),
             version=int(row["version"]),
+            media_id=None
+            if row["media_id"] is None
+            else MediaId.from_string(str(row["media_id"])),
+            media_location_id=None
+            if row["media_location_id"] is None
+            else MediaLocationId.from_string(str(row["media_location_id"])),
         )
     except (
         FrameNestIdentityError,
@@ -506,6 +739,44 @@ def _publication_from_row(row: Mapping[str, object]) -> UploadPublication:
         raise FrameNestUploadPublicationRepositoryError(
             _REPOSITORY_FAILURE_MESSAGE
         ) from exc
+
+
+def _catalog_links_resolve(
+    connection: Connection,
+    publication: UploadPublication,
+) -> bool:
+    assert publication.media_id is not None
+    assert publication.media_location_id is not None
+    media_exists = (
+        connection.execute(
+            select(logical_media.c.id).where(
+                logical_media.c.id == publication.media_id.to_string()
+            )
+        ).first()
+        is not None
+    )
+    location_row = (
+        connection.execute(
+            select(
+                physical_media_locations.c.id,
+                physical_media_locations.c.media_id,
+                physical_media_locations.c.library_id,
+                physical_media_locations.c.relative_path,
+            ).where(
+                physical_media_locations.c.id
+                == publication.media_location_id.to_string()
+            )
+        )
+        .mappings()
+        .first()
+    )
+    if not media_exists or location_row is None:
+        return False
+    return (
+        str(location_row["media_id"]) == publication.media_id.to_string()
+        and str(location_row["library_id"]) == publication.destination_id.to_string()
+        and str(location_row["relative_path"]) == publication.relative_path.value
+    )
 
 
 def _upload_from_row(row: Mapping[str, object]) -> UploadSession:

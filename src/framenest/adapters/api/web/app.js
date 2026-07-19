@@ -117,6 +117,7 @@ let uploadState = {
   pollTimer: null,
   pollRetryDelayMs: UPLOAD_POLL_INTERVAL_MS,
   publicationPollAttempts: 0,
+  galleryCatalogRefreshUploadId: null,
   message: "",
   failureMessage: "",
 };
@@ -1130,6 +1131,7 @@ function uploadShouldPoll(snapshot) {
           snapshot.state === "publish_pending"
           && uploadState.publicationPollAttempts < UPLOAD_PUBLICATION_POLL_MAX_ATTEMPTS
         )
+        || snapshot.state === "published"
       ),
   );
 }
@@ -1238,6 +1240,9 @@ function uploadStatusMessage(snapshot) {
   }
   if (snapshot.state === "published") {
     return "Published. Awaiting cataloging. Not yet available in Gallery.";
+  }
+  if (snapshot.state === "cataloged") {
+    return "Cataloged. Available in Gallery.";
   }
   if (snapshot.state === "received") {
     return "Bytes received. Waiting for server validation.";
@@ -1449,7 +1454,20 @@ function applyUploadSnapshot(snapshot, owner = null, options = {}) {
   }
   saveUploadRecovery(snapshot);
   renderUploadCockpit();
+  if (snapshot.state === "cataloged") {
+    refreshGalleryAfterCataloged(snapshot.id);
+  }
   return true;
+}
+
+function refreshGalleryAfterCataloged(uploadId) {
+  if (!uploadId || uploadState.galleryCatalogRefreshUploadId === uploadId) {
+    return;
+  }
+  uploadState.galleryCatalogRefreshUploadId = uploadId;
+  if (typeof loadCatalog === "function") {
+    loadCatalog();
+  }
 }
 
 function resetUploadForFile(file) {
@@ -1475,6 +1493,7 @@ function resetUploadForFile(file) {
     pollTimer: null,
     pollRetryDelayMs: UPLOAD_POLL_INTERVAL_MS,
     publicationPollAttempts: 0,
+    galleryCatalogRefreshUploadId: null,
     message: file ? "Ready to upload." : "Select one local GIF or MP4.",
     failureMessage: "",
   };

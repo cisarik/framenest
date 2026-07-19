@@ -7,7 +7,12 @@ from enum import StrEnum
 import re
 import uuid
 
-from framenest.domain.identities import LibraryId, MediaByteIdentityId
+from framenest.domain.identities import (
+    LibraryId,
+    MediaByteIdentityId,
+    MediaId,
+    MediaLocationId,
+)
 from framenest.domain.uploads import (
     UploadSession,
     UploadSessionId,
@@ -132,6 +137,8 @@ class UploadPublication:
     verified_at_ms: int | None
     cleanup_completed_at_ms: int | None
     version: int
+    media_id: MediaId | None = None
+    media_location_id: MediaLocationId | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.upload_id, UploadSessionId):
@@ -203,6 +210,15 @@ class UploadPublication:
                 or self.cleanup_completed_at_ms < self.verified_at_ms
             ):
                 raise FrameNestUploadPublicationError(INVALID_UPLOAD_PUBLICATION_MESSAGE)
+        if (self.media_id is None) != (self.media_location_id is None):
+            raise FrameNestUploadPublicationError(INVALID_UPLOAD_PUBLICATION_MESSAGE)
+        if self.media_id is not None and not isinstance(self.media_id, MediaId):
+            raise FrameNestUploadPublicationError(INVALID_UPLOAD_PUBLICATION_MESSAGE)
+        if self.media_location_id is not None and not isinstance(
+            self.media_location_id,
+            MediaLocationId,
+        ):
+            raise FrameNestUploadPublicationError(INVALID_UPLOAD_PUBLICATION_MESSAGE)
 
 
 def new_upload_publication_reservation(
@@ -240,6 +256,8 @@ def new_upload_publication_reservation(
         verified_at_ms=None,
         cleanup_completed_at_ms=None,
         version=0,
+        media_id=None,
+        media_location_id=None,
     )
 
 

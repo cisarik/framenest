@@ -61,6 +61,8 @@ from framenest.application.media_suggestion import PreviewMediaSuggestion
 from framenest.application.media_suggestion import PreviewImportedMediaSuggestion
 from framenest.application.upload_transport import UploadTransportLimits, UploadTransportService
 from framenest.application.upload_transport import UploadSessionLockRegistry
+from framenest.application.upload_catalog import CatalogPublishedUpload
+from framenest.application.upload_catalog_coordinator import UploadCatalogCoordinator
 from framenest.application.upload_publication import PublishPendingUpload
 from framenest.application.upload_publication_coordinator import (
     UploadPublicationCoordinator,
@@ -150,6 +152,8 @@ def create_app(
     owned_upload_validation_coordinator = None
     owned_upload_publication = None
     owned_upload_publication_coordinator = None
+    owned_upload_catalog = None
+    owned_upload_catalog_coordinator = None
     if (
         library_api_dependencies is None
         or media_import_api_dependencies is None
@@ -286,6 +290,7 @@ def create_app(
             owned_library_repository,
             quarantine_configured=storage is not None,
         )
+        owned_upload_publication_repository = None
         if published_storage is not None:
             assert owned_engine is not None
             assert storage is not None
@@ -297,10 +302,19 @@ def create_app(
                 published_storage,
                 storage,
             )
+            owned_upload_catalog = CatalogPublishedUpload(
+                owned_upload_publication_repository,
+            )
+            owned_upload_catalog_coordinator = UploadCatalogCoordinator(
+                owned_upload_publication_repository,
+                owned_upload_catalog,
+                upload_locks,
+            )
             owned_upload_publication_coordinator = UploadPublicationCoordinator(
                 owned_upload_publication_repository,
                 owned_upload_publication,
                 upload_locks,
+                catalog_coordinator=owned_upload_catalog_coordinator,
             )
         upload_api_dependencies = UploadApiDependencies(
             transport=UploadTransportService(
@@ -319,6 +333,7 @@ def create_app(
                 preview_cache_root=resolved_settings.gallery_preview_cache_path,
                 locks=upload_locks,
             ),
+            publication_repository=owned_upload_publication_repository,
         )
         if storage is not None:
             owned_upload_validation = ValidateReceivedUpload(
@@ -337,15 +352,21 @@ def create_app(
                 transport=upload_api_dependencies.transport,
                 validation_coordinator=owned_upload_validation_coordinator,
                 publication_coordinator=owned_upload_publication_coordinator,
+                publication_repository=upload_api_dependencies.publication_repository,
             )
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         validation_coordinator = owned_upload_validation_coordinator
         publication_coordinator = owned_upload_publication_coordinator
+        catalog_coordinator = owned_upload_catalog_coordinator
         publication_started = False
         validation_started = False
+        catalog_started = False
         try:
+            if catalog_coordinator is not None:
+                await catalog_coordinator.start()
+                catalog_started = True
             if publication_coordinator is not None:
                 await publication_coordinator.start()
                 publication_started = True
@@ -362,8 +383,12 @@ def create_app(
                     if publication_started and publication_coordinator is not None:
                         await publication_coordinator.shutdown()
                 finally:
-                    if owned_engine is not None:
-                        dispose_engine(owned_engine)
+                    try:
+                        if catalog_started and catalog_coordinator is not None:
+                            await catalog_coordinator.shutdown()
+                    finally:
+                        if owned_engine is not None:
+                            dispose_engine(owned_engine)
 
     app = FastAPI(lifespan=lifespan)
     app.state.settings = resolved_settings
@@ -379,6 +404,8 @@ def create_app(
         if owned_upload_publication_coordinator is not None
         else _upload_publication_coordinator(upload_api_dependencies)
     )
+    app.state.upload_catalog = owned_upload_catalog
+    app.state.upload_catalog_coordinator = owned_upload_catalog_coordinator
     app.include_router(create_library_api_router(library_api_dependencies))
     app.include_router(create_media_import_api_router(media_import_api_dependencies))
     app.include_router(create_media_catalog_api_router(media_catalog_api_dependencies))

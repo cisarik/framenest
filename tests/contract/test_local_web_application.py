@@ -2719,13 +2719,17 @@ def test_javascript_upload_states_polling_cancel_and_gallery_boundaries_are_trut
     ):
         assert label in upload_block
     assert "Validated. Awaiting publication. Not yet available in Gallery." in upload_block
+    assert "Published. Awaiting cataloging. Not yet available in Gallery." in upload_block
+    assert "Cataloged. Available in Gallery." in upload_block
+    assert 'snapshot.state === "published"' in upload_block
     assert "uploadShouldPoll(snapshot)" in upload_block
+    assert "refreshGalleryAfterCataloged" in upload_block
     assert "publish_pending" in upload_block
     assert "rejected" in upload_block
     assert "failed" in upload_block
     assert "cancelled" in upload_block
     assert "expired" in upload_block
     assert 'method: "DELETE"' in upload_block
-    assert "loadCatalog()" not in upload_block
+    assert "loadCatalog()" in upload_block
     assert "mediaContentUrl" not in upload_block
     assert "gallery-preview" not in upload_block

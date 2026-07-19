@@ -230,7 +230,7 @@ def _insert_publication(connection: sqlite3.Connection, values: dict[str, object
     )
 
 
-def test_fresh_database_upgrades_to_0013_with_empty_publication_table(
+def test_fresh_database_upgrades_to_head_with_empty_publication_table(
     tmp_path: Path,
 ) -> None:
     from framenest.infrastructure.persistence.migrations import upgrade_database_to_head
@@ -238,7 +238,7 @@ def test_fresh_database_upgrades_to_0013_with_empty_publication_table(
     settings = _settings(tmp_path / "fresh" / "catalog.sqlite3")
     status = upgrade_database_to_head(settings)
 
-    assert status.current_revision == status.head_revision == "0013"
+    assert status.current_revision == status.head_revision == "0014"
     assert "upload_publications" in _table_names(settings.database_path)
     connection = _connect(settings.database_path)
     try:
@@ -302,12 +302,12 @@ def test_0013_downgrade_and_reupgrade_preserve_uploads_without_inventing_provena
         connection.close()
 
 
-def test_fresh_metadata_and_incremental_0013_publication_schema_are_equivalent(
+def test_fresh_metadata_and_incremental_head_publication_schema_are_equivalent(
     tmp_path: Path,
 ) -> None:
     migrated = tmp_path / "equivalence" / "migrated.sqlite3"
     metadata_created = tmp_path / "equivalence" / "metadata.sqlite3"
-    _migrate(migrated, "0013")
+    _migrate(migrated, "0014")
     metadata_created.parent.mkdir(parents=True, exist_ok=True)
     engine = create_sqlite_engine(metadata_created)
     try:

@@ -1,4 +1,4 @@
-"""Lifecycle-owned bounded coordinator for automatic upload publication."""
+"""Lifecycle-owned bounded coordinator for published-to-cataloged transition."""
 
 from __future__ import annotations
 
@@ -12,20 +12,23 @@ from framenest.application.ports.upload_publications import (
     UploadPublicationCandidate,
     UploadPublicationRepository,
 )
-from framenest.application.upload_publication import (
-    UploadPublicationError,
-    UploadPublicationResult,
+from framenest.application.upload_catalog import (
+    UploadCatalogError,
+    UploadCatalogResult,
 )
 from framenest.application.upload_transport import UploadSessionLockRegistry
-from framenest.domain.upload_publications import UploadPublicationCleanupState
+from framenest.domain.upload_publications import (
+    UploadPublicationCleanupState,
+    UploadPublicationState,
+)
 from framenest.domain.uploads import UploadSessionId, UploadSessionState
 from framenest.structured_logging import get_logger
 
-LOGGER = get_logger("upload_publication_coordinator")
+LOGGER = get_logger("upload_catalog_coordinator")
 
-DEFAULT_UPLOAD_PUBLICATION_BATCH_SIZE = 32
-DEFAULT_PUBLICATION_RETRY_INITIAL_DELAY_SECONDS = 0.25
-DEFAULT_PUBLICATION_RETRY_MAX_DELAY_SECONDS = 5.0
+DEFAULT_UPLOAD_CATALOG_BATCH_SIZE = 32
+DEFAULT_CATALOG_RETRY_INITIAL_DELAY_SECONDS = 0.25
+DEFAULT_CATALOG_RETRY_MAX_DELAY_SECONDS = 5.0
 
 
 class _DrainOutcome(Enum):
@@ -41,16 +44,16 @@ class _CandidateOutcome(Enum):
     SHUTDOWN = auto()
 
 
-class _UploadPublisher(Protocol):
-    def publish_owned_blocking(
+class _UploadCataloger(Protocol):
+    def catalog_owned_blocking(
         self,
         upload_id: UploadSessionId,
-    ) -> UploadPublicationResult:
-        """Recover one upload while the caller owns its process-local lock."""
+    ) -> UploadCatalogResult:
+        """Catalog one upload while the caller owns its process-local lock."""
 
 
-class UploadPublicationCoordinator:
-    """Run publication through one consumer in the current single-process topology.
+class UploadCatalogCoordinator:
+    """Run cataloging through one consumer in the current single-process topology.
 
     SQLite guards and the shared per-upload lock converge work inside one process.
     Multiprocess leases and fencing remain explicitly deferred.
@@ -59,31 +62,30 @@ class UploadPublicationCoordinator:
     def __init__(
         self,
         repository: UploadPublicationRepository,
-        publisher: _UploadPublisher,
+        cataloger: _UploadCataloger,
         locks: UploadSessionLockRegistry,
         *,
-        batch_size: int = DEFAULT_UPLOAD_PUBLICATION_BATCH_SIZE,
+        batch_size: int = DEFAULT_UPLOAD_CATALOG_BATCH_SIZE,
         executor: ThreadPoolExecutor | None = None,
         retry_initial_delay_seconds: float = (
-            DEFAULT_PUBLICATION_RETRY_INITIAL_DELAY_SECONDS
+            DEFAULT_CATALOG_RETRY_INITIAL_DELAY_SECONDS
         ),
-        retry_max_delay_seconds: float = DEFAULT_PUBLICATION_RETRY_MAX_DELAY_SECONDS,
-        catalog_coordinator: object | None = None,
+        retry_max_delay_seconds: float = DEFAULT_CATALOG_RETRY_MAX_DELAY_SECONDS,
     ) -> None:
         if isinstance(batch_size, bool) or batch_size <= 0:
-            raise ValueError("upload publication batch size must be positive")
+            raise ValueError("upload catalog batch size must be positive")
         if (
             isinstance(retry_initial_delay_seconds, bool)
             or retry_initial_delay_seconds < 0
         ):
-            raise ValueError("upload publication retry delay must be non-negative")
+            raise ValueError("upload catalog retry delay must be non-negative")
         if (
             isinstance(retry_max_delay_seconds, bool)
             or retry_max_delay_seconds < retry_initial_delay_seconds
         ):
-            raise ValueError("upload publication retry max delay is invalid")
+            raise ValueError("upload catalog retry max delay is invalid")
         self._repository = repository
-        self._publisher = publisher
+        self._cataloger = cataloger
         self._locks = locks
         self._batch_size = batch_size
         self._executor = executor
@@ -95,13 +97,12 @@ class UploadPublicationCoordinator:
         self._wake: asyncio.Event | None = None
         self._stopping = False
         self._active_upload_ids: set[str] = set()
-        self._catalog_coordinator = catalog_coordinator
 
     async def start(self) -> None:
         """Start one runner and wake startup reconciliation."""
         if self._runner is not None:
             if self._runner.done() and not self._stopping:
-                raise RuntimeError("upload publication coordinator runner is not active")
+                raise RuntimeError("upload catalog coordinator runner is not active")
             return
         self._stopping = False
         self._current_retry_delay_seconds = self._retry_initial_delay_seconds
@@ -109,15 +110,15 @@ class UploadPublicationCoordinator:
         self._wake = asyncio.Event()
         self._runner = asyncio.create_task(
             self._run(),
-            name="framenest-upload-publication-coordinator",
+            name="framenest-upload-catalog-coordinator",
         )
         self.notify()
 
     def notify(self) -> None:
-        """Wake the runner after durable work becomes eligible."""
+        """Wake the runner after durable published work becomes eligible."""
         runner = self._runner
         if runner is not None and runner.done() and not self._stopping:
-            raise RuntimeError("upload publication coordinator runner is not active")
+            raise RuntimeError("upload catalog coordinator runner is not active")
         if self._wake is not None and not self._stopping:
             self._wake.set()
 
@@ -142,9 +143,9 @@ class UploadPublicationCoordinator:
                 except Exception:
                     _safe_log(
                         level="WARNING",
-                        event="upload_publication_runner_shutdown_fault",
-                        operation="upload_publication_shutdown",
-                        error_code="UPLOAD_PUBLICATION_RUNNER_SHUTDOWN_FAULT",
+                        event="upload_catalog_runner_shutdown_fault",
+                        operation="upload_catalog_shutdown",
+                        error_code="UPLOAD_CATALOG_RUNNER_SHUTDOWN_FAULT",
                         retryable=False,
                     )
         finally:
@@ -187,9 +188,9 @@ class UploadPublicationCoordinator:
             except Exception:
                 _safe_log(
                     level="ERROR",
-                    event="upload_publication_runner_iteration_failed",
-                    operation="upload_publication_run",
-                    error_code="UPLOAD_PUBLICATION_RUNNER_ITERATION_FAILED",
+                    event="upload_catalog_runner_iteration_failed",
+                    operation="upload_catalog_run",
+                    error_code="UPLOAD_CATALOG_RUNNER_ITERATION_FAILED",
                     retryable=True,
                 )
 
@@ -243,7 +244,7 @@ class UploadPublicationCoordinator:
     ) -> tuple[UploadPublicationCandidate, ...] | None:
         try:
             return await self._run_blocking(
-                self._repository.list_candidates,
+                self._repository.list_catalog_candidates,
                 limit=self._batch_size,
                 after_updated_at_ms=None if after is None else after[0],
                 after_id=None if after is None else after[1],
@@ -251,9 +252,9 @@ class UploadPublicationCoordinator:
         except Exception:
             _safe_log(
                 level="WARNING",
-                event="upload_publication_candidate_discovery_failed",
-                operation="upload_publication_discovery",
-                error_code="UPLOAD_PUBLICATION_DISCOVERY_FAILED",
+                event="upload_catalog_candidate_discovery_failed",
+                operation="upload_catalog_discovery",
+                error_code="UPLOAD_CATALOG_DISCOVERY_FAILED",
                 retryable=True,
             )
             return None
@@ -271,19 +272,18 @@ class UploadPublicationCoordinator:
                 if self._stopping:
                     return _CandidateOutcome.SHUTDOWN
                 await self._run_blocking(
-                    self._publisher.publish_owned_blocking,
+                    self._cataloger.catalog_owned_blocking,
                     candidate.upload.id,
                 )
-            _notify_catalog_coordinator(self._catalog_coordinator)
             return _CandidateOutcome.PROGRESS
-        except UploadPublicationError:
+        except UploadCatalogError:
             return await self._classify_after_error(candidate)
         except Exception:
             _safe_log(
                 level="WARNING",
-                event="upload_publication_candidate_processing_failed",
-                operation="upload_publication_candidate",
-                error_code="UPLOAD_PUBLICATION_CANDIDATE_FAILED",
+                event="upload_catalog_candidate_processing_failed",
+                operation="upload_catalog_candidate",
+                error_code="UPLOAD_CATALOG_CANDIDATE_FAILED",
                 retryable=True,
             )
             return await self._classify_after_error(candidate)
@@ -346,36 +346,22 @@ class UploadPublicationCoordinator:
         if self._executor is None:
             self._executor = ThreadPoolExecutor(
                 max_workers=1,
-                thread_name_prefix="framenest-upload-publication",
+                thread_name_prefix="framenest-upload-catalog",
             )
         return self._executor
 
 
 def _eligible(candidate: UploadPublicationCandidate) -> bool:
-    if candidate.upload.state is UploadSessionState.PUBLISH_PENDING:
-        return True
+    publication = candidate.publication
+    if publication is None:
+        return False
     return bool(
         candidate.upload.state is UploadSessionState.PUBLISHED
-        and candidate.publication is not None
-        and candidate.publication.cleanup_state
-        is UploadPublicationCleanupState.PENDING
+        and publication.state is UploadPublicationState.VERIFIED
+        and publication.cleanup_state is UploadPublicationCleanupState.COMPLETE
+        and publication.media_id is None
+        and publication.media_location_id is None
     )
-
-
-def _notify_catalog_coordinator(coordinator: object | None) -> None:
-    if coordinator is None:
-        return
-    try:
-        notify = getattr(coordinator, "notify")
-        notify()
-    except Exception:
-        _safe_log(
-            level="WARNING",
-            event="upload_catalog_notify_failed",
-            operation="upload_publication_catalog_notify",
-            error_code="UPLOAD_CATALOG_NOTIFY_FAILED",
-            retryable=True,
-        )
 
 
 def _safe_log(**fields: object) -> None:

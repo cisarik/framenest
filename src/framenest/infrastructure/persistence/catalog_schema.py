@@ -345,6 +345,26 @@ upload_publications = Table(
     Column("verified_at_ms", Integer(), nullable=True),
     Column("cleanup_completed_at_ms", Integer(), nullable=True),
     Column("version", Integer(), nullable=False),
+    Column(
+        "media_id",
+        Text(),
+        ForeignKey(
+            "logical_media.id",
+            ondelete="RESTRICT",
+            name="fk_upload_publications_media_id",
+        ),
+        nullable=True,
+    ),
+    Column(
+        "media_location_id",
+        Text(),
+        ForeignKey(
+            "physical_media_locations.id",
+            ondelete="RESTRICT",
+            name="fk_upload_publications_media_location_id",
+        ),
+        nullable=True,
+    ),
     CheckConstraint(
         "length(upload_id) = 36",
         name="ck_upload_publications_upload_id_length",
@@ -424,6 +444,19 @@ upload_publications = Table(
         "version >= 0",
         name="ck_upload_publications_version_non_negative",
     ),
+    CheckConstraint(
+        "(media_id IS NULL AND media_location_id IS NULL) "
+        "OR (media_id IS NOT NULL AND media_location_id IS NOT NULL)",
+        name="ck_upload_publications_catalog_linkage",
+    ),
+    CheckConstraint(
+        "media_id IS NULL OR length(media_id) = 36",
+        name="ck_upload_publications_media_id_length",
+    ),
+    CheckConstraint(
+        "media_location_id IS NULL OR length(media_location_id) = 36",
+        name="ck_upload_publications_media_location_id_length",
+    ),
     UniqueConstraint(
         "publication_id",
         name="uq_upload_publications_publication_id",
@@ -432,6 +465,14 @@ upload_publications = Table(
         "destination_id",
         "relative_target",
         name="uq_upload_publications_destination_target",
+    ),
+    UniqueConstraint(
+        "media_id",
+        name="uq_upload_publications_media_id",
+    ),
+    UniqueConstraint(
+        "media_location_id",
+        name="uq_upload_publications_media_location_id",
     ),
     Index(
         "ix_upload_publications_state_cleanup",
