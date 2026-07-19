@@ -150,6 +150,32 @@ def test_owned_partial_or_complete_temporary_is_rebuilt_and_target_is_reconstruc
     assert published.verify_target(publication) is True
 
 
+def test_hard_linked_existing_temporary_is_rejected_before_truncation(
+    tmp_path: Path,
+) -> None:
+    data = b"synthetic-hard-link-guard"
+    publication = _publication(data)
+    quarantine, key, _ = _quarantine(tmp_path, data)
+    published, root = _published_storage(tmp_path, publication)
+    temp = root / f".{publication.publication_id.value.hex}.publish.tmp"
+    temp.write_bytes(b"synthetic-stale-temporary")
+    temp.chmod(0o600)
+    alias = root / ".synthetic-hard-link-alias"
+    os.link(temp, alias)
+
+    reader = quarantine.open_reader(key, expected_size_bytes=len(data))
+    try:
+        with pytest.raises(PublishedMediaWriteError):
+            published.publish_from_reader(publication, reader)
+    finally:
+        reader.close()
+
+    assert temp.read_bytes() == b"synthetic-stale-temporary"
+    assert alias.read_bytes() == b"synthetic-stale-temporary"
+    assert not (root / publication.relative_path.value).exists()
+    assert quarantine.file_size(key) == len(data)
+
+
 def test_unexpected_final_collision_is_never_overwritten_or_adopted(
     tmp_path: Path,
 ) -> None:

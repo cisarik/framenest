@@ -208,6 +208,7 @@ def _open_owned_temporary(root_fd: int, name: str) -> int:
         if (
             not stat_module.S_ISREG(stat_result.st_mode)
             or stat_module.S_IMODE(stat_result.st_mode) != 0o600
+            or stat_result.st_nlink != 1
         ):
             raise PublishedMediaWriteError("published media write failed")
         os.ftruncate(fd, 0)
