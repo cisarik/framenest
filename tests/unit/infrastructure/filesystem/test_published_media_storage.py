@@ -150,7 +150,7 @@ def test_owned_partial_or_complete_temporary_is_rebuilt_and_target_is_reconstruc
     assert published.verify_target(publication) is True
 
 
-def test_hard_linked_existing_temporary_is_rejected_before_truncation(
+def test_hard_linked_existing_temporary_is_rejected_and_retry_succeeds_after_alias_removal(
     tmp_path: Path,
 ) -> None:
     data = b"synthetic-hard-link-guard"
@@ -172,6 +172,148 @@ def test_hard_linked_existing_temporary_is_rejected_before_truncation(
 
     assert temp.read_bytes() == b"synthetic-stale-temporary"
     assert alias.read_bytes() == b"synthetic-stale-temporary"
+    assert not (root / publication.relative_path.value).exists()
+
+    alias.unlink()
+    retry_reader = quarantine.open_reader(key, expected_size_bytes=len(data))
+    try:
+        published.publish_from_reader(publication, retry_reader)
+    finally:
+        retry_reader.close()
+
+    final = root / publication.relative_path.value
+    assert final.read_bytes() == data
+    assert not temp.exists()
+    assert published.verify_target(publication) is True
+    assert quarantine.file_size(key) == len(data)
+
+
+def test_temporary_aliased_to_another_publication_object_fails_closed(
+    tmp_path: Path,
+) -> None:
+    data = b"synthetic-alias-victim-guard"
+    publication = _publication(data)
+    quarantine, key, _ = _quarantine(tmp_path, data)
+    published, root = _published_storage(tmp_path, publication)
+    victim_bytes = b"synthetic-neighboring-publication-bytes"
+    victim = root / "synthetic-neighboring-publication-object"
+    victim.write_bytes(victim_bytes)
+    victim.chmod(0o600)
+    temp = root / f".{publication.publication_id.value.hex}.publish.tmp"
+    os.link(victim, temp)
+    assert temp.stat().st_nlink == 2
+
+    reader = quarantine.open_reader(key, expected_size_bytes=len(data))
+    try:
+        with pytest.raises(PublishedMediaWriteError):
+            published.publish_from_reader(publication, reader)
+    finally:
+        reader.close()
+
+    assert victim.read_bytes() == victim_bytes
+    assert temp.read_bytes() == victim_bytes
+    assert not (root / publication.relative_path.value).exists()
+    assert quarantine.file_size(key) == len(data)
+
+
+def test_verified_final_first_recovery_removes_surviving_legitimate_temporary(
+    tmp_path: Path,
+) -> None:
+    data = b"synthetic-final-first-recovery"
+    publication = _publication(data)
+    quarantine, key, _ = _quarantine(tmp_path, data)
+    published, root = _published_storage(tmp_path, publication)
+    first_reader = quarantine.open_reader(key, expected_size_bytes=len(data))
+    try:
+        published.publish_from_reader(publication, first_reader)
+    finally:
+        first_reader.close()
+    assert published.verify_target(publication) is True
+
+    temp = root / f".{publication.publication_id.value.hex}.publish.tmp"
+    temp.write_bytes(b"synthetic-surviving-temporary")
+    temp.chmod(0o600)
+
+    second_reader = quarantine.open_reader(key, expected_size_bytes=len(data))
+    try:
+        published.publish_from_reader(publication, second_reader)
+    finally:
+        second_reader.close()
+
+    final = root / publication.relative_path.value
+    assert final.read_bytes() == data
+    assert not temp.exists()
+    assert published.verify_target(publication) is True
+    assert quarantine.file_size(key) == len(data)
+
+
+def test_symlink_temporary_is_rejected_without_touching_link_target(
+    tmp_path: Path,
+) -> None:
+    data = b"synthetic-symlink-temporary"
+    publication = _publication(data)
+    quarantine, key, _ = _quarantine(tmp_path, data)
+    published, root = _published_storage(tmp_path, publication)
+    external_bytes = b"synthetic-external-bytes"
+    external = tmp_path / "synthetic-external-object"
+    external.write_bytes(external_bytes)
+    temp = root / f".{publication.publication_id.value.hex}.publish.tmp"
+    temp.symlink_to(external)
+
+    reader = quarantine.open_reader(key, expected_size_bytes=len(data))
+    try:
+        with pytest.raises(PublishedMediaWriteError):
+            published.publish_from_reader(publication, reader)
+    finally:
+        reader.close()
+
+    assert external.read_bytes() == external_bytes
+    assert temp.is_symlink()
+    assert not (root / publication.relative_path.value).exists()
+    assert quarantine.file_size(key) == len(data)
+
+
+def test_non_regular_temporary_path_is_rejected_without_rewrite(
+    tmp_path: Path,
+) -> None:
+    data = b"synthetic-non-regular-temporary"
+    publication = _publication(data)
+    quarantine, key, _ = _quarantine(tmp_path, data)
+    published, root = _published_storage(tmp_path, publication)
+    temp = root / f".{publication.publication_id.value.hex}.publish.tmp"
+    temp.mkdir()
+
+    reader = quarantine.open_reader(key, expected_size_bytes=len(data))
+    try:
+        with pytest.raises(PublishedMediaWriteError):
+            published.publish_from_reader(publication, reader)
+    finally:
+        reader.close()
+
+    assert temp.is_dir()
+    assert not (root / publication.relative_path.value).exists()
+    assert quarantine.file_size(key) == len(data)
+
+
+def test_wrong_mode_existing_temporary_is_rejected_before_truncation(
+    tmp_path: Path,
+) -> None:
+    data = b"synthetic-wrong-mode-temporary"
+    publication = _publication(data)
+    quarantine, key, _ = _quarantine(tmp_path, data)
+    published, root = _published_storage(tmp_path, publication)
+    temp = root / f".{publication.publication_id.value.hex}.publish.tmp"
+    temp.write_bytes(b"synthetic-stale-temporary")
+    temp.chmod(0o644)
+
+    reader = quarantine.open_reader(key, expected_size_bytes=len(data))
+    try:
+        with pytest.raises(PublishedMediaWriteError):
+            published.publish_from_reader(publication, reader)
+    finally:
+        reader.close()
+
+    assert temp.read_bytes() == b"synthetic-stale-temporary"
     assert not (root / publication.relative_path.value).exists()
     assert quarantine.file_size(key) == len(data)
 
