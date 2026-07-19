@@ -483,3 +483,115 @@ upload_publications = Table(
     ),
     Index("ix_upload_publications_byte_identity_id", "byte_identity_id"),
 )
+
+media_analysis_runs = Table(
+    "media_analysis_runs",
+    metadata,
+    Column("id", Text(), primary_key=True, nullable=False),
+    Column(
+        "media_id",
+        Text(),
+        ForeignKey(
+            "logical_media.id",
+            ondelete="RESTRICT",
+            name="fk_media_analysis_runs_media_id",
+        ),
+        nullable=False,
+    ),
+    Column(
+        "media_location_id",
+        Text(),
+        ForeignKey(
+            "physical_media_locations.id",
+            ondelete="RESTRICT",
+            name="fk_media_analysis_runs_media_location_id",
+        ),
+        nullable=False,
+    ),
+    Column("analysis_definition", Text(), nullable=False),
+    Column("state", Text(), nullable=False),
+    Column("attempt_count", Integer(), nullable=False),
+    Column("provider_id", Text(), nullable=True),
+    Column("model_id", Text(), nullable=True),
+    Column("prompt_version", Text(), nullable=True),
+    Column("result_schema_version", Text(), nullable=True),
+    Column("result_json", Text(), nullable=True),
+    Column("error_code", Text(), nullable=True),
+    Column("error_message", Text(), nullable=True),
+    Column("created_at_ms", Integer(), nullable=False),
+    Column("started_at_ms", Integer(), nullable=True),
+    Column("completed_at_ms", Integer(), nullable=True),
+    Column("version", Integer(), nullable=False),
+    CheckConstraint("length(id) = 36", name="ck_media_analysis_runs_id_length"),
+    CheckConstraint(
+        "length(media_id) = 36",
+        name="ck_media_analysis_runs_media_id_length",
+    ),
+    CheckConstraint(
+        "length(media_location_id) = 36",
+        name="ck_media_analysis_runs_media_location_id_length",
+    ),
+    CheckConstraint(
+        "length(analysis_definition) >= 1 AND length(analysis_definition) <= 64",
+        name="ck_media_analysis_runs_definition_length",
+    ),
+    CheckConstraint(
+        "state IN ('pending', 'analyzing', 'analyzed', 'failed')",
+        name="ck_media_analysis_runs_state",
+    ),
+    CheckConstraint(
+        "attempt_count >= 0 AND attempt_count <= 100",
+        name="ck_media_analysis_runs_attempt_count",
+    ),
+    CheckConstraint(
+        "created_at_ms >= 0",
+        name="ck_media_analysis_runs_created_at_ms_non_negative",
+    ),
+    CheckConstraint(
+        "started_at_ms IS NULL OR started_at_ms >= 0",
+        name="ck_media_analysis_runs_started_at_ms_non_negative",
+    ),
+    CheckConstraint(
+        "completed_at_ms IS NULL OR completed_at_ms >= 0",
+        name="ck_media_analysis_runs_completed_at_ms_non_negative",
+    ),
+    CheckConstraint(
+        "version >= 1",
+        name="ck_media_analysis_runs_version_positive",
+    ),
+    CheckConstraint(
+        "("
+        "state = 'pending' AND started_at_ms IS NULL AND completed_at_ms IS NULL "
+        "AND result_json IS NULL AND result_schema_version IS NULL "
+        "AND error_code IS NULL AND error_message IS NULL"
+        ") OR ("
+        "state = 'analyzing' AND started_at_ms IS NOT NULL AND completed_at_ms IS NULL "
+        "AND result_json IS NULL AND result_schema_version IS NULL "
+        "AND error_code IS NULL AND error_message IS NULL "
+        "AND attempt_count >= 1"
+        ") OR ("
+        "state = 'analyzed' AND started_at_ms IS NOT NULL AND completed_at_ms IS NOT NULL "
+        "AND result_json IS NOT NULL AND result_schema_version IS NOT NULL "
+        "AND error_code IS NULL AND error_message IS NULL "
+        "AND provider_id IS NOT NULL AND model_id IS NOT NULL "
+        "AND prompt_version IS NOT NULL AND attempt_count >= 1"
+        ") OR ("
+        "state = 'failed' AND started_at_ms IS NOT NULL AND completed_at_ms IS NOT NULL "
+        "AND result_json IS NULL AND result_schema_version IS NULL "
+        "AND error_code IS NOT NULL AND error_message IS NOT NULL "
+        "AND attempt_count >= 1"
+        ")",
+        name="ck_media_analysis_runs_state_payload",
+    ),
+    UniqueConstraint(
+        "media_id",
+        "analysis_definition",
+        name="uq_media_analysis_runs_media_definition",
+    ),
+    Index(
+        "ix_media_analysis_runs_unfinished",
+        "state",
+        "created_at_ms",
+        "id",
+    ),
+)

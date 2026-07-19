@@ -14,7 +14,7 @@ from framenest.application.upload_catalog import (
 )
 from framenest.application.upload_catalog_coordinator import UploadCatalogCoordinator
 from framenest.application.upload_transport import UploadSessionLockRegistry
-from framenest.domain.identities import LibraryId, MediaByteIdentityId, MediaId
+from framenest.domain.identities import LibraryId, MediaByteIdentityId, MediaId, MediaLocationId
 from framenest.domain.upload_publications import (
     UploadPublication,
     UploadPublicationCleanupState,
@@ -167,6 +167,7 @@ class _Cataloger:
             upload_id_text,
             "cataloged",
             MediaId.new().to_string(),
+            MediaLocationId.new().to_string(),
         )
 
 

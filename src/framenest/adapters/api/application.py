@@ -41,6 +41,10 @@ from framenest.adapters.api.media_suggestion_api import (
     MediaSuggestionStatusRead,
     create_media_suggestion_api_router,
 )
+from framenest.adapters.api.media_analysis_lifecycle_api import (
+    MediaAnalysisLifecycleApiDependencies,
+    create_media_analysis_lifecycle_api_router,
+)
 from framenest.adapters.api.upload_api import (
     UploadApiDependencies,
     create_upload_api_router,
@@ -63,6 +67,13 @@ from framenest.application.upload_transport import UploadTransportLimits, Upload
 from framenest.application.upload_transport import UploadSessionLockRegistry
 from framenest.application.upload_catalog import CatalogPublishedUpload
 from framenest.application.upload_catalog_coordinator import UploadCatalogCoordinator
+from framenest.application.media_analysis_coordinator import MediaAnalysisCoordinator
+from framenest.application.media_analysis_lifecycle import (
+    AutomaticImportedMediaSuggestionExecutor,
+    ExecuteAutomaticMediaAnalysisRun,
+    ReadAutomaticMediaAnalysis,
+    ScheduleAutomaticMediaAnalysis,
+)
 from framenest.application.upload_publication import PublishPendingUpload
 from framenest.application.upload_publication_coordinator import (
     UploadPublicationCoordinator,
@@ -104,6 +115,9 @@ from framenest.infrastructure.persistence.upload_session_repository import (
 from framenest.infrastructure.persistence.upload_publication_repository import (
     SqliteUploadPublicationRepository,
 )
+from framenest.infrastructure.persistence.media_analysis_run_repository import (
+    SqliteMediaAnalysisRunRepository,
+)
 
 
 class HealthResponse(BaseModel):
@@ -139,6 +153,9 @@ def create_app(
     media_content_api_dependencies: MediaContentApiDependencies | None = None,
     gallery_preview_api_dependencies: GalleryPreviewApiDependencies | None = None,
     media_suggestion_api_dependencies: MediaSuggestionApiDependencies | None = None,
+    media_analysis_lifecycle_api_dependencies: (
+        MediaAnalysisLifecycleApiDependencies | None
+    ) = None,
     upload_api_dependencies: UploadApiDependencies | None = None,
 ) -> FastAPI:
     resolved_settings = settings if settings is not None else load_settings()
@@ -154,6 +171,8 @@ def create_app(
     owned_upload_publication_coordinator = None
     owned_upload_catalog = None
     owned_upload_catalog_coordinator = None
+    owned_media_analysis_run_repository = None
+    owned_media_analysis_coordinator = None
     if (
         library_api_dependencies is None
         or media_import_api_dependencies is None
@@ -163,6 +182,7 @@ def create_app(
         or media_content_api_dependencies is None
         or gallery_preview_api_dependencies is None
         or media_suggestion_api_dependencies is None
+        or media_analysis_lifecycle_api_dependencies is None
         or upload_api_dependencies is None
     ):
         owned_engine = create_sqlite_engine(resolved_settings.database_path)
@@ -171,6 +191,9 @@ def create_app(
         owned_media_catalog_repository = SqliteMediaCatalogRepository(owned_engine)
         owned_media_metadata_repository = SqliteMediaMetadataRepository(owned_engine)
         owned_upload_session_repository = SqliteUploadSessionRepository(owned_engine)
+        owned_media_analysis_run_repository = SqliteMediaAnalysisRunRepository(
+            owned_engine
+        )
     if library_api_dependencies is None:
         assert owned_library_repository is not None
         library_api_dependencies = LibraryApiDependencies(
@@ -276,6 +299,41 @@ def create_app(
             last_connection_test=_last_test_payload(resolved_ai.last_test),
             read_status=_media_suggestion_status_reader(resolved_ai),
         )
+    if media_analysis_lifecycle_api_dependencies is None:
+        assert owned_media_analysis_run_repository is not None
+        assert owned_media_repository is not None
+        assert owned_library_repository is not None
+        resolved_analysis_ai = resolve_ai_provider(resolved_settings)
+        analysis_provider = resolved_analysis_ai.provider
+        analysis_scheduler = ScheduleAutomaticMediaAnalysis(
+            owned_media_analysis_run_repository,
+            enabled=resolved_settings.automatic_media_analysis_enabled,
+        )
+        analysis_executor = ExecuteAutomaticMediaAnalysisRun(
+            owned_media_analysis_run_repository,
+            AutomaticImportedMediaSuggestionExecutor(
+                owned_media_repository,
+                owned_library_repository,
+                LocalMediaAnalysisAdapter(),
+                analysis_provider,
+            ),
+        )
+        owned_media_analysis_coordinator = MediaAnalysisCoordinator(
+            owned_media_analysis_run_repository,
+            analysis_scheduler,
+            analysis_executor,
+        )
+        media_analysis_lifecycle_api_dependencies = MediaAnalysisLifecycleApiDependencies(
+            read_analysis=ReadAutomaticMediaAnalysis(
+                owned_media_analysis_run_repository
+            ),
+            automatic_analysis_enabled=(
+                resolved_settings.automatic_media_analysis_enabled
+            ),
+            provider_configured=analysis_provider is not None,
+            provider_id=resolved_analysis_ai.provider_id,
+            model_id=resolved_analysis_ai.model_id,
+        )
     if upload_api_dependencies is None:
         assert owned_upload_session_repository is not None
         assert owned_library_repository is not None
@@ -309,6 +367,7 @@ def create_app(
                 owned_upload_publication_repository,
                 owned_upload_catalog,
                 upload_locks,
+                analysis_notifier=owned_media_analysis_coordinator,
             )
             owned_upload_publication_coordinator = UploadPublicationCoordinator(
                 owned_upload_publication_repository,
@@ -360,10 +419,15 @@ def create_app(
         validation_coordinator = owned_upload_validation_coordinator
         publication_coordinator = owned_upload_publication_coordinator
         catalog_coordinator = owned_upload_catalog_coordinator
+        analysis_coordinator = owned_media_analysis_coordinator
         publication_started = False
         validation_started = False
         catalog_started = False
+        analysis_started = False
         try:
+            if analysis_coordinator is not None:
+                await analysis_coordinator.start()
+                analysis_started = True
             if catalog_coordinator is not None:
                 await catalog_coordinator.start()
                 catalog_started = True
@@ -387,8 +451,12 @@ def create_app(
                         if catalog_started and catalog_coordinator is not None:
                             await catalog_coordinator.shutdown()
                     finally:
-                        if owned_engine is not None:
-                            dispose_engine(owned_engine)
+                        try:
+                            if analysis_started and analysis_coordinator is not None:
+                                await analysis_coordinator.shutdown()
+                        finally:
+                            if owned_engine is not None:
+                                dispose_engine(owned_engine)
 
     app = FastAPI(lifespan=lifespan)
     app.state.settings = resolved_settings
@@ -406,6 +474,7 @@ def create_app(
     )
     app.state.upload_catalog = owned_upload_catalog
     app.state.upload_catalog_coordinator = owned_upload_catalog_coordinator
+    app.state.media_analysis_coordinator = owned_media_analysis_coordinator
     app.include_router(create_library_api_router(library_api_dependencies))
     app.include_router(create_media_import_api_router(media_import_api_dependencies))
     app.include_router(create_media_catalog_api_router(media_catalog_api_dependencies))
@@ -414,6 +483,11 @@ def create_app(
     app.include_router(create_media_content_api_router(media_content_api_dependencies))
     app.include_router(create_gallery_preview_api_router(gallery_preview_api_dependencies))
     app.include_router(create_media_suggestion_api_router(media_suggestion_api_dependencies))
+    app.include_router(
+        create_media_analysis_lifecycle_api_router(
+            media_analysis_lifecycle_api_dependencies
+        )
+    )
     app.include_router(create_upload_api_router(upload_api_dependencies))
 
     @app.get("/", response_class=HTMLResponse)

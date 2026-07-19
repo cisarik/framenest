@@ -13,7 +13,7 @@ from framenest.configuration import FrameNestSettings
 PRODUCTION_VERSIONS_PACKAGE = (
     "framenest.infrastructure.persistence.alembic_environment.versions"
 )
-CURRENT_HEAD_REVISION = "0014"
+CURRENT_HEAD_REVISION = "0015"
 TARGET_COLLECTION_REVISION = "0007"
 TARGET_PREVIOUS_REVISION = "0006"
 DEVICE_ID = "12345678-1234-4234-9234-123456789abc"

@@ -57,6 +57,7 @@ class UploadCatalogResult:
     upload_id: str
     state: str
     media_id: str | None
+    media_location_id: str | None = None
 
 
 class CatalogPublishedUpload:
@@ -173,14 +174,18 @@ class CatalogPublishedUpload:
 def _result(candidate: UploadPublicationCandidate) -> UploadCatalogResult:
     publication = candidate.publication
     media_id = None
+    media_location_id = None
     if (
         publication is not None
         and publication.media_id is not None
+        and publication.media_location_id is not None
         and candidate.upload.state is UploadSessionState.CATALOGED
     ):
         media_id = publication.media_id.to_string()
+        media_location_id = publication.media_location_id.to_string()
     return UploadCatalogResult(
         upload_id=candidate.upload.id.to_string(),
         state=candidate.upload.state.value,
         media_id=media_id,
+        media_location_id=media_location_id,
     )

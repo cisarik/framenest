@@ -90,6 +90,7 @@ class FrameNestSettings(BaseSettings):
     )
     ai_provider_id: str | None = Field(default=None)
     ai_model_id: str | None = Field(default=None)
+    automatic_media_analysis_enabled: bool = Field(default=False)
 
     @field_validator("host")
     @classmethod

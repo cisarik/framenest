@@ -6,6 +6,7 @@ const MEDIA_CATALOG_ENDPOINT = "/api/media";
 const MEDIA_METADATA_ENDPOINT_PREFIX = "/api/media";
 const CANONICAL_TAGS_ENDPOINT = "/api/canonical-tags";
 const AI_CAPABILITY_ENDPOINT = "/api/ai/media-suggestion-capability";
+const AUTOMATIC_ANALYSIS_CAPABILITY_ENDPOINT = "/api/ai/automatic-analysis-capability";
 const CLOUD_STATUS_ENDPOINT = "/api/status/cloud";
 const UPLOADS_ENDPOINT = "/api/uploads";
 const UPLOAD_CAPABILITY_ENDPOINT = "/api/uploads/capability";
@@ -18,6 +19,9 @@ const DEFAULT_UPLOAD_CHUNK_BYTES = 1024 * 1024;
 const UPLOAD_POLL_INTERVAL_MS = 1200;
 const UPLOAD_POLL_RETRY_MAX_MS = 10000;
 const UPLOAD_PUBLICATION_POLL_MAX_ATTEMPTS = 25;
+const AUTOMATIC_ANALYSIS_POLL_INTERVAL_MS = 1500;
+const AUTOMATIC_ANALYSIS_POLL_MAX_ATTEMPTS = 40;
+const AUTOMATIC_ANALYSIS_TERMINAL_STATES = new Set(["analyzed", "failed", "not_requested"]);
 const UPLOAD_PUBLIC_ID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const UPLOAD_KNOWN_STATES = new Set([
@@ -153,6 +157,12 @@ let aiCapability = {
   last_status_check: null,
   requires_explicit_confirmation: true,
 };
+let automaticAnalysisCapability = {
+  automatic_analysis_enabled: false,
+  provider_configured: false,
+};
+const automaticAnalysisByMediaId = new Map();
+const automaticAnalysisPollControllers = new Map();
 
 function restoredCatalogPageSize() {
   try {
@@ -723,6 +733,110 @@ async function loadAiCapability() {
   } catch {
     renderAiCapability({ available: false, status: "status_unavailable" });
   }
+  await loadAutomaticAnalysisCapability();
+}
+
+async function loadAutomaticAnalysisCapability() {
+  try {
+    const response = await fetch(AUTOMATIC_ANALYSIS_CAPABILITY_ENDPOINT, {
+      headers: { Accept: "application/json" },
+      cache: "no-store",
+    });
+    if (!response.ok) {
+      automaticAnalysisCapability = {
+        automatic_analysis_enabled: false,
+        provider_configured: false,
+      };
+      return;
+    }
+    const payload = await response.json();
+    automaticAnalysisCapability = {
+      automatic_analysis_enabled: payload && payload.automatic_analysis_enabled === true,
+      provider_configured: payload && payload.provider_configured === true,
+    };
+  } catch {
+    automaticAnalysisCapability = {
+      automatic_analysis_enabled: false,
+      provider_configured: false,
+    };
+  }
+}
+
+function automaticAnalysisEndpoint(mediaId) {
+  return `${MEDIA_METADATA_ENDPOINT_PREFIX}/${encodeURIComponent(mediaId)}/automatic-analysis`;
+}
+
+function automaticAnalysisStatusMessage(payload) {
+  if (!payload || !payload.state) return "";
+  if (payload.state === "pending") return "AI analysis queued.";
+  if (payload.state === "analyzing") return "AI analysis in progress.";
+  if (payload.state === "analyzed") return "AI analysis ready for review.";
+  if (payload.state === "failed") {
+    return payload.error_message || "AI analysis failed.";
+  }
+  return "";
+}
+
+function applyAutomaticAnalysisStatusToCard(mediaId, payload) {
+  if (!mediaId || !payload) return;
+  automaticAnalysisByMediaId.set(mediaId, payload);
+  const card = catalogResults && Array.from(catalogResults.querySelectorAll(".catalog-card")).find(
+    (element) => element.dataset.mediaId === String(mediaId),
+  );
+  if (!card) return;
+  const status = card.querySelector(".catalog-card__analysis-status");
+  if (!status) return;
+  const message = automaticAnalysisStatusMessage(payload);
+  status.textContent = message;
+  status.hidden = !message;
+  status.dataset.analysisLifecycle = payload.state;
+  if (payload.state === "analyzed") {
+    status.dataset.analysisSuccess = "true";
+  } else {
+    delete status.dataset.analysisSuccess;
+  }
+}
+
+function stopAutomaticAnalysisPolling(mediaId) {
+  const controller = automaticAnalysisPollControllers.get(mediaId);
+  if (!controller) return;
+  controller.stopped = true;
+  automaticAnalysisPollControllers.delete(mediaId);
+}
+
+async function pollAutomaticAnalysisForMedia(mediaId) {
+  if (!mediaId || !automaticAnalysisCapability.automatic_analysis_enabled) return;
+  stopAutomaticAnalysisPolling(mediaId);
+  const controller = { stopped: false, attempts: 0 };
+  automaticAnalysisPollControllers.set(mediaId, controller);
+  while (!controller.stopped && controller.attempts < AUTOMATIC_ANALYSIS_POLL_MAX_ATTEMPTS) {
+    controller.attempts += 1;
+    try {
+      const response = await fetch(automaticAnalysisEndpoint(mediaId), {
+        headers: { Accept: "application/json" },
+        cache: "no-store",
+      });
+      if (!response.ok) break;
+      const payload = await response.json();
+      applyAutomaticAnalysisStatusToCard(mediaId, payload);
+      if (AUTOMATIC_ANALYSIS_TERMINAL_STATES.has(payload.state)) {
+        stopAutomaticAnalysisPolling(mediaId);
+        return;
+      }
+    } catch {
+      break;
+    }
+    await new Promise((resolve) => {
+      window.setTimeout(resolve, AUTOMATIC_ANALYSIS_POLL_INTERVAL_MS);
+    });
+  }
+  stopAutomaticAnalysisPolling(mediaId);
+}
+
+function maybeTrackAutomaticAnalysisAfterCatalog(snapshot) {
+  if (!snapshot || snapshot.state !== "cataloged" || !snapshot.media_id) return;
+  if (!automaticAnalysisCapability.automatic_analysis_enabled) return;
+  pollAutomaticAnalysisForMedia(snapshot.media_id);
 }
 
 function renderCloudStatus(payload) {
@@ -1242,6 +1356,9 @@ function uploadStatusMessage(snapshot) {
     return "Published. Awaiting cataloging. Not yet available in Gallery.";
   }
   if (snapshot.state === "cataloged") {
+    if (automaticAnalysisCapability.automatic_analysis_enabled) {
+      return "Cataloged. Available in Gallery. Automatic AI analysis may follow.";
+    }
     return "Cataloged. Available in Gallery.";
   }
   if (snapshot.state === "received") {
@@ -1456,6 +1573,7 @@ function applyUploadSnapshot(snapshot, owner = null, options = {}) {
   renderUploadCockpit();
   if (snapshot.state === "cataloged") {
     refreshGalleryAfterCataloged(snapshot.id);
+    maybeTrackAutomaticAnalysisAfterCatalog(snapshot);
   }
   return true;
 }
@@ -3528,6 +3646,16 @@ function renderCatalogCard(item) {
   const analysisStatus = document.createElement("p");
   analysisStatus.className = "catalog-card__analysis-status";
   analysisStatus.hidden = true;
+  const trackedAnalysis = automaticAnalysisByMediaId.get(item.media_id);
+  if (trackedAnalysis) {
+    const message = automaticAnalysisStatusMessage(trackedAnalysis);
+    analysisStatus.textContent = message;
+    analysisStatus.hidden = !message;
+    analysisStatus.dataset.analysisLifecycle = trackedAnalysis.state;
+    if (trackedAnalysis.state === "analyzed") {
+      analysisStatus.dataset.analysisSuccess = "true";
+    }
+  }
 
   card.append(mediaFrame, body, analysisStatus);
   return card;

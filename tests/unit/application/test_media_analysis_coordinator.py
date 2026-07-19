@@ -1,0 +1,244 @@
+"""Coordinator idempotency and recovery tests for automatic analysis."""
+
+from __future__ import annotations
+
+import asyncio
+
+from framenest.application.media_analysis_coordinator import MediaAnalysisCoordinator
+from framenest.application.media_analysis_lifecycle import (
+    CatalogedAnalysisTarget,
+    ExecuteAutomaticMediaAnalysisRun,
+    ScheduleAutomaticMediaAnalysis,
+)
+from framenest.application.media_suggestion import MediaSuggestion, PROMPT_VERSION
+from framenest.domain.identities import MediaId, MediaLocationId
+from framenest.domain.media_analysis_runs import (
+    AUTOMATIC_POST_CATALOG_ANALYSIS_DEFINITION,
+    MediaAnalysisRun,
+    MediaAnalysisRunId,
+    MediaAnalysisRunState,
+)
+from dataclasses import replace
+import threading
+
+
+MEDIA_ID = MediaId.from_string("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
+LOCATION_ID = MediaLocationId.from_string("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")
+
+
+class _FakeRepository:
+    def __init__(self) -> None:
+        self.run: MediaAnalysisRun | None = None
+        self._lock = threading.Lock()
+
+    def get_by_media_definition(self, media_id, analysis_definition):
+        del media_id, analysis_definition
+        return self.run
+
+    def create_pending(self, *, media_id, media_location_id, analysis_definition, created_at_ms):
+        with self._lock:
+            if self.run is not None:
+                return self.run
+            self.run = MediaAnalysisRun(
+                id=MediaAnalysisRunId("11111111-1111-4111-8111-111111111111"),
+                media_id=media_id,
+                media_location_id=media_location_id,
+                analysis_definition=analysis_definition,
+                state=MediaAnalysisRunState.PENDING,
+                attempt_count=0,
+                provider_id=None,
+                model_id=None,
+                prompt_version=None,
+                result_schema_version=None,
+                result_json=None,
+                error_code=None,
+                error_message=None,
+                created_at_ms=created_at_ms,
+                started_at_ms=None,
+                completed_at_ms=None,
+                version=1,
+            )
+            return self.run
+
+    def claim_pending(self, *, run_id, expected_version, started_at_ms, max_attempts):
+        del run_id, max_attempts
+        with self._lock:
+            assert self.run is not None
+            assert self.run.version == expected_version
+            self.run = replace(
+                self.run,
+                state=MediaAnalysisRunState.ANALYZING,
+                attempt_count=self.run.attempt_count + 1,
+                started_at_ms=started_at_ms,
+                version=self.run.version + 1,
+            )
+            return self.run
+
+    def requeue_for_retry(self, **kwargs):
+        raise AssertionError("unexpected requeue")
+
+    def record_analyzed(
+        self,
+        *,
+        run_id,
+        expected_version,
+        provider_id,
+        model_id,
+        prompt_version,
+        result_schema_version,
+        result_json,
+        completed_at_ms,
+    ):
+        del run_id
+        with self._lock:
+            assert self.run is not None
+            assert self.run.version == expected_version
+            self.run = replace(
+                self.run,
+                state=MediaAnalysisRunState.ANALYZED,
+                provider_id=provider_id,
+                model_id=model_id,
+                prompt_version=prompt_version,
+                result_schema_version=result_schema_version,
+                result_json=result_json,
+                completed_at_ms=completed_at_ms,
+                version=self.run.version + 1,
+            )
+            return self.run
+
+    def record_failed(self, **kwargs):
+        raise AssertionError("unexpected failure")
+
+    def reset_interrupted_analyzing(self, **kwargs):
+        raise AssertionError("unexpected reset")
+
+    def list_unfinished(self, *, limit, after_created_at_ms=None, after_id=None):
+        del limit, after_created_at_ms, after_id
+        if self.run is None or self.run.state in {
+            MediaAnalysisRunState.ANALYZED,
+            MediaAnalysisRunState.FAILED,
+        }:
+            return ()
+        return (self.run,)
+
+
+class _Executor:
+    def __init__(self) -> None:
+        self.calls = 0
+        self.block = threading.Event()
+        self.entered = threading.Event()
+
+    def execute(self, media_id, location_id):
+        del media_id, location_id
+        self.calls += 1
+        self.entered.set()
+        self.block.wait(timeout=2)
+        return MediaSuggestion(
+            title="Title",
+            description="Description text for suggestion.",
+            collection="Collection",
+            tags=("tag-one",),
+            suggested_filename="title.mp4",
+            confidence=0.8,
+            evidence=("frame evidence",),
+            uncertainties=(),
+            provider_id="nvidia-nim",
+            model_id="test-model",
+            prompt_version=PROMPT_VERSION,
+        )
+
+
+def test_notify_cataloged_disabled_does_not_create_run() -> None:
+    repository = _FakeRepository()
+    scheduler = ScheduleAutomaticMediaAnalysis(repository, enabled=False)
+    service = ExecuteAutomaticMediaAnalysisRun(repository, _Executor())
+    coordinator = MediaAnalysisCoordinator(repository, scheduler, service)
+
+    async def scenario() -> None:
+        await coordinator.start()
+        coordinator.notify_cataloged(MEDIA_ID, LOCATION_ID)
+        await coordinator.drain()
+        await coordinator.shutdown()
+
+    asyncio.run(scenario())
+    assert repository.run is None
+
+
+def test_notify_cataloged_enabled_is_idempotent_and_executes_once() -> None:
+    repository = _FakeRepository()
+    scheduler = ScheduleAutomaticMediaAnalysis(repository, enabled=True, now_ms=lambda: 1)
+    executor = _Executor()
+    executor.block.set()
+    service = ExecuteAutomaticMediaAnalysisRun(repository, executor, now_ms=lambda: 2)
+    coordinator = MediaAnalysisCoordinator(repository, scheduler, service)
+
+    async def scenario() -> None:
+        await coordinator.start()
+        coordinator.notify_cataloged(MEDIA_ID, LOCATION_ID)
+        coordinator.notify_cataloged(MEDIA_ID, LOCATION_ID)
+        await asyncio.sleep(0.05)
+        await coordinator.drain()
+        await coordinator.shutdown()
+
+    asyncio.run(scenario())
+    assert repository.run is not None
+    assert repository.run.state is MediaAnalysisRunState.ANALYZED
+    assert executor.calls == 1
+
+
+def test_startup_reconciles_pending_without_inventing_historical_jobs() -> None:
+    repository = _FakeRepository()
+    repository.run = MediaAnalysisRun(
+        id=MediaAnalysisRunId("11111111-1111-4111-8111-111111111111"),
+        media_id=MEDIA_ID,
+        media_location_id=LOCATION_ID,
+        analysis_definition=AUTOMATIC_POST_CATALOG_ANALYSIS_DEFINITION,
+        state=MediaAnalysisRunState.PENDING,
+        attempt_count=0,
+        provider_id=None,
+        model_id=None,
+        prompt_version=None,
+        result_schema_version=None,
+        result_json=None,
+        error_code=None,
+        error_message=None,
+        created_at_ms=1,
+        started_at_ms=None,
+        completed_at_ms=None,
+        version=1,
+    )
+    scheduler = ScheduleAutomaticMediaAnalysis(repository, enabled=False)
+    executor = _Executor()
+    executor.block.set()
+    service = ExecuteAutomaticMediaAnalysisRun(repository, executor, now_ms=lambda: 2)
+    coordinator = MediaAnalysisCoordinator(repository, scheduler, service)
+
+    async def scenario() -> None:
+        await coordinator.start()
+        await asyncio.sleep(0.05)
+        await coordinator.shutdown()
+
+    asyncio.run(scenario())
+    assert repository.run.state is MediaAnalysisRunState.ANALYZED
+    assert executor.calls == 1
+
+
+def test_shutdown_stops_new_work() -> None:
+    repository = _FakeRepository()
+    scheduler = ScheduleAutomaticMediaAnalysis(repository, enabled=True, now_ms=lambda: 1)
+    executor = _Executor()
+    service = ExecuteAutomaticMediaAnalysisRun(repository, executor, now_ms=lambda: 2)
+    coordinator = MediaAnalysisCoordinator(repository, scheduler, service)
+
+    async def scenario() -> None:
+        await coordinator.start()
+        await coordinator.shutdown()
+        coordinator.notify_cataloged(MEDIA_ID, LOCATION_ID)
+        assert repository.run is None
+
+    asyncio.run(scenario())
+
+
+def test_schedule_target_helper_round_trip() -> None:
+    target = CatalogedAnalysisTarget(media_id=MEDIA_ID, media_location_id=LOCATION_ID)
+    assert target.media_id == MEDIA_ID

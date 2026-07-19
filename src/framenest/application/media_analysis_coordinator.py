@@ -1,35 +1,33 @@
-"""Lifecycle-owned bounded coordinator for published-to-cataloged transition."""
+"""Lifecycle-owned bounded coordinator for durable automatic media analysis."""
 
 from __future__ import annotations
 
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from enum import Enum, auto
-from typing import Protocol
 
-from framenest.application.ports.upload_publications import (
-    FrameNestUploadPublicationRepositoryError,
-    UploadPublicationCandidate,
-    UploadPublicationRepository,
+from framenest.application.media_analysis_lifecycle import (
+    CatalogedAnalysisTarget,
+    ExecuteAutomaticMediaAnalysisRun,
+    MediaAnalysisLifecycleError,
+    ScheduleAutomaticMediaAnalysis,
 )
-from framenest.application.upload_catalog import (
-    UploadCatalogError,
-    UploadCatalogResult,
+from framenest.application.ports.media_analysis_runs import (
+    FrameNestMediaAnalysisRunRepositoryError,
+    MediaAnalysisRunRepository,
 )
-from framenest.application.upload_transport import UploadSessionLockRegistry
 from framenest.domain.identities import MediaId, MediaLocationId
-from framenest.domain.upload_publications import (
-    UploadPublicationCleanupState,
-    UploadPublicationState,
+from framenest.domain.media_analysis_runs import (
+    MediaAnalysisRun,
+    MediaAnalysisRunState,
 )
-from framenest.domain.uploads import UploadSessionId, UploadSessionState
 from framenest.structured_logging import get_logger
 
-LOGGER = get_logger("upload_catalog_coordinator")
+LOGGER = get_logger("media_analysis_coordinator")
 
-DEFAULT_UPLOAD_CATALOG_BATCH_SIZE = 32
-DEFAULT_CATALOG_RETRY_INITIAL_DELAY_SECONDS = 0.25
-DEFAULT_CATALOG_RETRY_MAX_DELAY_SECONDS = 5.0
+DEFAULT_MEDIA_ANALYSIS_BATCH_SIZE = 32
+DEFAULT_ANALYSIS_RETRY_INITIAL_DELAY_SECONDS = 0.25
+DEFAULT_ANALYSIS_RETRY_MAX_DELAY_SECONDS = 5.0
 
 
 class _DrainOutcome(Enum):
@@ -45,60 +43,37 @@ class _CandidateOutcome(Enum):
     SHUTDOWN = auto()
 
 
-class _UploadCataloger(Protocol):
-    def catalog_owned_blocking(
-        self,
-        upload_id: UploadSessionId,
-    ) -> UploadCatalogResult:
-        """Catalog one upload while the caller owns its process-local lock."""
-
-
-class _AnalysisNotifier(Protocol):
-    def notify_cataloged(
-        self,
-        media_id: MediaId,
-        media_location_id: MediaLocationId,
-    ) -> None:
-        """Schedule automatic analysis after a successful catalog transition."""
-
-
-class UploadCatalogCoordinator:
-    """Run cataloging through one consumer in the current single-process topology.
-
-    SQLite guards and the shared per-upload lock converge work inside one process.
-    Multiprocess leases and fencing remain explicitly deferred.
-    """
+class MediaAnalysisCoordinator:
+    """Run automatic analysis through one consumer in the current process."""
 
     def __init__(
         self,
-        repository: UploadPublicationRepository,
-        cataloger: _UploadCataloger,
-        locks: UploadSessionLockRegistry,
+        repository: MediaAnalysisRunRepository,
+        scheduler: ScheduleAutomaticMediaAnalysis,
+        executor_service: ExecuteAutomaticMediaAnalysisRun,
         *,
-        analysis_notifier: _AnalysisNotifier | None = None,
-        batch_size: int = DEFAULT_UPLOAD_CATALOG_BATCH_SIZE,
+        batch_size: int = DEFAULT_MEDIA_ANALYSIS_BATCH_SIZE,
         executor: ThreadPoolExecutor | None = None,
         retry_initial_delay_seconds: float = (
-            DEFAULT_CATALOG_RETRY_INITIAL_DELAY_SECONDS
+            DEFAULT_ANALYSIS_RETRY_INITIAL_DELAY_SECONDS
         ),
-        retry_max_delay_seconds: float = DEFAULT_CATALOG_RETRY_MAX_DELAY_SECONDS,
+        retry_max_delay_seconds: float = DEFAULT_ANALYSIS_RETRY_MAX_DELAY_SECONDS,
     ) -> None:
         if isinstance(batch_size, bool) or batch_size <= 0:
-            raise ValueError("upload catalog batch size must be positive")
+            raise ValueError("media analysis batch size must be positive")
         if (
             isinstance(retry_initial_delay_seconds, bool)
             or retry_initial_delay_seconds < 0
         ):
-            raise ValueError("upload catalog retry delay must be non-negative")
+            raise ValueError("media analysis retry delay must be non-negative")
         if (
             isinstance(retry_max_delay_seconds, bool)
             or retry_max_delay_seconds < retry_initial_delay_seconds
         ):
-            raise ValueError("upload catalog retry max delay is invalid")
+            raise ValueError("media analysis retry max delay is invalid")
         self._repository = repository
-        self._cataloger = cataloger
-        self._locks = locks
-        self._analysis_notifier = analysis_notifier
+        self._scheduler = scheduler
+        self._executor_service = executor_service
         self._batch_size = batch_size
         self._executor = executor
         self._owns_executor = executor is None
@@ -108,13 +83,13 @@ class UploadCatalogCoordinator:
         self._runner: asyncio.Task[None] | None = None
         self._wake: asyncio.Event | None = None
         self._stopping = False
-        self._active_upload_ids: set[str] = set()
+        self._active_run_ids: set[str] = set()
 
     async def start(self) -> None:
-        """Start one runner and wake startup reconciliation."""
+        """Start one runner and wake startup reconciliation of requested work."""
         if self._runner is not None:
             if self._runner.done() and not self._stopping:
-                raise RuntimeError("upload catalog coordinator runner is not active")
+                raise RuntimeError("media analysis coordinator runner is not active")
             return
         self._stopping = False
         self._current_retry_delay_seconds = self._retry_initial_delay_seconds
@@ -122,20 +97,46 @@ class UploadCatalogCoordinator:
         self._wake = asyncio.Event()
         self._runner = asyncio.create_task(
             self._run(),
-            name="framenest-upload-catalog-coordinator",
+            name="framenest-media-analysis-coordinator",
         )
         self.notify()
 
     def notify(self) -> None:
-        """Wake the runner after durable published work becomes eligible."""
+        """Wake the runner after durable analysis work becomes eligible."""
         runner = self._runner
         if runner is not None and runner.done() and not self._stopping:
-            raise RuntimeError("upload catalog coordinator runner is not active")
+            raise RuntimeError("media analysis coordinator runner is not active")
         if self._wake is not None and not self._stopping:
             self._wake.set()
 
+    def notify_cataloged(
+        self,
+        media_id: MediaId,
+        media_location_id: MediaLocationId,
+    ) -> None:
+        """Schedule automatic analysis after successful cataloging when enabled."""
+        if self._stopping or not self._scheduler.enabled:
+            return
+        try:
+            self._scheduler.execute(
+                CatalogedAnalysisTarget(
+                    media_id=media_id,
+                    media_location_id=media_location_id,
+                )
+            )
+        except MediaAnalysisLifecycleError:
+            _safe_log(
+                level="WARNING",
+                event="media_analysis_schedule_failed",
+                operation="media_analysis_schedule",
+                error_code="MEDIA_ANALYSIS_SCHEDULE_FAILED",
+                retryable=False,
+            )
+            return
+        self.notify()
+
     async def drain(self) -> None:
-        """Process currently discoverable work once for deterministic tests."""
+        """Process currently discoverable unfinished work once for tests."""
         self._ensure_executor()
         await self._drain_once()
 
@@ -155,15 +156,15 @@ class UploadCatalogCoordinator:
                 except Exception:
                     _safe_log(
                         level="WARNING",
-                        event="upload_catalog_runner_shutdown_fault",
-                        operation="upload_catalog_shutdown",
-                        error_code="UPLOAD_CATALOG_RUNNER_SHUTDOWN_FAULT",
+                        event="media_analysis_runner_shutdown_fault",
+                        operation="media_analysis_shutdown",
+                        error_code="MEDIA_ANALYSIS_RUNNER_SHUTDOWN_FAULT",
                         retryable=False,
                     )
         finally:
             self._runner = None
             self._wake = None
-            self._active_upload_ids.clear()
+            self._active_run_ids.clear()
             self._current_retry_delay_seconds = self._retry_initial_delay_seconds
             try:
                 if self._executor is not None and self._owns_executor:
@@ -180,11 +181,7 @@ class UploadCatalogCoordinator:
 
     @property
     def active_count(self) -> int:
-        return len(self._active_upload_ids)
-
-    @property
-    def executor_running(self) -> bool:
-        return self._executor is not None
+        return len(self._active_run_ids)
 
     async def _run(self) -> None:
         assert self._wake is not None
@@ -200,9 +197,9 @@ class UploadCatalogCoordinator:
             except Exception:
                 _safe_log(
                     level="ERROR",
-                    event="upload_catalog_runner_iteration_failed",
-                    operation="upload_catalog_run",
-                    error_code="UPLOAD_CATALOG_RUNNER_ITERATION_FAILED",
+                    event="media_analysis_runner_iteration_failed",
+                    operation="media_analysis_run",
+                    error_code="MEDIA_ANALYSIS_RUNNER_ITERATION_FAILED",
                     retryable=True,
                 )
 
@@ -226,23 +223,20 @@ class UploadCatalogCoordinator:
         visited: set[str] = set()
         retry_needed = False
         while not self._stopping:
-            candidates = await self._discover(after=cursor)
-            if candidates is None:
+            runs = await self._discover(after=cursor)
+            if runs is None:
                 return _DrainOutcome.RETRY
-            if not candidates:
+            if not runs:
                 return _DrainOutcome.RETRY if retry_needed else _DrainOutcome.IDLE
-            for candidate in candidates:
-                cursor = (
-                    candidate.upload.updated_at_ms,
-                    candidate.upload.id.to_string(),
-                )
+            for run in runs:
+                cursor = (run.created_at_ms, run.id.to_string())
                 if self._stopping:
                     return _DrainOutcome.SHUTDOWN
-                upload_id = candidate.upload.id.to_string()
-                if upload_id in visited:
+                run_id = run.id.to_string()
+                if run_id in visited:
                     continue
-                visited.add(upload_id)
-                outcome = await self._process_candidate(candidate)
+                visited.add(run_id)
+                outcome = await self._process_run(run)
                 if outcome is _CandidateOutcome.SHUTDOWN:
                     return _DrainOutcome.SHUTDOWN
                 if outcome is _CandidateOutcome.RETRY:
@@ -253,72 +247,63 @@ class UploadCatalogCoordinator:
         self,
         *,
         after: tuple[int, str] | None,
-    ) -> tuple[UploadPublicationCandidate, ...] | None:
+    ) -> tuple[MediaAnalysisRun, ...] | None:
         try:
             return await self._run_blocking(
-                self._repository.list_catalog_candidates,
+                self._repository.list_unfinished,
                 limit=self._batch_size,
-                after_updated_at_ms=None if after is None else after[0],
+                after_created_at_ms=None if after is None else after[0],
                 after_id=None if after is None else after[1],
             )
+        except FrameNestMediaAnalysisRunRepositoryError as exc:
+            if _missing_schema_error(exc):
+                return ()
+            _safe_log(
+                level="WARNING",
+                event="media_analysis_discovery_failed",
+                operation="media_analysis_discovery",
+                error_code="MEDIA_ANALYSIS_DISCOVERY_FAILED",
+                retryable=True,
+            )
+            return None
         except Exception:
             _safe_log(
                 level="WARNING",
-                event="upload_catalog_candidate_discovery_failed",
-                operation="upload_catalog_discovery",
-                error_code="UPLOAD_CATALOG_DISCOVERY_FAILED",
+                event="media_analysis_discovery_failed",
+                operation="media_analysis_discovery",
+                error_code="MEDIA_ANALYSIS_DISCOVERY_FAILED",
                 retryable=True,
             )
             return None
 
-    async def _process_candidate(
-        self,
-        candidate: UploadPublicationCandidate,
-    ) -> _CandidateOutcome:
-        upload_id = candidate.upload.id.to_string()
-        if upload_id in self._active_upload_ids or not _eligible(candidate):
+    async def _process_run(self, run: MediaAnalysisRun) -> _CandidateOutcome:
+        run_id = run.id.to_string()
+        if run_id in self._active_run_ids:
             return _CandidateOutcome.STALE
-        self._active_upload_ids.add(upload_id)
+        if run.state not in {
+            MediaAnalysisRunState.PENDING,
+            MediaAnalysisRunState.ANALYZING,
+        }:
+            return _CandidateOutcome.STALE
+        self._active_run_ids.add(run_id)
         try:
-            async with self._locks.lease(candidate.upload.id):
-                if self._stopping:
-                    return _CandidateOutcome.SHUTDOWN
-                result = await self._run_blocking(
-                    self._cataloger.catalog_owned_blocking,
-                    candidate.upload.id,
-                )
-            self._notify_analysis(result)
+            if self._stopping:
+                return _CandidateOutcome.SHUTDOWN
+            await self._run_blocking(self._executor_service.execute, run)
             return _CandidateOutcome.PROGRESS
-        except UploadCatalogError:
-            return await self._classify_after_error(candidate)
+        except MediaAnalysisLifecycleError:
+            return _CandidateOutcome.RETRY
         except Exception:
             _safe_log(
                 level="WARNING",
-                event="upload_catalog_candidate_processing_failed",
-                operation="upload_catalog_candidate",
-                error_code="UPLOAD_CATALOG_CANDIDATE_FAILED",
+                event="media_analysis_candidate_processing_failed",
+                operation="media_analysis_candidate",
+                error_code="MEDIA_ANALYSIS_CANDIDATE_FAILED",
                 retryable=True,
             )
-            return await self._classify_after_error(candidate)
+            return _CandidateOutcome.RETRY
         finally:
-            self._active_upload_ids.discard(upload_id)
-
-    async def _classify_after_error(
-        self,
-        candidate: UploadPublicationCandidate,
-    ) -> _CandidateOutcome:
-        try:
-            current = await self._run_blocking(
-                self._repository.get_candidate,
-                candidate.upload.id,
-            )
-        except FrameNestUploadPublicationRepositoryError:
-            return _CandidateOutcome.RETRY
-        except Exception:
-            return _CandidateOutcome.RETRY
-        if current is None or not _eligible(current):
-            return _CandidateOutcome.STALE
-        return _CandidateOutcome.RETRY
+            self._active_run_ids.discard(run_id)
 
     async def _wait_before_retry(self) -> None:
         delay = self._current_retry_delay_seconds
@@ -359,44 +344,18 @@ class UploadCatalogCoordinator:
         if self._executor is None:
             self._executor = ThreadPoolExecutor(
                 max_workers=1,
-                thread_name_prefix="framenest-upload-catalog",
+                thread_name_prefix="framenest-media-analysis",
             )
         return self._executor
 
-    def _notify_analysis(self, result: UploadCatalogResult) -> None:
-        notifier = self._analysis_notifier
-        if (
-            notifier is None
-            or result.media_id is None
-            or result.media_location_id is None
-            or result.state != UploadSessionState.CATALOGED.value
-        ):
-            return
-        try:
-            notifier.notify_cataloged(
-                MediaId.from_string(result.media_id),
-                MediaLocationId.from_string(result.media_location_id),
-            )
-        except Exception:
-            _safe_log(
-                level="WARNING",
-                event="upload_catalog_analysis_notify_failed",
-                operation="upload_catalog_analysis_notify",
-                error_code="UPLOAD_CATALOG_ANALYSIS_NOTIFY_FAILED",
-                retryable=False,
-            )
 
-
-def _eligible(candidate: UploadPublicationCandidate) -> bool:
-    publication = candidate.publication
-    if publication is None:
-        return False
-    return bool(
-        candidate.upload.state is UploadSessionState.PUBLISHED
-        and publication.state is UploadPublicationState.VERIFIED
-        and publication.cleanup_state is UploadPublicationCleanupState.COMPLETE
-        and publication.media_id is None
-        and publication.media_location_id is None
+def _missing_schema_error(exc: BaseException) -> bool:
+    message = str(exc).lower()
+    cause = getattr(exc, "__cause__", None)
+    cause_message = "" if cause is None else str(cause).lower()
+    haystack = f"{message} {cause_message}"
+    return "media_analysis_runs" in haystack and (
+        "no such table" in haystack or "does not exist" in haystack
     )
 
 
