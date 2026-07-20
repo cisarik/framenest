@@ -675,8 +675,9 @@ def test_browser_editor_uses_single_form_ai_assistance(client: TestClient) -> No
     assert "metadata-title-input" in dialog_section
     assert "metadata-description-input" in dialog_section
     assert "metadata-tag-search-input" in dialog_section
-    assert "metadata-ai-filename-display" in dialog_section
+    assert "metadata-durable-ai-filename" in dialog_section
     assert "metadata-ai-filename-input" not in dialog_section
+    assert "metadata-ai-filename-display" not in dialog_section
     assert "review-title-input" not in dialog_section
     assert "review-description-input" not in dialog_section
     assert "review-tag-input" not in dialog_section
@@ -710,7 +711,7 @@ def test_browser_editor_hides_provider_model_noise_in_ordinary_editor(client: Te
     assert "prompt_version" not in dialog_section
     assert "provider_id ||" not in ai_panel_body
     assert "model_id ||" not in ai_panel_body
-    assert "AI analysis is available after confirmation." in ai_panel_body
+    assert "New AI analysis is available after confirmation." in ai_panel_body
 
 
 def test_browser_editor_idle_ai_button_is_exact_and_not_loading(client: TestClient) -> None:
@@ -773,7 +774,8 @@ def test_browser_ai_replacement_is_session_only_without_mutation_api(
     assert "metadataWorkspace.current.tagKeys = tagKeys" in apply_body
     assert "metadataWorkspace.suggestedFilename = suggestion.suggestedFilename" in apply_body
     assert "metadataWorkspace.aiSuggestionApplied = true" in apply_body
-    assert "metadataAiAnalyzeButton.hidden = metadataWorkspace.aiSuggestionApplied && !metadataWorkspace.analyzing;" in controls_body
+    assert "metadataAiAnalyzeButton.hidden = !showAnalyze" in controls_body
+    assert "analysisAvailable" in controls_body
     assert "fetch(metadataEndpoint" not in analyze_block
     assert "confirm_cloud_upload: true" in analyze_block
     assert "if (metadataWorkspace.analyzing || metadataWorkspace.aiSuggestionApplied) return;" in analyze_block
@@ -793,7 +795,7 @@ def test_browser_editor_ai_failure_restores_idle_action_and_preserves_values(cli
     assert "metadataWorkspace.current = " not in analyze_block
     assert "beforeRequest" not in analyze_block
     assert "renderMetadataAiAnalyzeButtonContent(metadataWorkspace.analyzing)" in controls_body
-    assert "metadataAiAnalyzeButton.disabled = metadataWorkspace.loading" in controls_body
+    assert "metadataAiAnalyzeButton.disabled = !showAnalyze" in controls_body
     assert 'metadataAiAnalyzeButton.textContent = "Analyze by AI"' in script
 
 
@@ -2005,12 +2007,17 @@ def test_javascript_explicit_card_play_renders_original_media(client: TestClient
 def test_javascript_card_media_surface_is_accessible_and_card_title_opens_details(client: TestClient) -> None:
     script = client.get("/assets/app.js").text
     surface_body = _javascript_function(script, "renderCatalogCardMediaSurface")
+    sync_body = _javascript_function(script, "syncCardMediaSurfaceToggleState")
+    activate_body = _javascript_function(script, "activateCardPlayback")
     card_body = _javascript_function(script, "renderCatalogCard")
     open_body = _javascript_function(script, "openPlaybackDetails")
 
-    assert "aria-label" in surface_body
-    assert "Play ${title}" in surface_body
+    assert "syncCardMediaSurfaceToggleState(surface, item, title, false)" in surface_body
+    assert "aria-label" in sync_body
+    assert "aria-pressed" in sync_body
+    assert "Play animated preview for ${title}" in sync_body
     assert "activateCardPlayback(item, surface)" in surface_body
+    assert 'media_kind === "animated_image"' in activate_body
     assert "Enter" in surface_body
     assert "event.key === \" \"" in surface_body
     assert "Open details for" in card_body
@@ -2400,9 +2407,10 @@ def test_metadata_dialog_contains_single_form_ai_assistance(client: TestClient) 
     assert "Use draft" not in dialog_section
     assert "Discard draft" not in dialog_section
     assert "Suggested filename" in dialog_section
-    assert "Informational only — the physical file has not been renamed" in dialog_section
-    assert "metadata-ai-filename-display" in dialog_section
+    assert "Informational only" in dialog_section
+    assert "metadata-durable-ai-filename" in dialog_section
     assert "metadata-ai-filename-input" not in dialog_section
+    assert "metadata-ai-filename-display" not in dialog_section
     assert dialog_section.index("metadata-save-button") < dialog_section.index("metadata-ai-analyze-button")
     assert dialog_section.index("metadata-ai-analyze-button") < dialog_section.index("metadata-discard-button")
     assert "Canonical key" not in dialog_section
@@ -2413,35 +2421,47 @@ def test_metadata_dialog_contains_single_form_ai_assistance(client: TestClient) 
 def test_browser_metadata_editor_exposes_durable_load_ai_suggestion(client: TestClient) -> None:
     html = client.get("/").text
     script = client.get("/assets/app.js").text
+    css = client.get("/assets/styles.css").text
     dialog_section = html[html.index('id="metadata-dialog"') : html.index('id="catalog-browser"')]
 
     assert 'id="metadata-load-ai-suggestion-button"' in dialog_section
     assert "Load AI suggestion" in dialog_section
     assert 'id="metadata-durable-ai-suggestion"' in dialog_section
+    assert 'id="metadata-ai-heading"' in dialog_section
+    assert ">AI suggestion<" in dialog_section
+    assert 'id="metadata-ai-details-toggle"' in dialog_section
+    assert "Saved AI suggestion" not in dialog_section
     assert "handleLoadDurableAiSuggestion" in script
     assert "refreshMetadataDurableAnalysis" in script
     assert "aiSuggestionFromAutomaticAnalysisResult" in script
+    assert "aiSuggestionOriginExplanation" in script
     load_body = _javascript_function(script, "handleLoadDurableAiSuggestion")
     assert "automaticAnalysisEndpoint(mediaId)" in load_body
     assert "ai-suggestion-preview" not in load_body
     assert "confirm_cloud_upload" not in load_body
     assert "Replace current draft?" in load_body
-    assert "Keep editing" in load_body
-    assert "Replace draft" in load_body
+    assert 'dismissLabel: "No"' in load_body
+    assert 'confirmLabel: "Yes"' in load_body
+    assert "focusReturn: invokeElement" in load_body
     assert "destructive: false" in load_body
+    assert "Keep editing" not in load_body
+    assert "Replace draft" not in load_body
     assert "Load suggestion" not in load_body
     assert "handleSaveMetadata" not in load_body
     assert "window.confirm" not in load_body
-    assert "Saved AI suggestion" in dialog_section
     assert "Durable AI suggestion" not in dialog_section
-    assert 'id="metadata-ai-filename-display"' in dialog_section
+    assert 'id="metadata-durable-ai-filename"' in dialog_section
     assert "metadata-ai-filename-input" not in dialog_section
+    assert "metadata-ai-filename-display" not in dialog_section
     assert dialog_section.index("metadata-save-button") < dialog_section.index(
         "metadata-load-ai-suggestion-button"
     )
     assert dialog_section.index("metadata-load-ai-suggestion-button") < dialog_section.index(
         "metadata-ai-analyze-button"
     )
+    assert ".metadata-dialog::backdrop" in css
+    assert "rgba(0, 0, 0, 0.34)" in css
+    assert "rgba(0, 0, 0, 0.52)" in css
 
 
 def test_javascript_metadata_ai_analysis_requires_confirmation_and_identity_url(
@@ -2477,9 +2497,9 @@ def test_javascript_metadata_ai_success_populates_single_form_without_autosave_o
     assert "metadataWorkspace.suggestedFilename = suggestion.suggestedFilename" in apply_body
     assert "metadataWorkspace.aiSuggestionApplied = true" in apply_body
     assert "metadataTagKeysFromSuggestion(suggestion.tags)" in analyze_body
-    assert "metadataAiAnalyzeButton.hidden = metadataWorkspace.aiSuggestionApplied" in script
+    assert "metadataAiAnalyzeButton.hidden = !showAnalyze" in script
     assert "fetch(metadataEndpoint" not in analyze_body
-    assert "Review the updated fields, then Save." in apply_body
+    assert "AI suggestion loaded into draft." in apply_body
     assert "fetch(metadataEndpoint" not in analyze_body
     assert "handleUseMetadataAiDraft" not in script
     assert "handleDiscardMetadataAiDraft" not in script

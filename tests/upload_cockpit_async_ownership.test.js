@@ -368,6 +368,20 @@ function createDocument() {
     ["#metadata-save-button", "#metadata-dialog"],
     ["#metadata-ai-analyze-button", "#metadata-dialog"],
     ["#metadata-load-ai-suggestion-button", "#metadata-dialog"],
+    ["#metadata-ai-details-toggle", "#metadata-dialog"],
+    ["#metadata-ai-heading", "#metadata-dialog"],
+    ["#metadata-ai-origin", "#metadata-dialog"],
+    ["#metadata-ai-filename-note", "#metadata-dialog"],
+    ["#metadata-durable-ai-suggestion", "#metadata-dialog"],
+    ["#metadata-durable-ai-title", "#metadata-dialog"],
+    ["#metadata-durable-ai-description", "#metadata-dialog"],
+    ["#metadata-durable-ai-tags", "#metadata-dialog"],
+    ["#metadata-durable-ai-collection-row", "#metadata-dialog"],
+    ["#metadata-durable-ai-collection", "#metadata-dialog"],
+    ["#metadata-durable-ai-filename-row", "#metadata-dialog"],
+    ["#metadata-durable-ai-filename", "#metadata-dialog"],
+    ["#metadata-ai-capability", "#metadata-dialog"],
+    ["#metadata-ai-status", "#metadata-dialog"],
     ["#metadata-discard-button", "#metadata-dialog"],
     ["#media-details-close", "#media-details-dialog"],
     ["#media-details-edit", "#media-details-dialog"],
@@ -706,14 +720,21 @@ function metadataStateOf(harness) {
     focusedAnalyze: document.activeElement === document.querySelector("#metadata-ai-analyze-button"),
     focusedLoadSuggestion: document.activeElement === document.querySelector("#metadata-load-ai-suggestion-button"),
     focusedTitle: document.activeElement === document.querySelector("#metadata-title-input"),
+    focusedDismiss: document.activeElement === document.querySelector("#confirmation-dismiss-button"),
     beforeUnloadAttached: metadataBeforeUnloadAttached,
     durableState: metadataDurableAnalysis.state,
     durableLoading: metadataDurableAnalysis.loadingIntoDraft,
     durableFetching: metadataDurableAnalysis.fetching,
+    durableDetailsExpanded: metadataDurableAnalysis.detailsExpanded,
     loadButtonHidden: document.querySelector("#metadata-load-ai-suggestion-button").hidden,
     loadButtonDisabled: document.querySelector("#metadata-load-ai-suggestion-button").disabled,
+    analyzeButtonHidden: document.querySelector("#metadata-ai-analyze-button").hidden,
+    detailsToggleHidden: document.querySelector("#metadata-ai-details-toggle").hidden,
     durablePanelHidden: document.querySelector("#metadata-durable-ai-suggestion").hidden,
     collectionKey: metadataWorkspace.current.collectionKey,
+    aiStatus: document.querySelector("#metadata-ai-status").textContent,
+    aiOrigin: document.querySelector("#metadata-ai-origin").textContent,
+    aiHeading: document.querySelector("#metadata-ai-heading").textContent,
   })`)));
 }
 
@@ -750,6 +771,7 @@ function analyzedAutomaticPayload(overrides = {}) {
     media_id: String(MEDIA_A),
     state: "analyzed",
     automatic_analysis_enabled: true,
+    analysis_definition: "automatic_post_catalog",
     result: {
       title: "Durable AI title",
       description: "Durable AI description",
@@ -771,9 +793,11 @@ function seedDurableAnalyzedSuggestion(harness, payload = analyzedAutomaticPaylo
       fetching: false,
       loadingIntoDraft: false,
       state: "analyzed",
+      analysisDefinition: ${JSON.stringify(payload.analysis_definition || "automatic_post_catalog")},
       result: ${JSON.stringify(payload.result)},
-      statusMessage: "Saved AI suggestion ready for review.",
+      statusMessage: "AI suggestion ready for review.",
       errorMessage: "",
+      detailsExpanded: false,
     };
     renderMetadataWorkspace();
   `);
@@ -2844,7 +2868,7 @@ test("Metadata AI response cannot overwrite a newer edit revision", async () => 
   assert.equal(state.metadataOpen, true);
 });
 
-test("Durable analyzed suggestion exposes Load AI suggestion in the metadata editor", async () => {
+test("Durable analyzed suggestion exposes compact Load AI suggestion without default duplication", async () => {
   const h = await createHarness();
   setMetadataWorkspace(h, {
     currentTitle: "Persisted title",
@@ -2853,12 +2877,26 @@ test("Durable analyzed suggestion exposes Load AI suggestion in the metadata edi
   });
   seedDurableAnalyzedSuggestion(h);
   const state = metadataStateOf(h);
+  assert.equal(state.aiHeading, "AI suggestion");
+  assert.match(state.aiOrigin, /Generated automatically after upload/);
   assert.equal(state.loadButtonHidden, false);
   assert.equal(state.loadButtonDisabled, false);
-  assert.equal(state.durablePanelHidden, false);
+  assert.equal(state.detailsToggleHidden, false);
+  assert.equal(state.durablePanelHidden, true);
+  assert.equal(state.durableDetailsExpanded, false);
+  assert.equal(h.document.querySelector("#metadata-durable-ai-title").textContent, "");
+  h.run("handleMetadataAiDetailsToggle()");
+  const expanded = metadataStateOf(h);
+  assert.equal(expanded.durableDetailsExpanded, true);
+  assert.equal(expanded.durablePanelHidden, false);
   assert.match(h.document.querySelector("#metadata-durable-ai-title").textContent, /Durable AI title/);
-  assert.match(h.document.querySelector("#metadata-durable-ai-collection").textContent, /not applied/);
-  assert.match(h.document.querySelector("#metadata-durable-ai-filename").textContent, /not renamed/);
+  assert.equal(h.document.querySelector("#metadata-durable-ai-collection").textContent, "MustStayInformational");
+  assert.equal(h.document.querySelector("#metadata-durable-ai-filename").textContent, "durable-ai.mp4");
+  assert.equal(h.document.querySelector("#metadata-durable-ai-filename-row").hidden, false);
+  assert.equal(
+    h.document.querySelector("#metadata-ai-details-toggle").getAttribute("aria-expanded"),
+    "true",
+  );
 });
 
 test("Load AI suggestion reads automatic-analysis, applies title/description/tags, and never Saves or Analyzes", async () => {
@@ -2897,6 +2935,10 @@ test("Load AI suggestion reads automatic-analysis, applies title/description/tag
   assert.equal(state.dirty, true);
   assert.equal(state.metadataOpen, true);
   assert.equal(state.focusedTitle, true);
+  assert.equal(state.durableDetailsExpanded, false);
+  assert.equal(state.durablePanelHidden, true);
+  assert.match(state.aiStatus, /AI suggestion loaded into draft/);
+  assert.equal(h.document.querySelector("#metadata-durable-ai-title").textContent, "");
 });
 
 test("Loaded durable suggestion remains editable and Save uses metadata PUT only", async () => {
@@ -2956,7 +2998,7 @@ test("Loaded durable suggestion remains editable and Save uses metadata PUT only
 });
 
 test("Dirty draft requires custom confirmation before durable load replacement", async (t) => {
-  for (const dismissal of ["Keep editing", "Escape", "backdrop", "Replace draft"]) {
+  for (const dismissal of ["No", "Escape", "backdrop", "Yes"]) {
     await t.test(dismissal, async () => {
       const h = await createHarness();
       setMetadataWorkspace(h);
@@ -2984,13 +3026,15 @@ test("Dirty draft requires custom confirmation before durable load replacement",
         h.document.querySelector("#confirmation-dialog-message").textContent,
         /Unsaved metadata edits will be replaced/,
       );
-      assert.equal(h.document.querySelector("#confirmation-confirm-button").textContent, "Replace draft");
+      assert.equal(h.document.querySelector("#confirmation-dismiss-button").textContent, "No");
+      assert.equal(h.document.querySelector("#confirmation-confirm-button").textContent, "Yes");
+      assert.equal(confirmationStateOf(h).focusedDismiss, true);
       assert.equal(
         h.document.querySelector("#confirmation-confirm-button").classList.contains("danger-button"),
         false,
       );
 
-      if (dismissal === "Keep editing") activateConfirmation(h, "dismiss");
+      if (dismissal === "No") activateConfirmation(h, "dismiss");
       else if (dismissal === "Escape") dismissConfirmationWithEscape(h);
       else if (dismissal === "backdrop") {
         dispatch(h.document.querySelector("#confirmation-dialog"), "click", {
@@ -3002,7 +3046,7 @@ test("Dirty draft requires custom confirmation before durable load replacement",
       await h.flush();
       const after = metadataStateOf(h);
       assert.equal(after.metadataOpen, true);
-      if (dismissal === "Replace draft") {
+      if (dismissal === "Yes") {
         assert.equal(after.currentTitle, "Durable AI title");
         assert.equal(after.currentDescription, "Durable AI description");
         assert.equal(after.aiSuggestionApplied, true);
@@ -3013,6 +3057,25 @@ test("Dirty draft requires custom confirmation before durable load replacement",
         assert.deepEqual(after.currentTags, before.currentTags);
         assert.equal(after.aiSuggestionApplied, false);
         assert.equal(after.focusedLoadSuggestion, true);
+        enqueue(h, "GET", automaticAnalysisEndpoint(), response(analyzedAutomaticPayload({
+          result: {
+            title: "Durable AI title",
+            description: "Durable AI description",
+            collection: "MustStayInformational",
+            tags: [],
+            suggested_filename: "durable-ai.mp4",
+            confidence: 0.8,
+            evidence: [],
+            uncertainties: [],
+          },
+        })));
+        const reopen = h.run("handleLoadDurableAiSuggestion()");
+        await h.flush();
+        assert.equal(h.document.querySelector("#confirmation-dialog-title").textContent, "Replace current draft?");
+        activateConfirmation(h, "dismiss");
+        await reopen;
+        await h.flush();
+        assert.equal(metadataStateOf(h).focusedLoadSuggestion, true);
       }
       assert.equal(h.fetchController.matching("PUT", metadataEndpoint()).length, 0);
     });
@@ -3080,13 +3143,31 @@ test("Saved suggestion stays reviewable when new AI analysis is unavailable", as
   `);
   const capability = h.document.querySelector("#metadata-ai-capability").textContent;
   const status = h.document.querySelector("#metadata-ai-status").textContent;
-  assert.match(capability, /previously generated suggestion is ready to review/i);
   assert.match(capability, /New AI analysis is currently unavailable/i);
   assert.equal(capability.includes("AI analysis is not configured."), false);
   assert.equal(status.includes("AI analysis ready for review."), false);
   assert.equal(status.includes("AI analysis is not configured."), false);
   assert.equal(metadataStateOf(h).loadButtonHidden, false);
-  assert.equal(metadataStateOf(h).durablePanelHidden, false);
+  assert.equal(metadataStateOf(h).analyzeButtonHidden, true);
+  assert.equal(metadataStateOf(h).detailsToggleHidden, false);
+  assert.equal(metadataStateOf(h).durablePanelHidden, true);
+  assert.match(metadataStateOf(h).aiOrigin, /Generated automatically after upload/);
+});
+
+test("Available Analyze action remains distinct while stored suggestion stays loadable", async () => {
+  const h = await createHarness();
+  setMetadataWorkspace(h, {
+    currentTitle: "Persisted title",
+    currentDescription: "Persisted description",
+    currentTags: ["persisted"],
+  });
+  seedDurableAnalyzedSuggestion(h);
+  enableMetadataAi(h);
+  h.run("renderMetadataWorkspace()");
+  const state = metadataStateOf(h);
+  assert.equal(state.analyzeButtonHidden, false);
+  assert.equal(state.loadButtonHidden, false);
+  assert.equal(h.document.querySelector("#metadata-ai-analyze-button").disabled, false);
 });
 
 test("Suggested filename is display-only and excluded from metadata Save", async () => {
@@ -3112,9 +3193,12 @@ test("Suggested filename is display-only and excluded from metadata Save", async
   await h.run("handleLoadDurableAiSuggestion()");
   await h.flush();
 
-  assert.equal(h.document.querySelector("#metadata-ai-filename-display").textContent, "durable-ai.mp4");
-  assert.equal(h.document.querySelector("#metadata-ai-filename-display").tagName, "P");
-  assert.equal(h.document.querySelector("#metadata-ai-suggestion").hidden, false);
+  assert.equal(metadataStateOf(h).durablePanelHidden, true);
+  h.run("handleMetadataAiDetailsToggle()");
+  assert.equal(h.document.querySelector("#metadata-durable-ai-filename").textContent, "durable-ai.mp4");
+  assert.equal(h.document.querySelector("#metadata-durable-ai-filename").tagName, "DD");
+  assert.equal(h.document.querySelector("#metadata-durable-ai-filename-row").hidden, false);
+  assert.equal(h.document.querySelector("#metadata-ai-filename-note").hidden, true);
   // Harness auto-creates missing selectors; prove no input listener mutates workspace.
   const phantomInput = h.document.querySelector("#metadata-ai-filename-input");
   phantomInput.value = "moj-test-nazov.gif";

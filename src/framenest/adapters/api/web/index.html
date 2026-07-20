@@ -238,21 +238,47 @@
             <p id="metadata-tag-status" class="metadata-note" aria-live="polite"></p>
           </div>
 
-          <section id="metadata-ai-panel" class="metadata-ai-panel" aria-label="AI assistance">
+          <section id="metadata-ai-panel" class="metadata-ai-panel" aria-labelledby="metadata-ai-heading">
+            <div class="metadata-ai-panel__header">
+              <h3 id="metadata-ai-heading" class="metadata-ai-heading">AI suggestion</h3>
+              <button
+                id="metadata-ai-details-toggle"
+                class="metadata-ai-details-toggle"
+                type="button"
+                hidden
+                aria-expanded="false"
+                aria-controls="metadata-durable-ai-suggestion"
+              >View details</button>
+            </div>
+            <p id="metadata-ai-origin" class="metadata-ai-origin" hidden></p>
             <p id="metadata-ai-capability" class="metadata-note">AI analysis is not configured.</p>
             <p id="metadata-ai-status" class="metadata-note" aria-live="polite"></p>
+            <p id="metadata-ai-filename-note" class="metadata-ai-filename-note" hidden></p>
             <div id="metadata-durable-ai-suggestion" class="metadata-durable-ai-suggestion" hidden>
-              <p class="metadata-note">Saved AI suggestion</p>
-              <p id="metadata-durable-ai-title" class="metadata-durable-ai-suggestion__title"></p>
-              <p id="metadata-durable-ai-description" class="metadata-durable-ai-suggestion__description"></p>
-              <p id="metadata-durable-ai-tags" class="metadata-durable-ai-suggestion__tags"></p>
-              <p id="metadata-durable-ai-collection" class="metadata-note" hidden></p>
-              <p id="metadata-durable-ai-filename" class="metadata-note" hidden></p>
-            </div>
-            <div id="metadata-ai-suggestion" class="metadata-ai-suggestion" hidden>
-              <p class="metadata-note">Suggested filename</p>
-              <p id="metadata-ai-filename-display" class="metadata-ai-suggestion__filename"></p>
-              <p class="metadata-note">Informational only — the physical file has not been renamed.</p>
+              <p class="metadata-ai-details-eyebrow">Proposed values — not saved yet</p>
+              <dl class="metadata-ai-details-list">
+                <div>
+                  <dt>Suggested title</dt>
+                  <dd id="metadata-durable-ai-title"></dd>
+                </div>
+                <div>
+                  <dt>Suggested description</dt>
+                  <dd id="metadata-durable-ai-description"></dd>
+                </div>
+                <div>
+                  <dt>Suggested tags</dt>
+                  <dd id="metadata-durable-ai-tags"></dd>
+                </div>
+                <div id="metadata-durable-ai-collection-row" hidden>
+                  <dt>Suggested collection</dt>
+                  <dd id="metadata-durable-ai-collection"></dd>
+                </div>
+                <div id="metadata-durable-ai-filename-row" hidden>
+                  <dt>Suggested filename</dt>
+                  <dd id="metadata-durable-ai-filename"></dd>
+                </div>
+              </dl>
+              <p class="metadata-ai-details-note">Informational only. Collection and filename are not saved, and the physical file is not renamed.</p>
             </div>
           </section>
         </div>
