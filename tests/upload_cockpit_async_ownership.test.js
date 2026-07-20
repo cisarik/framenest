@@ -772,7 +772,7 @@ function seedDurableAnalyzedSuggestion(harness, payload = analyzedAutomaticPaylo
       loadingIntoDraft: false,
       state: "analyzed",
       result: ${JSON.stringify(payload.result)},
-      statusMessage: "AI analysis ready for review.",
+      statusMessage: "Saved AI suggestion ready for review.",
       errorMessage: "",
     };
     renderMetadataWorkspace();
@@ -2956,7 +2956,7 @@ test("Loaded durable suggestion remains editable and Save uses metadata PUT only
 });
 
 test("Dirty draft requires custom confirmation before durable load replacement", async (t) => {
-  for (const dismissal of ["Keep editing", "Escape", "backdrop", "Load suggestion"]) {
+  for (const dismissal of ["Keep editing", "Escape", "backdrop", "Replace draft"]) {
     await t.test(dismissal, async () => {
       const h = await createHarness();
       setMetadataWorkspace(h);
@@ -2984,6 +2984,11 @@ test("Dirty draft requires custom confirmation before durable load replacement",
         h.document.querySelector("#confirmation-dialog-message").textContent,
         /Unsaved metadata edits will be replaced/,
       );
+      assert.equal(h.document.querySelector("#confirmation-confirm-button").textContent, "Replace draft");
+      assert.equal(
+        h.document.querySelector("#confirmation-confirm-button").classList.contains("danger-button"),
+        false,
+      );
 
       if (dismissal === "Keep editing") activateConfirmation(h, "dismiss");
       else if (dismissal === "Escape") dismissConfirmationWithEscape(h);
@@ -2997,7 +3002,7 @@ test("Dirty draft requires custom confirmation before durable load replacement",
       await h.flush();
       const after = metadataStateOf(h);
       assert.equal(after.metadataOpen, true);
-      if (dismissal === "Load suggestion") {
+      if (dismissal === "Replace draft") {
         assert.equal(after.currentTitle, "Durable AI title");
         assert.equal(after.currentDescription, "Durable AI description");
         assert.equal(after.aiSuggestionApplied, true);
@@ -3046,6 +3051,99 @@ test("Repeated durable load clicks while reading create one automatic-analysis r
   await h.flush();
   assert.equal(h.fetchController.matching("GET", automaticAnalysisEndpoint()).length, 1);
   assert.equal(metadataStateOf(h).currentTitle, "Durable AI title");
+});
+
+test("Saved suggestion stays reviewable when new AI analysis is unavailable", async () => {
+  const h = await createHarness();
+  setMetadataWorkspace(h, {
+    currentTitle: "Persisted title",
+    currentDescription: "Persisted description",
+    currentTags: ["persisted"],
+  });
+  seedDurableAnalyzedSuggestion(h);
+  h.run(`
+    aiCapability = {
+      available: false,
+      provider_id: "",
+      provider_display_name: "",
+      model_id: "",
+      prompt_version: "",
+      execution: "server",
+      status: "not_configured",
+      configured: false,
+      credential_available: false,
+      last_connection_test: null,
+      last_status_check: null,
+      requires_explicit_confirmation: true,
+    };
+    renderMetadataWorkspace();
+  `);
+  const capability = h.document.querySelector("#metadata-ai-capability").textContent;
+  const status = h.document.querySelector("#metadata-ai-status").textContent;
+  assert.match(capability, /previously generated suggestion is ready to review/i);
+  assert.match(capability, /New AI analysis is currently unavailable/i);
+  assert.equal(capability.includes("AI analysis is not configured."), false);
+  assert.equal(status.includes("AI analysis ready for review."), false);
+  assert.equal(status.includes("AI analysis is not configured."), false);
+  assert.equal(metadataStateOf(h).loadButtonHidden, false);
+  assert.equal(metadataStateOf(h).durablePanelHidden, false);
+});
+
+test("Suggested filename is display-only and excluded from metadata Save", async () => {
+  const h = await createHarness();
+  setMetadataWorkspace(h, {
+    currentTitle: "Persisted title",
+    currentDescription: "Persisted description",
+    currentTags: ["persisted"],
+  });
+  seedDurableAnalyzedSuggestion(h);
+  enqueue(h, "GET", automaticAnalysisEndpoint(), response(analyzedAutomaticPayload({
+    result: {
+      title: "Durable AI title",
+      description: "Durable AI description",
+      collection: "MustStayInformational",
+      tags: [],
+      suggested_filename: "durable-ai.mp4",
+      confidence: 0.8,
+      evidence: [],
+      uncertainties: [],
+    },
+  })));
+  await h.run("handleLoadDurableAiSuggestion()");
+  await h.flush();
+
+  assert.equal(h.document.querySelector("#metadata-ai-filename-display").textContent, "durable-ai.mp4");
+  assert.equal(h.document.querySelector("#metadata-ai-filename-display").tagName, "P");
+  assert.equal(h.document.querySelector("#metadata-ai-suggestion").hidden, false);
+  // Harness auto-creates missing selectors; prove no input listener mutates workspace.
+  const phantomInput = h.document.querySelector("#metadata-ai-filename-input");
+  phantomInput.value = "moj-test-nazov.gif";
+  dispatch(phantomInput, "input");
+  assert.equal(metadataStateOf(h).suggestedFilename, "durable-ai.mp4");
+
+  const titleInput = h.document.querySelector("#metadata-title-input");
+  titleInput.value = "Edited title";
+  dispatch(titleInput, "input");
+  enqueue(h, "PUT", metadataEndpoint(), response({
+    status: "updated",
+    metadata: makeMetadataPayload({
+      title: "Edited title",
+      description: "Durable AI description",
+      tagKeys: [],
+    }),
+  }));
+  h.fetchController.enqueue(
+    (call) => call.method === "GET" && call.url.startsWith("/api/media?"),
+    response({ items: [], total: 0, offset: 0, limit: 30, q: "" }),
+  );
+  const saving = h.run("handleSaveMetadata()");
+  await h.flush();
+  await saving;
+  await h.flush();
+  const body = JSON.parse(h.fetchController.matching("PUT", metadataEndpoint())[0].options.body);
+  assert.equal(body.suggested_filename, undefined);
+  assert.equal(body.collection, undefined);
+  assert.deepEqual(Object.keys(body).sort(), ["description", "display_title", "tag_keys"]);
 });
 
 test("Durable load states stay truthful for pending analyzing failed missing and malformed results", async (t) => {

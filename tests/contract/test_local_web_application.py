@@ -675,7 +675,8 @@ def test_browser_editor_uses_single_form_ai_assistance(client: TestClient) -> No
     assert "metadata-title-input" in dialog_section
     assert "metadata-description-input" in dialog_section
     assert "metadata-tag-search-input" in dialog_section
-    assert "metadata-ai-filename-input" in dialog_section
+    assert "metadata-ai-filename-display" in dialog_section
+    assert "metadata-ai-filename-input" not in dialog_section
     assert "review-title-input" not in dialog_section
     assert "review-description-input" not in dialog_section
     assert "review-tag-input" not in dialog_section
@@ -2399,7 +2400,9 @@ def test_metadata_dialog_contains_single_form_ai_assistance(client: TestClient) 
     assert "Use draft" not in dialog_section
     assert "Discard draft" not in dialog_section
     assert "Suggested filename" in dialog_section
-    assert "The physical file has not been renamed" in dialog_section
+    assert "Informational only — the physical file has not been renamed" in dialog_section
+    assert "metadata-ai-filename-display" in dialog_section
+    assert "metadata-ai-filename-input" not in dialog_section
     assert dialog_section.index("metadata-save-button") < dialog_section.index("metadata-ai-analyze-button")
     assert dialog_section.index("metadata-ai-analyze-button") < dialog_section.index("metadata-discard-button")
     assert "Canonical key" not in dialog_section
@@ -2424,9 +2427,15 @@ def test_browser_metadata_editor_exposes_durable_load_ai_suggestion(client: Test
     assert "confirm_cloud_upload" not in load_body
     assert "Replace current draft?" in load_body
     assert "Keep editing" in load_body
-    assert "Load suggestion" in load_body
+    assert "Replace draft" in load_body
+    assert "destructive: false" in load_body
+    assert "Load suggestion" not in load_body
     assert "handleSaveMetadata" not in load_body
     assert "window.confirm" not in load_body
+    assert "Saved AI suggestion" in dialog_section
+    assert "Durable AI suggestion" not in dialog_section
+    assert 'id="metadata-ai-filename-display"' in dialog_section
+    assert "metadata-ai-filename-input" not in dialog_section
     assert dialog_section.index("metadata-save-button") < dialog_section.index(
         "metadata-load-ai-suggestion-button"
     )

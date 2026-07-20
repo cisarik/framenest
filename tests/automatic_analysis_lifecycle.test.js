@@ -63,11 +63,12 @@ test("pending and analyzing never appear as success messages", () => {
   });
   assert.match(pending, /queued/i);
   assert.match(analyzing, /progress/i);
-  assert.match(analyzed, /ready/i);
+  assert.match(analyzed, /Saved AI suggestion ready for review/i);
   assert.match(failed, /unavailable|failed/i);
   assert.doesNotMatch(pending, /ready for review/i);
   assert.doesNotMatch(analyzing, /ready for review/i);
   assert.doesNotMatch(failed, /ready for review/i);
+  assert.doesNotMatch(analyzed, /AI analysis ready for review/i);
 });
 
 test("automatic analysis polling stops at terminal states and avoids interval loops", () => {
@@ -136,9 +137,12 @@ test("durable load path reads automatic-analysis and never calls interactive Ana
   assert.equal(loadBody.includes("metadataEndpoint("), false);
   assert.match(loadBody, /Replace current draft\?/);
   assert.match(loadBody, /Keep editing/);
-  assert.match(loadBody, /Load suggestion/);
+  assert.match(loadBody, /Replace draft/);
+  assert.match(loadBody, /destructive: false/);
   assert.match(loadBody, /requestConfirmation\(/);
   assert.equal(loadBody.includes("window.confirm"), false);
+  assert.equal(/confirmLabel:\s*"Load suggestion"/.test(loadBody), false);
+  assert.equal(/destructive:\s*true/.test(loadBody), false);
 });
 
 test("durable load reuses existing apply helper and excludes collection mutation", () => {
@@ -150,4 +154,31 @@ test("durable load reuses existing apply helper and excludes collection mutation
   assert.equal(applyBody.includes("collectionKey"), false);
   assert.equal(applyBody.includes("collection"), false);
   assert.match(applyBody, /Review the updated fields, then Save\./);
+});
+
+test("saved suggestion terminology avoids Durable label and contradictory provider-unavailable copy", () => {
+  assert.match(INDEX_SOURCE, />Saved AI suggestion</);
+  assert.equal(INDEX_SOURCE.includes("Durable AI suggestion"), false);
+  assert.match(APP_SOURCE, /Saved AI suggestion ready for review\./);
+  assert.equal(APP_SOURCE.includes("AI analysis ready for review."), false);
+  const panelBody = extractFunction("renderMetadataAiPanel");
+  assert.match(
+    panelBody,
+    /A previously generated suggestion is ready to review\. New AI analysis is currently unavailable\./,
+  );
+  assert.match(panelBody, /durableAnalysisLoadAvailable\(\)/);
+});
+
+test("suggested filename is display-only in metadata HTML and AI panel render", () => {
+  assert.match(INDEX_SOURCE, /id="metadata-ai-filename-display"/);
+  assert.equal(INDEX_SOURCE.includes("metadata-ai-filename-input"), false);
+  const aiSuggestionBlock = INDEX_SOURCE.slice(
+    INDEX_SOURCE.indexOf('id="metadata-ai-suggestion"'),
+    INDEX_SOURCE.indexOf('id="metadata-save-button"'),
+  );
+  assert.equal(aiSuggestionBlock.includes("<input"), false);
+  const panelBody = extractFunction("renderMetadataAiPanel");
+  assert.match(panelBody, /metadataAiFilenameDisplay\.textContent/);
+  assert.equal(panelBody.includes("metadataAiFilenameInput"), false);
+  assert.equal(APP_SOURCE.includes("metadataAiFilenameInput.addEventListener"), false);
 });

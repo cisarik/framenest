@@ -200,6 +200,28 @@ def test_cache_writes_cannot_occur_inside_registered_source_root(tmp_path: Path)
     assert not cache_root.exists()
 
 
+def test_missing_derivative_is_not_served_until_generated(tmp_path: Path) -> None:
+    """Cataloged media alone is not enough for Gallery card preview delivery.
+
+    Runtime acceptance fixtures must run gallery-preview generation before expecting
+    card previews; Details playback uses original media content and does not require
+    the derivative.
+    """
+    service, media, location, _media_path, _cache_root, preparer = _fixture(tmp_path)
+    assert service.status().missing_count == 1
+    assert preparer.calls == 0
+    with pytest.raises(GalleryPreviewUnavailableError):
+        service.open_ready(media.id, location.id)
+    generated = service.generate_one(media.id, location.id)
+    assert generated.state == GalleryPreviewState.READY
+    opened = service.open_ready(media.id, location.id)
+    try:
+        assert opened.media_type == "image/jpeg"
+        assert opened.byte_size > 0
+    finally:
+        opened.close()
+
+
 def test_source_change_makes_existing_derivative_stale_and_not_ready(tmp_path: Path) -> None:
     service, media, location, media_path, _cache_root, _preparer = _fixture(tmp_path)
     assert service.generate_one(media.id, location.id).state == GalleryPreviewState.READY

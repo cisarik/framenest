@@ -285,7 +285,7 @@ const metadataAiAnalyzeButton = document.querySelector("#metadata-ai-analyze-but
 const metadataLoadAiSuggestionButton = document.querySelector("#metadata-load-ai-suggestion-button");
 const metadataAiStatus = document.querySelector("#metadata-ai-status");
 const metadataAiSuggestion = document.querySelector("#metadata-ai-suggestion");
-const metadataAiFilenameInput = document.querySelector("#metadata-ai-filename-input");
+const metadataAiFilenameDisplay = document.querySelector("#metadata-ai-filename-display");
 const metadataDurableAiSuggestion = document.querySelector("#metadata-durable-ai-suggestion");
 const metadataDurableAiTitle = document.querySelector("#metadata-durable-ai-title");
 const metadataDurableAiDescription = document.querySelector("#metadata-durable-ai-description");
@@ -788,7 +788,7 @@ function automaticAnalysisStatusMessage(payload) {
   if (!payload || !payload.state) return "";
   if (payload.state === "pending") return "AI analysis queued.";
   if (payload.state === "analyzing") return "AI analysis in progress.";
-  if (payload.state === "analyzed") return "AI analysis ready for review.";
+  if (payload.state === "analyzed") return "Saved AI suggestion ready for review.";
   if (payload.state === "failed") {
     return payload.error_message || "AI analysis failed.";
   }
@@ -4267,11 +4267,16 @@ function releaseMetadataAiRequest(requestContext) {
 function renderMetadataAiPanel() {
   if (!metadataAiPanel) return;
   const location = metadataAiLocation();
-  metadataAiCapability.textContent = aiCapability.available
-    ? "AI analysis is available after confirmation."
-    : "AI analysis is not configured.";
-  if (aiCapability.available && !location) {
-    metadataAiCapability.textContent = "AI analysis needs an available local GIF or MP4.";
+  const hasSavedSuggestion = durableAnalysisLoadAvailable();
+  if (aiCapability.available) {
+    metadataAiCapability.textContent = location
+      ? "AI analysis is available after confirmation."
+      : "AI analysis needs an available local GIF or MP4.";
+  } else if (hasSavedSuggestion) {
+    metadataAiCapability.textContent =
+      "A previously generated suggestion is ready to review. New AI analysis is currently unavailable.";
+  } else {
+    metadataAiCapability.textContent = "AI analysis is not configured.";
   }
   if (
     !metadataWorkspace.analyzing
@@ -4280,6 +4285,9 @@ function renderMetadataAiPanel() {
   ) {
     if (metadataDurableAnalysis.errorMessage) {
       metadataAiStatus.textContent = metadataDurableAnalysis.errorMessage;
+    } else if (hasSavedSuggestion && !aiCapability.available) {
+      // Capability already explains saved suggestion + unavailable analysis.
+      metadataAiStatus.textContent = "";
     } else if (
       metadataDurableAnalysis.state === "pending"
       || metadataDurableAnalysis.state === "analyzing"
@@ -4291,10 +4299,14 @@ function renderMetadataAiPanel() {
   }
   if (metadataWorkspace.suggestedFilename) {
     metadataAiSuggestion.hidden = false;
-    metadataAiFilenameInput.value = metadataWorkspace.suggestedFilename;
+    if (metadataAiFilenameDisplay) {
+      metadataAiFilenameDisplay.textContent = metadataWorkspace.suggestedFilename;
+    }
   } else {
     metadataAiSuggestion.hidden = true;
-    metadataAiFilenameInput.value = "";
+    if (metadataAiFilenameDisplay) {
+      metadataAiFilenameDisplay.textContent = "";
+    }
   }
   renderMetadataDurableAnalysis();
 }
@@ -4548,8 +4560,8 @@ async function handleLoadDurableAiSuggestion() {
         title: "Replace current draft?",
         message: "Unsaved metadata edits will be replaced by the AI suggestion.",
         dismissLabel: "Keep editing",
-        confirmLabel: "Load suggestion",
-        destructive: true,
+        confirmLabel: "Replace draft",
+        destructive: false,
       });
       if (
         token !== metadataDurableLoadToken
@@ -4916,7 +4928,9 @@ async function handleOpenMetadataWorkspace(item, openerElement, { aiSuggestion =
   metadataStatus.textContent = "";
   metadataValidationMessage.textContent = "";
   metadataAiStatus.textContent = "";
-  metadataAiFilenameInput.value = "";
+  if (metadataAiFilenameDisplay) {
+    metadataAiFilenameDisplay.textContent = "";
+  }
   metadataTagSearchInput.value = "";
   metadataTagSuggestionState = { items: [], activeIndex: -1 };
   if (metadataDialog && typeof metadataDialog.showModal === "function") {
@@ -5053,7 +5067,9 @@ function closeMetadataWorkspaceWithContext(discardContext) {
   metadataStatus.textContent = "";
   metadataValidationMessage.textContent = "";
   metadataAiStatus.textContent = "";
-  metadataAiFilenameInput.value = "";
+  if (metadataAiFilenameDisplay) {
+    metadataAiFilenameDisplay.textContent = "";
+  }
   metadataTagSearchInput.value = "";
   metadataTagSuggestionState = { items: [], activeIndex: -1 };
   metadataTagSuggestions.replaceChildren();
@@ -6120,10 +6136,6 @@ metadataAiAnalyzeButton.addEventListener("click", handleAnalyzeMetadataByAi);
 if (metadataLoadAiSuggestionButton) {
   metadataLoadAiSuggestionButton.addEventListener("click", handleLoadDurableAiSuggestion);
 }
-metadataAiFilenameInput.addEventListener("input", () => {
-  metadataWorkspace.suggestedFilename = metadataAiFilenameInput.value;
-  advanceMetadataWorkspaceRevision();
-});
 
 function setActiveStatusTab(tabName, { focusTab = false, refreshAiStatus = false } = {}) {
   const isCloud = tabName === "cloud";
