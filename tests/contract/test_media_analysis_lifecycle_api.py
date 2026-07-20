@@ -219,3 +219,70 @@ def test_ambiguous_outcome_failure_exposes_sanitized_classification_only() -> No
     assert SECRET not in response.text
     assert PRIVATE_PATH not in response.text
     assert "/tmp/" not in response.text
+
+
+def test_analyzed_read_is_side_effect_free_and_does_not_schedule_provider_work() -> None:
+    reader = _FakeReadAnalysis(
+        AutomaticAnalysisPublicView(
+            state="analyzed",
+            analysis_definition="automatic_post_catalog",
+            provider_id="nvidia-nim",
+            model_id="test-model",
+            prompt_version="framenest-media-suggestion-v3",
+            result={
+                "title": "Title",
+                "description": "Description",
+                "collection": "Collection",
+                "tags": ["one"],
+                "suggested_filename": "title.mp4",
+                "confidence": 0.5,
+                "evidence": ["frame"],
+                "uncertainties": [],
+            },
+            error_code=None,
+            error_message=None,
+            attempt_count=1,
+            created_at_ms=10,
+            started_at_ms=11,
+            completed_at_ms=12,
+        )
+    )
+    settings = FrameNestSettings(
+        host="127.0.0.1",
+        database_path=Path("/tmp/framenest-analysis-lifecycle-api-side-effect.sqlite3"),
+        automatic_media_analysis_enabled=True,
+        _env_file=None,
+    )
+    app = create_app(
+        settings=settings,
+        library_api_dependencies=LibraryApiDependencies(
+            repository=object(),  # type: ignore[arg-type]
+            scan_preview=object(),
+            catalog_available=lambda: True,
+        ),
+        media_analysis_api_dependencies=MediaAnalysisApiDependencies(
+            prepare_preview=object(),
+            catalog_available=lambda: True,
+        ),
+        media_suggestion_api_dependencies=MediaSuggestionApiDependencies(
+            preview_suggestion=None,
+            provider_configured=False,
+        ),
+        media_analysis_lifecycle_api_dependencies=MediaAnalysisLifecycleApiDependencies(
+            read_analysis=reader,  # type: ignore[arg-type]
+            automatic_analysis_enabled=True,
+            provider_configured=True,
+            provider_id="nvidia-nim",
+            model_id="test-model",
+        ),
+    )
+    client = TestClient(app)
+    first = client.get(f"/api/media/{CANONICAL_MEDIA_ID}/automatic-analysis")
+    second = client.get(f"/api/media/{CANONICAL_MEDIA_ID}/automatic-analysis")
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert len(reader.calls) == 2
+    assert first.json()["result"]["title"] == "Title"
+    assert first.json() == second.json()
+    assert SECRET not in first.text
+    assert PRIVATE_PATH not in first.text

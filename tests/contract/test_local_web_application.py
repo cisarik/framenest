@@ -2407,6 +2407,34 @@ def test_metadata_dialog_contains_single_form_ai_assistance(client: TestClient) 
     assert "Authorization" not in dialog_section
 
 
+def test_browser_metadata_editor_exposes_durable_load_ai_suggestion(client: TestClient) -> None:
+    html = client.get("/").text
+    script = client.get("/assets/app.js").text
+    dialog_section = html[html.index('id="metadata-dialog"') : html.index('id="catalog-browser"')]
+
+    assert 'id="metadata-load-ai-suggestion-button"' in dialog_section
+    assert "Load AI suggestion" in dialog_section
+    assert 'id="metadata-durable-ai-suggestion"' in dialog_section
+    assert "handleLoadDurableAiSuggestion" in script
+    assert "refreshMetadataDurableAnalysis" in script
+    assert "aiSuggestionFromAutomaticAnalysisResult" in script
+    load_body = _javascript_function(script, "handleLoadDurableAiSuggestion")
+    assert "automaticAnalysisEndpoint(mediaId)" in load_body
+    assert "ai-suggestion-preview" not in load_body
+    assert "confirm_cloud_upload" not in load_body
+    assert "Replace current draft?" in load_body
+    assert "Keep editing" in load_body
+    assert "Load suggestion" in load_body
+    assert "handleSaveMetadata" not in load_body
+    assert "window.confirm" not in load_body
+    assert dialog_section.index("metadata-save-button") < dialog_section.index(
+        "metadata-load-ai-suggestion-button"
+    )
+    assert dialog_section.index("metadata-load-ai-suggestion-button") < dialog_section.index(
+        "metadata-ai-analyze-button"
+    )
+
+
 def test_javascript_metadata_ai_analysis_requires_confirmation_and_identity_url(
     client: TestClient,
 ) -> None:

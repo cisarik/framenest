@@ -241,6 +241,14 @@
           <section id="metadata-ai-panel" class="metadata-ai-panel" aria-label="AI assistance">
             <p id="metadata-ai-capability" class="metadata-note">AI analysis is not configured.</p>
             <p id="metadata-ai-status" class="metadata-note" aria-live="polite"></p>
+            <div id="metadata-durable-ai-suggestion" class="metadata-durable-ai-suggestion" hidden>
+              <p class="metadata-note">Durable AI suggestion</p>
+              <p id="metadata-durable-ai-title" class="metadata-durable-ai-suggestion__title"></p>
+              <p id="metadata-durable-ai-description" class="metadata-durable-ai-suggestion__description"></p>
+              <p id="metadata-durable-ai-tags" class="metadata-durable-ai-suggestion__tags"></p>
+              <p id="metadata-durable-ai-collection" class="metadata-note" hidden></p>
+              <p id="metadata-durable-ai-filename" class="metadata-note" hidden></p>
+            </div>
             <div id="metadata-ai-suggestion" class="metadata-ai-suggestion" hidden>
               <label class="metadata-field" for="metadata-ai-filename-input">
                 <span>Suggested filename</span>
@@ -254,6 +262,7 @@
 
       <div class="metadata-dialog__footer">
         <button id="metadata-save-button" type="button" disabled>Save</button>
+        <button id="metadata-load-ai-suggestion-button" type="button" hidden disabled>Load AI suggestion</button>
         <button id="metadata-ai-analyze-button" class="metadata-ai-analyze-button" type="button" disabled>Analyze by AI</button>
         <button id="metadata-discard-button" type="button">Cancel</button>
       </div>

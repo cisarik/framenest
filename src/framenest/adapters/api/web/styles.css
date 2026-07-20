@@ -2311,6 +2311,31 @@ h2 {
   margin-top: 12px;
 }
 
+.metadata-durable-ai-suggestion {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.metadata-durable-ai-suggestion__title,
+.metadata-durable-ai-suggestion__description,
+.metadata-durable-ai-suggestion__tags {
+  margin: 0;
+  color: var(--text);
+  font-size: 0.92rem;
+  line-height: 1.4;
+  text-transform: none;
+  font-weight: 500;
+  letter-spacing: 0;
+}
+
+.metadata-durable-ai-suggestion__description {
+  color: var(--text-soft);
+  white-space: pre-wrap;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .metadata-dialog__footer .metadata-ai-analyze-button[aria-busy="true"]::after {
     animation: none;

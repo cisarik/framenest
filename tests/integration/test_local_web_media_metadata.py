@@ -162,3 +162,141 @@ def test_local_web_metadata_api_exposes_processed_collection_lifecycle(
 
         unknown_collection = client.get("/api/media", params={"collection": "custom-collection"})
         assert unknown_collection.status_code == 422
+
+
+def test_metadata_save_leaves_automatic_analysis_result_and_path_unchanged(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "durable-suggestion-immutability.sqlite3"
+    settings = FrameNestSettings(
+        database_path=database_path,
+        automatic_media_analysis_enabled=True,
+        _env_file=None,
+    )
+    upgrade_database_to_head(settings)
+    media_id = MediaId.from_string("12345678-1234-4234-9234-123456789abc")
+    location_id = "87654321-4321-4321-8321-cba987654321"
+    device_id = "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+    library_id = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+    run_id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+    result_json = (
+        '{"collection":"MustStay","confidence":0.5,"description":"Durable description",'
+        '"evidence":["frame"],"suggested_filename":"durable.mp4","tags":["alpha"],'
+        '"title":"Durable title","uncertainties":[]}'
+    )
+    relative_path = "clips/original-name.mp4"
+
+    engine = create_sqlite_engine(database_path)
+    try:
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "INSERT INTO devices (id, display_name) VALUES (:id, 'Synthetic')"
+                ),
+                {"id": device_id},
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO libraries (id, device_id, display_name, path_flavor, root_path) "
+                    "VALUES (:id, :device_id, 'Library', 'posix', '/synthetic')"
+                ),
+                {"id": library_id, "device_id": device_id},
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO logical_media (id, media_kind, created_at_ms, updated_at_ms) "
+                    "VALUES (:id, 'video', 10, 10)"
+                ),
+                {"id": media_id.to_string()},
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO physical_media_locations ("
+                    "id, media_id, library_id, relative_path, availability, "
+                    "observed_size_bytes, observed_mtime_ns, created_at_ms, updated_at_ms"
+                    ") VALUES ("
+                    ":id, :media_id, :library_id, :relative_path, 'available', 8, NULL, 10, 10)"
+                ),
+                {
+                    "id": location_id,
+                    "media_id": media_id.to_string(),
+                    "library_id": library_id,
+                    "relative_path": relative_path,
+                },
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO media_analysis_runs ("
+                    "id, media_id, media_location_id, analysis_definition, state, attempt_count, "
+                    "provider_id, model_id, prompt_version, result_schema_version, result_json, "
+                    "error_code, error_message, created_at_ms, started_at_ms, completed_at_ms, version"
+                    ") VALUES ("
+                    ":id, :media_id, :location_id, 'automatic_post_catalog', 'analyzed', 1, "
+                    "'nvidia-nim', 'test-model', 'framenest-media-suggestion-v3', "
+                    "'framenest-media-suggestion-result-v1', :result_json, "
+                    "NULL, NULL, 10, 11, 12, 3)"
+                ),
+                {
+                    "id": run_id,
+                    "media_id": media_id.to_string(),
+                    "location_id": location_id,
+                    "result_json": result_json,
+                },
+            )
+    finally:
+        dispose_engine(engine)
+
+    with TestClient(create_app(settings=settings)) as client:
+        before = client.get(f"/api/media/{media_id}/automatic-analysis")
+        assert before.status_code == 200
+        assert before.json()["state"] == "analyzed"
+        assert before.json()["result"]["title"] == "Durable title"
+        assert "sk-" not in before.text
+
+        client.post("/api/canonical-tags", json={"key": "alpha", "display_name": "Alpha"})
+        saved = client.put(
+            f"/api/media/{media_id}/metadata",
+            json={
+                "display_title": "Operator title",
+                "description": "Operator description",
+                "tag_keys": ["alpha"],
+            },
+        )
+        assert saved.status_code == 200
+        assert saved.json()["metadata"]["display_title"] == "Operator title"
+        assert "suggested_filename" not in saved.json()["metadata"]
+        assert saved.json()["metadata"]["collection_key"] == "processed"
+
+        invalid = client.put(
+            f"/api/media/{media_id}/metadata",
+            json={"display_title": "", "description": None, "tag_keys": []},
+        )
+        assert invalid.status_code == 422
+
+        after = client.get(f"/api/media/{media_id}/automatic-analysis")
+        assert after.status_code == 200
+        assert after.json()["result"] == before.json()["result"]
+
+    engine = create_sqlite_engine(database_path)
+    try:
+        with engine.connect() as connection:
+            stored_result = connection.execute(
+                text("SELECT result_json, state FROM media_analysis_runs WHERE id = :id"),
+                {"id": run_id},
+            ).one()
+            assert stored_result.result_json == result_json
+            assert stored_result.state == "analyzed"
+            stored_path = connection.execute(
+                text(
+                    "SELECT relative_path FROM physical_media_locations WHERE id = :id"
+                ),
+                {"id": location_id},
+            ).scalar_one()
+            assert stored_path == relative_path
+            title = connection.execute(
+                text("SELECT display_title FROM media_metadata WHERE media_id = :id"),
+                {"id": media_id.to_string()},
+            ).scalar_one()
+            assert title == "Operator title"
+    finally:
+        dispose_engine(engine)

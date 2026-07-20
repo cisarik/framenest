@@ -367,6 +367,7 @@ function createDocument() {
     ["#metadata-tag-search-input", "#metadata-dialog"],
     ["#metadata-save-button", "#metadata-dialog"],
     ["#metadata-ai-analyze-button", "#metadata-dialog"],
+    ["#metadata-load-ai-suggestion-button", "#metadata-dialog"],
     ["#metadata-discard-button", "#metadata-dialog"],
     ["#media-details-close", "#media-details-dialog"],
     ["#media-details-edit", "#media-details-dialog"],
@@ -703,8 +704,16 @@ function metadataStateOf(harness) {
     confirmationRequestId: activeConfirmationRequest ? activeConfirmationRequest.id : null,
     focusedClose: document.activeElement === document.querySelector("#metadata-close-button"),
     focusedAnalyze: document.activeElement === document.querySelector("#metadata-ai-analyze-button"),
+    focusedLoadSuggestion: document.activeElement === document.querySelector("#metadata-load-ai-suggestion-button"),
     focusedTitle: document.activeElement === document.querySelector("#metadata-title-input"),
     beforeUnloadAttached: metadataBeforeUnloadAttached,
+    durableState: metadataDurableAnalysis.state,
+    durableLoading: metadataDurableAnalysis.loadingIntoDraft,
+    durableFetching: metadataDurableAnalysis.fetching,
+    loadButtonHidden: document.querySelector("#metadata-load-ai-suggestion-button").hidden,
+    loadButtonDisabled: document.querySelector("#metadata-load-ai-suggestion-button").disabled,
+    durablePanelHidden: document.querySelector("#metadata-durable-ai-suggestion").hidden,
+    collectionKey: metadataWorkspace.current.collectionKey,
   })`)));
 }
 
@@ -730,6 +739,45 @@ function metadataAiEndpoint(mediaId = MEDIA_A, locationId = LOCATION_A) {
 
 function metadataEndpoint(mediaId = MEDIA_A) {
   return `/api/media/${mediaId}/metadata`;
+}
+
+function automaticAnalysisEndpoint(mediaId = MEDIA_A) {
+  return `/api/media/${mediaId}/automatic-analysis`;
+}
+
+function analyzedAutomaticPayload(overrides = {}) {
+  return {
+    media_id: String(MEDIA_A),
+    state: "analyzed",
+    automatic_analysis_enabled: true,
+    result: {
+      title: "Durable AI title",
+      description: "Durable AI description",
+      collection: "MustStayInformational",
+      tags: ["durable-tag"],
+      suggested_filename: "durable-ai.mp4",
+      confidence: 0.8,
+      evidence: ["frame"],
+      uncertainties: [],
+    },
+    ...overrides,
+  };
+}
+
+function seedDurableAnalyzedSuggestion(harness, payload = analyzedAutomaticPayload()) {
+  harness.run(`
+    metadataDurableAnalysis = {
+      mediaId: metadataWorkspace.openMediaId,
+      fetching: false,
+      loadingIntoDraft: false,
+      state: "analyzed",
+      result: ${JSON.stringify(payload.result)},
+      statusMessage: "AI analysis ready for review.",
+      errorMessage: "",
+    };
+    renderMetadataWorkspace();
+  `);
+  harness.fetchController.clearCalls();
 }
 
 function dispatch(element, type, values = {}) {
@@ -2794,6 +2842,267 @@ test("Metadata AI response cannot overwrite a newer edit revision", async () => 
   assert.equal(state.suggestedFilename, "");
   assert.equal(state.analyzing, false);
   assert.equal(state.metadataOpen, true);
+});
+
+test("Durable analyzed suggestion exposes Load AI suggestion in the metadata editor", async () => {
+  const h = await createHarness();
+  setMetadataWorkspace(h, {
+    currentTitle: "Persisted title",
+    currentDescription: "Persisted description",
+    currentTags: ["persisted"],
+  });
+  seedDurableAnalyzedSuggestion(h);
+  const state = metadataStateOf(h);
+  assert.equal(state.loadButtonHidden, false);
+  assert.equal(state.loadButtonDisabled, false);
+  assert.equal(state.durablePanelHidden, false);
+  assert.match(h.document.querySelector("#metadata-durable-ai-title").textContent, /Durable AI title/);
+  assert.match(h.document.querySelector("#metadata-durable-ai-collection").textContent, /not applied/);
+  assert.match(h.document.querySelector("#metadata-durable-ai-filename").textContent, /not renamed/);
+});
+
+test("Load AI suggestion reads automatic-analysis, applies title/description/tags, and never Saves or Analyzes", async () => {
+  const h = await createHarness();
+  setMetadataWorkspace(h, {
+    currentTitle: "Persisted title",
+    currentDescription: "Persisted description",
+    currentTags: ["persisted"],
+  });
+  seedDurableAnalyzedSuggestion(h);
+  enqueue(h, "GET", automaticAnalysisEndpoint(), response(analyzedAutomaticPayload()));
+  enqueue(h, "POST", "/api/canonical-tags", response({
+    tag: { key: "durable-tag", display_name: "durable-tag" },
+  }));
+  enqueue(h, "GET", "/api/canonical-tags", response({
+    tags: [{ key: "durable-tag", display_name: "durable-tag" }],
+  }));
+
+  const load = h.run("handleLoadDurableAiSuggestion()");
+  await h.flush();
+  await load;
+  await h.flush();
+
+  assert.equal(h.fetchController.matching("GET", automaticAnalysisEndpoint()).length, 1);
+  assert.equal(h.fetchController.matchingPrefix("POST", "/api/media/").length, 0);
+  assert.equal(h.fetchController.matching("PUT", metadataEndpoint()).length, 0);
+  assert.equal(h.fetchController.matching("POST", metadataAiEndpoint()).length, 0);
+
+  const state = metadataStateOf(h);
+  assert.equal(state.currentTitle, "Durable AI title");
+  assert.equal(state.currentDescription, "Durable AI description");
+  assert.deepEqual(state.currentTags, ["durable-tag"]);
+  assert.equal(state.suggestedFilename, "durable-ai.mp4");
+  assert.equal(state.collectionKey, null);
+  assert.equal(state.aiSuggestionApplied, true);
+  assert.equal(state.dirty, true);
+  assert.equal(state.metadataOpen, true);
+  assert.equal(state.focusedTitle, true);
+});
+
+test("Loaded durable suggestion remains editable and Save uses metadata PUT only", async () => {
+  const h = await createHarness();
+  setMetadataWorkspace(h, {
+    currentTitle: "Persisted title",
+    currentDescription: "Persisted description",
+    currentTags: ["persisted"],
+  });
+  seedDurableAnalyzedSuggestion(h);
+  enqueue(h, "GET", automaticAnalysisEndpoint(), response(analyzedAutomaticPayload({
+    result: {
+      title: "Durable AI title",
+      description: "Durable AI description",
+      collection: "MustStayInformational",
+      tags: [],
+      suggested_filename: "durable-ai.mp4",
+      confidence: 0.8,
+      evidence: [],
+      uncertainties: [],
+    },
+  })));
+  await h.run("handleLoadDurableAiSuggestion()");
+  await h.flush();
+
+  const titleInput = h.document.querySelector("#metadata-title-input");
+  titleInput.value = "Edited after load";
+  dispatch(titleInput, "input");
+  enqueue(h, "PUT", metadataEndpoint(), response({
+    status: "updated",
+    metadata: makeMetadataPayload({
+      title: "Edited after load",
+      description: "Durable AI description",
+      tagKeys: [],
+    }),
+  }));
+  h.fetchController.enqueue(
+    (call) => call.method === "GET" && call.url.startsWith("/api/media?"),
+    response({ items: [], total: 0, offset: 0, limit: 30, q: "" }),
+  );
+
+  const saving = h.run("handleSaveMetadata()");
+  await h.flush();
+  await saving;
+  await h.flush();
+
+  const puts = h.fetchController.matching("PUT", metadataEndpoint());
+  assert.equal(puts.length, 1);
+  assert.deepEqual(JSON.parse(puts[0].options.body), {
+    display_title: "Edited after load",
+    description: "Durable AI description",
+    tag_keys: [],
+  });
+  assert.equal(h.fetchController.matching("POST", metadataAiEndpoint()).length, 0);
+  assert.equal(JSON.parse(puts[0].options.body).suggested_filename, undefined);
+  assert.equal(JSON.parse(puts[0].options.body).collection, undefined);
+});
+
+test("Dirty draft requires custom confirmation before durable load replacement", async (t) => {
+  for (const dismissal of ["Keep editing", "Escape", "backdrop", "Load suggestion"]) {
+    await t.test(dismissal, async () => {
+      const h = await createHarness();
+      setMetadataWorkspace(h);
+      seedDurableAnalyzedSuggestion(h);
+      const loadButton = h.document.querySelector("#metadata-load-ai-suggestion-button");
+      loadButton.focus();
+      const before = metadataStateOf(h);
+      enqueue(h, "GET", automaticAnalysisEndpoint(), response(analyzedAutomaticPayload({
+        result: {
+          title: "Durable AI title",
+          description: "Durable AI description",
+          collection: "MustStayInformational",
+          tags: [],
+          suggested_filename: "durable-ai.mp4",
+          confidence: 0.8,
+          evidence: [],
+          uncertainties: [],
+        },
+      })));
+      const load = h.run("handleLoadDurableAiSuggestion()");
+      await h.flush();
+
+      assert.equal(h.document.querySelector("#confirmation-dialog-title").textContent, "Replace current draft?");
+      assert.match(
+        h.document.querySelector("#confirmation-dialog-message").textContent,
+        /Unsaved metadata edits will be replaced/,
+      );
+
+      if (dismissal === "Keep editing") activateConfirmation(h, "dismiss");
+      else if (dismissal === "Escape") dismissConfirmationWithEscape(h);
+      else if (dismissal === "backdrop") {
+        dispatch(h.document.querySelector("#confirmation-dialog"), "click", {
+          target: h.document.querySelector("#confirmation-dialog"),
+        });
+      } else activateConfirmation(h, "confirm");
+
+      await load;
+      await h.flush();
+      const after = metadataStateOf(h);
+      assert.equal(after.metadataOpen, true);
+      if (dismissal === "Load suggestion") {
+        assert.equal(after.currentTitle, "Durable AI title");
+        assert.equal(after.currentDescription, "Durable AI description");
+        assert.equal(after.aiSuggestionApplied, true);
+        assert.equal(after.focusedTitle, true);
+      } else {
+        assert.equal(after.currentTitle, before.currentTitle);
+        assert.equal(after.currentDescription, before.currentDescription);
+        assert.deepEqual(after.currentTags, before.currentTags);
+        assert.equal(after.aiSuggestionApplied, false);
+        assert.equal(after.focusedLoadSuggestion, true);
+      }
+      assert.equal(h.fetchController.matching("PUT", metadataEndpoint()).length, 0);
+    });
+  }
+});
+
+test("Repeated durable load clicks while reading create one automatic-analysis request", async () => {
+  const h = await createHarness();
+  setMetadataWorkspace(h, {
+    currentTitle: "Persisted title",
+    currentDescription: "Persisted description",
+    currentTags: ["persisted"],
+  });
+  seedDurableAnalyzedSuggestion(h);
+  const pendingResponse = deferred();
+  enqueue(h, "GET", automaticAnalysisEndpoint(), pendingResponse.promise);
+  const first = h.run("handleLoadDurableAiSuggestion()");
+  const repeated = h.run("handleLoadDurableAiSuggestion()");
+  await h.flush();
+  assert.equal(h.fetchController.matching("GET", automaticAnalysisEndpoint()).length, 1);
+  assert.equal(metadataStateOf(h).durableLoading, true);
+
+  pendingResponse.resolve(response(analyzedAutomaticPayload({
+    result: {
+      title: "Durable AI title",
+      description: "Durable AI description",
+      collection: "MustStayInformational",
+      tags: [],
+      suggested_filename: "durable-ai.mp4",
+      confidence: 0.8,
+      evidence: [],
+      uncertainties: [],
+    },
+  })));
+  await Promise.all([first, repeated]);
+  await h.flush();
+  assert.equal(h.fetchController.matching("GET", automaticAnalysisEndpoint()).length, 1);
+  assert.equal(metadataStateOf(h).currentTitle, "Durable AI title");
+});
+
+test("Durable load states stay truthful for pending analyzing failed missing and malformed results", async (t) => {
+  const cases = [
+    { state: "pending", message: /queued|still queued/i },
+    { state: "analyzing", message: /progress|still in progress/i },
+    { state: "failed", payload: { error_message: "AI analysis failed." }, message: /failed/i },
+    { state: "not_requested", message: /No automatic AI suggestion/i },
+    {
+      state: "analyzed",
+      result: { title: "Incomplete" },
+      message: /incomplete/i,
+    },
+  ];
+  for (const entry of cases) {
+    await t.test(entry.state === "analyzed" ? "malformed analyzed" : entry.state, async () => {
+      const h = await createHarness();
+      setMetadataWorkspace(h, {
+        currentTitle: "Persisted title",
+        currentDescription: "Persisted description",
+        currentTags: ["persisted"],
+      });
+      seedDurableAnalyzedSuggestion(h);
+      const payload = {
+        media_id: String(MEDIA_A),
+        state: entry.state,
+        automatic_analysis_enabled: true,
+        result: Object.prototype.hasOwnProperty.call(entry, "result") ? entry.result : null,
+        error_message: entry.payload ? entry.payload.error_message : null,
+      };
+      enqueue(h, "GET", automaticAnalysisEndpoint(), response(payload));
+      await h.run("handleLoadDurableAiSuggestion()");
+      await h.flush();
+      assert.match(h.document.querySelector("#metadata-ai-status").textContent, entry.message);
+      assert.equal(metadataStateOf(h).currentTitle, "Persisted title");
+      assert.equal(metadataStateOf(h).aiSuggestionApplied, false);
+      assert.equal(h.fetchController.matching("POST", metadataAiEndpoint()).length, 0);
+    });
+  }
+
+  await t.test("network error", async () => {
+    const h = await createHarness();
+    setMetadataWorkspace(h, {
+      currentTitle: "Persisted title",
+      currentDescription: "Persisted description",
+      currentTags: ["persisted"],
+    });
+    seedDurableAnalyzedSuggestion(h);
+    enqueue(h, "GET", automaticAnalysisEndpoint(), Promise.reject(new Error("network")));
+    await h.run("handleLoadDurableAiSuggestion()");
+    await h.flush();
+    assert.match(
+      h.document.querySelector("#metadata-ai-status").textContent,
+      /could not be loaded/i,
+    );
+    assert.equal(metadataStateOf(h).currentTitle, "Persisted title");
+  });
 });
 
 test("Cancel upload confirms once, sends one DELETE, fences stale work, and focuses status", async () => {

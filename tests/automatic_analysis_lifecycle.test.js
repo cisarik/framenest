@@ -5,10 +5,33 @@ const test = require("node:test");
 const vm = require("node:vm");
 
 const APP_PATH = path.resolve(__dirname, "../src/framenest/adapters/api/web/app.js");
+const INDEX_PATH = path.resolve(__dirname, "../src/framenest/adapters/api/web/index.html");
 const APP_SOURCE = fs.readFileSync(APP_PATH, "utf8");
+const INDEX_SOURCE = fs.readFileSync(INDEX_PATH, "utf8");
 
 function extractFunction(name) {
   const marker = `function ${name}(`;
+  const start = APP_SOURCE.indexOf(marker);
+  assert.notEqual(start, -1, `missing ${name}`);
+  let depth = 0;
+  let started = false;
+  for (let index = start; index < APP_SOURCE.length; index += 1) {
+    const char = APP_SOURCE[index];
+    if (char === "{") {
+      depth += 1;
+      started = true;
+    } else if (char === "}") {
+      depth -= 1;
+      if (started && depth === 0) {
+        return APP_SOURCE.slice(start, index + 1);
+      }
+    }
+  }
+  assert.fail(`unterminated ${name}`);
+}
+
+function extractAsyncFunction(name) {
+  const marker = `async function ${name}(`;
   const start = APP_SOURCE.indexOf(marker);
   assert.notEqual(start, -1, `missing ${name}`);
   let depth = 0;
@@ -63,4 +86,68 @@ test("cataloged upload copy mentions automatic analysis only when enabled", () =
   );
   assert.match(catalogedBranch, /Automatic AI analysis may follow/);
   assert.match(catalogedBranch, /automaticAnalysisCapability\.automatic_analysis_enabled/);
+});
+
+test("metadata editor exposes durable Load AI suggestion without Apply endpoint", () => {
+  assert.match(INDEX_SOURCE, /id="metadata-load-ai-suggestion-button"/);
+  assert.match(INDEX_SOURCE, />Load AI suggestion</);
+  assert.match(INDEX_SOURCE, /id="metadata-durable-ai-suggestion"/);
+  assert.match(APP_SOURCE, /async function handleLoadDurableAiSuggestion/);
+  assert.match(APP_SOURCE, /async function refreshMetadataDurableAnalysis/);
+  assert.match(APP_SOURCE, /function aiSuggestionFromAutomaticAnalysisResult/);
+  assert.match(APP_SOURCE, /automaticAnalysisEndpoint\(mediaId\)/);
+  assert.equal(APP_SOURCE.includes("/apply"), false);
+  assert.equal(APP_SOURCE.includes("handleApplyDurable"), false);
+});
+
+test("durable suggestion mapping keeps only title description tags and display filename", () => {
+  const context = {};
+  vm.runInNewContext(extractFunction("aiSuggestionFromAutomaticAnalysisResult"), context);
+  const mapped = context.aiSuggestionFromAutomaticAnalysisResult({
+    title: "Durable title",
+    description: "Durable description",
+    collection: "Must not map",
+    tags: ["alpha", "beta"],
+    suggested_filename: "durable.mp4",
+    confidence: 0.9,
+    evidence: ["frame"],
+    uncertainties: ["maybe"],
+  });
+  assert.equal(mapped.title, "Durable title");
+  assert.equal(mapped.description, "Durable description");
+  assert.deepEqual([...mapped.tags], ["alpha", "beta"]);
+  assert.equal(mapped.suggestedFilename, "durable.mp4");
+  assert.equal("collection" in mapped, false);
+  assert.equal(context.aiSuggestionFromAutomaticAnalysisResult(null), null);
+  assert.equal(context.aiSuggestionFromAutomaticAnalysisResult({ title: "x" }), null);
+});
+
+test("durable load path reads automatic-analysis and never calls interactive Analyze", () => {
+  const loadBody = extractAsyncFunction("handleLoadDurableAiSuggestion");
+  assert.match(loadBody, /automaticAnalysisEndpoint\(mediaId\)/);
+  assert.match(loadBody, /headers: \{ Accept: "application\/json" \}/);
+  assert.equal(loadBody.includes("method:"), false);
+  assert.equal(loadBody.includes("ai-suggestion-preview"), false);
+  assert.equal(loadBody.includes("confirm_cloud_upload"), false);
+  assert.equal(loadBody.includes("mediaAiSuggestionEndpoint"), false);
+  assert.equal(loadBody.includes("handleAnalyzeMetadataByAi"), false);
+  assert.match(loadBody, /applyResolvedAiSuggestionToMetadataWorkspace\(suggestion, tagKeys\)/);
+  assert.equal(loadBody.includes("handleSaveMetadata"), false);
+  assert.equal(loadBody.includes("metadataEndpoint("), false);
+  assert.match(loadBody, /Replace current draft\?/);
+  assert.match(loadBody, /Keep editing/);
+  assert.match(loadBody, /Load suggestion/);
+  assert.match(loadBody, /requestConfirmation\(/);
+  assert.equal(loadBody.includes("window.confirm"), false);
+});
+
+test("durable load reuses existing apply helper and excludes collection mutation", () => {
+  const applyBody = extractFunction("applyResolvedAiSuggestionToMetadataWorkspace");
+  assert.match(applyBody, /metadataWorkspace\.current\.displayTitle = suggestion\.title/);
+  assert.match(applyBody, /metadataWorkspace\.current\.description = suggestion\.description/);
+  assert.match(applyBody, /metadataWorkspace\.current\.tagKeys = tagKeys/);
+  assert.match(applyBody, /metadataWorkspace\.suggestedFilename = suggestion\.suggestedFilename/);
+  assert.equal(applyBody.includes("collectionKey"), false);
+  assert.equal(applyBody.includes("collection"), false);
+  assert.match(applyBody, /Review the updated fields, then Save\./);
 });
