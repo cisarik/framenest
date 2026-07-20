@@ -329,7 +329,19 @@ provider-secret integration remains unresolved.
 
 Suspicious filenames may be manually analyzed, but AI suggestions require confirmation. Current pre-alpha AI suggestion review is editable, session-only, and not catalog truth.
 
-FrameNest must not automatically rename media or upload frames without user intent and confirmation.
+FrameNest must not automatically rename media.
+
+FrameNest must not automatically upload media or prepared frames to a cloud
+provider merely because media was cataloged: automatic cloud analysis stays
+off by default and is permitted only after the explicit server-owner or
+administrator opt-in `FRAMENEST_AUTOMATIC_MEDIA_ANALYSIS_ENABLED=true`, which
+represents standing consent only for eligible automatic post-catalog analysis
+on that server. That enablement does not authorize historical bulk analysis,
+arbitrary external URL retrieval, user-provided provider keys, hidden provider
+fallback, analysis before cataloging, or uploading unrelated personal files.
+Interactive on-demand suggestion preview continues to require explicit
+per-request confirmation such as `confirm_cloud_upload: true`. Ordinary users
+do not supply provider credentials; credentials remain server-side.
 
 ## 18. Security Principles
 

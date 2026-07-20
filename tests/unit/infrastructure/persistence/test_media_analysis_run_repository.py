@@ -188,3 +188,118 @@ def test_requeue_and_terminal_failure(
     assert failed.state is MediaAnalysisRunState.FAILED
     assert failed.error_code == "PROVIDER_AUTH"
     assert failed.result_json is None
+
+
+def test_reset_interrupted_analyzing_fails_closed_as_outcome_unknown(
+    repository: SqliteMediaAnalysisRunRepository,
+) -> None:
+    pending = repository.create_pending(
+        media_id=MEDIA_ID,
+        media_location_id=LOCATION_ID,
+        analysis_definition=AUTOMATIC_POST_CATALOG_ANALYSIS_DEFINITION,
+        created_at_ms=10,
+    )
+    claimed = repository.claim_pending(
+        run_id=pending.id.to_string(),
+        expected_version=pending.version,
+        started_at_ms=11,
+        max_attempts=3,
+    )
+    assert claimed.state is MediaAnalysisRunState.ANALYZING
+    assert claimed.attempt_count == 1
+    failed = repository.reset_interrupted_analyzing(
+        run_id=claimed.id.to_string(),
+        expected_version=claimed.version,
+        max_attempts=3,
+        updated_at_ms=12,
+    )
+    assert failed.state is MediaAnalysisRunState.FAILED
+    assert failed.error_code == "ANALYSIS_OUTCOME_UNKNOWN"
+    assert failed.result_json is None
+    assert "ANALYSIS_OUTCOME_UNKNOWN" == failed.error_code
+    assert failed.error_message is not None
+    assert "/home/" not in failed.error_message
+    assert "sk-" not in failed.error_message
+    # Must not return to pending under remaining attempts.
+    assert failed.state is not MediaAnalysisRunState.PENDING
+    listed = repository.list_unfinished(limit=8)
+    assert listed == ()
+
+
+def test_crash_window_provider_success_then_interrupt_does_not_replay_provider(
+    repository: SqliteMediaAnalysisRunRepository,
+) -> None:
+    """Reproduce ambiguous crash: provider OK, analyzed row never written."""
+    from framenest.application.media_analysis_lifecycle import (
+        ExecuteAutomaticMediaAnalysisRun,
+    )
+    from framenest.application.media_suggestion import MediaSuggestion, PROMPT_VERSION
+
+    pending = repository.create_pending(
+        media_id=MEDIA_ID,
+        media_location_id=LOCATION_ID,
+        analysis_definition=AUTOMATIC_POST_CATALOG_ANALYSIS_DEFINITION,
+        created_at_ms=10,
+    )
+    calls = {"n": 0}
+
+    class _CountingProvider:
+        def execute(self, media_id, location_id):
+            del media_id, location_id
+            calls["n"] += 1
+            return MediaSuggestion(
+                title="Title",
+                description="Description text for suggestion.",
+                collection="Collection",
+                tags=("tag-one",),
+                suggested_filename="title.mp4",
+                confidence=0.8,
+                evidence=("frame evidence",),
+                uncertainties=(),
+                provider_id="nvidia-nim",
+                model_id="test-model",
+                prompt_version=PROMPT_VERSION,
+            )
+
+    service = ExecuteAutomaticMediaAnalysisRun(
+        repository,
+        _CountingProvider(),
+        max_attempts=3,
+        now_ms=lambda: 20,
+    )
+    claimed = repository.claim_pending(
+        run_id=pending.id.to_string(),
+        expected_version=pending.version,
+        started_at_ms=11,
+        max_attempts=3,
+    )
+    # External provider succeeds once; process dies before record_analyzed.
+    _ = service._executor.execute(claimed.media_id, claimed.media_location_id)
+    assert calls["n"] == 1
+    surviving = repository.get_by_media_definition(
+        MEDIA_ID,
+        AUTOMATIC_POST_CATALOG_ANALYSIS_DEFINITION,
+    )
+    assert surviving is not None
+    assert surviving.state is MediaAnalysisRunState.ANALYZING
+
+    recovered = service.execute(surviving)
+    assert recovered.state is MediaAnalysisRunState.FAILED
+    assert recovered.error_code == "ANALYSIS_OUTCOME_UNKNOWN"
+    assert calls["n"] == 1
+
+    second_restart = service.execute(recovered)
+    assert second_restart.state is MediaAnalysisRunState.FAILED
+    assert calls["n"] == 1
+    assert repository.list_unfinished(limit=8) == ()
+
+    # Repeated catalog-equivalent create must not invent another paid job.
+    again = repository.create_pending(
+        media_id=MEDIA_ID,
+        media_location_id=LOCATION_ID,
+        analysis_definition=AUTOMATIC_POST_CATALOG_ANALYSIS_DEFINITION,
+        created_at_ms=30,
+    )
+    assert again.id.to_string() == recovered.id.to_string()
+    assert again.state is MediaAnalysisRunState.FAILED
+    assert calls["n"] == 1

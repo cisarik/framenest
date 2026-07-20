@@ -15,6 +15,7 @@ from framenest.application.media_analysis_lifecycle import (
 )
 from framenest.application.media_suggestion import (
     MediaSuggestion,
+    MediaSuggestionProviderAuthError,
     MediaSuggestionProviderRateLimitedError,
     MediaSuggestionProviderUnavailableError,
     PROMPT_VERSION,
@@ -189,27 +190,23 @@ class _FakeRepository:
         max_attempts,
         updated_at_ms,
     ):
-        del run_id
+        del run_id, max_attempts
         with self._lock:
             self.transactions.append("reset_interrupted_analyzing")
             assert self.run is not None
             assert self.run.version == expected_version
-            if self.run.attempt_count >= max_attempts:
-                self.run = replace(
-                    self.run,
-                    state=MediaAnalysisRunState.FAILED,
-                    error_code="ANALYSIS_INTERRUPTED",
-                    error_message="Automatic analysis was interrupted.",
-                    completed_at_ms=updated_at_ms,
-                    version=self.run.version + 1,
-                )
-            else:
-                self.run = replace(
-                    self.run,
-                    state=MediaAnalysisRunState.PENDING,
-                    started_at_ms=None,
-                    version=self.run.version + 1,
-                )
+            # Mirror production: stale analyzing is ambiguous and fail-closed.
+            self.run = replace(
+                self.run,
+                state=MediaAnalysisRunState.FAILED,
+                error_code="ANALYSIS_OUTCOME_UNKNOWN",
+                error_message=(
+                    "Automatic analysis was interrupted and the provider "
+                    "outcome cannot be determined safely."
+                ),
+                completed_at_ms=updated_at_ms,
+                version=self.run.version + 1,
+            )
             return self.run
 
     def list_unfinished(self, *, limit, after_created_at_ms=None, after_id=None):
@@ -340,6 +337,91 @@ def test_rate_limited_is_retryable_then_terminal_on_exhaustion() -> None:
     assert failed.error_code == "PROVIDER_RATE_LIMITED"
 
 
+def test_terminal_provider_auth_refusal_is_not_retried() -> None:
+    repository = _FakeRepository()
+    scheduler = ScheduleAutomaticMediaAnalysis(repository, enabled=True, now_ms=lambda: 1)
+    run = scheduler.execute(
+        CatalogedAnalysisTarget(media_id=MEDIA_ID, media_location_id=LOCATION_ID)
+    )
+    assert run is not None
+    executor = _FakeExecutor(error=MediaSuggestionProviderAuthError("denied"))
+    service = ExecuteAutomaticMediaAnalysisRun(
+        repository,
+        executor,
+        max_attempts=3,
+        now_ms=lambda: 2,
+    )
+    failed = service.execute(run)
+    assert failed.state is MediaAnalysisRunState.FAILED
+    assert failed.error_code == "PROVIDER_AUTH"
+    assert len(executor.calls) == 1
+    again = service.execute(failed)
+    assert again.state is MediaAnalysisRunState.FAILED
+    assert len(executor.calls) == 1
+
+
+def test_pending_surviving_restart_executes_normally() -> None:
+    repository = _FakeRepository()
+    scheduler = ScheduleAutomaticMediaAnalysis(repository, enabled=True, now_ms=lambda: 1)
+    pending = scheduler.execute(
+        CatalogedAnalysisTarget(media_id=MEDIA_ID, media_location_id=LOCATION_ID)
+    )
+    assert pending is not None
+    assert pending.state is MediaAnalysisRunState.PENDING
+    executor = _FakeExecutor()
+    service = ExecuteAutomaticMediaAnalysisRun(repository, executor, now_ms=lambda: 2)
+    result = service.execute(pending)
+    assert result.state is MediaAnalysisRunState.ANALYZED
+    assert len(executor.calls) == 1
+
+
+def test_stale_analyzing_fails_closed_without_provider_call() -> None:
+    repository = _FakeRepository()
+    scheduler = ScheduleAutomaticMediaAnalysis(repository, enabled=True, now_ms=lambda: 1)
+    pending = scheduler.execute(
+        CatalogedAnalysisTarget(media_id=MEDIA_ID, media_location_id=LOCATION_ID)
+    )
+    assert pending is not None
+    claimed = repository.claim_pending(
+        run_id=pending.id.to_string(),
+        expected_version=pending.version,
+        started_at_ms=2,
+        max_attempts=3,
+    )
+    assert claimed.state is MediaAnalysisRunState.ANALYZING
+    executor = _FakeExecutor()
+    service = ExecuteAutomaticMediaAnalysisRun(repository, executor, now_ms=lambda: 3)
+    failed = service.execute(claimed)
+    assert failed.state is MediaAnalysisRunState.FAILED
+    assert failed.error_code == "ANALYSIS_OUTCOME_UNKNOWN"
+    assert failed.result_json is None
+    assert len(executor.calls) == 0
+    view = public_view_from_run(failed)
+    assert view.state == "failed"
+    assert view.error_code == "ANALYSIS_OUTCOME_UNKNOWN"
+    assert view.result is None
+    again = service.execute(failed)
+    assert again.state is MediaAnalysisRunState.FAILED
+    assert len(executor.calls) == 0
+
+
+def test_analyzed_run_is_never_re_executed() -> None:
+    repository = _FakeRepository()
+    scheduler = ScheduleAutomaticMediaAnalysis(repository, enabled=True, now_ms=lambda: 1)
+    pending = scheduler.execute(
+        CatalogedAnalysisTarget(media_id=MEDIA_ID, media_location_id=LOCATION_ID)
+    )
+    assert pending is not None
+    executor = _FakeExecutor()
+    service = ExecuteAutomaticMediaAnalysisRun(repository, executor, now_ms=lambda: 2)
+    analyzed = service.execute(pending)
+    assert analyzed.state is MediaAnalysisRunState.ANALYZED
+    assert len(executor.calls) == 1
+    again = service.execute(analyzed)
+    assert again.state is MediaAnalysisRunState.ANALYZED
+    assert len(executor.calls) == 1
+
+
 def test_public_view_states_are_truthful() -> None:
     assert public_view_from_run(None).state == "not_requested"
     pending = MediaAnalysisRun(
@@ -390,3 +472,17 @@ def test_public_view_states_are_truthful() -> None:
     assert isinstance(analyzed_view, AutomaticAnalysisPublicView)
     assert analyzed_view.result is not None
     assert analyzed_view.error_code is None
+    failed = replace(
+        analyzing,
+        state=MediaAnalysisRunState.FAILED,
+        error_code="ANALYSIS_OUTCOME_UNKNOWN",
+        error_message=(
+            "Automatic analysis was interrupted and the provider "
+            "outcome cannot be determined safely."
+        ),
+        completed_at_ms=4,
+        version=3,
+    )
+    failed_view = public_view_from_run(failed)
+    assert failed_view.error_code == "ANALYSIS_OUTCOME_UNKNOWN"
+    assert failed_view.result is None

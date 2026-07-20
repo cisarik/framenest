@@ -188,3 +188,34 @@ def test_failed_returns_sanitized_error_without_result() -> None:
     assert payload["error_code"] == "PROVIDER_UNAVAILABLE"
     assert SECRET not in payload["error_message"]
     assert PRIVATE_PATH not in payload["error_message"]
+
+
+def test_ambiguous_outcome_failure_exposes_sanitized_classification_only() -> None:
+    client = _client(
+        AutomaticAnalysisPublicView(
+            state="failed",
+            analysis_definition="automatic_post_catalog",
+            provider_id=None,
+            model_id=None,
+            prompt_version="framenest-media-suggestion-v3",
+            result=None,
+            error_code="ANALYSIS_OUTCOME_UNKNOWN",
+            error_message=(
+                "Automatic analysis was interrupted and the provider "
+                "outcome cannot be determined safely."
+            ),
+            attempt_count=1,
+            created_at_ms=10,
+            started_at_ms=11,
+            completed_at_ms=12,
+        )
+    )
+    response = client.get(f"/api/media/{CANONICAL_MEDIA_ID}/automatic-analysis")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["state"] == "failed"
+    assert payload["result"] is None
+    assert payload["error_code"] == "ANALYSIS_OUTCOME_UNKNOWN"
+    assert SECRET not in response.text
+    assert PRIVATE_PATH not in response.text
+    assert "/tmp/" not in response.text

@@ -40,15 +40,28 @@ cataloged uploads:
    and ffmpeg/ffprobe work run outside write transactions.
 5. Startup reconciles only unfinished requested runs. Historical catalog rows
    without a run are not treated as paid jobs.
-6. API exposes capability and per-media status without credentials, paths, or
+6. Durable `pending` runs may execute after restart. A run left durable in
+   `analyzing` has an ambiguous external-provider outcome: startup must not
+   return it to `pending` when that could invoke the provider again. Unless a
+   durable pre-provider distinction proves the provider was never invoked,
+   stale `analyzing` fails closed to terminal `failed` with sanitized
+   `ANALYSIS_OUTCOME_UNKNOWN` (not automatically retryable). FrameNest does
+   not claim generic exactly-once execution; it guarantees no replay after a
+   durably completed run and no automatic replay of ambiguous stale
+   `analyzing`. Manual administrator retry and provider-supported idempotency
+   remain deferred.
+7. API exposes capability and per-media status without credentials, paths, or
    raw provider payloads. Gallery visibility does not depend on analysis state.
-7. Existing on-demand preview routes remain unchanged.
+8. Existing on-demand preview routes remain unchanged.
 
 ## Authorization Boundary
 
-Server-owned enablement of automatic analysis is the consent boundary for
-non-interactive cloud frame upload. Credentials remain server-only. The
-current product remains trusted-loopback and single-tenant.
+Server-owned enablement of automatic analysis
+(`FRAMENEST_AUTOMATIC_MEDIA_ANALYSIS_ENABLED=true`) is the consent boundary for
+non-interactive cloud frame upload of newly cataloged media. That standing
+opt-in does not replace interactive per-request `confirm_cloud_upload: true`
+for on-demand preview. Credentials remain server-only. The current product
+remains trusted-loopback and single-tenant.
 
 ## Rejected Alternatives
 
@@ -65,6 +78,8 @@ current product remains trusted-loopback and single-tenant.
 - Catalog success is independent of provider availability.
 - SPEC and PRODUCT statements that forbade all automatic cloud upload are
   narrowed to require explicit server enablement for this path.
+- Ambiguous crash recovery prefers a terminal sanitized failure over risking a
+  duplicate paid provider request.
 - Manual re-analysis history, editable drafts, and provider-management UI
   remain deferred.
 

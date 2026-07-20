@@ -106,4 +106,4 @@ class MediaAnalysisRunRepository(Protocol):
         max_attempts: int,
         updated_at_ms: int,
     ) -> MediaAnalysisRun:
-        """Reconcile an interrupted analyzing row according to attempt policy."""
+        """Fail-closed reconcile for ambiguous interrupted analyzing rows."""

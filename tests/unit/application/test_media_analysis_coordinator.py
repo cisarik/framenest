@@ -106,11 +106,56 @@ class _FakeRepository:
             )
             return self.run
 
-    def record_failed(self, **kwargs):
-        raise AssertionError("unexpected failure")
+    def record_failed(
+        self,
+        *,
+        run_id,
+        expected_version,
+        error_code,
+        error_message,
+        provider_id,
+        model_id,
+        prompt_version,
+        completed_at_ms,
+    ):
+        del run_id, provider_id, model_id, prompt_version
+        with self._lock:
+            assert self.run is not None
+            assert self.run.version == expected_version
+            self.run = replace(
+                self.run,
+                state=MediaAnalysisRunState.FAILED,
+                error_code=error_code,
+                error_message=error_message,
+                completed_at_ms=completed_at_ms,
+                version=self.run.version + 1,
+            )
+            return self.run
 
-    def reset_interrupted_analyzing(self, **kwargs):
-        raise AssertionError("unexpected reset")
+    def reset_interrupted_analyzing(
+        self,
+        *,
+        run_id,
+        expected_version,
+        max_attempts,
+        updated_at_ms,
+    ):
+        del run_id, max_attempts
+        with self._lock:
+            assert self.run is not None
+            assert self.run.version == expected_version
+            self.run = replace(
+                self.run,
+                state=MediaAnalysisRunState.FAILED,
+                error_code="ANALYSIS_OUTCOME_UNKNOWN",
+                error_message=(
+                    "Automatic analysis was interrupted and the provider "
+                    "outcome cannot be determined safely."
+                ),
+                completed_at_ms=updated_at_ms,
+                version=self.run.version + 1,
+            )
+            return self.run
 
     def list_unfinished(self, *, limit, after_created_at_ms=None, after_id=None):
         del limit, after_created_at_ms, after_id
@@ -242,3 +287,119 @@ def test_shutdown_stops_new_work() -> None:
 def test_schedule_target_helper_round_trip() -> None:
     target = CatalogedAnalysisTarget(media_id=MEDIA_ID, media_location_id=LOCATION_ID)
     assert target.media_id == MEDIA_ID
+
+
+def test_stale_analyzing_startup_does_not_invoke_provider() -> None:
+    repository = _FakeRepository()
+    repository.run = MediaAnalysisRun(
+        id=MediaAnalysisRunId("11111111-1111-4111-8111-111111111111"),
+        media_id=MEDIA_ID,
+        media_location_id=LOCATION_ID,
+        analysis_definition=AUTOMATIC_POST_CATALOG_ANALYSIS_DEFINITION,
+        state=MediaAnalysisRunState.ANALYZING,
+        attempt_count=1,
+        provider_id=None,
+        model_id=None,
+        prompt_version=None,
+        result_schema_version=None,
+        result_json=None,
+        error_code=None,
+        error_message=None,
+        created_at_ms=1,
+        started_at_ms=2,
+        completed_at_ms=None,
+        version=2,
+    )
+    scheduler = ScheduleAutomaticMediaAnalysis(repository, enabled=True, now_ms=lambda: 3)
+    executor = _Executor()
+    executor.block.set()
+    service = ExecuteAutomaticMediaAnalysisRun(repository, executor, now_ms=lambda: 4)
+    coordinator = MediaAnalysisCoordinator(repository, scheduler, service)
+
+    async def scenario() -> None:
+        await coordinator.start()
+        await asyncio.sleep(0.05)
+        await coordinator.drain()
+        await coordinator.shutdown()
+        # Repeated startup reconciliation must remain fail-closed.
+        await coordinator.start()
+        await asyncio.sleep(0.05)
+        await coordinator.drain()
+        await coordinator.shutdown()
+        coordinator.notify_cataloged(MEDIA_ID, LOCATION_ID)
+        await asyncio.sleep(0.05)
+        await coordinator.drain()
+
+    asyncio.run(scenario())
+    assert repository.run is not None
+    assert repository.run.state is MediaAnalysisRunState.FAILED
+    assert repository.run.error_code == "ANALYSIS_OUTCOME_UNKNOWN"
+    assert executor.calls == 0
+
+
+def test_crash_window_provider_success_without_persist_does_not_replay() -> None:
+    """Exact ambiguous crash window: provider succeeded, result never persisted."""
+    repository = _FakeRepository()
+    scheduler = ScheduleAutomaticMediaAnalysis(repository, enabled=True, now_ms=lambda: 1)
+    pending = scheduler.execute(
+        CatalogedAnalysisTarget(media_id=MEDIA_ID, media_location_id=LOCATION_ID)
+    )
+    assert pending is not None
+    call_count = {"n": 0}
+
+    class _CountingExecutor:
+        def execute(self, media_id, location_id):
+            del media_id, location_id
+            call_count["n"] += 1
+            return MediaSuggestion(
+                title="Title",
+                description="Description text for suggestion.",
+                collection="Collection",
+                tags=("tag-one",),
+                suggested_filename="title.mp4",
+                confidence=0.8,
+                evidence=("frame evidence",),
+                uncertainties=(),
+                provider_id="nvidia-nim",
+                model_id="test-model",
+                prompt_version=PROMPT_VERSION,
+            )
+
+    service = ExecuteAutomaticMediaAnalysisRun(
+        repository,
+        _CountingExecutor(),
+        now_ms=lambda: 2,
+    )
+    claimed = repository.claim_pending(
+        run_id=pending.id.to_string(),
+        expected_version=pending.version,
+        started_at_ms=2,
+        max_attempts=3,
+    )
+    # Provider returns success once; durable analyzed persistence is interrupted.
+    suggestion = service._executor.execute(claimed.media_id, claimed.media_location_id)
+    assert suggestion.title == "Title"
+    assert call_count["n"] == 1
+    assert repository.run is not None
+    assert repository.run.state is MediaAnalysisRunState.ANALYZING
+
+    coordinator = MediaAnalysisCoordinator(repository, scheduler, service)
+
+    async def recover_twice() -> None:
+        await coordinator.start()
+        await asyncio.sleep(0.05)
+        await coordinator.drain()
+        await coordinator.shutdown()
+        await coordinator.start()
+        await asyncio.sleep(0.05)
+        await coordinator.drain()
+        await coordinator.shutdown()
+        coordinator.notify_cataloged(MEDIA_ID, LOCATION_ID)
+        await asyncio.sleep(0.05)
+        await coordinator.drain()
+
+    asyncio.run(recover_twice())
+    assert call_count["n"] == 1
+    assert repository.run.state is MediaAnalysisRunState.FAILED
+    assert repository.run.error_code == "ANALYSIS_OUTCOME_UNKNOWN"
+    assert repository.run.result_json is None

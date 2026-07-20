@@ -363,7 +363,12 @@ boundary for non-interactive cloud frame upload of newly cataloged media only.
 Interactive suggestion preview continues to require explicit per-request
 confirmation. Automatic analysis MUST NOT invent paid work for historical
 catalog rows, MUST NOT roll back cataloging on provider failure, and MUST
-persist a truthful sanitized lifecycle.
+persist a truthful sanitized lifecycle. A durable run left in `analyzing`
+after process interruption MUST be treated as an ambiguous provider outcome
+and MUST fail closed to terminal `failed` with sanitized
+`ANALYSIS_OUTCOME_UNKNOWN` rather than automatically returning to `pending`
+when that could repeat a possibly paid provider call. FrameNest MUST NOT claim
+generic exactly-once provider execution.
 
 Full playback MUST remain separate from inline preview.
 

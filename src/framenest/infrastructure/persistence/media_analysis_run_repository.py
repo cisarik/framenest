@@ -381,6 +381,8 @@ class SqliteMediaAnalysisRunRepository:
         max_attempts: int,
         updated_at_ms: int,
     ) -> MediaAnalysisRun:
+        del max_attempts  # No durable pre-provider distinction; always fail closed.
+
         def operation(connection: Connection) -> MediaAnalysisRun:
             row = _require_row(connection, run_id)
             if (
@@ -388,38 +390,27 @@ class SqliteMediaAnalysisRunRepository:
                 or row["version"] != expected_version
             ):
                 raise MediaAnalysisRunConflictError(_REPOSITORY_FAILURE_MESSAGE)
-            if int(row["attempt_count"]) >= max_attempts:
-                updated = connection.execute(
-                    update(media_analysis_runs)
-                    .where(
-                        media_analysis_runs.c.id == run_id,
-                        media_analysis_runs.c.version == expected_version,
-                        media_analysis_runs.c.state
-                        == MediaAnalysisRunState.ANALYZING.value,
-                    )
-                    .values(
-                        state=MediaAnalysisRunState.FAILED.value,
-                        error_code="ANALYSIS_INTERRUPTED",
-                        error_message="Automatic analysis was interrupted.",
-                        completed_at_ms=updated_at_ms,
-                        version=expected_version + 1,
-                    )
+            # Stale analyzing means the external provider outcome is unknown.
+            # Prefer terminal failure over risking a duplicate paid call.
+            updated = connection.execute(
+                update(media_analysis_runs)
+                .where(
+                    media_analysis_runs.c.id == run_id,
+                    media_analysis_runs.c.version == expected_version,
+                    media_analysis_runs.c.state
+                    == MediaAnalysisRunState.ANALYZING.value,
                 )
-            else:
-                updated = connection.execute(
-                    update(media_analysis_runs)
-                    .where(
-                        media_analysis_runs.c.id == run_id,
-                        media_analysis_runs.c.version == expected_version,
-                        media_analysis_runs.c.state
-                        == MediaAnalysisRunState.ANALYZING.value,
-                    )
-                    .values(
-                        state=MediaAnalysisRunState.PENDING.value,
-                        started_at_ms=None,
-                        version=expected_version + 1,
-                    )
+                .values(
+                    state=MediaAnalysisRunState.FAILED.value,
+                    error_code="ANALYSIS_OUTCOME_UNKNOWN",
+                    error_message=(
+                        "Automatic analysis was interrupted and the provider "
+                        "outcome cannot be determined safely."
+                    ),
+                    completed_at_ms=updated_at_ms,
+                    version=expected_version + 1,
                 )
+            )
             if updated.rowcount != 1:
                 raise MediaAnalysisRunConflictError(_REPOSITORY_FAILURE_MESSAGE)
             return _run_from_row(_require_row(connection, run_id))
