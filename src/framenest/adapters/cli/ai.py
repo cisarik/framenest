@@ -17,6 +17,12 @@ from framenest.application.media_suggestion import (
     MediaSuggestionProviderRateLimitedError,
     MediaSuggestionProviderUnavailableError,
 )
+from framenest.application.still_frame_smoke import (
+    FrameNestStillFrameSmokeError,
+    STILL_FRAME_SMOKE_INVALID_MESSAGE,
+    build_still_frame_smoke_request,
+    prepare_still_frame_smoke_images,
+)
 from framenest.configuration import load_settings
 from framenest.infrastructure.ai.configuration import (
     AiConfigurationError,
@@ -80,6 +86,24 @@ def build_parser() -> argparse.ArgumentParser:
         help="Confirm a non-interactive provider/model configuration.",
     )
     subcommands.add_parser("test", help="Run one explicit text-only provider connection test.")
+    still_frame_smoke = subcommands.add_parser(
+        "still-frame-smoke",
+        help="Run one non-persistent still-frame provider smoke with local images.",
+    )
+    still_frame_smoke.add_argument(
+        "--image",
+        action="append",
+        dest="images",
+        required=True,
+        type=Path,
+        help="Local still image path. Repeat one to three times.",
+    )
+    still_frame_smoke.add_argument(
+        "--confirm-cloud-upload",
+        action="store_true",
+        dest="confirm_cloud_upload",
+        help="Required explicit confirmation before contacting the configured provider.",
+    )
     return parser
 
 
@@ -105,6 +129,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             return configure_command(context)
         if args.command == "test":
             return test_command(context)
+        if args.command == "still-frame-smoke":
+            return still_frame_smoke_command(
+                context,
+                image_paths=tuple(args.images),
+                confirm_cloud_upload=args.confirm_cloud_upload,
+            )
     except AiConfigurationError as exc:
         print(f"AI configuration error: {exc}", file=sys.stderr)
         return 2
@@ -280,6 +310,76 @@ def test_command(context: _CliContext, *, output: Output = print) -> int:
             lock_path.unlink(missing_ok=True)
         except OSError:
             pass
+
+
+def still_frame_smoke_command(
+    context: _CliContext,
+    *,
+    image_paths: tuple[Path, ...],
+    confirm_cloud_upload: bool,
+    output: Output = print,
+) -> int:
+    """Run one non-persistent still-frame provider smoke."""
+    if not confirm_cloud_upload:
+        output("AI still-frame smoke: confirmation_required")
+        output("Pass --confirm-cloud-upload to contact the configured provider.")
+        return 2
+    resolved = _resolve(context)
+    if resolved.source == "unconfigured":
+        output("AI still-frame smoke: not configured")
+        output("Configure server AI provider state before still-frame smoke.")
+        return 2
+    if resolved.provider_id != DEFAULT_PROVIDER_ID:
+        output("AI still-frame smoke: unsupported_provider")
+        output("Still-frame smoke requires the configured NVIDIA NIM provider.")
+        return 2
+    if not resolved.credential_available or resolved.provider is None:
+        output("AI still-frame smoke: authentication_failed")
+        output("Credential available to this process: no")
+        output(f"Required credential environment variable: {resolved.credential_environment_name}")
+        return 2
+    try:
+        images = prepare_still_frame_smoke_images(image_paths)
+        request = build_still_frame_smoke_request(images)
+    except FrameNestStillFrameSmokeError:
+        output("AI still-frame smoke: invalid_input")
+        output(STILL_FRAME_SMOKE_INVALID_MESSAGE)
+        return 2
+    try:
+        suggestion = resolved.provider.suggest(request)
+    except MediaSuggestionProviderAuthError:
+        output("AI still-frame smoke: authentication_failed")
+        return 2
+    except MediaSuggestionProviderRateLimitedError:
+        output("AI still-frame smoke: rate_limited_or_quota_exhausted")
+        return 2
+    except MediaSuggestionProviderModelUnavailableError:
+        output("AI still-frame smoke: model_unavailable")
+        return 2
+    except MediaSuggestionProviderUnavailableError:
+        output("AI still-frame smoke: provider_unreachable")
+        return 2
+    except MediaSuggestionProviderInvalidResponseError:
+        output("AI still-frame smoke: invalid_response")
+        return 2
+    except MediaSuggestionProviderFailedError:
+        output("AI still-frame smoke: provider_error")
+        return 2
+    except Exception:
+        output("AI still-frame smoke: provider_error")
+        return 2
+    output("AI still-frame smoke: success")
+    output(f"Provider: {resolved.display_name}")
+    output(f"Model: {resolved.model_id}")
+    output(f"Sent frames: {len(images)}")
+    for index, image in enumerate(images, start=1):
+        output(
+            f"Frame {index}: {image.width}x{image.height} {image.format_name} {image.byte_size} bytes"
+        )
+    output(f"Suggestion title length: {len(suggestion.title)}")
+    output(f"Suggestion tag count: {len(suggestion.tags)}")
+    output(f"Prompt version: {suggestion.prompt_version}")
+    return 0
 
 
 def _resolve(context: _CliContext) -> ResolvedAiProvider:

@@ -21,7 +21,7 @@ from framenest.infrastructure.ai.configuration import (
     load_ai_status_snapshot,
     load_ai_test_state,
 )
-from framenest.infrastructure.ai.constants import VERCEL_AI_GATEWAY_DEFAULT_MODEL_ID
+from framenest.infrastructure.ai.constants import DEFAULT_PROVIDER_ID, VERCEL_AI_GATEWAY_DEFAULT_MODEL_ID
 
 
 def test_configure_can_cancel_without_mutation(tmp_path: Path) -> None:
@@ -389,3 +389,119 @@ def test_test_command_categorizes_safe_failures(
     output = "\n".join(lines)
     assert category in output
     assert "raw" not in output
+
+
+def test_still_frame_smoke_requires_confirmation(tmp_path: Path) -> None:
+    assert (
+        ai.main(
+            [
+                "--config-path",
+                str(tmp_path / "config.json"),
+                "still-frame-smoke",
+                "--image",
+                str(tmp_path / "a.jpg"),
+            ]
+        )
+        == 2
+    )
+
+
+def test_still_frame_smoke_performs_one_suggest_without_persistence(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from PIL import Image
+
+    from framenest.application.media_suggestion import MediaSuggestion, PROMPT_VERSION
+
+    image_path = tmp_path / "frame.jpg"
+    Image.new("RGB", (48, 32), (12, 34, 56)).save(image_path, format="JPEG")
+
+    class _Provider:
+        calls = 0
+        last_request = None
+
+        def suggest(self, request):  # noqa: ANN001
+            self.calls += 1
+            self.last_request = request
+            return MediaSuggestion(
+                title="Synthetic smoke",
+                description="Bounded still-frame smoke suggestion.",
+                collection="Smoke",
+                tags=("synthetic",),
+                suggested_filename="still-frame-smoke.jpg",
+                confidence=0.5,
+                evidence=("flat color frame",),
+                uncertainties=("synthetic input",),
+                provider_id=DEFAULT_PROVIDER_ID,
+                model_id="nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
+                prompt_version=PROMPT_VERSION,
+            )
+
+        def test_connection(self) -> None:
+            raise AssertionError("text-only test must not run")
+
+    provider = _Provider()
+    resolved = ai.ResolvedAiProvider(
+        provider_id=DEFAULT_PROVIDER_ID,
+        display_name="NVIDIA NIM",
+        model_id="nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
+        source="server config",
+        credential_environment_name="NVIDIA_API_KEY",
+        credential_available=True,
+        provider=provider,
+        last_test=None,
+        last_status=None,
+        config_path=tmp_path / "config.json",
+        test_state_path=tmp_path / "test-state.json",
+        status_snapshot_path=tmp_path / "status-snapshot.json",
+    )
+    monkeypatch.setattr(ai, "_resolve", lambda _context: resolved)
+    lines: list[str] = []
+
+    result = ai.still_frame_smoke_command(
+        ai._CliContext(config_path=tmp_path / "config.json"),
+        image_paths=(image_path,),
+        confirm_cloud_upload=True,
+        output=lines.append,
+    )
+
+    assert result == 0
+    assert provider.calls == 1
+    assert provider.last_request is not None
+    assert len(provider.last_request.representative_frames) == 1
+    assert not (tmp_path / "test-state.json").exists()
+    output = "\n".join(lines)
+    assert "AI still-frame smoke: success" in output
+    assert "Sent frames: 1" in output
+    assert "secret" not in output.lower()
+
+
+def test_still_frame_smoke_rejects_non_nvidia_provider(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    resolved = ai.ResolvedAiProvider(
+        provider_id="vercel-ai-gateway",
+        display_name="Vercel AI Gateway",
+        model_id=VERCEL_AI_GATEWAY_DEFAULT_MODEL_ID,
+        source="server config",
+        credential_environment_name="AI_GATEWAY_API_KEY",
+        credential_available=True,
+        provider=object(),
+        last_test=None,
+        last_status=None,
+        config_path=tmp_path / "config.json",
+        test_state_path=tmp_path / "test-state.json",
+        status_snapshot_path=tmp_path / "status-snapshot.json",
+    )
+    monkeypatch.setattr(ai, "_resolve", lambda _context: resolved)
+    lines: list[str] = []
+    result = ai.still_frame_smoke_command(
+        ai._CliContext(config_path=tmp_path / "config.json"),
+        image_paths=(tmp_path / "missing.jpg",),
+        confirm_cloud_upload=True,
+        output=lines.append,
+    )
+    assert result == 2
+    assert "unsupported_provider" in "\n".join(lines)
