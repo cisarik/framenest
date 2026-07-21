@@ -72,6 +72,7 @@ from framenest.application.media_analysis_lifecycle import (
     AutomaticImportedMediaSuggestionExecutor,
     ExecuteAutomaticMediaAnalysisRun,
     ReadAutomaticMediaAnalysis,
+    RequestManualMediaAnalysis,
     ScheduleAutomaticMediaAnalysis,
 )
 from framenest.application.upload_publication import PublishPendingUpload
@@ -309,6 +310,9 @@ def create_app(
             owned_media_analysis_run_repository,
             enabled=resolved_settings.automatic_media_analysis_enabled,
         )
+        analysis_manual_requester = RequestManualMediaAnalysis(
+            owned_media_analysis_run_repository,
+        )
         analysis_executor = ExecuteAutomaticMediaAnalysisRun(
             owned_media_analysis_run_repository,
             AutomaticImportedMediaSuggestionExecutor(
@@ -323,6 +327,7 @@ def create_app(
             owned_media_analysis_run_repository,
             analysis_scheduler,
             analysis_executor,
+            manual_requester=analysis_manual_requester,
         )
         media_analysis_lifecycle_api_dependencies = MediaAnalysisLifecycleApiDependencies(
             read_analysis=ReadAutomaticMediaAnalysis(
@@ -334,6 +339,7 @@ def create_app(
             provider_configured=analysis_provider is not None,
             provider_id=resolved_analysis_ai.provider_id,
             model_id=resolved_analysis_ai.model_id,
+            request_manual_analysis=owned_media_analysis_coordinator.request_manual,
         )
     if upload_api_dependencies is None:
         assert owned_upload_session_repository is not None

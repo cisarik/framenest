@@ -286,3 +286,105 @@ def test_analyzed_read_is_side_effect_free_and_does_not_schedule_provider_work()
     assert first.json() == second.json()
     assert SECRET not in first.text
     assert PRIVATE_PATH not in first.text
+
+
+def test_manual_durable_analysis_request_requires_confirmation_and_schedules() -> None:
+    calls: list[tuple[MediaId, object]] = []
+
+    def _request(media_id: MediaId, location_id: object) -> object:
+        from framenest.domain.media_analysis_runs import (
+            AUTOMATIC_POST_CATALOG_ANALYSIS_DEFINITION,
+            MediaAnalysisRun,
+            MediaAnalysisRunId,
+            MediaAnalysisRunState,
+        )
+        from framenest.domain.identities import MediaLocationId
+
+        assert isinstance(location_id, MediaLocationId)
+        calls.append((media_id, location_id))
+        return MediaAnalysisRun(
+            id=MediaAnalysisRunId("11111111-1111-4111-8111-111111111111"),
+            media_id=media_id,
+            media_location_id=location_id,
+            analysis_definition=AUTOMATIC_POST_CATALOG_ANALYSIS_DEFINITION,
+            state=MediaAnalysisRunState.PENDING,
+            attempt_count=0,
+            provider_id=None,
+            model_id=None,
+            prompt_version=None,
+            result_schema_version=None,
+            result_json=None,
+            error_code=None,
+            error_message=None,
+            created_at_ms=10,
+            started_at_ms=None,
+            completed_at_ms=None,
+            version=1,
+        )
+
+    location_id = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+    settings = FrameNestSettings(
+        host="127.0.0.1",
+        database_path=Path("/tmp/framenest-analysis-lifecycle-api-manual.sqlite3"),
+        automatic_media_analysis_enabled=False,
+        _env_file=None,
+    )
+    app = create_app(
+        settings=settings,
+        library_api_dependencies=LibraryApiDependencies(
+            repository=object(),  # type: ignore[arg-type]
+            scan_preview=object(),
+            catalog_available=lambda: True,
+        ),
+        media_analysis_api_dependencies=MediaAnalysisApiDependencies(
+            prepare_preview=object(),
+            catalog_available=lambda: True,
+        ),
+        media_suggestion_api_dependencies=MediaSuggestionApiDependencies(
+            preview_suggestion=None,
+            provider_configured=False,
+        ),
+        media_analysis_lifecycle_api_dependencies=MediaAnalysisLifecycleApiDependencies(
+            read_analysis=_FakeReadAnalysis(
+                AutomaticAnalysisPublicView(
+                    state="not_requested",
+                    analysis_definition=None,
+                    provider_id=None,
+                    model_id=None,
+                    prompt_version=None,
+                    result=None,
+                    error_code=None,
+                    error_message=None,
+                    attempt_count=None,
+                    created_at_ms=None,
+                    started_at_ms=None,
+                    completed_at_ms=None,
+                )
+            ),  # type: ignore[arg-type]
+            automatic_analysis_enabled=False,
+            provider_configured=True,
+            provider_id="nvidia-nim",
+            model_id="test-model",
+            request_manual_analysis=_request,  # type: ignore[arg-type]
+        ),
+    )
+    client = TestClient(app)
+    denied = client.post(
+        f"/api/media/{CANONICAL_MEDIA_ID}/locations/{location_id}/durable-analysis",
+        json={"confirm_cloud_upload": False},
+    )
+    assert denied.status_code == 409
+    assert denied.json()["error"]["code"] == "CLOUD_CONFIRMATION_REQUIRED"
+    assert calls == []
+    accepted = client.post(
+        f"/api/media/{CANONICAL_MEDIA_ID}/locations/{location_id}/durable-analysis",
+        json={"confirm_cloud_upload": True},
+    )
+    assert accepted.status_code == 200
+    payload = accepted.json()
+    assert payload["state"] == "pending"
+    assert payload["automatic_analysis_enabled"] is False
+    assert payload["result"] is None
+    assert len(calls) == 1
+    assert SECRET not in accepted.text
+    assert PRIVATE_PATH not in accepted.text

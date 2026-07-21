@@ -208,6 +208,38 @@ class ScheduleAutomaticMediaAnalysis:
             ) from exc
 
 
+class RequestManualMediaAnalysis:
+    """Explicitly request one durable analysis run for cataloged media.
+
+    Independent of automatic post-catalog enablement so operators can analyze
+    one item while FRAMENEST_AUTOMATIC_MEDIA_ANALYSIS_ENABLED remains false.
+    """
+
+    def __init__(
+        self,
+        repository: MediaAnalysisRunRepository,
+        *,
+        now_ms: Callable[[], int] = default_now_ms,
+        analysis_definition: str = AUTOMATIC_POST_CATALOG_ANALYSIS_DEFINITION,
+    ) -> None:
+        self._repository = repository
+        self._now_ms = now_ms
+        self._analysis_definition = analysis_definition
+
+    def execute(self, target: CatalogedAnalysisTarget) -> MediaAnalysisRun:
+        try:
+            return self._repository.create_pending(
+                media_id=target.media_id,
+                media_location_id=target.media_location_id,
+                analysis_definition=self._analysis_definition,
+                created_at_ms=self._now_ms(),
+            )
+        except FrameNestMediaAnalysisRunRepositoryError as exc:
+            raise MediaAnalysisLifecycleError(
+                "manual analysis request failed"
+            ) from exc
+
+
 class ExecuteAutomaticMediaAnalysisRun:
     """Claim, execute outside the DB transaction, and persist terminal truth."""
 

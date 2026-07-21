@@ -209,6 +209,28 @@ def test_notify_cataloged_disabled_does_not_create_run() -> None:
     assert repository.run is None
 
 
+def test_request_manual_works_when_automatic_scheduling_disabled() -> None:
+    repository = _FakeRepository()
+    scheduler = ScheduleAutomaticMediaAnalysis(repository, enabled=False)
+    executor = _Executor()
+    executor.block.set()
+    service = ExecuteAutomaticMediaAnalysisRun(repository, executor, now_ms=lambda: 2)
+    coordinator = MediaAnalysisCoordinator(repository, scheduler, service)
+
+    async def scenario() -> None:
+        await coordinator.start()
+        run = coordinator.request_manual(MEDIA_ID, LOCATION_ID)
+        assert run.state is MediaAnalysisRunState.PENDING
+        await asyncio.sleep(0.05)
+        await coordinator.drain()
+        await coordinator.shutdown()
+
+    asyncio.run(scenario())
+    assert repository.run is not None
+    assert repository.run.state is MediaAnalysisRunState.ANALYZED
+    assert executor.calls == 1
+
+
 def test_notify_cataloged_enabled_is_idempotent_and_executes_once() -> None:
     repository = _FakeRepository()
     scheduler = ScheduleAutomaticMediaAnalysis(repository, enabled=True, now_ms=lambda: 1)

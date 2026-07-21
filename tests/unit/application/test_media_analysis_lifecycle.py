@@ -11,6 +11,7 @@ from framenest.application.media_analysis_lifecycle import (
     AutomaticAnalysisPublicView,
     CatalogedAnalysisTarget,
     ExecuteAutomaticMediaAnalysisRun,
+    RequestManualMediaAnalysis,
     ScheduleAutomaticMediaAnalysis,
     public_view_from_run,
     serialize_suggestion_result,
@@ -245,6 +246,17 @@ def test_schedule_disabled_creates_no_run() -> None:
         is None
     )
     assert repository.run is None
+
+
+def test_manual_request_creates_pending_when_automatic_disabled() -> None:
+    repository = _FakeRepository()
+    requester = RequestManualMediaAnalysis(repository, now_ms=lambda: 42)
+    run = requester.execute(
+        CatalogedAnalysisTarget(media_id=MEDIA_ID, media_location_id=LOCATION_ID)
+    )
+    assert run.state is MediaAnalysisRunState.PENDING
+    assert run.created_at_ms == 42
+    assert repository.transactions.count("create_pending") == 1
 
 
 def test_schedule_enabled_is_idempotent() -> None:

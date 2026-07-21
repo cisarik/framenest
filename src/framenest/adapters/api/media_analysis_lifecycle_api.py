@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from fastapi import APIRouter
@@ -12,10 +13,12 @@ from framenest.application.media_analysis_lifecycle import (
     AutomaticAnalysisPublicView,
     MediaAnalysisLifecycleError,
     ReadAutomaticMediaAnalysis,
+    public_view_from_run,
 )
-from framenest.domain.identities import FrameNestIdentityError, MediaId
+from framenest.domain.identities import FrameNestIdentityError, MediaId, MediaLocationId
 from framenest.domain.media_analysis_runs import (
     AUTOMATIC_POST_CATALOG_ANALYSIS_DEFINITION,
+    MediaAnalysisRun,
     RESULT_SCHEMA_VERSION,
 )
 
@@ -75,6 +78,12 @@ class AutomaticAnalysisCapabilityResponse(BaseModel):
     model_id: str | None = None
 
 
+class ManualDurableAnalysisRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    confirm_cloud_upload: bool
+
+
 @dataclass(frozen=True, slots=True)
 class MediaAnalysisLifecycleApiDependencies:
     """Injected dependencies for automatic analysis status routes."""
@@ -84,6 +93,9 @@ class MediaAnalysisLifecycleApiDependencies:
     provider_configured: bool
     provider_id: str | None = None
     model_id: str | None = None
+    request_manual_analysis: (
+        Callable[[MediaId, MediaLocationId], MediaAnalysisRun] | None
+    ) = None
 
 
 def create_media_analysis_lifecycle_api_router(
@@ -140,6 +152,60 @@ def create_media_analysis_lifecycle_api_router(
         return _status_response(
             media_id=parsed_media_id.to_string(),
             view=view,
+            automatic_analysis_enabled=dependencies.automatic_analysis_enabled,
+        )
+
+    @router.post(
+        "/api/media/{media_id}/locations/{location_id}/durable-analysis",
+        response_model=AutomaticAnalysisStatusResponse,
+        responses={
+            404: {"model": ErrorResponse},
+            409: {"model": ErrorResponse},
+            503: {"model": ErrorResponse},
+        },
+    )
+    def request_durable_analysis(
+        media_id: str,
+        location_id: str,
+        request: ManualDurableAnalysisRequest,
+    ) -> AutomaticAnalysisStatusResponse | JSONResponse:
+        if request.confirm_cloud_upload is not True:
+            return _error(
+                "CLOUD_CONFIRMATION_REQUIRED",
+                "Cloud frame upload confirmation is required.",
+                409,
+            )
+        if not dependencies.provider_configured:
+            return _error(
+                "AI_PROVIDER_NOT_CONFIGURED",
+                "AI analysis is not configured.",
+                503,
+            )
+        if dependencies.request_manual_analysis is None:
+            return _error(
+                "ANALYSIS_REQUEST_UNAVAILABLE",
+                "Durable analysis request is unavailable.",
+                503,
+            )
+        try:
+            parsed_media_id = MediaId.from_string(media_id)
+            parsed_location_id = MediaLocationId.from_string(location_id)
+        except FrameNestIdentityError:
+            return _error("MEDIA_NOT_FOUND", "Media was not found.", 404)
+        try:
+            run = dependencies.request_manual_analysis(
+                parsed_media_id,
+                parsed_location_id,
+            )
+        except MediaAnalysisLifecycleError:
+            return _error(
+                "ANALYSIS_REQUEST_UNAVAILABLE",
+                "Durable analysis request is unavailable.",
+                503,
+            )
+        return _status_response(
+            media_id=parsed_media_id.to_string(),
+            view=public_view_from_run(run),
             automatic_analysis_enabled=dependencies.automatic_analysis_enabled,
         )
 

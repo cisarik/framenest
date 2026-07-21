@@ -10,6 +10,7 @@ from framenest.application.media_analysis_lifecycle import (
     CatalogedAnalysisTarget,
     ExecuteAutomaticMediaAnalysisRun,
     MediaAnalysisLifecycleError,
+    RequestManualMediaAnalysis,
     ScheduleAutomaticMediaAnalysis,
 )
 from framenest.application.ports.media_analysis_runs import (
@@ -52,6 +53,7 @@ class MediaAnalysisCoordinator:
         scheduler: ScheduleAutomaticMediaAnalysis,
         executor_service: ExecuteAutomaticMediaAnalysisRun,
         *,
+        manual_requester: RequestManualMediaAnalysis | None = None,
         batch_size: int = DEFAULT_MEDIA_ANALYSIS_BATCH_SIZE,
         executor: ThreadPoolExecutor | None = None,
         retry_initial_delay_seconds: float = (
@@ -74,6 +76,9 @@ class MediaAnalysisCoordinator:
         self._repository = repository
         self._scheduler = scheduler
         self._executor_service = executor_service
+        self._manual_requester = manual_requester or RequestManualMediaAnalysis(
+            repository
+        )
         self._batch_size = batch_size
         self._executor = executor
         self._owns_executor = executor is None
@@ -134,6 +139,27 @@ class MediaAnalysisCoordinator:
             )
             return
         self.notify()
+
+    def request_manual(
+        self,
+        media_id: MediaId,
+        media_location_id: MediaLocationId,
+    ) -> MediaAnalysisRun:
+        """Request one durable analysis run without enabling automatic scheduling."""
+        if self._stopping:
+            raise MediaAnalysisLifecycleError("media analysis coordinator is stopping")
+        run = self._manual_requester.execute(
+            CatalogedAnalysisTarget(
+                media_id=media_id,
+                media_location_id=media_location_id,
+            )
+        )
+        if run.state in {
+            MediaAnalysisRunState.PENDING,
+            MediaAnalysisRunState.ANALYZING,
+        }:
+            self.notify()
+        return run
 
     async def drain(self) -> None:
         """Process currently discoverable unfinished work once for tests."""
