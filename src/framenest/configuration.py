@@ -11,6 +11,11 @@ import uuid
 from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from framenest.domain.media_analysis_runs import (
+    DEFAULT_MAX_ANALYSIS_ATTEMPTS,
+    MAX_CONFIGURED_ANALYSIS_ATTEMPTS,
+)
+
 DEFAULT_ENV_FILE = Path(".env")
 DEVELOPMENT_DATABASE_DIRECTORY = "framenest-development"
 DEVELOPMENT_DATABASE_FILENAME = "catalog.sqlite3"
@@ -91,6 +96,11 @@ class FrameNestSettings(BaseSettings):
     ai_provider_id: str | None = Field(default=None)
     ai_model_id: str | None = Field(default=None)
     automatic_media_analysis_enabled: bool = Field(default=False)
+    automatic_media_analysis_max_attempts: int = Field(
+        default=DEFAULT_MAX_ANALYSIS_ATTEMPTS,
+        ge=1,
+        le=MAX_CONFIGURED_ANALYSIS_ATTEMPTS,
+    )
 
     @field_validator("host")
     @classmethod

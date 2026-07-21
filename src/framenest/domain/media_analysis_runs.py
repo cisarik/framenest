@@ -20,6 +20,7 @@ class MediaAnalysisRunState(str, Enum):
 AUTOMATIC_POST_CATALOG_ANALYSIS_DEFINITION = "automatic_post_catalog"
 RESULT_SCHEMA_VERSION = "framenest-media-suggestion-result-v1"
 DEFAULT_MAX_ANALYSIS_ATTEMPTS = 3
+MAX_CONFIGURED_ANALYSIS_ATTEMPTS = 10
 
 ACTIVE_ANALYSIS_RUN_STATES = frozenset(
     {

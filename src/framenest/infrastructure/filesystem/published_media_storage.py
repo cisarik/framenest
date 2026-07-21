@@ -6,9 +6,12 @@ import errno
 import hashlib
 import os
 from pathlib import Path
+import shutil
 import stat as stat_module
 
 from framenest.application.ports.published_media_storage import (
+    PublishedMediaInsufficientSpaceError,
+    PublishedMediaStorageError,
     PublishedMediaStorageUnavailableError,
     PublishedMediaTargetCollisionError,
     PublishedMediaVerificationError,
@@ -32,10 +35,17 @@ class FilesystemPublishedMediaStorage:
         root: Path,
         *,
         forbidden_roots: tuple[Path, ...] = (),
+        min_free_space_reserve_bytes: int = 0,
     ) -> None:
+        if (
+            isinstance(min_free_space_reserve_bytes, bool)
+            or min_free_space_reserve_bytes < 0
+        ):
+            raise ValueError("min free space reserve bytes must be non-negative")
         self._destination_id = destination_id
         self._root = root
         self._forbidden_roots = forbidden_roots
+        self._min_free_space_reserve_bytes = min_free_space_reserve_bytes
 
     @property
     def destination_id(self) -> LibraryId:
@@ -53,6 +63,15 @@ class FilesystemPublishedMediaStorage:
             return False
         _close_descriptor(root_fd)
         return True
+
+    def available_bytes(self) -> int:
+        self._validate_root_path()
+        try:
+            return shutil.disk_usage(self._root).free
+        except OSError as exc:
+            raise PublishedMediaStorageUnavailableError(
+                "published media storage unavailable"
+            ) from exc
 
     def verify_target(self, publication: UploadPublication) -> bool:
         self._require_destination(publication)
@@ -79,12 +98,21 @@ class FilesystemPublishedMediaStorage:
                 raise PublishedMediaVerificationError(
                     "published media verification failed"
                 )
-            temp_fd = _open_owned_temporary(root_fd, temp_name)
+            # Publication always copies source bytes into a destination temporary
+            # before hardlinking within the same destination filesystem. Charge the
+            # full source size plus reserve; do not assume rename/hardlink from
+            # quarantine can avoid allocation.
+            self._ensure_space_for_copy(publication.expected_size_bytes)
             try:
-                _copy_and_verify_source(temp_fd, source, publication)
-                _fsync_file(temp_fd)
-            finally:
-                _close_descriptor(temp_fd)
+                temp_fd = _open_owned_temporary(root_fd, temp_name)
+                try:
+                    _copy_and_verify_source(temp_fd, source, publication)
+                    _fsync_file(temp_fd)
+                finally:
+                    _close_descriptor(temp_fd)
+            except PublishedMediaInsufficientSpaceError:
+                _unlink_owned_temporary(root_fd, temp_name)
+                raise
             try:
                 os.link(
                     temp_name,
@@ -104,6 +132,11 @@ class FilesystemPublishedMediaStorage:
                         raise PublishedMediaTargetCollisionError(
                             "published media target collision"
                         ) from exc
+                elif exc.errno == errno.ENOSPC:
+                    _unlink_owned_temporary(root_fd, temp_name)
+                    raise PublishedMediaInsufficientSpaceError(
+                        "insufficient published media storage"
+                    ) from exc
                 else:
                     raise PublishedMediaWriteError(
                         "published media write failed"
@@ -117,6 +150,21 @@ class FilesystemPublishedMediaStorage:
             _fsync_directory(root_fd)
         finally:
             _close_descriptor(root_fd)
+
+    def _ensure_space_for_copy(self, requested_bytes: int) -> None:
+        if isinstance(requested_bytes, bool) or requested_bytes < 0:
+            raise PublishedMediaVerificationError(
+                "published media verification failed"
+            )
+        try:
+            available = self.available_bytes()
+        except PublishedMediaStorageUnavailableError:
+            raise
+        required = requested_bytes + self._min_free_space_reserve_bytes
+        if required > available:
+            raise PublishedMediaInsufficientSpaceError(
+                "insufficient published media storage"
+            )
 
     def _require_destination(self, publication: UploadPublication) -> None:
         if publication.destination_id != self._destination_id:
@@ -202,6 +250,10 @@ def _open_owned_temporary(root_fd: int, name: str) -> int:
         except OSError as exc:
             raise PublishedMediaWriteError("published media write failed") from exc
     except OSError as exc:
+        if exc.errno == errno.ENOSPC:
+            raise PublishedMediaInsufficientSpaceError(
+                "insufficient published media storage"
+            ) from exc
         raise PublishedMediaWriteError("published media write failed") from exc
     try:
         stat_result = os.fstat(fd)
@@ -241,7 +293,7 @@ def _copy_and_verify_source(
             _write_all(target_fd, chunk)
         source.verify_still_consistent()
         stat_result = os.fstat(target_fd)
-    except PublishedMediaVerificationError:
+    except PublishedMediaStorageError:
         raise
     except Exception as exc:
         raise PublishedMediaVerificationError(
@@ -302,6 +354,10 @@ def _write_all(fd: int, data: bytes) -> None:
         try:
             written = os.write(fd, view)
         except OSError as exc:
+            if exc.errno == errno.ENOSPC:
+                raise PublishedMediaInsufficientSpaceError(
+                    "insufficient published media storage"
+                ) from exc
             raise PublishedMediaWriteError("published media write failed") from exc
         if written <= 0:
             raise PublishedMediaWriteError("published media write failed")
@@ -312,6 +368,10 @@ def _fsync_file(fd: int) -> None:
     try:
         os.fsync(fd)
     except OSError as exc:
+        if exc.errno == errno.ENOSPC:
+            raise PublishedMediaInsufficientSpaceError(
+                "insufficient published media storage"
+            ) from exc
         raise PublishedMediaWriteError("published media write failed") from exc
 
 

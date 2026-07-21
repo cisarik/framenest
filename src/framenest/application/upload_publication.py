@@ -7,6 +7,7 @@ from dataclasses import dataclass
 import time
 
 from framenest.application.ports.published_media_storage import (
+    PublishedMediaInsufficientSpaceError,
     PublishedMediaStorage,
     PublishedMediaStorageError,
 )
@@ -53,6 +54,10 @@ class UploadPublicationSourceError(UploadPublicationError):
 
 class UploadPublicationInfrastructureError(UploadPublicationError):
     """Raised when storage or persistence safely leaves work retryable."""
+
+
+class UploadPublicationInsufficientSpaceError(UploadPublicationInfrastructureError):
+    """Raised when destination free space is insufficient before materialization."""
 
 
 class UploadPublicationCleanupPendingError(UploadPublicationInfrastructureError):
@@ -116,6 +121,10 @@ class PublishPendingUpload:
         except FrameNestUploadPublicationRepositoryError as exc:
             raise UploadPublicationInfrastructureError(
                 "upload publication operation failed"
+            ) from exc
+        except PublishedMediaInsufficientSpaceError as exc:
+            raise UploadPublicationInsufficientSpaceError(
+                "insufficient published media storage"
             ) from exc
         except PublishedMediaStorageError as exc:
             raise UploadPublicationInfrastructureError(

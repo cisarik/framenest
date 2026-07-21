@@ -27,6 +27,8 @@ FRAMENEST_ENV_VARS = (
     "FRAMENEST_UPLOAD_MIN_FREE_SPACE_RESERVE_BYTES",
     "FRAMENEST_AI_PROVIDER_ID",
     "FRAMENEST_AI_MODEL_ID",
+    "FRAMENEST_AUTOMATIC_MEDIA_ANALYSIS_ENABLED",
+    "FRAMENEST_AUTOMATIC_MEDIA_ANALYSIS_MAX_ATTEMPTS",
 )
 
 
@@ -350,3 +352,37 @@ def test_dotenv_is_gitignored() -> None:
     )
     assert result.returncode == 0
     assert ".env" in result.stdout
+
+
+def test_automatic_media_analysis_max_attempts_defaults_compatibly(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from framenest.domain.media_analysis_runs import DEFAULT_MAX_ANALYSIS_ATTEMPTS
+
+    monkeypatch.chdir(tmp_path)
+    settings = load_settings(env_file=None)
+    assert settings.automatic_media_analysis_max_attempts == DEFAULT_MAX_ANALYSIS_ATTEMPTS
+    assert settings.automatic_media_analysis_max_attempts == 3
+
+
+def test_automatic_media_analysis_max_attempts_override_one(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("FRAMENEST_AUTOMATIC_MEDIA_ANALYSIS_MAX_ATTEMPTS", "1")
+    settings = load_settings(env_file=None)
+    assert settings.automatic_media_analysis_max_attempts == 1
+
+
+@pytest.mark.parametrize("invalid", ["0", "-1", "11"])
+def test_automatic_media_analysis_max_attempts_rejects_invalid(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    invalid: str,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("FRAMENEST_AUTOMATIC_MEDIA_ANALYSIS_MAX_ATTEMPTS", invalid)
+    with pytest.raises(ValidationError):
+        load_settings(env_file=None)

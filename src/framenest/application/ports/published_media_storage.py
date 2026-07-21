@@ -17,6 +17,10 @@ class PublishedMediaStorageUnavailableError(PublishedMediaStorageError):
     """Raised when the configured publication destination is unsafe or unavailable."""
 
 
+class PublishedMediaInsufficientSpaceError(PublishedMediaStorageError):
+    """Raised when destination free space is insufficient for publication allocation."""
+
+
 class PublishedMediaTargetCollisionError(PublishedMediaStorageError):
     """Raised when an unexpected object owns the reserved final target."""
 
@@ -39,6 +43,9 @@ class PublishedMediaStorage(Protocol):
     @property
     def root_available(self) -> bool:
         """Return whether the configured root is currently safe and writable."""
+
+    def available_bytes(self) -> int:
+        """Return free bytes on the destination filesystem without exposing paths."""
 
     def verify_target(self, publication: UploadPublication) -> bool:
         """Return True for exact final bytes, False when absent, or reject collision."""

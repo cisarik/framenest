@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import errno
 import os
 from pathlib import Path
 import stat
@@ -11,6 +12,7 @@ import uuid
 import pytest
 
 from framenest.application.ports.published_media_storage import (
+    PublishedMediaInsufficientSpaceError,
     PublishedMediaStorageUnavailableError,
     PublishedMediaTargetCollisionError,
     PublishedMediaVerificationError,
@@ -428,3 +430,271 @@ def test_root_must_be_native_non_symlink_writable_and_separate(
     assert missing.root_available is False
     with pytest.raises(PublishedMediaStorageUnavailableError):
         overlapping.verify_target(publication)
+
+
+def test_destination_free_space_is_queried_before_copy_allocation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    data = b"synthetic-capacity-check"
+    publication = _publication(data)
+    quarantine, key, _ = _quarantine(tmp_path, data)
+    published, root = _published_storage(tmp_path, publication)
+    queried: list[Path] = []
+    real_disk_usage = storage_module.shutil.disk_usage
+
+    def tracking_disk_usage(path):
+        queried.append(Path(path))
+        return real_disk_usage(path)
+
+    monkeypatch.setattr(storage_module.shutil, "disk_usage", tracking_disk_usage)
+    reader = quarantine.open_reader(key, expected_size_bytes=len(data))
+    try:
+        published.publish_from_reader(publication, reader)
+    finally:
+        reader.close()
+
+    assert queried == [root]
+    assert published.verify_target(publication) is True
+    assert str(root) not in "insufficient published media storage"
+
+
+def test_insufficient_destination_space_fails_before_partial_materialization(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    data = b"synthetic-no-space"
+    publication = _publication(data)
+    quarantine, key, quarantine_root = _quarantine(tmp_path, data)
+    published, root = _published_storage(tmp_path, publication)
+    reserve = 64
+    published = FilesystemPublishedMediaStorage(
+        publication.destination_id,
+        root,
+        min_free_space_reserve_bytes=reserve,
+    )
+
+    class _Usage:
+        free = len(data) + reserve - 1
+        used = 0
+        total = free + used
+
+    monkeypatch.setattr(
+        storage_module.shutil,
+        "disk_usage",
+        lambda _path: _Usage(),
+    )
+    opened: list[str] = []
+    real_open = os.open
+
+    def tracking_open(path, flags, *args, **kwargs):
+        if isinstance(path, str) and path.endswith(".publish.tmp"):
+            opened.append(path)
+        return real_open(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(storage_module.os, "open", tracking_open)
+    reader = quarantine.open_reader(key, expected_size_bytes=len(data))
+    try:
+        with pytest.raises(
+            PublishedMediaInsufficientSpaceError,
+            match="insufficient published media storage",
+        ) as exc_info:
+            published.publish_from_reader(publication, reader)
+    finally:
+        reader.close()
+
+    assert opened == []
+    assert not list(root.glob("*.publish.tmp"))
+    assert not (root / publication.relative_path.value).exists()
+    assert quarantine.file_size(key) == len(data)
+    assert quarantine_root.exists()
+    error_text = str(exc_info.value)
+    assert str(root) not in error_text
+    assert str(quarantine_root) not in error_text
+
+
+def test_copy_path_requires_source_size_plus_reserve(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    data = b"synthetic-reserve-math"
+    publication = _publication(data)
+    quarantine, key, _ = _quarantine(tmp_path, data)
+    root = tmp_path / "published"
+    root.mkdir()
+    reserve = 100
+    published = FilesystemPublishedMediaStorage(
+        publication.destination_id,
+        root,
+        min_free_space_reserve_bytes=reserve,
+    )
+    observed: list[int] = []
+
+    class _Usage:
+        def __init__(self, free: int) -> None:
+            self.free = free
+            self.used = 0
+            self.total = free
+
+    def fake_disk_usage(_path):
+        free = len(data) + reserve
+        observed.append(free)
+        return _Usage(free)
+
+    monkeypatch.setattr(storage_module.shutil, "disk_usage", fake_disk_usage)
+    reader = quarantine.open_reader(key, expected_size_bytes=len(data))
+    try:
+        published.publish_from_reader(publication, reader)
+    finally:
+        reader.close()
+    assert observed == [len(data) + reserve]
+    assert published.verify_target(publication) is True
+
+
+def test_idempotent_verified_target_skips_allocation_charge(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    data = b"synthetic-already-published"
+    publication = _publication(data)
+    quarantine, key, _ = _quarantine(tmp_path, data)
+    published, root = _published_storage(tmp_path, publication)
+    reader = quarantine.open_reader(key, expected_size_bytes=len(data))
+    try:
+        published.publish_from_reader(publication, reader)
+    finally:
+        reader.close()
+
+    queried = {"count": 0}
+
+    def fail_if_queried(_path):
+        queried["count"] += 1
+        raise AssertionError("verified target must not charge destination allocation")
+
+    monkeypatch.setattr(storage_module.shutil, "disk_usage", fail_if_queried)
+    retry = quarantine.open_reader(key, expected_size_bytes=len(data))
+    try:
+        published.publish_from_reader(publication, retry)
+    finally:
+        retry.close()
+    assert queried["count"] == 0
+    assert published.verify_target(publication) is True
+
+
+def test_late_enospc_cleans_partial_destination_and_preserves_source(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    data = b"synthetic-late-enospc-payload"
+    publication = _publication(data)
+    quarantine, key, quarantine_root = _quarantine(tmp_path, data)
+    published, root = _published_storage(tmp_path, publication)
+    real_write = os.write
+
+    def enospc_write(fd: int, data_view):
+        del fd, data_view
+        raise OSError(errno.ENOSPC, "No space left on device")
+
+    monkeypatch.setattr(storage_module.os, "write", enospc_write)
+    reader = quarantine.open_reader(key, expected_size_bytes=len(data))
+    try:
+        with pytest.raises(
+            PublishedMediaInsufficientSpaceError,
+            match="insufficient published media storage",
+        ) as exc_info:
+            published.publish_from_reader(publication, reader)
+    finally:
+        reader.close()
+
+    assert not (root / publication.relative_path.value).exists()
+    assert not list(root.glob("*.publish.tmp"))
+    assert quarantine.file_size(key) == len(data)
+    assert str(root) not in str(exc_info.value)
+    assert str(quarantine_root) not in str(exc_info.value)
+
+    monkeypatch.setattr(storage_module.os, "write", real_write)
+    retry = quarantine.open_reader(key, expected_size_bytes=len(data))
+    try:
+        published.publish_from_reader(publication, retry)
+    finally:
+        retry.close()
+    assert published.verify_target(publication) is True
+
+
+def test_same_destination_hardlink_is_not_double_charged(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Temp->final hardlink shares one inode; only one full copy allocation is charged."""
+    data = b"synthetic-single-charge"
+    publication = _publication(data)
+    quarantine, key, _ = _quarantine(tmp_path, data)
+    published, root = _published_storage(tmp_path, publication)
+    charges: list[int] = []
+
+    class _Usage:
+        free = 10**9
+        used = 0
+        total = free
+
+    original_ensure = FilesystemPublishedMediaStorage._ensure_space_for_copy
+
+    def tracking_ensure(self, requested_bytes: int) -> None:
+        charges.append(requested_bytes)
+        return original_ensure(self, requested_bytes)
+
+    monkeypatch.setattr(
+        FilesystemPublishedMediaStorage,
+        "_ensure_space_for_copy",
+        tracking_ensure,
+    )
+    monkeypatch.setattr(
+        storage_module.shutil,
+        "disk_usage",
+        lambda _path: _Usage(),
+    )
+    reader = quarantine.open_reader(key, expected_size_bytes=len(data))
+    try:
+        published.publish_from_reader(publication, reader)
+    finally:
+        reader.close()
+    assert charges == [len(data)]
+    final = root / publication.relative_path.value
+    assert final.stat().st_nlink == 1
+    assert not list(root.glob("*.publish.tmp"))
+
+
+def test_keep_separate_duplicate_still_requires_full_destination_allocation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Keep-separate still materializes a distinct published object via copy."""
+    data = b"synthetic-keep-separate-bytes"
+    publication = _publication(data)
+    quarantine, key, _ = _quarantine(tmp_path, data)
+    root = tmp_path / "published"
+    root.mkdir()
+    reserve = 8
+    published = FilesystemPublishedMediaStorage(
+        publication.destination_id,
+        root,
+        min_free_space_reserve_bytes=reserve,
+    )
+
+    class _Usage:
+        free = len(data) + reserve - 1
+        used = 0
+        total = free + used
+
+    monkeypatch.setattr(
+        storage_module.shutil,
+        "disk_usage",
+        lambda _path: _Usage(),
+    )
+    reader = quarantine.open_reader(key, expected_size_bytes=len(data))
+    try:
+        with pytest.raises(PublishedMediaInsufficientSpaceError):
+            published.publish_from_reader(publication, reader)
+    finally:
+        reader.close()
+    assert quarantine.file_size(key) == len(data)

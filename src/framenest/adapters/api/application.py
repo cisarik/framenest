@@ -317,6 +317,7 @@ def create_app(
                 LocalMediaAnalysisAdapter(),
                 analysis_provider,
             ),
+            max_attempts=resolved_settings.automatic_media_analysis_max_attempts,
         )
         owned_media_analysis_coordinator = MediaAnalysisCoordinator(
             owned_media_analysis_run_repository,
@@ -562,6 +563,7 @@ def _resolve_published_storage(
         destination_id,
         Path(destination.root.path),
         forbidden_roots=tuple(forbidden_roots),
+        min_free_space_reserve_bytes=settings.upload_min_free_space_reserve_bytes,
     )
     if not storage.root_available:
         raise ValueError("Upload publication configuration is invalid.")

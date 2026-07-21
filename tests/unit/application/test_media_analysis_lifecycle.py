@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import replace
 import threading
 
+import pytest
+
 from framenest.application.media_analysis_lifecycle import (
     AutomaticAnalysisPublicView,
     CatalogedAnalysisTarget,
@@ -335,6 +337,8 @@ def test_rate_limited_is_retryable_then_terminal_on_exhaustion() -> None:
     failed = service.execute(run)
     assert failed.state is MediaAnalysisRunState.FAILED
     assert failed.error_code == "PROVIDER_RATE_LIMITED"
+    assert len(executor.calls) == 1
+    assert "requeue_for_retry" not in repository.transactions
 
 
 def test_terminal_provider_auth_refusal_is_not_retried() -> None:
@@ -486,3 +490,118 @@ def test_public_view_states_are_truthful() -> None:
     failed_view = public_view_from_run(failed)
     assert failed_view.error_code == "ANALYSIS_OUTCOME_UNKNOWN"
     assert failed_view.result is None
+
+
+def test_max_attempts_one_permits_single_provider_call_without_requeue() -> None:
+    repository = _FakeRepository()
+    scheduler = ScheduleAutomaticMediaAnalysis(repository, enabled=True, now_ms=lambda: 1)
+    run = scheduler.execute(
+        CatalogedAnalysisTarget(media_id=MEDIA_ID, media_location_id=LOCATION_ID)
+    )
+    assert run is not None
+    executor = _FakeExecutor(error=MediaSuggestionProviderUnavailableError("down"))
+    service = ExecuteAutomaticMediaAnalysisRun(
+        repository,
+        executor,
+        max_attempts=1,
+        now_ms=lambda: 2,
+    )
+    failed = service.execute(run)
+    assert failed.state is MediaAnalysisRunState.FAILED
+    assert failed.error_code == "PROVIDER_UNAVAILABLE"
+    assert failed.attempt_count == 1
+    assert "requeue_for_retry" not in repository.transactions
+    assert len(executor.calls) == 1
+    again = service.execute(failed)
+    assert again.state is MediaAnalysisRunState.FAILED
+    assert len(executor.calls) == 1
+
+
+def test_higher_max_attempts_retains_bounded_retry_then_terminal() -> None:
+    repository = _FakeRepository()
+    scheduler = ScheduleAutomaticMediaAnalysis(repository, enabled=True, now_ms=lambda: 1)
+    run = scheduler.execute(
+        CatalogedAnalysisTarget(media_id=MEDIA_ID, media_location_id=LOCATION_ID)
+    )
+    assert run is not None
+    executor = _FakeExecutor(error=MediaSuggestionProviderUnavailableError("down"))
+    service = ExecuteAutomaticMediaAnalysisRun(
+        repository,
+        executor,
+        max_attempts=3,
+        now_ms=lambda: 2,
+    )
+    first = service.execute(run)
+    assert first.state is MediaAnalysisRunState.PENDING
+    assert first.attempt_count == 1
+    second = service.execute(first)
+    assert second.state is MediaAnalysisRunState.PENDING
+    assert second.attempt_count == 2
+    third = service.execute(second)
+    assert third.state is MediaAnalysisRunState.FAILED
+    assert third.error_code == "PROVIDER_UNAVAILABLE"
+    assert third.attempt_count == 3
+    assert repository.transactions.count("requeue_for_retry") == 2
+    assert len(executor.calls) == 3
+
+
+def test_startup_reconciliation_does_not_bypass_configured_max_attempts() -> None:
+    repository = _FakeRepository()
+    scheduler = ScheduleAutomaticMediaAnalysis(repository, enabled=True, now_ms=lambda: 1)
+    pending = scheduler.execute(
+        CatalogedAnalysisTarget(media_id=MEDIA_ID, media_location_id=LOCATION_ID)
+    )
+    assert pending is not None
+    claimed = repository.claim_pending(
+        run_id=pending.id.to_string(),
+        expected_version=pending.version,
+        started_at_ms=2,
+        max_attempts=1,
+    )
+    assert claimed.attempt_count == 1
+    executor = _FakeExecutor()
+    service = ExecuteAutomaticMediaAnalysisRun(
+        repository,
+        executor,
+        max_attempts=1,
+        now_ms=lambda: 3,
+    )
+    failed = service.execute(claimed)
+    assert failed.state is MediaAnalysisRunState.FAILED
+    assert failed.error_code == "ANALYSIS_OUTCOME_UNKNOWN"
+    assert failed.attempt_count == 1
+    assert len(executor.calls) == 0
+    assert "requeue_for_retry" not in repository.transactions
+    assert repository.transactions.count("reset_interrupted_analyzing") == 1
+
+
+def test_max_attempts_rejects_zero_and_above_configured_bound() -> None:
+    repository = _FakeRepository()
+    executor = _FakeExecutor()
+    with pytest.raises(ValueError):
+        ExecuteAutomaticMediaAnalysisRun(repository, executor, max_attempts=0)
+    with pytest.raises(ValueError):
+        ExecuteAutomaticMediaAnalysisRun(repository, executor, max_attempts=-1)
+    with pytest.raises(ValueError):
+        ExecuteAutomaticMediaAnalysisRun(repository, executor, max_attempts=11)
+
+
+def test_no_fallback_provider_is_selected_on_retryable_exhaustion() -> None:
+    repository = _FakeRepository()
+    scheduler = ScheduleAutomaticMediaAnalysis(repository, enabled=True, now_ms=lambda: 1)
+    run = scheduler.execute(
+        CatalogedAnalysisTarget(media_id=MEDIA_ID, media_location_id=LOCATION_ID)
+    )
+    assert run is not None
+    executor = _FakeExecutor(error=MediaSuggestionProviderRateLimitedError("slow"))
+    service = ExecuteAutomaticMediaAnalysisRun(
+        repository,
+        executor,
+        max_attempts=1,
+        now_ms=lambda: 2,
+    )
+    failed = service.execute(run)
+    assert failed.state is MediaAnalysisRunState.FAILED
+    assert failed.provider_id is None
+    assert failed.model_id is None
+    assert len(executor.calls) == 1

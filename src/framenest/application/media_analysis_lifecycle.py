@@ -45,6 +45,7 @@ from framenest.domain.media import MediaLocationAvailability
 from framenest.domain.media_analysis_runs import (
     AUTOMATIC_POST_CATALOG_ANALYSIS_DEFINITION,
     DEFAULT_MAX_ANALYSIS_ATTEMPTS,
+    MAX_CONFIGURED_ANALYSIS_ATTEMPTS,
     RESULT_SCHEMA_VERSION,
     MediaAnalysisRun,
     MediaAnalysisRunState,
@@ -219,8 +220,12 @@ class ExecuteAutomaticMediaAnalysisRun:
         now_ms: Callable[[], int] = default_now_ms,
         in_transaction: Callable[[], bool] | None = None,
     ) -> None:
-        if isinstance(max_attempts, bool) or max_attempts < 1:
-            raise ValueError("max analysis attempts must be positive")
+        if (
+            isinstance(max_attempts, bool)
+            or max_attempts < 1
+            or max_attempts > MAX_CONFIGURED_ANALYSIS_ATTEMPTS
+        ):
+            raise ValueError("max analysis attempts must be a positive bounded integer")
         self._repository = repository
         self._executor = executor
         self._max_attempts = max_attempts
