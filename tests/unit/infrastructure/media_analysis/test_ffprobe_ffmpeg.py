@@ -84,10 +84,10 @@ def test_format_timestamp_ms_is_deterministic() -> None:
 def test_build_ffmpeg_frame_argv_contract() -> None:
     argv = build_ffmpeg_frame_argv(media_path="/tmp/sample.mp4", timestamp_ms=500)
     assert argv[:4] == ["-nostdin", "-hide_banner", "-loglevel", "error"]
-    assert "-ss" in argv
-    assert "00:00:00.500" in argv
+    assert argv[4:8] == ["-ss", "00:00:00.500", "-i", "/tmp/sample.mp4"]
     assert "-map" in argv and "0:v:0" in argv
     assert "pipe:1" in argv
+    assert argv.index("-ss") < argv.index("-i")
 
 
 def test_parse_ffprobe_prefers_stream_duration() -> None:

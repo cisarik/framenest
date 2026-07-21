@@ -216,6 +216,59 @@ class SqliteMediaAnalysisRunRepository:
                 _REPOSITORY_FAILURE_MESSAGE
             ) from exc
 
+    def requeue_failed_preparation_for_manual(
+        self,
+        *,
+        run_id: str,
+        expected_version: int,
+        updated_at_ms: int,
+    ) -> MediaAnalysisRun:
+        del updated_at_ms
+
+        def operation(connection: Connection) -> MediaAnalysisRun:
+            row = _require_row(connection, run_id)
+            if (
+                row["state"] != MediaAnalysisRunState.FAILED.value
+                or row["version"] != expected_version
+                or row["error_code"]
+                not in {"PREPARATION_UNAVAILABLE", "PREPARATION_FAILED"}
+            ):
+                raise MediaAnalysisRunConflictError(_REPOSITORY_FAILURE_MESSAGE)
+            updated = connection.execute(
+                update(media_analysis_runs)
+                .where(
+                    media_analysis_runs.c.id == run_id,
+                    media_analysis_runs.c.version == expected_version,
+                    media_analysis_runs.c.state == MediaAnalysisRunState.FAILED.value,
+                )
+                .values(
+                    state=MediaAnalysisRunState.PENDING.value,
+                    attempt_count=0,
+                    provider_id=None,
+                    model_id=None,
+                    prompt_version=None,
+                    result_schema_version=None,
+                    result_json=None,
+                    error_code=None,
+                    error_message=None,
+                    started_at_ms=None,
+                    completed_at_ms=None,
+                    version=expected_version + 1,
+                )
+            )
+            if updated.rowcount != 1:
+                raise MediaAnalysisRunConflictError(_REPOSITORY_FAILURE_MESSAGE)
+            return _run_from_row(_require_row(connection, run_id))
+
+        try:
+            return run_in_immediate_transaction(self._engine, operation)
+        except FrameNestMediaAnalysisRunRepositoryError:
+            raise
+        except SQLAlchemyError as exc:
+            raise FrameNestMediaAnalysisRunRepositoryError(
+                _REPOSITORY_FAILURE_MESSAGE
+            ) from exc
+
     def record_analyzed(
         self,
         *,

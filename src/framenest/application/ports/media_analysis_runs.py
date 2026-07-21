@@ -61,6 +61,15 @@ class MediaAnalysisRunRepository(Protocol):
     ) -> MediaAnalysisRun:
         """Return an analyzing run to pending after a retryable failure."""
 
+    def requeue_failed_preparation_for_manual(
+        self,
+        *,
+        run_id: str,
+        expected_version: int,
+        updated_at_ms: int,
+    ) -> MediaAnalysisRun:
+        """Reset a terminal preparation failure so a manual request can run once."""
+
     def record_analyzed(
         self,
         *,

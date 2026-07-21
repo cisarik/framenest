@@ -125,6 +125,35 @@ class _FakeRepository:
             )
             return self.run
 
+    def requeue_failed_preparation_for_manual(
+        self,
+        *,
+        run_id,
+        expected_version,
+        updated_at_ms,
+    ):
+        del run_id, updated_at_ms
+        with self._lock:
+            self.transactions.append("requeue_failed_preparation_for_manual")
+            assert self.run is not None
+            assert self.run.version == expected_version
+            self.run = replace(
+                self.run,
+                state=MediaAnalysisRunState.PENDING,
+                attempt_count=0,
+                provider_id=None,
+                model_id=None,
+                prompt_version=None,
+                result_schema_version=None,
+                result_json=None,
+                error_code=None,
+                error_message=None,
+                started_at_ms=None,
+                completed_at_ms=None,
+                version=self.run.version + 1,
+            )
+            return self.run
+
     def record_analyzed(
         self,
         *,
@@ -257,6 +286,38 @@ def test_manual_request_creates_pending_when_automatic_disabled() -> None:
     assert run.state is MediaAnalysisRunState.PENDING
     assert run.created_at_ms == 42
     assert repository.transactions.count("create_pending") == 1
+
+
+def test_manual_request_requeues_preparation_failure() -> None:
+    repository = _FakeRepository()
+    repository.run = MediaAnalysisRun(
+        id=MediaAnalysisRunId("11111111-1111-4111-8111-111111111111"),
+        media_id=MEDIA_ID,
+        media_location_id=LOCATION_ID,
+        analysis_definition=AUTOMATIC_POST_CATALOG_ANALYSIS_DEFINITION,
+        state=MediaAnalysisRunState.FAILED,
+        attempt_count=1,
+        provider_id=None,
+        model_id=None,
+        prompt_version="framenest-media-suggestion-v3",
+        result_schema_version=None,
+        result_json=None,
+        error_code="PREPARATION_UNAVAILABLE",
+        error_message="Local media preparation is unavailable.",
+        created_at_ms=10,
+        started_at_ms=11,
+        completed_at_ms=12,
+        version=3,
+    )
+    requester = RequestManualMediaAnalysis(repository, now_ms=lambda: 99)
+    run = requester.execute(
+        CatalogedAnalysisTarget(media_id=MEDIA_ID, media_location_id=LOCATION_ID)
+    )
+    assert run.state is MediaAnalysisRunState.PENDING
+    assert run.attempt_count == 0
+    assert run.error_code is None
+    assert repository.transactions == ["requeue_failed_preparation_for_manual"]
+    assert repository.transactions.count("create_pending") == 0
 
 
 def test_schedule_enabled_is_idempotent() -> None:

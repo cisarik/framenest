@@ -77,6 +77,9 @@ class _FakeRepository:
     def requeue_for_retry(self, **kwargs):
         raise AssertionError("unexpected requeue")
 
+    def requeue_failed_preparation_for_manual(self, **kwargs):
+        raise AssertionError("unexpected preparation requeue")
+
     def record_analyzed(
         self,
         *,

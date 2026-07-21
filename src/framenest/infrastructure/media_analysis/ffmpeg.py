@@ -45,16 +45,21 @@ def format_timestamp_ms(timestamp_ms: int) -> str:
 
 
 def build_ffmpeg_frame_argv(*, media_path: str, timestamp_ms: int) -> list[str]:
-    """Return the deterministic ffmpeg argv for one representative frame."""
+    """Return the deterministic ffmpeg argv for one representative frame.
+
+    Seek with ``-ss`` before ``-i`` so long cataloged videos remain within the
+    bounded per-frame timeout; accurate decode-from-start seeking is too slow
+    for multi-hour sources under the accepted timeout budget.
+    """
     return [
         "-nostdin",
         "-hide_banner",
         "-loglevel",
         "error",
-        "-i",
-        media_path,
         "-ss",
         format_timestamp_ms(timestamp_ms),
+        "-i",
+        media_path,
         "-map",
         "0:v:0",
         "-frames:v",
