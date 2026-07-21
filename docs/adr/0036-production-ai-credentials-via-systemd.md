@@ -60,11 +60,15 @@ installation consumes the exact tracked template bytes, verifies deterministic
 byte equivalence before and after atomic rename, and does not reconstruct line
 breaks through shell escaping. Before restart, the helper verifies systemd
 acceptance, daemon-reloads, confirms `framenest.service` remains enabled,
-confirms systemd loaded the intended drop-in and credential identity, and only
-then restarts `framenest.service`. After bounded readiness succeeds, it checks
-only the same loopback, provider-free capability endpoint used by the web
-status modal and requires the selected provider/model to be configured,
-available, and not connection-tested. Deployment terminal service failure,
+confirms systemd loaded the intended drop-in, and verifies the exact
+`LoadCredential=IDENTITY:PATH` mapping from trusted on-disk drop-in bytes and
+`systemctl cat` without depending on redacted `systemctl show LoadCredential`
+output, and only then restarts `framenest.service`. After bounded readiness
+succeeds, it checks only the same loopback, provider-free capability endpoint
+used by the web status modal and requires the selected provider/model to be
+configured, available, and credential-available. Historical connection-test
+state must not fail deployment and is not treated as proof of the newly
+installed credential. Deployment terminal service failure,
 readiness timeout, systemd acceptance failure, byte-equivalence failure, and
 capability mismatch all roll back deployment-controlled files. The rollback
 contract restores the selected credential, systemd credential drop-in, and

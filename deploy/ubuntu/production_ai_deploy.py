@@ -530,8 +530,10 @@ def _remote_configure_ai(*, provider_id: str, model_id: str) -> str:
 
 def _remote_systemd_acceptance_commands(dropin: DropinTemplate) -> list[str]:
     quoted_dropin_path = shlex.quote(REMOTE_DROPIN_PATH)
-    expected_credential = f"{dropin.identity}:{REMOTE_CREDENTIAL_DIR}/{dropin.identity}"
-    quoted_expected_credential = shlex.quote(expected_credential)
+    quoted_service = shlex.quote(SERVICE_NAME)
+    quoted_identity = shlex.quote(dropin.identity)
+    quoted_cred_dir = shlex.quote(REMOTE_CREDENTIAL_DIR)
+    quoted_sha = shlex.quote(dropin.sha256)
     return [
         "\n".join(
             [
@@ -561,7 +563,32 @@ def _remote_systemd_acceptance_commands(dropin: DropinTemplate) -> list[str]:
         "\n".join(
             [
                 "set -e",
-                f"sudo -n systemctl show --property=LoadCredential --value {SERVICE_NAME} 2>/dev/null | grep -Fx -- {quoted_expected_credential} >/dev/null || exit {LOADED_CREDENTIAL_EXIT}",
+                "# Verify LoadCredential mapping without redacted systemctl show",
+                f"dropin_path={quoted_dropin_path}",
+                f"service_name={quoted_service}",
+                f"identity={quoted_identity}",
+                f"cred_dir={quoted_cred_dir}",
+                f"expected_sha={quoted_sha}",
+                'expected_line="LoadCredential=${identity}:${cred_dir}/${identity}"',
+                'sudo -n test -f "$dropin_path" || exit '
+                f"{LOADED_CREDENTIAL_EXIT}",
+                'sudo -n test ! -L "$dropin_path" || exit '
+                f"{LOADED_CREDENTIAL_EXIT}",
+                'test "$(sudo -n stat -c \'%U:%G:%a\' "$dropin_path")" = root:root:644 || exit '
+                f"{LOADED_CREDENTIAL_EXIT}",
+                'test "$(sudo -n sha256sum "$dropin_path" | awk \'{print $1}\')" = "$expected_sha" || exit '
+                f"{LOADED_CREDENTIAL_EXIT}",
+                'printf \'%s\\n\' \'[Service]\' "$expected_line" | sudo -n cmp -s - "$dropin_path" || exit '
+                f"{LOADED_CREDENTIAL_EXIT}",
+                'unit_text=$(sudo -n systemctl cat "$service_name" 2>/dev/null || true)',
+                'printf \'%s\\n\' "$unit_text" | grep -Fq -- "$dropin_path" || exit '
+                f"{LOADED_DROPIN_EXIT}",
+                'match_count=$(printf \'%s\\n\' "$unit_text" | grep -Fxc -- "$expected_line" || true)',
+                'test "$match_count" = 1 || exit '
+                f"{LOADED_CREDENTIAL_EXIT}",
+                'other_count=$(printf \'%s\\n\' "$unit_text" | grep -E \'^[[:space:]]*LoadCredential=\' | grep -Fvc -- "$expected_line" || true)',
+                'test "$other_count" = 0 || exit '
+                f"{LOADED_CREDENTIAL_EXIT}",
             ]
         ),
     ]
@@ -573,7 +600,6 @@ def _remote_validate_capability(*, provider_id: str, model_id: str) -> str:
             "set -e",
             "python3 - <<'PY'",
             "import json",
-            "import sys",
             "import urllib.error",
             "import urllib.request",
             f"url = {AI_CAPABILITY_URL!r}",
@@ -604,10 +630,9 @@ def _remote_validate_capability(*, provider_id: str, model_id: str) -> str:
             f"    raise SystemExit({CAPABILITY_VALIDATION_EXIT})",
             "if payload.get('available') is not True:",
             f"    raise SystemExit({CAPABILITY_VALIDATION_EXIT})",
-            "if payload.get('status') != 'configured_unverified':",
+            "if payload.get('credential_available') is not True:",
             f"    raise SystemExit({CAPABILITY_VALIDATION_EXIT})",
-            "if payload.get('last_connection_test') is not None:",
-            f"    raise SystemExit({CAPABILITY_VALIDATION_EXIT})",
+            "# Historical connection-test state is ignored: deployment does not prove liveness.",
             "last_status = payload.get('last_status_check')",
             "if isinstance(last_status, dict) and last_status.get('provider_error'):",
             f"    raise SystemExit({CAPABILITY_VALIDATION_EXIT})",

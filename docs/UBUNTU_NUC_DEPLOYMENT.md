@@ -296,12 +296,16 @@ payload, installs them to a `.next` path, proves byte equivalence before and
 after atomic rename, and never reconstructs line breaks with shell escaping.
 After non-secret provider/model configuration is written, the helper verifies
 systemd acceptance before restart: `systemd-analyze verify`, daemon reload,
-enabled state, loaded drop-in path, loaded credential identity, and unchanged
+enabled state, loaded drop-in path, exact on-disk drop-in
+`LoadCredential=IDENTITY:PATH` mapping via trusted drop-in bytes and
+`systemctl cat` (not redacted `systemctl show LoadCredential`), and unchanged
 base service unit. Only after those gates pass may it restart
 `framenest.service`. After readiness succeeds, it calls only the loopback
 `/api/ai/media-suggestion-capability` endpoint and requires the selected
-provider/model to be configured, available, and still without a provider
-connection test.
+provider/model to be configured, available, and credential-available. A
+historical connection-test record must not fail deployment and is not proof
+that the newly installed credential is valid; live proof remains an explicit
+later `framenest-ai test`.
 
 The helper starts rollback only after a complete backup marker has been written.
 That backup records present/absent state for the selected credential, the

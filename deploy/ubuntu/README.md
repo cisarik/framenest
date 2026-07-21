@@ -43,10 +43,14 @@ bytes transferred as a non-secret stdin payload, verified by deterministic byte
 equivalence before and after atomic rename. Before restart, the helper verifies
 systemd syntax, daemon-reloads, confirms `framenest.service` is still enabled,
 and checks that systemd loaded the intended drop-in and credential identity.
-After readiness, it checks only the same loopback capability endpoint used by
-the web status modal and requires the selected provider/model to be configured,
-available, and still untested. Rollback daemon-reloads, restarts, and waits up
-to 30 seconds for readiness on the restored service. Deployment and rollback
+Before restart, loaded-credential acceptance verifies the exact trusted drop-in
+bytes, `DropInPaths`, and `systemctl cat` mapping without relying on redacted
+`systemctl show LoadCredential` output. After readiness, it checks only the
+same loopback capability endpoint used by the web status modal and requires the
+selected provider/model to be configured, available, and credential-available.
+A historical connection-test record does not fail deployment and is not treated
+as proof that the newly installed credential is valid. Rollback daemon-reloads,
+restarts, and waits up to 30 seconds for readiness on the restored service. Deployment and rollback
 distinguish terminal service failure from readiness timeout. If rollback or
 cleanup fails, the helper reports the sanitized phase and leaves recovery
 material under `/run/framenest-ai-credential-deploy` for operator recovery.

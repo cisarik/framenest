@@ -438,7 +438,7 @@ def test_systemd_acceptance_occurs_before_single_restart(tmp_path: Path) -> None
     daemon_index = _call_index(runner, "systemctl daemon-reload")
     enabled_index = _call_index(runner, "systemctl is-enabled framenest.service")
     dropin_index = _call_index(runner, "DropInPaths")
-    credential_index = _call_index(runner, "LoadCredential")
+    credential_index = _call_index(runner, "Verify LoadCredential mapping without redacted systemctl show")
     restart_index = _call_index(runner, "systemctl restart framenest.service")
     assert verify_index < daemon_index < enabled_index < dropin_index < credential_index < restart_index
     assert _combined(runner).count("systemctl restart framenest.service") == 1
@@ -458,9 +458,12 @@ def test_successful_deployment_validates_running_capability_before_cleanup(
     assert readiness_index < capability_index < cleanup_index
     assert "vercel-ai-gateway" in capability_command
     assert "google/gemini-3.1-flash-lite" in capability_command
-    assert "configured_unverified" in capability_command
-    assert "last_connection_test" in capability_command
+    assert "credential_available" in capability_command
+    assert "configured_unverified" not in capability_command
+    assert "last_connection_test') is not None" not in capability_command
     assert "framenest-ai test" not in capability_command
+    assert "integrate.api.nvidia.com" not in capability_command
+    assert "ai-gateway.vercel.sh" not in capability_command
 
 
 def test_identity_failure_performs_no_rollback_command(tmp_path: Path) -> None:
@@ -587,7 +590,7 @@ def test_deploy_rolls_back_on_restart_or_health_failure(
         ("systemctl daemon-reload", "daemon reload failed"),
         ("systemctl is-enabled framenest.service", "service enabled-state validation failed"),
         ("DropInPaths", "loaded drop-in mismatch"),
-        ("LoadCredential", "loaded credential identity mismatch"),
+        ("Verify LoadCredential mapping without redacted systemctl show", "loaded credential identity mismatch"),
         ("/api/ai/media-suggestion-capability", "running capability validation failed"),
     ],
 )
@@ -843,3 +846,92 @@ def test_no_provider_or_nuc_network_call_occurs_in_contract_tests(tmp_path: Path
     combined = "\n".join(" ".join(argv) for argv, _input in runner.calls)
     assert "api.nvidia.com" not in combined
     assert "api.vercel.com" not in combined
+    assert "integrate.api.nvidia.com" not in combined
+    assert "ai-gateway.vercel.sh" not in combined
+    assert "framenest-ai test" not in combined
+
+
+def test_loaded_credential_verification_tolerates_redacted_systemctl_show() -> None:
+    dropin = production_ai_deploy._load_provider_dropin_template("vercel-ai-gateway")
+    commands = production_ai_deploy._remote_systemd_acceptance_commands(dropin)
+    combined = "\n".join(commands)
+
+    assert "systemctl show --property=LoadCredential" not in combined
+    assert "Verify LoadCredential mapping without redacted systemctl show" in combined
+    assert "systemctl cat" in combined
+    assert "cmp -s" in combined
+    assert "DropInPaths" in combined
+    assert 'expected_line="LoadCredential=${identity}:${cred_dir}/${identity}"' in combined
+    assert "LoadCredential=AI_GATEWAY_API_KEY:/etc/framenest/credentials/AI_GATEWAY_API_KEY" not in combined
+    assert "match_count=" in combined
+    assert "other_count=" in combined
+
+
+def test_loaded_credential_verification_requires_exact_identity_and_path() -> None:
+    dropin = production_ai_deploy._load_provider_dropin_template("nvidia-nim")
+    commands = production_ai_deploy._remote_systemd_acceptance_commands(dropin)
+    combined = "\n".join(commands)
+
+    assert 'identity="NVIDIA_API_KEY"' in combined or "identity=NVIDIA_API_KEY" in combined
+    assert 'cred_dir="/etc/framenest/credentials"' in combined or "cred_dir=/etc/framenest/credentials" in combined
+    assert f'expected_sha="{dropin.sha256}"' in combined or f"expected_sha={dropin.sha256}" in combined
+    assert "test \"$match_count\" = 1" in combined
+    assert "test \"$other_count\" = 0" in combined
+
+
+def test_loaded_credential_verification_fails_closed_on_missing_or_extra_mapping() -> None:
+    dropin = production_ai_deploy._load_provider_dropin_template("vercel-ai-gateway")
+    commands = production_ai_deploy._remote_systemd_acceptance_commands(dropin)
+    combined = "\n".join(commands)
+
+    assert f"|| exit {production_ai_deploy.LOADED_CREDENTIAL_EXIT}" in combined
+    assert f"|| exit {production_ai_deploy.LOADED_DROPIN_EXIT}" in combined
+    assert 'grep -Fq -- "$dropin_path"' in combined
+    assert "grep -Fxc -- \"$expected_line\"" in combined
+    assert "grep -E '^[[:space:]]*LoadCredential='" in combined
+
+
+def test_capability_gate_ignores_historical_connection_test_and_requires_credential_available() -> None:
+    command = production_ai_deploy._remote_validate_capability(
+        provider_id="nvidia-nim",
+        model_id="nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
+    )
+
+    assert "credential_available" in command
+    assert "Historical connection-test state is ignored" in command
+    assert "configured_unverified" not in command
+    assert "last_connection_test') is not None" not in command
+    assert "payload.get('last_connection_test') is not None" not in command
+    assert "framenest-ai test" not in command
+    assert "integrate.api.nvidia.com" not in command
+
+
+def test_helper_does_not_treat_historical_test_as_new_credential_proof(tmp_path: Path) -> None:
+    runner = _Runner()
+
+    assert production_ai_deploy.main(_base_args(tmp_path), runner=runner) == 0
+
+    capability_command = " ".join(
+        runner.calls[_call_index(runner, "/api/ai/media-suggestion-capability")][0]
+    )
+    assert "Historical connection-test state is ignored" in capability_command
+    assert "last_connection_test') is not None" not in capability_command
+    assert "framenest-ai test" not in _combined(runner)
+
+
+def test_loaded_credential_gate_failure_still_rolls_back(tmp_path: Path, capsys: Any) -> None:
+    runner = _Runner(
+        fail_on="Verify LoadCredential mapping without redacted systemctl show",
+        fail_message="loaded credential identity mismatch",
+    )
+
+    result = production_ai_deploy.main(_base_args(tmp_path), runner=runner)
+
+    combined = _combined(runner)
+    captured = capsys.readouterr()
+    assert result == 1
+    assert "loaded credential identity mismatch" in captured.err
+    assert "restore deployment-controlled files" in combined
+    assert "rm -rf /run/framenest-ai-credential-deploy" in combined
+    assert "framenest-ai test" not in combined
+    assert "integrate.api.nvidia.com" not in combined
