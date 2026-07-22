@@ -107,7 +107,7 @@ logical_media = Table(
     Column("updated_at_ms", Integer(), nullable=False),
     CheckConstraint("length(id) = 36", name="ck_logical_media_id_length"),
     CheckConstraint(
-        "media_kind IN ('video', 'animated_image')",
+        "media_kind IN ('video', 'animated_image', 'image')",
         name="ck_logical_media_kind",
     ),
     CheckConstraint(
@@ -389,7 +389,9 @@ upload_publications = Table(
         "AND relative_target NOT GLOB '*\\*' "
         "AND substr(relative_target, 1, 32) = replace(publication_id, '-', '') "
         "AND ((validated_format = 'gif' AND substr(relative_target, 33) = '.gif') "
-        "OR (validated_format = 'mp4' AND substr(relative_target, 33) = '.mp4'))",
+        "OR (validated_format = 'mp4' AND substr(relative_target, 33) = '.mp4') "
+        "OR (validated_format = 'jpg' AND substr(relative_target, 33) = '.jpg') "
+        "OR (validated_format = 'png' AND substr(relative_target, 33) = '.png'))",
         name="ck_upload_publications_relative_target_opaque",
     ),
     CheckConstraint(
@@ -408,7 +410,9 @@ upload_publications = Table(
     ),
     CheckConstraint(
         "(validated_media_kind = 'animated_image' AND validated_format = 'gif') "
-        "OR (validated_media_kind = 'video' AND validated_format = 'mp4')",
+        "OR (validated_media_kind = 'video' AND validated_format = 'mp4') "
+        "OR (validated_media_kind = 'image' AND validated_format = 'jpg') "
+        "OR (validated_media_kind = 'image' AND validated_format = 'png')",
         name="ck_upload_publications_validation_evidence_pair",
     ),
     CheckConstraint(

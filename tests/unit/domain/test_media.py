@@ -80,7 +80,7 @@ def test_valid_location_accepts_absent_optional_observations() -> None:
     assert location.observed_mtime_ns is None
 
 
-@pytest.mark.parametrize("kind", ["video", "animated_image"])
+@pytest.mark.parametrize("kind", ["video", "animated_image", "image"])
 def test_media_kind_values_are_stable(kind: str) -> None:
     assert MediaKind(kind).value == kind
 

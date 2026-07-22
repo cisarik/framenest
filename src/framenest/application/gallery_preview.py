@@ -390,6 +390,10 @@ def _item_status(
 
 
 def _is_supported(kind: MediaKind, location: MediaLocation) -> bool:
+    # Still images use identity-only original content in Gallery/Details.
+    # The ffmpeg-backed gallery-preview derivative pipeline stays video/GIF-only.
+    if kind is MediaKind.IMAGE:
+        return False
     extension = ""
     filename = location.relative_path.filename
     if "." in filename:

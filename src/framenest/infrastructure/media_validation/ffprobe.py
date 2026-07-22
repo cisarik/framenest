@@ -1,13 +1,16 @@
-"""Bounded ffprobe-backed validation for quarantined uploads."""
+"""Bounded validation for quarantined uploads."""
 
 from __future__ import annotations
 
+import io
 import json
 import math
 import re
 from dataclasses import dataclass
 from decimal import Decimal, DecimalException, InvalidOperation
 from typing import Any
+
+from PIL import Image, ImageFile, UnidentifiedImageError
 
 from framenest.application.ports.quarantine_storage import QuarantineReader
 from framenest.application.ports.upload_media_validation import (
@@ -57,6 +60,11 @@ _DECIMAL_SECONDS_PATTERN = re.compile(r"^(?:0|[1-9][0-9]*)(?:\.[0-9]{1,9})?$")
 
 _GIF87A_SIGNATURE = b"GIF87a"
 _GIF89A_SIGNATURE = b"GIF89a"
+_JPEG_SOI_MARKER = b"\xff\xd8\xff"
+_PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
+_STILL_IMAGE_FORMATS = frozenset(
+    {UploadValidatedFormat.JPEG, UploadValidatedFormat.PNG}
+)
 _MP4_ACCEPTED_MAJOR_BRANDS = frozenset(
     {
         "avc1",
@@ -109,7 +117,7 @@ class _ProbeEvidence:
 
 
 class BoundedUploadMediaValidator:
-    """Validate GIF/MP4 content through prefix evidence and bounded ffprobe."""
+    """Validate GIF/MP4/JPEG/PNG content through prefix evidence and bounded probes."""
 
     def __init__(
         self,
@@ -122,6 +130,8 @@ class BoundedUploadMediaValidator:
 
     def validate(self, reader: QuarantineReader) -> UploadMediaValidationEvidence:
         signature = _detect_signature(reader)
+        if signature.media_format in _STILL_IMAGE_FORMATS:
+            return _validate_still_image(reader, signature)
         probe = self._probe(reader)
         _ensure_signature_and_probe_agree(signature, probe)
         return UploadMediaValidationEvidence(
@@ -179,6 +189,10 @@ def _detect_signature(reader: QuarantineReader) -> _SignatureEvidence:
             raise UploadMediaValidationRejectedError(UPLOAD_VALIDATION_INVALID_MEDIA)
         _validate_dimensions(width, height)
         return _SignatureEvidence(UploadValidatedFormat.GIF, width=width, height=height)
+    if prefix.startswith(_JPEG_SOI_MARKER):
+        return _SignatureEvidence(UploadValidatedFormat.JPEG)
+    if prefix.startswith(_PNG_SIGNATURE):
+        return _SignatureEvidence(UploadValidatedFormat.PNG)
     ftyp = _mp4_ftyp_evidence(prefix)
     if ftyp is not None:
         major_brand, compatible_brands = ftyp
@@ -188,6 +202,65 @@ def _detect_signature(reader: QuarantineReader) -> _SignatureEvidence:
             mp4_compatible_brands=compatible_brands,
         )
     raise UploadMediaValidationRejectedError(UPLOAD_VALIDATION_UNSUPPORTED_MEDIA_TYPE)
+
+
+def _validate_still_image(
+    reader: QuarantineReader,
+    signature: _SignatureEvidence,
+) -> UploadMediaValidationEvidence:
+    reader.seek_start()
+    payload = bytearray()
+    while True:
+        chunk = reader.read(1024 * 1024)
+        if not chunk:
+            break
+        payload.extend(chunk)
+        if len(payload) > reader.size_bytes:
+            raise UploadMediaValidationRejectedError(UPLOAD_VALIDATION_INVALID_MEDIA)
+    if len(payload) != reader.size_bytes or not payload:
+        raise UploadMediaValidationRejectedError(UPLOAD_VALIDATION_INVALID_MEDIA)
+    previous_max_pixels = Image.MAX_IMAGE_PIXELS
+    previous_truncated = ImageFile.LOAD_TRUNCATED_IMAGES
+    Image.MAX_IMAGE_PIXELS = UPLOAD_VALIDATION_MAX_TOTAL_PIXELS
+    ImageFile.LOAD_TRUNCATED_IMAGES = False
+    try:
+        with Image.open(io.BytesIO(bytes(payload))) as source:
+            source.load()
+            format_name = source.format
+            if signature.media_format is UploadValidatedFormat.JPEG:
+                if format_name != "JPEG":
+                    raise UploadMediaValidationRejectedError(
+                        UPLOAD_VALIDATION_AMBIGUOUS_MEDIA_TYPE
+                    )
+                media_format = UploadValidatedFormat.JPEG
+            elif signature.media_format is UploadValidatedFormat.PNG:
+                if format_name != "PNG":
+                    raise UploadMediaValidationRejectedError(
+                        UPLOAD_VALIDATION_AMBIGUOUS_MEDIA_TYPE
+                    )
+                media_format = UploadValidatedFormat.PNG
+            else:
+                raise UploadMediaValidationRejectedError(
+                    UPLOAD_VALIDATION_UNSUPPORTED_MEDIA_TYPE
+                )
+            width, height = source.size
+            if width <= 0 or height <= 0:
+                raise UploadMediaValidationRejectedError(UPLOAD_VALIDATION_INVALID_MEDIA)
+            _validate_dimensions(width, height)
+    except UploadMediaValidationRejectedError:
+        raise
+    except Image.DecompressionBombError:
+        raise UploadMediaValidationRejectedError(UPLOAD_VALIDATION_MEDIA_POLICY_LIMIT) from None
+    except (OSError, UnidentifiedImageError, ValueError, TypeError, SyntaxError):
+        raise UploadMediaValidationRejectedError(UPLOAD_VALIDATION_INVALID_MEDIA) from None
+    finally:
+        Image.MAX_IMAGE_PIXELS = previous_max_pixels
+        ImageFile.LOAD_TRUNCATED_IMAGES = previous_truncated
+        reader.seek_start()
+    return UploadMediaValidationEvidence(
+        media_kind=UploadValidatedMediaKind.IMAGE,
+        media_format=media_format,
+    )
 
 
 def _mp4_ftyp_evidence(prefix: bytes) -> tuple[str, frozenset[str]] | None:

@@ -1353,6 +1353,10 @@ h2 {
   background: linear-gradient(135deg, #0d1018, #0a0e16);
 }
 
+.media-placeholder--image {
+  background: linear-gradient(135deg, #10140f, #0b100c);
+}
+
 .media-placeholder--live,
 .media-placeholder--preview {
   background: #000;

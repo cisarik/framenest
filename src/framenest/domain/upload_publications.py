@@ -14,6 +14,7 @@ from framenest.domain.identities import (
     MediaLocationId,
 )
 from framenest.domain.uploads import (
+    ALLOWED_UPLOAD_VALIDATION_EVIDENCE_PAIRS,
     UploadSession,
     UploadSessionId,
     UploadSessionState,
@@ -25,7 +26,7 @@ from framenest.domain.uploads import (
 INVALID_UPLOAD_PUBLICATION_MESSAGE = "Invalid upload publication."
 INVALID_UPLOAD_PUBLICATION_TRANSITION_MESSAGE = "Invalid upload publication transition."
 
-_RELATIVE_TARGET_PATTERN = re.compile(r"[0-9a-f]{32}\.(gif|mp4)")
+_RELATIVE_TARGET_PATTERN = re.compile(r"[0-9a-f]{32}\.(gif|mp4|jpg|png)")
 
 
 class FrameNestUploadPublicationError(ValueError):
@@ -171,12 +172,9 @@ class UploadPublication:
         if not isinstance(self.validated_format, UploadValidatedFormat):
             raise FrameNestUploadPublicationError(INVALID_UPLOAD_PUBLICATION_MESSAGE)
         if (
-            self.validated_media_kind is UploadValidatedMediaKind.ANIMATED_IMAGE
-            and self.validated_format is not UploadValidatedFormat.GIF
-        ) or (
-            self.validated_media_kind is UploadValidatedMediaKind.VIDEO
-            and self.validated_format is not UploadValidatedFormat.MP4
-        ):
+            self.validated_media_kind,
+            self.validated_format,
+        ) not in ALLOWED_UPLOAD_VALIDATION_EVIDENCE_PAIRS:
             raise FrameNestUploadPublicationError(INVALID_UPLOAD_PUBLICATION_MESSAGE)
         if not isinstance(self.state, UploadPublicationState) or not isinstance(
             self.cleanup_state,

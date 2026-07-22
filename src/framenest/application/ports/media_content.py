@@ -12,6 +12,9 @@ from framenest.domain.media import MediaKind, MediaRelativePath
 SUPPORTED_MEDIA_CONTENT: dict[tuple[MediaKind, str], str] = {
     (MediaKind.VIDEO, ".mp4"): "video/mp4",
     (MediaKind.ANIMATED_IMAGE, ".gif"): "image/gif",
+    (MediaKind.IMAGE, ".jpg"): "image/jpeg",
+    (MediaKind.IMAGE, ".jpeg"): "image/jpeg",
+    (MediaKind.IMAGE, ".png"): "image/png",
 }
 
 

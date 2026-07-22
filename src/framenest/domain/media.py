@@ -31,6 +31,7 @@ class MediaKind(StrEnum):
 
     VIDEO = "video"
     ANIMATED_IMAGE = "animated_image"
+    IMAGE = "image"
 
 
 class MediaLocationAvailability(StrEnum):

@@ -15,7 +15,7 @@ PRODUCTION_VERSIONS_PACKAGE = (
     "framenest.infrastructure.persistence.alembic_environment.versions"
 )
 TARGET_LIBRARY_REVISION = "0003"
-CURRENT_HEAD_REVISION = "0015"
+CURRENT_HEAD_REVISION = "0016"
 
 
 def _settings_for(database_path: Path) -> FrameNestSettings:

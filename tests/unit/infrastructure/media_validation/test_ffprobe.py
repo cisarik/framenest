@@ -414,3 +414,84 @@ def test_reader_io_error_is_sanitized_as_infrastructure_failure() -> None:
 
     with pytest.raises(QuarantineStateInconsistentError):
         validator.validate(_BrokenReader(_gif_bytes()))
+
+
+def _jpeg_bytes(*, size: tuple[int, int] = (2, 2)) -> bytes:
+    from io import BytesIO
+
+    from PIL import Image
+
+    buffer = BytesIO()
+    Image.new("RGB", size, (12, 34, 56)).save(buffer, format="JPEG", quality=90)
+    return buffer.getvalue()
+
+
+def _png_bytes(*, size: tuple[int, int] = (2, 2)) -> bytes:
+    from io import BytesIO
+
+    from PIL import Image
+
+    buffer = BytesIO()
+    Image.new("RGB", size, (1, 2, 3)).save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
+def test_valid_jpeg_is_accepted_without_ffprobe() -> None:
+    runner = _Runner(error=ProcessExecutionError(EXECUTABLE_NOT_FOUND_MESSAGE))
+    validator = BoundedUploadMediaValidator(runner, ffprobe_executable="/usr/bin/ffprobe")
+
+    evidence = validator.validate(_Reader(_jpeg_bytes()))
+
+    assert evidence.media_kind is UploadValidatedMediaKind.IMAGE
+    assert evidence.media_format is UploadValidatedFormat.JPEG
+    assert runner.calls == []
+
+
+def test_valid_png_is_accepted_without_ffprobe() -> None:
+    runner = _Runner(error=ProcessExecutionError(EXECUTABLE_NOT_FOUND_MESSAGE))
+    validator = BoundedUploadMediaValidator(runner, ffprobe_executable="/usr/bin/ffprobe")
+
+    evidence = validator.validate(_Reader(_png_bytes()))
+
+    assert evidence.media_kind is UploadValidatedMediaKind.IMAGE
+    assert evidence.media_format is UploadValidatedFormat.PNG
+    assert runner.calls == []
+
+
+def test_truncated_jpeg_is_rejected() -> None:
+    runner = _Runner(error=ProcessExecutionError(EXECUTABLE_NOT_FOUND_MESSAGE))
+    validator = BoundedUploadMediaValidator(runner, ffprobe_executable="/usr/bin/ffprobe")
+    payload = _jpeg_bytes()[:12]
+
+    with pytest.raises(UploadMediaValidationRejectedError) as exc:
+        validator.validate(_Reader(payload))
+
+    assert exc.value.failure_code == UPLOAD_VALIDATION_INVALID_MEDIA
+
+
+def test_png_bytes_with_jpeg_signature_prefix_mismatch_rejected() -> None:
+    # PNG content renamed as JPEG signature path is impossible; mismatch uses JPEG SOI
+    # followed by non-JPEG bytes.
+    runner = _Runner(error=ProcessExecutionError(EXECUTABLE_NOT_FOUND_MESSAGE))
+    validator = BoundedUploadMediaValidator(runner, ffprobe_executable="/usr/bin/ffprobe")
+    payload = b"\xff\xd8\xff" + b"not-a-jpeg-body"
+
+    with pytest.raises(UploadMediaValidationRejectedError) as exc:
+        validator.validate(_Reader(payload))
+
+    assert exc.value.failure_code in {
+        UPLOAD_VALIDATION_INVALID_MEDIA,
+        UPLOAD_VALIDATION_AMBIGUOUS_MEDIA_TYPE,
+    }
+
+
+def test_excessive_still_image_dimensions_are_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(ffprobe_module, "UPLOAD_VALIDATION_MAX_DIMENSION", 4)
+    monkeypatch.setattr(ffprobe_module, "UPLOAD_VALIDATION_MAX_TOTAL_PIXELS", 16)
+    runner = _Runner(error=ProcessExecutionError(EXECUTABLE_NOT_FOUND_MESSAGE))
+    validator = BoundedUploadMediaValidator(runner, ffprobe_executable="/usr/bin/ffprobe")
+
+    with pytest.raises(UploadMediaValidationRejectedError) as exc:
+        validator.validate(_Reader(_png_bytes(size=(8, 8))))
+
+    assert exc.value.failure_code == UPLOAD_VALIDATION_MEDIA_POLICY_LIMIT

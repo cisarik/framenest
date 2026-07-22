@@ -1,7 +1,8 @@
-"""Local ffprobe/ffmpeg media analysis preparation adapter."""
+"""Local media analysis preparation adapter."""
 
 from __future__ import annotations
 
+from framenest.application.library_scan import LibraryScanCandidateKind
 from framenest.application.media_analysis import (
     INVALID_MEDIA_PATH_MESSAGE,
     PREPARATION_FAILED_MESSAGE,
@@ -14,19 +15,20 @@ from framenest.application.media_analysis import (
     PreparedAnalysisResult,
     candidate_kind_for_relative_path,
 )
+from framenest.domain import LibraryRoot
 from framenest.infrastructure.media_analysis.ffmpeg import extract_representative_frames
 from framenest.infrastructure.media_analysis.ffprobe import probe_media_metadata
 from framenest.infrastructure.media_analysis.filesystem import resolve_safe_candidate_path
 from framenest.infrastructure.media_analysis.process import ProcessRunner, SubprocessRunner
+from framenest.infrastructure.media_analysis.still_image import prepare_still_image_analysis
 from framenest.infrastructure.media_analysis.tools import resolve_ffmpeg, resolve_ffprobe
-from framenest.domain import LibraryRoot
 
 _UNAVAILABLE = MediaAnalysisUnavailableError(PREPARATION_UNAVAILABLE_MESSAGE)
 _FAILED = MediaAnalysisFailedError(PREPARATION_FAILED_MESSAGE)
 
 
 class LocalMediaAnalysisAdapter:
-    """Read-only ffprobe/ffmpeg preparation adapter for one library candidate."""
+    """Read-only preparation adapter for cataloged library media."""
 
     def __init__(self, runner: ProcessRunner | None = None) -> None:
         self._runner = runner or SubprocessRunner()
@@ -39,6 +41,8 @@ class LocalMediaAnalysisAdapter:
         try:
             candidate_path, _extension = resolve_safe_candidate_path(root, relative_path)
             kind = candidate_kind_for_relative_path(relative_path)
+            if kind is LibraryScanCandidateKind.IMAGE:
+                return prepare_still_image_analysis(candidate_path, relative_path)
             ffprobe_executable, ffprobe_version = resolve_ffprobe(self._runner)
             ffmpeg_executable, ffmpeg_version = resolve_ffmpeg(self._runner)
             absolute_media_path = str(candidate_path)
@@ -65,10 +69,13 @@ class LocalMediaAnalysisAdapter:
             )
         except MediaAnalysisUnavailableError:
             raise
+        except MediaAnalysisFailedError:
+            raise
         except FrameNestMediaAnalysisError as exc:
             message = str(exc)
             if message in {
                 PREPARATION_UNAVAILABLE_MESSAGE,
+                INVALID_MEDIA_PATH_MESSAGE,
             }:
                 raise _UNAVAILABLE from None
             raise _UNAVAILABLE from None

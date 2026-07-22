@@ -2868,7 +2868,13 @@ function selectPlaybackLocation(item) {
 
 function selectSupportedAvailableLocation(item) {
   if (!item.locations || item.locations.length === 0) return null;
-  if (item.media_kind !== "video" && item.media_kind !== "animated_image") return null;
+  if (
+    item.media_kind !== "video"
+    && item.media_kind !== "animated_image"
+    && item.media_kind !== "image"
+  ) {
+    return null;
+  }
   return item.locations.find((location) => location.availability === "available" && location.location_id) || null;
 }
 
@@ -3347,6 +3353,9 @@ function formatCatalogKind(kind) {
   if (kind === "animated_image") {
     return "animated image";
   }
+  if (kind === "image") {
+    return "image";
+  }
   return String(kind).replaceAll("_", " ");
 }
 
@@ -3396,7 +3405,9 @@ function renderPersistentPreview(surface, item, location, title) {
 
   const image = document.createElement("img");
   image.className = "media-placeholder__preview-img";
-  image.alt = `Gallery preview for ${title}`;
+  image.alt = item.media_kind === "image"
+    ? `Still image for ${title}`
+    : `Gallery preview for ${title}`;
   image.loading = "lazy";
   image.decoding = "async";
   image.onerror = () => {
@@ -3404,7 +3415,9 @@ function renderPersistentPreview(surface, item, location, title) {
     image.removeAttribute("src");
     renderPreviewFallback(surface, title);
   };
-  image.src = mediaGalleryPreviewUrl(item.media_id, location.location_id);
+  image.src = item.media_kind === "image"
+    ? mediaContentUrl(item.media_id, location.location_id)
+    : mediaGalleryPreviewUrl(item.media_id, location.location_id);
   surface.appendChild(image);
 }
 
@@ -3444,7 +3457,9 @@ function renderCardOriginalPlayback(surface, item, location, title) {
   } else {
     const image = document.createElement("img");
     image.className = "media-placeholder__image";
-    image.alt = `Playing animated image preview for ${title}`;
+    image.alt = item.media_kind === "image"
+      ? `Still image preview for ${title}`
+      : `Playing animated image preview for ${title}`;
     image.onerror = showPreviewAgain;
     cardMediaElements.add(image);
     image.src = url;
@@ -3475,6 +3490,10 @@ function activateCardPlayback(item, surface) {
     renderPreviewFallback(surface, title);
     return;
   }
+  if (item.media_kind === "image") {
+    // Still images already render identity-only original content in the card.
+    return;
+  }
   if (
     item.media_kind === "animated_image"
     && activeCardMediaSurface === surface
@@ -3499,9 +3518,17 @@ function renderCatalogCardMediaSurface(item) {
   const surface = document.createElement("div");
   surface.className = `media-placeholder media-placeholder--preview media-placeholder--${item.media_kind}`;
   surface.setAttribute("data-media-state", "preview");
-  syncCardMediaSurfaceToggleState(surface, item, title, false);
   renderPersistentPreview(surface, item, location, title);
 
+  if (item.media_kind === "image") {
+    surface.setAttribute("aria-label", `Still image for ${title}`);
+    surface.removeAttribute("role");
+    surface.removeAttribute("tabindex");
+    surface.removeAttribute("title");
+    return surface;
+  }
+
+  syncCardMediaSurfaceToggleState(surface, item, title, false);
   surface.addEventListener("click", () => activateCardPlayback(item, surface));
   surface.addEventListener("keydown", (event) => {
     if (event.key === "Enter" || event.key === " ") {

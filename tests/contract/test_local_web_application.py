@@ -1681,7 +1681,15 @@ def test_catalog_card_original_media_action_appears_only_for_supported_available
 
     assert "const supportedLocation = selectSupportedAvailableLocation(item)" in card_body
     assert "if (supportedLocation)" in card_body
-    assert 'item.media_kind !== "video" && item.media_kind !== "animated_image"' in supported_body
+    assert (
+        'item.media_kind !== "video"\n'
+        '    && item.media_kind !== "animated_image"\n'
+        '    && item.media_kind !== "image"'
+    ) in supported_body or (
+        'item.media_kind !== "video"' in supported_body
+        and 'item.media_kind !== "animated_image"' in supported_body
+        and 'item.media_kind !== "image"' in supported_body
+    )
     assert 'location.availability === "available" && location.location_id' in supported_body
 
 
@@ -1963,10 +1971,10 @@ def test_javascript_initial_card_renders_static_persistent_preview_image(client:
 
     assert 'document.createElement("img")' in preview_body
     assert "media-placeholder__preview-img" in preview_body
-    assert "image.alt = `Gallery preview for ${title}`" in preview_body
-    assert "image.src = mediaGalleryPreviewUrl(item.media_id, location.location_id)" in preview_body
+    assert "Gallery preview for ${title}" in preview_body
+    assert "mediaGalleryPreviewUrl(item.media_id, location.location_id)" in preview_body
     assert "renderPreviewFallback(surface, title)" in preview_body
-    assert "mediaContentUrl" not in preview_body
+    assert "mediaContentUrl(item.media_id, location.location_id)" in preview_body
 
 
 def test_javascript_initial_card_render_does_not_fetch_original_or_generate_preview(client: TestClient) -> None:
@@ -1976,8 +1984,8 @@ def test_javascript_initial_card_render_does_not_fetch_original_or_generate_prev
     fallback_body = _javascript_function(script, "renderPreviewFallback")
 
     assert "mediaGalleryPreviewUrl(item.media_id, location.location_id)" in preview_body
-    assert "mediaContentUrl" not in surface_body
-    assert "/content" not in surface_body
+    assert "mediaContentUrl(item.media_id, location.location_id)" in preview_body
+    assert 'item.media_kind === "image"' in preview_body
     assert "media-analysis-preview" not in surface_body
     assert "media-analysis-preview" not in preview_body
     assert "previews generate" not in script

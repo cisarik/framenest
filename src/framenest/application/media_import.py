@@ -197,6 +197,8 @@ def _find_candidate(
 def _media_kind_for_candidate(candidate: LibraryScanCandidate) -> MediaKind:
     if candidate.kind == LibraryScanCandidateKind.GIF:
         return MediaKind.ANIMATED_IMAGE
+    if candidate.kind == LibraryScanCandidateKind.IMAGE:
+        return MediaKind.IMAGE
     return MediaKind.VIDEO
 
 

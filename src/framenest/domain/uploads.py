@@ -75,6 +75,7 @@ class UploadValidatedMediaKind(StrEnum):
 
     ANIMATED_IMAGE = "animated_image"
     VIDEO = "video"
+    IMAGE = "image"
 
 
 class UploadValidatedFormat(StrEnum):
@@ -82,6 +83,8 @@ class UploadValidatedFormat(StrEnum):
 
     GIF = "gif"
     MP4 = "mp4"
+    JPEG = "jpg"
+    PNG = "png"
 
 
 TERMINAL_UPLOAD_SESSION_STATES = frozenset(
@@ -119,6 +122,8 @@ ALLOWED_UPLOAD_VALIDATION_EVIDENCE_PAIRS = frozenset(
     {
         (UploadValidatedMediaKind.ANIMATED_IMAGE, UploadValidatedFormat.GIF),
         (UploadValidatedMediaKind.VIDEO, UploadValidatedFormat.MP4),
+        (UploadValidatedMediaKind.IMAGE, UploadValidatedFormat.JPEG),
+        (UploadValidatedMediaKind.IMAGE, UploadValidatedFormat.PNG),
     }
 )
 

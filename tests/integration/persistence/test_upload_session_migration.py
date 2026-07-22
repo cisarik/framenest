@@ -14,7 +14,7 @@ from framenest.infrastructure.persistence.catalog_schema import upload_sessions
 PRODUCTION_VERSIONS_PACKAGE = (
     "framenest.infrastructure.persistence.alembic_environment.versions"
 )
-CURRENT_HEAD_REVISION = "0015"
+CURRENT_HEAD_REVISION = "0016"
 TARGET_DUPLICATE_DISPOSITION_REVISION = "0012"
 TARGET_BYTE_IDENTITY_REVISION = "0011"
 TARGET_VALIDATION_REVISION = "0010"
@@ -141,6 +141,7 @@ def test_packaged_migration_resources_include_upload_session_revisions() -> None
     assert versions.joinpath("0010_upload_validation_evidence.py").is_file()
     assert versions.joinpath("0011_upload_byte_identities.py").is_file()
     assert versions.joinpath("0012_upload_duplicate_disposition.py").is_file()
+    assert versions.joinpath("0016_still_image_media_kinds.py").is_file()
 
     from framenest.infrastructure.persistence.migrations import load_script_directory
 

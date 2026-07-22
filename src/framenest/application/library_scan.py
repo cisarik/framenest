@@ -47,6 +47,7 @@ VIDEO_EXTENSIONS = frozenset(
     }
 )
 GIF_EXTENSIONS = frozenset({".gif"})
+IMAGE_EXTENSIONS = frozenset({".jpg", ".jpeg", ".png"})
 
 
 class FrameNestLibraryScanError(ValueError):
@@ -70,6 +71,7 @@ class LibraryScanCandidateKind(StrEnum):
 
     VIDEO = "video"
     GIF = "gif"
+    IMAGE = "image"
 
 
 def classify_candidate_extension(extension: str) -> LibraryScanCandidateKind | None:
@@ -78,6 +80,8 @@ def classify_candidate_extension(extension: str) -> LibraryScanCandidateKind | N
         return LibraryScanCandidateKind.VIDEO
     if extension in GIF_EXTENSIONS:
         return LibraryScanCandidateKind.GIF
+    if extension in IMAGE_EXTENSIONS:
+        return LibraryScanCandidateKind.IMAGE
     return None
 
 

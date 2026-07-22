@@ -82,7 +82,7 @@ _URL_PATTERN = re.compile(r"https?://\S+")
 _POSIX_PATH_PATTERN = re.compile(r"(?<![A-Za-z0-9_])/(?:[^\s\"']+)")
 _WINDOWS_PATH_PATTERN = re.compile(r"[A-Za-z]:\\(?:[^\s\"']+)")
 _MEDIA_FILENAME_PATTERN = re.compile(
-    r"[^\s\"']+\.(?:mkv|mp4|webm|mov|gif)\b",
+    r"[^\s\"']+\.(?:mkv|mp4|webm|mov|gif|jpg|jpeg|png)\b",
     re.IGNORECASE,
 )
 

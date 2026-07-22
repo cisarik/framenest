@@ -140,7 +140,9 @@ def define_upload_sessions_table(metadata: MetaData) -> Table:
         CheckConstraint(
             "(validated_media_kind IS NULL AND validated_format IS NULL) "
             "OR (validated_media_kind = 'animated_image' AND validated_format = 'gif') "
-            "OR (validated_media_kind = 'video' AND validated_format = 'mp4')",
+            "OR (validated_media_kind = 'video' AND validated_format = 'mp4') "
+            "OR (validated_media_kind = 'image' AND validated_format = 'jpg') "
+            "OR (validated_media_kind = 'image' AND validated_format = 'png')",
             name="ck_upload_sessions_validation_evidence_pair",
         ),
         CheckConstraint(
