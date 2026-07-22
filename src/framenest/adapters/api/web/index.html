@@ -226,6 +226,30 @@
               <textarea id="metadata-description-input" rows="5" autocomplete="off"></textarea>
             </label>
             <p id="metadata-description-status" class="metadata-note" aria-live="polite" hidden></p>
+
+            <label class="metadata-field" for="metadata-content-category">
+              <span>Content category</span>
+              <select id="metadata-content-category">
+                <option value="general">General</option>
+                <option value="meme">Meme</option>
+                <option value="movie">Movie</option>
+              </select>
+            </label>
+
+            <label class="metadata-field" for="metadata-acquisition-source">
+              <span>Acquisition source</span>
+              <select id="metadata-acquisition-source">
+                <option value="unknown">Unknown</option>
+                <option value="manual_upload">Manual upload</option>
+                <option value="library_scan">Library scan</option>
+                <option value="youtube_manual_claim">YouTube (manual claim)</option>
+              </select>
+            </label>
+
+            <fieldset id="metadata-genres-fieldset" class="metadata-field metadata-genres" hidden>
+              <legend>Genres</legend>
+              <div id="metadata-genres" class="metadata-genres__options"></div>
+            </fieldset>
           </div>
 
           <div class="metadata-tags-panel">
@@ -254,6 +278,7 @@
             <p id="metadata-ai-capability" class="metadata-note">AI analysis is not configured.</p>
             <p id="metadata-ai-status" class="metadata-note" aria-live="polite"></p>
             <p id="metadata-ai-filename-note" class="metadata-ai-filename-note" hidden></p>
+            <button id="metadata-movie-identify-button" type="button" hidden disabled>Identify movie</button>
             <div id="metadata-durable-ai-suggestion" class="metadata-durable-ai-suggestion" hidden>
               <p class="metadata-ai-details-eyebrow">Proposed values — not saved yet</p>
               <dl class="metadata-ai-details-list">
@@ -297,6 +322,11 @@
         <div class="catalog-scope" role="group" aria-label="Catalog scope">
           <button id="catalog-scope-all" type="button" class="scope-active">All media</button>
           <button id="catalog-scope-processed" type="button">Processed</button>
+        </div>
+        <div class="catalog-class-filters" role="group" aria-label="Content and source filters">
+          <button id="catalog-filter-memes" type="button" data-content-category="meme" aria-pressed="false">Memes</button>
+          <button id="catalog-filter-movies" type="button" data-content-category="movie" aria-pressed="false">Movies</button>
+          <button id="catalog-filter-youtube" type="button" data-acquisition-source="youtube_manual_claim" aria-pressed="false">YouTube</button>
         </div>
         <p id="catalog-tags-state" class="catalog-tags-state" role="status" hidden></p>
         <div id="catalog-state-loading" class="library-state" role="status">

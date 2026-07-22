@@ -16,6 +16,14 @@ from framenest.application.ports.media_metadata_repository import (
     MediaMetadataSnapshot,
 )
 from framenest.domain import FrameNestIdentityError, MediaId
+from framenest.domain.media_classification import (
+    DEFAULT_ACQUISITION_SOURCE,
+    DEFAULT_CONTENT_CATEGORY,
+    MAX_MEDIA_GENRES,
+    AcquisitionSource,
+    ContentCategory,
+    MovieGenre,
+)
 from framenest.domain.media_metadata import (
     CanonicalTag,
     CanonicalTagDisplayName,
@@ -26,11 +34,13 @@ from framenest.domain.media_metadata import (
     MediaCollectionKey,
     MediaDescription,
     MediaDisplayTitle,
+    normalize_genres_for_category,
 )
 from framenest.infrastructure.persistence.catalog_schema import (
     canonical_tags,
     logical_media,
     media_canonical_tags,
+    media_genres,
     media_metadata,
 )
 from framenest.infrastructure.persistence.engine import run_in_transaction
@@ -133,8 +143,21 @@ class SqliteMediaMetadataRepository:
         description: MediaDescription | None,
         tag_keys: tuple[CanonicalTagKey, ...],
         now_ms: int,
+        *,
+        content_category: ContentCategory = DEFAULT_CONTENT_CATEGORY,
+        acquisition_source: AcquisitionSource = DEFAULT_ACQUISITION_SOURCE,
+        genre_keys: tuple[MovieGenre, ...] = (),
     ) -> MediaMetadataSaveResult:
         if len(tag_keys) > 32 or len(set(tag_keys)) != len(tag_keys):
+            raise ValueError(_REPOSITORY_FAILURE_MESSAGE)
+        if not isinstance(content_category, ContentCategory):
+            raise ValueError(_REPOSITORY_FAILURE_MESSAGE)
+        if not isinstance(acquisition_source, AcquisitionSource):
+            raise ValueError(_REPOSITORY_FAILURE_MESSAGE)
+        normalized_genres = normalize_genres_for_category(content_category, genre_keys)
+        if len(normalized_genres) > MAX_MEDIA_GENRES or len(set(normalized_genres)) != len(
+            normalized_genres
+        ):
             raise ValueError(_REPOSITORY_FAILURE_MESSAGE)
 
         def operation(connection: Connection) -> MediaMetadataSaveResult:
@@ -157,6 +180,9 @@ class SqliteMediaMetadataRepository:
                 and current.tag_keys == tag_keys
                 and current.collection_key == derived.collection_key
                 and current.processed_at_ms == derived.processed_at_ms
+                and current.content_category == content_category
+                and current.acquisition_source == acquisition_source
+                and current.genre_keys == normalized_genres
             ):
                 return MediaMetadataSaveResult(status="unchanged", metadata=current)
 
@@ -169,6 +195,8 @@ class SqliteMediaMetadataRepository:
                     .values(
                         display_title=None if display_title is None else display_title.value,
                         description=None if description is None else description.value,
+                        content_category=content_category.value,
+                        acquisition_source=acquisition_source.value,
                         collection_key=None
                         if derived.collection_key is None
                         else derived.collection_key.value,
@@ -184,6 +212,8 @@ class SqliteMediaMetadataRepository:
                         media_id=media_id.to_string(),
                         display_title=None if display_title is None else display_title.value,
                         description=None if description is None else description.value,
+                        content_category=content_category.value,
+                        acquisition_source=acquisition_source.value,
                         collection_key=None
                         if derived.collection_key is None
                         else derived.collection_key.value,
@@ -198,7 +228,11 @@ class SqliteMediaMetadataRepository:
                     media_canonical_tags.c.media_id == media_id.to_string()
                 )
             )
+            connection.execute(
+                delete(media_genres).where(media_genres.c.media_id == media_id.to_string())
+            )
             _insert_assignments(connection, media_id, tag_keys)
+            _insert_genres(connection, media_id, normalized_genres)
             snapshot = MediaMetadataSnapshot(
                 media_id=media_id,
                 persisted=True,
@@ -209,6 +243,9 @@ class SqliteMediaMetadataRepository:
                 processed_at_ms=derived.processed_at_ms,
                 created_at_ms=created_at_ms,
                 updated_at_ms=now_ms,
+                content_category=content_category,
+                acquisition_source=acquisition_source,
+                genre_keys=normalized_genres,
             )
             return MediaMetadataSaveResult(status=status, metadata=snapshot)
 
@@ -260,6 +297,8 @@ def _load_metadata_snapshot(connection: Connection, media_id: MediaId) -> MediaM
                 media_metadata.c.media_id,
                 media_metadata.c.display_title,
                 media_metadata.c.description,
+                media_metadata.c.content_category,
+                media_metadata.c.acquisition_source,
                 media_metadata.c.collection_key,
                 media_metadata.c.processed_at_ms,
                 media_metadata.c.created_at_ms,
@@ -280,11 +319,19 @@ def _load_metadata_snapshot(connection: Connection, media_id: MediaId) -> MediaM
             processed_at_ms=None,
             created_at_ms=None,
             updated_at_ms=None,
+            content_category=DEFAULT_CONTENT_CATEGORY,
+            acquisition_source=DEFAULT_ACQUISITION_SOURCE,
+            genre_keys=(),
         )
     assignment_rows = connection.execute(
         select(media_canonical_tags.c.tag_key)
         .where(media_canonical_tags.c.media_id == media_id.to_string())
         .order_by(media_canonical_tags.c.position)
+    ).mappings()
+    genre_rows = connection.execute(
+        select(media_genres.c.genre_key)
+        .where(media_genres.c.media_id == media_id.to_string())
+        .order_by(media_genres.c.position)
     ).mappings()
     try:
         mapping = dict(metadata_row)
@@ -308,6 +355,9 @@ def _load_metadata_snapshot(connection: Connection, media_id: MediaId) -> MediaM
             processed_at_ms=raw_processed_at_ms,
             created_at_ms=mapping["created_at_ms"],
             updated_at_ms=mapping["updated_at_ms"],
+            content_category=ContentCategory(mapping["content_category"]),
+            acquisition_source=AcquisitionSource(mapping["acquisition_source"]),
+            genre_keys=tuple(MovieGenre(dict(row)["genre_key"]) for row in genre_rows),
         )
     except (
         FrameNestIdentityError,
@@ -329,6 +379,21 @@ def _insert_assignments(
             insert(media_canonical_tags).values(
                 media_id=media_id.to_string(),
                 tag_key=key.value,
+                position=position,
+            )
+        )
+
+
+def _insert_genres(
+    connection: Connection,
+    media_id: MediaId,
+    genre_keys: tuple[MovieGenre, ...],
+) -> None:
+    for position, genre in enumerate(genre_keys):
+        connection.execute(
+            insert(media_genres).values(
+                media_id=media_id.to_string(),
+                genre_key=genre.value,
                 position=position,
             )
         )

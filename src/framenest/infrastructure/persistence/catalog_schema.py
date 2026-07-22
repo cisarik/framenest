@@ -232,11 +232,22 @@ media_metadata = Table(
     ),
     Column("display_title", Text(), nullable=True),
     Column("description", Text(), nullable=True),
+    Column("content_category", Text(), nullable=False, server_default="general"),
+    Column("acquisition_source", Text(), nullable=False, server_default="unknown"),
     Column("collection_key", Text(), nullable=True),
     Column("processed_at_ms", Integer(), nullable=True),
     Column("created_at_ms", Integer(), nullable=False),
     Column("updated_at_ms", Integer(), nullable=False),
     CheckConstraint("length(media_id) = 36", name="ck_media_metadata_media_id_length"),
+    CheckConstraint(
+        "content_category IN ('general', 'meme', 'movie')",
+        name="ck_media_metadata_content_category",
+    ),
+    CheckConstraint(
+        "acquisition_source IN ("
+        "'unknown', 'manual_upload', 'library_scan', 'youtube_manual_claim')",
+        name="ck_media_metadata_acquisition_source",
+    ),
     CheckConstraint(
         "collection_key IS NULL OR collection_key = 'processed'",
         name="ck_media_metadata_collection_key_valid",
@@ -276,6 +287,35 @@ media_metadata = Table(
         "processed_at_ms",
         "media_id",
     ),
+    Index("ix_media_metadata_content_category", "content_category", "media_id"),
+    Index("ix_media_metadata_acquisition_source", "acquisition_source", "media_id"),
+)
+
+media_genres = Table(
+    "media_genres",
+    metadata,
+    Column(
+        "media_id",
+        Text(),
+        ForeignKey("media_metadata.media_id", ondelete="RESTRICT"),
+        nullable=False,
+    ),
+    Column("genre_key", Text(), nullable=False),
+    Column("position", Integer(), nullable=False),
+    CheckConstraint("length(media_id) = 36", name="ck_media_genres_media_id_length"),
+    CheckConstraint(
+        "genre_key IN ("
+        "'drama', 'comedy', 'sci-fi', 'thriller', 'horror', 'action', 'adventure', "
+        "'documentary', 'animation', 'family', 'romance', 'crime', 'fantasy', 'mystery')",
+        name="ck_media_genres_genre_key",
+    ),
+    CheckConstraint(
+        "position >= 0 AND position < 8",
+        name="ck_media_genres_position_range",
+    ),
+    PrimaryKeyConstraint("media_id", "genre_key", name="pk_media_genres"),
+    UniqueConstraint("media_id", "position", name="uq_media_genres_media_position"),
+    Index("ix_media_genres_genre_key", "genre_key"),
 )
 
 media_canonical_tags = Table(
@@ -522,6 +562,11 @@ media_analysis_runs = Table(
     Column("result_json", Text(), nullable=True),
     Column("error_code", Text(), nullable=True),
     Column("error_message", Text(), nullable=True),
+    Column("analysis_profile", Text(), nullable=True),
+    Column("reasoning_enabled", Integer(), nullable=True),
+    Column("derivative_strategy", Text(), nullable=True),
+    Column("derivative_count", Integer(), nullable=True),
+    Column("provider_submission_occurred", Integer(), nullable=True),
     Column("created_at_ms", Integer(), nullable=False),
     Column("started_at_ms", Integer(), nullable=True),
     Column("completed_at_ms", Integer(), nullable=True),
@@ -546,6 +591,23 @@ media_analysis_runs = Table(
     CheckConstraint(
         "attempt_count >= 0 AND attempt_count <= 100",
         name="ck_media_analysis_runs_attempt_count",
+    ),
+    CheckConstraint(
+        "analysis_profile IS NULL OR analysis_profile IN "
+        "('generic_media', 'movie_identification')",
+        name="ck_media_analysis_runs_analysis_profile",
+    ),
+    CheckConstraint(
+        "reasoning_enabled IS NULL OR reasoning_enabled IN (0, 1)",
+        name="ck_media_analysis_runs_reasoning_enabled",
+    ),
+    CheckConstraint(
+        "provider_submission_occurred IS NULL OR provider_submission_occurred IN (0, 1)",
+        name="ck_media_analysis_runs_provider_submission",
+    ),
+    CheckConstraint(
+        "derivative_count IS NULL OR (derivative_count >= 0 AND derivative_count <= 16)",
+        name="ck_media_analysis_runs_derivative_count",
     ),
     CheckConstraint(
         "created_at_ms >= 0",

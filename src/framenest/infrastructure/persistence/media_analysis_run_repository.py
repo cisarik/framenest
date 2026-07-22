@@ -280,6 +280,11 @@ class SqliteMediaAnalysisRunRepository:
         result_schema_version: str,
         result_json: str,
         completed_at_ms: int,
+        analysis_profile: str | None = None,
+        reasoning_enabled: bool | None = None,
+        derivative_strategy: str | None = None,
+        derivative_count: int | None = None,
+        provider_submission_occurred: bool | None = True,
     ) -> MediaAnalysisRun:
         def operation(connection: Connection) -> MediaAnalysisRun:
             row = _require_row(connection, run_id)
@@ -288,6 +293,30 @@ class SqliteMediaAnalysisRunRepository:
                 or row["version"] != expected_version
             ):
                 raise MediaAnalysisRunConflictError(_REPOSITORY_FAILURE_MESSAGE)
+            values = {
+                "state": MediaAnalysisRunState.ANALYZED.value,
+                "provider_id": provider_id,
+                "model_id": model_id,
+                "prompt_version": prompt_version,
+                "result_schema_version": result_schema_version,
+                "result_json": result_json,
+                "error_code": None,
+                "error_message": None,
+                "completed_at_ms": completed_at_ms,
+                "version": expected_version + 1,
+            }
+            if analysis_profile is not None:
+                values["analysis_profile"] = analysis_profile
+            if reasoning_enabled is not None:
+                values["reasoning_enabled"] = 1 if reasoning_enabled else 0
+            if derivative_strategy is not None:
+                values["derivative_strategy"] = derivative_strategy
+            if derivative_count is not None:
+                values["derivative_count"] = derivative_count
+            if provider_submission_occurred is not None:
+                values["provider_submission_occurred"] = (
+                    1 if provider_submission_occurred else 0
+                )
             updated = connection.execute(
                 update(media_analysis_runs)
                 .where(
@@ -296,18 +325,7 @@ class SqliteMediaAnalysisRunRepository:
                     media_analysis_runs.c.state
                     == MediaAnalysisRunState.ANALYZING.value,
                 )
-                .values(
-                    state=MediaAnalysisRunState.ANALYZED.value,
-                    provider_id=provider_id,
-                    model_id=model_id,
-                    prompt_version=prompt_version,
-                    result_schema_version=result_schema_version,
-                    result_json=result_json,
-                    error_code=None,
-                    error_message=None,
-                    completed_at_ms=completed_at_ms,
-                    version=expected_version + 1,
-                )
+                .values(**values)
             )
             if updated.rowcount != 1:
                 raise MediaAnalysisRunConflictError(_REPOSITORY_FAILURE_MESSAGE)
@@ -521,6 +539,31 @@ def _run_from_row(row: Mapping[str, object]) -> MediaAnalysisRun:
                 None if row["completed_at_ms"] is None else int(row["completed_at_ms"])
             ),
             version=int(row["version"]),
+            analysis_profile=(
+                None
+                if row.get("analysis_profile") is None
+                else str(row["analysis_profile"])
+            ),
+            reasoning_enabled=(
+                None
+                if row.get("reasoning_enabled") is None
+                else bool(int(row["reasoning_enabled"]))
+            ),
+            derivative_strategy=(
+                None
+                if row.get("derivative_strategy") is None
+                else str(row["derivative_strategy"])
+            ),
+            derivative_count=(
+                None
+                if row.get("derivative_count") is None
+                else int(row["derivative_count"])
+            ),
+            provider_submission_occurred=(
+                None
+                if row.get("provider_submission_occurred") is None
+                else bool(int(row["provider_submission_occurred"]))
+            ),
         )
     except (FrameNestIdentityError, TypeError, ValueError) as exc:
         raise FrameNestMediaAnalysisRunRepositoryError(

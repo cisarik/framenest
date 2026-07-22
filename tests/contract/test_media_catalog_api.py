@@ -41,10 +41,22 @@ class _FakeListMediaCatalog:
         limit: int,
         offset: int,
         collection_key: MediaCollectionKey | None = None,
+        content_category: str | None = None,
+        acquisition_source: str | None = None,
     ) -> MediaCatalogPage:
         if self.queries is None:
             self.queries = []
-        self.queries.append({"q": q, "tag_keys": tag_keys, "limit": limit, "offset": offset, "collection_key": collection_key})
+        self.queries.append(
+            {
+                "q": q,
+                "tag_keys": tag_keys,
+                "limit": limit,
+                "offset": offset,
+                "collection_key": collection_key,
+                "content_category": content_category,
+                "acquisition_source": acquisition_source,
+            }
+        )
         if self.error is not None:
             raise self.error
         return ListMediaCatalog(_FakeCatalogRepository()).execute(
@@ -53,6 +65,8 @@ class _FakeListMediaCatalog:
             limit=limit,
             offset=offset,
             collection_key=collection_key,
+            content_category=content_category,
+            acquisition_source=acquisition_source,
         )
 
 
@@ -135,6 +149,8 @@ def test_successful_default_listing_exposes_complete_catalog_safe_fields() -> No
                         "observed_mtime_ns": 456,
                     }
                 ],
+                "content_category": "general",
+                "acquisition_source": "unknown",
             }
         ],
         "total": 1,
@@ -142,6 +158,8 @@ def test_successful_default_listing_exposes_complete_catalog_safe_fields() -> No
         "offset": 0,
         "q": None,
         "tag_keys": [],
+        "content_category": None,
+        "acquisition_source": None,
     }
     assert PRIVATE_ROOT_MARKER not in response.text
 
@@ -170,6 +188,8 @@ def test_repeated_tags_title_query_combined_filters_and_pagination_metadata() ->
             "limit": 1,
             "offset": 2,
             "collection_key": None,
+            "content_category": None,
+            "acquisition_source": None,
         }
     ]
 

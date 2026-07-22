@@ -67,3 +67,8 @@ class MediaAnalysisRun:
     started_at_ms: int | None
     completed_at_ms: int | None
     version: int
+    analysis_profile: str | None = None
+    reasoning_enabled: bool | None = None
+    derivative_strategy: str | None = None
+    derivative_count: int | None = None
+    provider_submission_occurred: bool | None = None

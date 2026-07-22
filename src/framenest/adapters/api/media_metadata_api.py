@@ -86,12 +86,18 @@ class MediaMetadataResponse(BaseModel):
     processed_at_ms: int | None
     created_at_ms: int | None
     updated_at_ms: int | None
+    content_category: str = "general"
+    acquisition_source: str = "unknown"
+    genres: list[str] = []
 
 
 class MediaMetadataSaveRequest(BaseModel):
     display_title: str | None
     description: str | None
     tag_keys: list[str]
+    content_category: str = "general"
+    acquisition_source: str = "unknown"
+    genres: list[str] = []
 
     @field_validator("display_title")
     @classmethod
@@ -117,6 +123,27 @@ class MediaMetadataSaveRequest(BaseModel):
     def validate_tag_keys(cls, value: list[str]) -> list[str]:
         keys = [CanonicalTagKey(key) for key in value]
         if len(keys) > 32 or len(set(keys)) != len(keys):
+            raise ValueError(MEDIA_METADATA_OPERATION_FAILED_MESSAGE)
+        return value
+
+    @field_validator("content_category")
+    @classmethod
+    def validate_content_category(cls, value: str) -> str:
+        from framenest.domain.media_classification import ContentCategory
+
+        return ContentCategory(value).value
+
+    @field_validator("acquisition_source")
+    @classmethod
+    def validate_acquisition_source(cls, value: str) -> str:
+        from framenest.domain.media_classification import AcquisitionSource
+
+        return AcquisitionSource(value).value
+
+    @field_validator("genres")
+    @classmethod
+    def validate_genres(cls, value: list[str]) -> list[str]:
+        if len(value) > 8 or len(set(item.casefold() for item in value)) != len(value):
             raise ValueError(MEDIA_METADATA_OPERATION_FAILED_MESSAGE)
         return value
 
@@ -245,6 +272,9 @@ def create_media_metadata_api_router(dependencies: MediaMetadataApiDependencies)
                 request.display_title,
                 request.description,
                 request.tag_keys,
+                content_category=request.content_category,
+                acquisition_source=request.acquisition_source,
+                genres=request.genres,
             )
         except MediaMetadataMediaNotFoundError:
             return _error_response(404, MEDIA_NOT_FOUND_CODE, MEDIA_NOT_FOUND_MESSAGE)
@@ -311,4 +341,7 @@ def _metadata_response(metadata: object) -> MediaMetadataResponse:
         processed_at_ms=metadata.processed_at_ms,
         created_at_ms=metadata.created_at_ms,
         updated_at_ms=metadata.updated_at_ms,
+        content_category=getattr(metadata, "content_category", "general"),
+        acquisition_source=getattr(metadata, "acquisition_source", "unknown"),
+        genres=list(getattr(metadata, "genres", ())),
     )

@@ -70,11 +70,13 @@ from framenest.application.upload_catalog_coordinator import UploadCatalogCoordi
 from framenest.application.media_analysis_coordinator import MediaAnalysisCoordinator
 from framenest.application.media_analysis_lifecycle import (
     AutomaticImportedMediaSuggestionExecutor,
+    CatalogedAnalysisTarget,
     ExecuteAutomaticMediaAnalysisRun,
     ReadAutomaticMediaAnalysis,
     RequestManualMediaAnalysis,
     ScheduleAutomaticMediaAnalysis,
 )
+from framenest.domain.media_classification import MOVIE_IDENTIFICATION_ANALYSIS_DEFINITION
 from framenest.application.upload_publication import PublishPendingUpload
 from framenest.application.upload_publication_coordinator import (
     UploadPublicationCoordinator,
@@ -329,6 +331,36 @@ def create_app(
             analysis_executor,
             manual_requester=analysis_manual_requester,
         )
+        movie_identification_executor = None
+        movie_identification_requester = None
+        if analysis_provider is not None and hasattr(analysis_provider, "identify_movie"):
+            from framenest.application.movie_identification_lifecycle import (
+                ExecuteMovieIdentificationRun,
+                request_movie_identification,
+            )
+            from framenest.infrastructure.media_analysis.movie_identification import (
+                LocalMovieIdentificationAdapter,
+            )
+
+            movie_identification_executor = ExecuteMovieIdentificationRun(
+                owned_media_analysis_run_repository,
+                owned_media_repository,
+                owned_library_repository,
+                LocalMovieIdentificationAdapter(),
+                analysis_provider,
+            )
+
+            def _request_movie_identification(media_id, location_id):
+                return request_movie_identification(
+                    owned_media_analysis_run_repository,
+                    CatalogedAnalysisTarget(
+                        media_id=media_id,
+                        media_location_id=location_id,
+                    ),
+                )
+
+            movie_identification_requester = _request_movie_identification
+
         media_analysis_lifecycle_api_dependencies = MediaAnalysisLifecycleApiDependencies(
             read_analysis=ReadAutomaticMediaAnalysis(
                 owned_media_analysis_run_repository
@@ -340,6 +372,18 @@ def create_app(
             provider_id=resolved_analysis_ai.provider_id,
             model_id=resolved_analysis_ai.model_id,
             request_manual_analysis=owned_media_analysis_coordinator.request_manual,
+            request_movie_identification=movie_identification_requester,
+            read_movie_identification=ReadAutomaticMediaAnalysis(
+                owned_media_analysis_run_repository,
+                analysis_definition=MOVIE_IDENTIFICATION_ANALYSIS_DEFINITION,
+            ).execute
+            if movie_identification_requester is not None
+            else None,
+            execute_movie_identification=(
+                movie_identification_executor.execute
+                if movie_identification_executor is not None
+                else None
+            ),
         )
     if upload_api_dependencies is None:
         assert owned_upload_session_repository is not None

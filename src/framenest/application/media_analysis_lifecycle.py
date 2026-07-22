@@ -46,10 +46,18 @@ from framenest.domain.media_analysis_runs import (
     AUTOMATIC_POST_CATALOG_ANALYSIS_DEFINITION,
     DEFAULT_MAX_ANALYSIS_ATTEMPTS,
     MAX_CONFIGURED_ANALYSIS_ATTEMPTS,
-    RESULT_SCHEMA_VERSION,
     MediaAnalysisRun,
+    MediaAnalysisRunId,
     MediaAnalysisRunState,
+    RESULT_SCHEMA_VERSION,
     TERMINAL_ANALYSIS_RUN_STATES,
+)
+from framenest.domain.media_classification import (
+    AnalysisProfile,
+    CONTACT_SHEET_DERIVATIVE_STRATEGY,
+    GENERIC_DERIVATIVE_STRATEGY,
+    GENERIC_MEDIA_ANALYSIS_DEFINITION,
+    MOVIE_IDENTIFICATION_ANALYSIS_DEFINITION,
 )
 
 
@@ -89,6 +97,11 @@ class AutomaticAnalysisPublicView:
     created_at_ms: int | None
     started_at_ms: int | None
     completed_at_ms: int | None
+    analysis_profile: str | None = None
+    reasoning_enabled: bool | None = None
+    derivative_strategy: str | None = None
+    derivative_count: int | None = None
+    provider_submission_occurred: bool | None = None
 
 
 class _SuggestionExecutor(Protocol):
@@ -169,6 +182,11 @@ def public_view_from_run(run: MediaAnalysisRun | None) -> AutomaticAnalysisPubli
         created_at_ms=run.created_at_ms,
         started_at_ms=run.started_at_ms,
         completed_at_ms=run.completed_at_ms,
+        analysis_profile=run.analysis_profile,
+        reasoning_enabled=run.reasoning_enabled,
+        derivative_strategy=run.derivative_strategy,
+        derivative_count=run.derivative_count,
+        provider_submission_occurred=run.provider_submission_occurred,
     )
 
 
@@ -347,6 +365,11 @@ class ExecuteAutomaticMediaAnalysisRun:
                 result_schema_version=RESULT_SCHEMA_VERSION,
                 result_json=serialize_suggestion_result(suggestion),
                 completed_at_ms=self._now_ms(),
+                analysis_profile=AnalysisProfile.GENERIC_MEDIA.value,
+                reasoning_enabled=False,
+                derivative_strategy=GENERIC_DERIVATIVE_STRATEGY,
+                derivative_count=None,
+                provider_submission_occurred=True,
             )
         except FrameNestMediaAnalysisRunRepositoryError as exc:
             raise MediaAnalysisLifecycleError(

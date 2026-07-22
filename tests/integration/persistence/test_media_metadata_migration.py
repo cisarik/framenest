@@ -13,7 +13,7 @@ from framenest.configuration import FrameNestSettings
 PRODUCTION_VERSIONS_PACKAGE = (
     "framenest.infrastructure.persistence.alembic_environment.versions"
 )
-CURRENT_HEAD_REVISION = "0016"
+CURRENT_HEAD_REVISION = "0017"
 TARGET_COLLECTION_REVISION = "0007"
 TARGET_PREVIOUS_REVISION = "0006"
 DEVICE_ID = "12345678-1234-4234-9234-123456789abc"
@@ -192,6 +192,8 @@ def test_media_metadata_tables_have_required_schema_constraints_and_indexes(
         "media_id",
         "display_title",
         "description",
+        "content_category",
+        "acquisition_source",
         "collection_key",
         "processed_at_ms",
         "created_at_ms",

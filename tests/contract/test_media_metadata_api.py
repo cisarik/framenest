@@ -88,7 +88,17 @@ class _FakeSaveMetadata:
     last_description: str | None = None
     last_tag_keys: list[str] | None = None
 
-    def execute(self, media_id: str, display_title: str | None, description: str | None, tag_keys: list[str]) -> object:
+    def execute(
+        self,
+        media_id: str,
+        display_title: str | None,
+        description: str | None,
+        tag_keys: list[str],
+        *,
+        content_category: str = "general",
+        acquisition_source: str = "unknown",
+        genres: list[str] | None = None,
+    ) -> object:
         self.last_display_title = display_title
         self.last_description = description
         self.last_tag_keys = tag_keys
@@ -104,6 +114,9 @@ class _FakeSaveMetadata:
             processed_at_ms=10 if has_tags else None,
             created_at_ms=10,
             updated_at_ms=10,
+            content_category=content_category,
+            acquisition_source=acquisition_source,
+            genres=tuple(genres or ()),
         )
         return SaveMediaMetadataResult(status=self.status, metadata=metadata)
 
@@ -188,6 +201,9 @@ def test_metadata_get_unsaved_saved_and_save_statuses() -> None:
         "processed_at_ms": None,
         "created_at_ms": None,
         "updated_at_ms": None,
+        "content_category": "general",
+        "acquisition_source": "unknown",
+        "genres": [],
     }
     assert saved.json()["tags"] == [{"key": "mathematics", "display_name": "Math"}]
     assert saved.json()["description"] == "A plain text description."

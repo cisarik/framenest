@@ -7,6 +7,14 @@ import re
 import unicodedata
 
 from framenest.domain.identities import MediaId
+from framenest.domain.media_classification import (
+    DEFAULT_ACQUISITION_SOURCE,
+    DEFAULT_CONTENT_CATEGORY,
+    MAX_MEDIA_GENRES,
+    AcquisitionSource,
+    ContentCategory,
+    MovieGenre,
+)
 
 INVALID_MEDIA_METADATA_MESSAGE = "Invalid FrameNest media metadata."
 PROCESSED_COLLECTION_KEY = "processed"
@@ -213,6 +221,9 @@ class MediaMetadata:
     tag_keys: tuple[CanonicalTagKey, ...]
     created_at_ms: int
     updated_at_ms: int
+    content_category: ContentCategory = DEFAULT_CONTENT_CATEGORY
+    acquisition_source: AcquisitionSource = DEFAULT_ACQUISITION_SOURCE
+    genre_keys: tuple[MovieGenre, ...] = ()
 
     def __post_init__(self) -> None:
         if not isinstance(self.media_id, MediaId):
@@ -233,7 +244,36 @@ class MediaMetadata:
             raise FrameNestMediaMetadataError(INVALID_MEDIA_METADATA_MESSAGE)
         if len(self.tag_keys) > MAX_MEDIA_TAGS or len(set(self.tag_keys)) != len(self.tag_keys):
             raise FrameNestMediaMetadataError(INVALID_MEDIA_METADATA_MESSAGE)
+        if not isinstance(self.content_category, ContentCategory):
+            raise FrameNestMediaMetadataError(INVALID_MEDIA_METADATA_MESSAGE)
+        if not isinstance(self.acquisition_source, AcquisitionSource):
+            raise FrameNestMediaMetadataError(INVALID_MEDIA_METADATA_MESSAGE)
+        if not isinstance(self.genre_keys, tuple) or any(
+            not isinstance(genre, MovieGenre) for genre in self.genre_keys
+        ):
+            raise FrameNestMediaMetadataError(INVALID_MEDIA_METADATA_MESSAGE)
+        if len(self.genre_keys) > MAX_MEDIA_GENRES or len(set(self.genre_keys)) != len(
+            self.genre_keys
+        ):
+            raise FrameNestMediaMetadataError(INVALID_MEDIA_METADATA_MESSAGE)
+        if self.genre_keys and self.content_category is not ContentCategory.MOVIE:
+            raise FrameNestMediaMetadataError(INVALID_MEDIA_METADATA_MESSAGE)
         _validate_non_negative_int(self.created_at_ms)
         _validate_non_negative_int(self.updated_at_ms)
         if self.updated_at_ms < self.created_at_ms:
             raise FrameNestMediaMetadataError(INVALID_MEDIA_METADATA_MESSAGE)
+
+
+def normalize_genres_for_category(
+    content_category: ContentCategory,
+    genre_keys: tuple[MovieGenre, ...],
+) -> tuple[MovieGenre, ...]:
+    """Drop genres when the item is not categorized as a movie."""
+    if content_category is not ContentCategory.MOVIE:
+        return ()
+    return genre_keys
+
+
+def default_classification_fields() -> tuple[ContentCategory, AcquisitionSource, tuple[MovieGenre, ...]]:
+    """Neutral defaults for rows that have never been classified."""
+    return DEFAULT_CONTENT_CATEGORY, DEFAULT_ACQUISITION_SOURCE, ()

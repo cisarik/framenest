@@ -69,3 +69,4 @@ An accepted ADR may only be changed by a later ADR that supersedes it. Editing a
 | 0042 | Atomic Upload Publication | Accepted | 2026-07-18 | [0042-atomic-upload-publication.md](0042-atomic-upload-publication.md) |
 | 0043 | Published-to-Cataloged Upload Transaction | Accepted | 2026-07-19 | [0043-upload-to-catalog-transaction.md](0043-upload-to-catalog-transaction.md) |
 | 0044 | Durable Automatic Post-Catalog AI Analysis | Accepted | 2026-07-19 | [0044-durable-automatic-post-catalog-analysis.md](0044-durable-automatic-post-catalog-analysis.md) |
+| 0045 | Content Classification, Acquisition Source, and Movie Identification | Accepted | 2026-07-22 | [0045-content-classification-and-movie-identification.md](0045-content-classification-and-movie-identification.md) |

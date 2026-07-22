@@ -94,7 +94,20 @@ class _FakeRepository:
         description: MediaDescription | None,
         tag_keys: tuple[CanonicalTagKey, ...],
         now_ms: int,
+        *,
+        content_category=None,
+        acquisition_source=None,
+        genre_keys=(),
     ) -> MediaMetadataSaveResult:
+        from framenest.domain.media_classification import (
+            DEFAULT_ACQUISITION_SOURCE,
+            DEFAULT_CONTENT_CATEGORY,
+        )
+
+        if content_category is None:
+            content_category = DEFAULT_CONTENT_CATEGORY
+        if acquisition_source is None:
+            acquisition_source = DEFAULT_ACQUISITION_SOURCE
         if media_id != MEDIA_ID:
             raise MediaMetadataMediaNotFoundError()
         for key in tag_keys:
@@ -107,6 +120,9 @@ class _FakeRepository:
             and self.snapshot.display_title == display_title
             and self.snapshot.description == description
             and self.snapshot.tag_keys == tag_keys
+            and self.snapshot.content_category == content_category
+            and self.snapshot.acquisition_source == acquisition_source
+            and self.snapshot.genre_keys == genre_keys
         ):
             status = "unchanged"
         created_at_ms = self.snapshot.created_at_ms if self.snapshot.created_at_ms is not None else now_ms
@@ -127,6 +143,9 @@ class _FakeRepository:
             tag_keys=tag_keys,
             created_at_ms=created_at_ms,
             updated_at_ms=updated_at_ms,
+            content_category=content_category,
+            acquisition_source=acquisition_source,
+            genre_keys=genre_keys,
         )
         return MediaMetadataSaveResult(status=status, metadata=self.snapshot)
 

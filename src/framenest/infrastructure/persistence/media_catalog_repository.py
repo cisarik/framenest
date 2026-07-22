@@ -62,6 +62,8 @@ class SqliteMediaCatalogRepository:
                         filtered.c.display_title,
                         filtered.c.collection_key,
                         filtered.c.processed_at_ms,
+                        filtered.c.content_category,
+                        filtered.c.acquisition_source,
                     )
                     .order_by(*order_columns)
                     .limit(query.limit)
@@ -88,6 +90,16 @@ class SqliteMediaCatalogRepository:
                     else int(row["processed_at_ms"]),
                     tags=tuple(tags_by_media[str(row["id"])]),
                     locations=tuple(locations_by_media[str(row["id"])]),
+                    content_category=(
+                        "general"
+                        if row["content_category"] is None
+                        else str(row["content_category"])
+                    ),
+                    acquisition_source=(
+                        "unknown"
+                        if row["acquisition_source"] is None
+                        else str(row["acquisition_source"])
+                    ),
                 )
                 for row in page_rows
             )
@@ -98,6 +110,8 @@ class SqliteMediaCatalogRepository:
                 offset=query.offset,
                 q=query.q,
                 tag_keys=query.tag_keys,
+                content_category=query.content_category,
+                acquisition_source=query.acquisition_source,
             )
 
         try:
@@ -126,6 +140,8 @@ def _filtered_media_select(query: MediaCatalogQuery, tag_values: tuple[str, ...]
         media_metadata.c.display_title,
         media_metadata.c.collection_key,
         media_metadata.c.processed_at_ms,
+        media_metadata.c.content_category,
+        media_metadata.c.acquisition_source,
     ).select_from(joined)
     if query.q is not None:
         statement = statement.where(
@@ -138,6 +154,14 @@ def _filtered_media_select(query: MediaCatalogQuery, tag_values: tuple[str, ...]
         statement = statement.where(
             media_metadata.c.collection_key == query.collection_key.value
         )
+    if query.content_category is not None:
+        statement = statement.where(
+            media_metadata.c.content_category == query.content_category
+        )
+    if query.acquisition_source is not None:
+        statement = statement.where(
+            media_metadata.c.acquisition_source == query.acquisition_source
+        )
     if tag_values:
         statement = (
             statement.where(media_canonical_tags.c.tag_key.in_(tag_values))
@@ -149,6 +173,8 @@ def _filtered_media_select(query: MediaCatalogQuery, tag_values: tuple[str, ...]
                 media_metadata.c.display_title,
                 media_metadata.c.collection_key,
                 media_metadata.c.processed_at_ms,
+                media_metadata.c.content_category,
+                media_metadata.c.acquisition_source,
             )
             .having(func.count(distinct(media_canonical_tags.c.tag_key)) == len(tag_values))
         )

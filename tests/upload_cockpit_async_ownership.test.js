@@ -1700,6 +1700,9 @@ test("Metadata current save owns its request, response, baseline, and one post-s
     display_title: "Unsaved title",
     description: "Unsaved description",
     tag_keys: ["persisted", "unsaved"],
+    content_category: "general",
+    acquisition_source: "unknown",
+    genres: [],
   });
   assert.equal(metadataStateOf(h).saving, true);
 
@@ -2991,6 +2994,9 @@ test("Loaded durable suggestion remains editable and Save uses metadata PUT only
     display_title: "Edited after load",
     description: "Durable AI description",
     tag_keys: [],
+    content_category: "general",
+    acquisition_source: "unknown",
+    genres: [],
   });
   assert.equal(h.fetchController.matching("POST", metadataAiEndpoint()).length, 0);
   assert.equal(JSON.parse(puts[0].options.body).suggested_filename, undefined);
@@ -3227,7 +3233,14 @@ test("Suggested filename is display-only and excluded from metadata Save", async
   const body = JSON.parse(h.fetchController.matching("PUT", metadataEndpoint())[0].options.body);
   assert.equal(body.suggested_filename, undefined);
   assert.equal(body.collection, undefined);
-  assert.deepEqual(Object.keys(body).sort(), ["description", "display_title", "tag_keys"]);
+  assert.deepEqual(Object.keys(body).sort(), [
+    "acquisition_source",
+    "content_category",
+    "description",
+    "display_title",
+    "genres",
+    "tag_keys",
+  ]);
 });
 
 test("Durable load states stay truthful for pending analyzing failed missing and malformed results", async (t) => {

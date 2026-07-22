@@ -21,6 +21,8 @@ class MediaCatalogQuery:
     limit: int
     offset: int
     collection_key: MediaCollectionKey | None
+    content_category: str | None = None
+    acquisition_source: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -57,6 +59,8 @@ class CatalogMediaItem:
     processed_at_ms: int | None
     tags: tuple[CatalogMediaTag, ...]
     locations: tuple[CatalogMediaLocation, ...]
+    content_category: str = "general"
+    acquisition_source: str = "unknown"
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,6 +73,8 @@ class MediaCatalogPage:
     offset: int
     q: str | None
     tag_keys: tuple[CanonicalTagKey, ...]
+    content_category: str | None = None
+    acquisition_source: str | None = None
 
 
 class MediaCatalogRepository(Protocol):

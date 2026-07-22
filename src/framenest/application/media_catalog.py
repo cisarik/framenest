@@ -10,6 +10,7 @@ from framenest.application.ports.media_catalog_repository import (
     MediaCatalogQuery,
     MediaCatalogRepository,
 )
+from framenest.domain.media_classification import AcquisitionSource, ContentCategory
 from framenest.domain.media_metadata import (
     CanonicalTagKey,
     FrameNestMediaMetadataError,
@@ -40,6 +41,8 @@ class ListMediaCatalog:
         limit: int = DEFAULT_MEDIA_CATALOG_LIMIT,
         offset: int = 0,
         collection_key: MediaCollectionKey | None = None,
+        content_category: str | None = None,
+        acquisition_source: str | None = None,
     ) -> MediaCatalogPage:
         query = MediaCatalogQuery(
             q=_normalize_title_query(q),
@@ -47,6 +50,8 @@ class ListMediaCatalog:
             limit=_validate_limit(limit),
             offset=_validate_offset(offset),
             collection_key=collection_key,
+            content_category=_normalize_content_category(content_category),
+            acquisition_source=_normalize_acquisition_source(acquisition_source),
         )
         return self.repository.list_media(query)
 
@@ -76,6 +81,24 @@ def _normalize_tag_keys(values: list[str] | tuple[str, ...]) -> tuple[CanonicalT
     except FrameNestMediaMetadataError as exc:
         raise MediaCatalogValidationError(MEDIA_CATALOG_QUERY_INVALID_MESSAGE) from exc
     return tuple(normalized)
+
+
+def _normalize_content_category(value: str | None) -> str | None:
+    if value is None:
+        return None
+    try:
+        return ContentCategory(value).value
+    except ValueError as exc:
+        raise MediaCatalogValidationError(MEDIA_CATALOG_QUERY_INVALID_MESSAGE) from exc
+
+
+def _normalize_acquisition_source(value: str | None) -> str | None:
+    if value is None:
+        return None
+    try:
+        return AcquisitionSource(value).value
+    except ValueError as exc:
+        raise MediaCatalogValidationError(MEDIA_CATALOG_QUERY_INVALID_MESSAGE) from exc
 
 
 def _validate_limit(value: int) -> int:

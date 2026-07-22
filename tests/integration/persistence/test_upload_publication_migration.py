@@ -238,7 +238,7 @@ def test_fresh_database_upgrades_to_head_with_empty_publication_table(
     settings = _settings(tmp_path / "fresh" / "catalog.sqlite3")
     status = upgrade_database_to_head(settings)
 
-    assert status.current_revision == status.head_revision == "0016"
+    assert status.current_revision == status.head_revision == "0017"
     assert "upload_publications" in _table_names(settings.database_path)
     connection = _connect(settings.database_path)
     try:

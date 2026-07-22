@@ -6,6 +6,13 @@ from dataclasses import dataclass
 from typing import Literal, Protocol
 
 from framenest.domain import MediaId
+from framenest.domain.media_classification import (
+    DEFAULT_ACQUISITION_SOURCE,
+    DEFAULT_CONTENT_CATEGORY,
+    AcquisitionSource,
+    ContentCategory,
+    MovieGenre,
+)
 from framenest.domain.media_metadata import (
     CanonicalTag,
     CanonicalTagDisplayName,
@@ -54,6 +61,9 @@ class MediaMetadataSnapshot:
     processed_at_ms: int | None
     created_at_ms: int | None
     updated_at_ms: int | None
+    content_category: ContentCategory = DEFAULT_CONTENT_CATEGORY
+    acquisition_source: AcquisitionSource = DEFAULT_ACQUISITION_SOURCE
+    genre_keys: tuple[MovieGenre, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -91,5 +101,9 @@ class MediaMetadataRepository(Protocol):
         description: MediaDescription | None,
         tag_keys: tuple[CanonicalTagKey, ...],
         now_ms: int,
+        *,
+        content_category: ContentCategory = DEFAULT_CONTENT_CATEGORY,
+        acquisition_source: AcquisitionSource = DEFAULT_ACQUISITION_SOURCE,
+        genre_keys: tuple[MovieGenre, ...] = (),
     ) -> MediaMetadataSaveResult:
         """Persist a complete metadata replacement atomically, deriving collection state from tag list."""

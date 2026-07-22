@@ -57,6 +57,8 @@ class CatalogMediaResponse(BaseModel):
     processed_at_ms: int | None
     tags: list[CatalogTagResponse]
     locations: list[CatalogLocationResponse]
+    content_category: str = "general"
+    acquisition_source: str = "unknown"
 
 
 class MediaCatalogResponse(BaseModel):
@@ -66,6 +68,8 @@ class MediaCatalogResponse(BaseModel):
     offset: int
     q: str | None
     tag_keys: list[str]
+    content_category: str | None = None
+    acquisition_source: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -95,6 +99,8 @@ def create_media_catalog_api_router(dependencies: MediaCatalogApiDependencies) -
         limit: int = Query(default=24, ge=1, le=100),
         offset: int = Query(default=0, ge=0),
         collection: str | None = None,
+        content_category: str | None = None,
+        acquisition_source: str | None = None,
     ) -> MediaCatalogResponse | JSONResponse:
         if not dependencies.catalog_available():
             return _catalog_unavailable_response()
@@ -115,6 +121,8 @@ def create_media_catalog_api_router(dependencies: MediaCatalogApiDependencies) -
                 limit=limit,
                 offset=offset,
                 collection_key=parsed_collection,
+                content_category=content_category,
+                acquisition_source=acquisition_source,
             )
         except MediaCatalogValidationError:
             return _error_response(
@@ -155,6 +163,8 @@ def _catalog_response(result: object) -> MediaCatalogResponse:
         offset=result.offset,
         q=result.q,
         tag_keys=[key.value for key in result.tag_keys],
+        content_category=getattr(result, "content_category", None),
+        acquisition_source=getattr(result, "acquisition_source", None),
     )
 
 
@@ -167,6 +177,8 @@ def _media_response(item: object) -> CatalogMediaResponse:
         display_title=item.display_title,
         collection_key=item.collection_key,
         processed_at_ms=item.processed_at_ms,
+        content_category=getattr(item, "content_category", "general"),
+        acquisition_source=getattr(item, "acquisition_source", "unknown"),
         tags=[
             CatalogTagResponse(
                 key=tag.key,

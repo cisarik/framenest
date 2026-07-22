@@ -93,6 +93,8 @@ let catalogState = {
   q: "",
   tagKeys: [],
   collection: "",
+  contentCategory: "",
+  acquisitionSource: "",
   limit: CATALOG_PAGE_SIZE,
   offset: 0,
   total: 0,
@@ -138,8 +140,8 @@ let metadataWorkspace = {
   analyzing: false,
   aiSuggestionApplied: false,
   suggestedFilename: "",
-  baseline: { displayTitle: null, description: null, tagKeys: [], collectionKey: null, processedAtMs: null },
-  current: { displayTitle: "", description: "", tagKeys: [], collectionKey: null, processedAtMs: null },
+  baseline: { displayTitle: null, description: null, tagKeys: [], collectionKey: null, processedAtMs: null, contentCategory: "general", acquisitionSource: "unknown", genres: [] },
+  current: { displayTitle: "", description: "", tagKeys: [], collectionKey: null, processedAtMs: null, contentCategory: "general", acquisitionSource: "unknown", genres: [] },
 };
 let metadataTagSuggestionState = {
   items: [],
@@ -1023,7 +1025,14 @@ function normalizedMetadataFormState() {
     if (desc.error) {
       return desc;
     }
-    return { displayTitle: null, description: desc.description, tagKeys: [...metadataWorkspace.current.tagKeys] };
+    return {
+      displayTitle: null,
+      description: desc.description,
+      tagKeys: [...metadataWorkspace.current.tagKeys],
+      contentCategory: metadataWorkspace.current.contentCategory || "general",
+      acquisitionSource: metadataWorkspace.current.acquisitionSource || "unknown",
+      genres: [...(metadataWorkspace.current.genres || [])],
+    };
   }
   if (rawTitle.trim() !== rawTitle) {
     return { error: "Non-empty titles must not start or end with whitespace." };
@@ -1032,7 +1041,7 @@ function normalizedMetadataFormState() {
   if (desc.error) {
     return desc;
   }
-  return { displayTitle: rawTitle, description: desc.description, tagKeys: [...metadataWorkspace.current.tagKeys] };
+  return { displayTitle: rawTitle, description: desc.description, tagKeys: [...metadataWorkspace.current.tagKeys], contentCategory: metadataWorkspace.current.contentCategory || "general", acquisitionSource: metadataWorkspace.current.acquisitionSource || "unknown", genres: [...(metadataWorkspace.current.genres || [])] };
 }
 
 function metadataIsDirty() {
@@ -1040,9 +1049,15 @@ function metadataIsDirty() {
   if (normalized.error) {
     return true;
   }
+  const baselineCategory = metadataWorkspace.baseline.contentCategory || "general";
+  const baselineSource = metadataWorkspace.baseline.acquisitionSource || "unknown";
+  const baselineGenres = metadataWorkspace.baseline.genres || [];
   return normalized.displayTitle !== metadataWorkspace.baseline.displayTitle
     || normalized.description !== metadataWorkspace.baseline.description
-    || !semanticArraysEqual(normalized.tagKeys, metadataWorkspace.baseline.tagKeys);
+    || !semanticArraysEqual(normalized.tagKeys, metadataWorkspace.baseline.tagKeys)
+    || normalized.contentCategory !== baselineCategory
+    || normalized.acquisitionSource !== baselineSource
+    || !semanticArraysEqual(normalized.genres, baselineGenres);
 }
 
 function selectedTagDefinition(key) {
@@ -3263,6 +3278,8 @@ function snapshotCatalogQueryState() {
     q: catalogState.q,
     tagKeys,
     collection: catalogState.collection,
+    contentCategory: catalogState.contentCategory || "",
+    acquisitionSource: catalogState.acquisitionSource || "",
     limit: CATALOG_PAGE_SIZE_OPTIONS.includes(catalogState.limit) ? catalogState.limit : CATALOG_PAGE_SIZE,
     offset: catalogState.offset,
   });
@@ -3279,6 +3296,12 @@ function buildCatalogQueryParams(snapshot = snapshotCatalogQueryState()) {
   });
   if (snapshot.collection) {
     params.set("collection", snapshot.collection);
+  }
+  if (snapshot.contentCategory) {
+    params.set("content_category", snapshot.contentCategory);
+  }
+  if (snapshot.acquisitionSource) {
+    params.set("acquisition_source", snapshot.acquisitionSource);
   }
   params.set("limit", String(snapshot.limit));
   params.set("offset", String(snapshot.offset));
@@ -4005,8 +4028,12 @@ function claimMetadataSaveOwner(normalized, { closeAfterSave = true } = {}) {
     display_title: normalized.displayTitle,
     description: normalized.description,
     tag_keys: normalized.tagKeys,
+    content_category: normalized.contentCategory || "general",
+    acquisition_source: normalized.acquisitionSource || "unknown",
+    genres: normalized.genres || [],
   };
   Object.freeze(requestPayload.tag_keys);
+  Object.freeze(requestPayload.genres);
   Object.freeze(requestPayload);
   const owner = Object.freeze({
     token: ++metadataSaveRequestToken,
@@ -4862,12 +4889,18 @@ function applyMetadataPayloadToWorkspace(payload) {
   const tagKeys = (payload.tags || []).map((tag) => tag.key);
   const collectionKey = payload.collection_key ?? null;
   const processedAtMs = payload.processed_at_ms ?? null;
+  const contentCategory = payload.content_category || "general";
+  const acquisitionSource = payload.acquisition_source || "unknown";
+  const genres = Array.isArray(payload.genres) ? [...payload.genres] : [];
   metadataWorkspace.baseline = {
     displayTitle: payload.display_title === null ? null : payload.display_title,
     description: payload.description === null ? null : payload.description,
     tagKeys,
     collectionKey,
     processedAtMs,
+    contentCategory,
+    acquisitionSource,
+    genres: [...genres],
   };
   metadataWorkspace.current = {
     displayTitle: payload.display_title === null ? "" : payload.display_title,
@@ -4875,8 +4908,12 @@ function applyMetadataPayloadToWorkspace(payload) {
     tagKeys: [...tagKeys],
     collectionKey,
     processedAtMs,
+    contentCategory,
+    acquisitionSource,
+    genres: [...genres],
   };
   advanceMetadataWorkspaceRevision();
+  syncClassificationControlsFromWorkspace();
 }
 
 async function openDetailsDialog(item, openerElement, { playWhenReady = false } = {}) {
@@ -5340,18 +5377,13 @@ async function handleSaveMetadata() {
   setMetadataStatus("saving", "Saving...");
   updateMetadataControls();
   try {
-    const normalized = Object.freeze({
-      displayTitle: saveOwner.requestPayload.display_title,
-      description: saveOwner.requestPayload.description,
-      tagKeys: saveOwner.requestPayload.tag_keys,
-    });
     const response = await fetch(metadataEndpoint(saveOwner.mediaId), {
       method: "PUT",
       headers: {
         Accept: "application/json",
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ display_title: normalized.displayTitle, description: normalized.description, tag_keys: normalized.tagKeys }),
+      body: JSON.stringify(saveOwner.requestPayload),
       cache: "no-store",
     });
     const payload = await response.json();
@@ -5902,6 +5934,72 @@ async function loadLibraries() {
   }
 }
 
+const MOVIE_GENRE_OPTIONS = [
+  "Drama", "Comedy", "Sci-Fi", "Thriller", "Horror", "Action", "Adventure",
+  "Documentary", "Animation", "Family", "Romance", "Crime", "Fantasy", "Mystery",
+];
+
+function syncClassificationControlsFromWorkspace() {
+  const categorySelect = document.querySelector("#metadata-content-category");
+  const sourceSelect = document.querySelector("#metadata-acquisition-source");
+  const genresFieldset = document.querySelector("#metadata-genres-fieldset");
+  const genresContainer = document.querySelector("#metadata-genres");
+  const identifyButton = document.querySelector("#metadata-movie-identify-button");
+  if (categorySelect) {
+    categorySelect.value = metadataWorkspace.current.contentCategory || "general";
+  }
+  if (sourceSelect) {
+    sourceSelect.value = metadataWorkspace.current.acquisitionSource || "unknown";
+  }
+  const isMovie = (metadataWorkspace.current.contentCategory || "general") === "movie";
+  if (genresFieldset) {
+    genresFieldset.hidden = !isMovie;
+  }
+  if (genresContainer) {
+    const selected = new Set(metadataWorkspace.current.genres || []);
+    genresContainer.replaceChildren();
+    MOVIE_GENRE_OPTIONS.forEach((genre) => {
+      const label = document.createElement("label");
+      label.className = "metadata-genre-option";
+      const input = document.createElement("input");
+      input.type = "checkbox";
+      input.value = genre;
+      input.checked = selected.has(genre);
+      input.addEventListener("change", () => {
+        metadataWorkspace.current.genres = MOVIE_GENRE_OPTIONS.filter((name) => {
+          const box = genresContainer.querySelector(`input[value="${CSS.escape(name)}"]`);
+          return box && box.checked;
+        });
+        updateMetadataControls();
+      });
+      label.appendChild(input);
+      label.appendChild(document.createTextNode(` ${genre}`));
+      genresContainer.appendChild(label);
+    });
+  }
+  if (identifyButton) {
+    identifyButton.hidden = !isMovie;
+    identifyButton.disabled = !isMovie || !aiCapability.configured;
+  }
+}
+
+function setCatalogClassificationFilter({ contentCategory = null, acquisitionSource = null } = {}) {
+  if (contentCategory !== null) {
+    catalogState.contentCategory = catalogState.contentCategory === contentCategory ? "" : contentCategory;
+  }
+  if (acquisitionSource !== null) {
+    catalogState.acquisitionSource = catalogState.acquisitionSource === acquisitionSource ? "" : acquisitionSource;
+  }
+  catalogState.offset = 0;
+  const memes = document.querySelector("#catalog-filter-memes");
+  const movies = document.querySelector("#catalog-filter-movies");
+  const youtube = document.querySelector("#catalog-filter-youtube");
+  if (memes) memes.setAttribute("aria-pressed", String(catalogState.contentCategory === "meme"));
+  if (movies) movies.setAttribute("aria-pressed", String(catalogState.contentCategory === "movie"));
+  if (youtube) youtube.setAttribute("aria-pressed", String(catalogState.acquisitionSource === "youtube_manual_claim"));
+  loadCatalog();
+}
+
 function setCatalogScope(collection) {
   if (catalogState.collection !== collection) {
     advanceMetadataWorkspaceRevision();
@@ -5939,6 +6037,60 @@ document.querySelector("#catalog-scope-processed").addEventListener("click", asy
     return;
   }
   setCatalogScope(PROCESSED_COLLECTION);
+});
+
+document.querySelector("#catalog-filter-memes")?.addEventListener("click", () => {
+  setCatalogClassificationFilter({ contentCategory: "meme" });
+});
+document.querySelector("#catalog-filter-movies")?.addEventListener("click", () => {
+  setCatalogClassificationFilter({ contentCategory: "movie" });
+});
+document.querySelector("#catalog-filter-youtube")?.addEventListener("click", () => {
+  setCatalogClassificationFilter({ acquisitionSource: "youtube_manual_claim" });
+});
+
+document.querySelector("#metadata-content-category")?.addEventListener("change", (event) => {
+  metadataWorkspace.current.contentCategory = event.target.value;
+  if (metadataWorkspace.current.contentCategory !== "movie") {
+    metadataWorkspace.current.genres = [];
+  }
+  syncClassificationControlsFromWorkspace();
+  updateMetadataControls();
+});
+document.querySelector("#metadata-acquisition-source")?.addEventListener("change", (event) => {
+  metadataWorkspace.current.acquisitionSource = event.target.value;
+  updateMetadataControls();
+});
+
+document.querySelector("#metadata-movie-identify-button")?.addEventListener("click", async () => {
+  const mediaId = metadataWorkspace.openMediaId;
+  const location = metadataAiLocation();
+  if (!mediaId || !location || !aiCapability.configured) return;
+  const button = document.querySelector("#metadata-movie-identify-button");
+  if (button) button.disabled = true;
+  metadataAiStatus.textContent = "Running movie identification...";
+  try {
+    const response = await fetch(
+      `/api/media/${encodeURIComponent(mediaId)}/locations/${encodeURIComponent(location.location_id)}/movie-identification`,
+      {
+        method: "POST",
+        headers: { Accept: "application/json", "Content-Type": "application/json" },
+        body: JSON.stringify({ confirm_cloud_upload: true }),
+      },
+    );
+    const payload = await response.json();
+    if (!response.ok) {
+      metadataAiStatus.textContent = (payload.error && payload.error.message) || "Movie identification failed.";
+      return;
+    }
+    metadataAiStatus.textContent = payload.state === "analyzed"
+      ? "Movie identification ready for review."
+      : `Movie identification state: ${payload.state}.`;
+  } catch {
+    metadataAiStatus.textContent = "Movie identification failed.";
+  } finally {
+    syncClassificationControlsFromWorkspace();
+  }
 });
 
 let commandSearchDebounceTimer = null;

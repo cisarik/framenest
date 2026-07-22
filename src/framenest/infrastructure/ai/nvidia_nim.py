@@ -194,6 +194,47 @@ def build_nvidia_request_body(
     }
 
 
+def build_nvidia_movie_identification_body(
+    request: object,
+    *,
+    model_id: str,
+) -> dict[str, Any]:
+    """Build one NVIDIA request for movie identification with reasoning enabled."""
+    from framenest.application.movie_identification import movie_identification_prompt
+    from framenest.domain.media_classification import (
+        MOVIE_IDENTIFICATION_MAX_TOKENS,
+        MOVIE_IDENTIFICATION_REASONING_BUDGET,
+    )
+
+    encoded = base64.b64encode(request.contact_sheet.payload).decode("ascii")
+    content: list[dict[str, Any]] = [
+        {
+            "type": "text",
+            "text": movie_identification_prompt(hints=request.hints),
+        },
+        {
+            "type": "image_url",
+            "image_url": {
+                "url": f"data:{request.contact_sheet.mime_type};base64,{encoded}",
+            },
+        },
+    ]
+    return {
+        "model": model_id,
+        "messages": [
+            {"role": "user", "content": content},
+        ],
+        "stream": False,
+        "temperature": TEMPERATURE,
+        "top_k": TOP_K,
+        "max_tokens": MOVIE_IDENTIFICATION_MAX_TOKENS,
+        "chat_template_kwargs": {
+            "enable_thinking": True,
+            "reasoning_budget": MOVIE_IDENTIFICATION_REASONING_BUDGET,
+        },
+    }
+
+
 def build_nvidia_connection_test_body(*, model_id: str) -> dict[str, Any]:
     """Build a text-only NVIDIA provider connection test request."""
     return {
@@ -236,6 +277,16 @@ def extract_message_content(payload: dict[str, Any]) -> str:
 
 def parse_suggestion_content_text(text: str) -> dict[str, Any]:
     """Parse one raw or fenced JSON suggestion object."""
+    parsed = parse_json_object_content_text(text)
+    if set(parsed.keys()) != _ALLOWED_SUGGESTION_KEYS:
+        raise MediaSuggestionProviderInvalidResponseError(
+            SUGGESTION_PROVIDER_INVALID_RESPONSE_MESSAGE
+        )
+    return parsed
+
+
+def parse_json_object_content_text(text: str) -> dict[str, Any]:
+    """Parse one raw or fenced JSON object without schema-key validation."""
     candidate = text.strip()
     fence_match = _JSON_FENCE_PATTERN.fullmatch(candidate)
     if fence_match:
@@ -249,10 +300,6 @@ def parse_suggestion_content_text(text: str) -> dict[str, Any]:
             SUGGESTION_PROVIDER_INVALID_RESPONSE_MESSAGE
         ) from None
     if not isinstance(parsed, dict):
-        raise MediaSuggestionProviderInvalidResponseError(
-            SUGGESTION_PROVIDER_INVALID_RESPONSE_MESSAGE
-        )
-    if set(parsed.keys()) != _ALLOWED_SUGGESTION_KEYS:
         raise MediaSuggestionProviderInvalidResponseError(
             SUGGESTION_PROVIDER_INVALID_RESPONSE_MESSAGE
         )
@@ -470,6 +517,74 @@ class NvidiaNimMediaSuggestionProvider:
             provider_id=self._provider_id,
             model_id=self._model_id,
         )
+
+    def identify_movie(
+        self,
+        request: object,
+    ) -> object:
+        """Submit exactly one movie-identification request with reasoning enabled."""
+        from framenest.application.movie_identification import (
+            FrameNestMovieIdentificationError,
+            parse_movie_identification_payload,
+        )
+
+        try:
+            body_dict = build_nvidia_movie_identification_body(
+                request,
+                model_id=self._model_id,
+            )
+            # Reject accidental path leakage into the provider JSON text fields.
+            serialized = json.dumps(body_dict, separators=(",", ":"), ensure_ascii=False)
+            if "/" in request.basename and request.basename in serialized:
+                raise MediaSuggestionProviderInvalidResponseError(
+                    SUGGESTION_PROVIDER_INVALID_RESPONSE_MESSAGE
+                )
+            body = serialized.encode("utf-8")
+        except FrameNestMovieIdentificationError:
+            raise MediaSuggestionProviderInvalidResponseError(
+                SUGGESTION_PROVIDER_INVALID_RESPONSE_MESSAGE
+            ) from None
+        headers = {
+            "Authorization": self._credential.authorization_header(),
+            "Content-Type": "application/json",
+        }
+        try:
+            response = self._transport.post_json(
+                NVIDIA_CHAT_COMPLETIONS_URL,
+                headers=headers,
+                body=body,
+                max_request_bytes=MAX_REQUEST_BODY_BYTES,
+            )
+            response = self._resolve_pending_response(
+                response,
+                headers={"Authorization": headers["Authorization"]},
+            )
+            payload = _decode_json_body(response)
+        except HttpsTransportError as exc:
+            raise _map_transport_error(exc) from None
+        except (
+            MediaSuggestionProviderAuthError,
+            MediaSuggestionProviderInvalidResponseError,
+            MediaSuggestionProviderModelUnavailableError,
+            MediaSuggestionProviderRateLimitedError,
+            MediaSuggestionProviderUnavailableError,
+        ):
+            raise
+        except Exception:
+            raise MediaSuggestionProviderFailedError(SUGGESTION_PROVIDER_FAILED_MESSAGE) from None
+        content_text = extract_message_content(payload)
+        parsed = parse_json_object_content_text(content_text)
+        try:
+            return parse_movie_identification_payload(
+                parsed,
+                provider_id=self._provider_id,
+                model_id=self._model_id,
+                derivative_count=1,
+            )
+        except FrameNestMovieIdentificationError:
+            raise MediaSuggestionProviderInvalidResponseError(
+                SUGGESTION_PROVIDER_INVALID_RESPONSE_MESSAGE
+            ) from None
 
     def test_connection(self) -> None:
         body_dict = build_nvidia_connection_test_body(model_id=self._model_id)

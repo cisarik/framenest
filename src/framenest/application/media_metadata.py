@@ -14,12 +14,21 @@ from framenest.application.ports.media_metadata_repository import (
     MediaMetadataSnapshot,
 )
 from framenest.domain import MediaId
+from framenest.domain.media_classification import (
+    DEFAULT_ACQUISITION_SOURCE,
+    DEFAULT_CONTENT_CATEGORY,
+    MOVIE_GENRE_DISPLAY_NAMES,
+    AcquisitionSource,
+    ContentCategory,
+    MovieGenre,
+)
 from framenest.domain.media_metadata import (
     CanonicalTag,
     CanonicalTagDisplayName,
     CanonicalTagKey,
     MediaDescription,
     MediaDisplayTitle,
+    normalize_genres_for_category,
 )
 
 MEDIA_METADATA_OPERATION_FAILED_MESSAGE = "Media metadata operation failed."
@@ -51,6 +60,9 @@ class MediaMetadataView:
     processed_at_ms: int | None
     created_at_ms: int | None
     updated_at_ms: int | None
+    content_category: str = DEFAULT_CONTENT_CATEGORY.value
+    acquisition_source: str = DEFAULT_ACQUISITION_SOURCE.value
+    genres: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -120,18 +132,29 @@ class SaveMediaMetadata:
         display_title: str | None,
         description: str | None,
         tag_keys: list[str],
+        *,
+        content_category: str = DEFAULT_CONTENT_CATEGORY.value,
+        acquisition_source: str = DEFAULT_ACQUISITION_SOURCE.value,
+        genres: list[str] | None = None,
     ) -> SaveMediaMetadataResult:
         parsed_keys = tuple(CanonicalTagKey(key) for key in tag_keys)
         if len(parsed_keys) != len(set(parsed_keys)):
             raise ValueError(MEDIA_METADATA_OPERATION_FAILED_MESSAGE)
         parsed_title = None if display_title is None else MediaDisplayTitle(display_title)
         parsed_description = _normalize_description(description)
+        parsed_category = ContentCategory(content_category)
+        parsed_source = AcquisitionSource(acquisition_source)
+        parsed_genres = _parse_genres(genres or [])
+        parsed_genres = normalize_genres_for_category(parsed_category, parsed_genres)
         result = self._repository.save_media_metadata(
             MediaId.from_string(media_id),
             parsed_title,
             parsed_description,
             parsed_keys,
             _call_clock_ms(self._clock_ms),
+            content_category=parsed_category,
+            acquisition_source=parsed_source,
+            genre_keys=parsed_genres,
         )
         return SaveMediaMetadataResult(
             status=result.status,
@@ -146,6 +169,29 @@ def _normalize_description(value: str | None) -> MediaDescription | None:
     if not stripped:
         return None
     return MediaDescription(value)
+
+
+def _parse_genres(values: list[str]) -> tuple[MovieGenre, ...]:
+    display_to_genre = {
+        display.casefold(): genre for genre, display in MOVIE_GENRE_DISPLAY_NAMES.items()
+    }
+    parsed: list[MovieGenre] = []
+    seen: set[MovieGenre] = set()
+    for value in values:
+        if not isinstance(value, str):
+            raise ValueError(MEDIA_METADATA_OPERATION_FAILED_MESSAGE)
+        folded = value.strip().casefold()
+        try:
+            genre = MovieGenre(folded)
+        except ValueError:
+            genre = display_to_genre.get(folded)
+            if genre is None:
+                raise ValueError(MEDIA_METADATA_OPERATION_FAILED_MESSAGE) from None
+        if genre in seen:
+            raise ValueError(MEDIA_METADATA_OPERATION_FAILED_MESSAGE)
+        seen.add(genre)
+        parsed.append(genre)
+    return tuple(parsed)
 
 
 def _view_from_snapshot(
@@ -167,6 +213,9 @@ def _view_from_snapshot(
         processed_at_ms=snapshot.processed_at_ms,
         created_at_ms=snapshot.created_at_ms,
         updated_at_ms=snapshot.updated_at_ms,
+        content_category=snapshot.content_category.value,
+        acquisition_source=snapshot.acquisition_source.value,
+        genres=tuple(MOVIE_GENRE_DISPLAY_NAMES[genre] for genre in snapshot.genre_keys),
     )
 
 

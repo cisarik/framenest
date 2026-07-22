@@ -91,8 +91,15 @@ class _FakeRepository:
         result_schema_version,
         result_json,
         completed_at_ms,
+        analysis_profile=None,
+        reasoning_enabled=None,
+        derivative_strategy=None,
+        derivative_count=None,
+        provider_submission_occurred=None,
     ):
         del run_id
+        del analysis_profile, reasoning_enabled, derivative_strategy
+        del derivative_count, provider_submission_occurred
         with self._lock:
             assert self.run is not None
             assert self.run.version == expected_version

@@ -81,6 +81,11 @@ class MediaAnalysisRunRepository(Protocol):
         result_schema_version: str,
         result_json: str,
         completed_at_ms: int,
+        analysis_profile: str | None = None,
+        reasoning_enabled: bool | None = None,
+        derivative_strategy: str | None = None,
+        derivative_count: int | None = None,
+        provider_submission_occurred: bool | None = True,
     ) -> MediaAnalysisRun:
         """Persist a successful normalized result as analyzed."""
 
