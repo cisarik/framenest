@@ -1,4 +1,7 @@
-"""Non-persistent still-frame AI smoke preparation."""
+"""Non-persistent still-frame AI smoke preparation.
+
+Pillow decoding and byte/pixel validation stay in the infrastructure boundary.
+"""
 
 from __future__ import annotations
 

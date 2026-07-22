@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
-from framenest.application.still_frame_smoke import (
+from framenest.infrastructure.ai.still_frame_smoke import (
     FrameNestStillFrameSmokeError,
     MAX_STILL_FRAMES,
     build_still_frame_smoke_request,
@@ -79,7 +79,7 @@ def test_prepare_rejects_unsupported_format(tmp_path: Path) -> None:
 def test_prepare_rejects_oversized_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     path = _write_jpeg(tmp_path / "big.jpg", color=(4, 5, 6))
     monkeypatch.setattr(
-        "framenest.application.still_frame_smoke.MAX_BYTES_PER_IMAGE",
+        "framenest.infrastructure.ai.still_frame_smoke.MAX_BYTES_PER_IMAGE",
         10,
     )
     with pytest.raises(FrameNestStillFrameSmokeError):

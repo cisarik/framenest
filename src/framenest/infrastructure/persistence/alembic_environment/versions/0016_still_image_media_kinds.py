@@ -5,6 +5,11 @@ from __future__ import annotations
 import sqlalchemy as sa
 from alembic import op
 
+from framenest.infrastructure.persistence.sqlite_batch_fk import (
+    disable_sqlite_foreign_keys_for_batch_rebuild,
+    enable_and_verify_sqlite_foreign_keys,
+)
+
 revision = "0016"
 down_revision = "0015"
 branch_labels = None
@@ -60,43 +65,51 @@ _LEGACY_RELATIVE_TARGET_SQL = (
     "OR (validated_format = 'mp4' AND substr(relative_target, 33) = '.mp4'))"
 )
 
+_FK_FAILURE_MESSAGE = (
+    "Foreign key check failed after still-image media-kind migration."
+)
+
 
 def upgrade() -> None:
     """Allow durable still-image kinds without rewriting existing rows."""
-    with op.batch_alter_table("logical_media") as batch_op:
-        batch_op.drop_constraint("ck_logical_media_kind", type_="check")
-        batch_op.create_check_constraint(
-            "ck_logical_media_kind",
-            "media_kind IN ('video', 'animated_image', 'image')",
-        )
+    disable_sqlite_foreign_keys_for_batch_rebuild()
+    try:
+        with op.batch_alter_table("logical_media") as batch_op:
+            batch_op.drop_constraint("ck_logical_media_kind", type_="check")
+            batch_op.create_check_constraint(
+                "ck_logical_media_kind",
+                "media_kind IN ('video', 'animated_image', 'image')",
+            )
 
-    with op.batch_alter_table("upload_sessions") as batch_op:
-        batch_op.drop_constraint(
-            "ck_upload_sessions_validation_evidence_pair",
-            type_="check",
-        )
-        batch_op.create_check_constraint(
-            "ck_upload_sessions_validation_evidence_pair",
-            _VALIDATION_EVIDENCE_PAIR_SQL,
-        )
+        with op.batch_alter_table("upload_sessions") as batch_op:
+            batch_op.drop_constraint(
+                "ck_upload_sessions_validation_evidence_pair",
+                type_="check",
+            )
+            batch_op.create_check_constraint(
+                "ck_upload_sessions_validation_evidence_pair",
+                _VALIDATION_EVIDENCE_PAIR_SQL,
+            )
 
-    with op.batch_alter_table("upload_publications") as batch_op:
-        batch_op.drop_constraint(
-            "ck_upload_publications_relative_target_opaque",
-            type_="check",
-        )
-        batch_op.drop_constraint(
-            "ck_upload_publications_validation_evidence_pair",
-            type_="check",
-        )
-        batch_op.create_check_constraint(
-            "ck_upload_publications_relative_target_opaque",
-            _RELATIVE_TARGET_SQL,
-        )
-        batch_op.create_check_constraint(
-            "ck_upload_publications_validation_evidence_pair",
-            _PUBLICATION_EVIDENCE_PAIR_SQL,
-        )
+        with op.batch_alter_table("upload_publications") as batch_op:
+            batch_op.drop_constraint(
+                "ck_upload_publications_relative_target_opaque",
+                type_="check",
+            )
+            batch_op.drop_constraint(
+                "ck_upload_publications_validation_evidence_pair",
+                type_="check",
+            )
+            batch_op.create_check_constraint(
+                "ck_upload_publications_relative_target_opaque",
+                _RELATIVE_TARGET_SQL,
+            )
+            batch_op.create_check_constraint(
+                "ck_upload_publications_validation_evidence_pair",
+                _PUBLICATION_EVIDENCE_PAIR_SQL,
+            )
+    finally:
+        enable_and_verify_sqlite_foreign_keys(failure_message=_FK_FAILURE_MESSAGE)
 
 
 def downgrade() -> None:
@@ -128,37 +141,41 @@ def downgrade() -> None:
     if image_media_count or image_upload_count or image_publication_count:
         raise RuntimeError("Still-image downgrade blocked by existing image rows.")
 
-    with op.batch_alter_table("upload_publications") as batch_op:
-        batch_op.drop_constraint(
-            "ck_upload_publications_relative_target_opaque",
-            type_="check",
-        )
-        batch_op.drop_constraint(
-            "ck_upload_publications_validation_evidence_pair",
-            type_="check",
-        )
-        batch_op.create_check_constraint(
-            "ck_upload_publications_relative_target_opaque",
-            _LEGACY_RELATIVE_TARGET_SQL,
-        )
-        batch_op.create_check_constraint(
-            "ck_upload_publications_validation_evidence_pair",
-            _LEGACY_PUBLICATION_EVIDENCE_PAIR_SQL,
-        )
+    disable_sqlite_foreign_keys_for_batch_rebuild()
+    try:
+        with op.batch_alter_table("upload_publications") as batch_op:
+            batch_op.drop_constraint(
+                "ck_upload_publications_relative_target_opaque",
+                type_="check",
+            )
+            batch_op.drop_constraint(
+                "ck_upload_publications_validation_evidence_pair",
+                type_="check",
+            )
+            batch_op.create_check_constraint(
+                "ck_upload_publications_relative_target_opaque",
+                _LEGACY_RELATIVE_TARGET_SQL,
+            )
+            batch_op.create_check_constraint(
+                "ck_upload_publications_validation_evidence_pair",
+                _LEGACY_PUBLICATION_EVIDENCE_PAIR_SQL,
+            )
 
-    with op.batch_alter_table("upload_sessions") as batch_op:
-        batch_op.drop_constraint(
-            "ck_upload_sessions_validation_evidence_pair",
-            type_="check",
-        )
-        batch_op.create_check_constraint(
-            "ck_upload_sessions_validation_evidence_pair",
-            _LEGACY_VALIDATION_EVIDENCE_PAIR_SQL,
-        )
+        with op.batch_alter_table("upload_sessions") as batch_op:
+            batch_op.drop_constraint(
+                "ck_upload_sessions_validation_evidence_pair",
+                type_="check",
+            )
+            batch_op.create_check_constraint(
+                "ck_upload_sessions_validation_evidence_pair",
+                _LEGACY_VALIDATION_EVIDENCE_PAIR_SQL,
+            )
 
-    with op.batch_alter_table("logical_media") as batch_op:
-        batch_op.drop_constraint("ck_logical_media_kind", type_="check")
-        batch_op.create_check_constraint(
-            "ck_logical_media_kind",
-            "media_kind IN ('video', 'animated_image')",
-        )
+        with op.batch_alter_table("logical_media") as batch_op:
+            batch_op.drop_constraint("ck_logical_media_kind", type_="check")
+            batch_op.create_check_constraint(
+                "ck_logical_media_kind",
+                "media_kind IN ('video', 'animated_image')",
+            )
+    finally:
+        enable_and_verify_sqlite_foreign_keys(failure_message=_FK_FAILURE_MESSAGE)

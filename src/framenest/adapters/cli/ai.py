@@ -17,7 +17,7 @@ from framenest.application.media_suggestion import (
     MediaSuggestionProviderRateLimitedError,
     MediaSuggestionProviderUnavailableError,
 )
-from framenest.application.still_frame_smoke import (
+from framenest.infrastructure.ai.still_frame_smoke import (
     FrameNestStillFrameSmokeError,
     STILL_FRAME_SMOKE_INVALID_MESSAGE,
     build_still_frame_smoke_request,
