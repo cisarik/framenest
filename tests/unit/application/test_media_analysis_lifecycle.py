@@ -18,6 +18,7 @@ from framenest.application.media_analysis_lifecycle import (
 )
 from framenest.application.media_suggestion import (
     MediaSuggestion,
+    MediaSuggestionPreparationUnavailableError,
     MediaSuggestionProviderAuthError,
     MediaSuggestionProviderRateLimitedError,
     MediaSuggestionProviderUnavailableError,
@@ -202,6 +203,7 @@ class _FakeRepository:
         model_id,
         prompt_version,
         completed_at_ms,
+        provider_submission_occurred=None,
     ):
         del run_id
         with self._lock:
@@ -217,6 +219,7 @@ class _FakeRepository:
                 model_id=model_id,
                 prompt_version=prompt_version,
                 completed_at_ms=completed_at_ms,
+                provider_submission_occurred=provider_submission_occurred,
                 version=self.run.version + 1,
             )
             return self.run
@@ -397,6 +400,7 @@ def test_transient_failure_requeues_until_success_or_exhaustion() -> None:
     failed = service.execute(requeued)
     assert failed.state is MediaAnalysisRunState.FAILED
     assert failed.error_code == "PROVIDER_UNAVAILABLE"
+    assert failed.provider_submission_occurred is True
     assert len(executor.calls) == 2
 
 
@@ -438,9 +442,31 @@ def test_terminal_provider_auth_refusal_is_not_retried() -> None:
     failed = service.execute(run)
     assert failed.state is MediaAnalysisRunState.FAILED
     assert failed.error_code == "PROVIDER_AUTH"
+    assert failed.provider_submission_occurred is True
     assert len(executor.calls) == 1
     again = service.execute(failed)
     assert again.state is MediaAnalysisRunState.FAILED
+    assert len(executor.calls) == 1
+
+
+def test_preparation_failure_marks_no_provider_submission() -> None:
+    repository = _FakeRepository()
+    scheduler = ScheduleAutomaticMediaAnalysis(repository, enabled=True, now_ms=lambda: 1)
+    run = scheduler.execute(
+        CatalogedAnalysisTarget(media_id=MEDIA_ID, media_location_id=LOCATION_ID)
+    )
+    assert run is not None
+    executor = _FakeExecutor(error=MediaSuggestionPreparationUnavailableError("missing"))
+    service = ExecuteAutomaticMediaAnalysisRun(
+        repository,
+        executor,
+        max_attempts=1,
+        now_ms=lambda: 2,
+    )
+    failed = service.execute(run)
+    assert failed.state is MediaAnalysisRunState.FAILED
+    assert failed.error_code == "PREPARATION_UNAVAILABLE"
+    assert failed.provider_submission_occurred is False
     assert len(executor.calls) == 1
 
 

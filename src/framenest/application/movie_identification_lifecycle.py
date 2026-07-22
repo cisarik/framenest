@@ -19,6 +19,7 @@ from framenest.application.media_analysis_lifecycle import (
 )
 from framenest.application.media_content import supported_media_type
 from framenest.application.media_suggestion import (
+    FrameNestMediaSuggestionError,
     MediaSuggestionPreparationFailedError,
     MediaSuggestionPreparationUnavailableError,
     MediaSuggestionProviderAuthError,
@@ -27,6 +28,7 @@ from framenest.application.media_suggestion import (
     MediaSuggestionProviderModelUnavailableError,
     MediaSuggestionProviderRateLimitedError,
     MediaSuggestionProviderUnavailableError,
+    source_extension,
 )
 from framenest.application.movie_identification import (
     MovieIdentificationRequest,
@@ -140,10 +142,16 @@ class ExecuteMovieIdentificationRun:
         library = self.library_repository.get(location.library_id)
         if library is None:
             raise MediaSuggestionPreparationUnavailableError("library unavailable")
-        if supported_media_type(location.relative_path.value) is None:
+        relative = MediaRelativePath(location.relative_path.value)
+        try:
+            extension = source_extension(relative)
+        except FrameNestMediaSuggestionError:
+            raise MediaSuggestionPreparationUnavailableError(
+                "media type unsupported"
+            ) from None
+        if supported_media_type(media.kind, extension) is None:
             raise MediaSuggestionPreparationUnavailableError("media type unsupported")
 
-        relative = MediaRelativePath(location.relative_path.value)
         try:
             prepared = self.preparer.prepare(library.root, relative)
         except MediaAnalysisUnavailableError:
@@ -179,6 +187,7 @@ class ExecuteMovieIdentificationRun:
                 model_id=None,
                 prompt_version=None,
                 completed_at_ms=self.now_ms(),
+                provider_submission_occurred=_provider_submission_occurred(error_code),
             )
         except FrameNestMediaAnalysisRunRepositoryError as persist_exc:
             raise MediaAnalysisLifecycleError(
@@ -219,3 +228,20 @@ def _classify_movie_failure(exc: Exception) -> tuple[str, str]:
     if isinstance(exc, MediaSuggestionProviderFailedError):
         return "PROVIDER_FAILED", "Provider request failed."
     return "ANALYSIS_FAILED", "Movie identification failed."
+
+
+_PROVIDER_SUBMISSION_ERROR_CODES = frozenset(
+    {
+        "PROVIDER_AUTH",
+        "PROVIDER_RATE_LIMITED",
+        "PROVIDER_MODEL_UNAVAILABLE",
+        "PROVIDER_UNAVAILABLE",
+        "PROVIDER_INVALID_RESPONSE",
+        "PROVIDER_FAILED",
+    }
+)
+
+
+def _provider_submission_occurred(error_code: str) -> bool:
+    """True only when failure classification implies the provider adapter was entered."""
+    return error_code in _PROVIDER_SUBMISSION_ERROR_CODES

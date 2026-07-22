@@ -409,6 +409,7 @@ class ExecuteAutomaticMediaAnalysisRun:
                 model_id=None,
                 prompt_version=PROMPT_VERSION,
                 completed_at_ms=self._now_ms(),
+                provider_submission_occurred=_provider_submission_occurred(error_code),
             )
         except FrameNestMediaAnalysisRunRepositoryError as persist_exc:
             raise MediaAnalysisLifecycleError(
@@ -536,3 +537,20 @@ def _classify_failure(exc: Exception) -> tuple[str, str, bool]:
     ):
         return "PREPARATION_UNAVAILABLE", "Local media preparation is unavailable.", False
     return "ANALYSIS_FAILED", "Automatic analysis failed.", False
+
+
+_PROVIDER_SUBMISSION_ERROR_CODES = frozenset(
+    {
+        "PROVIDER_AUTH",
+        "PROVIDER_RATE_LIMITED",
+        "PROVIDER_MODEL_UNAVAILABLE",
+        "PROVIDER_UNAVAILABLE",
+        "PROVIDER_INVALID_RESPONSE",
+        "PROVIDER_FAILED",
+    }
+)
+
+
+def _provider_submission_occurred(error_code: str) -> bool:
+    """True only when failure classification implies the provider adapter was entered."""
+    return error_code in _PROVIDER_SUBMISSION_ERROR_CODES

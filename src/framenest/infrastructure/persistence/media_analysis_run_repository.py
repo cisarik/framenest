@@ -351,6 +351,7 @@ class SqliteMediaAnalysisRunRepository:
         model_id: str | None,
         prompt_version: str | None,
         completed_at_ms: int,
+        provider_submission_occurred: bool | None = None,
     ) -> MediaAnalysisRun:
         def operation(connection: Connection) -> MediaAnalysisRun:
             row = _require_row(connection, run_id)
@@ -362,6 +363,23 @@ class SqliteMediaAnalysisRunRepository:
             started_at_ms = row["started_at_ms"]
             if started_at_ms is None:
                 started_at_ms = completed_at_ms
+            values: dict[str, object] = {
+                "state": MediaAnalysisRunState.FAILED.value,
+                "provider_id": provider_id,
+                "model_id": model_id,
+                "prompt_version": prompt_version,
+                "result_schema_version": None,
+                "result_json": None,
+                "error_code": error_code,
+                "error_message": error_message,
+                "started_at_ms": started_at_ms,
+                "completed_at_ms": completed_at_ms,
+                "version": expected_version + 1,
+            }
+            if provider_submission_occurred is not None:
+                values["provider_submission_occurred"] = (
+                    1 if provider_submission_occurred else 0
+                )
             updated = connection.execute(
                 update(media_analysis_runs)
                 .where(
@@ -370,19 +388,7 @@ class SqliteMediaAnalysisRunRepository:
                     media_analysis_runs.c.state
                     == MediaAnalysisRunState.ANALYZING.value,
                 )
-                .values(
-                    state=MediaAnalysisRunState.FAILED.value,
-                    provider_id=provider_id,
-                    model_id=model_id,
-                    prompt_version=prompt_version,
-                    result_schema_version=None,
-                    result_json=None,
-                    error_code=error_code,
-                    error_message=error_message,
-                    started_at_ms=started_at_ms,
-                    completed_at_ms=completed_at_ms,
-                    version=expected_version + 1,
-                )
+                .values(**values)
             )
             if updated.rowcount != 1:
                 raise MediaAnalysisRunConflictError(_REPOSITORY_FAILURE_MESSAGE)

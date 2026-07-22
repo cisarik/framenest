@@ -184,10 +184,12 @@ def test_requeue_and_terminal_failure(
         model_id=None,
         prompt_version="framenest-media-suggestion-v3",
         completed_at_ms=14,
+        provider_submission_occurred=True,
     )
     assert failed.state is MediaAnalysisRunState.FAILED
     assert failed.error_code == "PROVIDER_AUTH"
     assert failed.result_json is None
+    assert failed.provider_submission_occurred is True
 
 
 def test_reset_interrupted_analyzing_fails_closed_as_outcome_unknown(

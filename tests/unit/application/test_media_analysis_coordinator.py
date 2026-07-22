@@ -127,8 +127,9 @@ class _FakeRepository:
         model_id,
         prompt_version,
         completed_at_ms,
+        provider_submission_occurred=None,
     ):
-        del run_id, provider_id, model_id, prompt_version
+        del run_id, provider_id, model_id, prompt_version, provider_submission_occurred
         with self._lock:
             assert self.run is not None
             assert self.run.version == expected_version
