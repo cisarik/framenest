@@ -388,3 +388,100 @@ def test_manual_durable_analysis_request_requires_confirmation_and_schedules() -
     assert len(calls) == 1
     assert SECRET not in accepted.text
     assert PRIVATE_PATH not in accepted.text
+
+
+def test_manual_durable_analysis_after_terminal_returns_new_pending_run() -> None:
+    from framenest.domain.media_analysis_runs import (
+        AUTOMATIC_POST_CATALOG_ANALYSIS_DEFINITION,
+        MediaAnalysisRun,
+        MediaAnalysisRunId,
+        MediaAnalysisRunState,
+    )
+    from framenest.domain.identities import MediaLocationId
+
+    calls: list[str] = []
+    prior = MediaAnalysisRunId("51c2f844-0240-4c26-8d6c-e185dd42332a")
+
+    def _request(media_id: MediaId, location_id: object) -> MediaAnalysisRun:
+        assert isinstance(location_id, MediaLocationId)
+        calls.append(media_id.to_string())
+        return MediaAnalysisRun(
+            id=MediaAnalysisRunId("11111111-1111-4111-8111-111111111111"),
+            media_id=media_id,
+            media_location_id=location_id,
+            analysis_definition=AUTOMATIC_POST_CATALOG_ANALYSIS_DEFINITION,
+            state=MediaAnalysisRunState.PENDING,
+            attempt_count=0,
+            provider_id=None,
+            model_id=None,
+            prompt_version=None,
+            result_schema_version=None,
+            result_json=None,
+            error_code=None,
+            error_message=None,
+            created_at_ms=30,
+            started_at_ms=None,
+            completed_at_ms=None,
+            version=1,
+            supersedes_run_id=prior,
+        )
+
+    location_id = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+    settings = FrameNestSettings(
+        host="127.0.0.1",
+        database_path=Path("/tmp/framenest-analysis-lifecycle-api-rerun.sqlite3"),
+        automatic_media_analysis_enabled=False,
+        _env_file=None,
+    )
+    app = create_app(
+        settings=settings,
+        library_api_dependencies=LibraryApiDependencies(
+            repository=object(),  # type: ignore[arg-type]
+            scan_preview=object(),
+            catalog_available=lambda: True,
+        ),
+        media_analysis_api_dependencies=MediaAnalysisApiDependencies(
+            prepare_preview=object(),
+            catalog_available=lambda: True,
+        ),
+        media_suggestion_api_dependencies=MediaSuggestionApiDependencies(
+            preview_suggestion=None,
+            provider_configured=False,
+        ),
+        media_analysis_lifecycle_api_dependencies=MediaAnalysisLifecycleApiDependencies(
+            read_analysis=_FakeReadAnalysis(
+                AutomaticAnalysisPublicView(
+                    state="failed",
+                    analysis_definition=AUTOMATIC_POST_CATALOG_ANALYSIS_DEFINITION,
+                    provider_id=None,
+                    model_id=None,
+                    prompt_version="framenest-media-suggestion-v3",
+                    result=None,
+                    error_code="PROVIDER_UNAVAILABLE",
+                    error_message="AI provider is temporarily unavailable.",
+                    attempt_count=1,
+                    created_at_ms=10,
+                    started_at_ms=11,
+                    completed_at_ms=12,
+                    provider_submission_occurred=True,
+                )
+            ),  # type: ignore[arg-type]
+            automatic_analysis_enabled=False,
+            provider_configured=True,
+            provider_id="nvidia-nim",
+            model_id="test-model",
+            request_manual_analysis=_request,  # type: ignore[arg-type]
+        ),
+    )
+    client = TestClient(app)
+    accepted = client.post(
+        f"/api/media/{CANONICAL_MEDIA_ID}/locations/{location_id}/durable-analysis",
+        json={"confirm_cloud_upload": True},
+    )
+    assert accepted.status_code == 200
+    payload = accepted.json()
+    assert payload["state"] == "pending"
+    assert payload["error_code"] is None
+    assert payload["analysis_definition"] == AUTOMATIC_POST_CATALOG_ANALYSIS_DEFINITION
+    assert calls == [CANONICAL_MEDIA_ID]
+    assert SECRET not in accepted.text

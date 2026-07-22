@@ -1,4 +1,4 @@
-"""SQLite adapter for durable automatic media analysis runs."""
+"""SQLite adapter for durable media analysis runs."""
 
 from __future__ import annotations
 
@@ -16,9 +16,11 @@ from framenest.application.ports.media_analysis_runs import (
 )
 from framenest.domain.identities import FrameNestIdentityError, MediaId, MediaLocationId
 from framenest.domain.media_analysis_runs import (
+    ACTIVE_ANALYSIS_RUN_STATE_VALUES,
     MediaAnalysisRun,
     MediaAnalysisRunId,
     MediaAnalysisRunState,
+    TERMINAL_ANALYSIS_RUN_STATES,
 )
 from framenest.infrastructure.persistence.catalog_schema import media_analysis_runs
 from framenest.infrastructure.persistence.engine import (
@@ -41,13 +43,7 @@ class SqliteMediaAnalysisRunRepository:
         analysis_definition: str,
     ) -> MediaAnalysisRun | None:
         def operation(connection: Connection) -> MediaAnalysisRun | None:
-            row = connection.execute(
-                select(media_analysis_runs).where(
-                    media_analysis_runs.c.media_id == media_id.to_string(),
-                    media_analysis_runs.c.analysis_definition == analysis_definition,
-                )
-            ).mappings().first()
-            return None if row is None else _run_from_row(row)
+            return _latest_run(connection, media_id, analysis_definition)
 
         try:
             return run_in_transaction(self._engine, operation)
@@ -66,59 +62,93 @@ class SqliteMediaAnalysisRunRepository:
         analysis_definition: str,
         created_at_ms: int,
     ) -> MediaAnalysisRun:
+        """Automatic get-or-create: never invent a new run after terminal history."""
+
         def operation(connection: Connection) -> MediaAnalysisRun:
-            existing = connection.execute(
-                select(media_analysis_runs).where(
-                    media_analysis_runs.c.media_id == media_id.to_string(),
-                    media_analysis_runs.c.analysis_definition == analysis_definition,
-                )
-            ).mappings().first()
-            if existing is not None:
-                return _run_from_row(existing)
-            run_id = str(uuid.uuid4())
+            active = _active_run(connection, media_id, analysis_definition)
+            if active is not None:
+                return active
+            latest = _latest_run(connection, media_id, analysis_definition)
+            if latest is not None:
+                return latest
             try:
-                connection.execute(
-                    insert(media_analysis_runs).values(
-                        id=run_id,
-                        media_id=media_id.to_string(),
-                        media_location_id=media_location_id.to_string(),
-                        analysis_definition=analysis_definition,
-                        state=MediaAnalysisRunState.PENDING.value,
-                        attempt_count=0,
-                        provider_id=None,
-                        model_id=None,
-                        prompt_version=None,
-                        result_schema_version=None,
-                        result_json=None,
-                        error_code=None,
-                        error_message=None,
-                        created_at_ms=created_at_ms,
-                        started_at_ms=None,
-                        completed_at_ms=None,
-                        version=1,
-                    )
+                return _insert_pending(
+                    connection,
+                    media_id=media_id,
+                    media_location_id=media_location_id,
+                    analysis_definition=analysis_definition,
+                    created_at_ms=created_at_ms,
+                    supersedes_run_id=None,
                 )
             except IntegrityError:
-                raced = connection.execute(
-                    select(media_analysis_runs).where(
-                        media_analysis_runs.c.media_id == media_id.to_string(),
-                        media_analysis_runs.c.analysis_definition
-                        == analysis_definition,
-                    )
-                ).mappings().first()
-                if raced is None:
-                    raise
-                return _run_from_row(raced)
-            created = connection.execute(
-                select(media_analysis_runs).where(media_analysis_runs.c.id == run_id)
-            ).mappings().one()
-            return _run_from_row(created)
+                winner = _active_run(connection, media_id, analysis_definition)
+                if winner is not None:
+                    return winner
+                raced = _latest_run(connection, media_id, analysis_definition)
+                if raced is not None:
+                    return raced
+                raise
 
         try:
             return run_in_immediate_transaction(self._engine, operation)
         except FrameNestMediaAnalysisRunRepositoryError:
             raise
         except IntegrityError as exc:
+            raced = self.get_by_media_definition(media_id, analysis_definition)
+            if raced is not None:
+                return raced
+            raise MediaAnalysisRunConflictError(_REPOSITORY_FAILURE_MESSAGE) from exc
+        except SQLAlchemyError as exc:
+            raise FrameNestMediaAnalysisRunRepositoryError(
+                _REPOSITORY_FAILURE_MESSAGE
+            ) from exc
+
+    def create_manual_pending(
+        self,
+        *,
+        media_id: MediaId,
+        media_location_id: MediaLocationId,
+        analysis_definition: str,
+        created_at_ms: int,
+    ) -> MediaAnalysisRun:
+        """Explicit reanalysis: preserve terminals and create a new pending run."""
+
+        def operation(connection: Connection) -> MediaAnalysisRun:
+            active = _active_run(connection, media_id, analysis_definition)
+            if active is not None:
+                return active
+            latest = _latest_run(connection, media_id, analysis_definition)
+            supersedes_run_id = None
+            if latest is not None:
+                if latest.state not in TERMINAL_ANALYSIS_RUN_STATES:
+                    return latest
+                supersedes_run_id = latest.id.to_string()
+            try:
+                return _insert_pending(
+                    connection,
+                    media_id=media_id,
+                    media_location_id=media_location_id,
+                    analysis_definition=analysis_definition,
+                    created_at_ms=created_at_ms,
+                    supersedes_run_id=supersedes_run_id,
+                )
+            except IntegrityError:
+                winner = _active_run(connection, media_id, analysis_definition)
+                if winner is not None:
+                    return winner
+                raise
+
+        try:
+            return run_in_immediate_transaction(self._engine, operation)
+        except FrameNestMediaAnalysisRunRepositoryError:
+            raise
+        except IntegrityError as exc:
+            raced = self.get_by_media_definition(media_id, analysis_definition)
+            if raced is not None and raced.state in {
+                MediaAnalysisRunState.PENDING,
+                MediaAnalysisRunState.ANALYZING,
+            }:
+                return raced
             raise MediaAnalysisRunConflictError(_REPOSITORY_FAILURE_MESSAGE) from exc
         except SQLAlchemyError as exc:
             raise FrameNestMediaAnalysisRunRepositoryError(
@@ -200,59 +230,6 @@ class SqliteMediaAnalysisRunRepository:
                 .values(
                     state=MediaAnalysisRunState.PENDING.value,
                     started_at_ms=None,
-                    version=expected_version + 1,
-                )
-            )
-            if updated.rowcount != 1:
-                raise MediaAnalysisRunConflictError(_REPOSITORY_FAILURE_MESSAGE)
-            return _run_from_row(_require_row(connection, run_id))
-
-        try:
-            return run_in_immediate_transaction(self._engine, operation)
-        except FrameNestMediaAnalysisRunRepositoryError:
-            raise
-        except SQLAlchemyError as exc:
-            raise FrameNestMediaAnalysisRunRepositoryError(
-                _REPOSITORY_FAILURE_MESSAGE
-            ) from exc
-
-    def requeue_failed_preparation_for_manual(
-        self,
-        *,
-        run_id: str,
-        expected_version: int,
-        updated_at_ms: int,
-    ) -> MediaAnalysisRun:
-        del updated_at_ms
-
-        def operation(connection: Connection) -> MediaAnalysisRun:
-            row = _require_row(connection, run_id)
-            if (
-                row["state"] != MediaAnalysisRunState.FAILED.value
-                or row["version"] != expected_version
-                or row["error_code"]
-                not in {"PREPARATION_UNAVAILABLE", "PREPARATION_FAILED"}
-            ):
-                raise MediaAnalysisRunConflictError(_REPOSITORY_FAILURE_MESSAGE)
-            updated = connection.execute(
-                update(media_analysis_runs)
-                .where(
-                    media_analysis_runs.c.id == run_id,
-                    media_analysis_runs.c.version == expected_version,
-                    media_analysis_runs.c.state == MediaAnalysisRunState.FAILED.value,
-                )
-                .values(
-                    state=MediaAnalysisRunState.PENDING.value,
-                    attempt_count=0,
-                    provider_id=None,
-                    model_id=None,
-                    prompt_version=None,
-                    result_schema_version=None,
-                    result_json=None,
-                    error_code=None,
-                    error_message=None,
-                    started_at_ms=None,
-                    completed_at_ms=None,
                     version=expected_version + 1,
                 )
             )
@@ -502,6 +479,96 @@ class SqliteMediaAnalysisRunRepository:
             ) from exc
 
 
+def _active_run(
+    connection: Connection,
+    media_id: MediaId,
+    analysis_definition: str,
+) -> MediaAnalysisRun | None:
+    row = connection.execute(
+        select(media_analysis_runs)
+        .where(
+            media_analysis_runs.c.media_id == media_id.to_string(),
+            media_analysis_runs.c.analysis_definition == analysis_definition,
+            media_analysis_runs.c.state.in_(tuple(ACTIVE_ANALYSIS_RUN_STATE_VALUES)),
+        )
+        .order_by(
+            media_analysis_runs.c.created_at_ms.desc(),
+            media_analysis_runs.c.id.desc(),
+        )
+        .limit(1)
+    ).mappings().first()
+    return None if row is None else _run_from_row(row)
+
+
+def _latest_run(
+    connection: Connection,
+    media_id: MediaId,
+    analysis_definition: str,
+) -> MediaAnalysisRun | None:
+    row = connection.execute(
+        select(media_analysis_runs)
+        .where(
+            media_analysis_runs.c.media_id == media_id.to_string(),
+            media_analysis_runs.c.analysis_definition == analysis_definition,
+        )
+        .order_by(
+            media_analysis_runs.c.created_at_ms.desc(),
+            media_analysis_runs.c.id.desc(),
+        )
+        .limit(1)
+    ).mappings().first()
+    return None if row is None else _run_from_row(row)
+
+
+def _insert_pending(
+    connection: Connection,
+    *,
+    media_id: MediaId,
+    media_location_id: MediaLocationId,
+    analysis_definition: str,
+    created_at_ms: int,
+    supersedes_run_id: str | None,
+) -> MediaAnalysisRun:
+    run_id = str(uuid.uuid4())
+    if supersedes_run_id is not None:
+        if supersedes_run_id == run_id:
+            raise MediaAnalysisRunConflictError(_REPOSITORY_FAILURE_MESSAGE)
+        superseded = _require_row(connection, supersedes_run_id)
+        if (
+            str(superseded["media_id"]) != media_id.to_string()
+            or str(superseded["analysis_definition"]) != analysis_definition
+            or MediaAnalysisRunState(str(superseded["state"]))
+            not in TERMINAL_ANALYSIS_RUN_STATES
+        ):
+            raise MediaAnalysisRunConflictError(_REPOSITORY_FAILURE_MESSAGE)
+    connection.execute(
+        insert(media_analysis_runs).values(
+            id=run_id,
+            media_id=media_id.to_string(),
+            media_location_id=media_location_id.to_string(),
+            analysis_definition=analysis_definition,
+            state=MediaAnalysisRunState.PENDING.value,
+            attempt_count=0,
+            provider_id=None,
+            model_id=None,
+            prompt_version=None,
+            result_schema_version=None,
+            result_json=None,
+            error_code=None,
+            error_message=None,
+            created_at_ms=created_at_ms,
+            started_at_ms=None,
+            completed_at_ms=None,
+            version=1,
+            supersedes_run_id=supersedes_run_id,
+        )
+    )
+    created = connection.execute(
+        select(media_analysis_runs).where(media_analysis_runs.c.id == run_id)
+    ).mappings().one()
+    return _run_from_row(created)
+
+
 def _require_row(connection: Connection, run_id: str) -> Mapping[str, object]:
     row = connection.execute(
         select(media_analysis_runs).where(media_analysis_runs.c.id == run_id)
@@ -513,6 +580,7 @@ def _require_row(connection: Connection, run_id: str) -> Mapping[str, object]:
 
 def _run_from_row(row: Mapping[str, object]) -> MediaAnalysisRun:
     try:
+        supersedes_raw = row.get("supersedes_run_id")
         return MediaAnalysisRun(
             id=MediaAnalysisRunId(str(row["id"])),
             media_id=MediaId.from_string(str(row["media_id"])),
@@ -569,6 +637,11 @@ def _run_from_row(row: Mapping[str, object]) -> MediaAnalysisRun:
                 None
                 if row.get("provider_submission_occurred") is None
                 else bool(int(row["provider_submission_occurred"]))
+            ),
+            supersedes_run_id=(
+                None
+                if supersedes_raw is None
+                else MediaAnalysisRunId(str(supersedes_raw))
             ),
         )
     except (FrameNestIdentityError, TypeError, ValueError) as exc:

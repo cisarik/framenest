@@ -1,4 +1,4 @@
-"""Domain types for durable automatic media analysis runs."""
+"""Domain types for durable media analysis runs."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from framenest.domain.identities import MediaId, MediaLocationId
 
 
 class MediaAnalysisRunState(str, Enum):
-    """Persisted lifecycle states for one automatic analysis run."""
+    """Persisted lifecycle states for one analysis run."""
 
     PENDING = "pending"
     ANALYZING = "analyzing"
@@ -34,6 +34,9 @@ TERMINAL_ANALYSIS_RUN_STATES = frozenset(
         MediaAnalysisRunState.FAILED,
     }
 )
+ACTIVE_ANALYSIS_RUN_STATE_VALUES = frozenset(
+    state.value for state in ACTIVE_ANALYSIS_RUN_STATES
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -48,7 +51,13 @@ class MediaAnalysisRunId:
 
 @dataclass(frozen=True, slots=True)
 class MediaAnalysisRun:
-    """One durable automatic analysis lifecycle record."""
+    """One durable analysis lifecycle record.
+
+    ``analysis_definition`` identifies the analysis profile/workflow key
+    (for example ``automatic_post_catalog`` or ``movie_identification``).
+    It is not request-trigger provenance. Automatic versus manual intent is
+    expressed by the create path, not by rewriting the definition string.
+    """
 
     id: MediaAnalysisRunId
     media_id: MediaId
@@ -72,3 +81,4 @@ class MediaAnalysisRun:
     derivative_strategy: str | None = None
     derivative_count: int | None = None
     provider_submission_occurred: bool | None = None
+    supersedes_run_id: MediaAnalysisRunId | None = None

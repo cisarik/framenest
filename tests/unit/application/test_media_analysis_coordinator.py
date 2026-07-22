@@ -60,6 +60,38 @@ class _FakeRepository:
             )
             return self.run
 
+    def create_manual_pending(
+        self, *, media_id, media_location_id, analysis_definition, created_at_ms
+    ):
+        with self._lock:
+            if self.run is not None and self.run.state in {
+                MediaAnalysisRunState.PENDING,
+                MediaAnalysisRunState.ANALYZING,
+            }:
+                return self.run
+            superseded = self.run
+            self.run = MediaAnalysisRun(
+                id=MediaAnalysisRunId("22222222-2222-4222-8222-222222222222"),
+                media_id=media_id,
+                media_location_id=media_location_id,
+                analysis_definition=analysis_definition,
+                state=MediaAnalysisRunState.PENDING,
+                attempt_count=0,
+                provider_id=None,
+                model_id=None,
+                prompt_version=None,
+                result_schema_version=None,
+                result_json=None,
+                error_code=None,
+                error_message=None,
+                created_at_ms=created_at_ms,
+                started_at_ms=None,
+                completed_at_ms=None,
+                version=1,
+                supersedes_run_id=None if superseded is None else superseded.id,
+            )
+            return self.run
+
     def claim_pending(self, *, run_id, expected_version, started_at_ms, max_attempts):
         del run_id, max_attempts
         with self._lock:
@@ -76,9 +108,6 @@ class _FakeRepository:
 
     def requeue_for_retry(self, **kwargs):
         raise AssertionError("unexpected requeue")
-
-    def requeue_failed_preparation_for_manual(self, **kwargs):
-        raise AssertionError("unexpected preparation requeue")
 
     def record_analyzed(
         self,

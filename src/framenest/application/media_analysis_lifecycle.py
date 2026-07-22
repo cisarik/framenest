@@ -231,9 +231,11 @@ class RequestManualMediaAnalysis:
 
     Independent of automatic post-catalog enablement so operators can analyze
     one item while FRAMENEST_AUTOMATIC_MEDIA_ANALYSIS_ENABLED remains false.
-    A prior terminal preparation failure may be reset so the operator can retry
-    without inventing a second provider submission for a call that never left
-    local preparation.
+
+    Terminal historical runs remain immutable evidence. An explicit manual
+    request creates a new pending run with durable supersession lineage when
+    the latest matching run is terminal, and remains idempotent while an
+    active matching run already exists.
     """
 
     def __init__(
@@ -248,32 +250,8 @@ class RequestManualMediaAnalysis:
         self._analysis_definition = analysis_definition
 
     def execute(self, target: CatalogedAnalysisTarget) -> MediaAnalysisRun:
-        existing = self._repository.get_by_media_definition(
-            target.media_id,
-            self._analysis_definition,
-        )
-        if (
-            existing is not None
-            and existing.state is MediaAnalysisRunState.FAILED
-            and existing.error_code
-            in {"PREPARATION_UNAVAILABLE", "PREPARATION_FAILED"}
-        ):
-            try:
-                return self._repository.requeue_failed_preparation_for_manual(
-                    run_id=existing.id.to_string(),
-                    expected_version=existing.version,
-                    updated_at_ms=self._now_ms(),
-                )
-            except MediaAnalysisRunConflictError as exc:
-                raise MediaAnalysisLifecycleError(
-                    "manual analysis request failed"
-                ) from exc
-            except FrameNestMediaAnalysisRunRepositoryError as exc:
-                raise MediaAnalysisLifecycleError(
-                    "manual analysis request failed"
-                ) from exc
         try:
-            return self._repository.create_pending(
+            return self._repository.create_manual_pending(
                 media_id=target.media_id,
                 media_location_id=target.media_location_id,
                 analysis_definition=self._analysis_definition,

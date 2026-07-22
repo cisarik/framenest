@@ -1,4 +1,4 @@
-"""Persistence port for durable automatic media analysis runs."""
+"""Persistence port for durable media analysis runs."""
 
 from __future__ import annotations
 
@@ -21,14 +21,14 @@ class MediaAnalysisRunNotFoundError(FrameNestMediaAnalysisRunRepositoryError):
 
 
 class MediaAnalysisRunRepository(Protocol):
-    """Short-transaction repository for automatic analysis lifecycle rows."""
+    """Short-transaction repository for analysis lifecycle rows."""
 
     def get_by_media_definition(
         self,
         media_id: MediaId,
         analysis_definition: str,
     ) -> MediaAnalysisRun | None:
-        """Return the single run for media and definition when present."""
+        """Return the latest run for media and definition when present."""
 
     def create_pending(
         self,
@@ -38,7 +38,25 @@ class MediaAnalysisRunRepository(Protocol):
         analysis_definition: str,
         created_at_ms: int,
     ) -> MediaAnalysisRun:
-        """Idempotently create or return the existing run for the definition."""
+        """Idempotently create the first run or return any existing matching run.
+
+        Automatic/catalog replay must not invent a new attempt after a terminal
+        historical run. Duplicate requests while active return the active run.
+        """
+
+    def create_manual_pending(
+        self,
+        *,
+        media_id: MediaId,
+        media_location_id: MediaLocationId,
+        analysis_definition: str,
+        created_at_ms: int,
+    ) -> MediaAnalysisRun:
+        """Create a new pending run after a terminal history, or return active.
+
+        Explicit manual reanalysis preserves every terminal run unchanged and
+        records durable ``supersedes_run_id`` lineage to the prior latest run.
+        """
 
     def claim_pending(
         self,
@@ -60,15 +78,6 @@ class MediaAnalysisRunRepository(Protocol):
         updated_at_ms: int,
     ) -> MediaAnalysisRun:
         """Return an analyzing run to pending after a retryable failure."""
-
-    def requeue_failed_preparation_for_manual(
-        self,
-        *,
-        run_id: str,
-        expected_version: int,
-        updated_at_ms: int,
-    ) -> MediaAnalysisRun:
-        """Reset a terminal preparation failure so a manual request can run once."""
 
     def record_analyzed(
         self,

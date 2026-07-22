@@ -305,3 +305,373 @@ def test_crash_window_provider_success_then_interrupt_does_not_replay_provider(
     assert again.id.to_string() == recovered.id.to_string()
     assert again.state is MediaAnalysisRunState.FAILED
     assert calls["n"] == 1
+
+
+def _fail_run(
+    repository: SqliteMediaAnalysisRunRepository,
+    *,
+    error_code: str,
+    provider_submission_occurred: bool,
+    created_at_ms: int,
+) -> object:
+    pending = repository.create_pending(
+        media_id=MEDIA_ID,
+        media_location_id=LOCATION_ID,
+        analysis_definition=AUTOMATIC_POST_CATALOG_ANALYSIS_DEFINITION,
+        created_at_ms=created_at_ms,
+    )
+    claimed = repository.claim_pending(
+        run_id=pending.id.to_string(),
+        expected_version=pending.version,
+        started_at_ms=created_at_ms + 1,
+        max_attempts=3,
+    )
+    return repository.record_failed(
+        run_id=claimed.id.to_string(),
+        expected_version=claimed.version,
+        error_code=error_code,
+        error_message=f"{error_code} message",
+        provider_id=None,
+        model_id=None,
+        prompt_version="framenest-media-suggestion-v3",
+        completed_at_ms=created_at_ms + 2,
+        provider_submission_occurred=provider_submission_occurred,
+    )
+
+
+def test_manual_pending_preserves_provider_failed_historical_run(
+    repository: SqliteMediaAnalysisRunRepository,
+) -> None:
+    failed = _fail_run(
+        repository,
+        error_code="PROVIDER_UNAVAILABLE",
+        provider_submission_occurred=True,
+        created_at_ms=10,
+    )
+    snapshot = (
+        failed.id.to_string(),
+        failed.state,
+        failed.error_code,
+        failed.provider_submission_occurred,
+        failed.version,
+        failed.result_json,
+    )
+    manual = repository.create_manual_pending(
+        media_id=MEDIA_ID,
+        media_location_id=LOCATION_ID,
+        analysis_definition=AUTOMATIC_POST_CATALOG_ANALYSIS_DEFINITION,
+        created_at_ms=20,
+    )
+    assert manual.id.to_string() != failed.id.to_string()
+    assert manual.state is MediaAnalysisRunState.PENDING
+    assert manual.supersedes_run_id is not None
+    assert manual.supersedes_run_id.to_string() == failed.id.to_string()
+    preserved = repository.get_by_media_definition(
+        MEDIA_ID,
+        AUTOMATIC_POST_CATALOG_ANALYSIS_DEFINITION,
+    )
+    assert preserved is not None
+    assert preserved.id.to_string() == manual.id.to_string()
+    # Historical row remains queryable by identity through supersession target.
+    from sqlalchemy import select
+    from framenest.infrastructure.persistence.catalog_schema import media_analysis_runs
+    from framenest.infrastructure.persistence.engine import run_in_transaction
+
+    def load_failed(connection):
+        row = connection.execute(
+            select(media_analysis_runs).where(
+                media_analysis_runs.c.id == failed.id.to_string()
+            )
+        ).mappings().one()
+        return (
+            row["id"],
+            row["state"],
+            row["error_code"],
+            row["provider_submission_occurred"],
+            row["version"],
+            row["result_json"],
+        )
+
+    loaded = run_in_transaction(repository._engine, load_failed)
+    assert loaded == (
+        snapshot[0],
+        "failed",
+        "PROVIDER_UNAVAILABLE",
+        1,
+        snapshot[4],
+        None,
+    )
+
+
+def test_manual_pending_preserves_local_failed_and_analyzed_history(
+    repository: SqliteMediaAnalysisRunRepository,
+) -> None:
+    local_failed = _fail_run(
+        repository,
+        error_code="ANALYSIS_FAILED",
+        provider_submission_occurred=False,
+        created_at_ms=10,
+    )
+    first_manual = repository.create_manual_pending(
+        media_id=MEDIA_ID,
+        media_location_id=LOCATION_ID,
+        analysis_definition=AUTOMATIC_POST_CATALOG_ANALYSIS_DEFINITION,
+        created_at_ms=20,
+    )
+    assert first_manual.supersedes_run_id is not None
+    assert first_manual.supersedes_run_id.to_string() == local_failed.id.to_string()
+    claimed = repository.claim_pending(
+        run_id=first_manual.id.to_string(),
+        expected_version=first_manual.version,
+        started_at_ms=21,
+        max_attempts=3,
+    )
+    analyzed = repository.record_analyzed(
+        run_id=claimed.id.to_string(),
+        expected_version=claimed.version,
+        provider_id="nvidia-nim",
+        model_id="model",
+        prompt_version="framenest-media-suggestion-v3",
+        result_schema_version="framenest-media-suggestion-result-v1",
+        result_json='{"title":"T","description":"D","collection":"C","tags":["a"],'
+        '"suggested_filename":"t.mp4","confidence":0.5,"evidence":["e"],'
+        '"uncertainties":[]}',
+        completed_at_ms=22,
+        provider_submission_occurred=True,
+    )
+    analyzed_json = analyzed.result_json
+    second_manual = repository.create_manual_pending(
+        media_id=MEDIA_ID,
+        media_location_id=LOCATION_ID,
+        analysis_definition=AUTOMATIC_POST_CATALOG_ANALYSIS_DEFINITION,
+        created_at_ms=30,
+    )
+    assert second_manual.id.to_string() != analyzed.id.to_string()
+    assert second_manual.supersedes_run_id is not None
+    assert second_manual.supersedes_run_id.to_string() == analyzed.id.to_string()
+    from sqlalchemy import select
+    from framenest.infrastructure.persistence.catalog_schema import media_analysis_runs
+    from framenest.infrastructure.persistence.engine import run_in_transaction
+
+    def load_analyzed(connection):
+        return connection.execute(
+            select(media_analysis_runs).where(
+                media_analysis_runs.c.id == analyzed.id.to_string()
+            )
+        ).mappings().one()
+
+    row = run_in_transaction(repository._engine, load_analyzed)
+    assert row["state"] == "analyzed"
+    assert row["result_json"] == analyzed_json
+
+    claimed_second = repository.claim_pending(
+        run_id=second_manual.id.to_string(),
+        expected_version=second_manual.version,
+        started_at_ms=31,
+        max_attempts=3,
+    )
+    second_done = repository.record_analyzed(
+        run_id=claimed_second.id.to_string(),
+        expected_version=claimed_second.version,
+        provider_id="nvidia-nim",
+        model_id="model",
+        prompt_version="framenest-media-suggestion-v3",
+        result_schema_version="framenest-media-suggestion-result-v1",
+        result_json='{"title":"U","description":"D","collection":"C","tags":["a"],'
+        '"suggested_filename":"u.mp4","confidence":0.5,"evidence":["e"],'
+        '"uncertainties":[]}',
+        completed_at_ms=32,
+        provider_submission_occurred=True,
+    )
+    third = repository.create_manual_pending(
+        media_id=MEDIA_ID,
+        media_location_id=LOCATION_ID,
+        analysis_definition=AUTOMATIC_POST_CATALOG_ANALYSIS_DEFINITION,
+        created_at_ms=40,
+    )
+    assert third.id.to_string() != second_done.id.to_string()
+    assert third.supersedes_run_id is not None
+    assert third.supersedes_run_id.to_string() == second_done.id.to_string()
+
+
+def test_create_pending_after_terminal_remains_idempotent(
+    repository: SqliteMediaAnalysisRunRepository,
+) -> None:
+    failed = _fail_run(
+        repository,
+        error_code="PROVIDER_UNAVAILABLE",
+        provider_submission_occurred=True,
+        created_at_ms=10,
+    )
+    again = repository.create_pending(
+        media_id=MEDIA_ID,
+        media_location_id=LOCATION_ID,
+        analysis_definition=AUTOMATIC_POST_CATALOG_ANALYSIS_DEFINITION,
+        created_at_ms=20,
+    )
+    assert again.id.to_string() == failed.id.to_string()
+    assert again.state is MediaAnalysisRunState.FAILED
+
+
+def test_duplicate_manual_while_pending_and_analyzing_returns_active(
+    repository: SqliteMediaAnalysisRunRepository,
+) -> None:
+    first = repository.create_manual_pending(
+        media_id=MEDIA_ID,
+        media_location_id=LOCATION_ID,
+        analysis_definition=AUTOMATIC_POST_CATALOG_ANALYSIS_DEFINITION,
+        created_at_ms=10,
+    )
+    second = repository.create_manual_pending(
+        media_id=MEDIA_ID,
+        media_location_id=LOCATION_ID,
+        analysis_definition=AUTOMATIC_POST_CATALOG_ANALYSIS_DEFINITION,
+        created_at_ms=11,
+    )
+    assert first.id.to_string() == second.id.to_string()
+    claimed = repository.claim_pending(
+        run_id=first.id.to_string(),
+        expected_version=first.version,
+        started_at_ms=12,
+        max_attempts=3,
+    )
+    third = repository.create_manual_pending(
+        media_id=MEDIA_ID,
+        media_location_id=LOCATION_ID,
+        analysis_definition=AUTOMATIC_POST_CATALOG_ANALYSIS_DEFINITION,
+        created_at_ms=13,
+    )
+    assert third.id.to_string() == claimed.id.to_string()
+    assert third.state is MediaAnalysisRunState.ANALYZING
+
+
+def test_concurrent_manual_requests_share_one_active_run(
+    repository: SqliteMediaAnalysisRunRepository,
+) -> None:
+    import threading
+
+    barrier = threading.Barrier(8)
+    results: list[str] = []
+    errors: list[BaseException] = []
+
+    def worker() -> None:
+        try:
+            barrier.wait(timeout=5)
+            run = repository.create_manual_pending(
+                media_id=MEDIA_ID,
+                media_location_id=LOCATION_ID,
+                analysis_definition=AUTOMATIC_POST_CATALOG_ANALYSIS_DEFINITION,
+                created_at_ms=10,
+            )
+            results.append(run.id.to_string())
+        except BaseException as exc:  # noqa: BLE001 - collect race evidence
+            errors.append(exc)
+
+    threads = [threading.Thread(target=worker) for _ in range(8)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=10)
+    assert errors == []
+    assert len(results) == 8
+    assert len(set(results)) == 1
+    unfinished = repository.list_unfinished(limit=8)
+    assert len(unfinished) == 1
+
+
+def test_active_partial_unique_index_rejects_second_active_insert(
+    repository: SqliteMediaAnalysisRunRepository,
+) -> None:
+    import sqlite3
+
+    first = repository.create_pending(
+        media_id=MEDIA_ID,
+        media_location_id=LOCATION_ID,
+        analysis_definition=AUTOMATIC_POST_CATALOG_ANALYSIS_DEFINITION,
+        created_at_ms=10,
+    )
+    assert first.state is MediaAnalysisRunState.PENDING
+    raw = sqlite3.connect(repository._engine.url.database)
+    try:
+        raw.execute("PRAGMA foreign_keys=ON")
+        with pytest.raises(sqlite3.IntegrityError):
+            raw.execute(
+                """
+                INSERT INTO media_analysis_runs (
+                    id, media_id, media_location_id, analysis_definition, state,
+                    attempt_count, created_at_ms, version
+                ) VALUES (?, ?, ?, ?, 'pending', 0, 11, 1)
+                """,
+                (
+                    "22222222-2222-4222-8222-222222222222",
+                    MEDIA_ID.to_string(),
+                    LOCATION_ID.to_string(),
+                    AUTOMATIC_POST_CATALOG_ANALYSIS_DEFINITION,
+                ),
+            )
+        raw.rollback()
+        # Terminal duplicates are allowed after history migration.
+        claimed = repository.claim_pending(
+            run_id=first.id.to_string(),
+            expected_version=first.version,
+            started_at_ms=12,
+            max_attempts=3,
+        )
+        repository.record_failed(
+            run_id=claimed.id.to_string(),
+            expected_version=claimed.version,
+            error_code="PROVIDER_UNAVAILABLE",
+            error_message="unavailable",
+            provider_id=None,
+            model_id=None,
+            prompt_version="v",
+            completed_at_ms=13,
+            provider_submission_occurred=True,
+        )
+        raw.execute(
+            """
+            INSERT INTO media_analysis_runs (
+                id, media_id, media_location_id, analysis_definition, state,
+                attempt_count, error_code, error_message,
+                created_at_ms, started_at_ms, completed_at_ms, version
+            ) VALUES (?, ?, ?, ?, 'failed', 1, 'ANALYSIS_FAILED', 'local',
+                      14, 14, 14, 1)
+            """,
+            (
+                "33333333-3333-4333-8333-333333333333",
+                MEDIA_ID.to_string(),
+                LOCATION_ID.to_string(),
+                AUTOMATIC_POST_CATALOG_ANALYSIS_DEFINITION,
+            ),
+        )
+        raw.commit()
+    finally:
+        raw.close()
+
+
+def test_create_manual_pending_makes_no_provider_call(
+    repository: SqliteMediaAnalysisRunRepository,
+) -> None:
+    calls = {"n": 0}
+
+    class _ForbiddenProvider:
+        def execute(self, *args, **kwargs):
+            del args, kwargs
+            calls["n"] += 1
+            raise AssertionError("provider must not be called")
+
+    _ = _ForbiddenProvider()
+    pending = repository.create_manual_pending(
+        media_id=MEDIA_ID,
+        media_location_id=LOCATION_ID,
+        analysis_definition=AUTOMATIC_POST_CATALOG_ANALYSIS_DEFINITION,
+        created_at_ms=10,
+    )
+    again = repository.create_manual_pending(
+        media_id=MEDIA_ID,
+        media_location_id=LOCATION_ID,
+        analysis_definition=AUTOMATIC_POST_CATALOG_ANALYSIS_DEFINITION,
+        created_at_ms=11,
+    )
+    assert pending.id.to_string() == again.id.to_string()
+    assert calls["n"] == 0

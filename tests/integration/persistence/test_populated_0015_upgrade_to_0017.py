@@ -217,7 +217,7 @@ def test_populated_0015_upgrades_to_0017_preserving_identities_and_relationships
 
     status = upgrade_database_to_head(_settings(database_path))
 
-    assert status.current_revision == status.head_revision == "0017"
+    assert status.current_revision == status.head_revision == "0018"
     connection = _connect(database_path)
     try:
         assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
@@ -286,7 +286,7 @@ def test_populated_0015_upgrades_to_0017_preserving_identities_and_relationships
         analysis = connection.execute(
             """
             SELECT id, media_id, media_location_id, analysis_definition, state,
-                   result_json, analysis_profile, reasoning_enabled
+                   result_json, analysis_profile, reasoning_enabled, supersedes_run_id
             FROM media_analysis_runs WHERE id = ?
             """,
             (ANALYSIS_RUN_ID,),
@@ -298,6 +298,7 @@ def test_populated_0015_upgrades_to_0017_preserving_identities_and_relationships
         assert analysis["result_json"] == RESULT_JSON
         assert analysis["analysis_profile"] == "generic_media"
         assert analysis["reasoning_enabled"] == 0
+        assert analysis["supersedes_run_id"] is None
 
         assert (
             connection.execute("SELECT COUNT(*) FROM media_genres").fetchone()[0] == 0

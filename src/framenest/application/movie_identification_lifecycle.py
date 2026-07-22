@@ -201,7 +201,7 @@ def request_movie_identification(
     *,
     now_ms: Callable[[], int] = default_now_ms,
 ) -> MediaAnalysisRun:
-    """Idempotently request one durable movie-identification run."""
+    """Explicitly request one durable movie-identification run."""
     requester = RequestManualMediaAnalysis(
         repository,
         now_ms=now_ms,

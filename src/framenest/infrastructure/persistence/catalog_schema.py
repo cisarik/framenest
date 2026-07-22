@@ -13,6 +13,7 @@ from sqlalchemy import (
     Table,
     Text,
     UniqueConstraint,
+    text,
 )
 
 from framenest.infrastructure.persistence.upload_schema import define_upload_sessions_table
@@ -567,6 +568,16 @@ media_analysis_runs = Table(
     Column("derivative_strategy", Text(), nullable=True),
     Column("derivative_count", Integer(), nullable=True),
     Column("provider_submission_occurred", Integer(), nullable=True),
+    Column(
+        "supersedes_run_id",
+        Text(),
+        ForeignKey(
+            "media_analysis_runs.id",
+            ondelete="RESTRICT",
+            name="fk_media_analysis_runs_supersedes_run_id",
+        ),
+        nullable=True,
+    ),
     Column("created_at_ms", Integer(), nullable=False),
     Column("started_at_ms", Integer(), nullable=True),
     Column("completed_at_ms", Integer(), nullable=True),
@@ -610,6 +621,12 @@ media_analysis_runs = Table(
         name="ck_media_analysis_runs_derivative_count",
     ),
     CheckConstraint(
+        "supersedes_run_id IS NULL OR ("
+        "length(supersedes_run_id) = 36 AND supersedes_run_id != id"
+        ")",
+        name="ck_media_analysis_runs_supersedes_run_id",
+    ),
+    CheckConstraint(
         "created_at_ms >= 0",
         name="ck_media_analysis_runs_created_at_ms_non_negative",
     ),
@@ -649,15 +666,17 @@ media_analysis_runs = Table(
         ")",
         name="ck_media_analysis_runs_state_payload",
     ),
-    UniqueConstraint(
-        "media_id",
-        "analysis_definition",
-        name="uq_media_analysis_runs_media_definition",
-    ),
     Index(
         "ix_media_analysis_runs_unfinished",
         "state",
         "created_at_ms",
         "id",
+    ),
+    Index(
+        "uq_media_analysis_runs_active_media_definition",
+        "media_id",
+        "analysis_definition",
+        unique=True,
+        sqlite_where=text("state IN ('pending', 'analyzing')"),
     ),
 )
