@@ -217,7 +217,7 @@ def test_populated_0015_upgrades_to_0017_preserving_identities_and_relationships
 
     status = upgrade_database_to_head(_settings(database_path))
 
-    assert status.current_revision == status.head_revision == "0018"
+    assert status.current_revision == status.head_revision == "0019"
     connection = _connect(database_path)
     try:
         assert connection.execute("PRAGMA foreign_key_check").fetchall() == []

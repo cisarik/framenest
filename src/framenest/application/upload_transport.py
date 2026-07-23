@@ -25,10 +25,12 @@ from framenest.application.ports.upload_sessions import (
     IncompleteUploadSessionError,
     InvalidUploadSessionTransitionError,
     UploadOffsetConflictError,
+    UploadSessionAlreadyExistsError,
     UploadSessionConcurrencyConflictError,
     UploadSessionNotFoundError,
     UploadSessionRepository,
     UploadSizeLimitExceededError,
+    UploadStorageKeyAlreadyExistsError,
 )
 from framenest.application.root_paths import roots_overlap
 from framenest.domain import LibraryPathFlavor
@@ -218,6 +220,8 @@ class UploadTransportService:
         *,
         display_filename: object,
         declared_size_bytes: object,
+        session_id: UploadSessionId | None = None,
+        storage_key: UploadStorageKey | None = None,
     ) -> UploadSessionSnapshot:
         storage = self._require_storage()
         try:
@@ -226,6 +230,14 @@ class UploadTransportService:
                 raise FrameNestUploadSessionError("invalid upload size")
             if declared_size_bytes <= 0:
                 raise FrameNestUploadSessionError("invalid upload size")
+            if session_id is not None and not isinstance(
+                session_id, UploadSessionId
+            ):
+                raise FrameNestUploadSessionError("invalid upload identity")
+            if storage_key is not None and not isinstance(
+                storage_key, UploadStorageKey
+            ):
+                raise FrameNestUploadSessionError("invalid upload identity")
         except FrameNestUploadSessionError as exc:
             raise UploadInvalidMetadataError("invalid upload metadata") from exc
         if declared_size_bytes > self._limits.max_total_bytes:
@@ -234,9 +246,9 @@ class UploadTransportService:
         self._ensure_space(declared_size_bytes)
         now_ms = self._now_ms()
         session = UploadSession(
-            id=UploadSessionId.new(),
+            id=session_id or UploadSessionId.new(),
             state=UploadSessionState.CREATED,
-            storage_key=UploadStorageKey(uuid.uuid4().hex),
+            storage_key=storage_key or UploadStorageKey(uuid.uuid4().hex),
             display_filename=filename,
             declared_size_bytes=declared_size_bytes,
             received_size_bytes=0,
@@ -250,6 +262,30 @@ class UploadTransportService:
         )
         try:
             self._repository.create(session)
+        except (
+            UploadSessionAlreadyExistsError,
+            UploadStorageKeyAlreadyExistsError,
+        ) as exc:
+            if session_id is None or storage_key is None:
+                raise UploadQuarantineUnavailableError(
+                    "upload storage unavailable"
+                ) from exc
+            try:
+                existing = self._repository.get(session_id)
+            except FrameNestUploadSessionRepositoryError as load_exc:
+                raise UploadQuarantineUnavailableError(
+                    "upload storage unavailable"
+                ) from load_exc
+            if (
+                existing is None
+                or existing.storage_key != storage_key
+                or existing.display_filename != filename
+                or existing.declared_size_bytes != declared_size_bytes
+            ):
+                raise UploadQuarantineUnavailableError(
+                    "upload storage unavailable"
+                ) from exc
+            return _snapshot(existing)
         except FrameNestUploadSessionRepositoryError as exc:
             raise UploadQuarantineUnavailableError("upload storage unavailable") from exc
         return _snapshot(session)

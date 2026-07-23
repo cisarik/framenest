@@ -159,6 +159,21 @@ def test_non_secret_environment_template_is_loopback_first_and_path_explicit() -
     }
 
 
+def test_youtube_staging_uses_existing_state_directory_without_unit_broadening() -> None:
+    service = _read_service()["Service"]
+    text = _service_text()
+    environment_text = ENV_TEMPLATE_PATH.read_text(encoding="utf-8")
+
+    assert service["StateDirectory"] == "framenest"
+    assert (
+        "# FRAMENEST_YOUTUBE_ACQUISITION_ROOT="
+        "/var/lib/framenest/youtube-acquisition"
+        in environment_text
+    )
+    assert "ReadWritePaths" not in text
+    assert "/srv/media" not in text
+
+
 def test_service_artifacts_do_not_encode_public_network_or_proxy_shortcuts() -> None:
     combined = _service_text() + "\n" + ENV_TEMPLATE_PATH.read_text(encoding="utf-8")
 

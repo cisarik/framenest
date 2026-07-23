@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-EXPECTED_AP_COMMIT = "f1d3a7f4511b617dfc009a42aa9c7c8d0d49cec6"
+EXPECTED_AP_COMMIT = "83ba79a55427b74d197b358573a66668d991e756"
 EXPECTED_AP_URL = "https://github.com/cisarik/ap.git"
 LEGACY_PROTOCOL_FILES = (
     "AP.md",

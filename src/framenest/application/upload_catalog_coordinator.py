@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from enum import Enum, auto
 from typing import Protocol
@@ -76,6 +77,8 @@ class UploadCatalogCoordinator:
         locks: UploadSessionLockRegistry,
         *,
         analysis_notifier: _AnalysisNotifier | None = None,
+        analysis_allowed_for_upload: Callable[[UploadSessionId], bool]
+        | None = None,
         batch_size: int = DEFAULT_UPLOAD_CATALOG_BATCH_SIZE,
         executor: ThreadPoolExecutor | None = None,
         retry_initial_delay_seconds: float = (
@@ -99,6 +102,7 @@ class UploadCatalogCoordinator:
         self._cataloger = cataloger
         self._locks = locks
         self._analysis_notifier = analysis_notifier
+        self._analysis_allowed_for_upload = analysis_allowed_for_upload
         self._batch_size = batch_size
         self._executor = executor
         self._owns_executor = executor is None
@@ -373,6 +377,12 @@ class UploadCatalogCoordinator:
         ):
             return
         try:
+            upload_id = UploadSessionId.from_string(result.upload_id)
+            if (
+                self._analysis_allowed_for_upload is not None
+                and not self._analysis_allowed_for_upload(upload_id)
+            ):
+                return
             notifier.notify_cataloged(
                 MediaId.from_string(result.media_id),
                 MediaLocationId.from_string(result.media_location_id),

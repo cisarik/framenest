@@ -25,6 +25,8 @@ acceptance.
 | Gallery preview cache | `/var/cache/framenest/gallery-previews` | Excluded; regenerate |
 | Original media | `/srv/media` | Excluded; needs separate second copy |
 | Published upload originals | configured registered publication library | Excluded; needs separate media second copy |
+| YouTube acquisition claims and provenance | catalog database | Included in catalog backup bundle |
+| YouTube acquisition staging | `/var/lib/framenest/youtube-acquisition` | Excluded; lifecycle-owned transient state |
 | Secrets | outside Git | Excluded; re-enter or rotate later |
 
 The catalog bundle contains only:
@@ -38,6 +40,12 @@ Revision `0013` publication provenance is catalog data and is included in the
 SQLite artifact, but the published media bytes it describes are not. Restoring
 the catalog bundle alone therefore does not restore a published upload original
 or prove that its destination object is available.
+
+Revision `0019` YouTube claims, retry/reuse lineage, downloader evidence, and
+final media/location links are likewise catalog data included in the SQLite
+artifact. Claim staging bytes, partial downloads, quarantine bytes, and
+published originals are excluded. A restore therefore preserves durable
+provenance but does not resume or recreate missing media bytes by itself.
 
 ## Check
 

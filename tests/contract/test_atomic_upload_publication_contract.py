@@ -169,6 +169,58 @@ def test_valid_opaque_library_configuration_composes_lifecycle_owned_publisher(
     assert DESTINATION_ID not in repr(settings)
 
 
+def test_youtube_staging_under_database_state_root_composes_operator_lifecycle(
+    tmp_path: Path,
+) -> None:
+    base, quarantine, _published = _configured_settings(
+        tmp_path,
+        publication_id=DESTINATION_ID,
+    )
+    youtube_root = base.database_path.parent / "youtube-acquisition"
+    youtube_root.mkdir(mode=0o700)
+    settings = FrameNestSettings(
+        database_path=base.database_path,
+        gallery_preview_cache_path=base.gallery_preview_cache_path,
+        upload_quarantine_root=quarantine,
+        upload_publication_library_id=DESTINATION_ID,
+        youtube_acquisition_root=youtube_root,
+        _env_file=None,
+    )
+
+    app = create_app(settings=settings, youtube_downloader=object())
+
+    assert app.state.youtube_acquisition_staging.root == youtube_root
+    assert app.state.youtube_acquisition_service is not None
+    assert app.state.youtube_acquisition_coordinator is not None
+    assert app.state.youtube_operator_api_dependencies.enabled is True
+
+
+def test_non_loopback_bind_does_not_compose_youtube_operator_lifecycle(
+    tmp_path: Path,
+) -> None:
+    base, quarantine, _published = _configured_settings(
+        tmp_path,
+        publication_id=DESTINATION_ID,
+    )
+    youtube_root = base.database_path.parent / "youtube-acquisition"
+    youtube_root.mkdir(mode=0o700)
+    settings = FrameNestSettings(
+        host="0.0.0.0",
+        database_path=base.database_path,
+        gallery_preview_cache_path=base.gallery_preview_cache_path,
+        upload_quarantine_root=quarantine,
+        upload_publication_library_id=DESTINATION_ID,
+        youtube_acquisition_root=youtube_root,
+        _env_file=None,
+    )
+
+    app = create_app(settings=settings, youtube_downloader=object())
+
+    assert app.state.youtube_acquisition_service is None
+    assert app.state.youtube_acquisition_coordinator is None
+    assert app.state.youtube_operator_api_dependencies.enabled is False
+
+
 def test_invalid_explicit_destination_fails_closed_with_sanitized_diagnostic(
     tmp_path: Path,
 ) -> None:

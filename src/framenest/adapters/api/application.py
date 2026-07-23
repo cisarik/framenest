@@ -5,6 +5,7 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 from collections.abc import AsyncIterator
 from importlib import resources
+from ipaddress import ip_address
 from pathlib import Path
 from typing import Literal
 
@@ -49,6 +50,10 @@ from framenest.adapters.api.upload_api import (
     UploadApiDependencies,
     create_upload_api_router,
 )
+from framenest.adapters.api.youtube_operator_api import (
+    YouTubeOperatorApiDependencies,
+    create_youtube_operator_api_router,
+)
 from framenest.application.library_scan import PreviewLibraryScan
 from framenest.application.media_catalog import ListMediaCatalog
 from framenest.application.media_import import ImportMediaFromScanCandidate
@@ -83,6 +88,12 @@ from framenest.application.upload_publication_coordinator import (
 )
 from framenest.application.upload_validation import ValidateReceivedUpload
 from framenest.application.upload_validation_coordinator import UploadValidationCoordinator
+from framenest.application.youtube_acquisition import (
+    YouTubeAcquisitionCoordinator,
+    YouTubeAcquisitionService,
+    automatic_analysis_allowed_for_upload,
+    youtube_classification_for_upload,
+)
 from framenest.adapters.api.library_api import (
     LibraryApiDependencies,
     create_library_api_router,
@@ -121,6 +132,11 @@ from framenest.infrastructure.persistence.upload_publication_repository import (
 from framenest.infrastructure.persistence.media_analysis_run_repository import (
     SqliteMediaAnalysisRunRepository,
 )
+from framenest.infrastructure.persistence.youtube_acquisition_claim_repository import (
+    SqliteYouTubeAcquisitionClaimRepository,
+)
+from framenest.infrastructure.youtube.downloader import YtDlpYouTubeDownloader
+from framenest.infrastructure.youtube.staging import FilesystemYouTubeStaging
 
 
 class HealthResponse(BaseModel):
@@ -160,6 +176,9 @@ def create_app(
         MediaAnalysisLifecycleApiDependencies | None
     ) = None,
     upload_api_dependencies: UploadApiDependencies | None = None,
+    youtube_operator_api_dependencies: YouTubeOperatorApiDependencies
+    | None = None,
+    youtube_downloader: object | None = None,
 ) -> FastAPI:
     resolved_settings = settings if settings is not None else load_settings()
     owned_engine = None
@@ -176,6 +195,10 @@ def create_app(
     owned_upload_catalog_coordinator = None
     owned_media_analysis_run_repository = None
     owned_media_analysis_coordinator = None
+    owned_youtube_claim_repository = None
+    owned_youtube_staging = None
+    owned_youtube_acquisition_coordinator = None
+    owned_youtube_acquisition_service = None
     if (
         library_api_dependencies is None
         or media_import_api_dependencies is None
@@ -196,6 +219,9 @@ def create_app(
         owned_upload_session_repository = SqliteUploadSessionRepository(owned_engine)
         owned_media_analysis_run_repository = SqliteMediaAnalysisRunRepository(
             owned_engine
+        )
+        owned_youtube_claim_repository = (
+            SqliteYouTubeAcquisitionClaimRepository(owned_engine)
         )
     if library_api_dependencies is None:
         assert owned_library_repository is not None
@@ -394,6 +420,10 @@ def create_app(
             if resolved_settings.upload_quarantine_root is None
             else FilesystemQuarantineStorage(resolved_settings.upload_quarantine_root)
         )
+        owned_youtube_staging = _resolve_youtube_staging(
+            resolved_settings,
+            owned_library_repository,
+        )
         published_storage = _resolve_published_storage(
             resolved_settings,
             owned_library_repository,
@@ -413,12 +443,28 @@ def create_app(
             )
             owned_upload_catalog = CatalogPublishedUpload(
                 owned_upload_publication_repository,
+                classification_for_upload=(
+                    None
+                    if owned_youtube_claim_repository is None
+                    else lambda upload_id: youtube_classification_for_upload(
+                        owned_youtube_claim_repository,
+                        upload_id,
+                    )
+                ),
             )
             owned_upload_catalog_coordinator = UploadCatalogCoordinator(
                 owned_upload_publication_repository,
                 owned_upload_catalog,
                 upload_locks,
                 analysis_notifier=owned_media_analysis_coordinator,
+                analysis_allowed_for_upload=(
+                    None
+                    if owned_youtube_claim_repository is None
+                    else lambda upload_id: automatic_analysis_allowed_for_upload(
+                        owned_youtube_claim_repository,
+                        upload_id,
+                    )
+                ),
             )
             owned_upload_publication_coordinator = UploadPublicationCoordinator(
                 owned_upload_publication_repository,
@@ -464,6 +510,52 @@ def create_app(
                 publication_coordinator=owned_upload_publication_coordinator,
                 publication_repository=upload_api_dependencies.publication_repository,
             )
+        if (
+            owned_youtube_staging is not None
+            and owned_youtube_claim_repository is not None
+            and owned_upload_publication_repository is not None
+            and owned_upload_validation_coordinator is not None
+            and ip_address(resolved_settings.host).is_loopback
+        ):
+            selected_downloader = (
+                youtube_downloader
+                if youtube_downloader is not None
+                else YtDlpYouTubeDownloader(
+                    owned_youtube_staging,
+                    max_final_size_bytes=resolved_settings.upload_max_total_bytes,
+                    max_staging_size_bytes=(
+                        resolved_settings.youtube_acquisition_max_staging_bytes
+                    ),
+                    free_space_reserve_bytes=(
+                        resolved_settings.upload_min_free_space_reserve_bytes
+                    ),
+                )
+            )
+            owned_youtube_acquisition_coordinator = YouTubeAcquisitionCoordinator(
+                owned_youtube_claim_repository,
+                selected_downloader,
+                owned_youtube_staging,
+                upload_api_dependencies.transport,
+                owned_upload_session_repository,
+                owned_upload_publication_repository,
+                validation_coordinator=owned_upload_validation_coordinator,
+                publication_coordinator=owned_upload_publication_coordinator,
+                chunk_size_bytes=resolved_settings.upload_max_patch_bytes,
+            )
+            owned_youtube_acquisition_service = YouTubeAcquisitionService(
+                owned_youtube_claim_repository,
+                owned_upload_session_repository,
+                owned_youtube_staging,
+                notifier=owned_youtube_acquisition_coordinator,
+            )
+    if youtube_operator_api_dependencies is None:
+        youtube_operator_api_dependencies = YouTubeOperatorApiDependencies(
+            service=owned_youtube_acquisition_service,
+            enabled=(
+                owned_youtube_acquisition_service is not None
+                and ip_address(resolved_settings.host).is_loopback
+            ),
+        )
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
@@ -471,10 +563,12 @@ def create_app(
         publication_coordinator = owned_upload_publication_coordinator
         catalog_coordinator = owned_upload_catalog_coordinator
         analysis_coordinator = owned_media_analysis_coordinator
+        youtube_coordinator = owned_youtube_acquisition_coordinator
         publication_started = False
         validation_started = False
         catalog_started = False
         analysis_started = False
+        youtube_started = False
         try:
             if analysis_coordinator is not None:
                 await analysis_coordinator.start()
@@ -488,26 +582,36 @@ def create_app(
             if validation_coordinator is not None:
                 await validation_coordinator.start()
                 validation_started = True
+            if youtube_coordinator is not None:
+                await youtube_coordinator.start()
+                youtube_started = True
             yield
         finally:
             try:
-                if validation_started and validation_coordinator is not None:
-                    await validation_coordinator.shutdown()
+                if youtube_started and youtube_coordinator is not None:
+                    await youtube_coordinator.shutdown()
             finally:
                 try:
-                    if publication_started and publication_coordinator is not None:
-                        await publication_coordinator.shutdown()
+                    if validation_started and validation_coordinator is not None:
+                        await validation_coordinator.shutdown()
                 finally:
                     try:
-                        if catalog_started and catalog_coordinator is not None:
-                            await catalog_coordinator.shutdown()
+                        if publication_started and publication_coordinator is not None:
+                            await publication_coordinator.shutdown()
                     finally:
                         try:
-                            if analysis_started and analysis_coordinator is not None:
-                                await analysis_coordinator.shutdown()
+                            if catalog_started and catalog_coordinator is not None:
+                                await catalog_coordinator.shutdown()
                         finally:
-                            if owned_engine is not None:
-                                dispose_engine(owned_engine)
+                            try:
+                                if (
+                                    analysis_started
+                                    and analysis_coordinator is not None
+                                ):
+                                    await analysis_coordinator.shutdown()
+                            finally:
+                                if owned_engine is not None:
+                                    dispose_engine(owned_engine)
 
     app = FastAPI(lifespan=lifespan)
     app.state.settings = resolved_settings
@@ -526,6 +630,14 @@ def create_app(
     app.state.upload_catalog = owned_upload_catalog
     app.state.upload_catalog_coordinator = owned_upload_catalog_coordinator
     app.state.media_analysis_coordinator = owned_media_analysis_coordinator
+    app.state.youtube_acquisition_service = owned_youtube_acquisition_service
+    app.state.youtube_acquisition_coordinator = (
+        owned_youtube_acquisition_coordinator
+    )
+    app.state.youtube_acquisition_staging = owned_youtube_staging
+    app.state.youtube_operator_api_dependencies = (
+        youtube_operator_api_dependencies
+    )
     app.include_router(create_library_api_router(library_api_dependencies))
     app.include_router(create_media_import_api_router(media_import_api_dependencies))
     app.include_router(create_media_catalog_api_router(media_catalog_api_dependencies))
@@ -540,6 +652,9 @@ def create_app(
         )
     )
     app.include_router(create_upload_api_router(upload_api_dependencies))
+    app.include_router(
+        create_youtube_operator_api_router(youtube_operator_api_dependencies)
+    )
 
     @app.get("/", response_class=HTMLResponse)
     def root() -> HTMLResponse:
@@ -603,6 +718,8 @@ def _resolve_published_storage(
         settings.gallery_preview_cache_path,
         settings.database_path.parent,
     ]
+    if settings.youtube_acquisition_root is not None:
+        forbidden_roots.append(settings.youtube_acquisition_root)
     forbidden_roots.extend(
         Path(library.root.path)
         for library in libraries
@@ -618,6 +735,36 @@ def _resolve_published_storage(
     if not storage.root_available:
         raise ValueError("Upload publication configuration is invalid.")
     return storage
+
+
+def _resolve_youtube_staging(
+    settings: FrameNestSettings,
+    library_repository: SqliteLibraryRepository,
+) -> FilesystemYouTubeStaging | None:
+    root = settings.youtube_acquisition_root
+    if root is None:
+        return None
+    forbidden_roots = [
+        settings.gallery_preview_cache_path,
+        settings.database_path,
+    ]
+    if settings.upload_quarantine_root is not None:
+        forbidden_roots.append(settings.upload_quarantine_root)
+    try:
+        forbidden_roots.extend(
+            Path(library.root.path)
+            for library in library_repository.list_all()
+            if library.root.flavor is LibraryPathFlavor.POSIX
+        )
+        staging = FilesystemYouTubeStaging(
+            root,
+            forbidden_roots=tuple(forbidden_roots),
+        )
+    except Exception:
+        raise ValueError("YouTube acquisition configuration is invalid.") from None
+    if not staging.root_available:
+        raise ValueError("YouTube acquisition configuration is invalid.")
+    return staging
 
 
 def _ai_status_from_last_test(

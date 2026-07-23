@@ -6,6 +6,7 @@ set -g controller "$repo_root/.venv/bin/framenest-dev"
 set -g ai_controller "$repo_root/.venv/bin/framenest-ai"
 set -g backup_controller "$repo_root/.venv/bin/framenest-backup"
 set -g library_python "$repo_root/.venv/bin/python"
+set -g youtube_controller "$repo_root/.venv/bin/framenest-youtube"
 set -g local_ai_env "$repo_root/.secrets/ai.env.fish"
 set -gx POETRY_VIRTUALENVS_IN_PROJECT true
 
@@ -29,6 +30,9 @@ function _framenest_help
     echo "  ./framenest library status"
     echo "  ./framenest library add"
     echo "  ./framenest library refresh"
+    echo "  ./framenest youtube ingest URL"
+    echo "  ./framenest youtube status CLAIM_ID"
+    echo "  ./framenest youtube retry CLAIM_ID"
     echo "  ./framenest previews status"
     echo "  ./framenest previews generate"
     echo "  ./framenest --help"
@@ -177,6 +181,13 @@ switch "$argv[1]"
         cd "$repo_root"
         or exit $status
         "$library_python" -m framenest.adapters.cli.previews $argv[2..-1]
+        exit $status
+    case youtube
+        if not test -x "$youtube_controller"
+            _framenest_setup
+            or exit $status
+        end
+        "$youtube_controller" $argv[2..-1]
         exit $status
     case '*'
         echo "Unknown FrameNest command: $argv[1]" >&2

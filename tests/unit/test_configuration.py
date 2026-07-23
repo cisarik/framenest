@@ -25,6 +25,8 @@ FRAMENEST_ENV_VARS = (
     "FRAMENEST_UPLOAD_MAX_PATCH_BYTES",
     "FRAMENEST_UPLOAD_SESSION_TTL_SECONDS",
     "FRAMENEST_UPLOAD_MIN_FREE_SPACE_RESERVE_BYTES",
+    "FRAMENEST_YOUTUBE_ACQUISITION_ROOT",
+    "FRAMENEST_YOUTUBE_ACQUISITION_MAX_STAGING_BYTES",
     "FRAMENEST_AI_PROVIDER_ID",
     "FRAMENEST_AI_MODEL_ID",
     "FRAMENEST_AUTOMATIC_MEDIA_ANALYSIS_ENABLED",
@@ -164,6 +166,56 @@ def test_relative_upload_quarantine_root_is_rejected_without_path_echo(
     monkeypatch.chdir(tmp_path)
     supplied = "relative/private/quarantine"
     monkeypatch.setenv("FRAMENEST_UPLOAD_QUARANTINE_ROOT", supplied)
+
+    with pytest.raises(ValidationError) as exc_info:
+        load_settings(env_file=None)
+
+    assert supplied not in str(exc_info.value)
+
+
+def test_youtube_staging_configuration_is_absolute_private_and_non_overlapping(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state_root = tmp_path / "state"
+    youtube_root = state_root / "youtube"
+    database_path = state_root / "catalog.sqlite3"
+    quarantine_root = tmp_path / "quarantine"
+    monkeypatch.setenv("FRAMENEST_YOUTUBE_ACQUISITION_ROOT", str(youtube_root))
+    monkeypatch.setenv("FRAMENEST_DATABASE_PATH", str(database_path))
+    monkeypatch.setenv("FRAMENEST_UPLOAD_QUARANTINE_ROOT", str(quarantine_root))
+    monkeypatch.setenv(
+        "FRAMENEST_YOUTUBE_ACQUISITION_MAX_STAGING_BYTES",
+        "12345",
+    )
+
+    settings = load_settings(env_file=None)
+
+    assert settings.youtube_acquisition_root == youtube_root
+    assert settings.database_path == database_path
+    assert settings.youtube_acquisition_max_staging_bytes == 12345
+    assert str(youtube_root) not in f"{settings!r}{settings!s}"
+
+    monkeypatch.setenv(
+        "FRAMENEST_UPLOAD_QUARANTINE_ROOT",
+        str(youtube_root / "quarantine"),
+    )
+    with pytest.raises(ValidationError) as exc_info:
+        load_settings(env_file=None)
+    assert str(youtube_root) not in str(exc_info.value)
+
+    monkeypatch.setenv("FRAMENEST_UPLOAD_QUARANTINE_ROOT", str(quarantine_root))
+    monkeypatch.setenv("FRAMENEST_YOUTUBE_ACQUISITION_ROOT", str(state_root))
+    with pytest.raises(ValidationError) as exc_info:
+        load_settings(env_file=None)
+    assert str(state_root) not in str(exc_info.value)
+
+
+def test_relative_youtube_staging_root_is_rejected_without_path_echo(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    supplied = "relative/private/youtube"
+    monkeypatch.setenv("FRAMENEST_YOUTUBE_ACQUISITION_ROOT", supplied)
 
     with pytest.raises(ValidationError) as exc_info:
         load_settings(env_file=None)

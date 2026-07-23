@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 from ipaddress import ip_address
+import os
 from pathlib import Path
 import tempfile
 from typing import Any
 import uuid
 
-from pydantic import Field, SecretStr, field_validator
+from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from framenest.domain.media_analysis_runs import (
@@ -24,6 +25,7 @@ DEFAULT_UPLOAD_MAX_TOTAL_BYTES = 1_073_741_824
 DEFAULT_UPLOAD_MAX_PATCH_BYTES = 8_388_608
 DEFAULT_UPLOAD_SESSION_TTL_SECONDS = 86_400
 DEFAULT_UPLOAD_MIN_FREE_SPACE_RESERVE_BYTES = 67_108_864
+DEFAULT_YOUTUBE_ACQUISITION_MAX_STAGING_BYTES = 2_214_592_512
 SUPPORTED_AI_PROVIDER_IDS = frozenset({"nvidia-nim", "vercel-ai-gateway"})
 
 
@@ -93,6 +95,11 @@ class FrameNestSettings(BaseSettings):
         default=DEFAULT_UPLOAD_MIN_FREE_SPACE_RESERVE_BYTES,
         ge=0,
     )
+    youtube_acquisition_root: Path | None = Field(default=None, repr=False)
+    youtube_acquisition_max_staging_bytes: int = Field(
+        default=DEFAULT_YOUTUBE_ACQUISITION_MAX_STAGING_BYTES,
+        gt=0,
+    )
     ai_provider_id: str | None = Field(default=None)
     ai_model_id: str | None = Field(default=None)
     automatic_media_analysis_enabled: bool = Field(default=False)
@@ -133,6 +140,39 @@ class FrameNestSettings(BaseSettings):
             return _normalize_absolute_path(value)
         except ValueError as exc:
             raise ValueError("upload quarantine root must be an absolute path") from exc
+
+    @field_validator("youtube_acquisition_root", mode="before")
+    @classmethod
+    def validate_youtube_acquisition_root(cls, value: Any) -> Path | None:
+        if value is None or value == "":
+            return None
+        try:
+            path = Path(value).expanduser()
+        except (RuntimeError, TypeError, ValueError) as exc:
+            raise ValueError(
+                "YouTube acquisition root must be an absolute path"
+            ) from exc
+        if not path.is_absolute():
+            raise ValueError(
+                "YouTube acquisition root must be an absolute path"
+            )
+        return Path(os.path.abspath(path))
+
+    @model_validator(mode="after")
+    def validate_private_storage_roots(self) -> "FrameNestSettings":
+        youtube_root = self.youtube_acquisition_root
+        if youtube_root is None:
+            return self
+        for other_root in (
+            self.upload_quarantine_root,
+            self.gallery_preview_cache_path,
+            self.database_path,
+        ):
+            if _paths_overlap(youtube_root, other_root):
+                raise ValueError(
+                    "YouTube acquisition root must not overlap other FrameNest storage"
+                )
+        return self
 
     @field_validator("upload_publication_library_id", mode="before")
     @classmethod
@@ -182,3 +222,9 @@ def load_settings(
     if env_file is None:
         return FrameNestSettings(_env_file=None)
     return FrameNestSettings(_env_file=env_file)
+
+
+def _paths_overlap(first: Path, second: Path | None) -> bool:
+    if second is None:
+        return False
+    return first == second or first in second.parents or second in first.parents

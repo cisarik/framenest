@@ -5,7 +5,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol
 
+from framenest.domain.identities import MediaByteIdentityId
 from framenest.domain.media import LogicalMedia, MediaLocation
+from framenest.domain.media_metadata import MediaMetadata
 from framenest.domain.upload_publications import UploadPublication, UploadPublicationId
 from framenest.domain.uploads import UploadSession, UploadSessionId
 
@@ -114,6 +116,14 @@ class UploadPublicationRepository(Protocol):
     ) -> tuple[UploadPublicationCandidate, ...]:
         """Return bounded published uploads eligible for catalog creation."""
 
+    def find_cataloged_by_byte_identity(
+        self,
+        byte_identity_id: MediaByteIdentityId,
+        *,
+        exclude_upload_id: UploadSessionId,
+    ) -> UploadPublicationCandidate | None:
+        """Return the canonical cataloged upload for exact-byte reuse."""
+
     def commit_cataloged_publication(
         self,
         upload_id: UploadSessionId,
@@ -123,5 +133,6 @@ class UploadPublicationRepository(Protocol):
         expected_upload_version: int,
         expected_publication_version: int,
         updated_at_ms: int,
+        metadata: MediaMetadata | None = None,
     ) -> UploadPublicationCandidate:
         """Atomically create catalog rows, link provenance, and set cataloged."""

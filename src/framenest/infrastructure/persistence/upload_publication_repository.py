@@ -35,6 +35,7 @@ from framenest.domain.identities import (
     MediaLocationId,
 )
 from framenest.domain.media import LogicalMedia, MediaLocation
+from framenest.domain.media_metadata import MediaMetadata
 from framenest.domain.upload_publications import (
     FrameNestUploadPublicationError,
     UploadPublication,
@@ -58,6 +59,7 @@ from framenest.domain.uploads import (
 )
 from framenest.infrastructure.persistence.catalog_schema import (
     logical_media,
+    media_metadata,
     physical_media_locations,
     upload_publications,
     upload_sessions,
@@ -479,6 +481,52 @@ class SqliteUploadPublicationRepository:
                 _REPOSITORY_FAILURE_MESSAGE
             ) from exc
 
+    def find_cataloged_by_byte_identity(
+        self,
+        byte_identity_id: MediaByteIdentityId,
+        *,
+        exclude_upload_id: UploadSessionId,
+    ) -> UploadPublicationCandidate | None:
+        def operation(connection: Connection) -> UploadPublicationCandidate | None:
+            upload_id_text = connection.execute(
+                select(upload_sessions.c.id)
+                .join(
+                    upload_publications,
+                    upload_publications.c.upload_id == upload_sessions.c.id,
+                )
+                .where(
+                    and_(
+                        upload_sessions.c.id != exclude_upload_id.to_string(),
+                        upload_sessions.c.byte_identity_id
+                        == byte_identity_id.to_string(),
+                        upload_sessions.c.state
+                        == UploadSessionState.CATALOGED.value,
+                        upload_publications.c.media_id.is_not(None),
+                        upload_publications.c.media_location_id.is_not(None),
+                    )
+                )
+                .order_by(
+                    upload_sessions.c.updated_at_ms.asc(),
+                    upload_sessions.c.id.asc(),
+                )
+                .limit(1)
+            ).scalar_one_or_none()
+            if upload_id_text is None:
+                return None
+            loaded_id = UploadSessionId.from_string(str(upload_id_text))
+            return _require_candidate(connection, loaded_id)
+
+        try:
+            return run_in_transaction(self._engine, operation)
+        except (
+            FrameNestIdentityError,
+            FrameNestUploadSessionError,
+            SQLAlchemyError,
+        ) as exc:
+            raise FrameNestUploadPublicationRepositoryError(
+                _REPOSITORY_FAILURE_MESSAGE
+            ) from exc
+
     def commit_cataloged_publication(
         self,
         upload_id: UploadSessionId,
@@ -488,11 +536,18 @@ class SqliteUploadPublicationRepository:
         expected_upload_version: int,
         expected_publication_version: int,
         updated_at_ms: int,
+        metadata: MediaMetadata | None = None,
     ) -> UploadPublicationCandidate:
         _validate_non_negative(expected_upload_version)
         _validate_non_negative(expected_publication_version)
         _validate_non_negative(updated_at_ms)
         if location.media_id != media.id:
+            raise UploadCatalogStateConflictError("upload catalog state conflict")
+        if metadata is not None and (
+            metadata.media_id != media.id
+            or metadata.tag_keys
+            or metadata.genre_keys
+        ):
             raise UploadCatalogStateConflictError("upload catalog state conflict")
 
         def operation(connection: Connection) -> UploadPublicationCandidate:
@@ -546,6 +601,24 @@ class SqliteUploadPublicationRepository:
             try:
                 _insert_media(connection, media)
                 _insert_location(connection, location)
+                if metadata is not None:
+                    connection.execute(
+                        insert(media_metadata).values(
+                            media_id=metadata.media_id.to_string(),
+                            display_title=None
+                            if metadata.display_title is None
+                            else metadata.display_title.value,
+                            description=None
+                            if metadata.description is None
+                            else metadata.description.value,
+                            content_category=metadata.content_category.value,
+                            acquisition_source=metadata.acquisition_source.value,
+                            collection_key=None,
+                            processed_at_ms=None,
+                            created_at_ms=metadata.created_at_ms,
+                            updated_at_ms=metadata.updated_at_ms,
+                        )
+                    )
             except (
                 MediaAlreadyExistsError,
                 MediaLocationAlreadyExistsError,

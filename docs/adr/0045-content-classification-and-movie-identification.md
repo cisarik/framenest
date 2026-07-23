@@ -47,11 +47,12 @@ Orthogonal to content category. Initial values:
 - `unknown` (neutral default for historical rows)
 - `manual_upload`
 - `library_scan`
-- `youtube_manual_claim` (owner-asserted, unverified)
+- `youtube_manual_claim` (owner-asserted classification)
 
-Future deterministic yt-dlp provenance must use a distinct verified value and
-must not collapse into `youtube_manual_claim`. This slice does not add URL,
-channel, or yt-dlp fields.
+This decision introduced only editable classification and did not add URL,
+channel, or yt-dlp fields. [ADR-0046](0046-youtube-manual-ingestion-and-provenance.md)
+later keeps this value while placing deterministic, immutable acquisition
+evidence in a separate source-specific claim.
 
 ### Genres
 
@@ -96,3 +97,4 @@ accidental duplicate submissions for the same definition.
 
 - [ADR-0019](0019-vlm-image-derivatives-and-nvidia-instruct-mode.md)
 - [ADR-0044](0044-durable-automatic-post-catalog-analysis.md)
+- [ADR-0046](0046-youtube-manual-ingestion-and-provenance.md)

@@ -82,6 +82,12 @@ class MediaByteIdentityId(_UuidIdentity):
     __slots__ = ()
 
 
+class YouTubeAcquisitionClaimId(_UuidIdentity):
+    """Stable identity for one durable YouTube acquisition claim."""
+
+    __slots__ = ()
+
+
 class DeviceId(_UuidIdentity):
     """Stable identity for one FrameNest device."""
 

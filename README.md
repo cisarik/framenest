@@ -6,7 +6,7 @@ FrameNest is a local-first, privacy-conscious, cross-platform library for video 
 
 FrameNest is in an early foundation, pre-alpha stage.
 
-A minimal Poetry package scaffold exists at the repository root with centralized settings, a FastAPI application factory, a typed `GET /health` endpoint, in-process contract tests, a loopback-first Uvicorn development server, a packaged pre-alpha local web shell at `GET /`, pure-domain identity primitives, and a repository-native systemd service foundation now targeted at Ubuntu Server 24.04 on the Intel NUC6i5SYH personal production server. There is no completed media application, downloader, desktop shell, installer, real host deployment, or supported release yet.
+A minimal Poetry package scaffold exists at the repository root with centralized settings, a FastAPI application factory, a typed `GET /health` endpoint, in-process contract tests, a loopback-first Uvicorn development server, a packaged pre-alpha local web shell at `GET /`, pure-domain identity primitives, and a repository-native systemd service foundation now targeted at Ubuntu Server 24.04 on the Intel NUC6i5SYH personal production server. A bounded operator-only YouTube manual-ingestion path exists, but there is no completed media application, generalized downloader UI, desktop shell, installer, real host deployment, or supported release yet.
 
 The repository also contains the first persistence, registry, media catalog, local media-analysis, AI suggestion-review, and quarantine upload-transport foundations: a centralized SQLite database path setting, synchronous SQLAlchemy Core engine helpers, packaged Alembic resources, explicit database commands, local device and library registry tables, durable upload-session, canonical byte-identity, duplicate-disposition, and publication-provenance and upload-to-catalog linkage tables through migration `0014`, persistent logical-media and physical-location tables, persistent display-title, plain-text description, and canonical-tag tables through migration `0006`, and an automatic built-in `Processed` workflow collection derived from durable tag saves added in migration `0007`, read-only library scan and media-analysis preview commands, explicit idempotent scan-candidate import, an imported-media catalog browser with display-title search, canonical-tag AND filters, a virtual `All media` Catalog scope, and an optional `Processed` Catalog scope, a manual browser `Edit media` dialog for persistent title, optional plain-text description, ordered tag assignment, and explicit server-provider AI assistance through NVIDIA NIM or Vercel AI Gateway. The media catalog foundation is now exposed for explicit scan-candidate import, same-origin title/description/tag API operations, same-origin catalog retrieval, browser editing of the currently persisted title, description, and tag state, and identity-only imported-media AI suggestion preview. The upload path receives untrusted bytes only into configured server quarantine, performs bounded server-side validation, and derives canonical identity from validated byte size and SHA-256 digest. The first qualifying exact identity reaches `publish_pending`; later exact copies wait in `duplicate_pending` for an explicit keep-or-discard decision. When an operator explicitly selects a safe registered publication library, lifecycle-owned recovery publishes each eligible upload to its own verified server-owned target without replacement and then cleans up quarantine. `published` remains absent from Gallery until specialized cataloging reaches `cataloged`. The current foundation does not provide arbitrary user-created collections, a general collection manager, persisted suggested filenames, covers, thumbnails, AI Draft persistence, or premium gallery data yet.
 
@@ -82,6 +82,7 @@ poetry run framenest-backup --help
 ./framenest backup create --help
 ./framenest backup verify --help
 ./framenest backup restore --help
+./framenest youtube --help
 ```
 
 The raw `poetry run framenest-server` process keeps its existing behavior: it
@@ -112,6 +113,14 @@ PATCH /api/uploads/{upload_id}
 POST /api/uploads/{upload_id}/complete
 POST /api/uploads/{upload_id}/duplicate-resolution
 DELETE /api/uploads/{upload_id}
+```
+
+The non-browser operator API additionally exposes:
+
+```text
+POST /api/operator/youtube/claims
+GET /api/operator/youtube/claims/{claim_id}
+POST /api/operator/youtube/claims/{claim_id}/retry
 ```
 
 These API paths do not run migrations automatically and do not expose library root paths. The scan-candidate import endpoint is explicit, same-origin, idempotent by exact `(library_id, relative_path)`, and creates only minimum logical-media and physical-location records. `GET /api/media` is read-only, returns one deterministic logical-media page with total count, searches only persisted display titles using escaped SQLite `LIKE` with `NOCASE`, treats repeated canonical tag filters as AND constraints, accepts an optional `collection=processed` query parameter that restricts the page to members of the built-in `Processed` workflow collection, and returns only catalog-safe library-relative location data. Canonical tag keys are stable English identifiers. Display titles are user-editable catalog metadata and remain separate from physical filenames and paths. Metadata saves derive collection membership automatically from the saved tag list, do not accept client-supplied collection state, and do not rename, move, delete, retag, or otherwise mutate media files. Gallery cards do not display the internal `Processed` workflow label or timestamp; the built-in Processed scope and persistence semantics remain internal catalog behavior. The media-analysis preview endpoint is explicit, same-origin, read-only, local-only, stateless, provider-free, and non-persistent. It returns inline base64 PNG frames only for the lifetime of the response/displayed browser preview and sets `Cache-Control: no-store`. Upload endpoints are disabled until `FRAMENEST_UPLOAD_QUARANTINE_ROOT` names an existing absolute non-symlink quarantine directory outside registered media roots and the preview cache. They use a FrameNest-owned offset protocol with `PATCH application/offset+octet-stream`, explicit completion, fixed session expiry, configured total/chunk/free-space limits, and same-origin browser mutation checks. Default upload limits are 1 GiB per session, 8 MiB per PATCH, 24 hours fixed session TTL, and 64 MiB minimum free-space reserve. Exact duplicates are compared only after authoritative validation, and the resolution endpoint accepts only explicit keep or discard decisions for the selected opaque session. Optional automatic publication additionally requires `FRAMENEST_UPLOAD_PUBLICATION_LIBRARY_ID` to select an existing safe registered POSIX library. Without it, eligible uploads remain `publish_pending`; invalid explicit destination configuration fails closed. Publication uses opaque server-owned targets, verifies exact bytes, never overwrites an existing object, and creates no catalog or Gallery records. Upload responses remain sanitized and never expose storage keys, publication identities, destination paths, checksums, cleanup state, or server paths; duplicate-resolution responses additionally omit the matching session, byte identity, checksum, and filename.
@@ -162,7 +171,64 @@ Explicitly upgrade the configured database to the packaged Alembic head:
 poetry run framenest-db migrate
 ```
 
-Normal `poetry run framenest-server` startup does not apply migrations. Migration remains explicit through `framenest-db`. Revisions through `0007` add the initial `devices`, `libraries`, `logical_media`, `physical_media_locations`, `canonical_tags`, `media_metadata`, and `media_canonical_tags` tables, with a nullable plain-text description column added in revision `0006`. Revision `0007` adds nullable `collection_key` and `processed_at_ms` columns to `media_metadata` for the automatic built-in `Processed` workflow collection; it does not fabricate historical tagging timestamps and adds no filesystem mutation. Revision `0008` introduces the durable upload-session foundation, revision `0009` enforces upload-session completeness invariants, revision `0010` adds bounded validation evidence, revision `0011` adds canonical upload byte identities, revision `0012` adds exact-duplicate disposition provenance, revision `0013` adds empty-by-default atomic publication provenance without inventing history, and revision `0014` adds nullable upload-to-catalog linkage for the specialized `published -> cataloged` transaction. A resumable quarantine upload transport now exists but remains disabled until `FRAMENEST_UPLOAD_QUARANTINE_ROOT` is configured. It writes only to server quarantine, validates completed uploads, and gates later exact copies in `duplicate_pending` until the user explicitly keeps or discards that copy. With an explicitly configured safe publication library, the application automatically reconciles and atomically publishes eligible uploads, including cleanup retry after a durable publication. Multiprocess publication or catalog leases/fencing and broader media-transfer product UX remain future work. The media catalog foundation supports explicit idempotent import from selected scan candidates, persistent display title and canonical content tags, catalog retrieval with display-title search plus canonical-tag AND filtering, an automatic built-in `Processed` collection entered by the first durable tag save and cleared when all tags are removed, and browser editing of the current title, description, and tag metadata. There is still no arbitrary user-created collection schema, general collection manager, suggested filenames, covers, thumbnails, gallery, sidecar, user, or authentication schema.
+Normal `poetry run framenest-server` startup does not apply migrations.
+Migration remains explicit through `framenest-db`. Revisions through `0007` add
+the initial catalog and metadata tables. Revisions `0008` through `0018` add
+the durable upload, validation, byte-identity, duplicate, publication, catalog,
+automatic-analysis, still-image, classification, movie-identification, and
+analysis-history foundations. Revision `0019` adds the durable YouTube
+manual-acquisition claim and provenance lifecycle without fabricating
+historical claims. A resumable quarantine upload transport now exists but
+remains disabled until `FRAMENEST_UPLOAD_QUARANTINE_ROOT` is configured. It
+writes only to server quarantine, validates completed uploads, and gates later
+exact copies in `duplicate_pending` until the user explicitly keeps or discards
+that copy. With an explicitly configured safe publication library, the
+application automatically reconciles and atomically publishes eligible
+uploads, including cleanup retry after a durable publication. Multiprocess
+publication or catalog leases/fencing and broader media-transfer product UX
+remain future work. The media catalog foundation supports explicit idempotent
+import from selected scan candidates, persistent display title and canonical
+content tags, catalog retrieval with display-title search plus canonical-tag
+AND filtering, an automatic built-in `Processed` collection entered by the
+first durable tag save and cleared when all tags are removed, and browser
+editing of the current title, description, and tag metadata. There is still no
+arbitrary user-created collection schema, general collection manager,
+suggested filenames, covers, thumbnails, gallery, sidecar, user, or
+authentication schema.
+
+## YouTube Operator Ingestion
+
+Cookie-free public single-video ingestion is an owner-operated loopback
+boundary. It is enabled only when upload quarantine, a safe publication
+library, and a pre-existing private `FRAMENEST_YOUTUBE_ACQUISITION_ROOT` are
+configured. The root must be absolute, non-symlinked, and disjoint from the
+database, quarantine, preview cache, and every registered media root. The
+server owns durable claims, one downloader subprocess at a time, restart
+recovery, staging cleanup, and the handoff into the existing upload lifecycle.
+The CLI never receives downloader output or filesystem paths.
+
+```text
+./framenest youtube ingest URL
+./framenest youtube status CLAIM_ID
+./framenest youtube retry CLAIM_ID
+```
+
+The server independently validates each URL. Only supported HTTPS YouTube
+single-video forms are accepted; playlists, authenticated or live media,
+cookies, browser profiles, sidecars, and transcoding are excluded. A successful
+new item begins with `content_category=general` and
+`acquisition_source=youtube_manual_claim`. Byte duplicates reuse the existing
+logical medium and location without overwriting editable metadata, while the
+claim retains immutable provenance. Automatic AI analysis is suppressed for
+this source.
+
+Run the deterministic no-network acceptance demonstration:
+
+```fish
+# [CachyOS / fish]
+poetry run python tests/support/youtube_fake_demo.py
+#------------------------------------------------------
+```
 
 ## Device Catalog CLI
 
@@ -276,7 +342,7 @@ Accepted implementation foundations so far:
 - Catalog read model and search semantics ([ADR-0028](docs/adr/0028-catalog-read-model-and-search-semantics.md))
 - Automatic built-in `Processed` workflow collection from durable tag saves ([ADR-0030](docs/adr/0030-automatic-processed-collection.md))
 - Fedora systemd service foundation, superseded for the active deployment target by the Ubuntu NUC deployment foundation ([ADR-0031](docs/adr/0031-fedora-systemd-service-foundation.md), [ADR-0032](docs/adr/0032-ubuntu-nuc-deployment-foundation.md))
-- Durable quarantine upload sessions, bounded validation, lifecycle orchestration, canonical byte identity, exact-duplicate disposition, and atomic upload publication ([ADR-0037](docs/adr/0037-durable-upload-session-and-safe-ingest-foundation.md), [ADR-0038](docs/adr/0038-bounded-upload-media-validation.md), [ADR-0039](docs/adr/0039-lifecycle-owned-upload-validation-orchestration.md), [ADR-0040](docs/adr/0040-canonical-upload-byte-identity-foundation.md), [ADR-0041](docs/adr/0041-exact-byte-upload-duplicate-disposition.md), [ADR-0042](docs/adr/0042-atomic-upload-publication.md), [ADR-0043](docs/adr/0043-upload-to-catalog-transaction.md))
+- Durable quarantine upload sessions, bounded validation, lifecycle orchestration, canonical byte identity, exact-duplicate disposition, atomic upload publication and cataloging, source-aware analysis suppression, content classification, and YouTube manual acquisition ([ADR-0037](docs/adr/0037-durable-upload-session-and-safe-ingest-foundation.md), [ADR-0038](docs/adr/0038-bounded-upload-media-validation.md), [ADR-0039](docs/adr/0039-lifecycle-owned-upload-validation-orchestration.md), [ADR-0040](docs/adr/0040-canonical-upload-byte-identity-foundation.md), [ADR-0041](docs/adr/0041-exact-byte-upload-duplicate-disposition.md), [ADR-0042](docs/adr/0042-atomic-upload-publication.md), [ADR-0043](docs/adr/0043-upload-to-catalog-transaction.md), [ADR-0044](docs/adr/0044-durable-automatic-post-catalog-analysis.md), [ADR-0045](docs/adr/0045-content-classification-and-movie-identification.md), [ADR-0046](docs/adr/0046-youtube-manual-ingestion-and-provenance.md))
 
 Exact future frontend framework or compiled toolchain, desktop/Tauri packaging choices, IPC design, sidecar bundling, data schema, identity database encoding, deployment model, production update mechanisms, and many server operational details remain subject to later documented decisions.
 
@@ -389,6 +455,10 @@ Current foundation files:
 - [`docs/adr/0034-canonical-analytic-programming-integration.md`](docs/adr/0034-canonical-analytic-programming-integration.md) records the accepted pinned canonical AP submodule integration.
 - [`docs/adr/0035-authoritative-server-and-client-state-model.md`](docs/adr/0035-authoritative-server-and-client-state-model.md) records the accepted authoritative server/client state model.
 - [`docs/adr/0042-atomic-upload-publication.md`](docs/adr/0042-atomic-upload-publication.md) records the accepted atomic upload publication decision.
+- [`docs/adr/0043-upload-to-catalog-transaction.md`](docs/adr/0043-upload-to-catalog-transaction.md) records the accepted upload-to-catalog transaction.
+- [`docs/adr/0044-durable-automatic-post-catalog-analysis.md`](docs/adr/0044-durable-automatic-post-catalog-analysis.md) records the accepted automatic-analysis lifecycle.
+- [`docs/adr/0045-content-classification-and-movie-identification.md`](docs/adr/0045-content-classification-and-movie-identification.md) records the accepted content classification and movie-identification decision.
+- [`docs/adr/0046-youtube-manual-ingestion-and-provenance.md`](docs/adr/0046-youtube-manual-ingestion-and-provenance.md) records the accepted YouTube manual-ingestion provenance lifecycle.
 
 ## Non-Goals for the Current Stage
 
@@ -400,7 +470,7 @@ The current stage does not provide:
 - Embedded libVLC.
 - AI-generated covers.
 - Public internet exposure.
-- A functional premium gallery, arbitrary user-created collections, suggested filenames, covers, thumbnails, persistent AI Drafts, persistent media scanner, or downloader.
+- A functional premium gallery, arbitrary user-created collections, suggested filenames, covers, thumbnails, persistent AI Drafts, persistent media scanner, or generalized downloader UI.
 - Production deployment.
 
 ## License

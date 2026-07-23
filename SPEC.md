@@ -456,6 +456,18 @@ and upload-publication linkage together. Catalog persistence failure MUST leave
 the upload truthfully `published` and MUST NOT delete the durable published
 file.
 
+Owner-operated YouTube manual ingestion MUST remain a source-specific,
+loopback-only CLI and server lifecycle. The server MUST independently validate
+one supported cookie-free public HTTPS YouTube video identity, persist an
+immutable acquisition claim, use a shell-free pinned downloader subprocess in
+a private claim-owned staging root, and hand only a stable exact-size artifact
+to the existing upload transport. It MUST NOT bypass quarantine, validation,
+canonical byte identity, publication, or catalog creation. Source-identity and
+byte duplicates MUST reuse existing outcomes without creating accidental
+logical media, while preserving each claim. YouTube ingestion MUST NOT use
+cookies, browser profiles, arbitrary extractors, playlists, live media,
+sidecars, transcoding, or automatic AI analysis.
+
 Per-user Trash MUST be server-persisted visibility state and MUST NOT delete
 the server original.
 
@@ -764,6 +776,11 @@ Tests MUST use deterministic, isolated configuration state and MUST NOT rely on 
 
 ### Initial Server API Framework
 
+Migration `0019` adds the source-specific YouTube acquisition claim per
+[ADR-0046](docs/adr/0046-youtube-manual-ingestion-and-provenance.md). The
+server-owned coordinator reuses the existing upload lifecycle and suppresses
+automatic analysis for this source.
+
 FrameNest MUST use FastAPI for the initial server HTTP API adapter per [ADR-0003](docs/adr/0003-initial-server-api-framework.md).
 
 FrameNest MUST use synchronous SQLAlchemy 2.x Core with Alembic for the initial local SQLite persistence and migration foundation per [ADR-0010](docs/adr/0010-initial-persistence-foundation.md). SQLAlchemy ORM mapped entities, SQLModel, and async SQLite access are not accepted for the initial foundation. A minimal migration foundation and explicit database command boundary exist. A minimal device domain entity and local device registry exist per [ADR-0012](docs/adr/0012-initial-device-registry.md). A minimal library domain entity, device-local root-locator model, and local library registry exist per [ADR-0013](docs/adr/0013-initial-library-registry.md), with canonical UUID text storage for catalog tables and lexical device-local root paths represented by explicit `posix` or `windows` flavor plus canonical absolute path text. A minimum persistent logical-media and physical-location foundation exists per [ADR-0025](docs/adr/0025-minimum-persistent-media-catalog-foundation.md), with canonical UUID text storage, explicit repository boundaries, migration `0004`, and no automatic migration. Persistent display title and canonical content tags exist per [ADR-0027](docs/adr/0027-persistent-display-title-and-canonical-tags.md), with migration `0005`, sparse metadata rows, ordered tag assignments, stable English tag keys, and no file mutation. A nullable plain-text description column is added in migration `0006`. An automatic built-in `Processed` workflow collection is added per [ADR-0030](docs/adr/0030-automatic-processed-collection.md), with nullable `collection_key` and `processed_at_ms` columns added in migration `0007`, one medium holding zero or one collection membership, the built-in `processed` key as the only supported collection key, and no arbitrary collection CRUD or general collection manager. A dedicated catalog read model exists per [ADR-0028](docs/adr/0028-catalog-read-model-and-search-semantics.md), with display-title substring search, repeated canonical-tag AND filters, deterministic ordering, bounded offset pagination, and catalog-safe location data. The packaged browser includes a manual `Current` metadata workspace that loads one imported medium by media ID, keeps persisted baseline values distinct from unsaved form state and filename fallback labels, edits or clears display title, edits or clears an optional plain-text description, locally searches existing canonical tags, selects, removes, and explicitly reorders up to 32 ordered tag assignments, explicitly creates canonical tag definitions, saves through the existing metadata API, refreshes the active catalog query after successful save, and does not rename, move, delete, analyze, upload, or mutate media files. A bounded, deterministic, read-only, non-persistent library scan preview exists per [ADR-0014](docs/adr/0014-safe-library-scan-preview.md); candidate classification is extension-hint based only. Explicit idempotent scan-candidate import exists per [ADR-0026](docs/adr/0026-explicit-idempotent-scan-candidate-import.md); it requires an explicit selected candidate, reruns the bounded scan, creates one logical media item plus one physical location atomically when absent, returns an existing location for repeated imports, and performs no filesystem mutation. A bounded, deterministic, read-only, provider-neutral local media-analysis preparation boundary exists per [ADR-0015](docs/adr/0015-deterministic-local-media-analysis-preparation.md); it inspects one explicit MP4 or GIF candidate through optional external `ffprobe` and `ffmpeg` executables, returns bounded technical metadata, prepares at most three exact-distinct representative PNG frames in memory only, and writes no media records. A bounded, explicit opt-in, non-persistent media suggestion preview exists per [ADR-0016](docs/adr/0016-provider-neutral-media-suggestions-and-nvidia-nim-prototype.md); it reuses local preparation, requires explicit cloud confirmation, derives bounded JPEG VLM images for NVIDIA NIM transport per [ADR-0019](docs/adr/0019-vlm-image-derivatives-and-nvidia-instruct-mode.md), validates one untrusted suggestion preview, and performs no catalog or filesystem mutation. An explicit same-origin browser AI suggestion review exists per [ADR-0020](docs/adr/0020-on-demand-ai-suggestion-review.md); capability discovery is sanitized and provider-free, suggestion requests require explicit confirmation, the browser receives no credential, raw prompt, raw provider response, frame payload, absolute media path, or database path, and accept/reject actions are session-only with no mutation endpoint. Durable sidecars, storage volumes, arbitrary user-created collections, a general collection manager, collection CRUD, manual collection assignment, suggested filenames, covers, thumbnails, persistent AI Drafts, gallery persistence, synchronization, per-user visibility state, and multi-device server workflows remain unimplemented. The trusted-loopback upload foundation through migrations `0014` and `0015` provides durable quarantine sessions, bounded validation, canonical byte identity, exact-duplicate disposition, lifecycle-owned single-process publication recovery, verified server-owned originals, a specialized atomic `published -> cataloged` transaction that creates exactly one logical media item and one physical location per successful catalog commit, and an optional durable automatic post-catalog AI analysis lifecycle per [ADR-0044](docs/adr/0044-durable-automatic-post-catalog-analysis.md) that remains off by default, never invents historical paid work, and never rolls back cataloging on provider failure.
@@ -821,7 +838,8 @@ authentication above Tailscale, synchronization protocol, offline client cache
 semantics, multiprocess publication or catalog leases or fencing, deferred multi-user
 transactions, per-user visibility state,
 category schema, language metadata schema, audio-track capability detection,
-FFmpeg distribution, yt-dlp packaging/update strategy, player invocation,
+FFmpeg distribution, future yt-dlp update policy beyond the currently pinned
+manual-ingestion dependency, player invocation,
 thumbnail formats and sizes, full-text search, packaging/signing/update
 mechanisms, telemetry, and license.
 

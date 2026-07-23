@@ -69,6 +69,7 @@ production executable: /opt/framenest/current/.venv/bin/framenest-production
 operator environment: /etc/framenest/framenest.env
 database: /var/lib/framenest/catalog.sqlite3
 non-secret AI configuration: /var/lib/framenest/ai/config.json
+YouTube acquisition staging: /var/lib/framenest/youtube-acquisition
 Gallery preview cache: /var/cache/framenest/gallery-previews
 runtime root: /run/framenest
 original media root: /srv/media
@@ -129,6 +130,9 @@ Read-only checks:
   `/srv/media/movies` are treated as source-media locations and are not
   service-writable by default.
 - Confirm the repository service artifact still binds to `127.0.0.1`.
+- If YouTube ingestion is configured, confirm its pre-existing `0700` staging
+  root is under `/var/lib/framenest`, is not a symlink, and is disjoint from
+  the database, quarantine, preview cache, and every registered media root.
 - Confirm any production AI credential plan uses optional systemd
   `LoadCredential=` drop-ins and root-controlled files under
   `/etc/framenest/credentials`, not `framenest.env` or command-line arguments.
@@ -148,6 +152,8 @@ Stop conditions:
 - The target is not Ubuntu Server 24.04 LTS on x86_64.
 - The service would bind to `0.0.0.0`.
 - `/srv/media` would be made broadly writable to the service.
+- YouTube acquisition would require write access to `/srv/media` or any
+  source-media library.
 
 Evidence:
 

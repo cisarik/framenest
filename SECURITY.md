@@ -110,6 +110,21 @@ Browser mutation requests with an `Origin` header must match the effective same
 origin; this is a bounded loopback protection and not authentication or
 authorization.
 
+YouTube manual ingestion is a separate operator-only loopback boundary. It is
+disabled unless its private staging root and the existing upload/publication
+prerequisites are configured, and it is disabled for non-loopback server
+binds. Operator requests with any `Origin` header are rejected. The server
+accepts only bounded exact JSON, revalidates supported single-video HTTPS
+YouTube forms, and never accepts client-supplied canonical identities,
+filenames, extractor evidence, or provenance. The pinned downloader runs
+shell-free with an explicit environment allowlist, ignores user configuration,
+uses no cookies or browser profiles, captures bounded output, and persists only
+fixed failure codes. Claim staging is private, opaque, non-overlapping, and
+cleaned by exact ownership. No downloader output, remote error, source title,
+filesystem path, cookie, header, or inherited credential may reach operator
+output or logs. YouTube-created catalog results are explicitly barred from
+automatic AI analysis in this slice.
+
 Avoid exposing:
 
 - Home-directory paths when they are not necessary.

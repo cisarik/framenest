@@ -16,6 +16,7 @@ from framenest.application.ports.upload_publications import (
 )
 from framenest.application.upload_transport import default_now_ms
 from framenest.domain.identities import MediaId, MediaLocationId
+from framenest.domain.media_classification import AcquisitionSource, ContentCategory
 from framenest.domain.media import (
     LogicalMedia,
     MediaKind,
@@ -27,6 +28,7 @@ from framenest.domain.upload_publications import (
     UploadPublicationCleanupState,
     UploadPublicationState,
 )
+from framenest.domain.media_metadata import MediaMetadata
 from framenest.domain.uploads import UploadSessionId, UploadSessionState
 
 
@@ -69,11 +71,17 @@ class CatalogPublishedUpload:
         *,
         media_id_factory: Callable[[], MediaId] | None = None,
         location_id_factory: Callable[[], MediaLocationId] | None = None,
+        classification_for_upload: Callable[
+            [UploadSessionId],
+            tuple[ContentCategory, AcquisitionSource] | None,
+        ]
+        | None = None,
         now_ms: Callable[[], int] = default_now_ms,
     ) -> None:
         self._repository = repository
         self._media_id_factory = media_id_factory or MediaId.new
         self._location_id_factory = location_id_factory or MediaLocationId.new
+        self._classification_for_upload = classification_for_upload
         self._now_ms = now_ms
 
     def catalog_owned_blocking(
@@ -132,14 +140,35 @@ class CatalogPublishedUpload:
                 created_at_ms=now_ms,
                 updated_at_ms=now_ms,
             )
+            metadata = None
+            if self._classification_for_upload is not None:
+                classification = self._classification_for_upload(upload_id)
+                if classification is not None:
+                    content_category, acquisition_source = classification
+                    metadata = MediaMetadata(
+                        media_id=media.id,
+                        display_title=None,
+                        description=None,
+                        tag_keys=(),
+                        created_at_ms=now_ms,
+                        updated_at_ms=now_ms,
+                        content_category=content_category,
+                        acquisition_source=acquisition_source,
+                        genre_keys=(),
+                    )
             try:
+                commit_arguments = {
+                    "media": media,
+                    "location": location,
+                    "expected_upload_version": candidate.upload.version,
+                    "expected_publication_version": publication.version,
+                    "updated_at_ms": now_ms,
+                }
+                if metadata is not None:
+                    commit_arguments["metadata"] = metadata
                 committed = self._repository.commit_cataloged_publication(
                     upload_id,
-                    media=media,
-                    location=location,
-                    expected_upload_version=candidate.upload.version,
-                    expected_publication_version=publication.version,
-                    updated_at_ms=now_ms,
+                    **commit_arguments,
                 )
             except UploadPublicationConcurrencyConflictError:
                 current = self._repository.get_candidate(upload_id)

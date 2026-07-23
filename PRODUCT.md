@@ -20,9 +20,9 @@ direction.
 
 FrameNest is currently in foundation-stage, pre-alpha development.
 
-A minimal Poetry package, runnable loopback FastAPI server, packaged local web shell, explicit SQLite migration foundation, local device and library registries, read-only library scan preview, explicit idempotent scan-candidate import into the minimum persistent media catalog, persistent display-title and canonical-tag core, local media-analysis preview, provider-neutral NVIDIA suggestion prototype, bounded JPEG VLM transport, and explicit editable browser AI suggestion review now exist. The browser review is pre-alpha, opt-in, non-persistent, and does not apply catalog or filesystem changes.
+A minimal Poetry package, runnable loopback FastAPI server, packaged local web shell, explicit SQLite migration foundation, local device and library registries, read-only library scan preview, explicit idempotent scan-candidate import into the minimum persistent media catalog, persistent display-title and canonical-tag core, local media-analysis preview, provider-neutral NVIDIA suggestion prototype, bounded JPEG VLM transport, explicit editable browser AI suggestion review, and owner-operated cookie-free YouTube manual ingestion now exist. YouTube ingestion is CLI-only, durable, loopback-only, and reuses the existing quarantine, validation, byte-identity, publication, and catalog lifecycle.
 
-There is still no completed media application, premium gallery, downloader,
+There is still no completed media application, premium gallery, generalized downloader UI,
 desktop shell, GUI Settings, broad automatic AI workflow beyond optional
 server-enabled post-catalog analysis, media mutation workflow,
 deployed server, installer, or supported release. The persistent media catalog

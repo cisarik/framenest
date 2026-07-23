@@ -22,9 +22,9 @@ class ContentCategory(StrEnum):
 class AcquisitionSource(StrEnum):
     """How the media entered the catalog, orthogonal to content category.
 
-    ``youtube_manual_claim`` is an owner-asserted unverified claim for an
-    already-local file. Future deterministic yt-dlp provenance must use a
-    distinct verified value and must not collapse into this claim.
+    ``youtube_manual_claim`` is a coarse editable catalog classification.
+    Immutable source evidence for controlled ingestion lives in the durable
+    acquisition claim defined by ADR-0046.
     """
 
     UNKNOWN = "unknown"
