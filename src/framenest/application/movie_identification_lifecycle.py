@@ -27,6 +27,7 @@ from framenest.application.media_suggestion import (
     MediaSuggestionProviderInvalidResponseError,
     MediaSuggestionProviderModelUnavailableError,
     MediaSuggestionProviderRateLimitedError,
+    MediaSuggestionProviderTruncatedResponseError,
     MediaSuggestionProviderUnavailableError,
     source_extension,
 )
@@ -188,6 +189,10 @@ class ExecuteMovieIdentificationRun:
                 prompt_version=None,
                 completed_at_ms=self.now_ms(),
                 provider_submission_occurred=_provider_submission_occurred(error_code),
+                analysis_profile=AnalysisProfile.MOVIE_IDENTIFICATION.value,
+                reasoning_enabled=True,
+                derivative_strategy=CONTACT_SHEET_DERIVATIVE_STRATEGY,
+                derivative_count=1,
             )
         except FrameNestMediaAnalysisRunRepositoryError as persist_exc:
             raise MediaAnalysisLifecycleError(
@@ -223,6 +228,8 @@ def _classify_movie_failure(exc: Exception) -> tuple[str, str]:
         return "PROVIDER_MODEL_UNAVAILABLE", "Provider model is unavailable."
     if isinstance(exc, MediaSuggestionProviderUnavailableError):
         return "PROVIDER_UNAVAILABLE", "Provider is unavailable."
+    if isinstance(exc, MediaSuggestionProviderTruncatedResponseError):
+        return "PROVIDER_RESPONSE_TRUNCATED", "Provider exhausted tokens before a final answer."
     if isinstance(exc, MediaSuggestionProviderInvalidResponseError):
         return "PROVIDER_INVALID_RESPONSE", "Provider returned an invalid response."
     if isinstance(exc, MediaSuggestionProviderFailedError):
@@ -237,6 +244,7 @@ _PROVIDER_SUBMISSION_ERROR_CODES = frozenset(
         "PROVIDER_MODEL_UNAVAILABLE",
         "PROVIDER_UNAVAILABLE",
         "PROVIDER_INVALID_RESPONSE",
+        "PROVIDER_RESPONSE_TRUNCATED",
         "PROVIDER_FAILED",
     }
 )

@@ -105,6 +105,10 @@ class MediaSuggestionProviderInvalidResponseError(RuntimeError):
     """Raised when provider output cannot be validated."""
 
 
+class MediaSuggestionProviderTruncatedResponseError(MediaSuggestionProviderInvalidResponseError):
+    """Raised when final content is empty or cut off after token exhaustion."""
+
+
 class MediaSuggestionProviderFailedError(RuntimeError):
     """Raised when an unexpected provider failure occurs."""
 

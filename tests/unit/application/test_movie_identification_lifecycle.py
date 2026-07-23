@@ -308,6 +308,8 @@ def test_movie_identification_accepts_eligible_published_video() -> None:
     body = build_nvidia_movie_identification_body(request, model_id="fake-model")
     assert body["chat_template_kwargs"]["enable_thinking"] is True
     assert body["chat_template_kwargs"]["reasoning_budget"] == 2048
+    assert body["max_tokens"] == 4096
+    assert body["thinking_token_budget"] == 2304
     images = [
         part for part in body["messages"][0]["content"] if part.get("type") == "image_url"
     ]
@@ -350,3 +352,46 @@ def test_provider_unavailable_marks_submission_attempted() -> None:
     assert len(provider.calls) == 1
     assert repository.failed_kwargs is not None
     assert repository.failed_kwargs["provider_submission_occurred"] is True
+    assert repository.failed_kwargs["analysis_profile"] == "movie_identification"
+    assert repository.failed_kwargs["reasoning_enabled"] is True
+    assert repository.failed_kwargs["derivative_strategy"] == CONTACT_SHEET_DERIVATIVE_STRATEGY
+    assert repository.failed_kwargs["derivative_count"] == 1
+
+
+def test_truncated_provider_response_classified_distinctly() -> None:
+    from framenest.application.media_suggestion import (
+        MediaSuggestionProviderTruncatedResponseError,
+    )
+
+    executor, repository, provider, preparer = _executor(
+        provider_error=MediaSuggestionProviderTruncatedResponseError("truncated")
+    )
+    result = executor.execute(repository.run)
+
+    assert result.state is MediaAnalysisRunState.FAILED
+    assert result.error_code == "PROVIDER_RESPONSE_TRUNCATED"
+    assert len(preparer.calls) == 1
+    assert len(provider.calls) == 1
+    assert repository.failed_kwargs is not None
+    assert repository.failed_kwargs["provider_submission_occurred"] is True
+    assert repository.failed_kwargs["reasoning_enabled"] is True
+    assert repository.failed_kwargs["analysis_profile"] == "movie_identification"
+    assert repository.failed_kwargs["derivative_count"] == 1
+
+
+def test_invalid_provider_response_remains_distinct_from_truncation() -> None:
+    from framenest.application.media_suggestion import (
+        MediaSuggestionProviderInvalidResponseError,
+    )
+
+    executor, repository, provider, preparer = _executor(
+        provider_error=MediaSuggestionProviderInvalidResponseError("invalid")
+    )
+    result = executor.execute(repository.run)
+
+    assert result.state is MediaAnalysisRunState.FAILED
+    assert result.error_code == "PROVIDER_INVALID_RESPONSE"
+    assert repository.failed_kwargs is not None
+    assert repository.failed_kwargs["provider_submission_occurred"] is True
+    assert type(provider.error) is MediaSuggestionProviderInvalidResponseError
+    assert len(preparer.calls) == 1

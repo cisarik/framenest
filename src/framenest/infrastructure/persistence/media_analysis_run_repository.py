@@ -329,6 +329,10 @@ class SqliteMediaAnalysisRunRepository:
         prompt_version: str | None,
         completed_at_ms: int,
         provider_submission_occurred: bool | None = None,
+        analysis_profile: str | None = None,
+        reasoning_enabled: bool | None = None,
+        derivative_strategy: str | None = None,
+        derivative_count: int | None = None,
     ) -> MediaAnalysisRun:
         def operation(connection: Connection) -> MediaAnalysisRun:
             row = _require_row(connection, run_id)
@@ -357,6 +361,14 @@ class SqliteMediaAnalysisRunRepository:
                 values["provider_submission_occurred"] = (
                     1 if provider_submission_occurred else 0
                 )
+            if analysis_profile is not None:
+                values["analysis_profile"] = analysis_profile
+            if reasoning_enabled is not None:
+                values["reasoning_enabled"] = 1 if reasoning_enabled else 0
+            if derivative_strategy is not None:
+                values["derivative_strategy"] = derivative_strategy
+            if derivative_count is not None:
+                values["derivative_count"] = derivative_count
             updated = connection.execute(
                 update(media_analysis_runs)
                 .where(

@@ -93,8 +93,11 @@ MOVIE_IDENTIFICATION_RESULT_SCHEMA_VERSION = "framenest-movie-identification-res
 MOVIE_IDENTIFICATION_PROMPT_VERSION = "framenest-movie-identification-prompt-v1"
 
 # Bounded reasoning budget for movie identification (NVIDIA chat_template_kwargs).
+# With thinking enabled, max_tokens must leave room for the final structured answer;
+# top-level thinking_token_budget tracks reasoning_budget plus a small grace margin.
 MOVIE_IDENTIFICATION_REASONING_BUDGET = 2048
-MOVIE_IDENTIFICATION_MAX_TOKENS = 3072
+MOVIE_IDENTIFICATION_REASONING_GRACE_TOKENS = 256
+MOVIE_IDENTIFICATION_MAX_TOKENS = 4096
 
 CONTACT_SHEET_REQUESTED_FRAME_COUNT = 6
 CONTACT_SHEET_DERIVATIVE_STRATEGY = "bounded_contact_sheet_jpeg_v1"

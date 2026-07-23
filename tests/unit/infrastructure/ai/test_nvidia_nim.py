@@ -20,6 +20,7 @@ from framenest.application.media_suggestion import (
     MediaSuggestionProviderInvalidResponseError,
     MediaSuggestionProviderModelUnavailableError,
     MediaSuggestionProviderRateLimitedError,
+    MediaSuggestionProviderTruncatedResponseError,
     MediaSuggestionProviderUnavailableError,
     MediaSuggestionRequest,
     PROMPT_VERSION,
@@ -645,7 +646,7 @@ def test_reasoning_content_is_not_used_as_final_content() -> None:
         image_encoder=_FakeImageEncoder(),
     )
 
-    with pytest.raises(MediaSuggestionProviderInvalidResponseError):
+    with pytest.raises(MediaSuggestionProviderTruncatedResponseError):
         provider.suggest(_sample_request())
 
 

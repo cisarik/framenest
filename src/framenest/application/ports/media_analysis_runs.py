@@ -110,6 +110,10 @@ class MediaAnalysisRunRepository(Protocol):
         prompt_version: str | None,
         completed_at_ms: int,
         provider_submission_occurred: bool | None = None,
+        analysis_profile: str | None = None,
+        reasoning_enabled: bool | None = None,
+        derivative_strategy: str | None = None,
+        derivative_count: int | None = None,
     ) -> MediaAnalysisRun:
         """Persist a sanitized terminal failure."""
 

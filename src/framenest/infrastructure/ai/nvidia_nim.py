@@ -16,6 +16,7 @@ from framenest.application.media_suggestion import (
     MediaSuggestionProviderInvalidResponseError,
     MediaSuggestionProviderModelUnavailableError,
     MediaSuggestionProviderRateLimitedError,
+    MediaSuggestionProviderTruncatedResponseError,
     MediaSuggestionProviderUnavailableError,
     MediaSuggestionRequest,
     PROMPT_VERSION,
@@ -204,8 +205,16 @@ def build_nvidia_movie_identification_body(
     from framenest.domain.media_classification import (
         MOVIE_IDENTIFICATION_MAX_TOKENS,
         MOVIE_IDENTIFICATION_REASONING_BUDGET,
+        MOVIE_IDENTIFICATION_REASONING_GRACE_TOKENS,
     )
 
+    thinking_token_budget = (
+        MOVIE_IDENTIFICATION_REASONING_BUDGET + MOVIE_IDENTIFICATION_REASONING_GRACE_TOKENS
+    )
+    if MOVIE_IDENTIFICATION_MAX_TOKENS <= thinking_token_budget:
+        raise MediaSuggestionProviderInvalidResponseError(
+            SUGGESTION_PROVIDER_INVALID_RESPONSE_MESSAGE
+        )
     encoded = base64.b64encode(request.contact_sheet.payload).decode("ascii")
     content: list[dict[str, Any]] = [
         {
@@ -228,6 +237,7 @@ def build_nvidia_movie_identification_body(
         "temperature": TEMPERATURE,
         "top_k": TOP_K,
         "max_tokens": MOVIE_IDENTIFICATION_MAX_TOKENS,
+        "thinking_token_budget": thinking_token_budget,
         "chat_template_kwargs": {
             "enable_thinking": True,
             "reasoning_budget": MOVIE_IDENTIFICATION_REASONING_BUDGET,
@@ -250,8 +260,86 @@ def build_nvidia_connection_test_body(*, model_id: str) -> dict[str, Any]:
     }
 
 
+def classify_chat_completion_choice(payload: dict[str, Any]) -> dict[str, Any]:
+    """Return sanitized structural facts about one chat-completions choice.
+
+    Never returns prompt text, reasoning traces, or media payloads.
+    """
+    choices = payload.get("choices")
+    if not isinstance(choices, list):
+        return {
+            "parser_stage": "provider_envelope",
+            "choice_count": None,
+            "finish_reason": None,
+            "content_repr": None,
+            "final_content_empty": None,
+            "has_reasoning_field": None,
+            "top_level_keys": sorted(payload.keys()) if isinstance(payload, dict) else None,
+        }
+    if not choices:
+        return {
+            "parser_stage": "choice_selection",
+            "choice_count": 0,
+            "finish_reason": None,
+            "content_repr": None,
+            "final_content_empty": None,
+            "has_reasoning_field": None,
+            "top_level_keys": sorted(payload.keys()),
+        }
+    first = choices[0]
+    if not isinstance(first, dict):
+        return {
+            "parser_stage": "choice_selection",
+            "choice_count": len(choices),
+            "finish_reason": None,
+            "content_repr": None,
+            "final_content_empty": None,
+            "has_reasoning_field": None,
+            "top_level_keys": sorted(payload.keys()),
+        }
+    finish_reason = first.get("finish_reason")
+    message = first.get("message")
+    if not isinstance(message, dict):
+        return {
+            "parser_stage": "final_content_extraction",
+            "choice_count": len(choices),
+            "finish_reason": finish_reason if isinstance(finish_reason, str) else None,
+            "content_repr": None,
+            "final_content_empty": None,
+            "has_reasoning_field": None,
+            "top_level_keys": sorted(payload.keys()),
+        }
+    content = message.get("content")
+    has_reasoning_field = any(
+        key in message and message.get(key) not in (None, "")
+        for key in ("reasoning", "reasoning_content")
+    )
+    if content is None:
+        content_repr = "null"
+        final_empty = True
+    elif isinstance(content, str):
+        content_repr = "string"
+        final_empty = not bool(content.strip())
+    elif isinstance(content, list):
+        content_repr = "array"
+        final_empty = len(content) == 0
+    else:
+        content_repr = type(content).__name__
+        final_empty = True
+    return {
+        "parser_stage": "final_content_extraction",
+        "choice_count": len(choices),
+        "finish_reason": finish_reason if isinstance(finish_reason, str) else None,
+        "content_repr": content_repr,
+        "final_content_empty": final_empty,
+        "has_reasoning_field": has_reasoning_field,
+        "top_level_keys": sorted(payload.keys()),
+    }
+
+
 def extract_message_content(payload: dict[str, Any]) -> str:
     """Extract provider message content from one chat-completions envelope."""
+    facts = classify_chat_completion_choice(payload)
     choices = payload.get("choices")
     if not isinstance(choices, list) or not choices:
         raise MediaSuggestionProviderInvalidResponseError(
@@ -269,6 +357,14 @@ def extract_message_content(payload: dict[str, Any]) -> str:
         )
     content = message.get("content")
     if not isinstance(content, str) or not content.strip():
+        # Empty final content after reasoning or length stop is distinct from
+        # opaque invalid envelopes; never parse reasoning text as the answer.
+        if facts.get("final_content_empty") and (
+            facts.get("finish_reason") == "length" or facts.get("has_reasoning_field")
+        ):
+            raise MediaSuggestionProviderTruncatedResponseError(
+                SUGGESTION_PROVIDER_INVALID_RESPONSE_MESSAGE
+            )
         raise MediaSuggestionProviderInvalidResponseError(
             SUGGESTION_PROVIDER_INVALID_RESPONSE_MESSAGE
         )
@@ -572,8 +668,16 @@ class NvidiaNimMediaSuggestionProvider:
             raise
         except Exception:
             raise MediaSuggestionProviderFailedError(SUGGESTION_PROVIDER_FAILED_MESSAGE) from None
+        facts = classify_chat_completion_choice(payload)
         content_text = extract_message_content(payload)
-        parsed = parse_json_object_content_text(content_text)
+        try:
+            parsed = parse_json_object_content_text(content_text)
+        except MediaSuggestionProviderInvalidResponseError:
+            if facts.get("finish_reason") == "length":
+                raise MediaSuggestionProviderTruncatedResponseError(
+                    SUGGESTION_PROVIDER_INVALID_RESPONSE_MESSAGE
+                ) from None
+            raise
         try:
             return parse_movie_identification_payload(
                 parsed,
