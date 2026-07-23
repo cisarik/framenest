@@ -58,12 +58,30 @@ from framenest.infrastructure.ai.transport import (
     TRANSPORT_RATE_LIMITED_MESSAGE,
     TRANSPORT_UNAVAILABLE_MESSAGE,
 )
+from framenest.structured_logging import LogLevel, get_logger
 
 _JSON_FENCE_PATTERN = re.compile(r"^```json\s*\n(?P<body>.*)\n```\s*$", re.DOTALL)
 _REQUEST_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
+_STRUCTURAL_KEY_PATTERN = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
 _NVIDIA_STATUS_URL_PREFIX = "https://integrate.api.nvidia.com/v1/status/"
 _PENDING_POLL_INTERVAL_SECONDS = 1.0
 _PENDING_TIMEOUT_SECONDS = 120.0
+MOVIE_STRUCTURED_OUTPUT_COMPATIBILITY_MODE = "nemotron_embedded_think_json_v1"
+_MOVIE_IDENTIFICATION_KEYS = frozenset(
+    {
+        "identified_title",
+        "release_year",
+        "identification_status",
+        "confidence",
+        "candidate_titles",
+        "genres",
+        "description",
+        "tags",
+        "evidence_summary",
+    }
+)
+_SAFE_FINISH_REASONS = frozenset({"stop", "length", "content_filter", "tool_calls"})
+LOGGER = get_logger("nvidia_nim")
 _ALLOWED_SUGGESTION_KEYS = frozenset(
     {
         "title",
@@ -237,6 +255,7 @@ def build_nvidia_movie_identification_body(
         "temperature": TEMPERATURE,
         "top_k": TOP_K,
         "max_tokens": MOVIE_IDENTIFICATION_MAX_TOKENS,
+        "reasoning_budget": MOVIE_IDENTIFICATION_REASONING_BUDGET,
         "thinking_token_budget": thinking_token_budget,
         "chat_template_kwargs": {
             "enable_thinking": True,
@@ -265,54 +284,57 @@ def classify_chat_completion_choice(payload: dict[str, Any]) -> dict[str, Any]:
 
     Never returns prompt text, reasoning traces, or media payloads.
     """
+    facts: dict[str, Any] = {
+        "parser_stage": "provider_envelope",
+        "choice_count": None,
+        "selected_choice_index": None,
+        "finish_reason": None,
+        "content_repr": None,
+        "final_content_length_bucket": None,
+        "final_content_empty": None,
+        "has_reasoning_field": None,
+        "reasoning_repr": None,
+        "top_level_keys": _bounded_key_names(payload),
+        "message_keys": None,
+        "detected_wrapper_category": "not_inspected",
+        "json_decode_stage": "not_started",
+        "decoded_top_level_type": None,
+        "decoded_top_level_keys": None,
+        "schema_validation_stage": "not_started",
+        "schema_error_category": None,
+    }
     choices = payload.get("choices")
     if not isinstance(choices, list):
-        return {
-            "parser_stage": "provider_envelope",
-            "choice_count": None,
-            "finish_reason": None,
-            "content_repr": None,
-            "final_content_empty": None,
-            "has_reasoning_field": None,
-            "top_level_keys": sorted(payload.keys()) if isinstance(payload, dict) else None,
-        }
+        return facts
+    facts["choice_count"] = len(choices)
     if not choices:
-        return {
-            "parser_stage": "choice_selection",
-            "choice_count": 0,
-            "finish_reason": None,
-            "content_repr": None,
-            "final_content_empty": None,
-            "has_reasoning_field": None,
-            "top_level_keys": sorted(payload.keys()),
-        }
+        facts["parser_stage"] = "choice_selection"
+        return facts
+    if len(choices) != 1:
+        facts["parser_stage"] = "choice_selection"
+        facts["detected_wrapper_category"] = "multiple_choices"
+        return facts
     first = choices[0]
     if not isinstance(first, dict):
-        return {
-            "parser_stage": "choice_selection",
-            "choice_count": len(choices),
-            "finish_reason": None,
-            "content_repr": None,
-            "final_content_empty": None,
-            "has_reasoning_field": None,
-            "top_level_keys": sorted(payload.keys()),
-        }
+        facts["parser_stage"] = "choice_selection"
+        return facts
+    facts["selected_choice_index"] = 0
     finish_reason = first.get("finish_reason")
+    facts["finish_reason"] = _safe_finish_reason(finish_reason)
     message = first.get("message")
     if not isinstance(message, dict):
-        return {
-            "parser_stage": "final_content_extraction",
-            "choice_count": len(choices),
-            "finish_reason": finish_reason if isinstance(finish_reason, str) else None,
-            "content_repr": None,
-            "final_content_empty": None,
-            "has_reasoning_field": None,
-            "top_level_keys": sorted(payload.keys()),
-        }
+        facts["parser_stage"] = "final_content_extraction"
+        return facts
+    facts["message_keys"] = _bounded_key_names(message)
     content = message.get("content")
-    has_reasoning_field = any(
-        key in message and message.get(key) not in (None, "")
+    reasoning_values = [
+        message[key]
         for key in ("reasoning", "reasoning_content")
+        if key in message and message[key] not in (None, "")
+    ]
+    facts["has_reasoning_field"] = bool(reasoning_values)
+    facts["reasoning_repr"] = (
+        _representation_type(reasoning_values[0]) if reasoning_values else None
     )
     if content is None:
         content_repr = "null"
@@ -324,17 +346,90 @@ def classify_chat_completion_choice(payload: dict[str, Any]) -> dict[str, Any]:
         content_repr = "array"
         final_empty = len(content) == 0
     else:
-        content_repr = type(content).__name__
+        content_repr = _representation_type(content)
         final_empty = True
-    return {
-        "parser_stage": "final_content_extraction",
-        "choice_count": len(choices),
-        "finish_reason": finish_reason if isinstance(finish_reason, str) else None,
-        "content_repr": content_repr,
-        "final_content_empty": final_empty,
-        "has_reasoning_field": has_reasoning_field,
-        "top_level_keys": sorted(payload.keys()),
-    }
+    facts["parser_stage"] = "final_content_extraction"
+    facts["content_repr"] = content_repr
+    facts["final_content_empty"] = final_empty
+    facts["final_content_length_bucket"] = _content_length_bucket(content)
+    facts["detected_wrapper_category"] = _detect_content_wrapper(content)
+    return facts
+
+
+def _bounded_key_names(mapping: dict[str, Any]) -> list[str]:
+    names: list[str] = []
+    for raw_key in sorted(mapping.keys(), key=lambda key: str(key)):
+        if len(names) == 16:
+            names.append("__additional_keys__")
+            break
+        if isinstance(raw_key, str) and _STRUCTURAL_KEY_PATTERN.fullmatch(raw_key):
+            names.append(raw_key)
+        else:
+            names.append("__other_key__")
+    return names
+
+
+def _safe_finish_reason(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    return value if value in _SAFE_FINISH_REASONS else "other"
+
+
+def _representation_type(value: object) -> str:
+    if value is None:
+        return "null"
+    if isinstance(value, bool):
+        return "boolean"
+    if isinstance(value, str):
+        return "string"
+    if isinstance(value, list):
+        return "array"
+    if isinstance(value, dict):
+        return "object"
+    if isinstance(value, (int, float)):
+        return "number"
+    return "other"
+
+
+def _content_length_bucket(content: object) -> str | None:
+    if isinstance(content, str):
+        length = len(content)
+    elif isinstance(content, list):
+        length = len(content)
+    else:
+        return None
+    if length == 0:
+        return "empty"
+    if length <= 256:
+        return "1-256"
+    if length <= 1024:
+        return "257-1024"
+    if length <= 4096:
+        return "1025-4096"
+    return "4097+"
+
+
+def _detect_content_wrapper(content: object) -> str:
+    if content is None:
+        return "null_content"
+    if isinstance(content, list):
+        return "content_list"
+    if not isinstance(content, str):
+        return "unsupported_content_type"
+    candidate = content.strip()
+    if not candidate:
+        return "empty_content"
+    if candidate.startswith("<think>"):
+        if candidate.count("<think>") == 1 and candidate.count("</think>") == 1:
+            return "embedded_think_prefix"
+        return "ambiguous_reasoning_tags"
+    if "<think>" in candidate or "</think>" in candidate:
+        return "ambiguous_reasoning_tags"
+    if _JSON_FENCE_PATTERN.fullmatch(candidate):
+        return "json_fence"
+    if candidate.startswith("{") and candidate.endswith("}"):
+        return "raw_json_object"
+    return "prose_or_ambiguous"
 
 
 def extract_message_content(payload: dict[str, Any]) -> str:
@@ -369,6 +464,152 @@ def extract_message_content(payload: dict[str, Any]) -> str:
             SUGGESTION_PROVIDER_INVALID_RESPONSE_MESSAGE
         )
     return content.strip()
+
+
+def extract_movie_message_content(
+    payload: dict[str, Any],
+    *,
+    facts: dict[str, Any] | None = None,
+) -> str:
+    """Extract one narrow movie final answer without consuming reasoning text."""
+    structural = facts if facts is not None else classify_chat_completion_choice(payload)
+    choices = payload.get("choices")
+    if not isinstance(choices, list) or len(choices) != 1:
+        structural["parser_stage"] = "choice_selection"
+        raise MediaSuggestionProviderInvalidResponseError(
+            SUGGESTION_PROVIDER_INVALID_RESPONSE_MESSAGE
+        )
+    first = choices[0]
+    if not isinstance(first, dict):
+        structural["parser_stage"] = "choice_selection"
+        raise MediaSuggestionProviderInvalidResponseError(
+            SUGGESTION_PROVIDER_INVALID_RESPONSE_MESSAGE
+        )
+    message = first.get("message")
+    if not isinstance(message, dict):
+        structural["parser_stage"] = "final_content_extraction"
+        raise MediaSuggestionProviderInvalidResponseError(
+            SUGGESTION_PROVIDER_INVALID_RESPONSE_MESSAGE
+        )
+    content = message.get("content")
+    if not isinstance(content, str) or not content.strip():
+        structural["parser_stage"] = "final_content_extraction"
+        if structural.get("final_content_empty") and (
+            structural.get("finish_reason") == "length"
+            or structural.get("has_reasoning_field")
+        ):
+            raise MediaSuggestionProviderTruncatedResponseError(
+                SUGGESTION_PROVIDER_INVALID_RESPONSE_MESSAGE
+            )
+        raise MediaSuggestionProviderInvalidResponseError(
+            SUGGESTION_PROVIDER_INVALID_RESPONSE_MESSAGE
+        )
+    if structural.get("finish_reason") == "length":
+        structural["parser_stage"] = "final_content_extraction"
+        raise MediaSuggestionProviderTruncatedResponseError(
+            SUGGESTION_PROVIDER_INVALID_RESPONSE_MESSAGE
+        )
+
+    candidate = content.strip()
+    wrapper = _detect_content_wrapper(candidate)
+    structural["detected_wrapper_category"] = wrapper
+    if candidate.startswith("<think>"):
+        if candidate.count("<think>") != 1 or candidate.count("</think>") != 1:
+            structural["detected_wrapper_category"] = "ambiguous_reasoning_tags"
+            raise MediaSuggestionProviderInvalidResponseError(
+                SUGGESTION_PROVIDER_INVALID_RESPONSE_MESSAGE
+            )
+        closing_tag_index = candidate.find("</think>")
+        final_answer = candidate[closing_tag_index + len("</think>") :]
+        if closing_tag_index < 0 or not final_answer.strip():
+            structural["detected_wrapper_category"] = "embedded_think_without_final"
+            raise MediaSuggestionProviderTruncatedResponseError(
+                SUGGESTION_PROVIDER_INVALID_RESPONSE_MESSAGE
+            )
+        candidate = final_answer.strip()
+        if "<think>" in candidate or "</think>" in candidate:
+            structural["detected_wrapper_category"] = "ambiguous_reasoning_tags"
+            raise MediaSuggestionProviderInvalidResponseError(
+                SUGGESTION_PROVIDER_INVALID_RESPONSE_MESSAGE
+            )
+        structural["detected_wrapper_category"] = "embedded_think_prefix"
+    elif "<think>" in candidate or "</think>" in candidate:
+        structural["detected_wrapper_category"] = "ambiguous_reasoning_tags"
+        raise MediaSuggestionProviderInvalidResponseError(
+            SUGGESTION_PROVIDER_INVALID_RESPONSE_MESSAGE
+        )
+
+    fence_match = _JSON_FENCE_PATTERN.fullmatch(candidate)
+    if fence_match:
+        candidate = fence_match.group("body").strip()
+        prior_wrapper = structural["detected_wrapper_category"]
+        structural["detected_wrapper_category"] = (
+            "embedded_think_json_fence"
+            if prior_wrapper == "embedded_think_prefix"
+            else "json_fence"
+        )
+    elif not (candidate.startswith("{") and candidate.endswith("}")):
+        structural["detected_wrapper_category"] = "prose_or_ambiguous"
+        raise MediaSuggestionProviderInvalidResponseError(
+            SUGGESTION_PROVIDER_INVALID_RESPONSE_MESSAGE
+        )
+    structural["parser_stage"] = "json_decoding"
+    return candidate
+
+
+def parse_movie_json_object_content_text(
+    text: str,
+    *,
+    facts: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Decode one already-normalized movie JSON object, failing closed."""
+    structural = facts if facts is not None else {}
+    structural["json_decode_stage"] = "started"
+    try:
+        parsed = json.loads(text)
+    except (json.JSONDecodeError, UnicodeError):
+        structural["json_decode_stage"] = "failed"
+        structural["decoded_top_level_type"] = None
+        structural["parser_stage"] = "json_decoding"
+        raise MediaSuggestionProviderInvalidResponseError(
+            SUGGESTION_PROVIDER_INVALID_RESPONSE_MESSAGE
+        ) from None
+    structural["json_decode_stage"] = "succeeded"
+    structural["decoded_top_level_type"] = _representation_type(parsed)
+    if not isinstance(parsed, dict):
+        structural["decoded_top_level_keys"] = None
+        structural["parser_stage"] = "json_decoding"
+        raise MediaSuggestionProviderInvalidResponseError(
+            SUGGESTION_PROVIDER_INVALID_RESPONSE_MESSAGE
+        )
+    structural["decoded_top_level_keys"] = _bounded_key_names(parsed)
+    structural["parser_stage"] = "schema_validation"
+    return parsed
+
+
+def _movie_schema_error_category(payload: dict[str, Any]) -> str | None:
+    keys = set(payload)
+    if keys - _MOVIE_IDENTIFICATION_KEYS:
+        return "extra_fields"
+    if _MOVIE_IDENTIFICATION_KEYS - keys:
+        return "missing_fields"
+    if payload["identified_title"] is not None and not isinstance(
+        payload["identified_title"], str
+    ):
+        return "field_type"
+    release_year = payload["release_year"]
+    if release_year is not None and (
+        not isinstance(release_year, int) or isinstance(release_year, bool)
+    ):
+        return "field_type"
+    for name in ("identification_status", "confidence", "description", "evidence_summary"):
+        if not isinstance(payload[name], str):
+            return "field_type"
+    for name in ("candidate_titles", "genres", "tags"):
+        value = payload[name]
+        if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+            return "field_type"
+    return None
 
 
 def parse_suggestion_content_text(text: str) -> dict[str, Any]:
@@ -464,6 +705,23 @@ def _response_status_code(response: object) -> int:
     return status_code
 
 
+def _response_content_type(response: object) -> str:
+    value = getattr(response, "content_type", None)
+    if not isinstance(value, str) or not value:
+        return "unknown"
+    if len(value) > 100 or not all(
+        character.isalnum() or character in "!#$&^_.+-/" for character in value
+    ):
+        return "other"
+    return value.lower()
+
+
+def _http_status_class(status_code: int) -> str:
+    if 100 <= status_code <= 599:
+        return f"{status_code // 100}xx"
+    return "other"
+
+
 def _response_body(response: object) -> bytes | bytearray:
     body = getattr(response, "body", response)
     if not isinstance(body, (bytes, bytearray)):
@@ -533,6 +791,47 @@ def _map_transport_error(exc: HttpsTransportError) -> Exception:
             SUGGESTION_PROVIDER_INVALID_RESPONSE_MESSAGE
         )
     return MediaSuggestionProviderFailedError(SUGGESTION_PROVIDER_FAILED_MESSAGE)
+
+
+def _movie_request_diagnostics() -> dict[str, Any]:
+    from framenest.domain.media_classification import (
+        MOVIE_IDENTIFICATION_MAX_TOKENS,
+        MOVIE_IDENTIFICATION_REASONING_BUDGET,
+        MOVIE_IDENTIFICATION_REASONING_GRACE_TOKENS,
+    )
+
+    return {
+        "compatibility_mode": MOVIE_STRUCTURED_OUTPUT_COMPATIBILITY_MODE,
+        "reasoning_enabled": True,
+        "reasoning_budget": MOVIE_IDENTIFICATION_REASONING_BUDGET,
+        "max_tokens": MOVIE_IDENTIFICATION_MAX_TOKENS,
+        "thinking_token_budget": (
+            MOVIE_IDENTIFICATION_REASONING_BUDGET
+            + MOVIE_IDENTIFICATION_REASONING_GRACE_TOKENS
+        ),
+        "provider_submission_occurred": True,
+        "initial_http_status_class": None,
+        "http_status_class": None,
+        "response_content_type": None,
+        "response_lifecycle": None,
+        "terminal_domain_error": None,
+    }
+
+
+def _emit_movie_response_diagnostics(
+    facts: dict[str, Any],
+    *,
+    level: LogLevel,
+    error_code: str | None,
+) -> None:
+    LOGGER.emit(
+        level=level,
+        event="movie_identification_response_classified",
+        operation="identify_movie",
+        error_code=error_code,
+        retryable=False,
+        context=facts,
+    )
 
 
 class NvidiaNimMediaSuggestionProvider:
@@ -624,6 +923,7 @@ class NvidiaNimMediaSuggestionProvider:
             parse_movie_identification_payload,
         )
 
+        facts = _movie_request_diagnostics()
         try:
             body_dict = build_nvidia_movie_identification_body(
                 request,
@@ -651,11 +951,18 @@ class NvidiaNimMediaSuggestionProvider:
                 body=body,
                 max_request_bytes=MAX_REQUEST_BODY_BYTES,
             )
+            initial_status = _response_status_code(response)
+            facts["initial_http_status_class"] = _http_status_class(initial_status)
+            facts["response_lifecycle"] = (
+                "synchronous_200" if initial_status == 200 else "http_202_poll"
+            )
             response = self._resolve_pending_response(
                 response,
                 headers={"Authorization": headers["Authorization"]},
             )
-            payload = _decode_json_body(response)
+            final_status = _response_status_code(response)
+            facts["http_status_class"] = _http_status_class(final_status)
+            facts["response_content_type"] = _response_content_type(response)
         except HttpsTransportError as exc:
             raise _map_transport_error(exc) from None
         except (
@@ -668,27 +975,83 @@ class NvidiaNimMediaSuggestionProvider:
             raise
         except Exception:
             raise MediaSuggestionProviderFailedError(SUGGESTION_PROVIDER_FAILED_MESSAGE) from None
-        facts = classify_chat_completion_choice(payload)
-        content_text = extract_message_content(payload)
+
         try:
-            parsed = parse_json_object_content_text(content_text)
-        except MediaSuggestionProviderInvalidResponseError:
-            if facts.get("finish_reason") == "length":
-                raise MediaSuggestionProviderTruncatedResponseError(
+            payload = _decode_json_body(response)
+        except (json.JSONDecodeError, UnicodeError, MediaSuggestionProviderInvalidResponseError):
+            facts.update(
+                {
+                    "parser_stage": "provider_envelope_json",
+                    "json_decode_stage": "provider_envelope_failed",
+                    "terminal_domain_error": "PROVIDER_INVALID_RESPONSE",
+                }
+            )
+            _emit_movie_response_diagnostics(
+                facts,
+                level="WARNING",
+                error_code="PROVIDER_INVALID_RESPONSE",
+            )
+            raise MediaSuggestionProviderInvalidResponseError(
+                SUGGESTION_PROVIDER_INVALID_RESPONSE_MESSAGE
+            ) from None
+
+        facts.update(classify_chat_completion_choice(payload))
+        try:
+            content_text = extract_movie_message_content(payload, facts=facts)
+            parsed = parse_movie_json_object_content_text(content_text, facts=facts)
+            schema_error = _movie_schema_error_category(parsed)
+            if schema_error is not None:
+                facts["schema_validation_stage"] = "failed"
+                facts["schema_error_category"] = schema_error
+                raise MediaSuggestionProviderInvalidResponseError(
                     SUGGESTION_PROVIDER_INVALID_RESPONSE_MESSAGE
-                ) from None
-            raise
-        try:
-            return parse_movie_identification_payload(
+                )
+            suggestion = parse_movie_identification_payload(
                 parsed,
                 provider_id=self._provider_id,
                 model_id=self._model_id,
                 derivative_count=1,
             )
+        except MediaSuggestionProviderTruncatedResponseError:
+            facts["terminal_domain_error"] = "PROVIDER_RESPONSE_TRUNCATED"
+            _emit_movie_response_diagnostics(
+                facts,
+                level="WARNING",
+                error_code="PROVIDER_RESPONSE_TRUNCATED",
+            )
+            raise
+        except MediaSuggestionProviderInvalidResponseError:
+            if facts.get("schema_validation_stage") == "not_started":
+                facts["schema_validation_stage"] = "not_reached"
+            facts["terminal_domain_error"] = "PROVIDER_INVALID_RESPONSE"
+            _emit_movie_response_diagnostics(
+                facts,
+                level="WARNING",
+                error_code="PROVIDER_INVALID_RESPONSE",
+            )
+            raise
         except FrameNestMovieIdentificationError:
+            facts["schema_validation_stage"] = "failed"
+            facts["schema_error_category"] = "domain_constraint"
+            facts["terminal_domain_error"] = "PROVIDER_INVALID_RESPONSE"
+            _emit_movie_response_diagnostics(
+                facts,
+                level="WARNING",
+                error_code="PROVIDER_INVALID_RESPONSE",
+            )
             raise MediaSuggestionProviderInvalidResponseError(
                 SUGGESTION_PROVIDER_INVALID_RESPONSE_MESSAGE
             ) from None
+        facts["schema_validation_stage"] = "succeeded"
+        facts["schema_error_category"] = None
+        facts["parser_stage"] = "completed"
+        facts["terminal_domain_error"] = None
+        _emit_movie_response_diagnostics(
+            facts,
+            level="INFO",
+            error_code=None,
+        )
+        return suggestion
 
     def test_connection(self) -> None:
         body_dict = build_nvidia_connection_test_body(model_id=self._model_id)

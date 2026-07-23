@@ -143,6 +143,49 @@ def test_movie_identification_payload_validation() -> None:
             derivative_count=1,
         )
 
+    invalid_payloads = [
+        {
+            "identified_title": None,
+            "release_year": "1999",
+            "identification_status": "unknown",
+            "confidence": "unknown",
+            "candidate_titles": [],
+            "genres": [],
+            "description": "Unknown.",
+            "tags": [],
+            "evidence_summary": "Insufficient evidence.",
+        },
+        {
+            "identified_title": None,
+            "release_year": None,
+            "identification_status": "unknown",
+            "confidence": "unknown",
+            "candidate_titles": [123],
+            "genres": [],
+            "description": "Unknown.",
+            "tags": [],
+            "evidence_summary": "Insufficient evidence.",
+        },
+        {
+            "identified_title": None,
+            "release_year": None,
+            "identification_status": "unknown",
+            "confidence": "unknown",
+            "candidate_titles": [],
+            "genres": [],
+            "description": "Unknown.",
+            "tags": [],
+        },
+    ]
+    for payload in invalid_payloads:
+        with pytest.raises(FrameNestMovieIdentificationError):
+            parse_movie_identification_payload(
+                payload,
+                provider_id="nvidia-nim",
+                model_id="test-model",
+                derivative_count=1,
+            )
+
     with pytest.raises(FrameNestMovieIdentificationError):
         parse_movie_identification_payload(
             {
@@ -204,6 +247,7 @@ def test_nvidia_generic_reasoning_off_movie_reasoning_on() -> None:
     movie_body = build_nvidia_movie_identification_body(movie_request, model_id="test-model")
     assert movie_body["chat_template_kwargs"]["enable_thinking"] is True
     assert movie_body["chat_template_kwargs"]["reasoning_budget"] == 2048
+    assert movie_body["reasoning_budget"] == 2048
     assert movie_body["max_tokens"] == 4096
     assert movie_body["thinking_token_budget"] == 2048 + 256
     images = [

@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-import math
-import re
 
 from framenest.domain.media_classification import (
     IdentificationConfidence,
@@ -22,7 +20,6 @@ MAX_DESCRIPTION_LENGTH = 2000
 MAX_TAG_COUNT = 12
 MAX_TAG_LENGTH = 64
 MAX_EVIDENCE_LENGTH = 500
-_YEAR_PATTERN = re.compile(r"^[12][0-9]{3}$")
 
 
 class FrameNestMovieIdentificationError(ValueError):
@@ -157,7 +154,7 @@ def parse_movie_identification_payload(
         "tags",
         "evidence_summary",
     }
-    if set(payload) - allowed:
+    if set(payload) != allowed:
         raise FrameNestMovieIdentificationError(INVALID_MOVIE_IDENTIFICATION_MESSAGE)
 
     status_raw = payload.get("identification_status")
@@ -173,22 +170,19 @@ def parse_movie_identification_payload(
         raise FrameNestMovieIdentificationError(INVALID_MOVIE_IDENTIFICATION_MESSAGE)
 
     year = payload.get("release_year")
-    if year is not None:
-        if isinstance(year, str) and _YEAR_PATTERN.fullmatch(year):
-            year = int(year)
-        elif isinstance(year, float) and math.isfinite(year) and year == int(year):
-            year = int(year)
-        elif not isinstance(year, int) or isinstance(year, bool):
-            raise FrameNestMovieIdentificationError(INVALID_MOVIE_IDENTIFICATION_MESSAGE)
-
-    candidates = payload.get("candidate_titles", [])
-    genres = payload.get("genres", [])
-    tags = payload.get("tags", [])
-    if not isinstance(candidates, list) or not isinstance(genres, list) or not isinstance(tags, list):
+    if year is not None and (not isinstance(year, int) or isinstance(year, bool)):
         raise FrameNestMovieIdentificationError(INVALID_MOVIE_IDENTIFICATION_MESSAGE)
 
-    description = payload.get("description")
-    evidence = payload.get("evidence_summary")
+    candidates = payload["candidate_titles"]
+    genres = payload["genres"]
+    tags = payload["tags"]
+    if not isinstance(candidates, list) or not isinstance(genres, list) or not isinstance(tags, list):
+        raise FrameNestMovieIdentificationError(INVALID_MOVIE_IDENTIFICATION_MESSAGE)
+    if not all(isinstance(item, str) for item in candidates + genres + tags):
+        raise FrameNestMovieIdentificationError(INVALID_MOVIE_IDENTIFICATION_MESSAGE)
+
+    description = payload["description"]
+    evidence = payload["evidence_summary"]
     if not isinstance(description, str) or not isinstance(evidence, str):
         raise FrameNestMovieIdentificationError(INVALID_MOVIE_IDENTIFICATION_MESSAGE)
 
@@ -197,10 +191,10 @@ def parse_movie_identification_payload(
         release_year=year,
         identification_status=status,
         confidence=confidence,
-        candidate_titles=tuple(str(item) for item in candidates),
-        genres=tuple(str(item) for item in genres),
+        candidate_titles=tuple(candidates),
+        genres=tuple(genres),
         description=description,
-        tags=tuple(str(item) for item in tags),
+        tags=tuple(tags),
         evidence_summary=evidence,
         provider_id=provider_id,
         model_id=model_id,
@@ -254,6 +248,8 @@ Return exactly one JSON object and no Markdown, commentary, prefix, suffix,
 explanation, hidden reasoning, or chain-of-thought. Keys must be only:
 identified_title, release_year, identification_status, confidence,
 candidate_titles, genres, description, tags, evidence_summary.
+All nine keys are required. End any internal reasoning before emitting the
+object, and never place the final object only inside reasoning.
 
 Contracts:
 - identification_status: identified | unknown | ambiguous
@@ -265,6 +261,11 @@ Contracts:
 - Do not invent a title when uncertain
 - Low confidence must not claim a definitive identity
 - evidence_summary: brief final evidence only; never include chain-of-thought
+- When evidence is insufficient, return this schema-compatible result:
+  {{"identified_title":null,"release_year":null,"identification_status":"unknown",
+  "confidence":"unknown","candidate_titles":[],"genres":[],
+  "description":"Movie could not be identified from the available frames.",
+  "tags":[],"evidence_summary":"Insufficient visual evidence."}}
 
 Local hints:
 {chr(10).join(hint_lines)}

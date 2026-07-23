@@ -16,6 +16,7 @@ from framenest.application.movie_identification import (
     MovieIdentificationRequest,
     MovieIdentificationSuggestion,
 )
+from framenest.application import movie_identification_lifecycle
 from framenest.application.movie_identification_lifecycle import (
     ExecuteMovieIdentificationRun,
 )
@@ -290,7 +291,15 @@ def test_prior_one_argument_supported_media_type_call_raises_typeerror() -> None
         supported_media_type("clips/sample.mp4")  # type: ignore[misc, arg-type]
 
 
-def test_movie_identification_accepts_eligible_published_video() -> None:
+def test_movie_identification_accepts_eligible_published_video(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events: list[dict[str, Any]] = []
+    monkeypatch.setattr(
+        movie_identification_lifecycle.LOGGER,
+        "emit",
+        lambda **fields: events.append(fields),
+    )
     executor, repository, provider, preparer = _executor()
     result = executor.execute(repository.run)
 
@@ -308,12 +317,26 @@ def test_movie_identification_accepts_eligible_published_video() -> None:
     body = build_nvidia_movie_identification_body(request, model_id="fake-model")
     assert body["chat_template_kwargs"]["enable_thinking"] is True
     assert body["chat_template_kwargs"]["reasoning_budget"] == 2048
+    assert body["reasoning_budget"] == 2048
     assert body["max_tokens"] == 4096
     assert body["thinking_token_budget"] == 2304
     images = [
         part for part in body["messages"][0]["content"] if part.get("type") == "image_url"
     ]
     assert len(images) == 1
+    assert len(events) == 1
+    assert events[0]["level"] == "INFO"
+    assert events[0]["error_code"] is None
+    assert events[0]["context"] == {
+        "run_uuid": RUN_ID.to_string(),
+        "supersedes_run_uuid": None,
+        "lineage": "primary",
+        "terminal_state": "analyzed",
+        "terminal_domain_error": None,
+        "provider_submission_occurred": True,
+        "durable_suggestion_exists": True,
+    }
+    assert "result_json" not in events[0]["context"]
 
 
 def test_movie_identification_rejects_unsupported_media_closed() -> None:
@@ -379,11 +402,19 @@ def test_truncated_provider_response_classified_distinctly() -> None:
     assert repository.failed_kwargs["derivative_count"] == 1
 
 
-def test_invalid_provider_response_remains_distinct_from_truncation() -> None:
+def test_invalid_provider_response_remains_distinct_from_truncation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from framenest.application.media_suggestion import (
         MediaSuggestionProviderInvalidResponseError,
     )
 
+    events: list[dict[str, Any]] = []
+    monkeypatch.setattr(
+        movie_identification_lifecycle.LOGGER,
+        "emit",
+        lambda **fields: events.append(fields),
+    )
     executor, repository, provider, preparer = _executor(
         provider_error=MediaSuggestionProviderInvalidResponseError("invalid")
     )
@@ -395,3 +426,15 @@ def test_invalid_provider_response_remains_distinct_from_truncation() -> None:
     assert repository.failed_kwargs["provider_submission_occurred"] is True
     assert type(provider.error) is MediaSuggestionProviderInvalidResponseError
     assert len(preparer.calls) == 1
+    assert len(events) == 1
+    assert events[0]["level"] == "WARNING"
+    assert events[0]["error_code"] == "PROVIDER_INVALID_RESPONSE"
+    assert events[0]["context"] == {
+        "run_uuid": RUN_ID.to_string(),
+        "supersedes_run_uuid": None,
+        "lineage": "primary",
+        "terminal_state": "failed",
+        "terminal_domain_error": "PROVIDER_INVALID_RESPONSE",
+        "provider_submission_occurred": True,
+        "durable_suggestion_exists": False,
+    }

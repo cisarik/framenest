@@ -32,6 +32,7 @@ class HttpsJsonResponse:
 
     status_code: int
     body: bytes
+    content_type: str | None = None
 
 
 class HttpsJsonTransport:
@@ -82,7 +83,11 @@ class HttpsJsonTransport:
                 if response.status in {301, 302, 303, 307, 308}:
                     raise HttpsTransportError(TRANSPORT_REDIRECT_REJECTED_MESSAGE)
                 body_bytes = self._read_bounded(response)
-                return HttpsJsonResponse(status_code=response.status, body=body_bytes)
+                return HttpsJsonResponse(
+                    status_code=response.status,
+                    body=body_bytes,
+                    content_type=_response_content_type(response),
+                )
         except HttpsTransportError:
             raise
         except urllib.error.HTTPError as exc:
@@ -123,3 +128,26 @@ class HttpsJsonTransport:
 
     def __repr__(self) -> str:
         return "HttpsJsonTransport(<redacted>)"
+
+
+def _response_content_type(response: object) -> str | None:
+    """Return only a bounded normalized media type from response headers."""
+    headers = getattr(response, "headers", None)
+    if headers is None:
+        return None
+    get_content_type = getattr(headers, "get_content_type", None)
+    if callable(get_content_type):
+        value = get_content_type()
+    else:
+        get = getattr(headers, "get", None)
+        value = get("Content-Type") if callable(get) else None
+        if isinstance(value, str):
+            value = value.split(";", maxsplit=1)[0].strip()
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip().lower()
+    if not normalized or len(normalized) > 100:
+        return None
+    if not all(character.isalnum() or character in "!#$&^_.+-/" for character in normalized):
+        return None
+    return normalized

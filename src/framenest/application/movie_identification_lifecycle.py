@@ -57,6 +57,10 @@ from framenest.domain.media_classification import (
     MOVIE_IDENTIFICATION_ANALYSIS_DEFINITION,
     MOVIE_IDENTIFICATION_RESULT_SCHEMA_VERSION,
 )
+from framenest.structured_logging import get_logger
+
+
+LOGGER = get_logger("movie_identification_lifecycle")
 
 
 class MovieIdentificationProvider(Protocol):
@@ -101,7 +105,7 @@ class ExecuteMovieIdentificationRun:
         except Exception as exc:
             return self._persist_failure(claimed, exc)
         try:
-            return self.repository.record_analyzed(
+            analyzed = self.repository.record_analyzed(
                 run_id=claimed.id.to_string(),
                 expected_version=claimed.version,
                 provider_id=suggestion.provider_id,
@@ -124,6 +128,13 @@ class ExecuteMovieIdentificationRun:
             raise MediaAnalysisLifecycleError(
                 "movie identification persistence failed"
             ) from exc
+        _emit_terminal_lifecycle_event(
+            analyzed,
+            terminal_domain_error=None,
+            provider_submission_occurred=True,
+            durable_suggestion_exists=True,
+        )
+        return analyzed
 
     def _identify(
         self,
@@ -178,8 +189,9 @@ class ExecuteMovieIdentificationRun:
         exc: Exception,
     ) -> MediaAnalysisRun:
         error_code, error_message = _classify_movie_failure(exc)
+        provider_submission_occurred = _provider_submission_occurred(error_code)
         try:
-            return self.repository.record_failed(
+            failed = self.repository.record_failed(
                 run_id=claimed.id.to_string(),
                 expected_version=claimed.version,
                 error_code=error_code,
@@ -188,7 +200,7 @@ class ExecuteMovieIdentificationRun:
                 model_id=None,
                 prompt_version=None,
                 completed_at_ms=self.now_ms(),
-                provider_submission_occurred=_provider_submission_occurred(error_code),
+                provider_submission_occurred=provider_submission_occurred,
                 analysis_profile=AnalysisProfile.MOVIE_IDENTIFICATION.value,
                 reasoning_enabled=True,
                 derivative_strategy=CONTACT_SHEET_DERIVATIVE_STRATEGY,
@@ -198,6 +210,13 @@ class ExecuteMovieIdentificationRun:
             raise MediaAnalysisLifecycleError(
                 "movie identification failure persistence failed"
             ) from persist_exc
+        _emit_terminal_lifecycle_event(
+            failed,
+            terminal_domain_error=error_code,
+            provider_submission_occurred=provider_submission_occurred,
+            durable_suggestion_exists=False,
+        )
+        return failed
 
 
 def request_movie_identification(
@@ -253,3 +272,33 @@ _PROVIDER_SUBMISSION_ERROR_CODES = frozenset(
 def _provider_submission_occurred(error_code: str) -> bool:
     """True only when failure classification implies the provider adapter was entered."""
     return error_code in _PROVIDER_SUBMISSION_ERROR_CODES
+
+
+def _emit_terminal_lifecycle_event(
+    run: MediaAnalysisRun,
+    *,
+    terminal_domain_error: str | None,
+    provider_submission_occurred: bool,
+    durable_suggestion_exists: bool,
+) -> None:
+    supersedes_run_uuid = (
+        run.supersedes_run_id.to_string() if run.supersedes_run_id is not None else None
+    )
+    LOGGER.emit(
+        level="INFO" if terminal_domain_error is None else "WARNING",
+        event="movie_identification_run_persisted",
+        operation="execute_movie_identification_run",
+        error_code=terminal_domain_error,
+        retryable=False,
+        context={
+            "run_uuid": run.id.to_string(),
+            "supersedes_run_uuid": supersedes_run_uuid,
+            "lineage": (
+                "correction" if supersedes_run_uuid is not None else "primary"
+            ),
+            "terminal_state": run.state.value,
+            "terminal_domain_error": terminal_domain_error,
+            "provider_submission_occurred": provider_submission_occurred,
+            "durable_suggestion_exists": durable_suggestion_exists,
+        },
+    )

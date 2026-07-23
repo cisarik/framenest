@@ -90,7 +90,7 @@ ANALYSIS_PROFILE_BY_DEFINITION: dict[str, AnalysisProfile] = {
 }
 
 MOVIE_IDENTIFICATION_RESULT_SCHEMA_VERSION = "framenest-movie-identification-result-v1"
-MOVIE_IDENTIFICATION_PROMPT_VERSION = "framenest-movie-identification-prompt-v1"
+MOVIE_IDENTIFICATION_PROMPT_VERSION = "framenest-movie-identification-prompt-v2"
 
 # Bounded reasoning budget for movie identification (NVIDIA chat_template_kwargs).
 # With thinking enabled, max_tokens must leave room for the final structured answer;
