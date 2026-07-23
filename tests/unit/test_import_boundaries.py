@@ -111,9 +111,30 @@ def test_importing_domain_has_no_identity_or_io_side_effects(
     monkeypatch.setattr("os.getenv", fail_getenv)
     monkeypatch.setattr("os.environ.get", fail_getenv)
 
-    sys.modules.pop("framenest.domain.identities", None)
-    sys.modules.pop("framenest.domain", None)
+    # The fresh import must not leak a second copy of the domain package into
+    # sys.modules: later tests keep references to the originally imported
+    # domain classes, and a replaced module object would break their
+    # isinstance identity. Preserve and restore the exact prior state.
+    def _domain_module_names() -> set[str]:
+        return {
+            name
+            for name in sys.modules
+            if name == "framenest.domain" or name.startswith("framenest.domain.")
+        }
 
-    importlib.import_module("framenest.domain")
+    preexisting = _domain_module_names()
+    original_domain = sys.modules.pop("framenest.domain", None)
+    original_identities = sys.modules.pop("framenest.domain.identities", None)
+    try:
+        importlib.import_module("framenest.domain")
 
-    assert bind_attempts == []
+        assert bind_attempts == []
+    finally:
+        for name in _domain_module_names() - preexisting:
+            sys.modules.pop(name, None)
+        sys.modules.pop("framenest.domain", None)
+        sys.modules.pop("framenest.domain.identities", None)
+        if original_domain is not None:
+            sys.modules["framenest.domain"] = original_domain
+        if original_identities is not None:
+            sys.modules["framenest.domain.identities"] = original_identities
