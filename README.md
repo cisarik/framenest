@@ -141,6 +141,13 @@ Reload, real host deployment, Tailscale behavior, authentication, and AppArmor/U
 
 FrameNest reads `FRAMENEST_DATABASE_PATH` through the centralized settings boundary.
 
+Administrative and production CLI commands never read a `.env` file from the
+caller's working directory. An environment file is applied only when
+explicitly requested through `FRAMENEST_ENV_FILE` (or the explicit
+`load_settings(env_file=...)` parameter); a missing or unreadable explicit
+file fails closed with a sanitized error, and process environment variables
+keep the highest precedence.
+
 The browser-development launcher uses a persistent development database at:
 
 ```text
@@ -212,6 +219,13 @@ The CLI never receives downloader output or filesystem paths.
 ./framenest youtube status CLAIM_ID
 ./framenest youtube retry CLAIM_ID
 ```
+
+These are CachyOS development-launcher forms. On the NUC production host the
+release-local `framenest-youtube` console entry point is the operator
+interface under the protected production environment and explicit release
+working directory; it does not require Fish. See the operator command
+execution contract in
+[docs/UBUNTU_NUC_DEPLOYMENT.md](docs/UBUNTU_NUC_DEPLOYMENT.md).
 
 The server independently validates each URL. Only supported HTTPS YouTube
 single-video forms are accepted; playlists, authenticated or live media,

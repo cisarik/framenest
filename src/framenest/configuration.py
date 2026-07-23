@@ -10,14 +10,17 @@ from typing import Any
 import uuid
 
 from pydantic import Field, SecretStr, field_validator, model_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, SettingsConfigDict, SettingsError
 
 from framenest.domain.media_analysis_runs import (
     DEFAULT_MAX_ANALYSIS_ATTEMPTS,
     MAX_CONFIGURED_ANALYSIS_ATTEMPTS,
 )
 
-DEFAULT_ENV_FILE = Path(".env")
+ENV_FILE_ENVIRONMENT_VARIABLE = "FRAMENEST_ENV_FILE"
+EXPLICIT_ENV_FILE_MESSAGE = (
+    "The explicitly configured environment file is missing or unreadable."
+)
 DEVELOPMENT_DATABASE_DIRECTORY = "framenest-development"
 DEVELOPMENT_DATABASE_FILENAME = "catalog.sqlite3"
 DEVELOPMENT_GALLERY_PREVIEW_DIRECTORY = "gallery-previews"
@@ -214,14 +217,65 @@ class FrameNestSettings(BaseSettings):
         return normalized
 
 
+class FrameNestConfigurationError(Exception):
+    """Sanitized configuration failure safe for operator-facing output."""
+
+
+class _EnvFileNotSpecified:
+    """Sentinel marking an omitted ``env_file`` argument."""
+
+
+_ENV_FILE_NOT_SPECIFIED = _EnvFileNotSpecified()
+
+
 def load_settings(
     *,
-    env_file: Path | str | None = DEFAULT_ENV_FILE,
+    env_file: Path | str | None | _EnvFileNotSpecified = _ENV_FILE_NOT_SPECIFIED,
 ) -> FrameNestSettings:
-    """Load settings with deterministic precedence for the given env file."""
+    """Load settings with deterministic explicit-only environment-file authority.
+
+    Environment-file selection:
+
+    - an explicit ``env_file`` path is authoritative and must name a readable
+      regular file;
+    - ``env_file=None`` disables environment-file loading entirely;
+    - an omitted argument consults the ``FRAMENEST_ENV_FILE`` process
+      environment variable and, when set, treats it as an authoritative
+      explicit file; when unset or empty, no environment file is loaded.
+
+    The caller's current working directory is never probed for an implicit
+    ``.env`` file, so administrative and production commands behave
+    identically from any working directory. An explicitly requested file that
+    is missing, unreadable, or unloadable fails closed with
+    ``FrameNestConfigurationError``. Process environment variables always
+    override environment-file values.
+    """
+    if isinstance(env_file, _EnvFileNotSpecified):
+        requested = os.environ.get(ENV_FILE_ENVIRONMENT_VARIABLE, "").strip()
+        if not requested:
+            return FrameNestSettings(_env_file=None)
+        env_file = requested
     if env_file is None:
         return FrameNestSettings(_env_file=None)
-    return FrameNestSettings(_env_file=env_file)
+    explicit_path = _require_readable_env_file(env_file)
+    try:
+        return FrameNestSettings(_env_file=explicit_path)
+    except (OSError, SettingsError) as exc:
+        raise FrameNestConfigurationError(EXPLICIT_ENV_FILE_MESSAGE) from exc
+
+
+def _require_readable_env_file(env_file: Path | str) -> Path:
+    try:
+        candidate = Path(env_file).expanduser()
+        if not candidate.is_file():
+            raise FrameNestConfigurationError(EXPLICIT_ENV_FILE_MESSAGE)
+        with candidate.open("rb"):
+            pass
+    except FrameNestConfigurationError:
+        raise
+    except OSError as exc:
+        raise FrameNestConfigurationError(EXPLICIT_ENV_FILE_MESSAGE) from exc
+    return candidate
 
 
 def _paths_overlap(first: Path, second: Path | None) -> bool:

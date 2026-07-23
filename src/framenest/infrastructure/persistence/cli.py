@@ -8,7 +8,7 @@ import sys
 from collections.abc import Sequence
 from typing import NoReturn
 
-from framenest.configuration import load_settings
+from framenest.configuration import FrameNestConfigurationError, load_settings
 from framenest.infrastructure.persistence.errors import FrameNestPersistenceError
 from framenest.infrastructure.persistence.migrations import (
     MigrationStatus,
@@ -17,6 +17,7 @@ from framenest.infrastructure.persistence.migrations import (
 )
 
 COMMAND_ERROR_CODE = "FRAMENEST_DB_COMMAND_FAILED"
+CONFIGURATION_ERROR_CODE = "FRAMENEST_DB_CONFIGURATION_FAILED"
 
 
 class _UsageError(Exception):
@@ -45,10 +46,25 @@ def main(argv: Sequence[str] | None = None) -> int:
         _write_success(operation, status)
         return 0
     except _UsageError:
-        _write_error(operation=operation)
+        _write_error(
+            operation=operation,
+            error_code=COMMAND_ERROR_CODE,
+            message="Database command failed.",
+        )
         return 2
+    except FrameNestConfigurationError:
+        _write_error(
+            operation=operation,
+            error_code=CONFIGURATION_ERROR_CODE,
+            message="FrameNest configuration could not be loaded.",
+        )
+        return 1
     except (FrameNestPersistenceError, Exception):
-        _write_error(operation=operation)
+        _write_error(
+            operation=operation,
+            error_code=COMMAND_ERROR_CODE,
+            message="Database command failed.",
+        )
         return 1
 
 
@@ -70,12 +86,12 @@ def _write_success(operation: str, status: MigrationStatus) -> None:
     print(json.dumps(payload, separators=(",", ":")), file=sys.stdout)
 
 
-def _write_error(*, operation: str) -> None:
+def _write_error(*, operation: str, error_code: str, message: str) -> None:
     payload = {
         "operation": operation,
         "state": "error",
-        "error_code": COMMAND_ERROR_CODE,
-        "message": "Database command failed.",
+        "error_code": error_code,
+        "message": message,
     }
     print(json.dumps(payload, separators=(",", ":")), file=sys.stderr)
 

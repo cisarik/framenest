@@ -33,6 +33,7 @@ SERVICE_NAME = "framenest.service"
 REMOTE_CREDENTIAL_DIR = "/etc/framenest/credentials"
 REMOTE_DROPIN_PATH = "/etc/systemd/system/framenest.service.d/20-ai-credential.conf"
 REMOTE_AI_CONFIG_PATH = "/var/lib/framenest/ai/config.json"
+REMOTE_RELEASE_ROOT = "/opt/framenest/current"
 REMOTE_AI_BIN = "/opt/framenest/current/.venv/bin/framenest-ai"
 REMOTE_ROLLBACK_DIR = "/run/framenest-ai-credential-deploy"
 HELPER_DIR = Path(__file__).resolve().parent
@@ -523,7 +524,7 @@ def _remote_configure_ai(*, provider_id: str, model_id: str) -> str:
     return "\n".join(
         [
             "set -e",
-            f"sudo -n -u framenest {REMOTE_AI_BIN} --config-path {REMOTE_AI_CONFIG_PATH} configure --provider-id {quoted_provider} --model-id {quoted_model} --yes",
+            f"sudo -n -u framenest --chdir={REMOTE_RELEASE_ROOT} {REMOTE_AI_BIN} --config-path {REMOTE_AI_CONFIG_PATH} configure --provider-id {quoted_provider} --model-id {quoted_model} --yes",
         ]
     )
 

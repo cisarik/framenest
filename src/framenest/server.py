@@ -2,10 +2,16 @@
 
 from __future__ import annotations
 
+import sys
+
 import uvicorn
 
 from framenest.adapters.api.application import create_app
-from framenest.configuration import FrameNestSettings, load_settings
+from framenest.configuration import (
+    FrameNestConfigurationError,
+    FrameNestSettings,
+    load_settings,
+)
 from framenest.structured_logging import build_uvicorn_log_config
 
 
@@ -39,6 +45,9 @@ def main() -> None:
         run_server()
     except KeyboardInterrupt:
         return
+    except FrameNestConfigurationError as exc:
+        print(f"FrameNest configuration error: {exc}", file=sys.stderr)
+        raise SystemExit(1) from None
 
 
 if __name__ == "__main__":

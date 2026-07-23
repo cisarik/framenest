@@ -12,7 +12,11 @@ import sys
 import time
 from typing import NoReturn, Protocol
 
-from framenest.configuration import FrameNestSettings, load_settings
+from framenest.configuration import (
+    FrameNestConfigurationError,
+    FrameNestSettings,
+    load_settings,
+)
 from framenest.domain.identities import (
     FrameNestIdentityError,
     YouTubeAcquisitionClaimId,
@@ -170,6 +174,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             "YouTube operator ingestion is not configured.",
         )
         return 3
+    except FrameNestConfigurationError:
+        _write_error(
+            "YOUTUBE_CONFIGURATION_FAILED",
+            "FrameNest configuration could not be loaded.",
+        )
+        return 6
     except _TerminalFailureError as exc:
         _write_error(
             "YOUTUBE_ACQUISITION_FAILED",

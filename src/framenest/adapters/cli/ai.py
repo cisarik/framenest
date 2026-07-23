@@ -23,7 +23,7 @@ from framenest.infrastructure.ai.still_frame_smoke import (
     build_still_frame_smoke_request,
     prepare_still_frame_smoke_images,
 )
-from framenest.configuration import load_settings
+from framenest.configuration import FrameNestConfigurationError, load_settings
 from framenest.infrastructure.ai.configuration import (
     AiConfigurationError,
     AiServerConfig,
@@ -383,7 +383,12 @@ def still_frame_smoke_command(
 
 
 def _resolve(context: _CliContext) -> ResolvedAiProvider:
-    settings = load_settings()
+    try:
+        settings = load_settings()
+    except FrameNestConfigurationError as exc:
+        raise AiConfigurationError(
+            "FrameNest configuration could not be loaded."
+        ) from exc
     return resolve_ai_provider(settings, config_path=context.config_path)
 
 

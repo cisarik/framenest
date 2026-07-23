@@ -506,6 +506,27 @@ def test_backup_records_credential_dropin_config_and_complete_marker() -> None:
     assert "/var/lib/framenest/ai/config.json" in command
 
 
+def test_service_account_configure_establishes_explicit_release_cwd() -> None:
+    command = production_ai_deploy._remote_configure_ai(
+        provider_id="vercel-ai-gateway",
+        model_id="google/gemini-3.1-flash-lite",
+    )
+
+    assert "sudo -n -u framenest --chdir=/opt/framenest/current" in command
+    assert "/opt/framenest/current/.venv/bin/framenest-ai" in command
+    assert "--config-path /var/lib/framenest/ai/config.json" in command
+
+
+def test_service_account_configure_quotes_operator_values() -> None:
+    command = production_ai_deploy._remote_configure_ai(
+        provider_id="vercel-ai-gateway",
+        model_id="model with spaces",
+    )
+
+    assert "'model with spaces'" in command
+    assert "--chdir=/opt/framenest/current" in command
+
+
 def test_pre_existing_recovery_fails_closed_before_mutation(
     tmp_path: Path,
     capsys: Any,

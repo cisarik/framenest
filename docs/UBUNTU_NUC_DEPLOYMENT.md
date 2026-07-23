@@ -82,9 +82,74 @@ framenest-production check-database-ready
 framenest-production serve
 ```
 
+Release-local operator console entry points:
+
+```text
+/opt/framenest/current/.venv/bin/framenest-db
+/opt/framenest/current/.venv/bin/framenest-youtube
+/opt/framenest/current/.venv/bin/framenest-ai
+/opt/framenest/current/.venv/bin/framenest-backup
+```
+
 The service must remain loopback-first, foreground under systemd, journal
 captured, explicit-migration only, and protected by the read-only database
 readiness gate.
+
+## Operator Command Execution Contract
+
+Every FrameNest service-account operator command on the NUC must run under an
+explicit identity transition that also establishes the immutable release root
+as the working directory:
+
+```text
+sudo -u framenest --chdir=/opt/framenest/current \
+  env FRAMENEST_ENV_FILE=/etc/framenest/framenest.env \
+  /opt/framenest/current/.venv/bin/<entry-point> <arguments>
+```
+
+- Ubuntu Server 24.04 provides `sudo` with `--chdir` support. The
+  service-account process always starts inside the immutable release root,
+  which that account can traverse. It never inherits the caller's working
+  directory.
+- Configuration authority is explicit. FrameNest administrative and
+  production commands never read a `.env` file from any working directory.
+  An environment file is applied only when explicitly requested through
+  `FRAMENEST_ENV_FILE`; a missing or unreadable explicit file fails closed
+  with a sanitized error, and process environment variables keep the highest
+  precedence.
+- Never run service-account commands from a user home directory. Never solve
+  a working-directory or permission failure by broadening access to a user
+  home or any other unrelated directory, changing its ownership, or adding
+  the service account to a personal group.
+- The repository-root `./framenest` launcher is CachyOS Fish development
+  tooling. It is not installed on the NUC and must not be used there. The
+  release-local console entry points above are the only NUC operator
+  interface; Fish is not a production prerequisite.
+- `framenest-production` is an exception by design: it reads only the
+  process environment (supplied by the systemd unit's `EnvironmentFile`)
+  and runs readiness and serving through the unit's own
+  `WorkingDirectory=/opt/framenest/current`.
+
+### YouTube Operator Ingestion
+
+YouTube manual ingestion uses the release-local `framenest-youtube` console
+entry point under the same contract, never the development launcher:
+
+```text
+sudo -u framenest --chdir=/opt/framenest/current \
+  env FRAMENEST_ENV_FILE=/etc/framenest/framenest.env \
+  /opt/framenest/current/.venv/bin/framenest-youtube ingest URL --yes
+sudo -u framenest --chdir=/opt/framenest/current \
+  env FRAMENEST_ENV_FILE=/etc/framenest/framenest.env \
+  /opt/framenest/current/.venv/bin/framenest-youtube status CLAIM_ID
+sudo -u framenest --chdir=/opt/framenest/current \
+  env FRAMENEST_ENV_FILE=/etc/framenest/framenest.env \
+  /opt/framenest/current/.venv/bin/framenest-youtube retry CLAIM_ID --yes
+```
+
+The CLI reaches only the loopback server. Without `--yes` it asks for
+interactive confirmation on stdin, which requires an interactive operator
+session.
 
 ## 0. Preconditions And Authority
 
@@ -332,7 +397,13 @@ repository script, but this repository task does not install anything into
 Service-affecting mutation:
 
 - Run explicit migration against the configured production database before
-  service activation.
+  service activation, using the operator command execution contract:
+
+```text
+sudo -u framenest --chdir=/opt/framenest/current \
+  env FRAMENEST_ENV_FILE=/etc/framenest/framenest.env \
+  /opt/framenest/current/.venv/bin/framenest-db migrate
+```
 
 Security control: explicit migration.
 
@@ -360,16 +431,32 @@ Evidence:
 
 ## 6. Readiness Verification
 
-Read-only check:
+Read-only checks:
+
+The readiness gate itself runs inside the service unit through
+`ExecStartPre` with the unit's own `WorkingDirectory` and `EnvironmentFile`:
 
 ```text
 /opt/framenest/current/.venv/bin/framenest-production check-database-ready
 ```
 
-AI status preflight uses the network-free read-only form:
+Manual operator verification of the same migration contract uses the
+read-only status form under the operator command execution contract:
 
 ```text
-/opt/framenest/current/.venv/bin/framenest-ai status --no-write
+sudo -u framenest --chdir=/opt/framenest/current \
+  env FRAMENEST_ENV_FILE=/etc/framenest/framenest.env \
+  /opt/framenest/current/.venv/bin/framenest-db status
+```
+
+AI status preflight uses the network-free read-only form with the explicit
+non-secret AI configuration path:
+
+```text
+sudo -u framenest --chdir=/opt/framenest/current \
+  env FRAMENEST_ENV_FILE=/etc/framenest/framenest.env \
+  /opt/framenest/current/.venv/bin/framenest-ai \
+  --config-path /var/lib/framenest/ai/config.json status --no-write
 ```
 
 The ordinary `framenest-ai status` command may record a safe local status

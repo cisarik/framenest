@@ -85,6 +85,30 @@ FRAMENEST_PORT=8123
 Overrides must be absolute paths. They are launcher/runtime inputs only and are
 not web API response data.
 
+## Local `.env` And Explicit Environment Files
+
+FrameNest commands never read a `.env` file from the caller's current working
+directory. An environment file is applied only when explicitly requested
+through the `FRAMENEST_ENV_FILE` environment variable or the explicit
+`load_settings(env_file=...)` parameter. A missing or unreadable explicit
+file fails closed with a sanitized error; process environment variables keep
+the highest precedence.
+
+For launcher-driven development commands (`ai`, `backup`, `library`,
+`previews`, `youtube`), the launcher deterministically exposes a regular
+non-symlink repository-root `.env` as `FRAMENEST_ENV_FILE` when one exists
+and the operator has not already set the variable. An ignored local `.env`
+anywhere else is never discovered implicitly. Direct `poetry run` usage can
+opt in explicitly:
+
+```text
+FRAMENEST_ENV_FILE=.env poetry run framenest-db status
+```
+
+The managed development server (`./framenest start`, `framenest-dev`) resolves
+its own explicit settings and never reads an environment file.
+`framenest-production` likewise reads only the process environment.
+
 ## Start And Migration
 
 `./framenest start` enforces loopback host `127.0.0.1`, resolves the development

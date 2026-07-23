@@ -762,6 +762,8 @@ FrameNest MUST use a layered configuration model with explicit precedence per [A
 
 Precedence from lowest to highest authority MUST be: safe program defaults; optional committed non-secret configuration; ignored local `.env` values; process environment variables; future approved secret-store values.
 
+The `.env` layer MUST be applied only when explicitly requested through `FRAMENEST_ENV_FILE` or an explicit `load_settings(env_file=...)` argument. Configuration loading MUST NOT implicitly probe the caller's working directory for a `.env` file. An explicitly requested environment file that is missing, unreadable, or unloadable MUST fail closed with a sanitized error that does not disclose the file path or contents.
+
 The default server host MUST be `127.0.0.1`. Public bind addresses MUST NOT be the default.
 
 Configuration MUST be loaded through a centralized boundary. Application and domain logic MUST NOT read environment variables directly throughout the codebase. The domain layer MUST remain independent of the concrete configuration library.
