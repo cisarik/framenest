@@ -16,6 +16,7 @@ framenest-ai = "framenest.adapters.cli.ai:main"
 framenest-production = "framenest.infrastructure.runtime.production:main"
 framenest-backup = "framenest.adapters.cli.backup:main"
 framenest-youtube = "framenest.adapters.cli.youtube:main"
+framenest-previews = "framenest.adapters.cli.previews:main"
 
 [tool.poetry]
 package-mode = true

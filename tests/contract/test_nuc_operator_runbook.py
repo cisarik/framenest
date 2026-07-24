@@ -94,6 +94,17 @@ def test_runbook_documents_youtube_release_local_entry_point() -> None:
     assert f"{RELEASE_ROOT}/.venv/bin/framenest-youtube retry CLAIM_ID --yes" in text
 
 
+def test_runbook_documents_previews_release_local_entry_point() -> None:
+    text = _ubuntu_text()
+
+    assert f"{RELEASE_ROOT}/.venv/bin/framenest-previews" in text
+    assert f"{RELEASE_ROOT}/.venv/bin/framenest-previews status" in text
+    assert (
+        f"{RELEASE_ROOT}/.venv/bin/framenest-previews generate --all --yes"
+        in text
+    )
+
+
 def test_runbook_documents_migration_command_under_operator_contract() -> None:
     text = _ubuntu_text()
 

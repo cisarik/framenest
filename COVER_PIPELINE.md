@@ -136,12 +136,18 @@ current safely observed source size and mtime behind the registered-root
 containment boundary. A source identity change or algorithm-version change
 therefore produces a new expected derivative key.
 
-Generation is explicit through:
+Generation is explicit through the packaged `framenest-previews` console entry
+point. Local CachyOS development may use the Fish launcher form; NUC production
+must use the release-local console entry point under the operator contract in
+[docs/UBUNTU_NUC_DEPLOYMENT.md](docs/UBUNTU_NUC_DEPLOYMENT.md):
 
 ```text
 ./framenest previews status
 ./framenest previews generate --library-id <library-id> --yes --max-items <n>
 ./framenest previews generate --all --yes --max-items <n>
+framenest-previews status
+framenest-previews generate --library-id <library-id> --yes --max-items <n>
+framenest-previews generate --all --yes --max-items <n>
 ```
 
 `status` is read-only and generation-free. `generate` displays a plan before

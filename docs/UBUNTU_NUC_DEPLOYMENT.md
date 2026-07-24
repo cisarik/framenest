@@ -89,6 +89,7 @@ Release-local operator console entry points:
 /opt/framenest/current/.venv/bin/framenest-youtube
 /opt/framenest/current/.venv/bin/framenest-ai
 /opt/framenest/current/.venv/bin/framenest-backup
+/opt/framenest/current/.venv/bin/framenest-previews
 ```
 
 The service must remain loopback-first, foreground under systemd, journal
@@ -150,6 +151,26 @@ sudo -u framenest --chdir=/opt/framenest/current \
 The CLI reaches only the loopback server. Without `--yes` it asks for
 interactive confirmation on stdin, which requires an interactive operator
 session.
+
+### Gallery Preview Operator Generation
+
+Persistent Gallery preview derivatives for GIF and video cards are generated
+explicitly through the release-local `framenest-previews` console entry point
+under the same contract, never the development launcher and never on demand
+from the Gallery preview HTTP endpoint:
+
+```text
+sudo -u framenest --chdir=/opt/framenest/current \
+  env FRAMENEST_ENV_FILE=/etc/framenest/framenest.env \
+  /opt/framenest/current/.venv/bin/framenest-previews status
+sudo -u framenest --chdir=/opt/framenest/current \
+  env FRAMENEST_ENV_FILE=/etc/framenest/framenest.env \
+  /opt/framenest/current/.venv/bin/framenest-previews generate --all --yes
+```
+
+`status` is read-only. `generate` prints a plan and requires `--yes` or an
+interactive confirmation before writing JPEG derivatives under
+`/var/cache/framenest/gallery-previews`.
 
 ## 0. Preconditions And Authority
 
