@@ -75,6 +75,33 @@ def build_ffmpeg_frame_argv(*, media_path: str, timestamp_ms: int) -> list[str]:
     ]
 
 
+def _extract_one_frame(
+    runner: ProcessRunner,
+    *,
+    ffmpeg_executable: str,
+    media_path: str,
+    timestamp_ms: int,
+) -> RepresentativeFrame | None:
+    try:
+        result = runner.run(
+            executable=ffmpeg_executable,
+            argv=build_ffmpeg_frame_argv(media_path=media_path, timestamp_ms=timestamp_ms),
+            timeout_seconds=FFMPEG_FRAME_TIMEOUT_SECONDS,
+            stdout_max_bytes=PNG_PAYLOAD_MAX_BYTES,
+            stderr_max_bytes=SUBPROCESS_STDERR_MAX_BYTES,
+        )
+    except ProcessExecutionError:
+        return None
+    if result.returncode != 0:
+        # Retain sanitized stderr only for process accounting; warning text stays fixed.
+        sanitize_retained_stderr(result.stderr)
+        return None
+    try:
+        return build_representative_frame(timestamp_ms=timestamp_ms, payload=result.stdout)
+    except FrameNestMediaAnalysisError:
+        return None
+
+
 def extract_representative_frames(
     runner: ProcessRunner,
     *,
@@ -89,26 +116,13 @@ def extract_representative_frames(
     aggregate_size = 0
 
     for target_ms in targets:
-        try:
-            result = runner.run(
-                executable=ffmpeg_executable,
-                argv=build_ffmpeg_frame_argv(media_path=media_path, timestamp_ms=target_ms),
-                timeout_seconds=FFMPEG_FRAME_TIMEOUT_SECONDS,
-                stdout_max_bytes=PNG_PAYLOAD_MAX_BYTES,
-                stderr_max_bytes=SUBPROCESS_STDERR_MAX_BYTES,
-            )
-        except ProcessExecutionError:
-            warnings.append(INDIVIDUAL_FRAME_FAILED_WARNING)
-            continue
-        if result.returncode != 0:
-            if sanitize_retained_stderr(result.stderr):
-                warnings.append(INDIVIDUAL_FRAME_FAILED_WARNING)
-            else:
-                warnings.append(INDIVIDUAL_FRAME_FAILED_WARNING)
-            continue
-        try:
-            frame = build_representative_frame(timestamp_ms=target_ms, payload=result.stdout)
-        except FrameNestMediaAnalysisError:
+        frame = _extract_one_frame(
+            runner,
+            ffmpeg_executable=ffmpeg_executable,
+            media_path=media_path,
+            timestamp_ms=target_ms,
+        )
+        if frame is None:
             warnings.append(INDIVIDUAL_FRAME_FAILED_WARNING)
             continue
         if aggregate_size + frame.byte_size > AGGREGATE_PNG_PAYLOAD_MAX_BYTES:
@@ -117,6 +131,21 @@ def extract_representative_frames(
         frames.append(frame)
 
     unique_frames = deduplicate_representative_frames(tuple(frames))
+    # Ultra-short / one-frame GIF and video sources can report a positive duration
+    # while mid-point seeks return empty payloads. Fall back to timestamp 0 once.
+    if not unique_frames and 0 not in targets:
+        frame = _extract_one_frame(
+            runner,
+            ffmpeg_executable=ffmpeg_executable,
+            media_path=media_path,
+            timestamp_ms=0,
+        )
+        if frame is None:
+            warnings.append(INDIVIDUAL_FRAME_FAILED_WARNING)
+        elif frame.byte_size > AGGREGATE_PNG_PAYLOAD_MAX_BYTES:
+            raise FrameNestMediaAnalysisError(INVALID_REPRESENTATIVE_FRAME_MESSAGE)
+        else:
+            unique_frames = (frame,)
     if not unique_frames:
         raise FrameNestMediaAnalysisError(FRAME_EXTRACTION_FAILED_MESSAGE)
     if len(unique_frames) > REQUESTED_FRAME_COUNT:

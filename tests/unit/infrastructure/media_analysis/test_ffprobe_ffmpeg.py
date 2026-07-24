@@ -215,9 +215,10 @@ def test_extract_frames_records_warning_for_individual_failure() -> None:
     assert warnings == (INDIVIDUAL_FRAME_FAILED_WARNING,)
 
 
-def test_extract_frames_fails_when_all_targets_fail() -> None:
+def test_extract_frames_fails_when_all_targets_and_zero_fallback_fail() -> None:
     runner = _SequenceRunner(
         [
+            ProcessRunResult(returncode=1, stdout=b"", stderr=b""),
             ProcessRunResult(returncode=1, stdout=b"", stderr=b""),
             ProcessRunResult(returncode=1, stdout=b"", stderr=b""),
             ProcessRunResult(returncode=1, stdout=b"", stderr=b""),
@@ -230,6 +231,34 @@ def test_extract_frames_fails_when_all_targets_fail() -> None:
             media_path="/tmp/sample.mp4",
             duration_ms=10_000,
         )
+    assert len(runner.calls) == 4
+    assert runner.calls[-1][1][runner.calls[-1][1].index("-ss") + 1] == "00:00:00.000"
+
+
+def test_extract_frames_falls_back_to_timestamp_zero_for_empty_midpoint_seeks() -> None:
+    png = PNG_SIGNATURE + b"first-frame"
+    runner = _SequenceRunner(
+        [
+            ProcessRunResult(returncode=0, stdout=b"", stderr=b""),
+            ProcessRunResult(returncode=0, stdout=b"", stderr=b""),
+            ProcessRunResult(returncode=0, stdout=b"", stderr=b""),
+            ProcessRunResult(returncode=0, stdout=png, stderr=b""),
+        ]
+    )
+    frames, warnings = extract_representative_frames(
+        runner,
+        ffmpeg_executable="/usr/bin/ffmpeg",
+        media_path="/tmp/one-frame.gif",
+        duration_ms=100,
+    )
+    assert [frame.timestamp_ms for frame in frames] == [0]
+    assert warnings == (
+        INDIVIDUAL_FRAME_FAILED_WARNING,
+        INDIVIDUAL_FRAME_FAILED_WARNING,
+        INDIVIDUAL_FRAME_FAILED_WARNING,
+    )
+    assert len(runner.calls) == 4
+    assert runner.calls[-1][1][runner.calls[-1][1].index("-ss") + 1] == "00:00:00.000"
 
 
 def test_compute_target_timestamps_matches_policy() -> None:
