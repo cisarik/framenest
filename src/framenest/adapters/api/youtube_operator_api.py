@@ -17,6 +17,11 @@ from framenest.application.youtube_acquisition import (
     YouTubeAcquisitionNotFoundError,
     YouTubeAcquisitionStateConflictError,
 )
+from framenest.adapters.api.tailscale_ingress import (
+    CHANNEL_LOCAL_OPERATOR,
+    CHANNEL_TAILSCALE,
+    SCOPE_INGRESS_CHANNEL,
+)
 from framenest.domain.identities import (
     FrameNestIdentityError,
     YouTubeAcquisitionClaimId,
@@ -146,6 +151,15 @@ def _guard(
             403,
             YOUTUBE_OPERATOR_ORIGIN_FORBIDDEN,
             "Browser-origin requests are forbidden.",
+        )
+    ingress_channel = request.scope.get(SCOPE_INGRESS_CHANNEL)
+    if ingress_channel == CHANNEL_LOCAL_OPERATOR:
+        return None
+    if ingress_channel == CHANNEL_TAILSCALE:
+        return _error(
+            403,
+            YOUTUBE_OPERATOR_LOOPBACK_REQUIRED,
+            "Loopback operator access is required.",
         )
     client = request.client
     try:

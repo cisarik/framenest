@@ -9,7 +9,7 @@ from ipaddress import ip_address
 from pathlib import Path
 from typing import Literal
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, Response
 from pydantic import BaseModel
 
@@ -53,6 +53,10 @@ from framenest.adapters.api.upload_api import (
 from framenest.adapters.api.youtube_operator_api import (
     YouTubeOperatorApiDependencies,
     create_youtube_operator_api_router,
+)
+from framenest.adapters.api.tailscale_ingress import (
+    SCOPE_IDENTITY,
+    TailscaleIngressMiddleware,
 )
 from framenest.application.library_scan import PreviewLibraryScan
 from framenest.application.media_catalog import ListMediaCatalog
@@ -99,8 +103,17 @@ from framenest.adapters.api.library_api import (
     create_library_api_router,
 )
 from framenest.domain import LibraryId, LibraryPathFlavor
+from framenest.domain.identity_access import (
+    IdentityContext,
+    IdentityMappingEntry,
+    build_identity_mapping,
+)
 import framenest.adapters.api.web as web_resources
-from framenest.configuration import FrameNestSettings, load_settings
+from framenest.configuration import (
+    INGRESS_MODE_TAILSCALE_UDS,
+    FrameNestSettings,
+    load_settings,
+)
 from framenest.infrastructure.ai.registry import ai_provider_persisted_status_reader, resolve_ai_provider
 from framenest.infrastructure.filesystem.library_scanner import LocalLibraryScanner
 from framenest.infrastructure.filesystem.media_content import LocalMediaContentReader
@@ -132,6 +145,9 @@ from framenest.infrastructure.persistence.upload_publication_repository import (
 from framenest.infrastructure.persistence.media_analysis_run_repository import (
     SqliteMediaAnalysisRunRepository,
 )
+from framenest.infrastructure.persistence.security_audit_repository import (
+    SqliteSecurityAuditRepository,
+)
 from framenest.infrastructure.persistence.youtube_acquisition_claim_repository import (
     SqliteYouTubeAcquisitionClaimRepository,
 )
@@ -147,6 +163,14 @@ class CloudStatusResponse(BaseModel):
     server: Literal["connected", "unavailable"]
     connection: Literal["loopback", "lan", "tailscale", "unknown"]
     remote_access: str | None = None
+
+
+class IdentityMeResponse(BaseModel):
+    login: str
+    display_name: str
+    role: str
+    capabilities: list[str]
+    provenance: str
 
 
 _ASSET_MEDIA_TYPES = {
@@ -179,8 +203,12 @@ def create_app(
     youtube_operator_api_dependencies: YouTubeOperatorApiDependencies
     | None = None,
     youtube_downloader: object | None = None,
+    security_audit_recorder: object | None = None,
 ) -> FastAPI:
     resolved_settings = settings if settings is not None else load_settings()
+    tailscale_ingress_enabled = (
+        resolved_settings.ingress_mode == INGRESS_MODE_TAILSCALE_UDS
+    )
     owned_engine = None
     owned_library_repository = None
     owned_media_repository = None
@@ -613,7 +641,26 @@ def create_app(
                                 if owned_engine is not None:
                                     dispose_engine(owned_engine)
 
-    app = FastAPI(lifespan=lifespan)
+    identity_mapping: dict[str, IdentityMappingEntry] | None = None
+    resolved_audit_recorder = security_audit_recorder
+    if tailscale_ingress_enabled:
+        identity_mapping = build_identity_mapping(resolved_settings.identity_map)
+        if resolved_audit_recorder is None:
+            if owned_engine is None:
+                raise ValueError(
+                    "Tailscale UDS ingress requires a security audit recorder."
+                )
+            resolved_audit_recorder = SqliteSecurityAuditRepository(owned_engine)
+
+    if tailscale_ingress_enabled:
+        app = FastAPI(
+            lifespan=lifespan,
+            docs_url=None,
+            redoc_url=None,
+            openapi_url=None,
+        )
+    else:
+        app = FastAPI(lifespan=lifespan)
     app.state.settings = resolved_settings
     app.state.upload_validation = owned_upload_validation
     app.state.upload_validation_coordinator = (
@@ -655,6 +702,14 @@ def create_app(
     app.include_router(
         create_youtube_operator_api_router(youtube_operator_api_dependencies)
     )
+    if tailscale_ingress_enabled:
+        assert identity_mapping is not None
+        app.add_middleware(
+            TailscaleIngressMiddleware,
+            identity_mapping=identity_mapping,
+            external_origin=resolved_settings.external_origin,
+            audit_recorder=resolved_audit_recorder,
+        )
 
     @app.get("/", response_class=HTMLResponse)
     def root() -> HTMLResponse:
@@ -679,7 +734,28 @@ def create_app(
 
     @app.get("/api/status/cloud", response_model=CloudStatusResponse)
     def cloud_status() -> CloudStatusResponse:
+        if tailscale_ingress_enabled:
+            return CloudStatusResponse(
+                server="connected",
+                connection="tailscale",
+                remote_access=resolved_settings.external_origin,
+            )
         return CloudStatusResponse(server="connected", connection="loopback", remote_access=None)
+
+    if tailscale_ingress_enabled:
+
+        @app.get("/api/identity/me", response_model=IdentityMeResponse)
+        def identity_me(request: Request) -> IdentityMeResponse:
+            identity = request.scope.get(SCOPE_IDENTITY)
+            if not isinstance(identity, IdentityContext):
+                raise HTTPException(status_code=401, detail="Not authenticated")
+            return IdentityMeResponse(
+                login=identity.login,
+                display_name=identity.display_name,
+                role=identity.role,
+                capabilities=sorted(identity.capabilities),
+                provenance=identity.provenance,
+            )
 
     return app
 

@@ -72,3 +72,4 @@ An accepted ADR may only be changed by a later ADR that supersedes it. Editing a
 | 0045 | Content Classification, Acquisition Source, and Movie Identification | Accepted | 2026-07-22 | [0045-content-classification-and-movie-identification.md](0045-content-classification-and-movie-identification.md) |
 | 0046 | YouTube Manual Ingestion and Provenance | Accepted | 2026-07-23 | [0046-youtube-manual-ingestion-and-provenance.md](0046-youtube-manual-ingestion-and-provenance.md) |
 | 0047 | Operator CLI Configuration and Working-Directory Hygiene | Accepted | 2026-07-23 | [0047-operator-cli-configuration-and-working-directory-hygiene.md](0047-operator-cli-configuration-and-working-directory-hygiene.md) |
+| 0048 | Tailscale Remote Access and Identity Foundation | Accepted | 2026-07-25 | [0048-tailscale-remote-access-and-identity-foundation.md](0048-tailscale-remote-access-and-identity-foundation.md) |

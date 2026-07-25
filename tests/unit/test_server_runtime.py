@@ -290,6 +290,38 @@ def test_production_uvicorn_imports_are_confined_to_server_module() -> None:
     assert violations == []
 
 
+def test_create_server_binds_only_unix_socket_in_tailscale_mode(
+    tmp_path: Path,
+) -> None:
+    from framenest.server import create_server
+
+    uds_path = tmp_path / "framenest.sock"
+    settings = FrameNestSettings(
+        database_path=tmp_path / "catalog.sqlite3",
+        gallery_preview_cache_path=tmp_path / "previews",
+        ingress_mode="tailscale_uds",
+        uds_path=uds_path,
+        external_origin="https://nuc-1.example.ts.net",
+        identity_map={"admin@example.com": "admin"},
+        _env_file=None,
+    )
+    server = create_server(settings=settings)
+    assert server.config.uds == str(uds_path)
+    assert server.config.proxy_headers is False
+    assert server.config.forwarded_allow_ips != "*"
+
+
+def test_create_server_binds_tcp_in_default_mode(
+    settings_with_secret: FrameNestSettings,
+) -> None:
+    from framenest.server import create_server
+
+    server = create_server(settings=settings_with_secret)
+    assert server.config.uds is None
+    assert server.config.host == "127.0.0.1"
+    assert server.config.port == 8000
+
+
 def test_fastapi_imports_remain_confined_to_adapters_api() -> None:
     repository_root = Path(__file__).resolve().parents[2]
     forbidden_import_roots = frozenset({"fastapi", "starlette"})

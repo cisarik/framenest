@@ -541,7 +541,9 @@ Evidence:
 
 Read-only checks:
 
-- Query `GET /health` through `127.0.0.1`.
+- Query `GET /health` through `127.0.0.1`, or run the release-local
+  `framenest-production check-health` command, which uses the Unix socket
+  automatically when the Tailscale ingress mode from section 11 is active.
 - Inspect recent journald entries for the FrameNest unit.
 - Verify logs contain no credentials, private media filenames, raw provider
   responses, database paths, or tracebacks.
@@ -627,14 +629,102 @@ Do not capture or share:
 - private media filenames;
 - paths below the approved generic roots.
 
+## 11. Tailscale Remote Access Ingress
+
+This phase is a separately authorized slice. It is not part of the base
+activation above and requires its own bounded task authority.
+
+Architecture:
+
+```text
+authenticated tailnet browser
+  -> Tailscale HTTPS Serve (root-owned tailscaled)
+  -> /run/framenest/framenest.sock (service-account Unix socket)
+  -> FrameNest tailscale_uds ingress mode
+```
+
+Security properties:
+
+- The application stops listening on TCP entirely; Tailscale Serve is the
+  only remote application ingress.
+- Serve strips and reinjects `Tailscale-User-*` identity headers; the
+  application trusts them only in this ingress mode, bound to the protected
+  Unix socket, and never trusts same-named headers from any other channel.
+- `RuntimeDirectory=framenest` (mode `0750`, service account only) and
+  `UMask=0077` keep the socket closed to normal login users; the root-owned
+  `tailscaled` can always reach it.
+- An explicit configuration identity map assigns roles; unknown verified
+  identities are denied, privileged actions are capability-checked and
+  recorded in the durable `security_audit_events` table.
+- Browser mutations require the exact external `Origin` plus the
+  `X-FrameNest-Request: 1` header; no CORS middleware is enabled.
+
+Configuration (placeholders; see `deploy/systemd/framenest.env.example`):
+
+```text
+FRAMENEST_INGRESS_MODE=tailscale_uds
+FRAMENEST_UDS_PATH=/run/framenest/framenest.sock
+FRAMENEST_EXTERNAL_ORIGIN=https://<node>.<tailnet>.ts.net
+FRAMENEST_IDENTITY_MAP={"<verified-login>":"<admin|user>"}
+```
+
+Rules:
+
+- The exact verified Serve login must be observed through
+  `GET /api/identity/me` from an authenticated tailnet client before the
+  admin mapping is written.
+- The database must be backed up before migration `0020` runs, and the
+  backup readability must be verified.
+- Health verification in this mode uses the release-local
+  `framenest-production check-health` command, which speaks to the Unix
+  socket; there is no separate TCP health listener.
+- Funnel stays disabled. No LAN binding, no tailnet-wide ACL, DNS, user, or
+  tag changes, and no stale node cleanup belong to this slice.
+
+Serve activation (root, after the application is healthy on the socket):
+
+```bash
+tailscale serve --bg unix:/run/framenest/framenest.sock
+tailscale serve status --json
+tailscale funnel status
+```
+
+Verification:
+
+- No FrameNest TCP listener remains (`ss -tlnp` shows no port 8000).
+- `tailscale serve status --json` shows exactly one HTTPS handler to the
+  Unix socket, and Funnel reports no configuration.
+- `framenest-production check-health` reports ready.
+- `GET /api/identity/me` through the tailnet HTTPS URL returns the expected
+  login, role, and capability list.
+
+Rollback:
+
+1. Capture `tailscale serve status --json` before any change; remove only
+   the FrameNest Serve handler (`tailscale serve reset` is acceptable only
+   when the captured state was empty).
+2. Remove the four ingress environment keys and restore the previous
+   `/opt/framenest/current` reference.
+3. Restore the pre-migration database backup when the previous release
+   predates migration `0020`, per `docs/BACKUP_AND_RECOVERY.md`.
+4. Restart the service and verify loopback health.
+
+Stop conditions:
+
+- Tailscale is below the accepted minimum version, Serve Unix-socket proxying
+  is unsupported, or MagicDNS/HTTPS would require a tailnet-wide setting that
+  is not already enabled.
+- The observed Serve login differs from the intended admin identity.
+- A normal login user can open the application socket.
+
 ## Not Implemented By This Runbook
 
 - Real deployment acceptance.
 - Real-host backup/restore acceptance, off-device copies, retention policy, and
   production restore drills.
 - Live production provider-secret deployment or provider testing.
-- Tailscale.
-- Application authentication or authorization.
+- Tailscale Funnel or any ingress beyond the authenticated tailnet.
+- Multi-user administration UI, invitations, or per-user personal metadata.
 - AppArmor profile.
 - UFW policy changes.
 - SSH changes.

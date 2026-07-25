@@ -68,9 +68,13 @@ The NUC may later provide:
 Ubuntu Server 24.04 on the Intel NUC6i5SYH supersedes Fedora as the active
 deployment target. A repository-native systemd service foundation and Ubuntu
 NUC deployment-readiness runbook now exist, but real host installation,
-activation, NUC acceptance, Tailscale Serve, AppArmor/UFW policy,
-production database replacement, media backup, secret recovery, and
-authentication remain unimplemented. The minimum catalog backup and
+activation, NUC acceptance, AppArmor/UFW policy, production database
+replacement, media backup, and secret recovery remain unimplemented. A
+Tailscale remote-access and identity foundation (root-owned HTTPS Serve to a
+permission-restricted Unix socket, verified-identity mapping, capability
+authorization, and privileged-action audit) is recorded in
+[ADR-0048](docs/adr/0048-tailscale-remote-access-and-identity-foundation.md)
+and the current runbook. The minimum catalog backup and
 restore-to-new-destination foundation is documented in
 [docs/BACKUP_AND_RECOVERY.md](docs/BACKUP_AND_RECOVERY.md).
 Sanitized command-observed NUC hardening and media-storage baseline facts are
@@ -205,10 +209,16 @@ transcode originals.
 
 ## Network And Deployment Direction
 
-Future remote access remains Tailscale-only unless superseded by a later
+Remote access remains Tailscale-only unless superseded by a later
 accepted decision. FrameNest must not require router port forwarding or public
 internet exposure. Tailscale networking is not sufficient authorization by
-itself; application-level authorization remains required.
+itself; application-level authorization remains required. The accepted
+implementation of this direction is the Tailscale remote-access and identity
+foundation in
+[ADR-0048](docs/adr/0048-tailscale-remote-access-and-identity-foundation.md):
+root-owned Tailscale HTTPS Serve proxies to a permission-restricted Unix
+socket, and the application maps the exact verified Serve login to explicit
+roles and capabilities with durable privileged-action audit.
 
 The historical Fedora service foundation is recorded in
 [ADR-0031](docs/adr/0031-fedora-systemd-service-foundation.md). It is
@@ -246,8 +256,8 @@ AI Gateway is supported with preferred model `google/gemini-3.1-flash-lite`.
 The browser Status modal is read-only. Its AI tab shows the configured provider
 and model plus safe historical status rows when such state exists. Its Cloud tab
 uses the sanitized server status contract and reports the local development
-server as connected over loopback; it does not implement Tailscale detection or
-authorization.
+server as connected over loopback; when the Tailscale ingress mode is active it
+reports the exact external tailnet origin instead.
 
 In development, provider credentials remain in the server process environment:
 `NVIDIA_API_KEY` for NVIDIA NIM and `AI_GATEWAY_API_KEY` for Vercel AI Gateway.
@@ -258,17 +268,19 @@ application-level remote administrator authorization remain future bounded work.
 
 ## Security And Authorization Deferred Decisions
 
-Deferred security decisions include:
+The initial server authentication and authorization slice is implemented by
+the Tailscale remote-access and identity foundation: exact-login identity
+mapping, role capabilities, sanitized 401/403 responses, and durable
+privileged-action audit logging. Deferred security decisions now include:
 
-- server authentication and authorization;
-- Tailscale Serve configuration;
 - device trust and enrollment;
 - provider-secret storage;
 - transfer authorization;
 - stream URL lifetime;
-- audit logging;
 - backup access;
-- administrator operations;
+- administrator operations beyond the initial capability set;
+- schema-backed identity migration if the configuration map outgrows its
+  audit provenance or operational needs;
 - multi-user behavior, if any.
 
 ## Current MacBook MVP Non-Goals

@@ -3,18 +3,25 @@
 from __future__ import annotations
 
 import argparse
+import http.client
 import json
+import socket
 import sys
 from collections.abc import Sequence
 from typing import NoReturn
 
-from framenest.configuration import load_settings
+from framenest.configuration import (
+    INGRESS_MODE_TAILSCALE_UDS,
+    FrameNestSettings,
+    load_settings,
+)
 from framenest.infrastructure.persistence.errors import FrameNestPersistenceError
 from framenest.infrastructure.persistence.migrations import inspect_database_migration_status
 from framenest.server import run_server
 
 COMMAND_ERROR_CODE = "FRAMENEST_PRODUCTION_COMMAND_FAILED"
 DATABASE_NOT_READY_CODE = "FRAMENEST_DATABASE_NOT_READY"
+HEALTH_CHECK_FAILED_CODE = "FRAMENEST_HEALTH_CHECK_FAILED"
 
 
 class _UsageError(Exception):
@@ -22,6 +29,10 @@ class _UsageError(Exception):
 
 
 class _DatabaseNotReadyError(Exception):
+    pass
+
+
+class _HealthCheckFailedError(Exception):
     pass
 
 
@@ -43,6 +54,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             if status.state != "at_head":
                 raise _DatabaseNotReadyError()
             _write_success(operation, current_revision=status.current_revision)
+        elif operation == "check-health":
+            _check_health(settings)
+            _write_success(operation, current_revision=None)
         elif operation == "serve":
             run_server(settings=settings)
         else:
@@ -64,6 +78,13 @@ def main(argv: Sequence[str] | None = None) -> int:
             message="Catalog database is not ready. Run framenest-db migrate first.",
         )
         return 4
+    except _HealthCheckFailedError:
+        _write_error(
+            operation=operation,
+            error_code=HEALTH_CHECK_FAILED_CODE,
+            message="FrameNest health check failed.",
+        )
+        return 5
     except (FrameNestPersistenceError, Exception):
         _write_error(
             operation=operation,
@@ -81,18 +102,69 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Verify the configured database is already migrated to head.",
     )
     subcommands.add_parser(
+        "check-health",
+        help="Verify the FrameNest listener answers a local /health request.",
+    )
+    subcommands.add_parser(
         "serve",
         help="Run the production FrameNest server in the foreground.",
     )
     return parser
 
 
+def _check_health(settings: FrameNestSettings) -> None:
+    try:
+        status_code, payload = _request_health(settings)
+    except OSError as exc:
+        raise _HealthCheckFailedError() from exc
+    if status_code != 200 or payload.get("status") != "ok":
+        raise _HealthCheckFailedError()
+
+
+def _request_health(settings: FrameNestSettings) -> tuple[int, dict[str, object]]:
+    connection: http.client.HTTPConnection
+    if settings.ingress_mode == INGRESS_MODE_TAILSCALE_UDS:
+        assert settings.uds_path is not None
+        connection = _UnixHTTPConnection(str(settings.uds_path))
+    else:
+        connection = http.client.HTTPConnection(
+            settings.host, settings.port, timeout=5.0
+        )
+    try:
+        connection.request("GET", "/health", headers={"Accept": "application/json"})
+        response = connection.getresponse()
+        body = response.read()
+    finally:
+        connection.close()
+    try:
+        decoded = json.loads(body.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        decoded = None
+    payload = decoded if isinstance(decoded, dict) else {}
+    return response.status, payload
+
+
+class _UnixHTTPConnection(http.client.HTTPConnection):
+    """Minimal HTTP client bound to the permission-restricted Unix socket."""
+
+    def __init__(self, uds_path: str, timeout: float = 5.0) -> None:
+        super().__init__("localhost", timeout=timeout)
+        self._uds_path = uds_path
+
+    def connect(self) -> None:
+        uds_socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        uds_socket.settimeout(self.timeout)
+        uds_socket.connect(self._uds_path)
+        self.sock = uds_socket
+
+
 def _write_success(operation: str, *, current_revision: str | None) -> None:
     payload = {
         "operation": operation,
         "state": "ready",
-        "current_revision": current_revision,
     }
+    if current_revision is not None:
+        payload["current_revision"] = current_revision
     print(json.dumps(payload, separators=(",", ":")), file=sys.stdout)
 
 

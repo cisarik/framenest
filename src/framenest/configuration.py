@@ -12,6 +12,11 @@ import uuid
 from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict, SettingsError
 
+from framenest.domain.identity_access import (
+    ROLE_ADMIN,
+    FrameNestIdentityAccessError,
+    build_identity_mapping,
+)
 from framenest.domain.media_analysis_runs import (
     DEFAULT_MAX_ANALYSIS_ATTEMPTS,
     MAX_CONFIGURED_ANALYSIS_ATTEMPTS,
@@ -30,6 +35,14 @@ DEFAULT_UPLOAD_SESSION_TTL_SECONDS = 86_400
 DEFAULT_UPLOAD_MIN_FREE_SPACE_RESERVE_BYTES = 67_108_864
 DEFAULT_YOUTUBE_ACQUISITION_MAX_STAGING_BYTES = 2_214_592_512
 SUPPORTED_AI_PROVIDER_IDS = frozenset({"nvidia-nim", "vercel-ai-gateway"})
+INGRESS_MODE_TCP = "tcp"
+INGRESS_MODE_TAILSCALE_UDS = "tailscale_uds"
+SUPPORTED_INGRESS_MODES = frozenset({INGRESS_MODE_TCP, INGRESS_MODE_TAILSCALE_UDS})
+MAX_EXTERNAL_ORIGIN_LENGTH = 255
+_INGRESS_CONFIGURATION_MESSAGE = (
+    "Tailscale UDS ingress requires an explicit UDS path, an exact https "
+    "external origin, and at least one configured admin identity."
+)
 
 
 def _default_database_path() -> Path:
@@ -105,6 +118,10 @@ class FrameNestSettings(BaseSettings):
     )
     ai_provider_id: str | None = Field(default=None)
     ai_model_id: str | None = Field(default=None)
+    ingress_mode: str = Field(default=INGRESS_MODE_TCP)
+    uds_path: Path | None = Field(default=None, repr=False)
+    external_origin: str | None = Field(default=None)
+    identity_map: dict[str, str] = Field(default_factory=dict, repr=False)
     automatic_media_analysis_enabled: bool = Field(default=False)
     automatic_media_analysis_max_attempts: int = Field(
         default=DEFAULT_MAX_ANALYSIS_ATTEMPTS,
@@ -216,6 +233,59 @@ class FrameNestSettings(BaseSettings):
             raise ValueError("ai model id must be non-empty when provided")
         return normalized
 
+    @field_validator("ingress_mode")
+    @classmethod
+    def validate_ingress_mode(cls, value: str) -> str:
+        normalized = value.strip()
+        if normalized not in SUPPORTED_INGRESS_MODES:
+            raise ValueError("ingress mode is not supported")
+        return normalized
+
+    @field_validator("uds_path", mode="before")
+    @classmethod
+    def validate_uds_path(cls, value: Any) -> Path | None:
+        if value is None or value == "":
+            return None
+        try:
+            return _normalize_absolute_path(value)
+        except ValueError as exc:
+            raise ValueError("uds path must be an absolute path") from exc
+
+    @field_validator("external_origin")
+    @classmethod
+    def validate_external_origin(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        if len(normalized) > MAX_EXTERNAL_ORIGIN_LENGTH or not _is_exact_https_origin(
+            normalized
+        ):
+            raise ValueError("external origin must be an exact https origin")
+        return normalized
+
+    @field_validator("identity_map")
+    @classmethod
+    def validate_identity_map(cls, value: dict[str, str]) -> dict[str, str]:
+        try:
+            build_identity_mapping(value)
+        except FrameNestIdentityAccessError as exc:
+            raise ValueError("identity map is invalid") from exc
+        return value
+
+    @model_validator(mode="after")
+    def validate_ingress_configuration(self) -> "FrameNestSettings":
+        if self.ingress_mode != INGRESS_MODE_TAILSCALE_UDS:
+            return self
+        if self.uds_path is None or self.external_origin is None:
+            raise ValueError(_INGRESS_CONFIGURATION_MESSAGE)
+        try:
+            mapping = build_identity_mapping(self.identity_map)
+        except FrameNestIdentityAccessError as exc:
+            raise ValueError(_INGRESS_CONFIGURATION_MESSAGE) from exc
+        if not any(entry.role == ROLE_ADMIN for entry in mapping.values()):
+            raise ValueError(_INGRESS_CONFIGURATION_MESSAGE)
+        return self
+
 
 class FrameNestConfigurationError(Exception):
     """Sanitized configuration failure safe for operator-facing output."""
@@ -282,3 +352,26 @@ def _paths_overlap(first: Path, second: Path | None) -> bool:
     if second is None:
         return False
     return first == second or first in second.parents or second in first.parents
+
+
+def _is_exact_https_origin(value: str) -> bool:
+    if not value.startswith("https://"):
+        return False
+    host = value[len("https://"):]
+    if not host or host != host.lower():
+        return False
+    if any(character in host for character in ("/", "?", "#", "@", " ")):
+        return False
+    labels, _, port = host.partition(":")
+    if not labels or "." not in labels:
+        return False
+    if port and (not port.isdigit() or not 1 <= int(port) <= 65535):
+        return False
+    return all(
+        label
+        and len(label) <= 63
+        and not label.startswith("-")
+        and not label.endswith("-")
+        and all(character.isalnum() or character == "-" for character in label)
+        for label in labels.split(".")
+    )

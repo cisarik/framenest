@@ -8,6 +8,7 @@ const CANONICAL_TAGS_ENDPOINT = "/api/canonical-tags";
 const AI_CAPABILITY_ENDPOINT = "/api/ai/media-suggestion-capability";
 const AUTOMATIC_ANALYSIS_CAPABILITY_ENDPOINT = "/api/ai/automatic-analysis-capability";
 const CLOUD_STATUS_ENDPOINT = "/api/status/cloud";
+const IDENTITY_ENDPOINT = "/api/identity/me";
 const UPLOADS_ENDPOINT = "/api/uploads";
 const UPLOAD_CAPABILITY_ENDPOINT = "/api/uploads/capability";
 const MEDIA_IMPORTS_ENDPOINT = "media-imports";
@@ -181,6 +182,84 @@ let metadataDurableAnalysis = {
   errorMessage: "",
   detailsExpanded: false,
 };
+let identityState = {
+  resolved: false,
+  available: false,
+  login: "",
+  displayName: "",
+  role: "",
+  capabilities: new Set(),
+};
+
+function identityHasCapability(capability) {
+  if (!identityState.available) return true;
+  return identityState.capabilities.has(capability);
+}
+
+function framenestMutationHeaders(headers) {
+  return Object.assign({ "X-FrameNest-Request": "1" }, headers);
+}
+
+async function loadIdentity() {
+  try {
+    const response = await fetch(IDENTITY_ENDPOINT, {
+      headers: { Accept: "application/json" },
+      cache: "no-store",
+    });
+    if (response.status === 404) {
+      identityState.resolved = true;
+      identityState.available = false;
+      return;
+    }
+    if (!response.ok) {
+      identityState.resolved = true;
+      identityState.available = true;
+      identityState.capabilities = new Set();
+      return;
+    }
+    const payload = await response.json();
+    identityState.resolved = true;
+    identityState.available = true;
+    identityState.login = typeof payload.login === "string" ? payload.login : "";
+    identityState.displayName = typeof payload.display_name === "string" ? payload.display_name : "";
+    identityState.role = typeof payload.role === "string" ? payload.role : "";
+    identityState.capabilities = new Set(
+      Array.isArray(payload.capabilities)
+        ? payload.capabilities.filter((capability) => typeof capability === "string")
+        : [],
+    );
+  } catch {
+    identityState.resolved = true;
+    identityState.available = false;
+  } finally {
+    applyIdentityCapabilities();
+    renderIdentityBadge();
+  }
+}
+
+function applyIdentityCapabilities() {
+  if (uploadOpenButton) {
+    uploadOpenButton.hidden = !identityHasCapability("upload.manage");
+  }
+  if (detailsEditButton) {
+    detailsEditButton.hidden = !identityHasCapability("metadata.canonical.write");
+  }
+  updateMetadataControls();
+}
+
+function renderIdentityBadge() {
+  if (!identityBadge) return;
+  if (!identityState.available || !identityState.login) {
+    identityBadge.hidden = true;
+    identityBadge.replaceChildren();
+    return;
+  }
+  const label = identityState.displayName || identityState.login;
+  const roleLabel = identityState.role === "admin" ? "Admin" : "User";
+  identityBadge.textContent = `${label} · ${roleLabel}`;
+  identityBadge.title = `Signed in as ${identityState.login}`;
+  identityBadge.hidden = false;
+}
 
 function restoredCatalogPageSize() {
   try {
@@ -224,6 +303,7 @@ const statusCloudConnection = document.querySelector("#status-cloud-connection")
 const statusCloudRemoteRow = document.querySelector("#status-cloud-remote-row");
 const statusCloudRemote = document.querySelector("#status-cloud-remote");
 const uploadOpenButton = document.querySelector("#upload-open-button");
+const identityBadge = document.querySelector("#identity-badge");
 const uploadDialog = document.querySelector("#upload-dialog");
 const uploadDialogTitle = document.querySelector("#upload-dialog-title");
 const uploadCloseButton = document.querySelector("#upload-close-button");
@@ -2039,7 +2119,7 @@ async function completeUploadIfReady(owner = currentUploadContext()) {
   try {
     const { response, payload } = await fetchUploadJson(uploadCompleteEndpoint(snapshot.id), {
       method: "POST",
-      headers: { Accept: "application/json" },
+      headers: framenestMutationHeaders({ Accept: "application/json" }),
       cache: "no-store",
     });
     if (!uploadContextStillCurrent(owner) || uploadState.completionOwner !== owner) return false;
@@ -2136,11 +2216,11 @@ async function runUploadLoop(owner = currentUploadContext()) {
     try {
       const { response, payload } = await fetchUploadJson(uploadEndpoint(snapshot.id), {
         method: "PATCH",
-        headers: {
+        headers: framenestMutationHeaders({
           Accept: "application/json",
           "Content-Type": "application/offset+octet-stream",
           "Upload-Offset": String(serverOffset),
-        },
+        }),
         body,
         cache: "no-store",
       });
@@ -2219,10 +2299,10 @@ async function handleStartUpload() {
     renderUploadCockpit();
     const { response, payload } = await fetchUploadJson(UPLOADS_ENDPOINT, {
       method: "POST",
-      headers: {
+      headers: framenestMutationHeaders({
         Accept: "application/json",
         "Content-Type": "application/json",
-      },
+      }),
       body: JSON.stringify({
         display_filename: file.name,
         declared_size_bytes: file.size,
@@ -2345,7 +2425,7 @@ async function handleCancelUpload() {
   try {
     const { response, payload } = await fetchUploadJson(uploadEndpoint(snapshot.id), {
       method: "DELETE",
-      headers: { Accept: "application/json" },
+      headers: framenestMutationHeaders({ Accept: "application/json" }),
       cache: "no-store",
     });
     if (!uploadContextStillCurrent(owner)) return;
@@ -2392,10 +2472,10 @@ async function submitDuplicateResolution(owner, resolution) {
       uploadDuplicateResolutionEndpoint(owner.uploadId),
       {
         method: "POST",
-        headers: {
+        headers: framenestMutationHeaders({
           Accept: "application/json",
           "Content-Type": "application/json",
-        },
+        }),
         body: JSON.stringify({ resolution }),
         cache: "no-store",
       },
@@ -2834,7 +2914,7 @@ async function handleCardPreview(item, card, placeholder) {
   try {
     const response = await fetch(`${LIBRARIES_ENDPOINT}/${location.libraryId}/media-analysis-preview`, {
       method: "POST",
-      headers: { Accept: "application/json", "Content-Type": "application/json" },
+      headers: framenestMutationHeaders({ Accept: "application/json", "Content-Type": "application/json" }),
       body: JSON.stringify({ relative_path: location.relativePath }),
       cache: "no-store",
     });
@@ -3729,10 +3809,10 @@ async function handleAnalyzeCatalogCard(item, button) {
   try {
     const response = await fetch(mediaAiSuggestionEndpoint(item.media_id, location.location_id), {
       method: "POST",
-      headers: {
+      headers: framenestMutationHeaders({
         Accept: "application/json",
         "Content-Type": "application/json",
-      },
+      }),
       body: JSON.stringify({ confirm_cloud_upload: true }),
       cache: "no-store",
     });
@@ -3827,7 +3907,7 @@ function renderCatalogCard(item) {
   const displayTitle = item.display_title || deriveCatalogFallbackTitle(item);
   const actions = document.createElement("div");
   actions.className = "catalog-card__actions catalog-card__actions--overlay";
-  if (cardNeedsMetadata(item)) {
+  if (cardNeedsMetadata(item) && identityHasCapability("analysis.run")) {
     const analyzeButton = document.createElement("button");
     analyzeButton.className = "catalog-card__action catalog-card__action--overlay catalog-card__action--analyze catalog-card__action--top-right";
     analyzeButton.type = "button";
@@ -3841,14 +3921,16 @@ function renderCatalogCard(item) {
     analyzeButton.addEventListener("click", () => handleAnalyzeCatalogCard(item, analyzeButton));
     actions.appendChild(analyzeButton);
   }
-  const editButton = document.createElement("button");
-  editButton.className = "catalog-card__action catalog-card__action--overlay catalog-card__action--edit catalog-card__action--bottom-left";
-  editButton.type = "button";
-  editButton.setAttribute("aria-label", `Edit ${displayTitle}`);
-  editButton.title = "Edit";
-  editButton.appendChild(editIcon());
-  editButton.addEventListener("click", () => handleOpenMetadataWorkspace(item, editButton));
-  actions.appendChild(editButton);
+  if (identityHasCapability("metadata.canonical.write")) {
+    const editButton = document.createElement("button");
+    editButton.className = "catalog-card__action catalog-card__action--overlay catalog-card__action--edit catalog-card__action--bottom-left";
+    editButton.type = "button";
+    editButton.setAttribute("aria-label", `Edit ${displayTitle}`);
+    editButton.title = "Edit";
+    editButton.appendChild(editIcon());
+    editButton.addEventListener("click", () => handleOpenMetadataWorkspace(item, editButton));
+    actions.appendChild(editButton);
+  }
   if (supportedLocation) {
     const openOriginalLink = document.createElement("a");
     openOriginalLink.className = "catalog-card__action catalog-card__action--overlay catalog-card__action--open-original catalog-card__action--bottom-right";
@@ -4268,7 +4350,8 @@ function updateMetadataControls() {
   }
   if (metadataAiAnalyzeButton) {
     const location = metadataAiLocation();
-    const analysisAvailable = Boolean(aiCapability.available && location);
+    const analysisAvailable = Boolean(aiCapability.available && location)
+      && identityHasCapability("analysis.run");
     const showAnalyze = analysisAvailable
       && (!metadataWorkspace.aiSuggestionApplied || metadataWorkspace.analyzing);
     metadataAiAnalyzeButton.hidden = !showAnalyze;
@@ -4281,7 +4364,7 @@ function updateMetadataControls() {
     metadataAiAnalyzeButton.setAttribute("aria-busy", metadataWorkspace.analyzing ? "true" : "false");
   }
   if (metadataLoadAiSuggestionButton) {
-    const loadAvailable = durableAnalysisLoadAvailable();
+    const loadAvailable = durableAnalysisLoadAvailable() && identityHasCapability("analysis.run");
     const loadBusy = metadataDurableAnalysis.loadingIntoDraft;
     metadataLoadAiSuggestionButton.hidden = !loadAvailable && !loadBusy;
     metadataLoadAiSuggestionButton.disabled = metadataWorkspace.loading
@@ -4916,10 +4999,10 @@ async function handleAnalyzeMetadataByAi() {
   try {
     const response = await fetch(mediaAiSuggestionEndpoint(requestContext.mediaId, requestContext.locationId), {
       method: "POST",
-      headers: {
+      headers: framenestMutationHeaders({
         Accept: "application/json",
         "Content-Type": "application/json",
-      },
+      }),
       body: JSON.stringify({ confirm_cloud_upload: true }),
       cache: "no-store",
     });
@@ -4976,10 +5059,10 @@ async function ensureMetadataTagKey(displayName) {
   if (!key) throw new Error("Tag could not be added.");
   const response = await fetch(CANONICAL_TAGS_ENDPOINT, {
     method: "POST",
-    headers: {
+    headers: framenestMutationHeaders({
       Accept: "application/json",
       "Content-Type": "application/json",
-    },
+    }),
     body: JSON.stringify({ key, display_name: normalized }),
     cache: "no-store",
   });
@@ -5401,10 +5484,10 @@ async function createAndSelectMetadataTag(displayName) {
   try {
     const response = await fetch(CANONICAL_TAGS_ENDPOINT, {
       method: "POST",
-      headers: {
+      headers: framenestMutationHeaders({
         Accept: "application/json",
         "Content-Type": "application/json",
-      },
+      }),
       body: JSON.stringify({ key, display_name: displayName }),
       cache: "no-store",
     });
@@ -5514,10 +5597,10 @@ async function handleSaveMetadata() {
   try {
     const response = await fetch(metadataEndpoint(saveOwner.mediaId), {
       method: "PUT",
-      headers: {
+      headers: framenestMutationHeaders({
         Accept: "application/json",
         "Content-Type": "application/json",
-      },
+      }),
       body: JSON.stringify(saveOwner.requestPayload),
       cache: "no-store",
     });
@@ -5596,10 +5679,10 @@ async function handleImportClick(libraryId, candidate, button, status) {
   try {
     const response = await fetch(`${LIBRARIES_ENDPOINT}/${libraryId}/${MEDIA_IMPORTS_ENDPOINT}`, {
       method: "POST",
-      headers: {
+      headers: framenestMutationHeaders({
         Accept: "application/json",
         "Content-Type": "application/json",
-      },
+      }),
       body: JSON.stringify({ relative_path: candidate.relative_path }),
       cache: "no-store",
     });
@@ -5654,10 +5737,10 @@ async function handleInspectClick(libraryId, candidate, card) {
   try {
     const response = await fetch(`${LIBRARIES_ENDPOINT}/${libraryId}/media-analysis-preview`, {
       method: "POST",
-      headers: {
+      headers: framenestMutationHeaders({
         Accept: "application/json",
         "Content-Type": "application/json",
-      },
+      }),
       body: JSON.stringify({ relative_path: candidate.relative_path }),
       cache: "no-store",
     });
@@ -5964,10 +6047,10 @@ async function handleAnalyzeClick(card) {
   try {
     const response = await fetch(`${LIBRARIES_ENDPOINT}/${libraryId}/media-suggestion-preview`, {
       method: "POST",
-      headers: {
+      headers: framenestMutationHeaders({
         Accept: "application/json",
         "Content-Type": "application/json",
-      },
+      }),
       body: JSON.stringify({
         relative_path: relativePath,
         confirm_cloud_upload: true,
@@ -6008,7 +6091,7 @@ async function handlePreviewClick(library, card) {
   try {
     const response = await fetch(`${LIBRARIES_ENDPOINT}/${library.id}/scan-preview`, {
       method: "POST",
-      headers: { Accept: "application/json" },
+      headers: framenestMutationHeaders({ Accept: "application/json" }),
       cache: "no-store",
     });
     const payload = await response.json();
@@ -6241,7 +6324,7 @@ document.querySelector("#metadata-movie-identify-button")?.addEventListener("cli
       `/api/media/${encodeURIComponent(mediaId)}/locations/${encodeURIComponent(location.location_id)}/movie-identification`,
       {
         method: "POST",
-        headers: { Accept: "application/json", "Content-Type": "application/json" },
+        headers: framenestMutationHeaders({ Accept: "application/json", "Content-Type": "application/json" }),
         body: JSON.stringify({ confirm_cloud_upload: true }),
       },
     );
@@ -6823,12 +6906,15 @@ if (catalogRetryButton) {
   });
 }
 
+const identityReady = loadIdentity();
 checkHealth();
 loadAiCapability();
 loadUploadCapability();
 restoreUploadRecovery();
 loadCatalogTags();
-loadCatalog();
+identityReady.then(() => {
+  loadCatalog();
+});
 loadLibraries();
 if (commandSearchInput) {
   commandSearchInput.focus({ preventScroll: true });

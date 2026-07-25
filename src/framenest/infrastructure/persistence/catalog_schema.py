@@ -963,3 +963,74 @@ media_analysis_runs = Table(
         sqlite_where=text("state IN ('pending', 'analyzing')"),
     ),
 )
+
+security_audit_events = Table(
+    "security_audit_events",
+    metadata,
+    Column("id", Text(), primary_key=True, nullable=False),
+    Column("occurred_at_ms", Integer(), nullable=False),
+    Column("request_id", Text(), nullable=False),
+    Column("actor_login", Text(), nullable=False),
+    Column("actor_key", Text(), nullable=False),
+    Column("identity_provenance", Text(), nullable=False),
+    Column("role", Text(), nullable=False),
+    Column("capability", Text(), nullable=False),
+    Column("action", Text(), nullable=False),
+    Column("target_type", Text(), nullable=False),
+    Column("target_id", Text(), nullable=True),
+    Column("outcome", Text(), nullable=False),
+    Column("http_status", Integer(), nullable=True),
+    CheckConstraint("length(id) = 36", name="ck_security_audit_events_id_length"),
+    CheckConstraint(
+        "occurred_at_ms >= 0",
+        name="ck_security_audit_events_occurred_at_non_negative",
+    ),
+    CheckConstraint(
+        "length(request_id) >= 1 AND length(request_id) <= 64",
+        name="ck_security_audit_events_request_id_length",
+    ),
+    CheckConstraint(
+        "length(actor_login) >= 1 AND length(actor_login) <= 254",
+        name="ck_security_audit_events_actor_login_length",
+    ),
+    CheckConstraint(
+        "length(actor_key) >= 1 AND length(actor_key) <= 254",
+        name="ck_security_audit_events_actor_key_length",
+    ),
+    CheckConstraint(
+        "length(identity_provenance) >= 1 AND length(identity_provenance) <= 32",
+        name="ck_security_audit_events_provenance_length",
+    ),
+    CheckConstraint(
+        "length(role) >= 1 AND length(role) <= 16",
+        name="ck_security_audit_events_role_length",
+    ),
+    CheckConstraint(
+        "length(capability) >= 1 AND length(capability) <= 64",
+        name="ck_security_audit_events_capability_length",
+    ),
+    CheckConstraint(
+        "length(action) >= 1 AND length(action) <= 64",
+        name="ck_security_audit_events_action_length",
+    ),
+    CheckConstraint(
+        "length(target_type) >= 1 AND length(target_type) <= 64",
+        name="ck_security_audit_events_target_type_length",
+    ),
+    CheckConstraint(
+        "target_id IS NULL OR "
+        "(length(target_id) >= 1 AND length(target_id) <= 128)",
+        name="ck_security_audit_events_target_id_length",
+    ),
+    CheckConstraint(
+        "outcome IN ('allowed', 'denied')",
+        name="ck_security_audit_events_outcome",
+    ),
+    CheckConstraint(
+        "http_status IS NULL OR (http_status >= 100 AND http_status <= 599)",
+        name="ck_security_audit_events_http_status",
+    ),
+    Index("ix_security_audit_events_occurred_at", "occurred_at_ms", "id"),
+    Index("ix_security_audit_events_actor_key", "actor_key", "occurred_at_ms"),
+    Index("ix_security_audit_events_capability", "capability", "occurred_at_ms"),
+)

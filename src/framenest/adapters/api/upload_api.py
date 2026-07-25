@@ -27,6 +27,10 @@ from framenest.application.upload_transport import (
     UploadSessionStateConflictError,
     UploadTooLargeError,
 )
+from framenest.adapters.api.tailscale_ingress import (
+    CHANNEL_TAILSCALE,
+    SCOPE_INGRESS_CHANNEL,
+)
 from framenest.domain.uploads import (
     FrameNestUploadSessionError,
     UploadSessionId,
@@ -449,6 +453,11 @@ def _notify_publication_coordinator(coordinator: object | None) -> None:
 
 
 def _reject_cross_origin_mutation(request: Request) -> JSONResponse | None:
+    if request.scope.get(SCOPE_INGRESS_CHANNEL) == CHANNEL_TAILSCALE:
+        # The trusted-ingress middleware already enforces the exact external
+        # Origin and the FrameNest mutation header for this channel; the
+        # loopback scheme comparison below cannot evaluate UDS requests.
+        return None
     origin = request.headers.get("origin")
     if origin is None:
         return None

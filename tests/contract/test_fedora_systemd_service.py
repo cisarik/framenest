@@ -179,7 +179,6 @@ def test_service_artifacts_do_not_encode_public_network_or_proxy_shortcuts() -> 
 
     forbidden = [
         "0.0.0.0",
-        "tailscale",
         "funnel",
         "firewall",
         "firewalld",
@@ -189,6 +188,21 @@ def test_service_artifacts_do_not_encode_public_network_or_proxy_shortcuts() -> 
     ]
     for marker in forbidden:
         assert marker.lower() not in combined.lower()
+
+
+def test_environment_template_documents_tailscale_ingress_as_commented_options() -> None:
+    text = ENV_TEMPLATE_PATH.read_text(encoding="utf-8")
+
+    assert "# FRAMENEST_INGRESS_MODE=tailscale_uds" in text
+    assert "# FRAMENEST_UDS_PATH=/run/framenest/framenest.sock" in text
+    assert "# FRAMENEST_EXTERNAL_ORIGIN=https://<node>.<tailnet>.ts.net" in text
+    assert "# FRAMENEST_IDENTITY_MAP=" in text
+    assert "funnel" not in text.lower()
+    for line in text.splitlines():
+        assert not line.startswith("FRAMENEST_INGRESS_MODE")
+        assert not line.startswith("FRAMENEST_UDS_PATH")
+        assert not line.startswith("FRAMENEST_EXTERNAL_ORIGIN")
+        assert not line.startswith("FRAMENEST_IDENTITY_MAP")
 
 
 def test_non_secret_environment_template_contains_no_secret_variables() -> None:
