@@ -2763,6 +2763,10 @@ function cleanupDetailsMedia({ invalidate = true } = {}) {
   }
   if (detailsMediaElement) {
     if (detailsMediaElement.tagName === "VIDEO") {
+      // Detach position listeners before teardown so pause/load cannot overwrite
+      // the stored resume timestamp with a reset currentTime of 0.
+      detailsMediaElement.ontimeupdate = null;
+      detailsMediaElement.onpause = null;
       if (detailsCurrentItem && detailsCurrentItem.media_kind === "video") {
         captureVideoPlaybackPosition(detailsCurrentItem.media_id, detailsMediaElement);
       }

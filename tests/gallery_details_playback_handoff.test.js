@@ -384,6 +384,35 @@ test("Reopening Details remains deterministic for the same media ID", () => {
   assert.equal(second.currentTime, 7.25);
 });
 
+test("Details cleanup captures position before teardown and ignores reset-to-zero events", () => {
+  const { context } = createHarness();
+  const item = mp4Item();
+  context.detailsCurrentItem = item;
+  const video = openDetailsWithMetadata(context, item, { duration: 80 });
+  video.currentTime = 11.5;
+  video.dispatchEvent({ type: "timeupdate" });
+  assert.equal(context.videoPlaybackPositionByMediaId.get(item.media_id), 11.5);
+
+  // Simulate browser reset during src teardown after listeners are detached.
+  const originalPause = video.pause.bind(video);
+  video.pause = function pauseWithReset() {
+    originalPause();
+    this.currentTime = 0;
+    if (typeof this.ontimeupdate === "function") {
+      this.ontimeupdate({ type: "timeupdate", target: this });
+    }
+    if (typeof this.onpause === "function") {
+      this.onpause({ type: "pause", target: this });
+    }
+  };
+
+  context.cleanupDetailsMedia();
+  assert.equal(context.videoPlaybackPositionByMediaId.get(item.media_id), 11.5);
+
+  const reopened = openDetailsWithMetadata(context, item, { duration: 80 });
+  assert.equal(reopened.currentTime, 11.5);
+});
+
 test("Timestamp near end resets to zero", () => {
   const { context } = createHarness();
   const item = mp4Item();
