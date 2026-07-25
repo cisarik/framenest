@@ -236,8 +236,13 @@ def test_web_shell_does_not_contain_verbose_library_prose(client: TestClient) ->
 def test_web_shell_contains_reachable_catalog_browser_states(client: TestClient) -> None:
     html = client.get("/").text
     assert "catalog-browser" in html
-    assert "Loading catalog media" in html
+    assert "catalog-state-loading" in html
+    assert "library-state__spinner" in html
+    assert "Loading media…" in html
+    assert "Loading catalog media" not in html
     assert "No media matched this catalog query" in html
+    assert "catalog-retry-button" in html
+    assert "Media could not be loaded." in html
     assert "Previous page" in html
     assert "Next page" in html
     assert "&lt;" in html

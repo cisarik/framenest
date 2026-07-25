@@ -1039,14 +1039,103 @@ h2 {
   border: 1px solid var(--line);
   border-radius: var(--radius-md);
   background: var(--surface);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
   padding: 16px 18px;
   color: var(--text-muted);
   font-size: 0.9rem;
 }
 
+.library-state--loading,
+.library-state--empty,
+.library-state--error,
+.library-state--warning {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  min-height: 220px;
+  text-align: center;
+}
+
+.library-state--loading {
+  flex-direction: row;
+  gap: 14px;
+  border-color: var(--accent-border);
+  background:
+    linear-gradient(180deg, rgba(0, 255, 65, 0.04), transparent 58%),
+    var(--surface);
+  box-shadow: inset 0 0 0 1px rgba(0, 255, 65, 0.04);
+  color: var(--text);
+}
+
+.library-state__spinner {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  border: 2px solid rgba(0, 255, 65, 0.22);
+  border-top-color: var(--accent);
+  border-radius: 999px;
+  animation: library-state-spin 0.85s linear infinite;
+}
+
+.library-state__message {
+  margin: 0;
+  max-width: 36rem;
+  color: inherit;
+  font-size: 0.9rem;
+  line-height: 1.45;
+}
+
+.library-state__action {
+  border: 1px solid var(--accent-border);
+  border-radius: var(--radius-sm);
+  background: var(--accent-soft);
+  color: var(--accent);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 700;
+  padding: 6px 14px;
+}
+
+.library-state__action:hover {
+  border-color: var(--accent);
+  color: var(--accent-strong);
+  box-shadow: 0 0 12px var(--accent-glow);
+}
+
+.library-state--empty {
+  border-color: var(--line-strong);
+  color: var(--text-muted);
+}
+
 .library-state--warning {
   border-color: rgba(243, 189, 101, 0.48);
   color: var(--warning);
+}
+
+.library-state--error {
+  border-color: var(--danger-border);
+  background:
+    linear-gradient(180deg, var(--danger-soft), transparent 58%),
+    var(--surface);
+  color: #ffb4b4;
+}
+
+@keyframes library-state-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .library-state__spinner {
+    animation: none;
+    border-style: double;
+    border-color: var(--accent);
+    border-top-color: var(--accent);
+  }
 }
 
 .library-list {

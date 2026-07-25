@@ -329,17 +329,27 @@
           <button id="catalog-filter-youtube" type="button" data-acquisition-source="youtube_manual_claim" aria-pressed="false">YouTube</button>
         </div>
         <p id="catalog-tags-state" class="catalog-tags-state" role="status" hidden></p>
-        <div id="catalog-state-loading" class="library-state" role="status">
-          Loading catalog media...
+        <div
+          id="catalog-state-loading"
+          class="library-state library-state--loading"
+          role="status"
+          aria-live="polite"
+          aria-busy="true"
+        >
+          <span class="library-state__spinner" aria-hidden="true"></span>
+          <span class="library-state__message">Loading media…</span>
         </div>
-        <div id="catalog-state-empty" class="library-state" hidden>
-          No media matched this catalog query.
+        <div id="catalog-state-empty" class="library-state library-state--empty" hidden role="status">
+          <p id="catalog-state-empty-message" class="library-state__message">
+            No media matched this catalog query.
+          </p>
         </div>
-        <div id="catalog-state-unavailable" class="library-state library-state--warning" hidden>
-          The local catalog is not available.
+        <div id="catalog-state-unavailable" class="library-state library-state--warning" hidden role="status">
+          <p class="library-state__message">The local catalog is not available.</p>
         </div>
-        <div id="catalog-state-error" class="library-state library-state--warning" hidden>
-          Catalog media could not be loaded.
+        <div id="catalog-state-error" class="library-state library-state--error" hidden role="alert">
+          <p class="library-state__message">Media could not be loaded.</p>
+          <button id="catalog-retry-button" class="library-state__action" type="button">Retry</button>
         </div>
         <div id="catalog-results" class="catalog-results gallery-grid" aria-live="polite"></div>
         <div class="catalog-pagination" aria-label="Catalog pagination">

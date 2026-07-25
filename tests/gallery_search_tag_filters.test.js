@@ -344,6 +344,7 @@ function createInteractionHarness() {
     commandSearchClear,
     commandSearchSuggestions,
     catalogStateEmpty,
+    catalogStateEmptyMessage: null,
     setTimeout,
     clearTimeout,
   };
@@ -736,6 +737,9 @@ test("Selected-card and empty-result presentation reconcile with filtered result
   h.run("reconcileCatalogSelectedCard(); catalogState.q = 'needle'; catalogState.tagKeys = ['alpha']; renderCatalogEmptyState()");
   assert.equal(other.classList.contains("catalog-card--selected"), false);
   assert.equal(h.catalogStateEmpty.textContent, "No media match the current search and tag filters.");
+
+  h.run("catalogState.q = ''; catalogState.tagKeys = []; catalogState.contentCategory = 'meme'; renderCatalogEmptyState()");
+  assert.equal(h.catalogStateEmpty.textContent, "No media match the active filters.");
 });
 
 test("Catalog request owners reject stale success, error, and finally work under adversarial timing", async () => {

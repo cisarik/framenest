@@ -263,10 +263,13 @@ const catalogTagsState = document.querySelector("#catalog-tags-state");
 const commandSearchInput = document.querySelector("#command-search-input");
 const commandSearchClear = document.querySelector("#command-search-clear");
 const commandSearchSuggestions = document.querySelector("#command-search-suggestions");
+const catalogBrowser = document.querySelector("#catalog-browser");
 const catalogStateLoading = document.querySelector("#catalog-state-loading");
 const catalogStateEmpty = document.querySelector("#catalog-state-empty");
+const catalogStateEmptyMessage = document.querySelector("#catalog-state-empty-message");
 const catalogStateUnavailable = document.querySelector("#catalog-state-unavailable");
 const catalogStateError = document.querySelector("#catalog-state-error");
+const catalogRetryButton = document.querySelector("#catalog-retry-button");
 const catalogResults = document.querySelector("#catalog-results");
 const catalogPrevButton = document.querySelector("#catalog-prev-button");
 const catalogNextButton = document.querySelector("#catalog-next-button");
@@ -918,6 +921,12 @@ function showCatalogState(state) {
   catalogStateUnavailable.hidden = state !== "unavailable";
   catalogStateError.hidden = state !== "error";
   catalogResults.hidden = state !== "success";
+  if (catalogStateLoading) {
+    catalogStateLoading.setAttribute("aria-busy", state === "loading" ? "true" : "false");
+  }
+  if (catalogBrowser) {
+    catalogBrowser.setAttribute("aria-busy", state === "loading" ? "true" : "false");
+  }
 }
 
 function appendText(parent, value) {
@@ -3873,14 +3882,21 @@ function renderCatalogCard(item) {
 function renderCatalogEmptyState() {
   const hasSearch = Boolean(catalogState.q.trim());
   const hasTags = catalogState.tagKeys.length > 0;
+  const hasClassFilters = Boolean(catalogState.contentCategory) || Boolean(catalogState.acquisitionSource);
+  const hasCollection = Boolean(catalogState.collection);
+  const hasAnyFilter = hasSearch || hasTags || hasClassFilters || hasCollection;
+  const messageTarget = catalogStateEmptyMessage || catalogStateEmpty;
+  if (!messageTarget) return;
   if (hasSearch && hasTags) {
-    catalogStateEmpty.textContent = "No media match the current search and tag filters.";
+    messageTarget.textContent = "No media match the current search and tag filters.";
   } else if (hasSearch) {
-    catalogStateEmpty.textContent = "No media match the current search.";
+    messageTarget.textContent = "No media match the current search.";
   } else if (hasTags) {
-    catalogStateEmpty.textContent = "No media match the active tag filters.";
+    messageTarget.textContent = "No media match the active tag filters.";
+  } else if (hasAnyFilter) {
+    messageTarget.textContent = "No media match the active filters.";
   } else {
-    catalogStateEmpty.textContent = "No media are available in this catalog view.";
+    messageTarget.textContent = "No media are available in this catalog view.";
   }
 }
 
@@ -6799,6 +6815,12 @@ if (metadataDialog) {
 
 if (metadataCloseButton) {
   metadataCloseButton.addEventListener("click", () => closeMetadataWorkspace());
+}
+
+if (catalogRetryButton) {
+  catalogRetryButton.addEventListener("click", () => {
+    loadCatalog();
+  });
 }
 
 checkHealth();
