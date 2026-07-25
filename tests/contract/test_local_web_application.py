@@ -863,9 +863,11 @@ def test_browser_catalog_scope_defaults_to_all_media_and_switching_is_well_forme
     assert "collection: \"\"" in catalog_state_literal or "collection: ''" in catalog_state_literal
 
     assert "function setCatalogScope(collection)" in script
+    assert "function resetCatalogToAllMedia()" in script
     assert "catalogState.offset = 0" in script
-    assert "setCatalogScope(\"\")" in script or "setCatalogScope('')" in script
+    assert "resetCatalogToAllMedia()" in script
     assert "setCatalogScope(PROCESSED_COLLECTION)" in script
+    assert "catalogIsUnfilteredAllMedia()" in script
 
     build_start = script.index("function buildCatalogQueryParams(")
     build_end = script.index("}", script.index("return params;", build_start)) + 1

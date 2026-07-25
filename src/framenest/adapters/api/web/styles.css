@@ -1224,15 +1224,18 @@ h2 {
 
 .catalog-scope {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
-  margin-bottom: 14px;
+  margin-bottom: 12px;
 }
 
 .catalog-scope button {
+  appearance: none;
+  -webkit-appearance: none;
   border: 1px solid var(--line);
   border-radius: var(--radius-pill);
   background: var(--surface);
-  color: var(--text-muted);
+  color: var(--text);
   cursor: pointer;
   font: inherit;
   font-size: 0.84rem;
@@ -1245,12 +1248,62 @@ h2 {
 .catalog-scope button:focus-visible {
   border-color: rgba(255, 255, 255, 0.86);
   background: var(--surface-raised);
+  color: var(--text);
+}
+
+.catalog-scope button:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
 }
 
 .catalog-scope .scope-active {
   border-color: var(--accent-border);
   background: var(--accent-soft);
-  color: var(--accent);
+  color: var(--accent-strong);
+  box-shadow: 0 0 10px var(--accent-glow);
+}
+
+.catalog-class-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 18px;
+  min-height: 36px;
+}
+
+.catalog-class-filters button {
+  appearance: none;
+  -webkit-appearance: none;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 700;
+  line-height: 1.2;
+  padding: 7px 14px;
+  transition: background var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.catalog-class-filters button:hover,
+.catalog-class-filters button:focus-visible {
+  border-color: rgba(255, 255, 255, 0.86);
+  background: var(--surface-raised);
+  color: var(--text);
+}
+
+.catalog-class-filters button:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.catalog-class-filters button[aria-pressed="true"] {
+  border-color: var(--accent-border);
+  background: var(--accent-soft);
+  color: var(--accent-strong);
   box-shadow: 0 0 10px var(--accent-glow);
 }
 
@@ -1613,10 +1666,10 @@ h2 {
 }
 
 .catalog-card__tag[aria-pressed="true"] {
-  border-color: var(--accent-border);
-  background: var(--accent-soft);
-  color: var(--accent);
-  box-shadow: 0 0 8px rgba(0, 255, 65, 0.1);
+  border-color: var(--accent);
+  background: rgba(0, 255, 65, 0.22);
+  color: var(--accent-strong);
+  box-shadow: 0 0 12px var(--accent-glow);
 }
 
 /* --- Card actions --- */

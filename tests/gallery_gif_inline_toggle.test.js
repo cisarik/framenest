@@ -87,6 +87,9 @@ class FakeElement {
     this.muted = false;
     this.controls = false;
     this.loop = false;
+    this.paused = true;
+    this.ended = false;
+    this.currentTime = 0;
     this.onerror = null;
     this.isConnected = true;
   }
@@ -132,10 +135,17 @@ class FakeElement {
   }
 
   play() {
+    this.paused = false;
+    if (this.ended) {
+      this.ended = false;
+      this.currentTime = 0;
+    }
     return Promise.resolve();
   }
 
-  pause() {}
+  pause() {
+    this.paused = true;
+  }
 
   load() {}
 }
@@ -165,6 +175,7 @@ function createHarness() {
     "renderPersistentPreview",
     "renderCardOriginalPlayback",
     "cleanupCatalogCardMedia",
+    "cardSurfaceVideoElement",
     "syncCardMediaSurfaceToggleState",
     "activateCardPlayback",
     "renderCatalogCardMediaSurface",
@@ -255,7 +266,7 @@ test("GIF keyboard activation toggles the same preview and original URLs", () =>
   assert.equal(surface.getAttribute("aria-pressed"), "false");
 });
 
-test("MP4 activation continues to use original content without GIF toggle semantics", () => {
+test("MP4 activation pauses on second click without remounting or resetting time", () => {
   const { context } = createHarness();
   const item = mp4Item();
   const surface = context.renderCatalogCardMediaSurface(item);
@@ -263,18 +274,62 @@ test("MP4 activation continues to use original content without GIF toggle semant
   const originalUrl = context.mediaContentUrl(item.media_id, item.locations[0].location_id);
 
   assert.equal(mediaChild(surface).src, previewUrl);
-  assert.equal(surface.getAttribute("aria-pressed"), null);
+  assert.equal(surface.getAttribute("aria-pressed"), "false");
 
   surface.dispatchEvent({ type: "click", preventDefault() {}, key: "" });
-  assert.equal(mediaChild(surface).tagName, "VIDEO");
-  assert.equal(mediaChild(surface).src, originalUrl);
-  assert.equal(surface.getAttribute("aria-pressed"), null);
-
-  // Second activation restarts playback rather than restoring static preview.
-  surface.dispatchEvent({ type: "click", preventDefault() {}, key: "" });
-  assert.equal(mediaChild(surface).tagName, "VIDEO");
-  assert.equal(mediaChild(surface).src, originalUrl);
+  const playingVideo = mediaChild(surface);
+  assert.equal(playingVideo.tagName, "VIDEO");
+  assert.equal(playingVideo.src, originalUrl);
+  assert.equal(playingVideo.paused, false);
+  assert.equal(surface.getAttribute("aria-pressed"), "true");
   assert.equal(surface.getAttribute("data-media-state"), "playing");
+  playingVideo.currentTime = 1.25;
+
+  surface.dispatchEvent({ type: "click", preventDefault() {}, key: "" });
+  const pausedVideo = mediaChild(surface);
+  assert.equal(pausedVideo, playingVideo);
+  assert.equal(pausedVideo.tagName, "VIDEO");
+  assert.equal(pausedVideo.src, originalUrl);
+  assert.equal(pausedVideo.paused, true);
+  assert.equal(pausedVideo.currentTime, 1.25);
+  assert.equal(surface.getAttribute("data-media-state"), "paused");
+  assert.equal(surface.getAttribute("aria-pressed"), "false");
+
+  surface.dispatchEvent({ type: "click", preventDefault() {}, key: "" });
+  const resumedVideo = mediaChild(surface);
+  assert.equal(resumedVideo, playingVideo);
+  assert.equal(resumedVideo.paused, false);
+  assert.equal(resumedVideo.currentTime, 1.25);
+  assert.equal(surface.getAttribute("data-media-state"), "playing");
+  assert.equal(surface.getAttribute("aria-pressed"), "true");
+});
+
+test("Switching cards restores the previous MP4 preview without leaving a playing surface", () => {
+  const { context } = createHarness();
+  const first = mp4Item();
+  const second = {
+    ...mp4Item(),
+    media_id: "55555555-5555-4555-8555-555555555555",
+    display_title: "Other Clip",
+    locations: [{
+      location_id: "66666666-6666-4666-8666-666666666666",
+      availability: "available",
+      relative_path: "clips/other.mp4",
+    }],
+  };
+  const firstSurface = context.renderCatalogCardMediaSurface(first);
+  const secondSurface = context.renderCatalogCardMediaSurface(second);
+  const firstPreview = context.mediaGalleryPreviewUrl(first.media_id, first.locations[0].location_id);
+
+  firstSurface.dispatchEvent({ type: "click", preventDefault() {}, key: "" });
+  assert.equal(mediaChild(firstSurface).tagName, "VIDEO");
+
+  secondSurface.dispatchEvent({ type: "click", preventDefault() {}, key: "" });
+  assert.equal(mediaChild(firstSurface).tagName, "IMG");
+  assert.equal(mediaChild(firstSurface).src, firstPreview);
+  assert.equal(firstSurface.getAttribute("data-media-state"), "preview");
+  assert.equal(mediaChild(secondSurface).tagName, "VIDEO");
+  assert.equal(secondSurface.getAttribute("data-media-state"), "playing");
 });
 
 test("Unavailable GIF preview fallback remains truthful and does not invent persistence", () => {

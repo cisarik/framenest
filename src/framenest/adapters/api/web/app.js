@@ -3490,6 +3490,11 @@ function renderCardOriginalPlayback(surface, item, location, title) {
   }
 }
 
+function cardSurfaceVideoElement(surface) {
+  if (!surface || !surface.children) return null;
+  return [...surface.children].find((child) => child.tagName === "VIDEO") || null;
+}
+
 function syncCardMediaSurfaceToggleState(surface, item, title, playing) {
   if (!surface) return;
   if (item.media_kind === "animated_image") {
@@ -3499,6 +3504,15 @@ function syncCardMediaSurfaceToggleState(surface, item, title, playing) {
       playing ? `Show static preview for ${title}` : `Play animated preview for ${title}`,
     );
     surface.title = playing ? "Show static preview" : "Play";
+    return;
+  }
+  if (item.media_kind === "video") {
+    surface.setAttribute("aria-pressed", playing ? "true" : "false");
+    surface.setAttribute(
+      "aria-label",
+      playing ? `Pause ${title}` : `Play ${title}`,
+    );
+    surface.title = playing ? "Pause" : "Play";
     return;
   }
   surface.removeAttribute("aria-pressed");
@@ -3526,9 +3540,27 @@ function activateCardPlayback(item, surface) {
     syncCardMediaSurfaceToggleState(surface, item, title, false);
     return;
   }
+  if (item.media_kind === "video" && activeCardMediaSurface === surface) {
+    const video = cardSurfaceVideoElement(surface);
+    if (video) {
+      const isActivelyPlaying = surface.getAttribute("data-media-state") === "playing" && !video.paused;
+      if (isActivelyPlaying) {
+        video.pause();
+        surface.setAttribute("data-media-state", "paused");
+        syncCardMediaSurfaceToggleState(surface, item, title, false);
+        return;
+      }
+      video.play().catch(() => {
+        // The explicit Details surface remains available if compact-card playback is blocked.
+      });
+      surface.setAttribute("data-media-state", "playing");
+      syncCardMediaSurfaceToggleState(surface, item, title, true);
+      return;
+    }
+  }
   cleanupCatalogCardMedia();
   renderCardOriginalPlayback(surface, item, location, title);
-  syncCardMediaSurfaceToggleState(surface, item, title, item.media_kind === "animated_image");
+  syncCardMediaSurfaceToggleState(surface, item, title, true);
 }
 
 function renderCatalogCardMediaSurface(item) {
@@ -3858,6 +3890,7 @@ function activateCatalogTagFilter(tagKey, { focusChip = false } = {}) {
     renderActiveCatalogTagFilters();
   }
   renderCatalogTagFilterStates();
+  syncCatalogFilterControls();
   if (focusChip) {
     focusCatalogFilterChip(tagKey);
   }
@@ -3881,6 +3914,7 @@ function removeCatalogTagFilter(tagKey, { restoreFocus = true } = {}) {
   catalogState.offset = 0;
   renderActiveCatalogTagFilters();
   renderCatalogTagFilterStates();
+  syncCatalogFilterControls();
   const remainingChips = [...catalogTagFilters.querySelectorAll(".catalog-filter-chip")];
   const focusTarget = remainingChips[removedIndex]
     || remainingChips[removedIndex - 1]
@@ -5983,6 +6017,33 @@ function syncClassificationControlsFromWorkspace() {
   }
 }
 
+function catalogHasNarrowingFilters() {
+  return catalogState.tagKeys.length > 0
+    || Boolean(catalogState.contentCategory)
+    || Boolean(catalogState.acquisitionSource);
+}
+
+function catalogIsUnfilteredAllMedia() {
+  return catalogState.collection === "" && !catalogHasNarrowingFilters();
+}
+
+function syncCatalogFilterControls() {
+  const allButton = document.querySelector("#catalog-scope-all");
+  const processedButton = document.querySelector("#catalog-scope-processed");
+  if (allButton) {
+    allButton.classList.toggle("scope-active", catalogIsUnfilteredAllMedia());
+  }
+  if (processedButton) {
+    processedButton.classList.toggle("scope-active", catalogState.collection === PROCESSED_COLLECTION);
+  }
+  const memes = document.querySelector("#catalog-filter-memes");
+  const movies = document.querySelector("#catalog-filter-movies");
+  const youtube = document.querySelector("#catalog-filter-youtube");
+  if (memes) memes.setAttribute("aria-pressed", String(catalogState.contentCategory === "meme"));
+  if (movies) movies.setAttribute("aria-pressed", String(catalogState.contentCategory === "movie"));
+  if (youtube) youtube.setAttribute("aria-pressed", String(catalogState.acquisitionSource === "youtube_manual_claim"));
+}
+
 function setCatalogClassificationFilter({ contentCategory = null, acquisitionSource = null } = {}) {
   if (contentCategory !== null) {
     catalogState.contentCategory = catalogState.contentCategory === contentCategory ? "" : contentCategory;
@@ -5991,12 +6052,7 @@ function setCatalogClassificationFilter({ contentCategory = null, acquisitionSou
     catalogState.acquisitionSource = catalogState.acquisitionSource === acquisitionSource ? "" : acquisitionSource;
   }
   catalogState.offset = 0;
-  const memes = document.querySelector("#catalog-filter-memes");
-  const movies = document.querySelector("#catalog-filter-movies");
-  const youtube = document.querySelector("#catalog-filter-youtube");
-  if (memes) memes.setAttribute("aria-pressed", String(catalogState.contentCategory === "meme"));
-  if (movies) movies.setAttribute("aria-pressed", String(catalogState.contentCategory === "movie"));
-  if (youtube) youtube.setAttribute("aria-pressed", String(catalogState.acquisitionSource === "youtube_manual_claim"));
+  syncCatalogFilterControls();
   loadCatalog();
 }
 
@@ -6006,12 +6062,22 @@ function setCatalogScope(collection) {
   }
   catalogState.collection = collection;
   catalogState.offset = 0;
-  const allButton = document.querySelector("#catalog-scope-all");
-  const processedButton = document.querySelector("#catalog-scope-processed");
-  if (allButton && processedButton) {
-    allButton.classList.toggle("scope-active", collection === "");
-    processedButton.classList.toggle("scope-active", collection === PROCESSED_COLLECTION);
+  syncCatalogFilterControls();
+  loadCatalog();
+}
+
+function resetCatalogToAllMedia() {
+  if (catalogState.collection !== "") {
+    advanceMetadataWorkspaceRevision();
   }
+  catalogState.collection = "";
+  catalogState.tagKeys = [];
+  catalogState.contentCategory = "";
+  catalogState.acquisitionSource = "";
+  catalogState.offset = 0;
+  renderActiveCatalogTagFilters();
+  renderCatalogTagFilterStates();
+  syncCatalogFilterControls();
   loadCatalog();
 }
 
@@ -6024,7 +6090,7 @@ document.querySelector("#catalog-scope-all").addEventListener("click", async () 
   } else if (!metadataDiscardContextIsCurrent(discardContext)) {
     return;
   }
-  setCatalogScope("");
+  resetCatalogToAllMedia();
 });
 
 document.querySelector("#catalog-scope-processed").addEventListener("click", async () => {

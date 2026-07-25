@@ -373,7 +373,7 @@ function createInteractionHarness() {
   vm.runInContext(`
     const CATALOG_PAGE_SIZE_OPTIONS = [10, 30, 60, 90];
     const CATALOG_PAGE_SIZE = 30;
-    let catalogState = { q: "", tagKeys: [], collection: "", limit: 30, offset: 0, total: 0 };
+    let catalogState = { q: "", tagKeys: [], collection: "", contentCategory: "", acquisitionSource: "", limit: 30, offset: 0, total: 0 };
     let canonicalTagDefinitions = [];
     let metadataWorkspace = { openMediaId: null };
     let catalogLoadCalls = 0;
@@ -382,6 +382,7 @@ function createInteractionHarness() {
     let commandSearchActiveIndex = -1;
     let commandSearchCurrentSuggestions = [];
     function loadCatalog() { catalogLoadCalls += 1; }
+    function syncCatalogFilterControls() {}
     ${functions}
     ${COMMAND_SEARCH_INPUT_SETUP}
   `, context, { filename: APP_PATH });
@@ -447,7 +448,7 @@ function createRequestHarness(fetch) {
     let commandSearchRequestToken = 0;
     let commandSearchActiveIndex = -1;
     let commandSearchCurrentSuggestions = [];
-    let catalogState = { q: "", tagKeys: [], collection: "", limit: 30, offset: 0, total: 0 };
+    let catalogState = { q: "", tagKeys: [], collection: "", contentCategory: "", acquisitionSource: "", limit: 30, offset: 0, total: 0 };
     const catalogPrevButton = { disabled: false };
     const catalogNextButton = { disabled: false };
     const catalogPageSummary = { textContent: "" };
@@ -455,6 +456,7 @@ function createRequestHarness(fetch) {
     let renderedPages = [];
     function renderActiveCatalogTagFilters() {}
     function renderCatalogTagFilterStates() {}
+    function syncCatalogFilterControls() {}
     function showCatalogState(state) { catalogVisibleState = state; }
     function renderCatalogSuccess(page) {
       renderedPages.push(page.marker);
