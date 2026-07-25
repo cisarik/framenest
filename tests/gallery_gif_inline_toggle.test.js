@@ -162,12 +162,21 @@ function createHarness() {
     activeCardMediaSurface: null,
     activeCardMediaRestore: null,
     cardMediaElements: new Set(),
+    videoPlaybackPositionByMediaId: new Map(),
+    VIDEO_PLAYBACK_END_EPSILON_SECONDS: 0.35,
+    Number,
+    Math,
     fetch(url, options = {}) {
       fetchCalls.push({ url: String(url), method: options.method || "GET" });
       return Promise.resolve({ ok: true, status: 200, json: async () => ({}) });
     },
   };
   const names = [
+    "normalizeVideoPlaybackPosition",
+    "rememberVideoPlaybackPosition",
+    "captureVideoPlaybackPosition",
+    "applyStoredVideoPlaybackPosition",
+    "captureActiveCardVideoPlaybackPosition",
     "mediaContentUrl",
     "mediaGalleryPreviewUrl",
     "selectSupportedAvailableLocation",

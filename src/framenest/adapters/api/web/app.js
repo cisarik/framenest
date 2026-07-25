@@ -77,6 +77,9 @@ let activePreviewTimer = null;
 let cardMediaElements = new Set();
 let activeCardMediaSurface = null;
 let activeCardMediaRestore = null;
+/** Browser-session video resume positions keyed by stable logical media_id. */
+let videoPlaybackPositionByMediaId = new Map();
+const VIDEO_PLAYBACK_END_EPSILON_SECONDS = 0.35;
 let detailsMediaToken = 0;
 let detailsMediaElement = null;
 const prefersReducedMotion = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -2666,7 +2669,52 @@ function stopCardPreviewTimer() {
   activePreviewMediaId = null;
 }
 
+function normalizeVideoPlaybackPosition(seconds) {
+  if (typeof seconds !== "number" || !Number.isFinite(seconds) || seconds < 0) {
+    return null;
+  }
+  return seconds;
+}
+
+function rememberVideoPlaybackPosition(mediaId, seconds) {
+  if (!mediaId) return;
+  const normalized = normalizeVideoPlaybackPosition(seconds);
+  if (normalized === null) return;
+  videoPlaybackPositionByMediaId.set(mediaId, normalized);
+}
+
+function captureVideoPlaybackPosition(mediaId, video) {
+  if (!mediaId || !video || video.tagName !== "VIDEO") return;
+  rememberVideoPlaybackPosition(mediaId, video.currentTime);
+}
+
+function applyStoredVideoPlaybackPosition(mediaId, video) {
+  if (!mediaId || !video || video.tagName !== "VIDEO") return;
+  const stored = normalizeVideoPlaybackPosition(videoPlaybackPositionByMediaId.get(mediaId));
+  if (stored === null) return;
+  const duration = video.duration;
+  if (Number.isFinite(duration) && duration > 0) {
+    if (video.ended || stored >= duration - VIDEO_PLAYBACK_END_EPSILON_SECONDS) {
+      video.currentTime = 0;
+      videoPlaybackPositionByMediaId.set(mediaId, 0);
+      return;
+    }
+    video.currentTime = Math.min(stored, Math.max(0, duration - VIDEO_PLAYBACK_END_EPSILON_SECONDS));
+    return;
+  }
+  video.currentTime = stored;
+}
+
+function captureActiveCardVideoPlaybackPosition() {
+  if (!activeCardMediaRestore || !activeCardMediaRestore.item) return;
+  const mediaId = activeCardMediaRestore.item.media_id;
+  if (!mediaId || activeCardMediaRestore.item.media_kind !== "video") return;
+  const video = cardSurfaceVideoElement(activeCardMediaRestore.surface);
+  captureVideoPlaybackPosition(mediaId, video);
+}
+
 function cleanupCatalogCardMedia() {
+  captureActiveCardVideoPlaybackPosition();
   if (activeCardMediaRestore && activeCardMediaRestore.surface && activeCardMediaRestore.surface.isConnected) {
     const restore = activeCardMediaRestore;
     renderPersistentPreview(
@@ -2715,6 +2763,9 @@ function cleanupDetailsMedia({ invalidate = true } = {}) {
   }
   if (detailsMediaElement) {
     if (detailsMediaElement.tagName === "VIDEO") {
+      if (detailsCurrentItem && detailsCurrentItem.media_kind === "video") {
+        captureVideoPlaybackPosition(detailsCurrentItem.media_id, detailsMediaElement);
+      }
       detailsMediaElement.pause();
       detailsMediaElement.removeAttribute("src");
       detailsMediaElement.querySelectorAll("source").forEach((source) => source.remove());
@@ -2727,7 +2778,10 @@ function cleanupDetailsMedia({ invalidate = true } = {}) {
     detailsMediaElement.onerror = null;
     detailsMediaElement.onload = null;
     detailsMediaElement.onloadeddata = null;
+    detailsMediaElement.onloadedmetadata = null;
     detailsMediaElement.oncanplay = null;
+    detailsMediaElement.ontimeupdate = null;
+    detailsMediaElement.onpause = null;
     detailsMediaElement = null;
   }
   if (detailsPreviewContainer) {
@@ -2944,6 +2998,10 @@ function renderDetailsMedia(item, { playWhenReady = false } = {}) {
     video.setAttribute("aria-label", title);
     video.hidden = true;
 
+    video.onloadedmetadata = () => {
+      if (token !== detailsMediaToken) return;
+      applyStoredVideoPlaybackPosition(item.media_id, video);
+    };
     video.onloadeddata = () => {
       if (token !== detailsMediaToken) return;
       loading.remove();
@@ -2953,12 +3011,21 @@ function renderDetailsMedia(item, { playWhenReady = false } = {}) {
       if (token !== detailsMediaToken) return;
       loading.remove();
       video.hidden = false;
+      applyStoredVideoPlaybackPosition(item.media_id, video);
       if (playWhenReady) {
         video.play().catch(() => {
           // Native controls remain available when the browser blocks playback.
         });
         playWhenReady = false;
       }
+    };
+    video.ontimeupdate = () => {
+      if (token !== detailsMediaToken) return;
+      captureVideoPlaybackPosition(item.media_id, video);
+    };
+    video.onpause = () => {
+      if (token !== detailsMediaToken) return;
+      captureVideoPlaybackPosition(item.media_id, video);
     };
     video.onerror = () => {
       if (token !== detailsMediaToken) return;
@@ -3470,6 +3537,9 @@ function renderCardOriginalPlayback(surface, item, location, title) {
     video.controls = false;
     video.loop = false;
     video.setAttribute("aria-label", `Playing video preview for ${title}`);
+    video.onloadedmetadata = () => {
+      applyStoredVideoPlaybackPosition(item.media_id, video);
+    };
     video.onerror = showPreviewAgain;
     cardMediaElements.add(video);
     video.src = url;
@@ -3546,6 +3616,7 @@ function activateCardPlayback(item, surface) {
       const isActivelyPlaying = surface.getAttribute("data-media-state") === "playing" && !video.paused;
       if (isActivelyPlaying) {
         video.pause();
+        captureVideoPlaybackPosition(item.media_id, video);
         surface.setAttribute("data-media-state", "paused");
         syncCardMediaSurfaceToggleState(surface, item, title, false);
         return;
@@ -4957,6 +5028,16 @@ async function openDetailsDialog(item, openerElement, { playWhenReady = false } 
     const discardContext = await confirmDiscardDirtyMetadata({ action: "open-details", targetMediaId });
     if (!discardContext || item.media_id !== targetMediaId) return;
     if (!closeMetadataWorkspaceWithContext(discardContext)) return;
+  }
+  if (
+    item.media_kind === "video"
+    && activeCardMediaRestore
+    && activeCardMediaRestore.item
+    && activeCardMediaRestore.item.media_id === item.media_id
+  ) {
+    captureVideoPlaybackPosition(item.media_id, cardSurfaceVideoElement(activeCardMediaRestore.surface));
+  } else {
+    captureActiveCardVideoPlaybackPosition();
   }
   stopCardPreviewTimer();
   cleanupDetailsMedia();
