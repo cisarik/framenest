@@ -116,11 +116,14 @@ button {
   position: sticky;
   top: 0;
   z-index: 50;
-  display: flex;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-areas: "brand search controls";
   align-items: center;
-  justify-content: space-between;
   gap: 12px;
   width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
   padding: 10px 20px;
   background: rgba(10, 14, 10, 0.78);
   backdrop-filter: blur(var(--glass-blur));
@@ -136,10 +139,12 @@ button {
 }
 
 .brand {
+  grid-area: brand;
   display: inline-flex;
   align-items: center;
   gap: 10px;
   min-width: 0;
+  flex-shrink: 0;
 }
 
 .brand-mark {
@@ -161,9 +166,10 @@ button {
 /* --- Header command search --- */
 
 .header-search {
-  flex: 1 1 680px;
+  grid-area: search;
   min-width: 0;
-  max-width: 720px;
+  max-width: 100%;
+  width: 100%;
 }
 
 .header-search__control {
@@ -321,10 +327,12 @@ button {
 }
 
 .header-status-group {
+  grid-area: controls;
   display: flex;
   align-items: center;
-  gap: 10px;
-  flex-shrink: 1;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-shrink: 0;
   min-width: 0;
   max-width: 100%;
 }
@@ -332,9 +340,14 @@ button {
 .identity-badge {
   display: inline-flex;
   align-items: center;
-  gap: 7px;
+  justify-content: flex-start;
+  gap: 0;
   min-width: 0;
-  max-width: min(260px, 42vw);
+  max-width: min(180px, 28vw);
+  height: 36px;
+  padding: 0 12px;
+  border-color: var(--accent-border);
+  background: rgba(20, 28, 22, 0.88);
   color: var(--text);
   overflow: hidden;
 }
@@ -350,23 +363,8 @@ button {
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--text);
-  font-size: 0.76rem;
+  font-size: 0.78rem;
   font-weight: 700;
-}
-
-.identity-badge__sep {
-  flex: 0 0 auto;
-  color: var(--text-muted);
-  font-size: 0.76rem;
-}
-
-.identity-badge__role {
-  flex: 0 0 auto;
-  color: var(--accent);
-  font-size: 0.76rem;
-  font-weight: 700;
-  text-transform: none;
-  letter-spacing: 0;
 }
 
 /* --- Status buttons --- */
@@ -374,7 +372,8 @@ button {
 .status-button {
   display: inline-flex;
   align-items: center;
-  gap: 7px;
+  justify-content: center;
+  gap: 0;
   border: 1px solid var(--line);
   border-radius: var(--radius-pill);
   background: rgba(20, 28, 22, 0.6);
@@ -385,8 +384,28 @@ button {
   font-weight: 700;
   font-family: var(--font-mono);
   padding: 6px 12px;
-  min-height: 32px;
+  min-height: 36px;
   transition: border-color var(--transition-fast), background var(--transition-fast), box-shadow var(--transition-fast), color var(--transition-fast), transform var(--transition-fast);
+}
+
+.status-button--icon {
+  width: 36px;
+  height: 36px;
+  min-width: 36px;
+  min-height: 36px;
+  padding: 0;
+  flex: 0 0 36px;
+}
+
+.status-button__glyph {
+  display: inline-grid;
+  place-items: center;
+  width: 1.25rem;
+  height: 1.25rem;
+  line-height: 1;
+  font-size: 1rem;
+  pointer-events: none;
+  user-select: none;
 }
 
 .status-button:hover {
@@ -415,41 +434,26 @@ button {
   color: #ffffff;
 }
 
-.identity-badge:hover .identity-badge__role,
-.identity-badge:focus-visible .identity-badge__role {
-  color: var(--accent-strong);
-}
-
 .status-button__dot {
-  display: inline-block;
-  flex: 0 0 auto;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--warning);
-  transition: background var(--transition-fast), box-shadow var(--transition-fast);
+  display: none;
 }
 
 .status-button__label {
-  color: var(--text-soft);
-  font-size: 0.72rem;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
+  display: none;
 }
 
 .status-button__state {
-  color: var(--text-muted);
-  font-size: 0.76rem;
+  display: none;
 }
 
-.status-button--checking .status-button__dot {
-  background: var(--warning);
-  box-shadow: 0 0 6px rgba(243, 189, 101, 0.4);
-  animation: dot-pulse 1.5s ease-in-out infinite;
+.status-button--checking {
+  border-color: rgba(243, 189, 101, 0.55);
+  background: rgba(243, 189, 101, 0.1);
+  color: var(--warning);
 }
 
-.status-button--checking .status-button__label {
-  color: var(--text-soft);
+.status-button--checking .status-button__glyph {
+  opacity: 0.9;
 }
 
 .status-button--healthy {
@@ -458,41 +462,10 @@ button {
   color: var(--accent);
 }
 
-.status-button--healthy .status-button__dot {
-  background: var(--accent);
-  box-shadow: 0 0 8px var(--accent-glow);
-}
-
-.status-button--healthy .status-button__state {
-  color: var(--accent);
-}
-
-.status-button--healthy .status-button__label {
-  color: var(--accent);
-}
-
 .status-button--unhealthy {
   border-color: var(--danger-border);
   background: var(--danger-soft);
   color: var(--danger);
-}
-
-.status-button--unhealthy .status-button__dot {
-  background: var(--danger);
-  box-shadow: 0 0 8px var(--danger-glow);
-}
-
-.status-button--unhealthy .status-button__state {
-  color: var(--danger);
-}
-
-.status-button--unhealthy .status-button__label {
-  color: var(--danger);
-}
-
-@keyframes dot-pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.4; }
 }
 
 /* --- Hidden legacy status containers (kept for JS compatibility) --- */
@@ -3280,6 +3253,65 @@ h2 {
 
 /* --- Responsive --- */
 
+@media (max-width: 900px) {
+  .app-header {
+    grid-template-columns: auto minmax(0, 1fr);
+    grid-template-areas:
+      "brand controls"
+      "search search";
+    gap: 8px 10px;
+    padding: 8px 14px;
+  }
+
+  .header-search {
+    max-width: 100%;
+  }
+
+  .header-status-group {
+    gap: 6px;
+  }
+
+  .identity-badge {
+    max-width: min(112px, 30vw);
+    padding-inline: 10px;
+  }
+}
+
+@media (max-width: 360px) {
+  .app-header {
+    gap: 6px 8px;
+    padding: 8px 10px;
+  }
+
+  .brand-mark {
+    width: 32px;
+    height: 32px;
+    font-size: 0.7rem;
+  }
+
+  .header-status-group {
+    gap: 4px;
+  }
+
+  .status-button--icon {
+    width: 34px;
+    height: 34px;
+    min-width: 34px;
+    min-height: 34px;
+    flex-basis: 34px;
+  }
+
+  .identity-badge {
+    height: 34px;
+    max-width: min(88px, 26vw);
+    padding-inline: 8px;
+  }
+
+  .identity-badge__name {
+    font-size: 0.72rem;
+  }
+}
+
 @media (max-width: 940px) {
   .library-list {
     grid-template-columns: 1fr;
@@ -3287,42 +3319,9 @@ h2 {
 }
 
 @media (max-width: 620px) {
-  .app-header {
-    flex-wrap: wrap;
-    padding: 8px 14px;
-    gap: 8px;
-  }
-
-  .header-search {
-    order: 3;
-    flex: 1 1 100%;
-    max-width: 100%;
-  }
-
   .catalog-tag-filters {
     flex-basis: 46%;
     max-width: 46%;
-  }
-
-  .header-status-group {
-    gap: 6px;
-    flex-shrink: 1;
-    min-width: 0;
-  }
-
-  .status-button {
-    padding: 8px 10px;
-    font-size: 0.72rem;
-    min-height: 40px;
-  }
-
-  .status-button__label {
-    display: none;
-  }
-
-  .identity-badge {
-    max-width: min(148px, 36vw);
-    padding-inline: 10px;
   }
 
   .settings-dialog__tabs {
@@ -3427,10 +3426,6 @@ h2 {
     animation-iteration-count: 1 !important;
     scroll-behavior: auto !important;
     transition-duration: 0.01ms !important;
-  }
-
-  .status-button--checking .status-button__dot {
-    animation: none;
   }
 
   .header-search__prompt {

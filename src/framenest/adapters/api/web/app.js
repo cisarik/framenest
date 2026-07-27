@@ -258,22 +258,21 @@ function renderIdentityBadge() {
   if (!identityState.available || !identityState.login) {
     identityBadge.hidden = true;
     if (identityStatusName) identityStatusName.textContent = "";
-    if (identityStatusRole) identityStatusRole.textContent = "";
     identityBadge.removeAttribute("aria-label");
     identityBadge.title = "Open Tailscale identity status";
+    applyTailscalePanelDensity();
     return;
   }
   const label = identityState.displayName || identityState.login;
-  const roleLabel = identityState.role === "admin" ? "Admin" : "User";
   if (identityStatusName) identityStatusName.textContent = label;
-  if (identityStatusRole) identityStatusRole.textContent = roleLabel;
-  identityBadge.classList.add("status-button--healthy");
+  identityBadge.classList.remove("status-button--checking", "status-button--unhealthy");
   identityBadge.setAttribute(
     "aria-label",
-    `Tailscale identity status: ${label}, ${roleLabel}. Open Tailscale details.`,
+    `Signed in as ${label}. Open Tailscale identity status.`,
   );
   identityBadge.title = `Signed in as ${identityState.login}. Open Tailscale identity status.`;
   identityBadge.hidden = false;
+  applyTailscalePanelDensity();
 }
 
 function restoredCatalogPageSize() {
@@ -331,7 +330,7 @@ const statusTailscaleProvenance = document.querySelector("#status-tailscale-prov
 const uploadOpenButton = document.querySelector("#upload-open-button");
 const identityBadge = document.querySelector("#identity-badge");
 const identityStatusName = document.querySelector("#identity-status-name");
-const identityStatusRole = document.querySelector("#identity-status-role");
+const statusTailscaleAdminOnlyRows = document.querySelectorAll(".status-tailscale-admin-only");
 const uploadDialog = document.querySelector("#upload-dialog");
 const uploadDialogTitle = document.querySelector("#upload-dialog-title");
 const uploadCloseButton = document.querySelector("#upload-close-button");
@@ -627,14 +626,14 @@ function setServerHealthButtonState(state, label) {
   serverHealthButton.classList.add("status-button--" + state);
   if (serverHealthButtonText) serverHealthButtonText.textContent = label;
   if (state === "healthy") {
-    serverHealthButton.setAttribute("aria-label", "Local server healthy");
-    serverHealthButton.title = "Local server healthy. Click to open status.";
+    serverHealthButton.setAttribute("aria-label", "Cloud status: connected");
+    serverHealthButton.title = "Cloud status: connected. Open Cloud status.";
   } else if (state === "unhealthy") {
-    serverHealthButton.setAttribute("aria-label", "Local server unhealthy or unreachable");
-    serverHealthButton.title = "Local server unhealthy or unreachable. Click to open status.";
+    serverHealthButton.setAttribute("aria-label", "Cloud status: unavailable");
+    serverHealthButton.title = "Cloud status: unavailable. Open Cloud status.";
   } else {
-    serverHealthButton.setAttribute("aria-label", "Checking local server");
-    serverHealthButton.title = "Checking local server...";
+    serverHealthButton.setAttribute("aria-label", "Cloud status: checking");
+    serverHealthButton.title = "Cloud status: checking";
   }
 }
 
@@ -644,14 +643,14 @@ function setAiStatusButtonState(state, label) {
   aiStatusButton.classList.add("status-button--" + state);
   if (aiStatusButtonText) aiStatusButtonText.textContent = label;
   if (state === "healthy") {
-    aiStatusButton.setAttribute("aria-label", "AI available");
-    aiStatusButton.title = "AI available. Click to open status.";
+    aiStatusButton.setAttribute("aria-label", "AI status: available");
+    aiStatusButton.title = "AI status: available. Open AI status.";
   } else if (state === "unhealthy") {
-    aiStatusButton.setAttribute("aria-label", "AI unavailable");
-    aiStatusButton.title = "AI unavailable. Click to open status.";
+    aiStatusButton.setAttribute("aria-label", "AI status: unavailable");
+    aiStatusButton.title = "AI status: unavailable. Open AI status.";
   } else {
-    aiStatusButton.setAttribute("aria-label", "Checking AI status");
-    aiStatusButton.title = "Checking AI status...";
+    aiStatusButton.setAttribute("aria-label", "AI status: checking");
+    aiStatusButton.title = "AI status: checking";
   }
 }
 
@@ -1081,7 +1080,15 @@ async function loadCloudStatus() {
   }
 }
 
+function applyTailscalePanelDensity() {
+  const showAdminDiagnostics = identityState.available && identityState.role === "admin";
+  statusTailscaleAdminOnlyRows.forEach((row) => {
+    row.hidden = !showAdminDiagnostics;
+  });
+}
+
 function renderTailscaleStatus() {
+  applyTailscalePanelDensity();
   renderTailscaleIdentityFields();
   if (lastCloudStatusPayload) {
     renderTailscaleConnectionFields(lastCloudStatusPayload);

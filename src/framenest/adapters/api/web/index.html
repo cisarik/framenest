@@ -35,32 +35,44 @@
         </div>
       </div>
       <div class="header-status-group">
-        <button id="upload-open-button" class="status-button upload-action-button" type="button" aria-label="Open upload cockpit" title="Upload GIF or MP4">
-          <span class="status-button__label">Upload</span>
-          <span class="status-button__state">Local</span>
+        <button
+          id="upload-open-button"
+          class="status-button status-button--icon upload-action-button"
+          type="button"
+          aria-label="Upload media"
+          title="Upload media"
+        >
+          <span class="status-button__glyph" aria-hidden="true">↑</span>
         </button>
-        <button id="server-health-button" class="status-button status-button--checking" type="button" aria-label="Local server healthy" title="Checking local server...">
-          <span class="status-button__dot" aria-hidden="true"></span>
-          <span class="status-button__label">Cloud</span>
-          <span id="server-health-button-text" class="status-button__state visually-hidden">Checking server</span>
+        <button
+          id="server-health-button"
+          class="status-button status-button--icon status-button--checking"
+          type="button"
+          aria-label="Cloud status: checking"
+          title="Cloud status: checking"
+        >
+          <span class="status-button__glyph" aria-hidden="true">☁️</span>
+          <span id="server-health-button-text" class="visually-hidden">Checking server</span>
         </button>
-        <button id="ai-status-button" class="status-button status-button--checking" type="button" aria-label="AI status" title="Checking AI status...">
-          <span class="status-button__dot" aria-hidden="true"></span>
-          <span class="status-button__label">AI</span>
-          <span id="ai-status-button-text" class="status-button__state visually-hidden">Checking AI</span>
+        <button
+          id="ai-status-button"
+          class="status-button status-button--icon status-button--checking"
+          type="button"
+          aria-label="AI status: checking"
+          title="AI status: checking"
+        >
+          <span class="status-button__glyph" aria-hidden="true">🧠</span>
+          <span id="ai-status-button-text" class="visually-hidden">Checking AI</span>
         </button>
         <button
           id="identity-badge"
-          class="status-button identity-badge status-button--healthy"
+          class="status-button identity-badge"
           type="button"
           hidden
           aria-label="Tailscale identity status"
           title="Open Tailscale identity status"
         >
-          <span class="status-button__dot" aria-hidden="true"></span>
           <span id="identity-status-name" class="identity-badge__name"></span>
-          <span class="identity-badge__sep" aria-hidden="true">·</span>
-          <span id="identity-status-role" class="identity-badge__role"></span>
         </button>
       </div>
     </header>
@@ -192,7 +204,7 @@
         <div id="status-panel-tailscale" class="settings-dialog__section" role="tabpanel" aria-labelledby="status-tab-tailscale" tabindex="0" hidden>
           <h3 class="settings-dialog__section-title">Tailscale</h3>
           <dl class="settings-status-list settings-status-list--wrap">
-            <div>
+            <div class="status-tailscale-admin-only" hidden>
               <dt>Connection</dt>
               <dd id="status-tailscale-connection">Checking...</dd>
             </div>
@@ -200,11 +212,11 @@
               <dt>Access method</dt>
               <dd id="status-tailscale-access-method">Unknown</dd>
             </div>
-            <div>
+            <div class="status-tailscale-admin-only" hidden>
               <dt>Hostname</dt>
               <dd id="status-tailscale-hostname"></dd>
             </div>
-            <div>
+            <div class="status-tailscale-admin-only" hidden>
               <dt>Application URL</dt>
               <dd id="status-tailscale-url"></dd>
             </div>
@@ -224,7 +236,7 @@
               <dt>Role</dt>
               <dd id="status-tailscale-role"></dd>
             </div>
-            <div>
+            <div class="status-tailscale-admin-only" hidden>
               <dt>Provenance</dt>
               <dd id="status-tailscale-provenance"></dd>
             </div>

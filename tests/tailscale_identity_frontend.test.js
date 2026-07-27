@@ -59,7 +59,7 @@ function response(payload, status = 200) {
 
 function createIdentityControlMock() {
   const attrs = { "aria-label": "Tailscale identity status" };
-  const classes = new Set(["status-button", "identity-badge", "status-button--healthy"]);
+  const classes = new Set(["status-button", "identity-badge"]);
   return {
     hidden: true,
     textContent: "",
@@ -67,6 +67,9 @@ function createIdentityControlMock() {
     classList: {
       add(name) {
         classes.add(name);
+      },
+      remove(...names) {
+        for (const name of names) classes.delete(name);
       },
       contains(name) {
         return classes.has(name);
@@ -84,12 +87,21 @@ function createIdentityControlMock() {
   };
 }
 
+function createAdminOnlyRows() {
+  return [
+    { hidden: true, name: "connection" },
+    { hidden: true, name: "hostname" },
+    { hidden: true, name: "url" },
+    { hidden: true, name: "provenance" },
+  ];
+}
+
 function createIdentityHarness(fetchImpl) {
   const uploadOpenButton = { hidden: false };
   const detailsEditButton = { hidden: false };
   const identityBadge = createIdentityControlMock();
   const identityStatusName = { textContent: "" };
-  const identityStatusRole = { textContent: "" };
+  const statusTailscaleAdminOnlyRows = createAdminOnlyRows();
   const context = {
     console,
     fetch: fetchImpl,
@@ -101,7 +113,7 @@ function createIdentityHarness(fetchImpl) {
     detailsEditButton,
     identityBadge,
     identityStatusName,
-    identityStatusRole,
+    statusTailscaleAdminOnlyRows,
     metadataControlCalls: 0,
   };
   context.updateMetadataControls = () => {
@@ -123,6 +135,7 @@ function createIdentityHarness(fetchImpl) {
     extractFunction(APP_SOURCE, "identityHasCapability"),
     extractFunction(APP_SOURCE, "framenestMutationHeaders"),
     extractFunction(APP_SOURCE, "applyIdentityCapabilities"),
+    extractFunction(APP_SOURCE, "applyTailscalePanelDensity"),
     extractFunction(APP_SOURCE, "renderIdentityBadge"),
     extractFunction(APP_SOURCE, "loadIdentity"),
   ].join("\n");
@@ -130,7 +143,7 @@ function createIdentityHarness(fetchImpl) {
   return context;
 }
 
-function createStatusTabHarness(fetchImpl, locationStub) {
+function createStatusTabHarness(fetchImpl, locationStub, role = "admin") {
   const makeTab = (selected) => ({
     classList: {
       _active: selected,
@@ -176,6 +189,7 @@ function createStatusTabHarness(fetchImpl, locationStub) {
     fields[id] = { textContent: "" };
   }
   const statusCloudRemoteRow = { hidden: true };
+  const statusTailscaleAdminOnlyRows = createAdminOnlyRows();
   const statusDialog = {
     open: false,
     showModal() {
@@ -216,14 +230,15 @@ function createStatusTabHarness(fetchImpl, locationStub) {
     statusPanelTailscale: makePanel(true),
     statusDialog,
     statusCloudRemoteRow,
+    statusTailscaleAdminOnlyRows,
     lastFocusedElementBeforeStatus: null,
     lastCloudStatusPayload: null,
     identityState: {
       resolved: true,
       available: true,
-      login: "aecrypto@gmail.com",
-      displayName: "ae crypto",
-      role: "admin",
+      login: role === "admin" ? "aecrypto@gmail.com" : "user@example.com",
+      displayName: role === "admin" ? "ae crypto" : "Reader",
+      role,
       provenance: "tailscale-serve",
       capabilities: new Set(["gallery.read"]),
     },
@@ -237,6 +252,7 @@ function createStatusTabHarness(fetchImpl, locationStub) {
     "let lastCloudStatusPayload = null;",
     "let lastFocusedElementBeforeStatus = null;",
     extractFunction(APP_SOURCE, "identityRoleLabel"),
+    extractFunction(APP_SOURCE, "applyTailscalePanelDensity"),
     extractFunction(APP_SOURCE, "renderTailscaleConnectionFields"),
     extractFunction(APP_SOURCE, "renderTailscaleIdentityFields"),
     extractFunction(APP_SOURCE, "renderCloudStatus"),
@@ -284,28 +300,34 @@ test("identity fetch never sends the mutation header", () => {
   assert.ok(loadIdentityBody.includes('headers: { Accept: "application/json" }'));
 });
 
-test("identity status control markup and styles exist and stay hidden by default", () => {
-  assert.match(INDEX_SOURCE, /id="identity-badge"/);
-  assert.match(INDEX_SOURCE, /class="status-button identity-badge status-button--healthy"/);
-  assert.match(INDEX_SOURCE, /type="button"/);
-  assert.match(INDEX_SOURCE, /id="identity-status-name"/);
-  assert.match(INDEX_SOURCE, /id="identity-status-role"/);
-  assert.match(INDEX_SOURCE, /aria-label="Tailscale identity status"/);
-  assert.ok(INDEX_SOURCE.includes('id="identity-badge"'));
-  assert.ok(INDEX_SOURCE.includes("hidden"));
-  assert.ok(STYLES_SOURCE.includes(".identity-badge {"));
-  assert.ok(STYLES_SOURCE.includes(".identity-badge[hidden]"));
-  assert.ok(STYLES_SOURCE.includes(".identity-badge__name"));
-  assert.ok(STYLES_SOURCE.includes("color: var(--text)"));
-  assert.ok(STYLES_SOURCE.includes(".status-button:hover"));
-  assert.ok(STYLES_SOURCE.includes(".status-button:focus-visible"));
-  assert.ok(STYLES_SOURCE.includes(".status-button:active"));
-  assert.ok(STYLES_SOURCE.includes("outline: 2px solid var(--accent)"));
-  assert.ok(STYLES_SOURCE.includes("max-width: min(260px, 42vw)"));
-  assert.ok(STYLES_SOURCE.includes("max-width: min(148px, 36vw)"));
-  assert.ok(STYLES_SOURCE.includes("text-overflow: ellipsis"));
-  assert.ok(STYLES_SOURCE.includes(".settings-status-list--wrap dd"));
-  assert.ok(STYLES_SOURCE.includes("overflow-wrap: anywhere"));
+test("header controls are compact icon-only with distinct identity name pill", () => {
+  const headerStart = INDEX_SOURCE.indexOf('class="app-header"');
+  const headerEnd = INDEX_SOURCE.indexOf("</header>", headerStart);
+  const header = INDEX_SOURCE.slice(headerStart, headerEnd);
+  assert.match(header, /id="upload-open-button"/);
+  assert.match(header, /aria-label="Upload media"/);
+  assert.match(header, /status-button--icon/);
+  assert.match(header, />↑</);
+  assert.ok(!/status-button__label">Upload</.test(header));
+  assert.ok(!/>Local</.test(header));
+  assert.match(header, /☁️/);
+  assert.ok(!/status-button__label">Cloud</.test(header));
+  assert.match(header, /🧠/);
+  assert.ok(!/status-button__label">AI</.test(header));
+  assert.ok(!/status-button__dot/.test(header));
+  assert.match(header, /id="identity-status-name"/);
+  assert.ok(!/identity-status-role/.test(header));
+  assert.ok(!/identity-badge__sep/.test(header));
+  assert.ok(STYLES_SOURCE.includes("grid-template-areas: \"brand search controls\""));
+  assert.ok(STYLES_SOURCE.includes('"brand controls"'));
+  assert.ok(STYLES_SOURCE.includes('"search search"'));
+  assert.ok(STYLES_SOURCE.includes("@media (max-width: 900px)"));
+  assert.ok(STYLES_SOURCE.includes("@media (max-width: 360px)"));
+  assert.ok(STYLES_SOURCE.includes(".status-button--icon"));
+  assert.ok(STYLES_SOURCE.includes(".status-button__glyph"));
+  assert.ok(STYLES_SOURCE.includes("max-width: min(88px, 26vw)"));
+  assert.ok(!/overflow-x:\s*hidden/.test(STYLES_SOURCE.match(/body\s*\{[^}]*\}/)?.[0] || ""));
+  assert.ok(STYLES_SOURCE.includes("minmax(0, 1fr)"));
 });
 
 test("identity control opens Tailscale status tab in source wiring", () => {
@@ -328,7 +350,7 @@ test("privileged controls are gated by capabilities in source", () => {
   assert.ok(cardBody.includes('if (identityHasCapability("metadata.canonical.write")) {'));
 });
 
-test("admin identity populates badge and unlocks privileged controls", async () => {
+test("admin identity populates name-only badge and unlocks privileged controls", async () => {
   const context = createIdentityHarness(async (url) => {
     assert.equal(url, "/api/identity/me");
     return response({
@@ -351,18 +373,17 @@ test("admin identity populates badge and unlocks privileged controls", async () 
   assert.equal(state.provenance, "tailscale-serve");
   assert.equal(context.identityBadge.hidden, false);
   assert.equal(context.identityStatusName.textContent, "Admin User");
-  assert.equal(context.identityStatusRole.textContent, "Admin");
-  assert.match(context.identityBadge.getAttribute("aria-label"), /Admin User/);
-  assert.match(context.identityBadge.getAttribute("aria-label"), /Admin/);
+  assert.match(context.identityBadge.getAttribute("aria-label"), /Signed in as Admin User/);
+  assert.ok(!/Admin\./.test(context.identityBadge.getAttribute("aria-label").replace("Admin User", "")));
   assert.match(context.identityBadge.title, /Signed in as admin@example.com/);
-  assert.equal(context.identityBadge.classList.contains("status-button--healthy"), true);
+  assert.equal(context.identityBadge.classList.contains("status-button--healthy"), false);
   assert.equal(context.uploadOpenButton.hidden, false);
   assert.equal(context.detailsEditButton.hidden, false);
   assert.equal(context.metadataControlCalls, 1);
-  assert.equal(vm.runInContext('identityHasCapability("upload.manage")', context), true);
+  assert.equal(context.statusTailscaleAdminOnlyRows.every((row) => row.hidden === false), true);
 });
 
-test("ordinary user identity hides privileged controls", async () => {
+test("ordinary user identity hides privileged controls and keeps admin Tailscale rows hidden", async () => {
   const context = createIdentityHarness(async () =>
     response({
       login: "user@example.com",
@@ -375,9 +396,11 @@ test("ordinary user identity hides privileged controls", async () => {
   await vm.runInContext("loadIdentity()", context);
   assert.equal(context.identityBadge.hidden, false);
   assert.equal(context.identityStatusName.textContent, "Reader");
-  assert.equal(context.identityStatusRole.textContent, "User");
+  assert.match(context.identityBadge.getAttribute("aria-label"), /Signed in as Reader/);
+  assert.ok(!context.identityBadge.getAttribute("aria-label").includes("Admin"));
   assert.equal(context.uploadOpenButton.hidden, true);
   assert.equal(context.detailsEditButton.hidden, true);
+  assert.equal(context.statusTailscaleAdminOnlyRows.every((row) => row.hidden === true), true);
   assert.equal(vm.runInContext('identityHasCapability("upload.manage")', context), false);
   assert.equal(vm.runInContext('identityHasCapability("metadata.canonical.write")', context), false);
   assert.equal(vm.runInContext('identityHasCapability("gallery.read")', context), true);
@@ -392,6 +415,7 @@ test("denied identity fails closed and hides the badge", async () => {
   assert.equal(context.identityBadge.hidden, true);
   assert.equal(context.uploadOpenButton.hidden, true);
   assert.equal(context.detailsEditButton.hidden, true);
+  assert.equal(context.statusTailscaleAdminOnlyRows.every((row) => row.hidden === true), true);
 });
 
 test("missing identity endpoint keeps legacy local behavior", async () => {
@@ -415,7 +439,7 @@ test("identity network failure keeps legacy local behavior", async () => {
   assert.equal(vm.runInContext('identityHasCapability("analysis.run")', context), true);
 });
 
-test("opening via identity selects Tailscale and renders verified fields", async () => {
+test("admin Tailscale panel shows diagnostic rows", async () => {
   const context = createStatusTabHarness(
     async (url) => {
       assert.equal(url, "/api/status/cloud");
@@ -430,27 +454,45 @@ test("opening via identity selects Tailscale and renders verified fields", async
       origin: "https://example.ts.net",
       protocol: "https:",
     },
+    "admin",
   );
   await vm.runInContext('openStatusDialog("tailscale")', context);
   await vm.runInContext("loadTailscaleStatus()", context);
   assert.equal(context.statusDialog.open, true);
   assert.equal(context.statusPanelTailscale.hidden, false);
-  assert.equal(context.statusPanelAi.hidden, true);
-  assert.equal(context.statusPanelCloud.hidden, true);
   assert.equal(context.statusTabTailscale.getAttribute("aria-selected"), "true");
   assert.equal(context.statusTailscaleLogin.textContent, "aecrypto@gmail.com");
   assert.equal(context.statusTailscaleDisplayName.textContent, "ae crypto");
   assert.equal(context.statusTailscaleRole.textContent, "Admin");
   assert.equal(context.statusTailscaleProvenance.textContent, "tailscale-serve");
   assert.equal(context.statusTailscaleHostname.textContent, "example.ts.net");
-  assert.equal(context.statusTailscaleUrl.textContent, "https://example.ts.net");
-  assert.equal(context.statusTailscaleHttps.textContent, "Yes");
   assert.equal(context.statusTailscaleAccessMethod.textContent, "Tailscale");
-  assert.match(context.statusTailscaleConnection.textContent, /Connected/);
+  assert.equal(context.statusTailscaleAdminOnlyRows.every((row) => row.hidden === false), true);
   assert.equal(APP_SOURCE.includes("nuc-1.tail247768.ts.net"), false);
-  assert.equal(INDEX_SOURCE.includes("auth key"), false);
-  assert.equal(INDEX_SOURCE.toLowerCase().includes("wireguard"), false);
-  assert.equal(INDEX_SOURCE.toLowerCase().includes("api token"), false);
+});
+
+test("ordinary user Tailscale panel keeps admin diagnostics hidden", async () => {
+  const context = createStatusTabHarness(
+    async () =>
+      response({
+        server: "connected",
+        connection: "tailscale",
+      }),
+    {
+      hostname: "example.ts.net",
+      origin: "https://example.ts.net",
+      protocol: "https:",
+    },
+    "user",
+  );
+  await vm.runInContext('openStatusDialog("tailscale")', context);
+  await vm.runInContext("loadTailscaleStatus()", context);
+  assert.equal(context.statusTailscaleDisplayName.textContent, "Reader");
+  assert.equal(context.statusTailscaleLogin.textContent, "user@example.com");
+  assert.equal(context.statusTailscaleRole.textContent, "User");
+  assert.equal(context.statusTailscaleAccessMethod.textContent, "Tailscale");
+  assert.equal(context.statusTailscaleHttps.textContent, "Yes");
+  assert.equal(context.statusTailscaleAdminOnlyRows.every((row) => row.hidden === true), true);
 });
 
 test("Cloud and AI status controls still select their tabs", async () => {
@@ -480,15 +522,24 @@ test("Cloud and AI status controls still select their tabs", async () => {
   assert.equal(vm.runInContext("contextAiRefreshCount", context), 1);
 });
 
-test("Tailscale panel omits sensitive fields and hard-coded production host", () => {
-  const panelStart = INDEX_SOURCE.indexOf('id="status-panel-tailscale"');
-  const panelEnd = INDEX_SOURCE.indexOf("</div>", INDEX_SOURCE.indexOf("status-tailscale-note", panelStart));
-  const panel = INDEX_SOURCE.slice(panelStart, panelEnd + 6);
-  assert.ok(panel.includes("status-tailscale-login"));
-  assert.ok(panel.includes("status-tailscale-provenance"));
-  assert.ok(!panel.toLowerCase().includes("cookie"));
-  assert.ok(!panel.toLowerCase().includes("token"));
-  assert.ok(!panel.toLowerCase().includes("private key"));
-  assert.ok(!panel.includes("nuc-1.tail247768.ts.net"));
-  assert.ok(panel.includes("tailnet"));
+test("Tailscale admin-only rows are hidden by default in markup", () => {
+  const matches = [...INDEX_SOURCE.matchAll(/class="status-tailscale-admin-only" hidden/g)];
+  assert.equal(matches.length, 4);
+  assert.ok(INDEX_SOURCE.includes("status-tailscale-login"));
+  assert.ok(INDEX_SOURCE.includes("status-tailscale-provenance"));
+  assert.ok(!INDEX_SOURCE.toLowerCase().includes("cookie"));
+  assert.ok(!INDEX_SOURCE.includes("nuc-1.tail247768.ts.net"));
+  assert.ok(INDEX_SOURCE.includes("tailnet"));
+  assert.ok(APP_SOURCE.includes("applyTailscalePanelDensity"));
+});
+
+test("Cloud and AI accessible labels communicate status without emoji reliance", () => {
+  const cloudBody = extractFunction(APP_SOURCE, "setServerHealthButtonState");
+  const aiBody = extractFunction(APP_SOURCE, "setAiStatusButtonState");
+  assert.ok(cloudBody.includes("Cloud status: connected"));
+  assert.ok(cloudBody.includes("Cloud status: unavailable"));
+  assert.ok(cloudBody.includes("Cloud status: checking"));
+  assert.ok(aiBody.includes("AI status: available"));
+  assert.ok(aiBody.includes("AI status: unavailable"));
+  assert.ok(aiBody.includes("AI status: checking"));
 });

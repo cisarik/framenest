@@ -1057,18 +1057,21 @@ def test_header_contains_server_health_status_button(client: TestClient) -> None
     html = client.get("/").text
     header_section = html[html.index("<header") : html.index("</header>")]
     assert "server-health-button" in html
-    assert "Cloud" in header_section
+    assert "☁️" in header_section
+    assert 'aria-label="Cloud status: checking"' in header_section
+    assert "status-button--icon" in header_section
     assert "Server" not in header_section
-    assert "aria-label" in header_section
-    assert "Local server healthy" in header_section or "server-health-button" in header_section
+    assert 'status-button__label">Cloud<' not in header_section
 
 
 def test_header_contains_ai_status_button(client: TestClient) -> None:
     html = client.get("/").text
+    header_section = html[html.index("<header") : html.index("</header>")]
     assert "ai-status-button" in html
-    assert ">AI<" in html
+    assert "🧠" in header_section
+    assert 'aria-label="AI status: checking"' in header_section
+    assert 'status-button__label">AI<' not in header_section
     assert "🧠 AI" not in html
-    assert "aria-label" in html
 
 
 def test_header_statuses_keep_accessible_truth_and_state_coloring(client: TestClient) -> None:
@@ -1079,16 +1082,15 @@ def test_header_statuses_keep_accessible_truth_and_state_coloring(client: TestCl
     assert "server-health-button-text" in html
     assert "ai-status-button-text" in html
     assert "visually-hidden" in html
-    assert "Local server healthy" in html
-    assert "AI status" in html
-    assert "setServerHealthButtonState(\"healthy\", \"Server healthy\")" in script
-    assert "setAiStatusButtonState(\"healthy\", \"AI test successful\")" in script
-    assert ".status-button--checking .status-button__label" in css
-    assert ".status-button--healthy .status-button__label" in css
-    assert ".status-button--unhealthy .status-button__label" in css
-    assert ".status-button--healthy .status-button__label {\n  color: var(--accent);" in css
-    assert ".status-button--unhealthy .status-button__label {\n  color: var(--danger);" in css
-    assert ".status-button--checking .status-button__label {\n  color: var(--text-soft);" in css
+    assert "Cloud status: connected" in script
+    assert "AI status: available" in script
+    assert 'setServerHealthButtonState("healthy", "Server healthy")' in script
+    assert 'setAiStatusButtonState("healthy", "AI test successful")' in script
+    assert ".status-button--checking" in css
+    assert ".status-button--healthy" in css
+    assert ".status-button--unhealthy" in css
+    assert ".status-button--icon" in css
+    assert ".status-button__glyph" in css
 
 
 def test_status_and_gallery_filters_have_white_border_hover_focus(client: TestClient) -> None:
@@ -2608,7 +2610,10 @@ def test_web_shell_contains_local_upload_cockpit_without_gallery_publication_cla
     upload_dialog = html[html.index('id="upload-dialog"') : html.index('id="status-dialog"')]
 
     assert "upload-open-button" in header_section
-    assert ">Upload<" in header_section
+    assert "↑" in header_section
+    assert 'aria-label="Upload media"' in header_section
+    assert 'status-button__label">Upload<' not in header_section
+    assert ">Local<" not in header_section
     assert 'aria-label="Upload"' in upload_dialog
     assert '>Upload</h2>' in upload_dialog
     assert "Upload media" not in upload_dialog
