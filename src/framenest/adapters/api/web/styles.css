@@ -1831,7 +1831,9 @@ h2 {
     pointer-events: none;
   }
 
-  .catalog-card__actions--overlay .catalog-card__action--analyze {
+  .catalog-card__actions--overlay .catalog-card__action--analyze[data-analysis-state="confirming"],
+  .catalog-card__actions--overlay .catalog-card__action--analyze[data-analysis-state="analyzing"],
+  .catalog-card__actions--overlay .catalog-card__action--analyze[data-analysis-state="applying"] {
     opacity: 1;
     pointer-events: auto;
   }

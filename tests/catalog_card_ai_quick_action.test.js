@@ -957,7 +957,11 @@ test("busy analyzing and applying keep brain glyph with pulse contract and no vi
   );
   assert.match(
     STYLES_SOURCE,
-    /\.catalog-card__actions--overlay \.catalog-card__action--analyze\s*\{[^}]*opacity:\s*1;[^}]*pointer-events:\s*auto;/s,
+    /\.catalog-card__actions--overlay \.catalog-card__action--analyze\[data-analysis-state="analyzing"\][^{]*\{[^}]*opacity:\s*1;[^}]*pointer-events:\s*auto;/s,
+  );
+  assert.equal(
+    /\.catalog-card__actions--overlay \.catalog-card__action--analyze\s*\{[^}]*opacity:\s*1/s.test(STYLES_SOURCE),
+    false,
   );
   assert.match(
     STYLES_SOURCE,
