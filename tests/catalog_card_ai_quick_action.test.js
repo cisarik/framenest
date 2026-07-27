@@ -100,6 +100,33 @@ class FakeElement {
     this.textContent = "";
     this.title = "";
     this.isConnected = true;
+    this.style = {};
+    this._rect = { left: 0, top: 0, width: 200, height: 120 };
+  }
+
+  get classList() {
+    const element = this;
+    return {
+      add(...tokens) {
+        const current = new Set(String(element.className || "").split(/\s+/).filter(Boolean));
+        tokens.forEach((token) => current.add(String(token)));
+        element.className = [...current].join(" ");
+      },
+      remove(...tokens) {
+        const current = new Set(String(element.className || "").split(/\s+/).filter(Boolean));
+        tokens.forEach((token) => current.delete(String(token)));
+        element.className = [...current].join(" ");
+      },
+      contains(token) {
+        return String(element.className || "").split(/\s+/).includes(String(token));
+      },
+      toggle(token, force) {
+        const has = this.contains(token);
+        if (force === true || (force === undefined && !has)) this.add(token);
+        else this.remove(token);
+        return this.contains(token);
+      },
+    };
   }
 
   setAttribute(name, value) {
@@ -120,6 +147,13 @@ class FakeElement {
     this.listeners.get(type).push(listener);
   }
 
+  removeEventListener(type, listener) {
+    const listeners = this.listeners.get(type);
+    if (!listeners) return;
+    const index = listeners.indexOf(listener);
+    if (index !== -1) listeners.splice(index, 1);
+  }
+
   dispatchEvent(event) {
     if (!event.target) event.target = this;
     if (typeof event.preventDefault !== "function") event.preventDefault = () => {};
@@ -130,6 +164,7 @@ class FakeElement {
 
   appendChild(node) {
     node.parentNode = this;
+    node.isConnected = true;
     this.children.push(node);
     return node;
   }
@@ -137,6 +172,7 @@ class FakeElement {
   replaceChildren(...nodes) {
     this.children.forEach((node) => {
       node.parentNode = null;
+      node.isConnected = false;
     });
     this.children = [];
     nodes.forEach((node) => this.appendChild(node));
@@ -149,7 +185,32 @@ class FakeElement {
     if (index === -1) return;
     siblings.splice(index, 1, node);
     node.parentNode = this.parentNode;
+    node.isConnected = true;
     this.parentNode = null;
+    this.isConnected = false;
+  }
+
+  remove() {
+    if (!this.parentNode) {
+      this.isConnected = false;
+      return;
+    }
+    const siblings = this.parentNode.children;
+    const index = siblings.indexOf(this);
+    if (index !== -1) siblings.splice(index, 1);
+    this.parentNode = null;
+    this.isConnected = false;
+  }
+
+  getBoundingClientRect() {
+    return {
+      left: this._rect.left,
+      top: this._rect.top,
+      width: this._rect.width,
+      height: this._rect.height,
+      right: this._rect.left + this._rect.width,
+      bottom: this._rect.top + this._rect.height,
+    };
   }
 
   querySelector(selector) {
@@ -200,22 +261,12 @@ class FakeElement {
   }
 }
 
-function createFlowHarness({ confirmAccepted = true } = {}) {
+function createFlowHarness({ confirmAccepted = true, reducedMotion = true } = {}) {
   const fetchCalls = [];
   const routes = new Map();
   const catalogResults = new FakeElement("div");
   catalogResults.className = "catalog-results";
-  const document = {
-    createElement(tagName) {
-      return new FakeElement(tagName);
-    },
-    activeElement: null,
-    querySelector() {
-      return null;
-    },
-  };
   const context = {
-    document,
     console,
     Set,
     Map,
@@ -228,6 +279,12 @@ function createFlowHarness({ confirmAccepted = true } = {}) {
     Promise,
     JSON,
     encodeURIComponent,
+    setTimeout,
+    clearTimeout,
+    reducedMotion,
+    prefersReducedMotion: reducedMotion,
+    CATALOG_CARD_REFLOW_MS: 220,
+    catalogCardReflowGeneration: 0,
     aiCapability: { available: true },
     aiCapabilityDiscoveryPending: false,
     identityState: {
@@ -252,6 +309,7 @@ function createFlowHarness({ confirmAccepted = true } = {}) {
     MAX_METADATA_TAGS: 32,
     openStatusDialogCalls: [],
     confirmationCalls: 0,
+    layoutSnapshots: [],
     openStatusDialog(tab) {
       context.openStatusDialogCalls.push(tab);
     },
@@ -369,17 +427,50 @@ function createFlowHarness({ confirmAccepted = true } = {}) {
       return typeof next === "function" ? next(options) : next;
     },
   };
-  context.window = context;
+  const document = {
+    createElement(tagName) {
+      return new FakeElement(tagName);
+    },
+    activeElement: null,
+    querySelector() {
+      return null;
+    },
+  };
+  context.document = document;
+  context.window = {
+    matchMedia(query) {
+      return {
+        matches: Boolean(context.reducedMotion && String(query).includes("prefers-reduced-motion")),
+        media: query,
+        addListener() {},
+        removeListener() {},
+        addEventListener() {},
+        removeEventListener() {},
+      };
+    },
+    requestAnimationFrame(callback) {
+      return setTimeout(callback, 0);
+    },
+    setTimeout,
+    clearTimeout,
+  };
   const source = [
     extractFunction(APP_SOURCE, "identityAllowsCardAiQuickAction"),
+    extractFunction(APP_SOURCE, "cardNeedsMetadata"),
     extractFunction(APP_SOURCE, "cardAiQuickActionEligible"),
+    extractFunction(APP_SOURCE, "galleryMotionPreferred"),
     extractFunction(APP_SOURCE, "cardAiQuickActionProviderBlocked"),
     extractFunction(APP_SOURCE, "cardAiPreviewResponseMatchesRequest"),
-    extractFunction(APP_SOURCE, "cardNeedsMetadata"),
     extractFunction(APP_SOURCE, "getCardAiQuickAction"),
     extractFunction(APP_SOURCE, "setCardAiQuickActionController"),
     extractFunction(APP_SOURCE, "cardAiQuickActionIsLocked"),
     extractFunction(APP_SOURCE, "cardAiQuickActionStatusMessage"),
+    extractFunction(APP_SOURCE, "setCardAnalysisStatus"),
+    extractFunction(APP_SOURCE, "announceCardAiQuickActionSuccess"),
+    extractFunction(APP_SOURCE, "dismissCardAiQuickActionButton"),
+    extractFunction(APP_SOURCE, "clearCatalogCardReflowInlineStyles"),
+    extractFunction(APP_SOURCE, "captureCatalogCardLayoutSnapshot"),
+    extractFunction(APP_SOURCE, "animateCatalogCardMetadataReflow"),
     extractFunction(APP_SOURCE, "setCardAnalyzeButtonState"),
     extractFunction(APP_SOURCE, "reconcileCatalogCardAiQuickActions"),
     extractFunction(APP_SOURCE, "suggestionIsUsableForCanonicalSave"),
@@ -389,6 +480,12 @@ function createFlowHarness({ confirmAccepted = true } = {}) {
   ].join("\n");
   vm.createContext(context);
   vm.runInContext(source, context);
+  const capture = context.captureCatalogCardLayoutSnapshot;
+  context.captureCatalogCardLayoutSnapshot = function wrappedCapture() {
+    const snapshot = capture.call(context);
+    context.layoutSnapshots.push(snapshot);
+    return snapshot;
+  };
   return {
     context,
     fetchCalls,
@@ -424,7 +521,7 @@ function sampleItem(overrides = {}) {
     display_title: "Sunset Still",
     content_category: "general",
     acquisition_source: "manual_upload",
-    tags: [{ key: "nature", display_name: "Nature" }],
+    tags: [],
     locations: [{
       location_id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
       availability: "available",
@@ -434,7 +531,7 @@ function sampleItem(overrides = {}) {
   };
 }
 
-test("brain eligibility requires both capabilities, supported location, and excludes movies", () => {
+test("brain eligibility requires metadata need, both capabilities, supported location, and excludes movies", () => {
   const { context } = createFlowHarness();
   const item = sampleItem();
   assert.equal(context.cardAiQuickActionEligible(item), true);
@@ -450,7 +547,7 @@ test("brain eligibility requires both capabilities, supported location, and excl
   assert.equal(context.cardAiQuickActionEligible(sampleItem({
     media_kind: "animated_image",
     tags: [{ key: "funny", display_name: "Funny" }],
-  })), true);
+  })), false);
   assert.equal(context.cardAiQuickActionEligible(sampleItem({
     media_kind: "video",
     content_category: "meme",
@@ -462,9 +559,9 @@ test("brain eligibility requires both capabilities, supported location, and excl
       { key: "alpha", display_name: "Alpha" },
       { key: "beta", display_name: "Beta" },
     ],
-  })), true);
+  })), false);
   assert.equal(context.cardNeedsMetadata(sampleItem({ tags: [{ key: "nature", display_name: "Nature" }] })), false);
-  assert.equal(context.cardAiQuickActionEligible(sampleItem({ tags: [{ key: "nature", display_name: "Nature" }] })), true);
+  assert.equal(context.cardAiQuickActionEligible(sampleItem({ tags: [{ key: "nature", display_name: "Nature" }] })), false);
 });
 
 test("ordinary missing-capability role-only and missing identity fail closed for brain eligibility", () => {
@@ -499,13 +596,13 @@ test("ordinary missing-capability role-only and missing identity fail closed for
   assert.equal(context.cardAiQuickActionEligible(item), true);
 });
 
-test("source wiring gates brain on positively resolved identity capabilities and excludes cardNeedsMetadata", () => {
+test("source wiring gates brain on metadata need and positively resolved identity capabilities", () => {
   const cardBody = extractFunction(APP_SOURCE, "renderCatalogCard");
   const handleBody = extractFunction(APP_SOURCE, "handleAnalyzeCatalogCard");
   const eligibleBody = extractFunction(APP_SOURCE, "cardAiQuickActionEligible");
   const identityGateBody = extractFunction(APP_SOURCE, "identityAllowsCardAiQuickAction");
   assert.ok(cardBody.includes("cardAiQuickActionEligible(item)"));
-  assert.equal(cardBody.includes("cardNeedsMetadata(item)"), false);
+  assert.ok(eligibleBody.includes("cardNeedsMetadata(item)"));
   assert.ok(identityGateBody.includes("identityState.resolved"));
   assert.ok(identityGateBody.includes("identityState.available"));
   assert.ok(identityGateBody.includes('capabilities.has("analysis.run")'));
@@ -531,6 +628,15 @@ test("source wiring gates brain on positively resolved identity capabilities and
   assert.ok(handleBody.includes("acquisition_source: metadataPayload.acquisition_source"));
   assert.ok(handleBody.includes("genres: Array.isArray(metadataPayload.genres)"));
   assert.equal(handleBody.includes('openStatusDialog("ai"'), false);
+  assert.ok(handleBody.includes('state: "idle"'));
+  assert.equal(handleBody.includes('state: "saved"'), false);
+  assert.ok(APP_SOURCE.includes("dismissCardAiQuickActionButton"));
+  assert.ok(APP_SOURCE.includes("announceCardAiQuickActionSuccess"));
+  assert.ok(APP_SOURCE.includes("captureCatalogCardLayoutSnapshot"));
+  assert.ok(APP_SOURCE.includes("animateCatalogCardMetadataReflow"));
+  const applyBody = extractFunction(APP_SOURCE, "applySavedAiMetadataToCatalogSurfaces");
+  assert.equal(applyBody.includes("loadCatalog("), false);
+  assert.equal(handleBody.includes("loadCatalog("), false);
 });
 
 test("Edit Analyze remains draft-only and does not auto-save", () => {
@@ -539,6 +645,19 @@ test("Edit Analyze remains draft-only and does not auto-save", () => {
   assert.equal(analyzeBody.includes('method: "PUT"'), false);
   assert.equal(analyzeBody.includes("applySavedAiMetadataToCatalogSurfaces"), false);
   assert.ok(analyzeBody.includes("await requestConfirmation({"));
+});
+
+test("Edit remains available in card source after brain eligibility disappears", () => {
+  const cardBody = extractFunction(APP_SOURCE, "renderCatalogCard");
+  assert.ok(cardBody.includes('identityHasCapability("metadata.canonical.write")'));
+  assert.ok(cardBody.includes("handleOpenMetadataWorkspace(item, editButton)"));
+  assert.ok(cardBody.includes("cardAiQuickActionEligible(item)"));
+  const analyzeGate = cardBody.slice(
+    cardBody.indexOf("if (cardAiQuickActionEligible(item))"),
+    cardBody.indexOf('identityHasCapability("metadata.canonical.write")'),
+  );
+  assert.ok(analyzeGate.includes("analyzeButton"));
+  assert.equal(analyzeGate.includes("editButton"), false);
 });
 
 test("unavailable and pending provider use native disabled without Status confirmation or preview", async () => {
@@ -615,7 +734,7 @@ test("capability reconciliation enables operable brain without remounting or res
   harness.context.reconcileCatalogCardAiQuickActions();
   assert.equal(idleButton.disabled, false);
   assert.equal(idleButton.getAttribute("aria-disabled"), null);
-  assert.equal(idleButton.getAttribute("aria-label"), "Analyze by AI Sunset Still");
+  assert.equal(idleButton.getAttribute("aria-label"), "Generate first-pass AI metadata for Sunset Still");
   assert.equal(idleButton.title, "Analyze by AI");
   assert.equal(lockedButton.disabled, true);
   assert.equal(lockedButton.dataset.analysisState, "analyzing");
@@ -625,7 +744,7 @@ test("capability reconciliation enables operable brain without remounting or res
   assert.equal(harness.fetchCalls.length, 0);
 });
 
-test("saved pending then available restores rerun label without resetting visible saved state", async () => {
+test("successful save removes brain, keeps accessible announcement, and does not recreate on reload eligibility", async () => {
   const harness = createFlowHarness();
   const item = sampleItem();
   const mediaId = item.media_id;
@@ -664,6 +783,114 @@ test("saved pending then available restores rerun label without resetting visibl
     }),
   );
   const button = new FakeElement("button");
+  button.className = "catalog-card__action catalog-card__action--analyze";
+  button.dataset.mediaTitle = item.display_title;
+  const card = new FakeElement("article");
+  card.className = "catalog-card";
+  card.dataset.mediaId = mediaId;
+  const actions = new FakeElement("div");
+  actions.className = "catalog-card__actions";
+  const editButton = new FakeElement("button");
+  editButton.className = "catalog-card__action--edit";
+  const status = Object.assign(new FakeElement("p"), { className: "catalog-card__analysis-status" });
+  const titleButton = Object.assign(new FakeElement("button"), { className: "catalog-card__title-button" });
+  const tags = Object.assign(new FakeElement("div"), { className: "catalog-card__tags" });
+  const mediaSurface = Object.assign(new FakeElement("div"), { className: "media-placeholder" });
+  mediaSurface.dataset.mediaState = "playing";
+  actions.appendChild(button);
+  actions.appendChild(editButton);
+  card.appendChild(mediaSurface);
+  card.appendChild(actions);
+  card.appendChild(titleButton);
+  card.appendChild(tags);
+  card.appendChild(status);
+  harness.catalogResults.appendChild(card);
+
+  await harness.context.handleAnalyzeCatalogCard(item, button);
+  await flushAll();
+
+  assert.equal(item.tags.length, 1);
+  assert.equal(item.display_title, "AI Sunset");
+  assert.equal(titleButton.textContent, "AI Sunset");
+  assert.equal(card.querySelector(".catalog-card__action--analyze"), null);
+  assert.equal(button.isConnected, false);
+  assert.equal(editButton.isConnected, true);
+  assert.equal(mediaSurface.dataset.mediaState, "playing");
+  assert.equal(status.textContent, "AI metadata saved");
+  assert.equal(status.classList.contains("visually-hidden"), true);
+  assert.equal(status.hidden, false);
+  assert.equal(status.dataset.analysisSuccess, "true");
+  assert.equal(harness.context.cardAiQuickActionEligible(item), false);
+  assert.equal(harness.context.getCardAiQuickAction(mediaId).state, "idle");
+  assert.equal(harness.fetchCalls.some((call) => call.url.includes("loadCatalog") || call.method === "GET" && call.url === "/api/media"), false);
+
+  const reloaded = sampleItem({
+    display_title: "AI Sunset",
+    tags: [{ key: "nature", display_name: "Nature" }],
+  });
+  assert.equal(harness.context.cardNeedsMetadata(reloaded), false);
+  assert.equal(harness.context.cardAiQuickActionEligible(reloaded), false);
+});
+
+test("busy analyzing and applying keep brain glyph with pulse contract and no visible progress text", () => {
+  const harness = createFlowHarness();
+  const button = new FakeElement("button");
+  button.className = "catalog-card__action--analyze";
+  button.dataset.mediaTitle = "Sunset Still";
+  const other = new FakeElement("button");
+  other.className = "catalog-card__action--analyze";
+  other.dataset.mediaTitle = "Other";
+  other.dataset.analysisState = "idle";
+  other.textContent = "🧠";
+  const card = new FakeElement("article");
+  card.className = "catalog-card";
+  const status = Object.assign(new FakeElement("p"), { className: "catalog-card__analysis-status" });
+  card.appendChild(button);
+  card.appendChild(status);
+  harness.catalogResults.appendChild(card);
+  harness.catalogResults.appendChild(other);
+
+  harness.context.setCardAnalyzeButtonState(button, "analyzing");
+  assert.equal(button.dataset.analysisState, "analyzing");
+  assert.equal(button.getAttribute("aria-busy"), "true");
+  assert.equal(button.disabled, true);
+  assert.equal(button.textContent, "🧠");
+  assert.equal(status.hidden, true);
+  assert.equal(status.textContent, "");
+  assert.match(STYLES_SOURCE, /catalog-card-analyze-pulse/);
+  assert.match(
+    STYLES_SOURCE,
+    /\.catalog-card__action--analyze\[data-analysis-state="analyzing"\][\s\S]*animation:\s*catalog-card-analyze-pulse/,
+  );
+  assert.match(STYLES_SOURCE, /prefers-reduced-motion: reduce[\s\S]*animation:\s*none !important/);
+  assert.equal(STYLES_SOURCE.includes("catalog-card__analyze-busy"), false);
+
+  harness.context.setCardAnalyzeButtonState(button, "applying");
+  assert.equal(button.dataset.analysisState, "applying");
+  assert.equal(button.textContent, "🧠");
+  assert.equal(status.hidden, true);
+
+  harness.context.setCardAnalyzeButtonState(button, "failed_analysis", "AI analysis failed.");
+  assert.equal(button.dataset.analysisState, "failed_analysis");
+  assert.equal(button.getAttribute("aria-busy"), "false");
+  assert.equal(status.textContent, "AI analysis failed.");
+  assert.equal(status.hidden, false);
+  assert.equal(status.classList.contains("visually-hidden"), false);
+  assert.equal(other.dataset.analysisState, "idle");
+  assert.equal(other.textContent, "🧠");
+});
+
+test("failed analysis and failed save keep the brain available for confirmed retry", async () => {
+  const analysisHarness = createFlowHarness();
+  const item = sampleItem();
+  const mediaId = item.media_id;
+  const locationId = item.locations[0].location_id;
+  analysisHarness.enqueue(
+    "POST",
+    `/api/media/${mediaId}/locations/${locationId}/ai-suggestion-preview`,
+    response({ error: { code: "AI_PROVIDER_UNAVAILABLE", message: "down" } }, 503),
+  );
+  const button = new FakeElement("button");
   button.className = "catalog-card__action--analyze";
   button.dataset.mediaTitle = item.display_title;
   const card = new FakeElement("article");
@@ -672,86 +899,210 @@ test("saved pending then available restores rerun label without resetting visibl
   const status = Object.assign(new FakeElement("p"), { className: "catalog-card__analysis-status" });
   card.appendChild(button);
   card.appendChild(status);
-  card.appendChild(Object.assign(new FakeElement("div"), { className: "catalog-card__tags" }));
-  card.appendChild(Object.assign(new FakeElement("button"), { className: "catalog-card__title-button" }));
-  harness.catalogResults.appendChild(card);
-
-  await harness.context.handleAnalyzeCatalogCard(item, button);
+  analysisHarness.catalogResults.appendChild(card);
+  await analysisHarness.context.handleAnalyzeCatalogCard(item, button);
   await flushAll();
-  assert.equal(button.dataset.analysisState, "saved");
-  assert.equal(status.textContent, "AI metadata saved");
-  const requestsBeforeReconcile = harness.fetchCalls.length;
+  assert.equal(button.dataset.analysisState, "failed_analysis");
+  assert.equal(button.isConnected, true);
+  assert.equal(status.textContent, "AI provider is not available.");
+  assert.equal(status.classList.contains("visually-hidden"), false);
 
-  const mediaTitle = button.dataset.mediaTitle;
-  assert.equal(mediaTitle, "AI Sunset");
-  harness.context.aiCapabilityDiscoveryPending = true;
-  harness.context.aiCapability.available = false;
-  harness.context.reconcileCatalogCardAiQuickActions();
-  assert.equal(button.disabled, true);
-  assert.equal(button.getAttribute("aria-disabled"), "true");
-  assert.equal(button.getAttribute("aria-label"), `Checking AI availability for ${mediaTitle}`);
-  assert.equal(button.title, `Checking AI availability for ${mediaTitle}`);
-  assert.equal(button.dataset.analysisState, "saved");
-  assert.equal(status.textContent, "AI metadata saved");
-  assert.equal(harness.fetchCalls.length, requestsBeforeReconcile);
-  assert.deepEqual(harness.context.openStatusDialogCalls, []);
-
-  harness.context.aiCapabilityDiscoveryPending = false;
-  harness.context.aiCapability.available = true;
-  harness.context.reconcileCatalogCardAiQuickActions();
-  assert.equal(harness.catalogResults.children[0], card);
-  assert.equal(card.children[0], button);
-  assert.equal(button.disabled, false);
-  assert.equal(button.getAttribute("aria-disabled"), null);
-  assert.equal(button.dataset.analysisState, "saved");
-  assert.equal(status.textContent, "AI metadata saved");
-  assert.equal(status.dataset.analysisSuccess, "true");
-  assert.equal(
-    button.getAttribute("aria-label"),
-    `AI metadata saved for ${mediaTitle}. Analyze by AI again`,
-  );
-  assert.equal(button.title, "AI metadata saved — rerun available");
-  assert.equal(harness.fetchCalls.length, requestsBeforeReconcile);
-  assert.deepEqual(harness.context.openStatusDialogCalls, []);
-
-  harness.enqueue(
+  const saveHarness = createFlowHarness();
+  saveHarness.context.canonicalTagDefinitions = [];
+  saveHarness.enqueue(
     "POST",
     `/api/media/${mediaId}/locations/${locationId}/ai-suggestion-preview`,
-    response(previewPayload(item, { title: "AI Sunset Again" })),
+    response(previewPayload(item, { tags: ["Brand New"] })),
   );
-  harness.enqueue(
+  saveHarness.enqueue(
+    "POST",
+    "/api/canonical-tags",
+    response({ status: "created", tag: { key: "brand-new", display_name: "Brand New" } }, 201),
+  );
+  saveHarness.enqueue(
     "GET",
     `/api/media/${mediaId}/metadata`,
     response({
-      display_title: "AI Sunset",
-      description: "Warm light",
-      tags: [{ key: "nature", display_name: "Nature" }],
+      display_title: "Sunset Still",
+      description: "keep me",
+      tags: [],
       content_category: "general",
       acquisition_source: "unknown",
       genres: [],
     }),
   );
-  harness.enqueue(
+  saveHarness.enqueue(
     "PUT",
     `/api/media/${mediaId}/metadata`,
-    response({
-      status: "saved",
-      metadata: {
-        display_title: "AI Sunset Again",
-        description: "Warm light",
-        tags: [{ key: "nature", display_name: "Nature" }],
-        content_category: "general",
-        acquisition_source: "unknown",
-        genres: [],
-      },
-    }),
+    response({ error: { code: "MEDIA_METADATA_OPERATION_FAILED", message: "failed" } }, 500),
   );
-  const confirmationsBefore = harness.context.confirmationCalls;
-  await harness.context.handleAnalyzeCatalogCard(item, button);
+  const saveButton = new FakeElement("button");
+  saveButton.className = "catalog-card__action--analyze";
+  saveButton.dataset.mediaTitle = item.display_title;
+  const saveCard = new FakeElement("article");
+  saveCard.className = "catalog-card";
+  const saveStatus = Object.assign(new FakeElement("p"), { className: "catalog-card__analysis-status" });
+  saveCard.appendChild(saveButton);
+  saveCard.appendChild(saveStatus);
+  saveHarness.catalogResults.appendChild(saveCard);
+  await saveHarness.context.handleAnalyzeCatalogCard(item, saveButton);
   await flushAll();
-  assert.equal(harness.context.confirmationCalls, confirmationsBefore + 1);
-  const previewCalls = harness.fetchCalls.filter((call) => call.url.includes("ai-suggestion-preview"));
-  assert.equal(previewCalls.length, 2);
+  assert.equal(saveButton.dataset.analysisState, "failed_save");
+  assert.equal(saveButton.isConnected, true);
+  assert.match(saveStatus.textContent, /could not be saved/);
+});
+
+test("success reflow captures layout before patch, animates moved cards, and clears temporary styles", async () => {
+  const harness = createFlowHarness({ reducedMotion: false });
+  const item = sampleItem();
+  const neighbor = sampleItem({
+    media_id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+    display_title: "Neighbor",
+  });
+  const mediaId = item.media_id;
+  harness.context.canonicalTagDefinitions = [{ key: "nature", display_name: "Nature" }];
+  const card = new FakeElement("article");
+  card.className = "catalog-card";
+  card.dataset.mediaId = mediaId;
+  card._rect = { left: 0, top: 0, width: 200, height: 120 };
+  const neighborCard = new FakeElement("article");
+  neighborCard.className = "catalog-card";
+  neighborCard.dataset.mediaId = neighbor.media_id;
+  neighborCard._rect = { left: 220, top: 0, width: 200, height: 120 };
+  const button = new FakeElement("button");
+  button.className = "catalog-card__action--analyze";
+  const titleButton = Object.assign(new FakeElement("button"), {
+    className: "catalog-card__title-button",
+    textContent: item.display_title,
+  });
+  const tags = Object.assign(new FakeElement("div"), { className: "catalog-card__tags" });
+  const status = Object.assign(new FakeElement("p"), { className: "catalog-card__analysis-status" });
+  const mediaSurface = Object.assign(new FakeElement("video"), { className: "media-placeholder" });
+  mediaSurface.dataset.kept = "true";
+  card.appendChild(mediaSurface);
+  card.appendChild(button);
+  card.appendChild(titleButton);
+  card.appendChild(tags);
+  card.appendChild(status);
+  harness.catalogResults.appendChild(card);
+  harness.catalogResults.appendChild(neighborCard);
+
+  const capture = harness.context.captureCatalogCardLayoutSnapshot;
+  harness.context.captureCatalogCardLayoutSnapshot = function wrapped() {
+    const snapshot = capture.call(harness.context);
+    card._rect = { left: 0, top: 0, width: 200, height: 180 };
+    neighborCard._rect = { left: 220, top: 60, width: 200, height: 120 };
+    return snapshot;
+  };
+
+  harness.context.applySavedAiMetadataToCatalogSurfaces(item, {
+    display_title: "AI Sunset",
+    description: "Warm light",
+    tags: [{ key: "nature", display_name: "Nature" }],
+    content_category: "general",
+    acquisition_source: "unknown",
+    genres: [],
+  });
+  await flushAll();
+  await new Promise((resolve) => setTimeout(resolve, 20));
+
+  assert.equal(harness.context.layoutSnapshots.length, 1);
+  assert.equal(titleButton.textContent, "AI Sunset");
+  assert.ok(card.querySelector(".catalog-card__tags"));
+  assert.equal(mediaSurface.dataset.kept, "true");
+  assert.equal(neighborCard.isConnected, true);
+  assert.equal(harness.catalogResults.children[0], card);
+  assert.equal(harness.catalogResults.children[1], neighborCard);
+  assert.ok(
+    card.classList.contains("catalog-card--reflowing")
+    || neighborCard.classList.contains("catalog-card--reflowing")
+    || card.style.height
+    || neighborCard.style.transform,
+  );
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  assert.equal(card.style.transform || "", "");
+  assert.equal(card.style.height || "", "");
+  assert.equal(neighborCard.style.transform || "", "");
+  assert.equal(card.classList.contains("catalog-card--reflowing"), false);
+  assert.equal(neighborCard.classList.contains("catalog-card--reflowing"), false);
+});
+
+test("reduced motion bypasses FLIP movement and removes brain immediately", () => {
+  const harness = createFlowHarness({ reducedMotion: true });
+  const item = sampleItem();
+  const card = new FakeElement("article");
+  card.className = "catalog-card";
+  card.dataset.mediaId = item.media_id;
+  const button = new FakeElement("button");
+  button.className = "catalog-card__action--analyze";
+  const titleButton = Object.assign(new FakeElement("button"), { className: "catalog-card__title-button" });
+  const tags = Object.assign(new FakeElement("div"), { className: "catalog-card__tags" });
+  const status = Object.assign(new FakeElement("p"), { className: "catalog-card__analysis-status" });
+  card.appendChild(button);
+  card.appendChild(titleButton);
+  card.appendChild(tags);
+  card.appendChild(status);
+  harness.catalogResults.appendChild(card);
+
+  harness.context.applySavedAiMetadataToCatalogSurfaces(item, {
+    display_title: "AI Sunset",
+    tags: [{ key: "nature", display_name: "Nature" }],
+  });
+
+  assert.equal(harness.context.layoutSnapshots.length, 0);
+  assert.equal(button.isConnected, false);
+  assert.equal(titleButton.textContent, "AI Sunset");
+  assert.equal(status.textContent, "AI metadata saved");
+  assert.equal(status.classList.contains("visually-hidden"), true);
+});
+
+test("matching Details updates while non-matching Details stay unchanged", () => {
+  const harness = createFlowHarness();
+  const item = sampleItem();
+  const other = sampleItem({
+    media_id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+    display_title: "Other Still",
+  });
+  harness.context.detailsCurrentItem = {
+    media_id: item.media_id,
+    display_title: item.display_title,
+    tags: [],
+  };
+  const card = new FakeElement("article");
+  card.className = "catalog-card";
+  card.dataset.mediaId = item.media_id;
+  card.appendChild(Object.assign(new FakeElement("button"), { className: "catalog-card__title-button" }));
+  card.appendChild(Object.assign(new FakeElement("div"), { className: "catalog-card__tags" }));
+  card.appendChild(Object.assign(new FakeElement("p"), { className: "catalog-card__analysis-status" }));
+  harness.catalogResults.appendChild(card);
+
+  harness.context.applySavedAiMetadataToCatalogSurfaces(item, {
+    display_title: "AI Sunset",
+    description: "Warm light",
+    tags: [{ key: "nature", display_name: "Nature" }],
+  });
+  assert.equal(harness.context.detailsCurrentItem.display_title, "AI Sunset");
+  assert.equal(harness.context.detailsDialogTitle.textContent, "AI Sunset");
+  assert.equal(harness.context.detailsDescription.textContent, "Warm light");
+  assert.equal(harness.context.detailsTagsContainer.children.length, 1);
+
+  harness.context.detailsCurrentItem = {
+    media_id: other.media_id,
+    display_title: other.display_title,
+    tags: [],
+  };
+  harness.context.detailsDialogTitle.textContent = other.display_title;
+  harness.context.detailsDescription.textContent = "keep";
+  harness.context.detailsTagsContainer.replaceChildren();
+  harness.context.applySavedAiMetadataToCatalogSurfaces(item, {
+    display_title: "AI Sunset Again",
+    description: "Changed",
+    tags: [{ key: "nature", display_name: "Nature" }],
+  });
+  assert.equal(harness.context.detailsCurrentItem.display_title, other.display_title);
+  assert.equal(harness.context.detailsDialogTitle.textContent, other.display_title);
+  assert.equal(harness.context.detailsDescription.textContent, "keep");
+  assert.equal(harness.context.detailsTagsContainer.children.length, 0);
 });
 
 test("failed_analysis pending then available restores retry analysis label", async () => {
@@ -963,6 +1314,7 @@ test("one acceptance creates one preview and locks through metadata save", async
     }),
   );
   const button = new FakeElement("button");
+  button.className = "catalog-card__action--analyze";
   button.dataset.mediaTitle = item.display_title;
   const card = new FakeElement("article");
   card.className = "catalog-card";
@@ -995,8 +1347,9 @@ test("one acceptance creates one preview and locks through metadata save", async
   assert.equal(putBody.content_category, "meme");
   assert.equal(putBody.acquisition_source, "library_scan");
   assert.deepEqual(putBody.genres, ["Documentary"]);
-  assert.equal(button.dataset.analysisState, "saved");
+  assert.equal(button.isConnected, false);
   assert.equal(status.textContent, "AI metadata saved");
+  assert.equal(status.classList.contains("visually-hidden"), true);
   assert.equal(titleButton.textContent, "AI Sunset");
   assert.equal(harness.fetchCalls.some((call) => call.method === "POST" && call.url === "/api/canonical-tags"), false);
 });
@@ -1048,6 +1401,7 @@ test("existing tags skip canonical POST while missing tags create definitions be
     }),
   );
   const button = new FakeElement("button");
+  button.className = "catalog-card__action--analyze";
   button.dataset.mediaTitle = item.display_title;
   const card = new FakeElement("article");
   card.className = "catalog-card";
@@ -1065,7 +1419,7 @@ test("existing tags skip canonical POST while missing tags create definitions be
   assert.equal(tagPosts.length, 1);
   assert.equal(JSON.parse(tagPosts[0].body).display_name, "Golden Hour");
   assert.equal(tagPosts[0].headers["X-FrameNest-Request"], "1");
-  assert.equal(button.dataset.analysisState, "saved");
+  assert.equal(button.isConnected, false);
 });
 
 test("preview failure creates no tags and saves no metadata", async () => {

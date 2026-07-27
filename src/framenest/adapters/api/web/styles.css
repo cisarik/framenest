@@ -1956,22 +1956,23 @@ h2 {
   color: #f8fafc;
   cursor: progress;
   padding: 0;
+  animation: catalog-card-analyze-pulse 0.7s ease-in-out infinite alternate;
 }
 
-.catalog-card__action--analyze[data-analysis-state="analyzing"] .catalog-card__analyze-busy,
-.catalog-card__action--analyze[data-analysis-state="applying"] .catalog-card__analyze-busy {
-  width: 14px;
-  height: 14px;
-  border: 2px solid rgba(219, 234, 254, 0.38);
-  border-top-color: #dbeafe;
-  border-radius: 999px;
-  animation: catalog-card-analyzing 0.8s linear infinite;
+.catalog-card__action--analyze-dismissing {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 180ms ease;
 }
 
-.catalog-card__action--analyze[data-analysis-state="saved"] {
-  border-color: rgba(0, 200, 83, 0.55);
-  background: rgba(0, 200, 83, 0.16);
-  color: #b7f7c8;
+.catalog-card__title--fade-in,
+.catalog-card__tags--fade-in {
+  animation: catalog-card-metadata-fade 220ms ease;
+}
+
+.catalog-card--reflowing {
+  will-change: transform, height;
+  z-index: 1;
 }
 
 .catalog-card__action--analyze[data-analysis-state="failed_analysis"],
@@ -1982,26 +1983,42 @@ h2 {
 }
 
 .catalog-card__analysis-status {
-  min-height: 1rem;
   margin: -6px 14px 12px;
   color: #fca5a5;
   font-size: 0.76rem;
 }
 
-.catalog-card__analysis-status[data-analysis-success="true"] {
-  color: #86efac;
+.catalog-card__analysis-status:not([hidden]):not(.visually-hidden) {
+  min-height: 1rem;
 }
 
-@keyframes catalog-card-analyzing {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
+.catalog-card__analysis-status.visually-hidden {
+  margin: 0;
+  min-height: 0;
+}
+
+@keyframes catalog-card-analyze-pulse {
+  from { opacity: 0.45; }
+  to { opacity: 1; }
+}
+
+@keyframes catalog-card-metadata-fade {
+  from { opacity: 0.35; }
+  to { opacity: 1; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .catalog-card__action--analyze[data-analysis-state="analyzing"] .catalog-card__analyze-busy,
-  .catalog-card__action--analyze[data-analysis-state="applying"] .catalog-card__analyze-busy {
-    animation: none;
-    border-style: double;
+  .catalog-card__action--analyze[data-analysis-state="analyzing"],
+  .catalog-card__action--analyze[data-analysis-state="applying"] {
+    animation: none !important;
+    opacity: 0.72;
+  }
+
+  .catalog-card__action--analyze-dismissing,
+  .catalog-card__title--fade-in,
+  .catalog-card__tags--fade-in {
+    animation: none !important;
+    transition: none !important;
   }
 }
 

@@ -94,6 +94,8 @@ let metadataWorkspaceRevision = 0;
 let aiCapabilityRevision = 0;
 const cardAiQuickActionByMediaId = new Map();
 const CARD_AI_QUICK_ACTION_LOCKED = new Set(["confirming", "analyzing", "applying"]);
+const CATALOG_CARD_REFLOW_MS = 220;
+let catalogCardReflowGeneration = 0;
 let catalogState = {
   q: "",
   tagKeys: [],
@@ -3917,8 +3919,19 @@ function identityAllowsCardAiQuickAction() {
 
 function cardAiQuickActionEligible(item) {
   return identityAllowsCardAiQuickAction()
-    && selectSupportedAvailableLocation(item) !== null
+    && cardNeedsMetadata(item)
     && (item.content_category || "general") !== "movie";
+}
+
+function galleryMotionPreferred() {
+  try {
+    if (window.matchMedia) {
+      return !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    }
+  } catch (_error) {
+    // MatchMedia may be unavailable in constrained test harnesses.
+  }
+  return !prefersReducedMotion;
 }
 
 function cardAiQuickActionProviderBlocked() {
@@ -3951,9 +3964,6 @@ function cardAiQuickActionIsLocked(mediaId) {
 }
 
 function cardAiQuickActionStatusMessage(state, detail = "") {
-  if (state === "analyzing") return "Analyzing with AI…";
-  if (state === "applying") return "Saving AI metadata…";
-  if (state === "saved") return "AI metadata saved";
   if (state === "failed_analysis") return detail || "AI analysis failed.";
   if (state === "failed_save") {
     return detail || "AI metadata could not be saved. Existing media metadata was not replaced.";
@@ -3962,7 +3972,144 @@ function cardAiQuickActionStatusMessage(state, detail = "") {
   return detail || "";
 }
 
+function setCardAnalysisStatus(status, options) {
+  if (!status) return;
+  const text = options && options.text ? options.text : "";
+  const success = Boolean(options && options.success);
+  const visuallyHidden = Boolean(options && options.visuallyHidden && text);
+  status.textContent = text;
+  status.hidden = !text;
+  status.classList.toggle("visually-hidden", visuallyHidden);
+  if (success) {
+    status.dataset.analysisSuccess = "true";
+    status.setAttribute("role", "status");
+  } else {
+    status.removeAttribute("data-analysis-success");
+    if (!text) status.removeAttribute("role");
+  }
+}
+
+function announceCardAiQuickActionSuccess(card) {
+  const status = card?.querySelector(".catalog-card__analysis-status");
+  setCardAnalysisStatus(status, {
+    text: "AI metadata saved",
+    success: true,
+    visuallyHidden: true,
+  });
+}
+
+function dismissCardAiQuickActionButton(button) {
+  if (!button || !button.isConnected) return;
+  const finish = () => {
+    if (button.parentNode) button.remove();
+  };
+  if (!galleryMotionPreferred()) {
+    finish();
+    return;
+  }
+  button.classList.add("catalog-card__action--analyze-dismissing");
+  button.disabled = true;
+  button.setAttribute("aria-hidden", "true");
+  let settled = false;
+  const settle = () => {
+    if (settled) return;
+    settled = true;
+    button.removeEventListener("transitionend", onEnd);
+    finish();
+  };
+  const onEnd = (event) => {
+    if (event && event.propertyName && event.propertyName !== "opacity") return;
+    settle();
+  };
+  button.addEventListener("transitionend", onEnd);
+  window.setTimeout(settle, CATALOG_CARD_REFLOW_MS + 60);
+}
+
+function clearCatalogCardReflowInlineStyles(card) {
+  if (!card || !card.style) return;
+  card.style.transform = "";
+  card.style.transition = "";
+  card.style.height = "";
+  card.style.overflow = "";
+  card.classList.remove("catalog-card--reflowing");
+}
+
+function captureCatalogCardLayoutSnapshot() {
+  return new Map(
+    [...catalogResults.querySelectorAll(".catalog-card")].map((card) => {
+      const rect = card.getBoundingClientRect();
+      return [card, {
+        left: rect.left,
+        top: rect.top,
+        height: rect.height,
+        width: rect.width,
+      }];
+    }),
+  );
+}
+
+function animateCatalogCardMetadataReflow(patchedCard, firstRects) {
+  if (!galleryMotionPreferred() || !firstRects || !catalogResults) return;
+  const generation = catalogCardReflowGeneration + 1;
+  catalogCardReflowGeneration = generation;
+  const cards = [...catalogResults.querySelectorAll(".catalog-card")];
+  const lastRects = new Map(
+    cards.map((card) => {
+      const rect = card.getBoundingClientRect();
+      return [card, {
+        left: rect.left,
+        top: rect.top,
+        height: rect.height,
+        width: rect.width,
+      }];
+    }),
+  );
+  cards.forEach((card) => {
+    clearCatalogCardReflowInlineStyles(card);
+    const first = firstRects.get(card);
+    const last = lastRects.get(card);
+    if (!first || !last) return;
+    const dx = first.left - last.left;
+    const dy = first.top - last.top;
+    const heightChanged = Math.abs(first.height - last.height) > 0.5;
+    if (card === patchedCard && heightChanged) {
+      card.style.height = `${first.height}px`;
+      card.style.overflow = "hidden";
+    }
+    if (dx !== 0 || dy !== 0) {
+      card.style.transform = `translate(${dx}px, ${dy}px)`;
+      card.style.transition = "none";
+      card.classList.add("catalog-card--reflowing");
+    } else if (card === patchedCard && heightChanged) {
+      card.style.transition = "none";
+      card.classList.add("catalog-card--reflowing");
+    }
+  });
+  const play = () => {
+    if (generation !== catalogCardReflowGeneration) return;
+    cards.forEach((card) => {
+      if (!card.classList.contains("catalog-card--reflowing")) return;
+      const last = lastRects.get(card);
+      card.style.transition = `transform ${CATALOG_CARD_REFLOW_MS}ms ease, height ${CATALOG_CARD_REFLOW_MS}ms ease`;
+      card.style.transform = "";
+      if (card === patchedCard && last) {
+        card.style.height = `${last.height}px`;
+      }
+    });
+    window.setTimeout(() => {
+      if (generation !== catalogCardReflowGeneration) return;
+      cards.forEach((card) => clearCatalogCardReflowInlineStyles(card));
+    }, CATALOG_CARD_REFLOW_MS + 40);
+  };
+  if (typeof window.requestAnimationFrame === "function") {
+    window.requestAnimationFrame(() => window.requestAnimationFrame(play));
+  } else {
+    window.setTimeout(play, 0);
+  }
+}
+
 function setCardAnalyzeButtonState(button, state, message = "") {
+  if (!button || !button.isConnected) return;
   const title = button.dataset.mediaTitle || "media";
   const busy = state === "analyzing" || state === "applying";
   const locked = CARD_AI_QUICK_ACTION_LOCKED.has(state);
@@ -3981,9 +4128,6 @@ function setCardAnalyzeButtonState(button, state, message = "") {
   } else if (state === "applying") {
     button.setAttribute("aria-label", `Saving AI metadata for ${title}`);
     button.title = "Saving AI metadata";
-  } else if (state === "saved") {
-    button.setAttribute("aria-label", `AI metadata saved for ${title}. Analyze by AI again`);
-    button.title = "AI metadata saved — rerun available";
   } else if (state === "failed_analysis") {
     button.setAttribute("aria-label", `AI analysis failed for ${title}. Retry Analyze by AI`);
     button.title = "AI analysis failed — retry";
@@ -4002,27 +4146,19 @@ function setCardAnalyzeButtonState(button, state, message = "") {
     button.setAttribute("aria-label", `Confirm AI analysis for ${title}`);
     button.title = "Confirm AI analysis";
   } else {
-    button.setAttribute("aria-label", `Analyze by AI ${title}`);
+    button.setAttribute("aria-label", `Generate first-pass AI metadata for ${title}`);
     button.title = "Analyze by AI";
   }
-  if (busy) {
-    const busyIndicator = document.createElement("span");
-    busyIndicator.className = "catalog-card__analyze-busy";
-    busyIndicator.setAttribute("aria-hidden", "true");
-    button.replaceChildren(busyIndicator);
-  } else {
-    button.textContent = "🧠";
-  }
+  button.textContent = "🧠";
   const status = button.closest(".catalog-card")?.querySelector(".catalog-card__analysis-status");
   if (status) {
-    const text = message || cardAiQuickActionStatusMessage(state);
-    status.textContent = text;
-    status.hidden = !text;
-    if (state === "saved") {
-      status.dataset.analysisSuccess = "true";
-    } else {
-      status.removeAttribute("data-analysis-success");
-    }
+    const failureText = message || cardAiQuickActionStatusMessage(state);
+    const showFailure = state === "failed_analysis" || state === "failed_save" || state === "unavailable";
+    setCardAnalysisStatus(status, {
+      text: showFailure ? failureText : "",
+      success: false,
+      visuallyHidden: false,
+    });
   }
 }
 
@@ -4094,21 +4230,38 @@ function applySavedAiMetadataToCatalogSurfaces(item, metadata) {
     item.processed_at_ms = metadata.processed_at_ms;
   }
   const displayTitle = item.display_title || deriveCatalogFallbackTitle(item);
-  const card = [...catalogResults.querySelectorAll(".catalog-card")]
-    .find((node) => node.dataset.mediaId === String(item.media_id));
+  const cards = [...catalogResults.querySelectorAll(".catalog-card")];
+  const card = cards.find((node) => node.dataset.mediaId === String(item.media_id));
+  const motion = galleryMotionPreferred();
+  const firstRects = motion && card ? captureCatalogCardLayoutSnapshot() : null;
   if (card) {
     const titleButton = card.querySelector(".catalog-card__title-button");
     if (titleButton) {
       titleButton.textContent = displayTitle;
       titleButton.setAttribute("aria-label", `Open details for ${displayTitle}`);
+      if (motion) {
+        titleButton.classList.remove("catalog-card__title--fade-in");
+        titleButton.classList.add("catalog-card__title--fade-in");
+      }
     }
     const analyzeButton = card.querySelector(".catalog-card__action--analyze");
     if (analyzeButton) {
       analyzeButton.dataset.mediaTitle = displayTitle;
+      analyzeButton.dataset.analysisState = "idle";
+      analyzeButton.setAttribute("aria-busy", "false");
     }
     const tagsContainer = card.querySelector(".catalog-card__tags");
     if (tagsContainer) {
-      tagsContainer.replaceWith(renderCatalogCardTags(item));
+      const nextTags = renderCatalogCardTags(item);
+      if (motion) nextTags.classList.add("catalog-card__tags--fade-in");
+      tagsContainer.replaceWith(nextTags);
+    }
+    announceCardAiQuickActionSuccess(card);
+    if (analyzeButton) {
+      dismissCardAiQuickActionButton(analyzeButton);
+    }
+    if (firstRects) {
+      animateCatalogCardMetadataReflow(card, firstRects);
     }
   }
   if (detailsCurrentItem && detailsCurrentItem.media_id === item.media_id) {
@@ -4254,8 +4407,7 @@ async function handleAnalyzeCatalogCard(item, button) {
       return;
     }
     applySavedAiMetadataToCatalogSurfaces(item, savePayload.metadata);
-    setCardAiQuickActionController(mediaId, { state: "saved" });
-    setCardAnalyzeButtonState(button, "saved");
+    setCardAiQuickActionController(mediaId, { state: "idle" });
   } catch {
     const controller = getCardAiQuickAction(mediaId);
     if (controller.requestToken !== requestToken) return;
@@ -4365,7 +4517,7 @@ function renderCatalogCard(item) {
     } else {
       analyzeButton.disabled = false;
       analyzeButton.removeAttribute("aria-disabled");
-      analyzeButton.setAttribute("aria-label", `Analyze by AI ${displayTitle}`);
+      analyzeButton.setAttribute("aria-label", `Generate first-pass AI metadata for ${displayTitle}`);
       analyzeButton.title = "Analyze by AI";
     }
     analyzeButton.addEventListener("click", (event) => {
