@@ -1672,14 +1672,19 @@ def test_catalog_card_analyze_shortcut_for_eligible_admin_media_not_only_untagge
     script = client.get("/assets/app.js").text
     card_body = _javascript_function(script, "renderCatalogCard")
     eligible_body = _javascript_function(script, "cardAiQuickActionEligible")
+    identity_gate_body = _javascript_function(script, "identityAllowsCardAiQuickAction")
 
     assert 'analyzeButton.textContent = "🧠"' in card_body
     assert 'analyzeButton.title = "Analyze by AI"' in card_body
     assert "cardAiQuickActionEligible(item)" in card_body
     assert "cardNeedsMetadata(item)" not in card_body
-    assert 'identityHasCapability("analysis.run")' in eligible_body
-    assert 'identityHasCapability("metadata.canonical.write")' in eligible_body
-    assert 'selectSupportedAvailableLocation(item) !== null' in eligible_body
+    assert "identityAllowsCardAiQuickAction()" in eligible_body
+    assert "identityHasCapability(" not in eligible_body
+    assert "identityState.resolved" in identity_gate_body
+    assert "identityState.available" in identity_gate_body
+    assert 'capabilities.has("analysis.run")' in identity_gate_body
+    assert 'capabilities.has("metadata.canonical.write")' in identity_gate_body
+    assert "selectSupportedAvailableLocation(item) !== null" in eligible_body
     assert '(item.content_category || "general") !== "movie"' in eligible_body
     assert "actions.appendChild(analyzeButton)" in card_body
     assert "renderCatalogCardTags(item)" in card_body
@@ -1827,16 +1832,25 @@ def test_catalog_card_actions_reveal_contextually_without_losing_keyboard_or_tou
     assert 'editButton.addEventListener("click", () => handleOpenMetadataWorkspace(item, editButton))' in card_body
 
 
-def test_catalog_card_unavailable_ai_opens_status_without_request(client: TestClient) -> None:
+def test_catalog_card_unavailable_ai_is_natively_disabled_without_status_shortcut(client: TestClient) -> None:
     script = client.get("/assets/app.js").text
     analyze_body = _javascript_function(script, "handleAnalyzeCatalogCard")
-    unavailable_section = analyze_body[
-        analyze_body.index("if (!aiCapability.available)") : analyze_body.index("setCardAiQuickActionController(mediaId, { state: \"confirming\" })")
-    ]
+    state_body = _javascript_function(script, "setCardAnalyzeButtonState")
+    reconcile_body = _javascript_function(script, "reconcileCatalogCardAiQuickActions")
+    provider_blocked_body = _javascript_function(script, "cardAiQuickActionProviderBlocked")
 
-    assert 'openStatusDialog("ai"' in unavailable_section
-    assert "fetch(" not in unavailable_section
-    assert 'analyzeButton.setAttribute("aria-disabled", aiCapability.available ? "false" : "true")' in script
+    assert 'openStatusDialog("ai"' not in analyze_body
+    assert "cardAiQuickActionProviderBlocked()" in analyze_body
+    assert "aiCapabilityDiscoveryPending || !aiCapability.available" in provider_blocked_body
+    assert "button.disabled = locked || providerBlocked || state === \"unavailable\"" in state_body
+    assert 'button.setAttribute("aria-disabled", "true")' in state_body
+    assert "button.removeAttribute(\"aria-disabled\")" in state_body
+    assert "Checking AI availability for" in state_body
+    assert "AI analysis unavailable for" in state_body
+    assert "button.disabled = true" in reconcile_body
+    assert "button.disabled = false" in reconcile_body
+    assert "cardAiPreviewResponseMatchesRequest(payload, mediaId, location.location_id)" in analyze_body
+    assert "AI response did not match the selected media. No metadata was changed." in analyze_body
 
 
 def test_catalog_card_analyze_request_busy_success_and_failure_flow(client: TestClient) -> None:

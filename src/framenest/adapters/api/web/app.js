@@ -166,6 +166,7 @@ let aiCapability = {
   last_status_check: null,
   requires_explicit_confirmation: true,
 };
+let aiCapabilityDiscoveryPending = true;
 let automaticAnalysisCapability = {
   automatic_analysis_enabled: false,
   provider_configured: false,
@@ -832,6 +833,7 @@ function renderAiCapability(payload) {
     last_connection_test: payload && payload.last_connection_test ? payload.last_connection_test : null,
     requires_explicit_confirmation: !payload || payload.requires_explicit_confirmation !== false,
   };
+  aiCapabilityDiscoveryPending = false;
   aiCapabilityRevision += 1;
   const providerName = aiCapability.provider_display_name || aiCapability.provider_id;
   const providerInfo = aiCapability.model_id ? `${providerName} / ${aiCapability.model_id}` : providerName;
@@ -861,11 +863,13 @@ function renderAiCapability(payload) {
 }
 
 async function loadAiCapability() {
+  aiCapabilityDiscoveryPending = true;
   setAiStatusClass("status--loading");
   aiStatusText.textContent = "Checking AI status...";
   aiStatusDetail.textContent = "No provider request is made for capability discovery.";
   setAiStatusButtonState("checking", "Checking AI");
   updateSettingsAiStatus();
+  reconcileCatalogCardAiQuickActions();
   try {
     const response = await fetch(AI_CAPABILITY_ENDPOINT, {
       headers: { Accept: "application/json" },
@@ -3904,11 +3908,31 @@ function cardNeedsMetadata(item) {
   return selectSupportedAvailableLocation(item) !== null && (!item.tags || item.tags.length === 0);
 }
 
+function identityAllowsCardAiQuickAction() {
+  return identityState.resolved
+    && identityState.available
+    && identityState.capabilities.has("analysis.run")
+    && identityState.capabilities.has("metadata.canonical.write");
+}
+
 function cardAiQuickActionEligible(item) {
-  return identityHasCapability("analysis.run")
-    && identityHasCapability("metadata.canonical.write")
+  return identityAllowsCardAiQuickAction()
     && selectSupportedAvailableLocation(item) !== null
     && (item.content_category || "general") !== "movie";
+}
+
+function cardAiQuickActionProviderBlocked() {
+  return aiCapabilityDiscoveryPending || !aiCapability.available;
+}
+
+function cardAiPreviewResponseMatchesRequest(payload, mediaId, locationId) {
+  return Boolean(
+    payload
+    && typeof payload.media_id === "string"
+    && typeof payload.location_id === "string"
+    && payload.media_id === String(mediaId)
+    && payload.location_id === String(locationId),
+  );
 }
 
 function getCardAiQuickAction(mediaId) {
@@ -3942,11 +3966,15 @@ function setCardAnalyzeButtonState(button, state, message = "") {
   const title = button.dataset.mediaTitle || "media";
   const busy = state === "analyzing" || state === "applying";
   const locked = CARD_AI_QUICK_ACTION_LOCKED.has(state);
-  const providerBlocked = !aiCapability.available && !locked;
+  const providerBlocked = cardAiQuickActionProviderBlocked() && !locked;
   button.dataset.analysisState = state;
   button.setAttribute("aria-busy", busy ? "true" : "false");
-  button.setAttribute("aria-disabled", providerBlocked || state === "unavailable" ? "true" : "false");
-  button.disabled = locked;
+  button.disabled = locked || providerBlocked || state === "unavailable";
+  if (providerBlocked || state === "unavailable") {
+    button.setAttribute("aria-disabled", "true");
+  } else {
+    button.removeAttribute("aria-disabled");
+  }
   if (state === "analyzing") {
     button.setAttribute("aria-label", `Analyzing ${title}`);
     button.title = "Analyzing with AI";
@@ -3962,9 +3990,14 @@ function setCardAnalyzeButtonState(button, state, message = "") {
   } else if (state === "failed_save") {
     button.setAttribute("aria-label", `AI metadata save failed for ${title}. Retry Analyze by AI`);
     button.title = "AI metadata save failed — retry";
-  } else if (state === "unavailable" || providerBlocked) {
-    button.setAttribute("aria-label", `AI unavailable for ${title}`);
-    button.title = "AI unavailable";
+  } else if (providerBlocked || state === "unavailable") {
+    if (aiCapabilityDiscoveryPending) {
+      button.setAttribute("aria-label", `Checking AI availability for ${title}`);
+      button.title = `Checking AI availability for ${title}`;
+    } else {
+      button.setAttribute("aria-label", `AI analysis unavailable for ${title}`);
+      button.title = `AI analysis unavailable for ${title}`;
+    }
   } else if (state === "confirming") {
     button.setAttribute("aria-label", `Confirm AI analysis for ${title}`);
     button.title = "Confirm AI analysis";
@@ -3997,16 +4030,33 @@ function reconcileCatalogCardAiQuickActions() {
   catalogResults.querySelectorAll(".catalog-card__action--analyze").forEach((button) => {
     const state = button.dataset.analysisState || "idle";
     if (CARD_AI_QUICK_ACTION_LOCKED.has(state)) return;
-    const providerBlocked = !aiCapability.available;
-    button.setAttribute("aria-disabled", providerBlocked || state === "unavailable" ? "true" : "false");
-    if (state === "idle" || state === "saved" || state === "failed_analysis" || state === "failed_save" || state === "unavailable") {
-      if (providerBlocked) {
-        button.title = "AI unavailable";
-      } else if (state === "idle") {
-        const title = button.dataset.mediaTitle || "media";
-        button.setAttribute("aria-label", `Analyze by AI ${title}`);
-        button.title = "Analyze by AI";
+    const title = button.dataset.mediaTitle || "media";
+    const providerBlocked = cardAiQuickActionProviderBlocked();
+    if (providerBlocked) {
+      button.disabled = true;
+      button.setAttribute("aria-disabled", "true");
+      if (aiCapabilityDiscoveryPending) {
+        button.setAttribute("aria-label", `Checking AI availability for ${title}`);
+        button.title = `Checking AI availability for ${title}`;
+      } else {
+        button.setAttribute("aria-label", `AI analysis unavailable for ${title}`);
+        button.title = `AI analysis unavailable for ${title}`;
       }
+      return;
+    }
+    button.disabled = false;
+    button.removeAttribute("aria-disabled");
+    if (state === "unavailable") {
+      const mediaId = button.closest(".catalog-card")?.dataset.mediaId;
+      if (mediaId) {
+        setCardAiQuickActionController(mediaId, { state: "idle" });
+      }
+      setCardAnalyzeButtonState(button, "idle");
+      return;
+    }
+    if (state === "idle") {
+      button.setAttribute("aria-label", `Analyze by AI ${title}`);
+      button.title = "Analyze by AI";
     }
   });
 }
@@ -4099,12 +4149,7 @@ async function handleAnalyzeCatalogCard(item, button) {
   if (!cardAiQuickActionEligible(item)) return;
   const location = selectSupportedAvailableLocation(item);
   if (!location) return;
-  if (!aiCapability.available) {
-    setCardAiQuickActionController(mediaId, { state: "unavailable" });
-    setCardAnalyzeButtonState(button, "unavailable");
-    openStatusDialog("ai");
-    return;
-  }
+  if (cardAiQuickActionProviderBlocked()) return;
   setCardAiQuickActionController(mediaId, { state: "confirming" });
   setCardAnalyzeButtonState(button, "confirming");
   const accepted = await requestConfirmation({
@@ -4140,6 +4185,15 @@ async function handleAnalyzeCatalogCard(item, button) {
     if (!response.ok) {
       setCardAiQuickActionController(mediaId, { state: "failed_analysis" });
       setCardAnalyzeButtonState(button, "failed_analysis", aiSuggestionErrorMessage(payload));
+      return;
+    }
+    if (!cardAiPreviewResponseMatchesRequest(payload, mediaId, location.location_id)) {
+      setCardAiQuickActionController(mediaId, { state: "failed_analysis" });
+      setCardAnalyzeButtonState(
+        button,
+        "failed_analysis",
+        "AI response did not match the selected media. No metadata was changed.",
+      );
       return;
     }
     const suggestion = aiSuggestionFromPayload(payload);
@@ -4301,9 +4355,22 @@ function renderCatalogCard(item) {
     const initialState = controller.state || "idle";
     analyzeButton.dataset.analysisState = initialState;
     analyzeButton.setAttribute("aria-busy", "false");
-    analyzeButton.setAttribute("aria-disabled", aiCapability.available ? "false" : "true");
-    analyzeButton.setAttribute("aria-label", `Analyze by AI ${displayTitle}`);
-    analyzeButton.title = "Analyze by AI";
+    if (cardAiQuickActionProviderBlocked()) {
+      analyzeButton.disabled = true;
+      analyzeButton.setAttribute("aria-disabled", "true");
+      if (aiCapabilityDiscoveryPending) {
+        analyzeButton.setAttribute("aria-label", `Checking AI availability for ${displayTitle}`);
+        analyzeButton.title = `Checking AI availability for ${displayTitle}`;
+      } else {
+        analyzeButton.setAttribute("aria-label", `AI analysis unavailable for ${displayTitle}`);
+        analyzeButton.title = `AI analysis unavailable for ${displayTitle}`;
+      }
+    } else {
+      analyzeButton.disabled = false;
+      analyzeButton.removeAttribute("aria-disabled");
+      analyzeButton.setAttribute("aria-label", `Analyze by AI ${displayTitle}`);
+      analyzeButton.title = "Analyze by AI";
+    }
     analyzeButton.addEventListener("click", (event) => {
       event.preventDefault();
       event.stopPropagation();
@@ -4357,8 +4424,8 @@ function renderCatalogCard(item) {
         initialState,
         cardAiQuickActionStatusMessage(initialState),
       );
-    } else {
-      analyzeButton.setAttribute("aria-disabled", aiCapability.available ? "false" : "true");
+    } else if (cardAiQuickActionProviderBlocked()) {
+      setCardAnalyzeButtonState(analyzeButton, "idle");
     }
   }
   return card;

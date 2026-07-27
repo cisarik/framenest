@@ -193,6 +193,11 @@ class FakeElement {
   }
 
   focus() {}
+
+  click() {
+    if (this.disabled) return false;
+    return this.dispatchEvent({ type: "click" });
+  }
 }
 
 function createFlowHarness({ confirmAccepted = true } = {}) {
@@ -224,8 +229,11 @@ function createFlowHarness({ confirmAccepted = true } = {}) {
     JSON,
     encodeURIComponent,
     aiCapability: { available: true },
+    aiCapabilityDiscoveryPending: false,
     identityState: {
+      resolved: true,
       available: true,
+      role: "admin",
       capabilities: new Set(["analysis.run", "metadata.canonical.write", "gallery.read"]),
     },
     cardAiQuickActionByMediaId: new Map(),
@@ -243,10 +251,12 @@ function createFlowHarness({ confirmAccepted = true } = {}) {
     CANONICAL_TAGS_ENDPOINT: "/api/canonical-tags",
     MAX_METADATA_TAGS: 32,
     openStatusDialogCalls: [],
+    confirmationCalls: 0,
     openStatusDialog(tab) {
       context.openStatusDialogCalls.push(tab);
     },
     async requestConfirmation() {
+      context.confirmationCalls += 1;
       return confirmAccepted;
     },
     identityHasCapability(capability) {
@@ -361,8 +371,11 @@ function createFlowHarness({ confirmAccepted = true } = {}) {
   };
   context.window = context;
   const source = [
-    extractFunction(APP_SOURCE, "cardNeedsMetadata"),
+    extractFunction(APP_SOURCE, "identityAllowsCardAiQuickAction"),
     extractFunction(APP_SOURCE, "cardAiQuickActionEligible"),
+    extractFunction(APP_SOURCE, "cardAiQuickActionProviderBlocked"),
+    extractFunction(APP_SOURCE, "cardAiPreviewResponseMatchesRequest"),
+    extractFunction(APP_SOURCE, "cardNeedsMetadata"),
     extractFunction(APP_SOURCE, "getCardAiQuickAction"),
     extractFunction(APP_SOURCE, "setCardAiQuickActionController"),
     extractFunction(APP_SOURCE, "cardAiQuickActionIsLocked"),
@@ -386,6 +399,20 @@ function createFlowHarness({ confirmAccepted = true } = {}) {
       const bucket = routes.get(key);
       if (Array.isArray(bucket)) bucket.push(value);
       else routes.set(key, value);
+    },
+  };
+}
+
+function previewPayload(item, suggestionOverrides = {}) {
+  return {
+    media_id: item.media_id,
+    location_id: item.locations[0].location_id,
+    suggestion: {
+      title: "AI Sunset",
+      description: "Warm light",
+      tags: ["Nature"],
+      suggested_filename: "sunset.jpg",
+      ...suggestionOverrides,
     },
   };
 }
@@ -440,22 +467,51 @@ test("brain eligibility requires both capabilities, supported location, and excl
   assert.equal(context.cardAiQuickActionEligible(sampleItem({ tags: [{ key: "nature", display_name: "Nature" }] })), true);
 });
 
-test("ordinary and missing-capability identities do not unlock the brain eligibility helper", () => {
+test("ordinary missing-capability role-only and missing identity fail closed for brain eligibility", () => {
   const { context } = createFlowHarness();
+  const item = sampleItem();
+
   context.identityState.capabilities = new Set(["gallery.read"]);
-  assert.equal(context.cardAiQuickActionEligible(sampleItem()), false);
-  context.identityState.available = true;
+  assert.equal(context.cardAiQuickActionEligible(item), false);
+
   context.identityState.capabilities = new Set();
-  assert.equal(context.cardAiQuickActionEligible(sampleItem()), false);
+  assert.equal(context.cardAiQuickActionEligible(item), false);
+
+  context.identityState.role = "admin";
+  context.identityState.capabilities = new Set();
+  assert.equal(context.identityHasCapability("analysis.run"), false);
+  assert.equal(context.cardAiQuickActionEligible(item), false);
+
+  context.identityState.resolved = true;
+  context.identityState.available = false;
+  context.identityState.capabilities = new Set(["analysis.run", "metadata.canonical.write"]);
+  assert.equal(context.identityHasCapability("analysis.run"), true);
+  assert.equal(context.cardAiQuickActionEligible(item), false);
+
+  context.identityState.resolved = false;
+  context.identityState.available = true;
+  context.identityState.capabilities = new Set(["analysis.run", "metadata.canonical.write"]);
+  assert.equal(context.cardAiQuickActionEligible(item), false);
+
+  context.identityState.resolved = true;
+  context.identityState.available = true;
+  context.identityState.capabilities = new Set(["analysis.run", "metadata.canonical.write"]);
+  assert.equal(context.cardAiQuickActionEligible(item), true);
 });
 
-test("source wiring gates brain on both capabilities and excludes cardNeedsMetadata as visibility rule", () => {
+test("source wiring gates brain on positively resolved identity capabilities and excludes cardNeedsMetadata", () => {
   const cardBody = extractFunction(APP_SOURCE, "renderCatalogCard");
   const handleBody = extractFunction(APP_SOURCE, "handleAnalyzeCatalogCard");
+  const eligibleBody = extractFunction(APP_SOURCE, "cardAiQuickActionEligible");
+  const identityGateBody = extractFunction(APP_SOURCE, "identityAllowsCardAiQuickAction");
   assert.ok(cardBody.includes("cardAiQuickActionEligible(item)"));
   assert.equal(cardBody.includes("cardNeedsMetadata(item)"), false);
-  assert.ok(APP_SOURCE.includes('identityHasCapability("analysis.run")'));
-  assert.ok(APP_SOURCE.includes('identityHasCapability("metadata.canonical.write")'));
+  assert.ok(identityGateBody.includes("identityState.resolved"));
+  assert.ok(identityGateBody.includes("identityState.available"));
+  assert.ok(identityGateBody.includes('capabilities.has("analysis.run")'));
+  assert.ok(identityGateBody.includes('capabilities.has("metadata.canonical.write")'));
+  assert.equal(eligibleBody.includes("identityHasCapability("), false);
+  assert.ok(eligibleBody.includes("identityAllowsCardAiQuickAction()"));
   assert.ok(APP_SOURCE.includes('(item.content_category || "general") !== "movie"'));
   assert.ok(handleBody.includes("await requestConfirmation({"));
   assert.ok(handleBody.includes('title: "Analyze and save with AI?"'));
@@ -469,10 +525,12 @@ test("source wiring gates brain on both capabilities and excludes cardNeedsMetad
   assert.ok(handleBody.includes('state: "failed_save"'));
   assert.ok(handleBody.includes('state: "failed_analysis"'));
   assert.ok(handleBody.includes("suggestionIsUsableForCanonicalSave(suggestion)"));
+  assert.ok(handleBody.includes("cardAiPreviewResponseMatchesRequest(payload, mediaId, location.location_id)"));
   assert.ok(handleBody.includes("cardAiQuickActionIsLocked(mediaId)"));
   assert.ok(handleBody.includes("content_category: metadataPayload.content_category"));
   assert.ok(handleBody.includes("acquisition_source: metadataPayload.acquisition_source"));
   assert.ok(handleBody.includes("genres: Array.isArray(metadataPayload.genres)"));
+  assert.equal(handleBody.includes('openStatusDialog("ai"'), false);
 });
 
 test("Edit Analyze remains draft-only and does not auto-save", () => {
@@ -483,11 +541,13 @@ test("Edit Analyze remains draft-only and does not auto-save", () => {
   assert.ok(analyzeBody.includes("await requestConfirmation({"));
 });
 
-test("unavailable provider opens status without preview request", async () => {
+test("unavailable and pending provider use native disabled without Status confirmation or preview", async () => {
   const harness = createFlowHarness();
   harness.context.aiCapability.available = false;
+  harness.context.aiCapabilityDiscoveryPending = false;
   const item = sampleItem();
   const button = new FakeElement("button");
+  button.className = "catalog-card__action--analyze";
   button.dataset.mediaTitle = item.display_title;
   const card = new FakeElement("article");
   card.className = "catalog-card";
@@ -495,11 +555,74 @@ test("unavailable provider opens status without preview request", async () => {
   status.className = "catalog-card__analysis-status";
   card.appendChild(button);
   card.appendChild(status);
+  harness.catalogResults.appendChild(card);
+  harness.context.setCardAnalyzeButtonState(button, "idle");
+
+  assert.equal(button.disabled, true);
+  assert.equal(button.getAttribute("aria-disabled"), "true");
+  assert.match(button.getAttribute("aria-label"), /AI analysis unavailable for Sunset Still/);
+  assert.equal(button.title, "AI analysis unavailable for Sunset Still");
+
+  button.click();
+  button.dispatchEvent({ type: "click" });
+  button.dispatchEvent({ type: "keydown", key: "Enter" });
+  button.dispatchEvent({ type: "keydown", key: " " });
   await harness.context.handleAnalyzeCatalogCard(item, button);
   await flushAll();
-  assert.deepEqual(harness.context.openStatusDialogCalls, ["ai"]);
+  assert.deepEqual(harness.context.openStatusDialogCalls, []);
+  assert.equal(harness.context.confirmationCalls, 0);
   assert.equal(harness.fetchCalls.length, 0);
-  assert.equal(button.dataset.analysisState, "unavailable");
+  assert.equal(button.dataset.analysisState, "idle");
+
+  harness.context.aiCapabilityDiscoveryPending = true;
+  harness.context.reconcileCatalogCardAiQuickActions();
+  assert.equal(button.disabled, true);
+  assert.equal(button.getAttribute("aria-disabled"), "true");
+  assert.match(button.getAttribute("aria-label"), /Checking AI availability for Sunset Still/);
+  assert.equal(button.title, "Checking AI availability for Sunset Still");
+  await harness.context.handleAnalyzeCatalogCard(item, button);
+  await flushAll();
+  assert.deepEqual(harness.context.openStatusDialogCalls, []);
+  assert.equal(harness.fetchCalls.length, 0);
+});
+
+test("capability reconciliation enables operable brain without remounting or resetting locked state", () => {
+  const harness = createFlowHarness();
+  const idleButton = new FakeElement("button");
+  idleButton.className = "catalog-card__action--analyze";
+  idleButton.dataset.analysisState = "idle";
+  idleButton.dataset.mediaTitle = "Sunset Still";
+  idleButton.disabled = true;
+  idleButton.setAttribute("aria-disabled", "true");
+  const lockedButton = new FakeElement("button");
+  lockedButton.className = "catalog-card__action--analyze";
+  lockedButton.dataset.analysisState = "analyzing";
+  lockedButton.dataset.mediaTitle = "Busy Still";
+  lockedButton.disabled = true;
+  lockedButton.setAttribute("aria-busy", "true");
+  lockedButton.setAttribute("aria-label", "Analyzing Busy Still");
+  harness.catalogResults.appendChild(idleButton);
+  harness.catalogResults.appendChild(lockedButton);
+
+  harness.context.aiCapability.available = false;
+  harness.context.aiCapabilityDiscoveryPending = false;
+  harness.context.reconcileCatalogCardAiQuickActions();
+  assert.equal(idleButton.disabled, true);
+  assert.equal(idleButton.getAttribute("aria-disabled"), "true");
+
+  harness.context.aiCapability.available = true;
+  harness.context.aiCapabilityDiscoveryPending = false;
+  harness.context.reconcileCatalogCardAiQuickActions();
+  assert.equal(idleButton.disabled, false);
+  assert.equal(idleButton.getAttribute("aria-disabled"), null);
+  assert.equal(idleButton.getAttribute("aria-label"), "Analyze by AI Sunset Still");
+  assert.equal(idleButton.title, "Analyze by AI");
+  assert.equal(lockedButton.disabled, true);
+  assert.equal(lockedButton.dataset.analysisState, "analyzing");
+  assert.equal(lockedButton.getAttribute("aria-label"), "Analyzing Busy Still");
+  assert.equal(harness.catalogResults.children.length, 2);
+  assert.equal(harness.catalogResults.children[0], idleButton);
+  assert.equal(harness.fetchCalls.length, 0);
 });
 
 test("confirmation cancel performs no mutation", async () => {
@@ -526,14 +649,7 @@ test("one acceptance creates one preview and locks through metadata save", async
   harness.enqueue(
     "POST",
     `/api/media/${mediaId}/locations/${locationId}/ai-suggestion-preview`,
-    response({
-      suggestion: {
-        title: "AI Sunset",
-        description: "Warm light",
-        tags: ["Nature"],
-        suggested_filename: "sunset.jpg",
-      },
-    }),
+    response(previewPayload(item)),
   );
   harness.enqueue(
     "GET",
@@ -610,14 +726,7 @@ test("existing tags skip canonical POST while missing tags create definitions be
   harness.enqueue(
     "POST",
     `/api/media/${mediaId}/locations/${locationId}/ai-suggestion-preview`,
-    response({
-      suggestion: {
-        title: "AI Sunset",
-        description: "Warm light",
-        tags: ["Nature", "Golden Hour"],
-        suggested_filename: "sunset.jpg",
-      },
-    }),
+    response(previewPayload(item, { tags: ["Nature", "Golden Hour"] })),
   );
   harness.enqueue(
     "POST",
@@ -697,6 +806,107 @@ test("preview failure creates no tags and saves no metadata", async () => {
   assert.equal(button.dataset.analysisState, "failed_analysis");
 });
 
+test("mismatched or missing preview identity fails before tag or metadata mutation", async () => {
+  async function runMismatch(payload) {
+    const harness = createFlowHarness();
+    const item = sampleItem();
+    const mediaId = item.media_id;
+    const locationId = item.locations[0].location_id;
+    harness.enqueue(
+      "POST",
+      `/api/media/${mediaId}/locations/${locationId}/ai-suggestion-preview`,
+      response(payload),
+    );
+    const button = new FakeElement("button");
+    button.dataset.mediaTitle = item.display_title;
+    const card = new FakeElement("article");
+    card.className = "catalog-card";
+    const status = Object.assign(new FakeElement("p"), { className: "catalog-card__analysis-status" });
+    card.appendChild(button);
+    card.appendChild(status);
+    await harness.context.handleAnalyzeCatalogCard(item, button);
+    await flushAll();
+    assert.equal(button.dataset.analysisState, "failed_analysis");
+    assert.equal(
+      status.textContent,
+      "AI response did not match the selected media. No metadata was changed.",
+    );
+    assert.equal(harness.fetchCalls.some((call) => call.method === "POST" && call.url === "/api/canonical-tags"), false);
+    assert.equal(harness.fetchCalls.some((call) => call.method === "GET" && call.url.includes("/metadata")), false);
+    assert.equal(harness.fetchCalls.some((call) => call.method === "PUT"), false);
+    return harness;
+  }
+
+  await runMismatch(previewPayload(sampleItem({
+    media_id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+  })));
+  await runMismatch({
+    ...previewPayload(sampleItem()),
+    location_id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+  });
+  await runMismatch({
+    location_id: sampleItem().locations[0].location_id,
+    suggestion: previewPayload(sampleItem()).suggestion,
+  });
+  await runMismatch({
+    media_id: sampleItem().media_id,
+    suggestion: previewPayload(sampleItem()).suggestion,
+  });
+});
+
+test("stale request token does not apply another media response", async () => {
+  const harness = createFlowHarness();
+  const item = sampleItem();
+  const mediaId = item.media_id;
+  const locationId = item.locations[0].location_id;
+  let resolvePreview;
+  harness.enqueue(
+    "POST",
+    `/api/media/${mediaId}/locations/${locationId}/ai-suggestion-preview`,
+    () => new Promise((resolve) => {
+      resolvePreview = () => resolve(response(previewPayload(item, {
+        title: "Late",
+        description: "Late",
+      })));
+    }),
+  );
+  const button = new FakeElement("button");
+  button.dataset.mediaTitle = item.display_title;
+  const card = new FakeElement("article");
+  card.className = "catalog-card";
+  card.appendChild(button);
+  card.appendChild(Object.assign(new FakeElement("p"), { className: "catalog-card__analysis-status" }));
+  const pending = harness.context.handleAnalyzeCatalogCard(item, button);
+  await flushAll();
+  harness.context.setCardAiQuickActionController(mediaId, { state: "analyzing", requestToken: 999 });
+  resolvePreview();
+  await pending;
+  await flushAll();
+  assert.equal(harness.fetchCalls.some((call) => call.method === "PUT"), false);
+  assert.equal(button.dataset.analysisState, "analyzing");
+});
+
+test("preview for another media controller identity is rejected by response match", () => {
+  const { context } = createFlowHarness();
+  const item = sampleItem();
+  assert.equal(
+    context.cardAiPreviewResponseMatchesRequest(
+      previewPayload(item),
+      item.media_id,
+      item.locations[0].location_id,
+    ),
+    true,
+  );
+  assert.equal(
+    context.cardAiPreviewResponseMatchesRequest(
+      previewPayload(item),
+      "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      item.locations[0].location_id,
+    ),
+    false,
+  );
+});
+
 test("tag creation failure prevents metadata PUT", async () => {
   const harness = createFlowHarness();
   const item = sampleItem({ tags: [] });
@@ -706,14 +916,7 @@ test("tag creation failure prevents metadata PUT", async () => {
   harness.enqueue(
     "POST",
     `/api/media/${mediaId}/locations/${locationId}/ai-suggestion-preview`,
-    response({
-      suggestion: {
-        title: "AI Sunset",
-        description: "Warm light",
-        tags: ["Brand New"],
-        suggested_filename: "sunset.jpg",
-      },
-    }),
+    response(previewPayload(item, { tags: ["Brand New"] })),
   );
   harness.enqueue(
     "POST",
@@ -742,14 +945,7 @@ test("metadata PUT failure is failed_save and does not claim success after tag d
   harness.enqueue(
     "POST",
     `/api/media/${mediaId}/locations/${locationId}/ai-suggestion-preview`,
-    response({
-      suggestion: {
-        title: "AI Sunset",
-        description: "Warm light",
-        tags: ["Brand New"],
-        suggested_filename: "sunset.jpg",
-      },
-    }),
+    response(previewPayload(item, { tags: ["Brand New"] })),
   );
   harness.enqueue(
     "POST",
@@ -790,42 +986,6 @@ test("metadata PUT failure is failed_save and does not claim success after tag d
   assert.equal(harness.context.canonicalTagDefinitions.some((tag) => tag.key === "brand-new"), true);
 });
 
-test("stale request token does not apply another media response", async () => {
-  const harness = createFlowHarness();
-  const item = sampleItem();
-  const mediaId = item.media_id;
-  const locationId = item.locations[0].location_id;
-  let resolvePreview;
-  harness.enqueue(
-    "POST",
-    `/api/media/${mediaId}/locations/${locationId}/ai-suggestion-preview`,
-    () => new Promise((resolve) => {
-      resolvePreview = () => resolve(response({
-        suggestion: {
-          title: "Late",
-          description: "Late",
-          tags: ["Nature"],
-          suggested_filename: "late.jpg",
-        },
-      }));
-    }),
-  );
-  const button = new FakeElement("button");
-  button.dataset.mediaTitle = item.display_title;
-  const card = new FakeElement("article");
-  card.className = "catalog-card";
-  card.appendChild(button);
-  card.appendChild(Object.assign(new FakeElement("p"), { className: "catalog-card__analysis-status" }));
-  const pending = harness.context.handleAnalyzeCatalogCard(item, button);
-  await flushAll();
-  harness.context.setCardAiQuickActionController(mediaId, { state: "analyzing", requestToken: 999 });
-  resolvePreview();
-  await pending;
-  await flushAll();
-  assert.equal(harness.fetchCalls.some((call) => call.method === "PUT"), false);
-  assert.equal(button.dataset.analysisState, "analyzing");
-});
-
 test("invalid suggestion does not erase metadata via PUT", async () => {
   const harness = createFlowHarness();
   const item = sampleItem();
@@ -834,7 +994,11 @@ test("invalid suggestion does not erase metadata via PUT", async () => {
   harness.enqueue(
     "POST",
     `/api/media/${mediaId}/locations/${locationId}/ai-suggestion-preview`,
-    response({ suggestion: { title: "", description: "", tags: [], suggested_filename: "" } }),
+    response({
+      media_id: mediaId,
+      location_id: locationId,
+      suggestion: { title: "", description: "", tags: [], suggested_filename: "" },
+    }),
   );
   const button = new FakeElement("button");
   button.dataset.mediaTitle = item.display_title;
@@ -846,21 +1010,6 @@ test("invalid suggestion does not erase metadata via PUT", async () => {
   await flushAll();
   assert.equal(harness.fetchCalls.some((call) => call.method === "PUT"), false);
   assert.equal(button.dataset.analysisState, "failed_analysis");
-});
-
-test("capability reconciliation updates aria-disabled without remounting catalog cards", () => {
-  const harness = createFlowHarness();
-  const button = new FakeElement("button");
-  button.className = "catalog-card__action--analyze";
-  button.dataset.analysisState = "idle";
-  button.dataset.mediaTitle = "Sunset Still";
-  button.setAttribute("aria-disabled", "true");
-  harness.catalogResults.appendChild(button);
-  harness.context.aiCapability.available = true;
-  harness.context.reconcileCatalogCardAiQuickActions();
-  assert.equal(button.getAttribute("aria-disabled"), "false");
-  assert.equal(harness.catalogResults.children.length, 1);
-  assert.equal(harness.catalogResults.children[0], button);
 });
 
 test("brain click handlers stop propagation in source and do not open details or playback helpers", () => {

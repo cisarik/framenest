@@ -350,8 +350,23 @@ test("privileged controls are gated by capabilities in source", () => {
   assert.equal(cardBody.includes("cardNeedsMetadata(item)"), false);
   assert.ok(cardBody.includes('if (identityHasCapability("metadata.canonical.write")) {'));
   const eligibleBody = extractFunction(APP_SOURCE, "cardAiQuickActionEligible");
-  assert.ok(eligibleBody.includes('identityHasCapability("analysis.run")'));
-  assert.ok(eligibleBody.includes('identityHasCapability("metadata.canonical.write")'));
+  const identityGateBody = extractFunction(APP_SOURCE, "identityAllowsCardAiQuickAction");
+  assert.ok(eligibleBody.includes("identityAllowsCardAiQuickAction()"));
+  assert.equal(eligibleBody.includes("identityHasCapability("), false);
+  assert.ok(identityGateBody.includes("identityState.resolved"));
+  assert.ok(identityGateBody.includes("identityState.available"));
+  assert.ok(identityGateBody.includes('capabilities.has("analysis.run")'));
+  assert.ok(identityGateBody.includes('capabilities.has("metadata.canonical.write")'));
+});
+
+test("gallery AI quick action fails closed for missing unresolved and ordinary identity", () => {
+  const identityGateBody = extractFunction(APP_SOURCE, "identityAllowsCardAiQuickAction");
+  assert.ok(identityGateBody.includes("identityState.resolved"));
+  assert.ok(identityGateBody.includes("identityState.available"));
+  assert.ok(identityGateBody.includes('capabilities.has("analysis.run")'));
+  assert.ok(identityGateBody.includes('capabilities.has("metadata.canonical.write")'));
+  assert.equal(identityGateBody.includes("identityHasCapability("), false);
+  assert.ok(APP_SOURCE.includes("function identityAllowsCardAiQuickAction()"));
 });
 
 test("admin identity populates name-only badge and unlocks privileged controls", async () => {
