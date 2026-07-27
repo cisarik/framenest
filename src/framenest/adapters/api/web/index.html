@@ -49,7 +49,19 @@
           <span class="status-button__label">AI</span>
           <span id="ai-status-button-text" class="status-button__state visually-hidden">Checking AI</span>
         </button>
-        <span id="identity-badge" class="identity-badge" hidden></span>
+        <button
+          id="identity-badge"
+          class="status-button identity-badge status-button--healthy"
+          type="button"
+          hidden
+          aria-label="Tailscale identity status"
+          title="Open Tailscale identity status"
+        >
+          <span class="status-button__dot" aria-hidden="true"></span>
+          <span id="identity-status-name" class="identity-badge__name"></span>
+          <span class="identity-badge__sep" aria-hidden="true">·</span>
+          <span id="identity-status-role" class="identity-badge__role"></span>
+        </button>
       </div>
     </header>
 
@@ -128,6 +140,7 @@
       <div class="settings-dialog__tabs" role="tablist" aria-label="Status sections">
         <button id="status-tab-ai" class="settings-dialog__tab settings-dialog__tab--active" type="button" role="tab" aria-selected="true" aria-controls="status-panel-ai">AI</button>
         <button id="status-tab-cloud" class="settings-dialog__tab" type="button" role="tab" aria-selected="false" aria-controls="status-panel-cloud">Cloud</button>
+        <button id="status-tab-tailscale" class="settings-dialog__tab" type="button" role="tab" aria-selected="false" aria-controls="status-panel-tailscale">Tailscale</button>
       </div>
       <div class="settings-dialog__body">
         <div id="status-panel-ai" class="settings-dialog__section" role="tabpanel" aria-labelledby="status-tab-ai" tabindex="0">
@@ -175,6 +188,50 @@
               <dd id="status-cloud-remote"></dd>
             </div>
           </dl>
+        </div>
+        <div id="status-panel-tailscale" class="settings-dialog__section" role="tabpanel" aria-labelledby="status-tab-tailscale" tabindex="0" hidden>
+          <h3 class="settings-dialog__section-title">Tailscale</h3>
+          <dl class="settings-status-list settings-status-list--wrap">
+            <div>
+              <dt>Connection</dt>
+              <dd id="status-tailscale-connection">Checking...</dd>
+            </div>
+            <div>
+              <dt>Access method</dt>
+              <dd id="status-tailscale-access-method">Unknown</dd>
+            </div>
+            <div>
+              <dt>Hostname</dt>
+              <dd id="status-tailscale-hostname"></dd>
+            </div>
+            <div>
+              <dt>Application URL</dt>
+              <dd id="status-tailscale-url"></dd>
+            </div>
+            <div>
+              <dt>HTTPS</dt>
+              <dd id="status-tailscale-https"></dd>
+            </div>
+            <div>
+              <dt>Login</dt>
+              <dd id="status-tailscale-login"></dd>
+            </div>
+            <div>
+              <dt>Display name</dt>
+              <dd id="status-tailscale-display-name"></dd>
+            </div>
+            <div>
+              <dt>Role</dt>
+              <dd id="status-tailscale-role"></dd>
+            </div>
+            <div>
+              <dt>Provenance</dt>
+              <dd id="status-tailscale-provenance"></dd>
+            </div>
+          </dl>
+          <p id="status-tailscale-note" class="settings-dialog__note">
+            Access is restricted through the Tailscale tailnet. FrameNest does not expose this application on the public internet.
+          </p>
         </div>
       </div>
     </dialog>

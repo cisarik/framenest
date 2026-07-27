@@ -1123,7 +1123,7 @@ def test_application_has_status_dialog_element(client: TestClient) -> None:
     assert "AI" in html
 
 
-def test_status_dialog_has_accessible_ai_and_cloud_tabs(client: TestClient) -> None:
+def test_status_dialog_has_accessible_ai_cloud_and_tailscale_tabs(client: TestClient) -> None:
     html = client.get("/").text
     start = html.index('id="status-dialog"')
     status_section = html[start : html.index("</dialog>", start)]
@@ -1131,14 +1131,28 @@ def test_status_dialog_has_accessible_ai_and_cloud_tabs(client: TestClient) -> N
     assert 'role="tablist"' in status_section
     assert 'id="status-tab-ai"' in status_section
     assert 'id="status-tab-cloud"' in status_section
+    assert 'id="status-tab-tailscale"' in status_section
     assert status_section.index('id="status-tab-ai"') < status_section.index('id="status-tab-cloud"')
+    assert status_section.index('id="status-tab-cloud"') < status_section.index(
+        'id="status-tab-tailscale"'
+    )
     assert 'role="tab"' in status_section
     assert 'aria-selected="true"' in status_section
     assert 'aria-controls="status-panel-ai"' in status_section
     assert 'aria-controls="status-panel-cloud"' in status_section
+    assert 'aria-controls="status-panel-tailscale"' in status_section
+    assert 'id="status-panel-tailscale"' in status_section
     assert 'role="tabpanel"' in status_section
     assert ">Model<" in status_section
     assert ">Cloud<" in status_section
+    assert ">Tailscale<" in status_section
+    assert "status-tailscale-login" in status_section
+    assert "status-tailscale-provenance" in status_section
+    assert "tailnet" in status_section.lower()
+    assert "auth key" not in status_section.lower()
+    assert "wireguard" not in status_section.lower()
+    assert "api token" not in status_section.lower()
+    assert "nuc-1.tail247768.ts.net" not in status_section
 
 
 def test_status_dialog_does_not_contain_provider_configuration_inputs(client: TestClient) -> None:
@@ -1172,22 +1186,27 @@ def test_javascript_status_buttons_open_status_tabs(client: TestClient) -> None:
     assert "status-dialog" in script or "statusDialog" in script
     assert 'openStatusDialog("ai"' in script
     assert 'openStatusDialog("cloud")' in script
+    assert 'openStatusDialog("tailscale")' in script
     assert "loadCloudStatus()" in script
+    assert "loadTailscaleStatus()" in set_tab_body
     assert "loadAiCapability(" in set_tab_body
     assert 'setActiveStatusTab("ai"' in script
+    assert 'setActiveStatusTab("tailscale")' in script
     assert "handleStatusTabKeydown" in script
     assert "ArrowLeft" in script and "ArrowRight" in script
-    assert "statusPanelAi.hidden = isCloud" in set_tab_body
-    assert "statusPanelCloud.hidden = !isCloud" in set_tab_body
-    assert 'statusTabAi.setAttribute("aria-selected", String(!isCloud))' in set_tab_body
-    assert 'statusTabCloud.setAttribute("aria-selected", String(isCloud))' in set_tab_body
+    assert 'tabName === "cloud"' in set_tab_body or 'normalized === "cloud"' in set_tab_body
+    assert 'normalized === "tailscale"' in set_tab_body
+    assert "statusTabTailscale" in set_tab_body
+    assert "statusPanelTailscale" in set_tab_body
+    assert 'entry.tab.setAttribute("aria-selected", String(selected))' in set_tab_body
+    assert "entry.panel.hidden = !selected" in set_tab_body
     assert "showModal" in script
 
 
 def test_javascript_ai_status_modal_refreshes_on_each_explicit_open(client: TestClient) -> None:
     script = client.get("/assets/app.js").text
     open_dialog_body = _javascript_function(script, "openStatusDialog")
-    ai_button_body = script[script.index("if (aiStatusButton)") : script.index("if (statusTabAi)")]
+    ai_button_body = script[script.index("if (aiStatusButton)") : script.index("if (identityBadge)")]
 
     assert "refreshAiStatus" in script
     assert "loadAiCapability(" in open_dialog_body or (
@@ -1197,7 +1216,7 @@ def test_javascript_ai_status_modal_refreshes_on_each_explicit_open(client: Test
     assert "statusDialog.showModal" in open_dialog_body
     assert "setInterval" not in open_dialog_body
     assert "setTimeout" not in open_dialog_body
-
+    assert 'openStatusDialog("tailscale")' in script[script.index("if (identityBadge)") :]
 
 def test_javascript_ai_status_modal_failure_stays_sanitized(client: TestClient) -> None:
     script = client.get("/assets/app.js").text

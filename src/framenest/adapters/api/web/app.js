@@ -188,6 +188,7 @@ let identityState = {
   login: "",
   displayName: "",
   role: "",
+  provenance: "",
   capabilities: new Set(),
 };
 
@@ -215,6 +216,10 @@ async function loadIdentity() {
       identityState.resolved = true;
       identityState.available = true;
       identityState.capabilities = new Set();
+      identityState.login = "";
+      identityState.displayName = "";
+      identityState.role = "";
+      identityState.provenance = "";
       return;
     }
     const payload = await response.json();
@@ -223,6 +228,7 @@ async function loadIdentity() {
     identityState.login = typeof payload.login === "string" ? payload.login : "";
     identityState.displayName = typeof payload.display_name === "string" ? payload.display_name : "";
     identityState.role = typeof payload.role === "string" ? payload.role : "";
+    identityState.provenance = typeof payload.provenance === "string" ? payload.provenance : "";
     identityState.capabilities = new Set(
       Array.isArray(payload.capabilities)
         ? payload.capabilities.filter((capability) => typeof capability === "string")
@@ -251,13 +257,22 @@ function renderIdentityBadge() {
   if (!identityBadge) return;
   if (!identityState.available || !identityState.login) {
     identityBadge.hidden = true;
-    identityBadge.replaceChildren();
+    if (identityStatusName) identityStatusName.textContent = "";
+    if (identityStatusRole) identityStatusRole.textContent = "";
+    identityBadge.removeAttribute("aria-label");
+    identityBadge.title = "Open Tailscale identity status";
     return;
   }
   const label = identityState.displayName || identityState.login;
   const roleLabel = identityState.role === "admin" ? "Admin" : "User";
-  identityBadge.textContent = `${label} · ${roleLabel}`;
-  identityBadge.title = `Signed in as ${identityState.login}`;
+  if (identityStatusName) identityStatusName.textContent = label;
+  if (identityStatusRole) identityStatusRole.textContent = roleLabel;
+  identityBadge.classList.add("status-button--healthy");
+  identityBadge.setAttribute(
+    "aria-label",
+    `Tailscale identity status: ${label}, ${roleLabel}. Open Tailscale details.`,
+  );
+  identityBadge.title = `Signed in as ${identityState.login}. Open Tailscale identity status.`;
   identityBadge.hidden = false;
 }
 
@@ -289,8 +304,10 @@ const statusDialog = document.querySelector("#status-dialog");
 const statusCloseButton = document.querySelector("#status-close-button");
 const statusTabAi = document.querySelector("#status-tab-ai");
 const statusTabCloud = document.querySelector("#status-tab-cloud");
+const statusTabTailscale = document.querySelector("#status-tab-tailscale");
 const statusPanelAi = document.querySelector("#status-panel-ai");
 const statusPanelCloud = document.querySelector("#status-panel-cloud");
+const statusPanelTailscale = document.querySelector("#status-panel-tailscale");
 const settingsAiProvider = document.querySelector("#settings-ai-provider");
 const settingsAiModel = document.querySelector("#settings-ai-model");
 const settingsAiConfiguration = document.querySelector("#settings-ai-configuration");
@@ -302,8 +319,19 @@ const statusCloudServer = document.querySelector("#status-cloud-server");
 const statusCloudConnection = document.querySelector("#status-cloud-connection");
 const statusCloudRemoteRow = document.querySelector("#status-cloud-remote-row");
 const statusCloudRemote = document.querySelector("#status-cloud-remote");
+const statusTailscaleConnection = document.querySelector("#status-tailscale-connection");
+const statusTailscaleAccessMethod = document.querySelector("#status-tailscale-access-method");
+const statusTailscaleHostname = document.querySelector("#status-tailscale-hostname");
+const statusTailscaleUrl = document.querySelector("#status-tailscale-url");
+const statusTailscaleHttps = document.querySelector("#status-tailscale-https");
+const statusTailscaleLogin = document.querySelector("#status-tailscale-login");
+const statusTailscaleDisplayName = document.querySelector("#status-tailscale-display-name");
+const statusTailscaleRole = document.querySelector("#status-tailscale-role");
+const statusTailscaleProvenance = document.querySelector("#status-tailscale-provenance");
 const uploadOpenButton = document.querySelector("#upload-open-button");
 const identityBadge = document.querySelector("#identity-badge");
+const identityStatusName = document.querySelector("#identity-status-name");
+const identityStatusRole = document.querySelector("#identity-status-role");
 const uploadDialog = document.querySelector("#upload-dialog");
 const uploadDialogTitle = document.querySelector("#upload-dialog-title");
 const uploadCloseButton = document.querySelector("#upload-close-button");
@@ -451,7 +479,10 @@ function restoreConfirmationFocus(target) {
     return;
   }
   if (statusDialog && statusDialog.hasAttribute("open")) {
-    const activePanel = statusPanelCloud && !statusPanelCloud.hidden ? statusPanelCloud : statusPanelAi;
+    const activePanel =
+      (statusPanelTailscale && !statusPanelTailscale.hidden && statusPanelTailscale) ||
+      (statusPanelCloud && !statusPanelCloud.hidden && statusPanelCloud) ||
+      statusPanelAi;
     if (activePanel) activePanel.focus();
   }
 }
@@ -968,7 +999,70 @@ function renderCloudStatus(payload) {
     statusCloudRemoteRow.hidden = !remote;
     statusCloudRemote.textContent = remote;
   }
+  renderTailscaleConnectionFields(payload);
 }
+
+function identityRoleLabel() {
+  return identityState.role === "admin" ? "Admin" : identityState.role === "user" ? "User" : "";
+}
+
+function renderTailscaleIdentityFields() {
+  const hostname = typeof location !== "undefined" && location.hostname ? location.hostname : "";
+  const origin = typeof location !== "undefined" && location.origin ? location.origin : "";
+  const httpsLabel =
+    typeof location !== "undefined" && location.protocol === "https:"
+      ? "Yes"
+      : typeof location !== "undefined" && location.protocol
+        ? "No"
+        : "Unknown";
+  if (statusTailscaleHostname) statusTailscaleHostname.textContent = hostname || "Unavailable";
+  if (statusTailscaleUrl) statusTailscaleUrl.textContent = origin || "Unavailable";
+  if (statusTailscaleHttps) statusTailscaleHttps.textContent = httpsLabel;
+  if (statusTailscaleLogin) {
+    statusTailscaleLogin.textContent = identityState.login || "Unavailable";
+  }
+  if (statusTailscaleDisplayName) {
+    statusTailscaleDisplayName.textContent =
+      identityState.displayName || identityState.login || "Unavailable";
+  }
+  if (statusTailscaleRole) {
+    statusTailscaleRole.textContent = identityRoleLabel() || "Unavailable";
+  }
+  if (statusTailscaleProvenance) {
+    statusTailscaleProvenance.textContent = identityState.provenance || "Unavailable";
+  }
+  if (statusTailscaleAccessMethod) {
+    const viaTailscale =
+      identityState.provenance === "tailscale-serve" ||
+      (lastCloudStatusPayload && lastCloudStatusPayload.connection === "tailscale");
+    statusTailscaleAccessMethod.textContent = viaTailscale ? "Tailscale" : "Unknown";
+  }
+}
+
+function renderTailscaleConnectionFields(payload) {
+  if (!statusTailscaleConnection) return;
+  if (!payload) {
+    statusTailscaleConnection.textContent = "Checking...";
+    return;
+  }
+  const server = payload.server === "connected" ? "Connected" : "Unavailable";
+  const connection = payload.connection ? String(payload.connection) : "unknown";
+  const labels = {
+    loopback: "Local loopback",
+    lan: "LAN",
+    tailscale: "Tailscale",
+    unknown: "Unknown",
+  };
+  const connectionLabel = labels[connection] || "Unknown";
+  statusTailscaleConnection.textContent = `${server} · ${connectionLabel}`;
+  if (statusTailscaleAccessMethod) {
+    const viaTailscale =
+      identityState.provenance === "tailscale-serve" || connection === "tailscale";
+    statusTailscaleAccessMethod.textContent = viaTailscale ? "Tailscale" : connectionLabel;
+  }
+}
+
+let lastCloudStatusPayload = null;
 
 async function loadCloudStatus() {
   renderCloudStatus({ server: "unavailable", connection: "unknown" });
@@ -978,9 +1072,45 @@ async function loadCloudStatus() {
       cache: "no-store",
     });
     if (!response.ok) return;
-    renderCloudStatus(await response.json());
+    const payload = await response.json();
+    lastCloudStatusPayload = payload;
+    renderCloudStatus(payload);
   } catch {
-    renderCloudStatus({ server: "unavailable", connection: "unknown" });
+    lastCloudStatusPayload = { server: "unavailable", connection: "unknown" };
+    renderCloudStatus(lastCloudStatusPayload);
+  }
+}
+
+function renderTailscaleStatus() {
+  renderTailscaleIdentityFields();
+  if (lastCloudStatusPayload) {
+    renderTailscaleConnectionFields(lastCloudStatusPayload);
+  } else if (statusTailscaleConnection) {
+    statusTailscaleConnection.textContent = "Checking...";
+  }
+}
+
+async function loadTailscaleStatus() {
+  renderTailscaleStatus();
+  try {
+    const response = await fetch(CLOUD_STATUS_ENDPOINT, {
+      headers: { Accept: "application/json" },
+      cache: "no-store",
+    });
+    if (!response.ok) {
+      lastCloudStatusPayload = { server: "unavailable", connection: "unknown" };
+      renderTailscaleConnectionFields(lastCloudStatusPayload);
+      renderTailscaleIdentityFields();
+      return;
+    }
+    const payload = await response.json();
+    lastCloudStatusPayload = payload;
+    renderCloudStatus(payload);
+    renderTailscaleIdentityFields();
+  } catch {
+    lastCloudStatusPayload = { server: "unavailable", connection: "unknown" };
+    renderTailscaleConnectionFields(lastCloudStatusPayload);
+    renderTailscaleIdentityFields();
   }
 }
 
@@ -6658,23 +6788,35 @@ if (metadataAiDetailsToggle) {
 }
 
 function setActiveStatusTab(tabName, { focusTab = false, refreshAiStatus = false } = {}) {
-  const isCloud = tabName === "cloud";
-  if (!statusTabAi || !statusTabCloud || !statusPanelAi || !statusPanelCloud) return;
-  statusTabAi.classList.toggle("settings-dialog__tab--active", !isCloud);
-  statusTabCloud.classList.toggle("settings-dialog__tab--active", isCloud);
-  statusTabAi.setAttribute("aria-selected", String(!isCloud));
-  statusTabCloud.setAttribute("aria-selected", String(isCloud));
-  statusTabAi.tabIndex = isCloud ? -1 : 0;
-  statusTabCloud.tabIndex = isCloud ? 0 : -1;
-  statusPanelAi.hidden = isCloud;
-  statusPanelCloud.hidden = !isCloud;
-  if (isCloud) {
+  const normalized =
+    tabName === "cloud" || tabName === "tailscale" || tabName === "ai" ? tabName : "ai";
+  if (!statusTabAi || !statusTabCloud || !statusTabTailscale) return;
+  if (!statusPanelAi || !statusPanelCloud || !statusPanelTailscale) return;
+
+  const tabs = [
+    { name: "ai", tab: statusTabAi, panel: statusPanelAi },
+    { name: "cloud", tab: statusTabCloud, panel: statusPanelCloud },
+    { name: "tailscale", tab: statusTabTailscale, panel: statusPanelTailscale },
+  ];
+  for (const entry of tabs) {
+    const selected = entry.name === normalized;
+    entry.tab.classList.toggle("settings-dialog__tab--active", selected);
+    entry.tab.setAttribute("aria-selected", String(selected));
+    entry.tab.tabIndex = selected ? 0 : -1;
+    entry.panel.hidden = !selected;
+  }
+
+  if (normalized === "cloud") {
     loadCloudStatus();
+  } else if (normalized === "tailscale") {
+    loadTailscaleStatus();
   } else if (refreshAiStatus) {
     loadAiCapability();
   }
+
   if (focusTab) {
-    (isCloud ? statusTabCloud : statusTabAi).focus();
+    const active = tabs.find((entry) => entry.name === normalized);
+    if (active) active.tab.focus();
   }
 }
 
@@ -6687,7 +6829,12 @@ function openStatusDialog(tabName = "ai", { refreshAiStatus = false } = {}) {
   } else {
     statusDialog.setAttribute("open", "");
   }
-  const panel = tabName === "cloud" ? statusPanelCloud : statusPanelAi;
+  const panel =
+    tabName === "cloud"
+      ? statusPanelCloud
+      : tabName === "tailscale"
+        ? statusPanelTailscale
+        : statusPanelAi;
   if (panel) panel.focus();
 }
 
@@ -6709,15 +6856,26 @@ function closeStatusDialog() {
 function handleStatusTabKeydown(event) {
   if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
   event.preventDefault();
+  const order = ["ai", "cloud", "tailscale"];
+  const currentIndex = order.findIndex((name) => {
+    if (name === "ai") return event.currentTarget === statusTabAi;
+    if (name === "cloud") return event.currentTarget === statusTabCloud;
+    return event.currentTarget === statusTabTailscale;
+  });
+  let nextName = "ai";
   if (event.key === "Home") {
-    setActiveStatusTab("ai", { focusTab: true, refreshAiStatus: true });
+    nextName = "ai";
   } else if (event.key === "End") {
-    setActiveStatusTab("cloud", { focusTab: true });
-  } else if (event.currentTarget === statusTabAi) {
-    setActiveStatusTab("cloud", { focusTab: true });
+    nextName = "tailscale";
+  } else if (event.key === "ArrowRight") {
+    nextName = order[(Math.max(currentIndex, 0) + 1) % order.length];
   } else {
-    setActiveStatusTab("ai", { focusTab: true, refreshAiStatus: true });
+    nextName = order[(Math.max(currentIndex, 0) - 1 + order.length) % order.length];
   }
+  setActiveStatusTab(nextName, {
+    focusTab: true,
+    refreshAiStatus: nextName === "ai",
+  });
 }
 
 if (serverHealthButton) {
@@ -6733,6 +6891,12 @@ if (aiStatusButton) {
   });
 }
 
+if (identityBadge) {
+  identityBadge.addEventListener("click", () => {
+    openStatusDialog("tailscale");
+  });
+}
+
 if (statusTabAi) {
   statusTabAi.addEventListener("click", () => setActiveStatusTab("ai", { refreshAiStatus: true }));
   statusTabAi.addEventListener("keydown", handleStatusTabKeydown);
@@ -6741,6 +6905,11 @@ if (statusTabAi) {
 if (statusTabCloud) {
   statusTabCloud.addEventListener("click", () => setActiveStatusTab("cloud"));
   statusTabCloud.addEventListener("keydown", handleStatusTabKeydown);
+}
+
+if (statusTabTailscale) {
+  statusTabTailscale.addEventListener("click", () => setActiveStatusTab("tailscale"));
+  statusTabTailscale.addEventListener("keydown", handleStatusTabKeydown);
 }
 
 if (statusCloseButton) {
