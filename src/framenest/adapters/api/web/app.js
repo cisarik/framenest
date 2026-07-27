@@ -3911,6 +3911,8 @@ function catalogItemHasCompleteMetadata(item) {
     item
     && typeof item.display_title === "string"
     && item.display_title.trim()
+    && typeof item.description === "string"
+    && item.description.trim()
     && Array.isArray(item.tags)
     && item.tags.length > 0,
   );
@@ -4230,6 +4232,7 @@ function applySavedAiMetadataToCatalogSurfaces(item, metadata) {
     ? metadata.tags.map((tag) => ({ key: tag.key, display_name: tag.display_name }))
     : [];
   item.display_title = metadata.display_title === undefined ? item.display_title : metadata.display_title;
+  item.description = metadata.description === undefined ? item.description : metadata.description;
   item.tags = tags;
   if (metadata.content_category) item.content_category = metadata.content_category;
   if (metadata.acquisition_source) item.acquisition_source = metadata.acquisition_source;

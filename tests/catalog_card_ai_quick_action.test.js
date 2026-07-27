@@ -522,6 +522,7 @@ function sampleItem(overrides = {}) {
     media_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
     media_kind: "image",
     display_title: "Sunset Still",
+    description: null,
     content_category: "general",
     acquisition_source: "manual_upload",
     tags: [],
@@ -549,6 +550,7 @@ test("brain eligibility requires metadata need, both capabilities, supported loc
   assert.equal(context.cardAiQuickActionEligible(sampleItem({ content_category: "movie" })), false);
   assert.equal(context.cardAiQuickActionEligible(sampleItem({
     media_kind: "animated_image",
+    description: "Complete description",
     tags: [{ key: "funny", display_name: "Funny" }],
   })), false);
   assert.equal(context.cardAiQuickActionEligible(sampleItem({
@@ -558,15 +560,17 @@ test("brain eligibility requires metadata need, both capabilities, supported loc
   })), true);
   assert.equal(context.cardAiQuickActionEligible(sampleItem({
     display_title: "Populated",
+    description: "Complete description",
     tags: [
       { key: "alpha", display_name: "Alpha" },
       { key: "beta", display_name: "Beta" },
     ],
   })), false);
-  assert.equal(context.cardNeedsMetadata(sampleItem({ tags: [{ key: "nature", display_name: "Nature" }] })), false);
-  assert.equal(context.cardAiQuickActionEligible(sampleItem({ tags: [{ key: "nature", display_name: "Nature" }] })), false);
+  assert.equal(context.cardNeedsMetadata(sampleItem({ tags: [{ key: "nature", display_name: "Nature" }] })), true);
+  assert.equal(context.cardAiQuickActionEligible(sampleItem({ tags: [{ key: "nature", display_name: "Nature" }] })), true);
   const fixtureOnly = sampleItem({
     display_title: null,
+    description: "Complete description",
     tags: [{ key: "acceptance", display_name: "Acceptance" }],
   });
   assert.equal(context.catalogItemHasCompleteMetadata(fixtureOnly), false);
@@ -575,22 +579,58 @@ test("brain eligibility requires metadata need, both capabilities, supported loc
   assert.equal(context.catalogItemHasCompleteMetadata(sampleItem({ tags: [] })), false);
   assert.equal(
     context.catalogItemHasCompleteMetadata(sampleItem({
+      description: "Complete description",
       tags: [{ key: "nature", display_name: "Nature" }],
     })),
     true,
   );
 });
 
+test("metadata completeness requires persisted trimmed title, description, and a canonical tag", () => {
+  const { context } = createFlowHarness();
+  const tag = [{ key: "acceptance", display_name: "Acceptance" }];
+  const emptyDescription = sampleItem({ description: "", tags: tag });
+  const whitespaceDescription = sampleItem({ description: " \n\t ", tags: tag });
+  const noTags = sampleItem({ description: "Complete description", tags: [] });
+  const noPersistedTitle = sampleItem({
+    display_title: null,
+    description: "Complete description",
+    tags: tag,
+  });
+  const filenameFallbackOnly = sampleItem({
+    display_title: null,
+    description: "Complete description",
+    tags: tag,
+  });
+  const complete = sampleItem({ description: "Complete description", tags: tag });
+
+  assert.equal(context.catalogItemHasCompleteMetadata(emptyDescription), false);
+  assert.equal(context.catalogItemHasCompleteMetadata(whitespaceDescription), false);
+  assert.equal(context.catalogItemHasCompleteMetadata(noTags), false);
+  assert.equal(context.catalogItemHasCompleteMetadata(noPersistedTitle), false);
+  assert.equal(filenameFallbackOnly.locations[0].relative_path, "stills/sunset.jpg");
+  assert.equal(context.catalogItemHasCompleteMetadata(filenameFallbackOnly), false);
+  assert.equal(
+    extractFunction(APP_SOURCE, "catalogItemHasCompleteMetadata").includes("deriveCatalogFallbackTitle"),
+    false,
+  );
+  assert.equal(context.catalogItemHasCompleteMetadata(complete), true);
+  assert.equal(context.cardAiQuickActionEligible(emptyDescription), true);
+  assert.equal(context.cardAiQuickActionEligible(complete), false);
+});
+
 test("Processed presentation uses the same metadata-completeness predicate as brain eligibility", () => {
   const { context } = createFlowHarness();
   const fixtureOnly = sampleItem({
-    display_title: null,
+    display_title: "Acceptance JPEG meme",
+    description: "",
     tags: [{ key: "acceptance", display_name: "Acceptance" }],
     collection_key: "processed",
   });
   const complete = sampleItem({
     media_id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
     display_title: "Reviewed still",
+    description: "Complete description",
     tags: [{ key: "nature", display_name: "Nature" }],
     collection_key: "processed",
   });
@@ -862,6 +902,7 @@ test("successful save removes brain, keeps accessible announcement, and does not
 
   assert.equal(item.tags.length, 1);
   assert.equal(item.display_title, "AI Sunset");
+  assert.equal(item.description, "Warm light");
   assert.equal(titleButton.textContent, "AI Sunset");
   assert.equal(card.querySelector(".catalog-card__action--analyze"), null);
   assert.equal(button.isConnected, false);
@@ -877,6 +918,7 @@ test("successful save removes brain, keeps accessible announcement, and does not
 
   const reloaded = sampleItem({
     display_title: "AI Sunset",
+    description: "Warm light",
     tags: [{ key: "nature", display_name: "Nature" }],
   });
   assert.equal(harness.context.cardNeedsMetadata(reloaded), false);
@@ -969,6 +1011,7 @@ test("failed analysis and failed save keep the brain available for confirmed ret
   assert.equal(button.isConnected, true);
   assert.equal(status.textContent, "AI provider is not available.");
   assert.equal(status.classList.contains("visually-hidden"), false);
+  assert.equal(analysisHarness.context.cardAiQuickActionEligible(item), true);
 
   const saveHarness = createFlowHarness();
   saveHarness.context.canonicalTagDefinitions = [];
@@ -1013,6 +1056,7 @@ test("failed analysis and failed save keep the brain available for confirmed ret
   assert.equal(saveButton.dataset.analysisState, "failed_save");
   assert.equal(saveButton.isConnected, true);
   assert.match(saveStatus.textContent, /could not be saved/);
+  assert.equal(saveHarness.context.cardAiQuickActionEligible(item), true);
 });
 
 test("success reflow captures layout before patch, animates moved cards, and clears temporary styles", async () => {
