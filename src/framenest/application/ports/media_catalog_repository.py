@@ -61,6 +61,7 @@ class CatalogMediaItem:
     locations: tuple[CatalogMediaLocation, ...]
     content_category: str = "general"
     acquisition_source: str = "unknown"
+    description: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

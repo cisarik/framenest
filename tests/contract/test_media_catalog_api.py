@@ -82,6 +82,7 @@ class _FakeCatalogRepository:
                     display_title="Reinventing Entropy",
                     collection_key=None,
                     processed_at_ms=None,
+                    description="A treatise on entropy",
                     tags=(CatalogMediaTag(key="mathematics", display_name="Math", position=0),),
                     locations=(
                         CatalogMediaLocation(
@@ -138,6 +139,7 @@ def test_successful_default_listing_exposes_complete_catalog_safe_fields() -> No
                 "display_title": "Reinventing Entropy",
                 "collection_key": None,
                 "processed_at_ms": None,
+                "description": "A treatise on entropy",
                 "tags": [{"key": "mathematics", "display_name": "Math", "position": 0}],
                 "locations": [
                     {

@@ -59,6 +59,7 @@ class CatalogMediaResponse(BaseModel):
     locations: list[CatalogLocationResponse]
     content_category: str = "general"
     acquisition_source: str = "unknown"
+    description: str | None = None
 
 
 class MediaCatalogResponse(BaseModel):
@@ -179,6 +180,7 @@ def _media_response(item: object) -> CatalogMediaResponse:
         processed_at_ms=item.processed_at_ms,
         content_category=getattr(item, "content_category", "general"),
         acquisition_source=getattr(item, "acquisition_source", "unknown"),
+        description=getattr(item, "description", None),
         tags=[
             CatalogTagResponse(
                 key=tag.key,

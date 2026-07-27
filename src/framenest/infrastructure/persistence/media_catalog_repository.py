@@ -60,6 +60,7 @@ class SqliteMediaCatalogRepository:
                         filtered.c.created_at_ms,
                         filtered.c.updated_at_ms,
                         filtered.c.display_title,
+                        filtered.c.description,
                         filtered.c.collection_key,
                         filtered.c.processed_at_ms,
                         filtered.c.content_category,
@@ -100,6 +101,9 @@ class SqliteMediaCatalogRepository:
                         if row["acquisition_source"] is None
                         else str(row["acquisition_source"])
                     ),
+                    description=None
+                    if row["description"] is None
+                    else str(row["description"]),
                 )
                 for row in page_rows
             )
@@ -138,6 +142,7 @@ def _filtered_media_select(query: MediaCatalogQuery, tag_values: tuple[str, ...]
         logical_media.c.created_at_ms,
         logical_media.c.updated_at_ms,
         media_metadata.c.display_title,
+        media_metadata.c.description,
         media_metadata.c.collection_key,
         media_metadata.c.processed_at_ms,
         media_metadata.c.content_category,
@@ -171,6 +176,7 @@ def _filtered_media_select(query: MediaCatalogQuery, tag_values: tuple[str, ...]
                 logical_media.c.created_at_ms,
                 logical_media.c.updated_at_ms,
                 media_metadata.c.display_title,
+                media_metadata.c.description,
                 media_metadata.c.collection_key,
                 media_metadata.c.processed_at_ms,
                 media_metadata.c.content_category,

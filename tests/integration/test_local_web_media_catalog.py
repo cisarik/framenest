@@ -121,6 +121,7 @@ def test_local_web_catalog_search_tags_pagination_locations_and_read_only_get(
         {"key": "mathematics", "display_name": "Math", "position": 0},
         {"key": "compression", "display_name": "Compression", "position": 1},
     ]
+    assert and_filter.json()["items"][0]["description"] == "A treatise on entropy"
     assert len(and_filter.json()["items"][0]["locations"]) == 2
     assert [location["relative_path"] for location in and_filter.json()["items"][0]["locations"]] == [
         "backup/entropy-copy.mp4",
