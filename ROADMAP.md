@@ -6,7 +6,10 @@ This roadmap is staged and evidence-based. It does not promise release dates.
 
 Each phase should begin only when its entry conditions are satisfied and should close only with the listed exit evidence.
 
-The roadmap distinguishes completed foundation, immediate next work, planned phases, long-term scope, and explicitly deferred work.
+The roadmap distinguishes completed foundation, immediate next work, planned
+phases, long-term scope, frozen or parked product logical wholes, and
+explicitly deferred work. Frozen and parked wholes below are durable backlog
+preservation, not active authorization and not ADR mutations.
 
 ## Near-Term MacBook MVP Convergence
 
@@ -419,6 +422,159 @@ Entry conditions: stable metadata, identity, server, and security foundations.
 Exit evidence: restore tests proving metadata and integrity behavior.
 
 Boundaries: not part of early implementation beyond the current catalog-only foundation and not a cloud-only direction.
+
+## Current Active Logical Whole
+
+Active logical whole: `Admin AI Quick Action and Edit Surface Polish`.
+
+Technical implementation candidate HEAD at documentation time:
+`127c7d7f698f1d612cb267333ff3425e8521f6da`.
+
+Deterministic verification for the technical implementation and bounded
+corrections has passed. This logical whole is **not closed**. Closure still
+requires:
+
+- immutable NUC deployment;
+- no-provider owner visual acceptance;
+- at most one explicitly authorized live provider-backed acceptance;
+- exact provider-count and durable-state explanation;
+- ORCHESTRATOR closure.
+
+Do not treat repository documentation as closure authority for this whole.
+
+## Frozen and Parked Product Logical Wholes
+
+The following product logical wholes are preserved for future fresh
+Orchestrator and Worker authorization. They are outside the current active
+MVP path unless explicitly reopened. Do not mix them into the current Admin AI
+Quick Action and Edit Surface Polish work.
+
+FrameNest product work remains prioritized before stable AP upgrade work,
+`cisarik/ap_experimental`, kiosk, general NUC desktop work, native mobile
+applications, VPS showcase, and observability/Grafana. That ordering is
+priority context only; it does not authorize those later tracks here.
+
+### Movie Identification, Reasoning Lifecycle and Movies Taxonomy
+
+Status: `FROZEN — separate future logical whole, outside the current MVP path`
+
+Goals when reopened:
+
+- reliably identify a movie title from supplied movie media;
+- use provider reasoning only where materially required;
+- reconstruct and verify the complete reasoning lifecycle;
+- verify how the application waits for reasoning and the final result;
+- verify structured output handling;
+- investigate the prior `PROVIDER_INVALID_RESPONSE`;
+- determine whether the failure came from provider response shape, reasoning
+  lifecycle, timeout/wait handling, parsing, validation, or orchestration;
+- classify the movie genre;
+- generate subtags belonging to the dedicated FrameNest `Movies` category or
+  taxonomy;
+- preserve exact run-to-result association;
+- preserve provider privacy and explicit owner authorization.
+
+Explicit boundaries:
+
+- do not combine this with ordinary still-image analysis;
+- do not combine this with meme analysis;
+- do not combine this with short-video analysis;
+- do not reintroduce it into the current AI quick-action flow;
+- do not use movie identification as a provider acceptance fixture;
+- automatic movie analysis remains prohibited.
+
+Future reopening requirements:
+
+- fresh ORCHESTRATOR;
+- fresh Worker;
+- separate fixtures;
+- separate provider acceptance;
+- explicit reasoning and structured-output architecture gate;
+- Codex 5.6 Sol Extra High may be appropriate for the initial
+  architecture/reasoning investigation;
+- Extra High must not be used automatically for every later bounded
+  correction.
+
+Related accepted architecture for classification and movie-identification
+profile direction remains in
+[ADR-0045](docs/adr/0045-content-classification-and-movie-identification.md).
+This frozen whole does not amend that ADR.
+
+### Processed Publish Workflow and Admin List View
+
+Status: `FROZEN — recommended future product logical whole after the current
+individual AI workflow is fully closed`
+
+Owner goals when reopened:
+
+- responsive admin-only list view;
+- compact small thumbnails;
+- checkboxes;
+- multi-select;
+- clear states: unpublished; analyzed and unpublished; published;
+- dark-green visual state for analyzed and unpublished;
+- bulk first analysis;
+- explicit bulk publish;
+- truthful per-item and aggregate progress;
+- safe partial-failure handling;
+- published media remains in the main user-facing Gallery;
+- unpublished media remains admin-only;
+- optional subdued or semi-transparent admin representation where product
+  evidence supports it;
+- analysis must never automatically publish;
+- publishing remains an explicit admin action.
+
+Likely future concerns to address only when reopened, without pre-designing
+implementation now:
+
+- durable publish state;
+- authorization and audit actions;
+- ordinary-user visibility;
+- idempotency;
+- duplicate protection;
+- bulk progress;
+- partial success;
+- retry semantics;
+- provider cost control;
+- selective owner acceptance.
+
+Explicit boundaries:
+
+- do not implement this now;
+- do not retrofit bulk architecture into the individual card quick action;
+- do not claim that canonical AI metadata save equals publication;
+- do not mix YouTube acquisition;
+- do not mix per-user metadata;
+- do not mix kiosk behavior.
+
+Existing automatic `Processed` workflow-collection membership from durable tag
+saves ([ADR-0030](docs/adr/0030-automatic-processed-collection.md)) is not
+publication and must not be treated as this frozen publish workflow.
+
+### Responsive Mobile-Web Polish
+
+Status: `PARKED — current responsive web scope accepted as sufficient for now`
+
+Preservation notes:
+
+- the currently accepted header and Gallery responsive behavior are sufficient
+  for the current MVP stage;
+- do not open a new general responsive/mobile-web logical whole without new
+  direct owner-visible evidence;
+- responsive correctness is still required locally for every touched UI
+  surface;
+- the current Edit modal corrections remain part of the active individual AI
+  workflow;
+- the future Processed admin list view must be designed responsively within its
+  own logical whole;
+- test narrow phone, ordinary phone, tablet/intermediate, and desktop widths
+  when relevant;
+- one phone width plus one desktop width is insufficient evidence;
+- direct owner screenshots at intermediate widths have higher authority than
+  Worker summary.
+
+This parking does not claim that all future mobile-web work is complete.
+Native Android/iOS architecture remains separate and later.
 
 ## Deferred Early Non-Goals
 
