@@ -356,18 +356,22 @@ ROUTE_POLICIES: tuple[RoutePolicy, ...] = (
     ),
 )
 
-_AUTHENTICATED_FALLBACK_POLICY = RoutePolicy(method="", template="/_fallback")
+_UNCLASSIFIED_FALLBACK_POLICY = RoutePolicy(method="", template="/_fallback")
 
 
 def find_route_policy(
     method: str, path: str
 ) -> tuple[RoutePolicy, re.Match[str] | None]:
-    """Return the single governing policy and its path match, or the fallback."""
+    """Return the single governing policy and its path match, or the fallback.
+
+    The fallback is fail-closed: a route without an explicit policy is never
+    served through the remote channel, regardless of identity or role.
+    """
     for policy in ROUTE_POLICIES:
         match = policy.match(method, path)
         if match is not None:
             return policy, match
-    return _AUTHENTICATED_FALLBACK_POLICY, None
+    return _UNCLASSIFIED_FALLBACK_POLICY, None
 
 
 class TailscaleIngressMiddleware:
@@ -422,6 +426,16 @@ class TailscaleIngressMiddleware:
                 status=403,
                 code=ERROR_INGRESS_HEADERS_FORBIDDEN,
                 message="The ingress request headers are forbidden.",
+                request_id=request_id,
+            )
+            return
+
+        if policy_match is None:
+            await _send_error(
+                send,
+                status=404,
+                code=ERROR_NOT_FOUND,
+                message="Not found.",
                 request_id=request_id,
             )
             return
@@ -572,7 +586,9 @@ class TailscaleIngressMiddleware:
             scope[SCOPE_INGRESS_CHANNEL] = CHANNEL_LOCAL
             await self._app(scope, receive, send)
             return
-        if path.startswith(_OPERATOR_PATH_PREFIX):
+        if path == _OPERATOR_PATH_PREFIX or path.startswith(
+            _OPERATOR_PATH_PREFIX + "/"
+        ):
             scope[SCOPE_INGRESS_CHANNEL] = CHANNEL_LOCAL_OPERATOR
             await self._app(scope, receive, send)
             return

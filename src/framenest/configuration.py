@@ -362,10 +362,10 @@ def _is_exact_https_origin(value: str) -> bool:
         return False
     if any(character in host for character in ("/", "?", "#", "@", " ")):
         return False
-    labels, _, port = host.partition(":")
-    if not labels or "." not in labels:
+    if ":" in host:
         return False
-    if port and (not port.isdigit() or not 1 <= int(port) <= 65535):
+    labels = host
+    if not labels or "." not in labels:
         return False
     return all(
         label

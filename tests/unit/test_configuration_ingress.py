@@ -37,12 +37,12 @@ def test_tailscale_uds_mode_accepts_exact_configuration() -> None:
     assert settings.identity_map == {"aecrypto@gmail.com": "admin"}
 
 
-def test_tailscale_uds_mode_allows_explicit_port_origin() -> None:
-    settings = FrameNestSettings(
-        **_tailscale_values(external_origin="https://nuc-1.example.ts.net:8443"),
-        _env_file=None,
-    )
-    assert settings.external_origin == "https://nuc-1.example.ts.net:8443"
+def test_tailscale_uds_mode_rejects_explicit_port_origin() -> None:
+    with pytest.raises(ValidationError):
+        FrameNestSettings(
+            **_tailscale_values(external_origin="https://nuc-1.example.ts.net:8443"),
+            _env_file=None,
+        )
 
 
 @pytest.mark.parametrize(
@@ -72,9 +72,11 @@ def test_tailscale_uds_mode_requires_socket_origin_and_admin(
         "https://nuc-1.tail247768.ts.net#fragment",
         "https://user@nuc-1.tail247768.ts.net",
         "https://localhost",
+        "https://nuc-1.tail247768.ts.net:443",
         "https://nuc-1.tail247768.ts.net:0",
         "https://nuc-1.tail247768.ts.net:99999",
         "https://nuc-1.tail247768.ts.net:abc",
+        "https://nuc-1.tail247768.ts.net:",
         "nuc-1.tail247768.ts.net",
         "",
     ],

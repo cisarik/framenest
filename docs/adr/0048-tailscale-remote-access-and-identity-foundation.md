@@ -66,7 +66,10 @@ authenticated tailnet browser
    users; admin-only capabilities for metadata writes, uploads, analysis,
    library scan/import, and provider operation). The policy table is kept in
    one-to-one correspondence with the live route inventory by contract
-   tests. Default posture is deny for privileged actions. The web shell
+   tests. Default posture is deny for privileged actions. The runtime
+   fallback is fail-closed: a route without an explicit policy is denied
+   with a sanitized `404` for every identity class, including admin. The
+   web shell
    reflects effective capabilities, but hiding controls is never the
    authorization mechanism.
 5. **Browser mutations require origin proof plus a custom header.** Unsafe

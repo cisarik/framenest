@@ -19,7 +19,7 @@ from fastapi.testclient import TestClient
 from framenest.adapters.api.application import create_app
 from framenest.adapters.api.tailscale_ingress import (
     ROUTE_POLICIES,
-    _AUTHENTICATED_FALLBACK_POLICY,
+    _UNCLASSIFIED_FALLBACK_POLICY,
     find_route_policy,
 )
 from framenest.configuration import FrameNestSettings
@@ -74,6 +74,36 @@ def tailscale_client(tmp_path: Path):
     app = create_app(settings=settings)
     with TestClient(app) as client:
         yield client, settings
+
+
+@pytest.fixture
+def unclassified_client(tmp_path: Path):
+    """App with one dynamically mounted route that has no explicit policy."""
+    settings = FrameNestSettings(
+        database_path=tmp_path / "catalog.sqlite3",
+        gallery_preview_cache_path=tmp_path / "previews",
+        ingress_mode="tailscale_uds",
+        uds_path=tmp_path / "framenest.sock",
+        external_origin=EXTERNAL_ORIGIN,
+        identity_map={ADMIN_LOGIN: "admin", USER_LOGIN: "user"},
+        _env_file=None,
+    )
+    upgrade_database_to_head(settings)
+    app = create_app(settings=settings)
+    invoked: list[str] = []
+
+    @app.get("/api/internal-unclassified")
+    def unclassified_read() -> dict[str, bool]:
+        invoked.append("GET")
+        return {"ok": True}
+
+    @app.post("/api/internal-unclassified")
+    def unclassified_mutation() -> dict[str, bool]:
+        invoked.append("POST")
+        return {"ok": True}
+
+    with TestClient(app) as client:
+        yield client, invoked
 
 
 def _audit_rows(database_path: Path) -> list[sqlite3.Row]:
@@ -334,6 +364,42 @@ def test_operator_routes_are_not_remote_routes(tailscale_client) -> None:
         assert _error_code(response) == "NOT_FOUND"
 
 
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/api/operator/youtubeX",
+        "/api/operator/youtube-evil",
+        "/api/operator/youtube.evil",
+        "/api/operator/youtube%2Devil",
+    ],
+)
+def test_operator_lookalike_paths_are_not_local_operator_paths(
+    tailscale_client, path: str
+) -> None:
+    client, _ = tailscale_client
+    response = client.get(path)
+    assert response.status_code == 401
+    assert _error_code(response) == "IDENTITY_REQUIRED"
+
+
+def test_bare_operator_prefix_stays_on_the_local_operator_channel(
+    tailscale_client,
+) -> None:
+    client, _ = tailscale_client
+    response = client.get("/api/operator/youtube")
+    assert response.status_code == 404
+
+
+def test_remote_operator_lookalike_paths_are_sanitized_not_found(
+    tailscale_client,
+) -> None:
+    client, _ = tailscale_client
+    for path in ("/api/operator/youtubeX", "/api/operator/youtube-evil"):
+        response = client.get(path, headers=_serve_headers())
+        assert response.status_code == 404
+        assert _error_code(response) == "NOT_FOUND"
+
+
 def test_operator_routes_remain_available_on_local_channel(tailscale_client) -> None:
     client, _ = tailscale_client
     response = client.post("/api/operator/youtube/claims", json={})
@@ -393,6 +459,83 @@ def test_route_policies_match_the_application_route_inventory(
             for path, methods in found
             for method in methods
         ), (policy.method, policy.pattern.pattern)
+
+
+# --- Unclassified routes fail closed --------------------------------------
+
+
+def test_unclassified_route_is_denied_for_missing_identity(
+    unclassified_client,
+) -> None:
+    client, invoked = unclassified_client
+    headers = _serve_headers()
+    del headers["Tailscale-User-Login"]
+    response = client.get("/api/internal-unclassified", headers=headers)
+    assert response.status_code == 404
+    assert _error_code(response) == "NOT_FOUND"
+    assert invoked == []
+
+
+@pytest.mark.parametrize("login", [STRANGER_LOGIN, USER_LOGIN, ADMIN_LOGIN])
+def test_unclassified_route_is_denied_for_every_identity_class(
+    unclassified_client, login: str
+) -> None:
+    client, invoked = unclassified_client
+    response = client.get(
+        "/api/internal-unclassified", headers=_serve_headers(login)
+    )
+    assert response.status_code == 404
+    assert _error_code(response) == "NOT_FOUND"
+    assert invoked == []
+
+
+def test_unclassified_route_mutation_is_denied_with_valid_mutation_proof(
+    unclassified_client,
+) -> None:
+    client, invoked = unclassified_client
+    response = client.post(
+        "/api/internal-unclassified",
+        headers=_mutation_headers(),
+        json={},
+    )
+    assert response.status_code == 404
+    assert _error_code(response) == "NOT_FOUND"
+    assert invoked == []
+
+
+def test_unclassified_route_response_is_indistinguishable_from_nonexistent(
+    unclassified_client,
+) -> None:
+    client, _ = unclassified_client
+    unclassified = client.get("/api/internal-unclassified", headers=_serve_headers())
+    nonexistent = client.get("/api/no-such-route", headers=_serve_headers())
+    assert unclassified.status_code == nonexistent.status_code == 404
+    assert unclassified.json() == nonexistent.json()
+
+
+def test_nonexistent_remote_path_is_sanitized_not_found(tailscale_client) -> None:
+    client, _ = tailscale_client
+    response = client.get("/api/no-such-route", headers=_serve_headers())
+    assert response.status_code == 404
+    assert _error_code(response) == "NOT_FOUND"
+
+
+def test_find_route_policy_returns_fail_closed_fallback() -> None:
+    policy, match = find_route_policy("GET", "/api/no-such-route")
+    assert policy is _UNCLASSIFIED_FALLBACK_POLICY
+    assert match is None
+    for method, path in (
+        ("GET", "/health"),
+        ("GET", "/"),
+        ("GET", "/assets/app.js"),
+        ("GET", "/api/identity/me"),
+        ("GET", "/api/status/cloud"),
+        ("GET", "/api/media"),
+        ("POST", "/api/canonical-tags"),
+        ("GET", f"/api/operator/youtube/claims/{uuid.uuid4()}"),
+    ):
+        _, matched = find_route_policy(method, path)
+        assert matched is not None, (method, path)
 
 
 def test_error_responses_are_sanitized(tailscale_client) -> None:
@@ -553,7 +696,7 @@ def test_hostile_preflight_is_not_authorized(tailscale_client) -> None:
             "Access-Control-Request-Method": "POST",
         },
     )
-    assert response.status_code in (400, 401, 403, 405)
+    assert response.status_code in (400, 401, 403, 404, 405)
     assert "access-control-allow-origin" not in response.headers
 
 
