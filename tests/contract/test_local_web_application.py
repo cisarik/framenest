@@ -1848,7 +1848,9 @@ def test_catalog_card_unavailable_ai_is_natively_disabled_without_status_shortcu
     assert "Checking AI availability for" in state_body
     assert "AI analysis unavailable for" in state_body
     assert "button.disabled = true" in reconcile_body
-    assert "button.disabled = false" in reconcile_body
+    assert "setCardAnalyzeButtonState(button, state, preservedMessage)" in reconcile_body
+    assert "Analyze by AI again" in state_body
+    assert "Retry Analyze by AI" in state_body
     assert "cardAiPreviewResponseMatchesRequest(payload, mediaId, location.location_id)" in analyze_body
     assert "AI response did not match the selected media. No metadata was changed." in analyze_body
 

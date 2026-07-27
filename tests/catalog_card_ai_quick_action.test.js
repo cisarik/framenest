@@ -625,6 +625,290 @@ test("capability reconciliation enables operable brain without remounting or res
   assert.equal(harness.fetchCalls.length, 0);
 });
 
+test("saved pending then available restores rerun label without resetting visible saved state", async () => {
+  const harness = createFlowHarness();
+  const item = sampleItem();
+  const mediaId = item.media_id;
+  const locationId = item.locations[0].location_id;
+  harness.context.canonicalTagDefinitions = [{ key: "nature", display_name: "Nature" }];
+  harness.enqueue(
+    "POST",
+    `/api/media/${mediaId}/locations/${locationId}/ai-suggestion-preview`,
+    response(previewPayload(item)),
+  );
+  harness.enqueue(
+    "GET",
+    `/api/media/${mediaId}/metadata`,
+    response({
+      display_title: "Sunset Still",
+      description: "old",
+      tags: [],
+      content_category: "general",
+      acquisition_source: "unknown",
+      genres: [],
+    }),
+  );
+  harness.enqueue(
+    "PUT",
+    `/api/media/${mediaId}/metadata`,
+    response({
+      status: "saved",
+      metadata: {
+        display_title: "AI Sunset",
+        description: "Warm light",
+        tags: [{ key: "nature", display_name: "Nature" }],
+        content_category: "general",
+        acquisition_source: "unknown",
+        genres: [],
+      },
+    }),
+  );
+  const button = new FakeElement("button");
+  button.className = "catalog-card__action--analyze";
+  button.dataset.mediaTitle = item.display_title;
+  const card = new FakeElement("article");
+  card.className = "catalog-card";
+  card.dataset.mediaId = mediaId;
+  const status = Object.assign(new FakeElement("p"), { className: "catalog-card__analysis-status" });
+  card.appendChild(button);
+  card.appendChild(status);
+  card.appendChild(Object.assign(new FakeElement("div"), { className: "catalog-card__tags" }));
+  card.appendChild(Object.assign(new FakeElement("button"), { className: "catalog-card__title-button" }));
+  harness.catalogResults.appendChild(card);
+
+  await harness.context.handleAnalyzeCatalogCard(item, button);
+  await flushAll();
+  assert.equal(button.dataset.analysisState, "saved");
+  assert.equal(status.textContent, "AI metadata saved");
+  const requestsBeforeReconcile = harness.fetchCalls.length;
+
+  const mediaTitle = button.dataset.mediaTitle;
+  assert.equal(mediaTitle, "AI Sunset");
+  harness.context.aiCapabilityDiscoveryPending = true;
+  harness.context.aiCapability.available = false;
+  harness.context.reconcileCatalogCardAiQuickActions();
+  assert.equal(button.disabled, true);
+  assert.equal(button.getAttribute("aria-disabled"), "true");
+  assert.equal(button.getAttribute("aria-label"), `Checking AI availability for ${mediaTitle}`);
+  assert.equal(button.title, `Checking AI availability for ${mediaTitle}`);
+  assert.equal(button.dataset.analysisState, "saved");
+  assert.equal(status.textContent, "AI metadata saved");
+  assert.equal(harness.fetchCalls.length, requestsBeforeReconcile);
+  assert.deepEqual(harness.context.openStatusDialogCalls, []);
+
+  harness.context.aiCapabilityDiscoveryPending = false;
+  harness.context.aiCapability.available = true;
+  harness.context.reconcileCatalogCardAiQuickActions();
+  assert.equal(harness.catalogResults.children[0], card);
+  assert.equal(card.children[0], button);
+  assert.equal(button.disabled, false);
+  assert.equal(button.getAttribute("aria-disabled"), null);
+  assert.equal(button.dataset.analysisState, "saved");
+  assert.equal(status.textContent, "AI metadata saved");
+  assert.equal(status.dataset.analysisSuccess, "true");
+  assert.equal(
+    button.getAttribute("aria-label"),
+    `AI metadata saved for ${mediaTitle}. Analyze by AI again`,
+  );
+  assert.equal(button.title, "AI metadata saved — rerun available");
+  assert.equal(harness.fetchCalls.length, requestsBeforeReconcile);
+  assert.deepEqual(harness.context.openStatusDialogCalls, []);
+
+  harness.enqueue(
+    "POST",
+    `/api/media/${mediaId}/locations/${locationId}/ai-suggestion-preview`,
+    response(previewPayload(item, { title: "AI Sunset Again" })),
+  );
+  harness.enqueue(
+    "GET",
+    `/api/media/${mediaId}/metadata`,
+    response({
+      display_title: "AI Sunset",
+      description: "Warm light",
+      tags: [{ key: "nature", display_name: "Nature" }],
+      content_category: "general",
+      acquisition_source: "unknown",
+      genres: [],
+    }),
+  );
+  harness.enqueue(
+    "PUT",
+    `/api/media/${mediaId}/metadata`,
+    response({
+      status: "saved",
+      metadata: {
+        display_title: "AI Sunset Again",
+        description: "Warm light",
+        tags: [{ key: "nature", display_name: "Nature" }],
+        content_category: "general",
+        acquisition_source: "unknown",
+        genres: [],
+      },
+    }),
+  );
+  const confirmationsBefore = harness.context.confirmationCalls;
+  await harness.context.handleAnalyzeCatalogCard(item, button);
+  await flushAll();
+  assert.equal(harness.context.confirmationCalls, confirmationsBefore + 1);
+  const previewCalls = harness.fetchCalls.filter((call) => call.url.includes("ai-suggestion-preview"));
+  assert.equal(previewCalls.length, 2);
+});
+
+test("failed_analysis pending then available restores retry analysis label", async () => {
+  const harness = createFlowHarness();
+  const item = sampleItem();
+  const mediaId = item.media_id;
+  const locationId = item.locations[0].location_id;
+  harness.enqueue(
+    "POST",
+    `/api/media/${mediaId}/locations/${locationId}/ai-suggestion-preview`,
+    response({ error: { code: "AI_PROVIDER_UNAVAILABLE", message: "down" } }, 503),
+  );
+  const button = new FakeElement("button");
+  button.className = "catalog-card__action--analyze";
+  button.dataset.mediaTitle = item.display_title;
+  const card = new FakeElement("article");
+  card.className = "catalog-card";
+  card.dataset.mediaId = mediaId;
+  const status = Object.assign(new FakeElement("p"), { className: "catalog-card__analysis-status" });
+  card.appendChild(button);
+  card.appendChild(status);
+  harness.catalogResults.appendChild(card);
+
+  await harness.context.handleAnalyzeCatalogCard(item, button);
+  await flushAll();
+  assert.equal(button.dataset.analysisState, "failed_analysis");
+  assert.equal(status.textContent, "AI provider is not available.");
+  const requestsBeforeReconcile = harness.fetchCalls.length;
+
+  harness.context.aiCapability.available = false;
+  harness.context.aiCapabilityDiscoveryPending = false;
+  harness.context.reconcileCatalogCardAiQuickActions();
+  assert.equal(button.disabled, true);
+  assert.equal(button.getAttribute("aria-label"), "AI analysis unavailable for Sunset Still");
+  assert.equal(button.dataset.analysisState, "failed_analysis");
+  assert.equal(status.textContent, "AI provider is not available.");
+
+  harness.context.aiCapability.available = true;
+  harness.context.reconcileCatalogCardAiQuickActions();
+  assert.equal(harness.catalogResults.children[0], card);
+  assert.equal(button.disabled, false);
+  assert.equal(button.getAttribute("aria-disabled"), null);
+  assert.equal(button.dataset.analysisState, "failed_analysis");
+  assert.equal(status.textContent, "AI provider is not available.");
+  assert.equal(
+    button.getAttribute("aria-label"),
+    "AI analysis failed for Sunset Still. Retry Analyze by AI",
+  );
+  assert.equal(button.title, "AI analysis failed — retry");
+  assert.equal(harness.fetchCalls.length, requestsBeforeReconcile);
+  assert.deepEqual(harness.context.openStatusDialogCalls, []);
+
+  const retryHarness = createFlowHarness({ confirmAccepted: false });
+  retryHarness.context.setCardAiQuickActionController(mediaId, { state: "failed_analysis" });
+  retryHarness.context.setCardAnalyzeButtonState(
+    button,
+    "failed_analysis",
+    "AI provider is not available.",
+  );
+  await retryHarness.context.handleAnalyzeCatalogCard(item, button);
+  await flushAll();
+  assert.equal(retryHarness.context.confirmationCalls, 1);
+  assert.equal(retryHarness.fetchCalls.length, 0);
+});
+
+test("failed_save pending then available restores full retry metadata label", async () => {
+  const harness = createFlowHarness();
+  const item = sampleItem({ tags: [] });
+  harness.context.canonicalTagDefinitions = [];
+  const mediaId = item.media_id;
+  const locationId = item.locations[0].location_id;
+  harness.enqueue(
+    "POST",
+    `/api/media/${mediaId}/locations/${locationId}/ai-suggestion-preview`,
+    response(previewPayload(item, { tags: ["Brand New"] })),
+  );
+  harness.enqueue(
+    "POST",
+    "/api/canonical-tags",
+    response({ status: "created", tag: { key: "brand-new", display_name: "Brand New" } }, 201),
+  );
+  harness.enqueue(
+    "GET",
+    `/api/media/${mediaId}/metadata`,
+    response({
+      display_title: "Sunset Still",
+      description: "keep me",
+      tags: [],
+      content_category: "general",
+      acquisition_source: "unknown",
+      genres: [],
+    }),
+  );
+  harness.enqueue(
+    "PUT",
+    `/api/media/${mediaId}/metadata`,
+    response({ error: { code: "MEDIA_METADATA_OPERATION_FAILED", message: "failed" } }, 500),
+  );
+  const button = new FakeElement("button");
+  button.className = "catalog-card__action--analyze";
+  button.dataset.mediaTitle = item.display_title;
+  const card = new FakeElement("article");
+  card.className = "catalog-card";
+  card.dataset.mediaId = mediaId;
+  const status = Object.assign(new FakeElement("p"), { className: "catalog-card__analysis-status" });
+  card.appendChild(button);
+  card.appendChild(status);
+  harness.catalogResults.appendChild(card);
+
+  await harness.context.handleAnalyzeCatalogCard(item, button);
+  await flushAll();
+  assert.equal(button.dataset.analysisState, "failed_save");
+  assert.equal(
+    status.textContent,
+    "AI metadata could not be saved. Existing media metadata was not replaced.",
+  );
+  const requestsBeforeReconcile = harness.fetchCalls.length;
+
+  harness.context.aiCapabilityDiscoveryPending = true;
+  harness.context.aiCapability.available = false;
+  harness.context.reconcileCatalogCardAiQuickActions();
+  assert.equal(button.disabled, true);
+  assert.equal(button.getAttribute("aria-label"), "Checking AI availability for Sunset Still");
+  assert.equal(button.dataset.analysisState, "failed_save");
+  assert.equal(
+    status.textContent,
+    "AI metadata could not be saved. Existing media metadata was not replaced.",
+  );
+
+  harness.context.aiCapabilityDiscoveryPending = false;
+  harness.context.aiCapability.available = true;
+  harness.context.reconcileCatalogCardAiQuickActions();
+  assert.equal(harness.catalogResults.children[0], card);
+  assert.equal(button.disabled, false);
+  assert.equal(button.getAttribute("aria-disabled"), null);
+  assert.equal(button.dataset.analysisState, "failed_save");
+  assert.equal(
+    status.textContent,
+    "AI metadata could not be saved. Existing media metadata was not replaced.",
+  );
+  assert.equal(
+    button.getAttribute("aria-label"),
+    "AI metadata save failed for Sunset Still. Retry Analyze by AI",
+  );
+  assert.equal(button.title, "AI metadata save failed — retry");
+  assert.equal(harness.fetchCalls.length, requestsBeforeReconcile);
+  assert.deepEqual(harness.context.openStatusDialogCalls, []);
+
+  const retryHarness = createFlowHarness({ confirmAccepted: false });
+  retryHarness.context.setCardAiQuickActionController(mediaId, { state: "failed_save" });
+  retryHarness.context.setCardAnalyzeButtonState(button, "failed_save", status.textContent);
+  await retryHarness.context.handleAnalyzeCatalogCard(item, button);
+  await flushAll();
+  assert.equal(retryHarness.context.confirmationCalls, 1);
+  assert.equal(retryHarness.fetchCalls.length, 0);
+});
+
 test("confirmation cancel performs no mutation", async () => {
   const harness = createFlowHarness({ confirmAccepted: false });
   const item = sampleItem();

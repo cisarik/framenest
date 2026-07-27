@@ -4044,8 +4044,6 @@ function reconcileCatalogCardAiQuickActions() {
       }
       return;
     }
-    button.disabled = false;
-    button.removeAttribute("aria-disabled");
     if (state === "unavailable") {
       const mediaId = button.closest(".catalog-card")?.dataset.mediaId;
       if (mediaId) {
@@ -4054,10 +4052,9 @@ function reconcileCatalogCardAiQuickActions() {
       setCardAnalyzeButtonState(button, "idle");
       return;
     }
-    if (state === "idle") {
-      button.setAttribute("aria-label", `Analyze by AI ${title}`);
-      button.title = "Analyze by AI";
-    }
+    const status = button.closest(".catalog-card")?.querySelector(".catalog-card__analysis-status");
+    const preservedMessage = status && !status.hidden ? status.textContent : "";
+    setCardAnalyzeButtonState(button, state, preservedMessage);
   });
 }
 
