@@ -1823,16 +1823,22 @@ h2 {
 
 @media (hover: hover) and (pointer: fine) {
   .catalog-card__actions--overlay {
-    opacity: 0;
+    opacity: 1;
   }
 
   .catalog-card__actions--overlay .catalog-card__action {
+    opacity: 0;
     pointer-events: none;
   }
 
-  .catalog-card:hover .catalog-card__actions--overlay,
-  .catalog-card:focus-within .catalog-card__actions--overlay,
-  .catalog-card--selected .catalog-card__actions--overlay {
+  .catalog-card__actions--overlay .catalog-card__action--analyze {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  .catalog-card:hover .catalog-card__action,
+  .catalog-card:focus-within .catalog-card__action,
+  .catalog-card--selected .catalog-card__action {
     opacity: 1;
   }
 
@@ -1871,7 +1877,7 @@ h2 {
   text-align: center;
   text-decoration: none;
   pointer-events: auto;
-  transition: background var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast);
+  transition: background var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast), opacity var(--transition-fast);
 }
 
 .catalog-card__action svg {
@@ -1923,9 +1929,9 @@ h2 {
 
 .catalog-card__action--analyze {
   overflow: hidden;
-  border-color: rgba(96, 165, 250, 0.55);
-  background: rgba(29, 78, 216, 0.18);
-  color: #bfdbfe;
+  border-color: rgba(255, 255, 255, 0.72);
+  background: #000;
+  color: #fff;
   z-index: 2;
 }
 
@@ -1942,9 +1948,9 @@ h2 {
 }
 
 .catalog-card__action--analyze[aria-disabled="true"] {
-  border-color: rgba(96, 165, 250, 0.28);
-  background: rgba(30, 41, 59, 0.4);
-  color: var(--text-soft);
+  border-color: rgba(255, 255, 255, 0.48);
+  background: #000;
+  color: #e2e8f0;
 }
 
 .catalog-card__action--analyze[data-analysis-state="analyzing"],
@@ -1952,7 +1958,7 @@ h2 {
   width: 36px;
   height: 36px;
   border-color: #93c5fd;
-  background: rgba(29, 78, 216, 0.32);
+  background: #000;
   color: #f8fafc;
   cursor: progress;
   padding: 0;

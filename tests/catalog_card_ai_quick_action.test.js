@@ -298,7 +298,8 @@ function createFlowHarness({ confirmAccepted = true, reducedMotion = true } = {}
     canonicalTagDefinitions: [],
     canonicalTagsLoaded: true,
     catalogResults,
-    catalogState: { tagKeys: [] },
+    catalogState: { tagKeys: [], collection: "" },
+    PROCESSED_COLLECTION: "processed",
     detailsCurrentItem: null,
     detailsDialogTitle: new FakeElement("h2"),
     detailsTagsContainer: new FakeElement("div"),
@@ -456,8 +457,10 @@ function createFlowHarness({ confirmAccepted = true, reducedMotion = true } = {}
   };
   const source = [
     extractFunction(APP_SOURCE, "identityAllowsCardAiQuickAction"),
+    extractFunction(APP_SOURCE, "catalogItemHasCompleteMetadata"),
     extractFunction(APP_SOURCE, "cardNeedsMetadata"),
     extractFunction(APP_SOURCE, "cardAiQuickActionEligible"),
+    extractFunction(APP_SOURCE, "catalogItemsForCurrentScope"),
     extractFunction(APP_SOURCE, "galleryMotionPreferred"),
     extractFunction(APP_SOURCE, "cardAiQuickActionProviderBlocked"),
     extractFunction(APP_SOURCE, "cardAiPreviewResponseMatchesRequest"),
@@ -562,6 +565,54 @@ test("brain eligibility requires metadata need, both capabilities, supported loc
   })), false);
   assert.equal(context.cardNeedsMetadata(sampleItem({ tags: [{ key: "nature", display_name: "Nature" }] })), false);
   assert.equal(context.cardAiQuickActionEligible(sampleItem({ tags: [{ key: "nature", display_name: "Nature" }] })), false);
+  const fixtureOnly = sampleItem({
+    display_title: null,
+    tags: [{ key: "acceptance", display_name: "Acceptance" }],
+  });
+  assert.equal(context.catalogItemHasCompleteMetadata(fixtureOnly), false);
+  assert.equal(context.cardNeedsMetadata(fixtureOnly), true);
+  assert.equal(context.cardAiQuickActionEligible(fixtureOnly), true);
+  assert.equal(context.catalogItemHasCompleteMetadata(sampleItem({ tags: [] })), false);
+  assert.equal(
+    context.catalogItemHasCompleteMetadata(sampleItem({
+      tags: [{ key: "nature", display_name: "Nature" }],
+    })),
+    true,
+  );
+});
+
+test("Processed presentation uses the same metadata-completeness predicate as brain eligibility", () => {
+  const { context } = createFlowHarness();
+  const fixtureOnly = sampleItem({
+    display_title: null,
+    tags: [{ key: "acceptance", display_name: "Acceptance" }],
+    collection_key: "processed",
+  });
+  const complete = sampleItem({
+    media_id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+    display_title: "Reviewed still",
+    tags: [{ key: "nature", display_name: "Nature" }],
+    collection_key: "processed",
+  });
+
+  context.catalogState.collection = "processed";
+  assert.deepEqual(
+    context.catalogItemsForCurrentScope([fixtureOnly, complete]).map((item) => item.media_id),
+    [complete.media_id],
+  );
+  context.catalogState.collection = "";
+  assert.deepEqual(
+    context.catalogItemsForCurrentScope([fixtureOnly, complete]).map((item) => item.media_id),
+    [fixtureOnly.media_id, complete.media_id],
+  );
+
+  const renderBody = extractFunction(APP_SOURCE, "renderCatalogSuccess");
+  assert.ok(renderBody.includes("catalogItemsForCurrentScope(page.items)"));
+  assert.ok(renderBody.includes("setCatalogPagination(page, visibleItems.length)"));
+  assert.ok(renderBody.includes("visibleItems.forEach"));
+  const paginationBody = extractFunction(APP_SOURCE, "setCatalogPagination");
+  assert.ok(paginationBody.includes("processedPageWasRefined"));
+  assert.ok(paginationBody.includes("metadata-complete"));
 });
 
 test("ordinary missing-capability role-only and missing identity fail closed for brain eligibility", () => {
@@ -861,6 +912,18 @@ test("busy analyzing and applying keep brain glyph with pulse contract and no vi
   assert.match(
     STYLES_SOURCE,
     /\.catalog-card__action--analyze\[data-analysis-state="analyzing"\][\s\S]*animation:\s*catalog-card-analyze-pulse/,
+  );
+  assert.match(
+    STYLES_SOURCE,
+    /\.catalog-card__actions--overlay \.catalog-card__action--analyze\s*\{[^}]*opacity:\s*1;[^}]*pointer-events:\s*auto;/s,
+  );
+  assert.match(
+    STYLES_SOURCE,
+    /\.catalog-card__action--analyze\s*\{[^}]*background:\s*#000/s,
+  );
+  assert.match(
+    STYLES_SOURCE,
+    /\.catalog-card__action--analyze\[data-analysis-state="analyzing"\],[\s\S]*background:\s*#000/s,
   );
   assert.match(STYLES_SOURCE, /prefers-reduced-motion: reduce[\s\S]*animation:\s*none !important/);
   assert.equal(STYLES_SOURCE.includes("catalog-card__analyze-busy"), false);

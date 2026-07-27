@@ -3906,8 +3906,18 @@ function renderCatalogCardMediaSurface(item) {
   return surface;
 }
 
+function catalogItemHasCompleteMetadata(item) {
+  return Boolean(
+    item
+    && typeof item.display_title === "string"
+    && item.display_title.trim()
+    && Array.isArray(item.tags)
+    && item.tags.length > 0,
+  );
+}
+
 function cardNeedsMetadata(item) {
-  return selectSupportedAvailableLocation(item) !== null && (!item.tags || item.tags.length === 0);
+  return selectSupportedAvailableLocation(item) !== null && !catalogItemHasCompleteMetadata(item);
 }
 
 function identityAllowsCardAiQuickAction() {
@@ -4421,12 +4431,20 @@ async function handleAnalyzeCatalogCard(item, button) {
   }
 }
 
-function setCatalogPagination(page) {
+function setCatalogPagination(page, renderedCount = page.items.length) {
   const start = page.total === 0 ? 0 : page.offset + 1;
   const end = Math.min(page.offset + page.limit, page.total);
-  catalogPageSummary.textContent = page.total === 0
-    ? "No catalog results."
-    : `${start}-${end} of ${page.total}`;
+  const processedPageWasRefined = catalogState.collection === PROCESSED_COLLECTION
+    && renderedCount !== page.items.length;
+  if (processedPageWasRefined) {
+    catalogPageSummary.textContent = renderedCount === 0
+      ? "No metadata-complete results on this page."
+      : `${renderedCount} metadata-complete ${renderedCount === 1 ? "result" : "results"} on this page.`;
+  } else {
+    catalogPageSummary.textContent = page.total === 0
+      ? "No catalog results."
+      : `${start}-${end} of ${page.total}`;
+  }
   catalogPrevButton.disabled = page.offset <= 0;
   catalogNextButton.disabled = page.offset + page.limit >= page.total;
 }
@@ -4601,6 +4619,12 @@ function renderCatalogEmptyState() {
   }
 }
 
+function catalogItemsForCurrentScope(items) {
+  if (!Array.isArray(items)) return [];
+  if (catalogState.collection !== PROCESSED_COLLECTION) return items;
+  return items.filter(catalogItemHasCompleteMetadata);
+}
+
 function renderCatalogSuccess(page) {
   cleanupCatalogCardMedia();
   catalogResults.replaceChildren();
@@ -4608,14 +4632,15 @@ function renderCatalogSuccess(page) {
   catalogState.offset = page.offset;
   catalogState.limit = CATALOG_PAGE_SIZE_OPTIONS.includes(page.limit) ? page.limit : catalogState.limit;
   syncCatalogPageSizeControl();
-  setCatalogPagination(page);
-  if (page.items.length === 0) {
+  const visibleItems = catalogItemsForCurrentScope(page.items);
+  setCatalogPagination(page, visibleItems.length);
+  if (visibleItems.length === 0) {
     renderCatalogEmptyState();
     reconcileCatalogSelectedCard();
     showCatalogState("empty");
     return;
   }
-  page.items.forEach((item) => {
+  visibleItems.forEach((item) => {
     catalogResults.appendChild(renderCatalogCard(item));
   });
   renderCatalogTagFilterStates();
