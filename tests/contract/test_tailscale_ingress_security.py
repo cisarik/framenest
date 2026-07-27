@@ -319,6 +319,11 @@ def test_ordinary_user_reads_succeed(tailscale_client) -> None:
         ("POST", f"/api/libraries/{uuid.uuid4()}/media-imports", {}),
         ("POST", f"/api/libraries/{uuid.uuid4()}/media-analysis-preview", {}),
         ("POST", f"/api/libraries/{uuid.uuid4()}/media-suggestion-preview", {}),
+        (
+            "POST",
+            f"/api/media/{uuid.uuid4()}/locations/{uuid.uuid4()}/ai-suggestion-preview",
+            {},
+        ),
         ("GET", "/api/ai/media-suggestion-capability", None),
         ("GET", "/api/ai/automatic-analysis-capability", None),
     ],

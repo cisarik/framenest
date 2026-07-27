@@ -297,24 +297,26 @@
             </label>
             <p id="metadata-description-status" class="metadata-note" aria-live="polite" hidden></p>
 
-            <label class="metadata-field" for="metadata-content-category">
-              <span>Content category</span>
-              <select id="metadata-content-category">
-                <option value="general">General</option>
-                <option value="meme">Meme</option>
-                <option value="movie">Movie</option>
-              </select>
-            </label>
+            <div class="metadata-classification-row">
+              <label class="metadata-field" for="metadata-content-category">
+                <span>Content category</span>
+                <select id="metadata-content-category">
+                  <option value="general">General</option>
+                  <option value="meme">Meme</option>
+                  <option value="movie">Movie</option>
+                </select>
+              </label>
 
-            <label class="metadata-field" for="metadata-acquisition-source">
-              <span>Acquisition source</span>
-              <select id="metadata-acquisition-source">
-                <option value="unknown">Unknown</option>
-                <option value="manual_upload">Manual upload</option>
-                <option value="library_scan">Library scan</option>
-                <option value="youtube_manual_claim">YouTube (manual claim)</option>
-              </select>
-            </label>
+              <label class="metadata-field" for="metadata-acquisition-source">
+                <span>Acquisition source</span>
+                <select id="metadata-acquisition-source">
+                  <option value="unknown">Unknown</option>
+                  <option value="manual_upload">Manual upload</option>
+                  <option value="library_scan">Library scan</option>
+                  <option value="youtube_manual_claim">YouTube (manual claim)</option>
+                </select>
+              </label>
+            </div>
 
             <fieldset id="metadata-genres-fieldset" class="metadata-field metadata-genres" hidden>
               <legend>Genres</legend>

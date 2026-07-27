@@ -282,8 +282,8 @@ test("mutation helper always injects the FrameNest mutation header", () => {
 test("every unsafe fetch call site sends the mutation header", () => {
   const mutationSites = APP_SOURCE.match(/method: "(?:POST|PUT|PATCH|DELETE)"/g) || [];
   const wrappedSites = APP_SOURCE.match(/headers: framenestMutationHeaders\(/g) || [];
-  assert.equal(mutationSites.length, 16);
-  assert.equal(wrappedSites.length, 16);
+  assert.equal(mutationSites.length, 17);
+  assert.equal(wrappedSites.length, 17);
   assert.equal((APP_SOURCE.match(/"X-FrameNest-Request"/g) || []).length, 1);
 });
 
@@ -346,8 +346,12 @@ test("privileged controls are gated by capabilities in source", () => {
   assert.ok(APP_SOURCE.includes('identityHasCapability("metadata.canonical.write")'));
   assert.ok(APP_SOURCE.includes('identityHasCapability("analysis.run")'));
   const cardBody = extractFunction(APP_SOURCE, "renderCatalogCard");
-  assert.ok(cardBody.includes('cardNeedsMetadata(item) && identityHasCapability("analysis.run")'));
+  assert.ok(cardBody.includes("cardAiQuickActionEligible(item)"));
+  assert.equal(cardBody.includes("cardNeedsMetadata(item)"), false);
   assert.ok(cardBody.includes('if (identityHasCapability("metadata.canonical.write")) {'));
+  const eligibleBody = extractFunction(APP_SOURCE, "cardAiQuickActionEligible");
+  assert.ok(eligibleBody.includes('identityHasCapability("analysis.run")'));
+  assert.ok(eligibleBody.includes('identityHasCapability("metadata.canonical.write")'));
 });
 
 test("admin identity populates name-only badge and unlocks privileged controls", async () => {

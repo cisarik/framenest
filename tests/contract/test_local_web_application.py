@@ -751,20 +751,25 @@ def test_browser_editor_ai_button_active_state_replaces_entire_content(client: T
 
 def test_browser_editor_ai_button_active_state_is_prominent_without_idle_animation(client: TestClient) -> None:
     css = client.get("/assets/styles.css").text
+    button_css = css[
+        css.index(".metadata-dialog__footer .metadata-ai-analyze-button {")
+        : css.index(".metadata-ai-analyze-button > *")
+    ]
     busy_block = css[
         css.index('.metadata-dialog__footer .metadata-ai-analyze-button[aria-busy="true"]')
         : css.index(".metadata-ai-analyze-button > *")
     ]
-    reduced_motion_block = css[css.index("@media (prefers-reduced-motion: reduce)") :]
 
+    assert "background: #f5f8f5" in button_css
+    assert "color: #0c1a10" in button_css
+    assert "linear-gradient(90deg, #0b2514" not in css
+    assert "metadata-ai-analyzing" not in css
     assert 'metadata-ai-analyze-button:hover::after' not in css
     assert 'metadata-ai-analyze-button:focus-visible::after' not in css
-    assert '[aria-busy="true"]::after' in busy_block
-    assert "metadata-ai-analyzing" in busy_block
     assert ':disabled:not([aria-busy="true"])' in css
     assert "opacity: 1" in busy_block
     assert "cursor: progress" in busy_block
-    assert "animation: none" in reduced_motion_block
+    assert "background: #e8f3ea" in busy_block
 
 
 def test_browser_ai_replacement_is_session_only_without_mutation_api(
@@ -1327,8 +1332,9 @@ def test_header_command_search_is_wider_with_restrained_green_focus(client: Test
     search_input = css[css.index(".header-search__input {") : css.index(".header-search__input::placeholder")]
     search_focus = css[css.index(".header-search__control:focus-within") : css.index(".header-search__prompt")]
 
-    assert "flex: 1 1 680px" in search
-    assert "max-width: 720px" in search
+    assert "grid-area: search" in search
+    assert "max-width: 100%" in search
+    assert "width: 100%" in search
     assert "rgba(0, 255, 65, 0.5)" in search_control
     assert "0 0 14px rgba(0, 255, 65, 0.06)" in search_control
     assert "border: 0" in search_input
@@ -1386,17 +1392,19 @@ def test_active_tag_filters_are_an_inline_region_of_the_unified_search_control(c
     mobile_css = css[css.index("@media (max-width: 620px)") : css.index("@keyframes ai-pending")]
 
     assert control_start < filters_start < suggestions_end < control_end
-    assert "max-width: 720px" in search_css
+    assert "max-width: 100%" in search_css
+    assert "grid-area: search" in search_css
     assert "min-width: 0" in control_css
     assert "height: 40px" in control_css
     assert "min-width: 80px" in input_css
     assert "flex-wrap: nowrap" in filters_css
     assert "overflow-x: auto" in filters_css
     assert "max-width: 360px" in filters_css
-    assert ".header-search" in mobile_css
-    assert "flex: 1 1 100%" in mobile_css
-    assert "max-width: 100%" in mobile_css
     assert "max-width: 46%" in mobile_css
+    assert ".catalog-tag-filters" in mobile_css
+    compact_header_css = css[css.index("@media (max-width: 900px)") : css.index("@media (max-width: 360px)")]
+    assert ".header-search" in compact_header_css
+    assert "max-width: 100%" in compact_header_css
 
 
 def test_terminal_search_prompt_pulses_boldly_and_respects_reduced_motion(client: TestClient) -> None:
@@ -1660,18 +1668,20 @@ def test_card_uses_media_surface_for_playback_without_visible_play_control(clien
     assert "handleCardPreview" not in _javascript_function(script, "renderCatalogCard")
 
 
-def test_catalog_card_analyze_shortcut_only_for_untagged_supported_media(client: TestClient) -> None:
+def test_catalog_card_analyze_shortcut_for_eligible_admin_media_not_only_untagged(client: TestClient) -> None:
     script = client.get("/assets/app.js").text
     card_body = _javascript_function(script, "renderCatalogCard")
-    needs_body = _javascript_function(script, "cardNeedsMetadata")
+    eligible_body = _javascript_function(script, "cardAiQuickActionEligible")
 
     assert 'analyzeButton.textContent = "🧠"' in card_body
     assert 'analyzeButton.title = "Analyze by AI"' in card_body
-    assert "cardNeedsMetadata(item)" in card_body
-    assert "selectSupportedAvailableLocation(item) !== null" in needs_body
-    assert "(!item.tags || item.tags.length === 0)" in needs_body
+    assert "cardAiQuickActionEligible(item)" in card_body
+    assert "cardNeedsMetadata(item)" not in card_body
+    assert 'identityHasCapability("analysis.run")' in eligible_body
+    assert 'identityHasCapability("metadata.canonical.write")' in eligible_body
+    assert 'selectSupportedAvailableLocation(item) !== null' in eligible_body
+    assert '(item.content_category || "general") !== "movie"' in eligible_body
     assert "actions.appendChild(analyzeButton)" in card_body
-    assert "item.tags.length > 0" not in card_body
     assert "renderCatalogCardTags(item)" in card_body
 
 
@@ -1821,7 +1831,7 @@ def test_catalog_card_unavailable_ai_opens_status_without_request(client: TestCl
     script = client.get("/assets/app.js").text
     analyze_body = _javascript_function(script, "handleAnalyzeCatalogCard")
     unavailable_section = analyze_body[
-        analyze_body.index("if (!aiCapability.available)") : analyze_body.index("cardAiAnalyzingMediaIds.add(item.media_id)")
+        analyze_body.index("if (!aiCapability.available)") : analyze_body.index("setCardAiQuickActionController(mediaId, { state: \"confirming\" })")
     ]
 
     assert 'openStatusDialog("ai"' in unavailable_section
@@ -1833,32 +1843,36 @@ def test_catalog_card_analyze_request_busy_success_and_failure_flow(client: Test
     script = client.get("/assets/app.js").text
     analyze_body = _javascript_function(script, "handleAnalyzeCatalogCard")
     state_body = _javascript_function(script, "setCardAnalyzeButtonState")
-    open_body = _javascript_function(script, "handleOpenMetadataWorkspace")
 
     assert '"Analyzing…"' not in state_body
     assert 'button.textContent = "🧠"' in state_body
     assert 'button.replaceChildren(busyIndicator)' in state_body
     assert 'busyIndicator.className = "catalog-card__analyze-busy"' in state_body
-    assert 'button.setAttribute("aria-busy", state === "analyzing" ? "true" : "false")' in state_body
-    assert 'button.setAttribute("aria-label", state === "analyzing" ? `Analyzing ${title}` : `Analyze by AI ${title}`)' in state_body
-    assert "cardAiAnalyzingMediaIds.has(item.media_id)" in analyze_body
-    assert "cardAiAnalyzingMediaIds.add(item.media_id)" in analyze_body
-    assert "mediaAiSuggestionEndpoint(item.media_id, location.location_id)" in analyze_body
+    assert 'button.setAttribute("aria-busy", busy ? "true" : "false")' in state_body
+    assert "cardAiQuickActionIsLocked(mediaId)" in analyze_body
+    assert 'state: "analyzing"' in analyze_body
+    assert 'state: "applying"' in analyze_body
+    assert 'state: "saved"' in analyze_body
+    assert 'state: "failed_analysis"' in analyze_body
+    assert 'state: "failed_save"' in analyze_body
+    assert "mediaAiSuggestionEndpoint(mediaId, location.location_id)" in analyze_body
     assert "confirm_cloud_upload: true" in analyze_body
-    assert "handleOpenMetadataWorkspace(item, button, { aiSuggestion: suggestion })" in analyze_body
-    assert "aiSuggestionErrorMessage(payload)" in analyze_body
-    assert "fetch(metadataEndpoint" in open_body
-    assert "fetch(metadataEndpoint" not in analyze_body
+    assert "await requestConfirmation({" in analyze_body
+    assert "metadataTagKeysFromSuggestion(suggestion.tags)" in analyze_body
+    assert 'method: "PUT"' in analyze_body
+    assert "applySavedAiMetadataToCatalogSurfaces(item, savePayload.metadata)" in analyze_body
+    assert "handleOpenMetadataWorkspace" not in analyze_body
+    assert "fetch(metadataEndpoint(mediaId)" in analyze_body
 
 
 def test_catalog_card_analyze_busy_keeps_fixed_size_and_reduced_motion(client: TestClient) -> None:
     styles = client.get("/assets/styles.css").text
     busy_css = styles[
-        styles.index(".catalog-card__action--analyze[data-analysis-state=\"analyzing\"]")
-        : styles.index(".catalog-card__action--analyze[data-analysis-state=\"analyzing\"] .catalog-card__analyze-busy")
+        styles.index('.catalog-card__action--analyze[data-analysis-state="analyzing"]')
+        : styles.index('.catalog-card__action--analyze[data-analysis-state="analyzing"] .catalog-card__analyze-busy')
     ]
     indicator_css = styles[
-        styles.index(".catalog-card__action--analyze[data-analysis-state=\"analyzing\"] .catalog-card__analyze-busy")
+        styles.index('.catalog-card__action--analyze[data-analysis-state="analyzing"] .catalog-card__analyze-busy')
         : styles.index(".catalog-card__analysis-status")
     ]
     reduced_css = styles[styles.index("@media (prefers-reduced-motion: reduce)") :]
@@ -2550,8 +2564,10 @@ def test_header_uses_compact_brand_and_accessible_status_labels(client: TestClie
 
     assert ">FN<" in header_section
     assert ">FrameNest<" not in header_section
-    assert ">Cloud<" in header_section
-    assert ">AI<" in header_section
+    assert 'aria-label="Cloud status: checking"' in header_section
+    assert 'aria-label="AI status: checking"' in header_section
+    assert ">Cloud<" not in header_section
+    assert ">AI<" not in header_section
     assert ">🧠 AI<" not in header_section
     assert ">Server<" not in header_section
     for visible_state in (">Healthy<", ">Available<", ">Unavailable<", ">Checking<"):

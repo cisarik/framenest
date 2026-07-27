@@ -1926,6 +1926,7 @@ h2 {
   border-color: rgba(96, 165, 250, 0.55);
   background: rgba(29, 78, 216, 0.18);
   color: #bfdbfe;
+  z-index: 2;
 }
 
 .catalog-card__action--analyze:hover,
@@ -1936,13 +1937,18 @@ h2 {
   color: #dbeafe;
 }
 
+.catalog-card__action--analyze:active:not(:disabled) {
+  transform: scale(0.96);
+}
+
 .catalog-card__action--analyze[aria-disabled="true"] {
   border-color: rgba(96, 165, 250, 0.28);
   background: rgba(30, 41, 59, 0.4);
   color: var(--text-soft);
 }
 
-.catalog-card__action--analyze[data-analysis-state="analyzing"] {
+.catalog-card__action--analyze[data-analysis-state="analyzing"],
+.catalog-card__action--analyze[data-analysis-state="applying"] {
   width: 36px;
   height: 36px;
   border-color: #93c5fd;
@@ -1952,13 +1958,27 @@ h2 {
   padding: 0;
 }
 
-.catalog-card__action--analyze[data-analysis-state="analyzing"] .catalog-card__analyze-busy {
+.catalog-card__action--analyze[data-analysis-state="analyzing"] .catalog-card__analyze-busy,
+.catalog-card__action--analyze[data-analysis-state="applying"] .catalog-card__analyze-busy {
   width: 14px;
   height: 14px;
   border: 2px solid rgba(219, 234, 254, 0.38);
   border-top-color: #dbeafe;
   border-radius: 999px;
   animation: catalog-card-analyzing 0.8s linear infinite;
+}
+
+.catalog-card__action--analyze[data-analysis-state="saved"] {
+  border-color: rgba(0, 200, 83, 0.55);
+  background: rgba(0, 200, 83, 0.16);
+  color: #b7f7c8;
+}
+
+.catalog-card__action--analyze[data-analysis-state="failed_analysis"],
+.catalog-card__action--analyze[data-analysis-state="failed_save"] {
+  border-color: rgba(248, 113, 113, 0.55);
+  background: rgba(127, 29, 29, 0.28);
+  color: #fecaca;
 }
 
 .catalog-card__analysis-status {
@@ -1968,13 +1988,18 @@ h2 {
   font-size: 0.76rem;
 }
 
+.catalog-card__analysis-status[data-analysis-success="true"] {
+  color: #86efac;
+}
+
 @keyframes catalog-card-analyzing {
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .catalog-card__action--analyze[data-analysis-state="analyzing"] .catalog-card__analyze-busy {
+  .catalog-card__action--analyze[data-analysis-state="analyzing"] .catalog-card__analyze-busy,
+  .catalog-card__action--analyze[data-analysis-state="applying"] .catalog-card__analyze-busy {
     animation: none;
     border-style: double;
   }
@@ -2390,45 +2415,49 @@ h2 {
   justify-content: center;
   gap: 8px;
   overflow: hidden;
-  border: 1px solid #020402;
-  background: linear-gradient(90deg, #0b2514, #00c853 48%, #39ff14);
-  color: #020402;
+  border: 1px solid rgba(0, 200, 83, 0.42);
+  background: #f5f8f5;
+  color: #0c1a10;
   text-shadow: none;
-}
-
-.metadata-dialog__footer .metadata-ai-analyze-button::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  transform: translateX(-120%);
-  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.32), transparent);
-  pointer-events: none;
-}
-
-.metadata-dialog__footer .metadata-ai-analyze-button[aria-busy="true"]::after {
-  animation: metadata-ai-analyzing 1.25s linear infinite;
+  box-shadow: none;
+  transition:
+    background var(--transition-fast),
+    border-color var(--transition-fast),
+    color var(--transition-fast),
+    transform var(--transition-fast),
+    box-shadow var(--transition-fast);
 }
 
 .metadata-dialog__footer .metadata-ai-analyze-button:hover,
 .metadata-dialog__footer .metadata-ai-analyze-button:focus-visible {
-  border-color: #000;
-  box-shadow: 0 0 16px var(--accent-glow);
-  color: #000;
+  border-color: rgba(0, 200, 83, 0.72);
+  background: #ffffff;
+  color: #06140a;
+  transform: translateY(-1px);
+  box-shadow: 0 1px 0 rgba(0, 200, 83, 0.28);
+}
+
+.metadata-dialog__footer .metadata-ai-analyze-button:active:not(:disabled) {
+  transform: translateY(0);
+  box-shadow: none;
 }
 
 .metadata-dialog__footer .metadata-ai-analyze-button:disabled:not([aria-busy="true"]) {
   border-color: rgba(106, 122, 106, 0.3);
-  background: transparent;
+  background: rgba(18, 24, 18, 0.35);
   color: var(--text-soft);
+  transform: none;
+  box-shadow: none;
 }
 
 .metadata-dialog__footer .metadata-ai-analyze-button[aria-busy="true"] {
-  border-color: #39ff14;
-  background: linear-gradient(90deg, #051f0e, #13c955 46%, #b7ff9a);
-  color: #020402;
-  box-shadow: 0 0 18px rgba(57, 255, 20, 0.42);
+  border-color: rgba(0, 200, 83, 0.55);
+  background: #e8f3ea;
+  color: #0c1a10;
   cursor: progress;
   opacity: 1;
+  transform: none;
+  box-shadow: none;
 }
 
 .metadata-ai-analyze-button > * {
@@ -2493,6 +2522,24 @@ h2 {
   border-radius: var(--radius-md);
   background: var(--surface);
   padding: 16px;
+}
+
+.metadata-form-panel {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+}
+
+.metadata-classification-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  min-width: 0;
+  width: 100%;
+}
+
+.metadata-classification-row .metadata-field {
+  min-width: 0;
 }
 
 .metadata-ai-panel {
@@ -2615,19 +2662,6 @@ h2 {
   line-height: 1.45;
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .metadata-dialog__footer .metadata-ai-analyze-button[aria-busy="true"]::after {
-    animation: none;
-    transform: translateX(0);
-  }
-}
-
-@keyframes metadata-ai-analyzing {
-  to {
-    transform: translateX(120%);
-  }
-}
-
 .metadata-field {
   display: grid;
   gap: 6px;
@@ -2639,8 +2673,12 @@ h2 {
 }
 
 .metadata-field input,
-.metadata-field textarea {
+.metadata-field textarea,
+.metadata-field select {
   width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
   background: var(--surface-input);
@@ -2653,10 +2691,27 @@ h2 {
   resize: vertical;
 }
 
+.metadata-field select {
+  appearance: none;
+  -webkit-appearance: none;
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--text-muted) 50%),
+    linear-gradient(135deg, var(--text-muted) 50%, transparent 50%);
+  background-position:
+    calc(100% - 18px) calc(50% - 3px),
+    calc(100% - 12px) calc(50% - 3px);
+  background-size: 6px 6px, 6px 6px;
+  background-repeat: no-repeat;
+  padding-right: 34px;
+  cursor: pointer;
+}
+
 .metadata-field input:focus,
-.metadata-field textarea:focus {
+.metadata-field textarea:focus,
+.metadata-field select:focus {
   border-color: var(--accent-border);
   box-shadow: 0 0 0 2px var(--accent-glow);
+  outline: none;
 }
 
 .metadata-tags-panel {
@@ -3357,7 +3412,8 @@ h2 {
   .library-card__header,
   .local-preview__header,
   .metadata-workspace__body,
-  .candidate-row {
+  .candidate-row,
+  .metadata-classification-row {
     grid-template-columns: 1fr;
   }
 

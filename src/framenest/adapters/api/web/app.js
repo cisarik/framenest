@@ -92,7 +92,8 @@ let metadataSaveRequestToken = 0;
 let metadataSaveOwner = null;
 let metadataWorkspaceRevision = 0;
 let aiCapabilityRevision = 0;
-let cardAiAnalyzingMediaIds = new Set();
+const cardAiQuickActionByMediaId = new Map();
+const CARD_AI_QUICK_ACTION_LOCKED = new Set(["confirming", "analyzing", "applying"]);
 let catalogState = {
   q: "",
   tagKeys: [],
@@ -842,6 +843,7 @@ function renderAiCapability(payload) {
       `${providerInfo}; ${status.reason}; ${aiCapability.execution}.`;
     setAiStatusButtonState("healthy", "AI test successful");
     updateSettingsAiStatus();
+    reconcileCatalogCardAiQuickActions();
     return;
   }
   setAiStatusClass(aiCapability.status === "configured_unverified" ? "status--loading" : "status--error");
@@ -855,6 +857,7 @@ function renderAiCapability(payload) {
     setAiStatusButtonState("unhealthy", "AI unavailable");
   }
   updateSettingsAiStatus();
+  reconcileCatalogCardAiQuickActions();
 }
 
 async function loadAiCapability() {
@@ -3901,13 +3904,75 @@ function cardNeedsMetadata(item) {
   return selectSupportedAvailableLocation(item) !== null && (!item.tags || item.tags.length === 0);
 }
 
+function cardAiQuickActionEligible(item) {
+  return identityHasCapability("analysis.run")
+    && identityHasCapability("metadata.canonical.write")
+    && selectSupportedAvailableLocation(item) !== null
+    && (item.content_category || "general") !== "movie";
+}
+
+function getCardAiQuickAction(mediaId) {
+  return cardAiQuickActionByMediaId.get(mediaId) || { state: "idle", requestToken: 0 };
+}
+
+function setCardAiQuickActionController(mediaId, patch) {
+  const current = getCardAiQuickAction(mediaId);
+  const next = Object.assign({}, current, patch);
+  cardAiQuickActionByMediaId.set(mediaId, next);
+  return next;
+}
+
+function cardAiQuickActionIsLocked(mediaId) {
+  return CARD_AI_QUICK_ACTION_LOCKED.has(getCardAiQuickAction(mediaId).state);
+}
+
+function cardAiQuickActionStatusMessage(state, detail = "") {
+  if (state === "analyzing") return "Analyzing with AI…";
+  if (state === "applying") return "Saving AI metadata…";
+  if (state === "saved") return "AI metadata saved";
+  if (state === "failed_analysis") return detail || "AI analysis failed.";
+  if (state === "failed_save") {
+    return detail || "AI metadata could not be saved. Existing media metadata was not replaced.";
+  }
+  if (state === "unavailable") return detail || "AI analysis is not configured.";
+  return detail || "";
+}
+
 function setCardAnalyzeButtonState(button, state, message = "") {
   const title = button.dataset.mediaTitle || "media";
+  const busy = state === "analyzing" || state === "applying";
+  const locked = CARD_AI_QUICK_ACTION_LOCKED.has(state);
+  const providerBlocked = !aiCapability.available && !locked;
   button.dataset.analysisState = state;
-  button.setAttribute("aria-busy", state === "analyzing" ? "true" : "false");
-  button.setAttribute("aria-label", state === "analyzing" ? `Analyzing ${title}` : `Analyze by AI ${title}`);
-  button.disabled = state === "analyzing";
+  button.setAttribute("aria-busy", busy ? "true" : "false");
+  button.setAttribute("aria-disabled", providerBlocked || state === "unavailable" ? "true" : "false");
+  button.disabled = locked;
   if (state === "analyzing") {
+    button.setAttribute("aria-label", `Analyzing ${title}`);
+    button.title = "Analyzing with AI";
+  } else if (state === "applying") {
+    button.setAttribute("aria-label", `Saving AI metadata for ${title}`);
+    button.title = "Saving AI metadata";
+  } else if (state === "saved") {
+    button.setAttribute("aria-label", `AI metadata saved for ${title}. Analyze by AI again`);
+    button.title = "AI metadata saved — rerun available";
+  } else if (state === "failed_analysis") {
+    button.setAttribute("aria-label", `AI analysis failed for ${title}. Retry Analyze by AI`);
+    button.title = "AI analysis failed — retry";
+  } else if (state === "failed_save") {
+    button.setAttribute("aria-label", `AI metadata save failed for ${title}. Retry Analyze by AI`);
+    button.title = "AI metadata save failed — retry";
+  } else if (state === "unavailable" || providerBlocked) {
+    button.setAttribute("aria-label", `AI unavailable for ${title}`);
+    button.title = "AI unavailable";
+  } else if (state === "confirming") {
+    button.setAttribute("aria-label", `Confirm AI analysis for ${title}`);
+    button.title = "Confirm AI analysis";
+  } else {
+    button.setAttribute("aria-label", `Analyze by AI ${title}`);
+    button.title = "Analyze by AI";
+  }
+  if (busy) {
     const busyIndicator = document.createElement("span");
     busyIndicator.className = "catalog-card__analyze-busy";
     busyIndicator.setAttribute("aria-hidden", "true");
@@ -3917,9 +3982,33 @@ function setCardAnalyzeButtonState(button, state, message = "") {
   }
   const status = button.closest(".catalog-card")?.querySelector(".catalog-card__analysis-status");
   if (status) {
-    status.textContent = message;
-    status.hidden = !message;
+    const text = message || cardAiQuickActionStatusMessage(state);
+    status.textContent = text;
+    status.hidden = !text;
+    if (state === "saved") {
+      status.dataset.analysisSuccess = "true";
+    } else {
+      status.removeAttribute("data-analysis-success");
+    }
   }
+}
+
+function reconcileCatalogCardAiQuickActions() {
+  catalogResults.querySelectorAll(".catalog-card__action--analyze").forEach((button) => {
+    const state = button.dataset.analysisState || "idle";
+    if (CARD_AI_QUICK_ACTION_LOCKED.has(state)) return;
+    const providerBlocked = !aiCapability.available;
+    button.setAttribute("aria-disabled", providerBlocked || state === "unavailable" ? "true" : "false");
+    if (state === "idle" || state === "saved" || state === "failed_analysis" || state === "failed_save" || state === "unavailable") {
+      if (providerBlocked) {
+        button.title = "AI unavailable";
+      } else if (state === "idle") {
+        const title = button.dataset.mediaTitle || "media";
+        button.setAttribute("aria-label", `Analyze by AI ${title}`);
+        button.title = "Analyze by AI";
+      }
+    }
+  });
 }
 
 function applyResolvedAiSuggestionToMetadataWorkspace(suggestion, tagKeys) {
@@ -3933,18 +4022,110 @@ function applyResolvedAiSuggestionToMetadataWorkspace(suggestion, tagKeys) {
   metadataAiStatus.textContent = "AI suggestion loaded into draft.";
 }
 
+function suggestionIsUsableForCanonicalSave(suggestion) {
+  return Boolean(
+    suggestion
+    && typeof suggestion.title === "string"
+    && suggestion.title.trim()
+    && Array.isArray(suggestion.tags)
+    && suggestion.tags.length > 0,
+  );
+}
+
+function applySavedAiMetadataToCatalogSurfaces(item, metadata) {
+  const tags = Array.isArray(metadata.tags)
+    ? metadata.tags.map((tag) => ({ key: tag.key, display_name: tag.display_name }))
+    : [];
+  item.display_title = metadata.display_title === undefined ? item.display_title : metadata.display_title;
+  item.tags = tags;
+  if (metadata.content_category) item.content_category = metadata.content_category;
+  if (metadata.acquisition_source) item.acquisition_source = metadata.acquisition_source;
+  if (Object.prototype.hasOwnProperty.call(metadata, "collection_key")) {
+    item.collection_key = metadata.collection_key;
+  }
+  if (Object.prototype.hasOwnProperty.call(metadata, "processed_at_ms")) {
+    item.processed_at_ms = metadata.processed_at_ms;
+  }
+  const displayTitle = item.display_title || deriveCatalogFallbackTitle(item);
+  const card = [...catalogResults.querySelectorAll(".catalog-card")]
+    .find((node) => node.dataset.mediaId === String(item.media_id));
+  if (card) {
+    const titleButton = card.querySelector(".catalog-card__title-button");
+    if (titleButton) {
+      titleButton.textContent = displayTitle;
+      titleButton.setAttribute("aria-label", `Open details for ${displayTitle}`);
+    }
+    const analyzeButton = card.querySelector(".catalog-card__action--analyze");
+    if (analyzeButton) {
+      analyzeButton.dataset.mediaTitle = displayTitle;
+    }
+    const tagsContainer = card.querySelector(".catalog-card__tags");
+    if (tagsContainer) {
+      tagsContainer.replaceWith(renderCatalogCardTags(item));
+    }
+  }
+  if (detailsCurrentItem && detailsCurrentItem.media_id === item.media_id) {
+    detailsCurrentItem.display_title = item.display_title;
+    detailsCurrentItem.tags = tags.map((tag) => ({ ...tag }));
+    detailsCurrentItem.content_category = item.content_category;
+    detailsCurrentItem.acquisition_source = item.acquisition_source;
+    detailsCurrentItem.collection_key = item.collection_key;
+    detailsCurrentItem.processed_at_ms = item.processed_at_ms;
+    if (detailsDialogTitle) {
+      detailsDialogTitle.textContent = displayTitle;
+    }
+    if (detailsTagsContainer) {
+      detailsTagsContainer.replaceChildren();
+      tags.forEach((tag) => {
+        const pill = document.createElement("button");
+        pill.type = "button";
+        pill.className = "media-details-dialog__tag";
+        pill.textContent = tag.display_name;
+        pill.setAttribute("aria-label", `Filter Gallery by ${tag.display_name}`);
+        pill.addEventListener("click", () => activateDetailsTagFilter(tag.key));
+        detailsTagsContainer.appendChild(pill);
+      });
+    }
+    if (detailsDescription) {
+      detailsDescription.textContent = metadata.description || "";
+      detailsDescription.hidden = !metadata.description;
+    }
+  }
+}
+
 async function handleAnalyzeCatalogCard(item, button) {
-  if (cardAiAnalyzingMediaIds.has(item.media_id)) return;
+  const mediaId = item.media_id;
+  if (cardAiQuickActionIsLocked(mediaId)) return;
+  if (!cardAiQuickActionEligible(item)) return;
   const location = selectSupportedAvailableLocation(item);
   if (!location) return;
   if (!aiCapability.available) {
+    setCardAiQuickActionController(mediaId, { state: "unavailable" });
+    setCardAnalyzeButtonState(button, "unavailable");
     openStatusDialog("ai");
     return;
   }
-  cardAiAnalyzingMediaIds.add(item.media_id);
+  setCardAiQuickActionController(mediaId, { state: "confirming" });
+  setCardAnalyzeButtonState(button, "confirming");
+  const accepted = await requestConfirmation({
+    title: "Analyze and save with AI?",
+    message: "FrameNest will send up to 3 optimized preview frames and bounded metadata to the configured server-side AI provider. The original file, local path, and API key are not uploaded. The returned AI title, description, and tags will replace the current canonical values for this media item. Content category, acquisition source, and genres are preserved. This uses last-write-wins and does not detect concurrent edits in another tab.",
+    dismissLabel: "Not now",
+    confirmLabel: "Analyze and save",
+    destructive: false,
+    focusReturn: button,
+  });
+  if (!accepted) {
+    setCardAiQuickActionController(mediaId, { state: "idle" });
+    setCardAnalyzeButtonState(button, "idle");
+    return;
+  }
+  if (getCardAiQuickAction(mediaId).state !== "confirming") return;
+  const requestToken = (getCardAiQuickAction(mediaId).requestToken || 0) + 1;
+  setCardAiQuickActionController(mediaId, { state: "analyzing", requestToken });
   setCardAnalyzeButtonState(button, "analyzing");
   try {
-    const response = await fetch(mediaAiSuggestionEndpoint(item.media_id, location.location_id), {
+    const response = await fetch(mediaAiSuggestionEndpoint(mediaId, location.location_id), {
       method: "POST",
       headers: framenestMutationHeaders({
         Accept: "application/json",
@@ -3954,20 +4135,86 @@ async function handleAnalyzeCatalogCard(item, button) {
       cache: "no-store",
     });
     const payload = await response.json();
+    const controller = getCardAiQuickAction(mediaId);
+    if (controller.requestToken !== requestToken || controller.state !== "analyzing") return;
     if (!response.ok) {
-      setCardAnalyzeButtonState(button, "error", aiSuggestionErrorMessage(payload));
+      setCardAiQuickActionController(mediaId, { state: "failed_analysis" });
+      setCardAnalyzeButtonState(button, "failed_analysis", aiSuggestionErrorMessage(payload));
       return;
     }
     const suggestion = aiSuggestionFromPayload(payload);
-    await handleOpenMetadataWorkspace(item, button, { aiSuggestion: suggestion });
-    setCardAnalyzeButtonState(button, "idle");
-  } catch {
-    setCardAnalyzeButtonState(button, "error", "AI analysis failed.");
-  } finally {
-    cardAiAnalyzingMediaIds.delete(item.media_id);
-    if (button.dataset.analysisState === "analyzing") {
-      setCardAnalyzeButtonState(button, "idle");
+    if (!suggestionIsUsableForCanonicalSave(suggestion)) {
+      setCardAiQuickActionController(mediaId, { state: "failed_analysis" });
+      setCardAnalyzeButtonState(button, "failed_analysis", "AI response was invalid.");
+      return;
     }
+    setCardAiQuickActionController(mediaId, { state: "applying" });
+    setCardAnalyzeButtonState(button, "applying");
+    const tagsReady = await ensureCanonicalTags();
+    if (getCardAiQuickAction(mediaId).requestToken !== requestToken) return;
+    if (!tagsReady) {
+      setCardAiQuickActionController(mediaId, { state: "failed_save" });
+      setCardAnalyzeButtonState(button, "failed_save");
+      return;
+    }
+    let tagKeys;
+    try {
+      tagKeys = await metadataTagKeysFromSuggestion(suggestion.tags);
+    } catch {
+      if (getCardAiQuickAction(mediaId).requestToken !== requestToken) return;
+      setCardAiQuickActionController(mediaId, { state: "failed_save" });
+      setCardAnalyzeButtonState(button, "failed_save");
+      return;
+    }
+    if (getCardAiQuickAction(mediaId).requestToken !== requestToken) return;
+    const metadataResponse = await fetch(metadataEndpoint(mediaId), {
+      headers: { Accept: "application/json" },
+      cache: "no-store",
+    });
+    const metadataPayload = await metadataResponse.json();
+    if (getCardAiQuickAction(mediaId).requestToken !== requestToken) return;
+    if (!metadataResponse.ok) {
+      setCardAiQuickActionController(mediaId, { state: "failed_save" });
+      setCardAnalyzeButtonState(button, "failed_save");
+      return;
+    }
+    const saveBody = {
+      display_title: suggestion.title,
+      description: suggestion.description || null,
+      tag_keys: tagKeys,
+      content_category: metadataPayload.content_category || "general",
+      acquisition_source: metadataPayload.acquisition_source || "unknown",
+      genres: Array.isArray(metadataPayload.genres) ? [...metadataPayload.genres] : [],
+    };
+    const saveResponse = await fetch(metadataEndpoint(mediaId), {
+      method: "PUT",
+      headers: framenestMutationHeaders({
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      }),
+      body: JSON.stringify(saveBody),
+      cache: "no-store",
+    });
+    const savePayload = await saveResponse.json();
+    if (getCardAiQuickAction(mediaId).requestToken !== requestToken) return;
+    if (!saveResponse.ok || !savePayload.metadata) {
+      setCardAiQuickActionController(mediaId, { state: "failed_save" });
+      setCardAnalyzeButtonState(button, "failed_save");
+      return;
+    }
+    applySavedAiMetadataToCatalogSurfaces(item, savePayload.metadata);
+    setCardAiQuickActionController(mediaId, { state: "saved" });
+    setCardAnalyzeButtonState(button, "saved");
+  } catch {
+    const controller = getCardAiQuickAction(mediaId);
+    if (controller.requestToken !== requestToken) return;
+    if (controller.state === "analyzing") {
+      setCardAiQuickActionController(mediaId, { state: "failed_analysis" });
+      setCardAnalyzeButtonState(button, "failed_analysis", "AI analysis failed.");
+      return;
+    }
+    setCardAiQuickActionController(mediaId, { state: "failed_save" });
+    setCardAnalyzeButtonState(button, "failed_save");
   }
 }
 
@@ -4044,18 +4291,24 @@ function renderCatalogCard(item) {
   const displayTitle = item.display_title || deriveCatalogFallbackTitle(item);
   const actions = document.createElement("div");
   actions.className = "catalog-card__actions catalog-card__actions--overlay";
-  if (cardNeedsMetadata(item) && identityHasCapability("analysis.run")) {
+  if (cardAiQuickActionEligible(item)) {
     const analyzeButton = document.createElement("button");
     analyzeButton.className = "catalog-card__action catalog-card__action--overlay catalog-card__action--analyze catalog-card__action--top-right";
     analyzeButton.type = "button";
     analyzeButton.textContent = "🧠";
-    analyzeButton.dataset.analysisState = "idle";
     analyzeButton.dataset.mediaTitle = displayTitle;
+    const controller = getCardAiQuickAction(item.media_id);
+    const initialState = controller.state || "idle";
+    analyzeButton.dataset.analysisState = initialState;
     analyzeButton.setAttribute("aria-busy", "false");
     analyzeButton.setAttribute("aria-disabled", aiCapability.available ? "false" : "true");
     analyzeButton.setAttribute("aria-label", `Analyze by AI ${displayTitle}`);
     analyzeButton.title = "Analyze by AI";
-    analyzeButton.addEventListener("click", () => handleAnalyzeCatalogCard(item, analyzeButton));
+    analyzeButton.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      handleAnalyzeCatalogCard(item, analyzeButton);
+    });
     actions.appendChild(analyzeButton);
   }
   if (identityHasCapability("metadata.canonical.write")) {
@@ -4093,8 +4346,21 @@ function renderCatalogCard(item) {
       analysisStatus.dataset.analysisSuccess = "true";
     }
   }
-
   card.append(mediaFrame, body, analysisStatus);
+  const analyzeButton = card.querySelector(".catalog-card__action--analyze");
+  if (analyzeButton) {
+    const controller = getCardAiQuickAction(item.media_id);
+    const initialState = controller.state || "idle";
+    if (initialState !== "idle") {
+      setCardAnalyzeButtonState(
+        analyzeButton,
+        initialState,
+        cardAiQuickActionStatusMessage(initialState),
+      );
+    } else {
+      analyzeButton.setAttribute("aria-disabled", aiCapability.available ? "false" : "true");
+    }
+  }
   return card;
 }
 
