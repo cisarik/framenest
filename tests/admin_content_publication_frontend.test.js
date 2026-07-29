@@ -56,6 +56,109 @@ function response(payload, status = 200) {
   };
 }
 
+class TestElement {
+  constructor(document, tagName) {
+    this.ownerDocument = document;
+    this.tagName = String(tagName).toUpperCase();
+    this.children = [];
+    this.parentNode = null;
+    this.dataset = {};
+    this.attributes = new Map();
+    this.listeners = new Map();
+    this.className = "";
+    this.textContent = "";
+    this.type = "";
+    this.disabled = false;
+    this.title = "";
+  }
+
+  appendChild(node) {
+    node.parentNode = this;
+    this.children.push(node);
+    return node;
+  }
+
+  append(...nodes) {
+    nodes.forEach((node) => this.appendChild(node));
+  }
+
+  setAttribute(name, value) {
+    this.attributes.set(String(name).toLowerCase(), String(value));
+  }
+
+  addEventListener(type, listener) {
+    if (!this.listeners.has(type)) this.listeners.set(type, []);
+    this.listeners.get(type).push(listener);
+  }
+}
+
+class TestDocument {
+  createElement(tagName) {
+    return new TestElement(this, tagName);
+  }
+}
+
+function renderAdminPublicationState(item) {
+  const document = new TestDocument();
+  const context = {
+    document,
+    adminCatalogState: {
+      actionStatusByMediaId: new Map(),
+      publishOwners: new Map(),
+    },
+    formatCatalogKind: () => "Video",
+    summarizeAvailability: () => "Available",
+    renderAdminThumbnail: () => document.createElement("div"),
+    safeAdminDetailsItem: (candidate) => candidate,
+    openDetailsDialog: () => {},
+    publishAdminMediaItem: () => {},
+    item,
+  };
+  context.globalThis = context;
+  vm.createContext(context);
+  vm.runInContext(
+    [
+      extractFunction(APP_SOURCE, "adminMediaTitle"),
+      extractFunction(APP_SOURCE, "adminReadinessLabel"),
+      extractFunction(APP_SOURCE, "adminAnalysisLabel"),
+      extractFunction(APP_SOURCE, "adminPublicationLabel"),
+      extractFunction(APP_SOURCE, "adminMissingFieldsLabel"),
+      extractFunction(APP_SOURCE, "createAdminStateBadge"),
+      extractFunction(APP_SOURCE, "renderAdminMediaItem"),
+    ].join("\n"),
+    context,
+  );
+  return vm.runInContext("renderAdminMediaItem(item)", context);
+}
+
+function adminPublicationFixture(overrides) {
+  return {
+    media_id: "media-1",
+    media_kind: "video",
+    display_title: "Catalog item",
+    processed: false,
+    locations: [],
+    publication_ready: true,
+    missing_fields: [],
+    analysis_state: "not_requested",
+    content_publication_state: "unpublished",
+    ...overrides,
+  };
+}
+
+function badgePresentation(cell) {
+  const badge = cell.children[0];
+  return {
+    label: badge.children[1].textContent,
+    className: badge.className,
+    icon: badge.children[0].textContent,
+  };
+}
+
+function actionFor(cell, action) {
+  return cell.children.find((child) => child.dataset.adminAction === action);
+}
+
 test("admin navigation is hidden by default and requires the explicit workflow capability", () => {
   assert.match(
     INDEX_SOURCE,
@@ -207,7 +310,99 @@ test("admin states use literal text and non-color icons without claiming AI appl
   }
   assert.equal(APP_SOURCE.includes("AI applied"), false);
   assert.match(extractFunction(APP_SOURCE, "createAdminStateBadge"), /aria-hidden/);
-  assert.match(extractFunction(APP_SOURCE, "renderAdminMediaItem"), /readyForPublication/);
+});
+
+test("ready unpublished DOM presents ready metadata and an active publish action", () => {
+  const row = renderAdminPublicationState(adminPublicationFixture());
+  const readiness = row.children[2];
+  const publication = row.children[4];
+  const actions = row.children[5];
+
+  assert.deepEqual(badgePresentation(readiness), {
+    label: "Ready to publish",
+    className: "admin-media-badge admin-media-badge--ready",
+    icon: "✓",
+  });
+  assert.equal(readiness.children.length, 1);
+  assert.deepEqual(badgePresentation(publication), {
+    label: "Unpublished",
+    className: "admin-media-badge admin-media-badge--neutral",
+    icon: "○",
+  });
+  assert.equal(actionFor(actions, "publish").disabled, false);
+  assert.equal(actionFor(actions, "retry"), undefined);
+});
+
+test("ready published DOM keeps ready metadata independent from durable publication", () => {
+  const row = renderAdminPublicationState(adminPublicationFixture({
+    content_publication_state: "published",
+  }));
+  const readiness = row.children[2];
+  const publication = row.children[4];
+  const actions = row.children[5];
+
+  assert.deepEqual(badgePresentation(readiness), {
+    label: "Ready to publish",
+    className: "admin-media-badge admin-media-badge--ready",
+    icon: "✓",
+  });
+  assert.equal(readiness.children.length, 1);
+  assert.deepEqual(badgePresentation(publication), {
+    label: "Published",
+    className: "admin-media-badge admin-media-badge--published",
+    icon: "✓",
+  });
+  assert.equal(actionFor(actions, "publish"), undefined);
+  assert.equal(actionFor(actions, "retry"), undefined);
+});
+
+test("incomplete unpublished DOM presents missing metadata and disables publication", () => {
+  const row = renderAdminPublicationState(adminPublicationFixture({
+    publication_ready: false,
+    missing_fields: ["description"],
+  }));
+  const readiness = row.children[2];
+  const publication = row.children[4];
+  const actions = row.children[5];
+
+  assert.deepEqual(badgePresentation(readiness), {
+    label: "Incomplete metadata",
+    className: "admin-media-badge admin-media-badge--incomplete",
+    icon: "!",
+  });
+  assert.equal(readiness.children[1].textContent, "Missing: description");
+  assert.deepEqual(badgePresentation(publication), {
+    label: "Unpublished",
+    className: "admin-media-badge admin-media-badge--neutral",
+    icon: "○",
+  });
+  assert.equal(actionFor(actions, "publish").disabled, true);
+  assert.equal(actionFor(actions, "retry"), undefined);
+});
+
+test("published metadata regression DOM preserves publication without an active action", () => {
+  const row = renderAdminPublicationState(adminPublicationFixture({
+    publication_ready: false,
+    missing_fields: ["description"],
+    content_publication_state: "published",
+  }));
+  const readiness = row.children[2];
+  const publication = row.children[4];
+  const actions = row.children[5];
+
+  assert.deepEqual(badgePresentation(readiness), {
+    label: "Incomplete metadata",
+    className: "admin-media-badge admin-media-badge--incomplete",
+    icon: "!",
+  });
+  assert.equal(readiness.children[1].textContent, "Missing: description");
+  assert.deepEqual(badgePresentation(publication), {
+    label: "Published",
+    className: "admin-media-badge admin-media-badge--published",
+    icon: "✓",
+  });
+  assert.equal(actionFor(actions, "publish"), undefined);
+  assert.equal(actionFor(actions, "retry"), undefined);
 });
 
 test("Inspect reuses Details through a path-redacted adapter", () => {

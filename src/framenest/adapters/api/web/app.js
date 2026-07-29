@@ -6594,12 +6594,12 @@ function renderAdminMediaItem(item) {
   const readinessCell = document.createElement("div");
   readinessCell.className = "admin-media-cell admin-media-cell--readiness";
   readinessCell.setAttribute("role", "cell");
-  const readyForPublication = item.publication_ready && item.content_publication_state !== "published";
+  const publicationReady = item.publication_ready;
   readinessCell.appendChild(
     createAdminStateBadge(
       adminReadinessLabel(item),
-      readyForPublication ? "ready" : "incomplete",
-      readyForPublication ? "✓" : "!",
+      publicationReady ? "ready" : "incomplete",
+      publicationReady ? "✓" : "!",
     ),
   );
   const missing = adminMissingFieldsLabel(item);
