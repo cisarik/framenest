@@ -45,6 +45,23 @@ def _register_library(database_path: Path, library_root: Path) -> LibraryId:
         dispose_engine(engine)
 
 
+def _publish_for_test(database_path: Path, *media_ids: str) -> None:
+    engine = create_sqlite_engine(database_path)
+    try:
+        with engine.begin() as connection:
+            for media_id in media_ids:
+                connection.execute(
+                    text(
+                        "INSERT INTO media_content_publications "
+                        "(media_id, published_at_ms, publication_origin) "
+                        "VALUES (:media_id, 1, 'admin_explicit')"
+                    ),
+                    {"media_id": media_id},
+                )
+    finally:
+        dispose_engine(engine)
+
+
 def test_local_web_playback_endpoint_returns_gif_and_mp4_content_identity_only(
     tmp_path: Path,
 ) -> None:
@@ -70,6 +87,7 @@ def test_local_web_playback_endpoint_returns_gif_and_mp4_content_identity_only(
         assert imported_reaction.status_code == 200
         entropy_media_id = imported_entropy.json()["media"]["id"]
         reaction_media_id = imported_reaction.json()["media"]["id"]
+        _publish_for_test(database_path, entropy_media_id, reaction_media_id)
 
         catalog = client.get("/api/media")
         assert catalog.status_code == 200
@@ -138,6 +156,7 @@ def test_local_web_playback_rejects_offline_location(
         )
         assert imported.status_code == 200
         media_id = imported.json()["media"]["id"]
+        _publish_for_test(database_path, media_id)
 
         engine = create_sqlite_engine(database_path)
         try:
@@ -180,6 +199,7 @@ def test_local_web_download_uses_sanitized_fallback_for_unsafe_filename(
         )
         assert imported.status_code == 200
         media_id = imported.json()["media"]["id"]
+        _publish_for_test(database_path, media_id)
         catalog = client.get("/api/media")
         item = next(i for i in catalog.json()["items"] if i["media_id"] == media_id)
         location = item["locations"][0]
@@ -212,6 +232,7 @@ def test_local_web_download_rejects_missing_file_without_path_disclosure(
         )
         assert imported.status_code == 200
         media_id = imported.json()["media"]["id"]
+        _publish_for_test(database_path, media_id)
         catalog = client.get("/api/media")
         item = next(i for i in catalog.json()["items"] if i["media_id"] == media_id)
         location = item["locations"][0]

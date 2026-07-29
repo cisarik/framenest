@@ -119,6 +119,44 @@ def _audit_rows(database_path: Path) -> list[sqlite3.Row]:
         connection.close()
 
 
+def _seed_publication_target(
+    database_path: Path,
+    *,
+    ready: bool,
+) -> str:
+    media_id = str(uuid.uuid4())
+    connection = sqlite3.connect(database_path)
+    try:
+        connection.execute("PRAGMA foreign_keys=ON")
+        connection.execute(
+            "INSERT INTO logical_media "
+            "(id, media_kind, created_at_ms, updated_at_ms) "
+            "VALUES (?, 'video', 1, 1)",
+            (media_id,),
+        )
+        if ready:
+            connection.execute(
+                "INSERT OR IGNORE INTO canonical_tags "
+                "(key, display_name, created_at_ms, updated_at_ms) "
+                "VALUES ('publish-ready', 'Publish ready', 1, 1)"
+            )
+            connection.execute(
+                "INSERT INTO media_metadata "
+                "(media_id, display_title, description, created_at_ms, updated_at_ms) "
+                "VALUES (?, 'Ready title', 'Ready description', 1, 1)",
+                (media_id,),
+            )
+            connection.execute(
+                "INSERT INTO media_canonical_tags "
+                "(media_id, tag_key, position) VALUES (?, 'publish-ready', 0)",
+                (media_id,),
+            )
+        connection.commit()
+    finally:
+        connection.close()
+    return media_id
+
+
 def _error_code(response) -> str:
     payload = response.json()
     return payload["error"]["code"]
@@ -326,6 +364,12 @@ def test_ordinary_user_reads_succeed(tailscale_client) -> None:
         ),
         ("GET", "/api/ai/media-suggestion-capability", None),
         ("GET", "/api/ai/automatic-analysis-capability", None),
+        ("GET", "/api/admin/media", None),
+        (
+            "PUT",
+            f"/api/admin/media/{uuid.uuid4()}/content-publication",
+            None,
+        ),
     ],
 )
 def test_ordinary_user_direct_privileged_calls_fail(
@@ -771,6 +815,112 @@ def test_ordinary_user_denial_is_recorded(tailscale_client) -> None:
     assert row["action"] == "canonical_tag.create"
     assert row["outcome"] == "denied"
     assert row["http_status"] == 403
+
+
+def test_publication_attempt_is_audited_before_action_with_final_status(
+    tailscale_client,
+) -> None:
+    client, settings = tailscale_client
+    media_id = str(uuid.uuid4())
+
+    response = client.put(
+        f"/api/admin/media/{media_id}/content-publication",
+        headers=_mutation_headers(),
+    )
+
+    assert response.status_code == 404
+    assert response.json()["error"]["code"] == "MEDIA_NOT_FOUND"
+    rows = _audit_rows(settings.database_path)
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["request_id"] == response.headers["x-request-id"]
+    assert row["capability"] == "media.content.publish"
+    assert row["action"] == "media.content_publish"
+    assert row["target_type"] == "media"
+    assert row["target_id"] == media_id
+    assert row["outcome"] == "allowed"
+    assert row["http_status"] == 404
+
+
+def test_publication_incomplete_failure_and_repeated_attempts_are_audited(
+    tailscale_client,
+) -> None:
+    client, settings = tailscale_client
+    incomplete_id = _seed_publication_target(
+        settings.database_path,
+        ready=False,
+    )
+    incomplete = client.put(
+        f"/api/admin/media/{incomplete_id}/content-publication",
+        headers=_mutation_headers(),
+    )
+    assert incomplete.status_code == 409
+
+    ready_id = _seed_publication_target(settings.database_path, ready=True)
+    first = client.put(
+        f"/api/admin/media/{ready_id}/content-publication",
+        headers=_mutation_headers(),
+    )
+    repeated = client.put(
+        f"/api/admin/media/{ready_id}/content-publication",
+        headers=_mutation_headers(),
+    )
+    assert first.status_code == 201
+    assert repeated.status_code == 200
+
+    failed_id = _seed_publication_target(settings.database_path, ready=True)
+    connection = sqlite3.connect(settings.database_path)
+    try:
+        connection.execute("DROP TABLE media_content_publications")
+        connection.commit()
+    finally:
+        connection.close()
+    failed = client.put(
+        f"/api/admin/media/{failed_id}/content-publication",
+        headers=_mutation_headers(),
+    )
+    assert failed.status_code == 500
+
+    rows = [
+        row
+        for row in _audit_rows(settings.database_path)
+        if row["action"] == "media.content_publish"
+    ]
+    assert [row["target_id"] for row in rows] == [
+        incomplete_id,
+        ready_id,
+        ready_id,
+        failed_id,
+    ]
+    assert [row["http_status"] for row in rows] == [409, 201, 200, 500]
+
+
+def test_denied_publication_attempt_is_audited_without_mutation(
+    tailscale_client,
+) -> None:
+    client, settings = tailscale_client
+    media_id = _seed_publication_target(settings.database_path, ready=True)
+
+    denied = client.put(
+        f"/api/admin/media/{media_id}/content-publication",
+        headers=_mutation_headers(USER_LOGIN),
+    )
+
+    assert denied.status_code == 403
+    rows = _audit_rows(settings.database_path)
+    assert len(rows) == 1
+    assert rows[0]["action"] == "media.content_publish"
+    assert rows[0]["target_id"] == media_id
+    assert rows[0]["outcome"] == "denied"
+    assert rows[0]["http_status"] == 403
+    connection = sqlite3.connect(settings.database_path)
+    try:
+        assert connection.execute(
+            "SELECT COUNT(*) FROM media_content_publications WHERE media_id = ?",
+            (media_id,),
+        ).fetchone() == (0,)
+    finally:
+        connection.close()
 
 
 def test_unmapped_privileged_denial_is_recorded_once(tailscale_client) -> None:

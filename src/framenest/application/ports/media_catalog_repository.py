@@ -23,6 +23,7 @@ class MediaCatalogQuery:
     collection_key: MediaCollectionKey | None
     content_category: str | None = None
     acquisition_source: str | None = None
+    published_only: bool = False
 
 
 @dataclass(frozen=True, slots=True)

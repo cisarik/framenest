@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, UUID4, field_validator
 
@@ -15,7 +15,13 @@ from framenest.application.ports.media_metadata_repository import (
     FrameNestMediaMetadataRepositoryError,
     MediaMetadataMediaNotFoundError,
 )
+from framenest.adapters.api.content_audience_api import (
+    ContentAudienceUnavailableError,
+    content_audience_allows,
+)
+from framenest.application.content_publication import ContentAudiencePolicy
 from framenest.domain import FrameNestIdentityError
+from framenest.domain.identities import MediaId
 from framenest.domain.media_metadata import (
     CanonicalTagDisplayName,
     CanonicalTagKey,
@@ -162,6 +168,7 @@ class MediaMetadataApiDependencies:
     get_metadata: object
     save_metadata: object
     catalog_available: Callable[[], bool]
+    audience_policy: ContentAudiencePolicy | None = None
 
 
 def create_media_metadata_api_router(dependencies: MediaMetadataApiDependencies) -> APIRouter:
@@ -235,9 +242,29 @@ def create_media_metadata_api_router(dependencies: MediaMetadataApiDependencies)
             503: {"model": ErrorResponse},
         },
     )
-    def get_metadata(media_id: UUID4) -> MediaMetadataResponse | JSONResponse:
+    def get_metadata(
+        media_id: UUID4,
+        request: Request,
+    ) -> MediaMetadataResponse | JSONResponse:
         if not dependencies.catalog_available():
             return _catalog_unavailable_response()
+        try:
+            if not content_audience_allows(
+                request=request,
+                media_id=MediaId.from_string(str(media_id)),
+                policy=dependencies.audience_policy,
+            ):
+                return _error_response(
+                    404,
+                    MEDIA_NOT_FOUND_CODE,
+                    MEDIA_NOT_FOUND_MESSAGE,
+                )
+        except ContentAudienceUnavailableError:
+            return _error_response(
+                500,
+                MEDIA_METADATA_OPERATION_FAILED_CODE,
+                MEDIA_METADATA_OPERATION_FAILED_MESSAGE,
+            )
         try:
             result = dependencies.get_metadata.execute(str(media_id))
         except MediaMetadataMediaNotFoundError:
@@ -263,9 +290,27 @@ def create_media_metadata_api_router(dependencies: MediaMetadataApiDependencies)
     def save_metadata(
         media_id: UUID4,
         request: MediaMetadataSaveRequest,
+        http_request: Request,
     ) -> MediaMetadataSaveResponse | JSONResponse:
         if not dependencies.catalog_available():
             return _catalog_unavailable_response()
+        try:
+            if not content_audience_allows(
+                request=http_request,
+                media_id=MediaId.from_string(str(media_id)),
+                policy=dependencies.audience_policy,
+            ):
+                return _error_response(
+                    404,
+                    MEDIA_NOT_FOUND_CODE,
+                    MEDIA_NOT_FOUND_MESSAGE,
+                )
+        except ContentAudienceUnavailableError:
+            return _error_response(
+                500,
+                MEDIA_METADATA_OPERATION_FAILED_CODE,
+                MEDIA_METADATA_OPERATION_FAILED_MESSAGE,
+            )
         try:
             result = dependencies.save_metadata.execute(
                 str(media_id),

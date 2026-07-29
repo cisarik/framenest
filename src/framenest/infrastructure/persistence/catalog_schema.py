@@ -121,6 +121,41 @@ logical_media = Table(
     ),
 )
 
+media_content_publications = Table(
+    "media_content_publications",
+    metadata,
+    Column(
+        "media_id",
+        Text(),
+        ForeignKey(
+            "logical_media.id",
+            ondelete="CASCADE",
+            name="fk_media_content_publications_media_id",
+        ),
+        primary_key=True,
+        nullable=False,
+    ),
+    Column("published_at_ms", Integer(), nullable=False),
+    Column("publication_origin", Text(), nullable=False),
+    CheckConstraint(
+        "length(media_id) = 36",
+        name="ck_media_content_publications_media_id_length",
+    ),
+    CheckConstraint(
+        "published_at_ms >= 0",
+        name="ck_media_content_publications_published_at_non_negative",
+    ),
+    CheckConstraint(
+        "publication_origin IN ('legacy_backfill', 'admin_explicit')",
+        name="ck_media_content_publications_origin",
+    ),
+    Index(
+        "ix_media_content_publications_published_at",
+        "published_at_ms",
+        "media_id",
+    ),
+)
+
 physical_media_locations = Table(
     "physical_media_locations",
     metadata,

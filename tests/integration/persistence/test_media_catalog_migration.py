@@ -14,7 +14,7 @@ PRODUCTION_VERSIONS_PACKAGE = (
     "framenest.infrastructure.persistence.alembic_environment.versions"
 )
 TARGET_MEDIA_CATALOG_REVISION = "0004"
-CURRENT_HEAD_REVISION = "0020"
+CURRENT_HEAD_REVISION = "0021"
 TARGET_PREVIOUS_REVISION = "0003"
 
 DEVICE_ID = "12345678-1234-4234-9234-123456789abc"
@@ -405,6 +405,17 @@ def test_downgrade_from_0004_to_0003_removes_only_media_catalog_objects(
     upgrade_database_to_head(settings)
     _insert_device_and_libraries(settings.database_path)
     _insert_media(settings.database_path)
+    connection = _connect(settings.database_path)
+    try:
+        connection.execute(
+            "INSERT INTO media_content_publications "
+            "(media_id, published_at_ms, publication_origin) "
+            "VALUES (?, 1, 'admin_explicit')",
+            (MEDIA_ID,),
+        )
+        connection.commit()
+    finally:
+        connection.close()
 
     _downgrade_to_revision(settings.database_path, TARGET_PREVIOUS_REVISION)
 

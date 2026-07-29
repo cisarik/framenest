@@ -5,12 +5,19 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+from fastapi import Request
 from fastapi.testclient import TestClient
 from sqlalchemy import text
 
 from framenest.adapters.api.application import create_app
+from framenest.adapters.api.tailscale_ingress import SCOPE_IDENTITY
 from framenest.configuration import FrameNestSettings
 from framenest.domain import Device, DeviceId, Library, LibraryId, LibraryPathFlavor, LibraryRoot
+from framenest.domain.identity_access import (
+    CAPABILITIES_BY_ROLE,
+    IdentityContext,
+    ROLE_ADMIN,
+)
 from framenest.infrastructure.persistence.device_repository import SqliteDeviceRepository
 from framenest.infrastructure.persistence.engine import create_sqlite_engine, dispose_engine
 from framenest.infrastructure.persistence.library_repository import SqliteLibraryRepository
@@ -41,6 +48,24 @@ def _register_library(database_path: Path, library_root: Path) -> LibraryId:
         dispose_engine(engine)
 
 
+def _admin_client(settings: FrameNestSettings) -> TestClient:
+    app = create_app(settings=settings)
+
+    @app.middleware("http")
+    async def inject_admin(request: Request, call_next):
+        request.scope[SCOPE_IDENTITY] = IdentityContext(
+            login="admin@example.com",
+            login_key="admin@example.com",
+            display_name="Admin",
+            role=ROLE_ADMIN,
+            capabilities=CAPABILITIES_BY_ROLE[ROLE_ADMIN],
+            provenance="test",
+        )
+        return await call_next(request)
+
+    return TestClient(app)
+
+
 def test_local_web_catalog_search_tags_pagination_locations_and_read_only_get(
     tmp_path: Path,
 ) -> None:
@@ -53,7 +78,7 @@ def test_local_web_catalog_search_tags_pagination_locations_and_read_only_get(
     upgrade_database_to_head(settings)
     library_id = _register_library(database_path, library_root)
 
-    with TestClient(create_app(settings=settings)) as client:
+    with _admin_client(settings) as client:
         imported_entropy = client.post(
             f"/api/libraries/{library_id}/media-imports",
             json={"relative_path": "entropy.mp4"},
@@ -89,6 +114,18 @@ def test_local_web_catalog_search_tags_pagination_locations_and_read_only_get(
         engine = create_sqlite_engine(database_path)
         try:
             with engine.begin() as connection:
+                connection.execute(
+                    text(
+                        "INSERT INTO media_content_publications "
+                        "(media_id, published_at_ms, publication_origin) "
+                        "VALUES (:entropy, 1, 'admin_explicit'), "
+                        "(:reaction, 1, 'admin_explicit')"
+                    ),
+                    {
+                        "entropy": entropy_media_id,
+                        "reaction": reaction_media_id,
+                    },
+                )
                 connection.execute(
                     text(
                         "INSERT INTO physical_media_locations "

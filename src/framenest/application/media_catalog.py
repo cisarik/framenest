@@ -52,6 +52,7 @@ class ListMediaCatalog:
             collection_key=collection_key,
             content_category=_normalize_content_category(content_category),
             acquisition_source=_normalize_acquisition_source(acquisition_source),
+            published_only=True,
         )
         return self.repository.list_media(query)
 

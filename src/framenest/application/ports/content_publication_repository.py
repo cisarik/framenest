@@ -1,0 +1,111 @@
+"""Persistence port for content publication and the admin workflow read model."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Literal, Protocol
+
+from framenest.application.ports.media_catalog_repository import (
+    CatalogMediaLocation,
+    CatalogMediaTag,
+)
+from framenest.domain.content_publication import (
+    ContentPublication,
+    ContentPublicationReadiness,
+)
+from framenest.domain.identities import MediaId
+
+PublicationFilter = Literal["unpublished", "published", "all"]
+ReadinessFilter = Literal["all", "ready", "incomplete"]
+AnalysisFilter = Literal[
+    "all",
+    "not_requested",
+    "pending",
+    "analyzing",
+    "analyzed",
+    "failed",
+]
+
+
+class FrameNestContentPublicationRepositoryError(RuntimeError):
+    """Sanitized content-publication persistence failure."""
+
+
+class ContentPublicationMediaNotFoundError(
+    FrameNestContentPublicationRepositoryError
+):
+    """Raised when the target logical medium is absent."""
+
+
+@dataclass(frozen=True, slots=True)
+class AdminMediaQuery:
+    """Normalized bounded admin workflow query."""
+
+    q: str | None
+    tag_keys: tuple[str, ...]
+    publication: PublicationFilter
+    readiness: ReadinessFilter
+    analysis: AnalysisFilter
+    limit: int
+    offset: int
+
+
+@dataclass(frozen=True, slots=True)
+class AdminMediaItem:
+    """One catalog-safe item in the administrator publication workflow."""
+
+    media_id: str
+    media_kind: str
+    created_at_ms: int
+    updated_at_ms: int
+    display_title: str | None
+    description: str | None
+    collection_key: str | None
+    processed_at_ms: int | None
+    content_category: str
+    acquisition_source: str
+    tags: tuple[CatalogMediaTag, ...]
+    locations: tuple[CatalogMediaLocation, ...]
+    publication: ContentPublication | None
+    readiness: ContentPublicationReadiness
+    analysis_state: str
+
+
+@dataclass(frozen=True, slots=True)
+class AdminMediaPage:
+    """Deterministic bounded page for the publication workflow."""
+
+    items: tuple[AdminMediaItem, ...]
+    total: int
+    limit: int
+    offset: int
+    q: str | None
+    tag_keys: tuple[str, ...]
+    publication: PublicationFilter
+    readiness: ReadinessFilter
+    analysis: AnalysisFilter
+
+
+@dataclass(frozen=True, slots=True)
+class PublishContentResult:
+    """Atomic publication decision and its current persisted representation."""
+
+    status: Literal["published", "already_published", "not_ready"]
+    publication: ContentPublication | None
+    readiness: ContentPublicationReadiness
+
+
+class ContentPublicationRepository(Protocol):
+    """Persistence contract for audience reads and explicit publication."""
+
+    def media_exists(self, media_id: MediaId) -> bool:
+        """Return whether the logical medium exists."""
+
+    def is_published(self, media_id: MediaId) -> bool:
+        """Return whether a publication row exists."""
+
+    def list_admin_media(self, query: AdminMediaQuery) -> AdminMediaPage:
+        """Return one filtered admin workflow page."""
+
+    def publish(self, media_id: MediaId, published_at_ms: int) -> PublishContentResult:
+        """Atomically publish a ready item or return the current decision."""

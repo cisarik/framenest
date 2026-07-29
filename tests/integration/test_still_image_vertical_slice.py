@@ -8,11 +8,16 @@ import sqlite3
 import time
 import uuid
 
+from fastapi import Request
 from fastapi.testclient import TestClient
 from PIL import Image
 from sqlalchemy import insert
 
 from framenest.adapters.api.application import create_app
+from framenest.adapters.api.tailscale_ingress import (
+    SCOPE_AUDIT_EVENT_ID,
+    SCOPE_IDENTITY,
+)
 from framenest.application.library_scan import LibraryScanCandidateKind
 from framenest.application.media_analysis import (
     MediaRelativePath,
@@ -30,12 +35,36 @@ from framenest.application.media_suggestion import (
 )
 from framenest.configuration import FrameNestSettings
 from framenest.domain.identities import LibraryId, MediaId, MediaLocationId
+from framenest.domain.identity_access import (
+    CAPABILITIES_BY_ROLE,
+    IdentityContext,
+    ROLE_ADMIN,
+)
 from framenest.domain.media import MediaKind
 from framenest.infrastructure.persistence.catalog_schema import devices, libraries
 from framenest.infrastructure.persistence.engine import create_sqlite_engine, dispose_engine
 from framenest.infrastructure.persistence.migrations import upgrade_database_to_head
 
 DESTINATION_ID = LibraryId(uuid.UUID("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"))
+
+
+def _admin_app(settings: FrameNestSettings):
+    app = create_app(settings=settings)
+
+    @app.middleware("http")
+    async def inject_admin(request: Request, call_next):
+        request.scope[SCOPE_IDENTITY] = IdentityContext(
+            login="admin@example.com",
+            login_key="admin@example.com",
+            display_name="Admin",
+            role=ROLE_ADMIN,
+            capabilities=CAPABILITIES_BY_ROLE[ROLE_ADMIN],
+            provenance="test",
+        )
+        request.scope[SCOPE_AUDIT_EVENT_ID] = "test-audit"
+        return await call_next(request)
+
+    return app
 
 
 def _png_payload(*, size: tuple[int, int] = (16, 12)) -> bytes:
@@ -184,7 +213,7 @@ def test_still_image_upload_catalog_content_and_single_provider_call(
     _seed_publication_library(database_path, published_root)
     payload = _jpeg_payload()
 
-    with TestClient(create_app(settings=settings)) as client:
+    with TestClient(_admin_app(settings)) as client:
         created = client.post(
             "/api/uploads",
             json={
@@ -215,6 +244,26 @@ def test_still_image_upload_catalog_content_and_single_provider_call(
             time.sleep(0.01)
         assert status["state"] == "cataloged"
         media_id = status["media_id"]
+
+        tag = client.post(
+            "/api/canonical-tags",
+            json={"key": "still", "display_name": "Still"},
+        )
+        assert tag.status_code == 201
+        prepared = client.put(
+            f"/api/media/{media_id}/metadata",
+            json={
+                "display_title": "Canonical Still",
+                "description": "Saved canonical description.",
+                "tag_keys": ["still"],
+            },
+        )
+        assert prepared.status_code == 200
+        published = client.put(
+            f"/api/admin/media/{media_id}/content-publication",
+        )
+        assert published.status_code == 201
+        assert published.json()["status"] == "published"
 
         catalog = client.get("/api/media")
         assert catalog.status_code == 200

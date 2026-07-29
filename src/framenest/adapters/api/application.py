@@ -17,6 +17,10 @@ from framenest.adapters.api.media_analysis_api import (
     MediaAnalysisApiDependencies,
     create_media_analysis_api_router,
 )
+from framenest.adapters.api.content_publication_api import (
+    ContentPublicationApiDependencies,
+    create_content_publication_api_router,
+)
 from framenest.adapters.api.gallery_preview_api import (
     GalleryPreviewApiDependencies,
     create_gallery_preview_api_router,
@@ -59,6 +63,11 @@ from framenest.adapters.api.tailscale_ingress import (
     TailscaleIngressMiddleware,
 )
 from framenest.application.library_scan import PreviewLibraryScan
+from framenest.application.content_publication import (
+    ContentAudiencePolicy,
+    ListAdminMedia,
+    PublishContent,
+)
 from framenest.application.media_catalog import ListMediaCatalog
 from framenest.application.media_import import ImportMediaFromScanCandidate
 from framenest.application.media_metadata import (
@@ -128,6 +137,9 @@ from framenest.infrastructure.media_analysis.gallery_preview import (
     PillowGalleryPreviewEncoder,
 )
 from framenest.infrastructure.persistence.engine import create_sqlite_engine, dispose_engine
+from framenest.infrastructure.persistence.content_publication_repository import (
+    SqliteContentPublicationRepository,
+)
 from framenest.infrastructure.persistence.library_repository import SqliteLibraryRepository
 from framenest.infrastructure.persistence.media_repository import SqliteMediaRepository
 from framenest.infrastructure.persistence.media_catalog_repository import (
@@ -199,6 +211,8 @@ def create_app(
     media_analysis_lifecycle_api_dependencies: (
         MediaAnalysisLifecycleApiDependencies | None
     ) = None,
+    content_publication_api_dependencies: ContentPublicationApiDependencies
+    | None = None,
     upload_api_dependencies: UploadApiDependencies | None = None,
     youtube_operator_api_dependencies: YouTubeOperatorApiDependencies
     | None = None,
@@ -222,6 +236,8 @@ def create_app(
     owned_upload_catalog = None
     owned_upload_catalog_coordinator = None
     owned_media_analysis_run_repository = None
+    owned_content_publication_repository = None
+    owned_content_audience_policy = None
     owned_media_analysis_coordinator = None
     owned_youtube_claim_repository = None
     owned_youtube_staging = None
@@ -237,6 +253,7 @@ def create_app(
         or gallery_preview_api_dependencies is None
         or media_suggestion_api_dependencies is None
         or media_analysis_lifecycle_api_dependencies is None
+        or content_publication_api_dependencies is None
         or upload_api_dependencies is None
     ):
         owned_engine = create_sqlite_engine(resolved_settings.database_path)
@@ -247,6 +264,12 @@ def create_app(
         owned_upload_session_repository = SqliteUploadSessionRepository(owned_engine)
         owned_media_analysis_run_repository = SqliteMediaAnalysisRunRepository(
             owned_engine
+        )
+        owned_content_publication_repository = (
+            SqliteContentPublicationRepository(owned_engine)
+        )
+        owned_content_audience_policy = ContentAudiencePolicy(
+            owned_content_publication_repository
         )
         owned_youtube_claim_repository = (
             SqliteYouTubeAcquisitionClaimRepository(owned_engine)
@@ -286,6 +309,7 @@ def create_app(
             get_metadata=GetMediaMetadata(owned_media_metadata_repository),
             save_metadata=SaveMediaMetadata(owned_media_metadata_repository),
             catalog_available=resolved_settings.database_path.exists,
+            audience_policy=owned_content_audience_policy,
         )
     if media_analysis_api_dependencies is None:
         assert owned_library_repository is not None
@@ -306,6 +330,7 @@ def create_app(
                 LocalMediaContentReader(),
             ),
             catalog_available=resolved_settings.database_path.exists,
+            audience_policy=owned_content_audience_policy,
         )
     if gallery_preview_api_dependencies is None:
         assert owned_media_repository is not None
@@ -320,6 +345,7 @@ def create_app(
                 FilesystemGalleryPreviewCache(resolved_settings.gallery_preview_cache_path),
             ),
             catalog_available=resolved_settings.database_path.exists,
+            audience_policy=owned_content_audience_policy,
         )
     if media_suggestion_api_dependencies is None:
         assert owned_library_repository is not None
@@ -355,6 +381,7 @@ def create_app(
             last_status_check=_last_status_payload(resolved_ai.last_status),
             last_connection_test=_last_test_payload(resolved_ai.last_test),
             read_status=_media_suggestion_status_reader(resolved_ai),
+            audience_policy=owned_content_audience_policy,
         )
     if media_analysis_lifecycle_api_dependencies is None:
         assert owned_media_analysis_run_repository is not None
@@ -438,6 +465,18 @@ def create_app(
                 if movie_identification_executor is not None
                 else None
             ),
+            audience_policy=owned_content_audience_policy,
+        )
+    if content_publication_api_dependencies is None:
+        assert owned_content_publication_repository is not None
+        content_publication_api_dependencies = ContentPublicationApiDependencies(
+            list_admin_media=ListAdminMedia(
+                owned_content_publication_repository
+            ),
+            publish_content=PublishContent(
+                owned_content_publication_repository
+            ),
+            catalog_available=resolved_settings.database_path.exists,
         )
     if upload_api_dependencies is None:
         assert owned_upload_session_repository is not None
@@ -696,6 +735,11 @@ def create_app(
     app.include_router(
         create_media_analysis_lifecycle_api_router(
             media_analysis_lifecycle_api_dependencies
+        )
+    )
+    app.include_router(
+        create_content_publication_api_router(
+            content_publication_api_dependencies
         )
     )
     app.include_router(create_upload_api_router(upload_api_dependencies))

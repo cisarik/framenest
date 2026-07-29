@@ -4,12 +4,19 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from fastapi import Request
 from fastapi.testclient import TestClient
 from sqlalchemy import text
 
 from framenest.adapters.api.application import create_app
+from framenest.adapters.api.tailscale_ingress import SCOPE_IDENTITY
 from framenest.configuration import FrameNestSettings
 from framenest.domain import MediaId
+from framenest.domain.identity_access import (
+    CAPABILITIES_BY_ROLE,
+    IdentityContext,
+    ROLE_ADMIN,
+)
 from framenest.infrastructure.persistence.engine import create_sqlite_engine, dispose_engine
 from framenest.infrastructure.persistence.migrations import upgrade_database_to_head
 
@@ -31,13 +38,47 @@ def _insert_media(database_path: Path) -> MediaId:
     return media_id
 
 
+def _admin_client(settings: FrameNestSettings) -> TestClient:
+    app = create_app(settings=settings)
+
+    @app.middleware("http")
+    async def inject_admin(request: Request, call_next):
+        request.scope[SCOPE_IDENTITY] = IdentityContext(
+            login="admin@example.com",
+            login_key="admin@example.com",
+            display_name="Admin",
+            role=ROLE_ADMIN,
+            capabilities=CAPABILITIES_BY_ROLE[ROLE_ADMIN],
+            provenance="test",
+        )
+        return await call_next(request)
+
+    return TestClient(app)
+
+
+def _publish_for_test(database_path: Path, media_id: MediaId) -> None:
+    engine = create_sqlite_engine(database_path)
+    try:
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "INSERT INTO media_content_publications "
+                    "(media_id, published_at_ms, publication_origin) "
+                    "VALUES (:media_id, 1, 'admin_explicit')"
+                ),
+                {"media_id": media_id.to_string()},
+            )
+    finally:
+        dispose_engine(engine)
+
+
 def test_local_web_persists_display_title_and_canonical_tags(tmp_path: Path) -> None:
     database_path = tmp_path / "catalog.sqlite3"
     settings = FrameNestSettings(database_path=database_path, _env_file=None)
     upgrade_database_to_head(settings)
     media_id = _insert_media(database_path)
 
-    with TestClient(create_app(settings=settings)) as client:
+    with _admin_client(settings) as client:
         math = client.post("/api/canonical-tags", json={"key": "mathematics", "display_name": "Math"})
         compression = client.post(
             "/api/canonical-tags",
@@ -90,8 +131,9 @@ def test_local_web_metadata_api_exposes_processed_collection_lifecycle(
     settings = FrameNestSettings(database_path=database_path, _env_file=None)
     upgrade_database_to_head(settings)
     media_id = _insert_media(database_path)
+    _publish_for_test(database_path, media_id)
 
-    with TestClient(create_app(settings=settings)) as client:
+    with _admin_client(settings) as client:
         client.post("/api/canonical-tags", json={"key": "mathematics", "display_name": "Math"})
         client.post("/api/canonical-tags", json={"key": "compression", "display_name": "Compression"})
 
@@ -246,7 +288,7 @@ def test_metadata_save_leaves_automatic_analysis_result_and_path_unchanged(
     finally:
         dispose_engine(engine)
 
-    with TestClient(create_app(settings=settings)) as client:
+    with _admin_client(settings) as client:
         before = client.get(f"/api/media/{media_id}/automatic-analysis")
         assert before.status_code == 200
         assert before.json()["state"] == "analyzed"

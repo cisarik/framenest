@@ -13,7 +13,7 @@ from framenest.configuration import FrameNestSettings
 PRODUCTION_VERSIONS_PACKAGE = (
     "framenest.infrastructure.persistence.alembic_environment.versions"
 )
-CURRENT_HEAD_REVISION = "0020"
+CURRENT_HEAD_REVISION = "0021"
 TARGET_COLLECTION_REVISION = "0007"
 TARGET_PREVIOUS_REVISION = "0006"
 DEVICE_ID = "12345678-1234-4234-9234-123456789abc"
@@ -345,6 +345,12 @@ def test_downgrade_from_0007_to_0006_removes_collection_columns_metadata_tables_
         connection.execute("PRAGMA foreign_keys=OFF")
         connection.execute(
             "DELETE FROM media_canonical_tags WHERE media_id = ?", (MEDIA_ID,)
+        )
+        connection.execute(
+            "INSERT INTO media_content_publications "
+            "(media_id, published_at_ms, publication_origin) "
+            "VALUES (?, 1, 'admin_explicit')",
+            (MEDIA_ID,),
         )
         connection.commit()
     finally:

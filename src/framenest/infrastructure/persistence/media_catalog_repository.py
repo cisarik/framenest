@@ -20,6 +20,7 @@ from framenest.infrastructure.persistence.catalog_schema import (
     canonical_tags,
     logical_media,
     media_canonical_tags,
+    media_content_publications,
     media_metadata,
     physical_media_locations,
 )
@@ -131,6 +132,11 @@ def _filtered_media_select(query: MediaCatalogQuery, tag_values: tuple[str, ...]
         media_metadata,
         media_metadata.c.media_id == logical_media.c.id,
     )
+    if query.published_only:
+        joined = joined.join(
+            media_content_publications,
+            media_content_publications.c.media_id == logical_media.c.id,
+        )
     if tag_values:
         joined = joined.join(
             media_canonical_tags,

@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -15,6 +15,11 @@ from framenest.application.media_analysis_lifecycle import (
     ReadAutomaticMediaAnalysis,
     public_view_from_run,
 )
+from framenest.adapters.api.content_audience_api import (
+    ContentAudienceUnavailableError,
+    content_audience_allows,
+)
+from framenest.application.content_publication import ContentAudiencePolicy
 from framenest.domain.identities import FrameNestIdentityError, MediaId, MediaLocationId
 from framenest.domain.media_analysis_runs import (
     AUTOMATIC_POST_CATALOG_ANALYSIS_DEFINITION,
@@ -115,6 +120,7 @@ class MediaAnalysisLifecycleApiDependencies:
         Callable[[MediaId], AutomaticAnalysisPublicView] | None
     ) = None
     execute_movie_identification: Callable[[MediaAnalysisRun], MediaAnalysisRun] | None = None
+    audience_policy: ContentAudiencePolicy | None = None
 
 
 def create_media_analysis_lifecycle_api_router(
@@ -139,11 +145,21 @@ def create_media_analysis_lifecycle_api_router(
         "/api/media/{media_id}/automatic-analysis",
         response_model=AutomaticAnalysisStatusResponse,
     )
-    def automatic_analysis_status(media_id: str) -> AutomaticAnalysisStatusResponse | JSONResponse:
+    def automatic_analysis_status(
+        media_id: str,
+        request: Request,
+    ) -> AutomaticAnalysisStatusResponse | JSONResponse:
         try:
             parsed_media_id = MediaId.from_string(media_id)
         except FrameNestIdentityError:
             return _error("MEDIA_NOT_FOUND", "Media was not found.", 404)
+        audience_error = _audience_error(
+            request,
+            parsed_media_id,
+            dependencies.audience_policy,
+        )
+        if audience_error is not None:
+            return audience_error
         if dependencies.read_analysis is None:
             view = AutomaticAnalysisPublicView(
                 state="not_requested",
@@ -187,7 +203,20 @@ def create_media_analysis_lifecycle_api_router(
         media_id: str,
         location_id: str,
         request: ManualDurableAnalysisRequest,
+        http_request: Request,
     ) -> AutomaticAnalysisStatusResponse | JSONResponse:
+        try:
+            parsed_media_id = MediaId.from_string(media_id)
+            parsed_location_id = MediaLocationId.from_string(location_id)
+        except FrameNestIdentityError:
+            return _error("MEDIA_NOT_FOUND", "Media was not found.", 404)
+        audience_error = _audience_error(
+            http_request,
+            parsed_media_id,
+            dependencies.audience_policy,
+        )
+        if audience_error is not None:
+            return audience_error
         if request.confirm_cloud_upload is not True:
             return _error(
                 "CLOUD_CONFIRMATION_REQUIRED",
@@ -206,11 +235,6 @@ def create_media_analysis_lifecycle_api_router(
                 "Durable analysis request is unavailable.",
                 503,
             )
-        try:
-            parsed_media_id = MediaId.from_string(media_id)
-            parsed_location_id = MediaLocationId.from_string(location_id)
-        except FrameNestIdentityError:
-            return _error("MEDIA_NOT_FOUND", "Media was not found.", 404)
         try:
             run = dependencies.request_manual_analysis(
                 parsed_media_id,
@@ -234,11 +258,19 @@ def create_media_analysis_lifecycle_api_router(
     )
     def movie_identification_status(
         media_id: str,
+        request: Request,
     ) -> AutomaticAnalysisStatusResponse | JSONResponse:
         try:
             parsed_media_id = MediaId.from_string(media_id)
         except FrameNestIdentityError:
             return _error("MEDIA_NOT_FOUND", "Media was not found.", 404)
+        audience_error = _audience_error(
+            request,
+            parsed_media_id,
+            dependencies.audience_policy,
+        )
+        if audience_error is not None:
+            return audience_error
         if dependencies.read_movie_identification is None:
             view = public_view_from_run(None)
         else:
@@ -269,7 +301,20 @@ def create_media_analysis_lifecycle_api_router(
         media_id: str,
         location_id: str,
         request: ManualMovieIdentificationRequest,
+        http_request: Request,
     ) -> AutomaticAnalysisStatusResponse | JSONResponse:
+        try:
+            parsed_media_id = MediaId.from_string(media_id)
+            parsed_location_id = MediaLocationId.from_string(location_id)
+        except FrameNestIdentityError:
+            return _error("MEDIA_NOT_FOUND", "Media was not found.", 404)
+        audience_error = _audience_error(
+            http_request,
+            parsed_media_id,
+            dependencies.audience_policy,
+        )
+        if audience_error is not None:
+            return audience_error
         if request.confirm_cloud_upload is not True:
             return _error(
                 "CLOUD_CONFIRMATION_REQUIRED",
@@ -291,11 +336,6 @@ def create_media_analysis_lifecycle_api_router(
                 "Movie identification request is unavailable.",
                 503,
             )
-        try:
-            parsed_media_id = MediaId.from_string(media_id)
-            parsed_location_id = MediaLocationId.from_string(location_id)
-        except FrameNestIdentityError:
-            return _error("MEDIA_NOT_FOUND", "Media was not found.", 404)
         try:
             run = dependencies.request_movie_identification(
                 parsed_media_id,
@@ -378,3 +418,24 @@ def _error(code: str, message: str, status_code: int) -> JSONResponse:
         status_code=status_code,
         content=ErrorResponse(error=ErrorBody(code=code, message=message)).model_dump(),
     )
+
+
+def _audience_error(
+    request: Request,
+    media_id: MediaId,
+    policy: ContentAudiencePolicy | None,
+) -> JSONResponse | None:
+    try:
+        if content_audience_allows(
+            request=request,
+            media_id=media_id,
+            policy=policy,
+        ):
+            return None
+        return _error("MEDIA_NOT_FOUND", "Media was not found.", 404)
+    except ContentAudienceUnavailableError:
+        return _error(
+            "ANALYSIS_STATUS_UNAVAILABLE",
+            "Analysis status is unavailable.",
+            503,
+        )

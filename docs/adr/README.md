@@ -67,9 +67,10 @@ An accepted ADR may only be changed by a later ADR that supersedes it. Editing a
 | 0040 | Canonical Upload Byte Identity Foundation | Accepted | 2026-07-15 | [0040-canonical-upload-byte-identity-foundation.md](0040-canonical-upload-byte-identity-foundation.md) |
 | 0041 | Exact-Byte Upload Duplicate Disposition | Accepted | 2026-07-18 | [0041-exact-byte-upload-duplicate-disposition.md](0041-exact-byte-upload-duplicate-disposition.md) |
 | 0042 | Atomic Upload Publication | Accepted | 2026-07-18 | [0042-atomic-upload-publication.md](0042-atomic-upload-publication.md) |
-| 0043 | Published-to-Cataloged Upload Transaction | Accepted | 2026-07-19 | [0043-upload-to-catalog-transaction.md](0043-upload-to-catalog-transaction.md) |
+| 0043 | Published-to-Cataloged Upload Transaction | Accepted; Gallery-eligibility portion superseded by [ADR-0049](0049-durable-content-publication-boundary.md) | 2026-07-19 | [0043-upload-to-catalog-transaction.md](0043-upload-to-catalog-transaction.md) |
 | 0044 | Durable Automatic Post-Catalog AI Analysis | Accepted | 2026-07-19 | [0044-durable-automatic-post-catalog-analysis.md](0044-durable-automatic-post-catalog-analysis.md) |
 | 0045 | Content Classification, Acquisition Source, and Movie Identification | Accepted | 2026-07-22 | [0045-content-classification-and-movie-identification.md](0045-content-classification-and-movie-identification.md) |
 | 0046 | YouTube Manual Ingestion and Provenance | Accepted | 2026-07-23 | [0046-youtube-manual-ingestion-and-provenance.md](0046-youtube-manual-ingestion-and-provenance.md) |
 | 0047 | Operator CLI Configuration and Working-Directory Hygiene | Accepted | 2026-07-23 | [0047-operator-cli-configuration-and-working-directory-hygiene.md](0047-operator-cli-configuration-and-working-directory-hygiene.md) |
 | 0048 | Tailscale Remote Access and Identity Foundation | Accepted | 2026-07-25 | [0048-tailscale-remote-access-and-identity-foundation.md](0048-tailscale-remote-access-and-identity-foundation.md) |
+| 0049 | Durable Content Publication Boundary | Accepted | 2026-07-29 | [0049-durable-content-publication-boundary.md](0049-durable-content-publication-boundary.md) |

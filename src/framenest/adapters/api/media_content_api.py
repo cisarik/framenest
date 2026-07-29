@@ -24,6 +24,11 @@ from framenest.application.ports.library_repository import (
 from framenest.application.ports.media_repository import (
     FrameNestMediaRepositoryError,
 )
+from framenest.adapters.api.content_audience_api import (
+    ContentAudienceUnavailableError,
+    content_audience_allows,
+)
+from framenest.application.content_publication import ContentAudiencePolicy
 from framenest.domain import MediaId, MediaLocationId
 
 CATALOG_UNAVAILABLE_CODE = "CATALOG_UNAVAILABLE"
@@ -53,6 +58,7 @@ class MediaContentApiDependencies:
 
     resolve_content: object
     catalog_available: Callable[[], bool]
+    audience_policy: ContentAudiencePolicy | None = None
 
 
 def create_media_content_api_router(
@@ -78,7 +84,12 @@ def create_media_content_api_router(
         location_id: UUID4,
         request: Request,
     ) -> StreamingResponse | JSONResponse:
-        resolved_or_error = _resolve_media_content(dependencies, media_id, location_id)
+        resolved_or_error = _resolve_media_content(
+            dependencies,
+            media_id,
+            location_id,
+            request,
+        )
         if isinstance(resolved_or_error, JSONResponse):
             return resolved_or_error
         resolved = resolved_or_error
@@ -106,8 +117,14 @@ def create_media_content_api_router(
     def download_media_content(
         media_id: UUID4,
         location_id: UUID4,
+        request: Request,
     ) -> StreamingResponse | JSONResponse:
-        resolved_or_error = _resolve_media_content(dependencies, media_id, location_id)
+        resolved_or_error = _resolve_media_content(
+            dependencies,
+            media_id,
+            location_id,
+            request,
+        )
         if isinstance(resolved_or_error, JSONResponse):
             return resolved_or_error
         return _download_content_response(resolved_or_error)
@@ -119,12 +136,30 @@ def _resolve_media_content(
     dependencies: MediaContentApiDependencies,
     media_id: UUID4,
     location_id: UUID4,
+    request: Request,
 ) -> ResolvedMediaContent | JSONResponse:
     if not dependencies.catalog_available():
         return _error_response(
             503,
             CATALOG_UNAVAILABLE_CODE,
             CATALOG_UNAVAILABLE_MESSAGE,
+        )
+    try:
+        if not content_audience_allows(
+            request=request,
+            media_id=MediaId.from_string(str(media_id)),
+            policy=dependencies.audience_policy,
+        ):
+            return _error_response(
+                404,
+                MEDIA_CONTENT_NOT_FOUND_CODE,
+                MEDIA_NOT_FOUND_MESSAGE,
+            )
+    except ContentAudienceUnavailableError:
+        return _error_response(
+            500,
+            MEDIA_CONTENT_FAILED_CODE,
+            MEDIA_CONTENT_FAILED_MESSAGE,
         )
     try:
         return dependencies.resolve_content.execute(

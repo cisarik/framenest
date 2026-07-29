@@ -23,8 +23,10 @@ from framenest.domain.identity_access import (
     CAPABILITY_GALLERY_READ,
     CAPABILITY_LIBRARY_SCAN,
     CAPABILITY_MEDIA_DOWNLOAD,
+    CAPABILITY_MEDIA_CONTENT_PUBLISH,
     CAPABILITY_MEDIA_IMPORT,
     CAPABILITY_MEDIA_ORIGINAL_READ,
+    CAPABILITY_MEDIA_WORKFLOW_READ,
     CAPABILITY_METADATA_CANONICAL_WRITE,
     CAPABILITY_PROVIDER_OPERATE,
     CAPABILITY_UPLOAD_MANAGE,
@@ -55,6 +57,7 @@ CHANNEL_TAILSCALE = "tailscale"
 SCOPE_REQUEST_ID = "framenest.request_id"
 SCOPE_IDENTITY = "framenest.identity"
 SCOPE_INGRESS_CHANNEL = "framenest.ingress_channel"
+SCOPE_AUDIT_EVENT_ID = "framenest.audit_event_id"
 
 HEADER_TAILSCALE_USER_LOGIN = b"tailscale-user-login"
 HEADER_TAILSCALE_USER_NAME = b"tailscale-user-name"
@@ -189,6 +192,21 @@ ROUTE_POLICIES: tuple[RoutePolicy, ...] = (
     ),
     RoutePolicy(
         method="GET", template="/api/media", capability=CAPABILITY_GALLERY_READ
+    ),
+    RoutePolicy(
+        method="GET",
+        template="/api/admin/media",
+        capability=CAPABILITY_MEDIA_WORKFLOW_READ,
+        audit_action="media.workflow.list",
+        audit_target_type="media_workflow",
+    ),
+    RoutePolicy(
+        method="PUT",
+        template="/api/admin/media/{media_id}/content-publication",
+        capability=CAPABILITY_MEDIA_CONTENT_PUBLISH,
+        audit_action="media.content_publish",
+        audit_target_type="media",
+        audit_target_group="media_id",
     ),
     RoutePolicy(
         method="GET",
@@ -560,6 +578,8 @@ class TailscaleIngressMiddleware:
 
         scope[SCOPE_INGRESS_CHANNEL] = CHANNEL_TAILSCALE
         scope[SCOPE_IDENTITY] = identity
+        if allowed_event_id is not None:
+            scope[SCOPE_AUDIT_EVENT_ID] = allowed_event_id
 
         async def audited_send(message: Message) -> None:
             if message["type"] == "http.response.start":

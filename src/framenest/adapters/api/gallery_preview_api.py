@@ -21,6 +21,11 @@ from framenest.application.media_content import (
 )
 from framenest.application.ports.library_repository import FrameNestLibraryRepositoryError
 from framenest.application.ports.media_repository import FrameNestMediaRepositoryError
+from framenest.adapters.api.content_audience_api import (
+    ContentAudienceUnavailableError,
+    content_audience_allows,
+)
+from framenest.application.content_publication import ContentAudiencePolicy
 from framenest.domain import MediaId, MediaLocationId
 
 CATALOG_UNAVAILABLE_CODE = "CATALOG_UNAVAILABLE"
@@ -47,6 +52,7 @@ class GalleryPreviewApiDependencies:
 
     preview_service: object
     catalog_available: Callable[[], bool]
+    audience_policy: ContentAudiencePolicy | None = None
 
 
 def create_gallery_preview_api_router(
@@ -76,6 +82,23 @@ def create_gallery_preview_api_router(
                 503,
                 CATALOG_UNAVAILABLE_CODE,
                 CATALOG_UNAVAILABLE_MESSAGE,
+            )
+        try:
+            if not content_audience_allows(
+                request=request,
+                media_id=MediaId.from_string(str(media_id)),
+                policy=dependencies.audience_policy,
+            ):
+                return _error_response(
+                    404,
+                    GALLERY_PREVIEW_NOT_FOUND_CODE,
+                    MEDIA_NOT_FOUND_MESSAGE,
+                )
+        except ContentAudienceUnavailableError:
+            return _error_response(
+                500,
+                GALLERY_PREVIEW_FAILED_CODE,
+                MEDIA_CONTENT_FAILED_MESSAGE,
             )
         try:
             opened = dependencies.preview_service.open_ready(

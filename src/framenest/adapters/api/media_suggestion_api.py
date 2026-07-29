@@ -6,7 +6,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Literal
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, UUID4
 
@@ -31,6 +31,11 @@ from framenest.application.media_suggestion import (
     MediaSuggestionPreviewResult,
     PROMPT_VERSION,
 )
+from framenest.adapters.api.content_audience_api import (
+    ContentAudienceUnavailableError,
+    content_audience_allows,
+)
+from framenest.application.content_publication import ContentAudiencePolicy
 from framenest.application.ports.library_repository import FrameNestLibraryRepositoryError
 from framenest.domain import LibraryId, MediaId, MediaLocationId
 from framenest.infrastructure.ai.constants import DEFAULT_MODEL_ID, DEFAULT_PROVIDER_ID
@@ -164,6 +169,7 @@ class MediaSuggestionApiDependencies:
     last_status_check: dict[str, object] | None = None
     last_connection_test: dict[str, object] | None = None
     read_status: Callable[[], MediaSuggestionStatusRead] | None = None
+    audience_policy: ContentAudiencePolicy | None = None
 
 
 def create_media_suggestion_api_router(dependencies: MediaSuggestionApiDependencies) -> APIRouter:
@@ -300,7 +306,26 @@ def create_media_suggestion_api_router(dependencies: MediaSuggestionApiDependenc
         media_id: UUID4,
         location_id: UUID4,
         request: ImportedMediaSuggestionPreviewRequest,
+        http_request: Request,
     ) -> ImportedMediaSuggestionPreviewResponse | JSONResponse:
+        parsed_media_id = MediaId.from_string(str(media_id))
+        try:
+            if not content_audience_allows(
+                request=http_request,
+                media_id=parsed_media_id,
+                policy=dependencies.audience_policy,
+            ):
+                return _error_response(
+                    404,
+                    LIBRARY_NOT_FOUND_CODE,
+                    LIBRARY_NOT_FOUND_MESSAGE,
+                )
+        except ContentAudienceUnavailableError:
+            return _error_response(
+                503,
+                AI_PROVIDER_UNAVAILABLE_CODE,
+                AI_PROVIDER_UNAVAILABLE_MESSAGE,
+            )
         if request.confirm_cloud_upload is not True:
             return _error_response(
                 409,
@@ -315,7 +340,7 @@ def create_media_suggestion_api_router(dependencies: MediaSuggestionApiDependenc
             )
         try:
             result = dependencies.preview_imported_suggestion.execute(
-                MediaId.from_string(str(media_id)),
+                parsed_media_id,
                 MediaLocationId.from_string(str(location_id)),
             )
         except MediaSuggestionNotFoundError:
