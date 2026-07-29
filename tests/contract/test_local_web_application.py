@@ -446,7 +446,7 @@ def test_javascript_metadata_save_refreshes_catalog_and_preserves_filters(
     script = client.get("/assets/app.js").text
 
     assert "async function handleSaveMetadata" in script
-    save_block = script[script.index("async function handleSaveMetadata") : script.index("async function handleInspectClick")]
+    save_block = _javascript_function(script, "handleSaveMetadata")
     assert 'setMetadataStatus("saved", "Saved.")' not in save_block
     assert "created" not in save_block
     assert "updated" not in save_block

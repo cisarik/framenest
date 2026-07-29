@@ -99,6 +99,8 @@ function createAdminOnlyRows() {
 function createIdentityHarness(fetchImpl) {
   const uploadOpenButton = { hidden: false };
   const detailsEditButton = { hidden: false };
+  const adminMediaOpenButton = { hidden: false };
+  const adminMediaBrowser = { hidden: true };
   const identityBadge = createIdentityControlMock();
   const identityStatusName = { textContent: "" };
   const statusTailscaleAdminOnlyRows = createAdminOnlyRows();
@@ -111,6 +113,8 @@ function createIdentityHarness(fetchImpl) {
     Boolean,
     uploadOpenButton,
     detailsEditButton,
+    adminMediaOpenButton,
+    adminMediaBrowser,
     identityBadge,
     identityStatusName,
     statusTailscaleAdminOnlyRows,
@@ -118,6 +122,9 @@ function createIdentityHarness(fetchImpl) {
   };
   context.updateMetadataControls = () => {
     context.metadataControlCalls += 1;
+  };
+  context.closeAdminMediaBrowser = () => {
+    context.adminMediaBrowser.hidden = true;
   };
   context.globalThis = context;
   vm.createContext(context);
@@ -133,6 +140,7 @@ function createIdentityHarness(fetchImpl) {
     "};",
     'const IDENTITY_ENDPOINT = "/api/identity/me";',
     extractFunction(APP_SOURCE, "identityHasCapability"),
+    extractFunction(APP_SOURCE, "identityAllowsAdminWorkflow"),
     extractFunction(APP_SOURCE, "framenestMutationHeaders"),
     extractFunction(APP_SOURCE, "applyIdentityCapabilities"),
     extractFunction(APP_SOURCE, "applyTailscalePanelDensity"),
@@ -282,8 +290,8 @@ test("mutation helper always injects the FrameNest mutation header", () => {
 test("every unsafe fetch call site sends the mutation header", () => {
   const mutationSites = APP_SOURCE.match(/method: "(?:POST|PUT|PATCH|DELETE)"/g) || [];
   const wrappedSites = APP_SOURCE.match(/headers: framenestMutationHeaders\(/g) || [];
-  assert.equal(mutationSites.length, 17);
-  assert.equal(wrappedSites.length, 17);
+  assert.equal(mutationSites.length, 18);
+  assert.equal(wrappedSites.length, 18);
   assert.equal((APP_SOURCE.match(/"X-FrameNest-Request"/g) || []).length, 1);
 });
 
@@ -380,6 +388,7 @@ test("admin identity populates name-only badge and unlocks privileged controls",
         "analysis.run",
         "gallery.read",
         "metadata.canonical.write",
+        "media.workflow.read",
         "upload.manage",
       ],
       provenance: "tailscale-serve",
@@ -398,6 +407,7 @@ test("admin identity populates name-only badge and unlocks privileged controls",
   assert.equal(context.identityBadge.classList.contains("status-button--healthy"), false);
   assert.equal(context.uploadOpenButton.hidden, false);
   assert.equal(context.detailsEditButton.hidden, false);
+  assert.equal(context.adminMediaOpenButton.hidden, false);
   assert.equal(context.metadataControlCalls, 1);
   assert.equal(context.statusTailscaleAdminOnlyRows.every((row) => row.hidden === false), true);
 });
@@ -419,6 +429,7 @@ test("ordinary user identity hides privileged controls and keeps admin Tailscale
   assert.ok(!context.identityBadge.getAttribute("aria-label").includes("Admin"));
   assert.equal(context.uploadOpenButton.hidden, true);
   assert.equal(context.detailsEditButton.hidden, true);
+  assert.equal(context.adminMediaOpenButton.hidden, true);
   assert.equal(context.statusTailscaleAdminOnlyRows.every((row) => row.hidden === true), true);
   assert.equal(vm.runInContext('identityHasCapability("upload.manage")', context), false);
   assert.equal(vm.runInContext('identityHasCapability("metadata.canonical.write")', context), false);
@@ -434,6 +445,7 @@ test("denied identity fails closed and hides the badge", async () => {
   assert.equal(context.identityBadge.hidden, true);
   assert.equal(context.uploadOpenButton.hidden, true);
   assert.equal(context.detailsEditButton.hidden, true);
+  assert.equal(context.adminMediaOpenButton.hidden, true);
   assert.equal(context.statusTailscaleAdminOnlyRows.every((row) => row.hidden === true), true);
 });
 
@@ -444,6 +456,7 @@ test("missing identity endpoint keeps legacy local behavior", async () => {
   assert.equal(state.available, false);
   assert.equal(vm.runInContext('identityHasCapability("upload.manage")', context), true);
   assert.equal(context.uploadOpenButton.hidden, false);
+  assert.equal(context.adminMediaOpenButton.hidden, true);
   assert.equal(context.identityBadge.hidden, true);
 });
 
@@ -456,6 +469,7 @@ test("identity network failure keeps legacy local behavior", async () => {
   assert.equal(state.resolved, true);
   assert.equal(state.available, false);
   assert.equal(vm.runInContext('identityHasCapability("analysis.run")', context), true);
+  assert.equal(context.adminMediaOpenButton.hidden, true);
 });
 
 test("admin Tailscale panel shows diagnostic rows", async () => {

@@ -3,6 +3,7 @@
 const HEALTH_ENDPOINT = "/health";
 const LIBRARIES_ENDPOINT = "/api/libraries";
 const MEDIA_CATALOG_ENDPOINT = "/api/media";
+const ADMIN_MEDIA_ENDPOINT = "/api/admin/media";
 const MEDIA_METADATA_ENDPOINT_PREFIX = "/api/media";
 const CANONICAL_TAGS_ENDPOINT = "/api/canonical-tags";
 const AI_CAPABILITY_ENDPOINT = "/api/ai/media-suggestion-capability";
@@ -16,6 +17,7 @@ const CATALOG_PAGE_SIZE_OPTIONS = [10, 30, 60, 90];
 const CATALOG_PAGE_SIZE_STORAGE_KEY = "framenest.catalog.pageSize";
 const UPLOAD_RECOVERY_STORAGE_KEY = "framenest.upload.recovery.v1";
 const CATALOG_PAGE_SIZE = 30;
+const ADMIN_MEDIA_PAGE_SIZE = 24;
 const DEFAULT_UPLOAD_CHUNK_BYTES = 1024 * 1024;
 const UPLOAD_POLL_INTERVAL_MS = 1200;
 const UPLOAD_POLL_RETRY_MAX_MS = 10000;
@@ -105,6 +107,23 @@ let catalogState = {
   limit: CATALOG_PAGE_SIZE,
   offset: 0,
   total: 0,
+};
+let adminCatalogRequestToken = 0;
+let adminPublicationRequestToken = 0;
+let adminCatalogState = {
+  q: "",
+  publication: "unpublished",
+  readiness: "all",
+  analysis: "all",
+  limit: ADMIN_MEDIA_PAGE_SIZE,
+  offset: 0,
+  total: 0,
+  requestOwner: null,
+  items: [],
+  publishOwners: new Map(),
+  actionStatusByMediaId: new Map(),
+  loading: false,
+  error: false,
 };
 let uploadCapability = {
   uploads_enabled: false,
@@ -201,6 +220,12 @@ function identityHasCapability(capability) {
   return identityState.capabilities.has(capability);
 }
 
+function identityAllowsAdminWorkflow() {
+  return identityState.resolved
+    && identityState.available
+    && identityState.capabilities.has("media.workflow.read");
+}
+
 function framenestMutationHeaders(headers) {
   return Object.assign({ "X-FrameNest-Request": "1" }, headers);
 }
@@ -253,6 +278,12 @@ function applyIdentityCapabilities() {
   }
   if (detailsEditButton) {
     detailsEditButton.hidden = !identityHasCapability("metadata.canonical.write");
+  }
+  if (adminMediaOpenButton) {
+    adminMediaOpenButton.hidden = !identityAllowsAdminWorkflow();
+  }
+  if (!identityAllowsAdminWorkflow() && adminMediaBrowser && !adminMediaBrowser.hidden) {
+    closeAdminMediaBrowser();
   }
   updateMetadataControls();
 }
@@ -374,6 +405,7 @@ const catalogTagsState = document.querySelector("#catalog-tags-state");
 const commandSearchInput = document.querySelector("#command-search-input");
 const commandSearchClear = document.querySelector("#command-search-clear");
 const commandSearchSuggestions = document.querySelector("#command-search-suggestions");
+const headerSearch = document.querySelector(".header-search");
 const catalogBrowser = document.querySelector("#catalog-browser");
 const catalogStateLoading = document.querySelector("#catalog-state-loading");
 const catalogStateEmpty = document.querySelector("#catalog-state-empty");
@@ -386,6 +418,25 @@ const catalogPrevButton = document.querySelector("#catalog-prev-button");
 const catalogNextButton = document.querySelector("#catalog-next-button");
 const catalogPageSummary = document.querySelector("#catalog-page-summary");
 const catalogPageSizeSelect = document.querySelector("#catalog-page-size-select");
+const adminMediaOpenButton = document.querySelector("#admin-media-open-button");
+const adminMediaBrowser = document.querySelector("#admin-media-browser");
+const adminMediaHeading = document.querySelector("#admin-media-heading");
+const adminMediaCloseButton = document.querySelector("#admin-media-close-button");
+const adminMediaFilters = document.querySelector("#admin-media-filters");
+const adminMediaSearch = document.querySelector("#admin-media-search");
+const adminMediaPublicationFilter = document.querySelector("#admin-media-publication-filter");
+const adminMediaReadinessFilter = document.querySelector("#admin-media-readiness-filter");
+const adminMediaAnalysisFilter = document.querySelector("#admin-media-analysis-filter");
+const adminMediaRefreshButton = document.querySelector("#admin-media-refresh-button");
+const adminMediaActionStatus = document.querySelector("#admin-media-action-status");
+const adminMediaLoading = document.querySelector("#admin-media-loading");
+const adminMediaEmpty = document.querySelector("#admin-media-empty");
+const adminMediaError = document.querySelector("#admin-media-error");
+const adminMediaRetryButton = document.querySelector("#admin-media-retry-button");
+const adminMediaResults = document.querySelector("#admin-media-results");
+const adminMediaPageSummary = document.querySelector("#admin-media-page-summary");
+const adminMediaPrevButton = document.querySelector("#admin-media-prev-button");
+const adminMediaNextButton = document.querySelector("#admin-media-next-button");
 const metadataWorkspaceElement = document.querySelector("#metadata-workspace");
 const metadataWorkspaceTitle = document.querySelector("#metadata-workspace-title");
 const metadataWorkspaceContext = document.querySelector("#metadata-workspace-context");
@@ -6320,6 +6371,519 @@ async function loadCatalog() {
   }
 }
 
+function snapshotAdminCatalogQueryState() {
+  return Object.freeze({
+    q: adminCatalogState.q,
+    publication: adminCatalogState.publication,
+    readiness: adminCatalogState.readiness,
+    analysis: adminCatalogState.analysis,
+    limit: adminCatalogState.limit,
+    offset: adminCatalogState.offset,
+  });
+}
+
+function buildAdminCatalogQueryParams(snapshot = snapshotAdminCatalogQueryState()) {
+  const params = new URLSearchParams();
+  const trimmed = snapshot.q.trim();
+  if (trimmed) params.set("q", trimmed);
+  params.set("publication", snapshot.publication);
+  params.set("readiness", snapshot.readiness);
+  params.set("analysis", snapshot.analysis);
+  params.set("limit", String(snapshot.limit));
+  params.set("offset", String(snapshot.offset));
+  return params;
+}
+
+function claimAdminCatalogRequest() {
+  const owner = Object.freeze({
+    ...snapshotAdminCatalogQueryState(),
+    token: adminCatalogRequestToken + 1,
+  });
+  adminCatalogRequestToken = owner.token;
+  adminCatalogState.requestOwner = owner;
+  return owner;
+}
+
+function adminCatalogRequestOwnerIsCurrent(owner) {
+  return Boolean(owner)
+    && adminCatalogState.requestOwner === owner
+    && adminCatalogRequestToken === owner.token
+    && adminCatalogState.q === owner.q
+    && adminCatalogState.publication === owner.publication
+    && adminCatalogState.readiness === owner.readiness
+    && adminCatalogState.analysis === owner.analysis
+    && adminCatalogState.limit === owner.limit
+    && adminCatalogState.offset === owner.offset;
+}
+
+function releaseAdminCatalogRequest(owner) {
+  if (!adminCatalogRequestOwnerIsCurrent(owner)) return false;
+  adminCatalogState.requestOwner = null;
+  return true;
+}
+
+function setAdminCatalogViewState(state) {
+  adminCatalogState.loading = state === "loading";
+  adminCatalogState.error = state === "error";
+  if (adminMediaLoading) adminMediaLoading.hidden = state !== "loading";
+  if (adminMediaEmpty) adminMediaEmpty.hidden = state !== "empty";
+  if (adminMediaError) adminMediaError.hidden = state !== "error";
+  if (adminMediaResults) {
+    adminMediaResults.hidden = state === "loading" || state === "error" || state === "empty";
+    adminMediaResults.setAttribute("aria-busy", String(state === "loading"));
+  }
+}
+
+function setAdminActionStatus(message) {
+  if (adminMediaActionStatus) adminMediaActionStatus.textContent = message;
+}
+
+function adminMediaTitle(item) {
+  const title = typeof item.display_title === "string" ? item.display_title.trim() : "";
+  return title || "Untitled media";
+}
+
+function adminReadinessLabel(item) {
+  return item.publication_ready ? "Ready to publish" : "Incomplete metadata";
+}
+
+function adminAnalysisLabel(state) {
+  if (state === "analyzed") return "AI suggestion ready";
+  if (state === "pending" || state === "analyzing") return "Analysis queued";
+  if (state === "failed") return "Analysis failed";
+  return "Analysis not requested";
+}
+
+function adminPublicationLabel(item) {
+  return item.content_publication_state === "published" ? "Published" : "Unpublished";
+}
+
+function adminMissingFieldsLabel(item) {
+  const labels = {
+    display_title: "title",
+    description: "description",
+    tags: "canonical tag",
+  };
+  const missing = Array.isArray(item.missing_fields)
+    ? item.missing_fields.map((field) => labels[field] || field)
+    : [];
+  return missing.length > 0 ? `Missing: ${missing.join(", ")}` : "";
+}
+
+function createAdminStateBadge(text, modifier, icon) {
+  const badge = document.createElement("span");
+  badge.className = `admin-media-badge admin-media-badge--${modifier}`;
+  const symbol = document.createElement("span");
+  symbol.className = "admin-media-badge__icon";
+  symbol.setAttribute("aria-hidden", "true");
+  symbol.textContent = icon;
+  const label = document.createElement("span");
+  label.textContent = text;
+  badge.append(symbol, label);
+  return badge;
+}
+
+function safeAdminDetailsItem(item) {
+  return {
+    media_id: item.media_id,
+    media_kind: item.media_kind,
+    created_at_ms: item.created_at_ms,
+    updated_at_ms: item.updated_at_ms,
+    display_title: item.display_title,
+    description: item.description,
+    collection_key: item.collection_key,
+    processed_at_ms: item.processed_at_ms,
+    processed: item.processed,
+    content_category: item.content_category,
+    acquisition_source: item.acquisition_source,
+    tags: (item.tags || []).map((tag) => ({
+      key: tag.key,
+      display_name: tag.display_name,
+      position: tag.position,
+    })),
+    locations: (item.locations || []).map((location) => ({
+      location_id: location.location_id,
+      library_id: location.library_id,
+      relative_path: "Local catalog location",
+      availability: location.availability,
+      observed_size_bytes: location.observed_size_bytes,
+      observed_mtime_ns: location.observed_mtime_ns,
+    })),
+  };
+}
+
+function renderAdminThumbnail(item) {
+  const wrapper = document.createElement("div");
+  wrapper.className = "admin-media-thumbnail";
+  const location = selectSupportedAvailableLocation(item);
+  if (!location) {
+    wrapper.classList.add("admin-media-thumbnail--fallback");
+    wrapper.textContent = formatCatalogKind(item.media_kind).slice(0, 1).toUpperCase() || "M";
+    wrapper.setAttribute("aria-label", `${formatCatalogKind(item.media_kind)} preview unavailable`);
+    return wrapper;
+  }
+  const image = document.createElement("img");
+  image.src = mediaGalleryPreviewUrl(item.media_id, location.location_id);
+  image.alt = "";
+  image.loading = "lazy";
+  image.addEventListener("error", () => {
+    wrapper.classList.add("admin-media-thumbnail--fallback");
+    wrapper.replaceChildren();
+    wrapper.textContent = formatCatalogKind(item.media_kind).slice(0, 1).toUpperCase() || "M";
+    wrapper.setAttribute("aria-label", `${formatCatalogKind(item.media_kind)} preview unavailable`);
+  }, { once: true });
+  wrapper.appendChild(image);
+  return wrapper;
+}
+
+function findAdminItemAction(mediaId, action) {
+  if (!adminMediaResults) return null;
+  return [...adminMediaResults.querySelectorAll("button")].find(
+    (button) => button.dataset.mediaId === mediaId && button.dataset.adminAction === action,
+  ) || null;
+}
+
+function publicationOwnerIsCurrent(owner) {
+  return Boolean(owner)
+    && adminCatalogState.publishOwners.get(owner.mediaId) === owner;
+}
+
+function claimPublicationRequest(mediaId, opener) {
+  if (adminCatalogState.publishOwners.has(mediaId)) return null;
+  const owner = Object.freeze({
+    token: adminPublicationRequestToken + 1,
+    mediaId,
+    opener,
+  });
+  adminPublicationRequestToken = owner.token;
+  adminCatalogState.publishOwners.set(mediaId, owner);
+  return owner;
+}
+
+function releasePublicationRequest(owner) {
+  if (!owner || adminCatalogState.publishOwners.get(owner.mediaId) !== owner) return false;
+  adminCatalogState.publishOwners.delete(owner.mediaId);
+  return true;
+}
+
+function renderAdminMediaItem(item) {
+  const row = document.createElement("article");
+  row.className = "admin-media-row";
+  row.setAttribute("role", "row");
+  row.dataset.mediaId = item.media_id;
+
+  const visualCell = document.createElement("div");
+  visualCell.className = "admin-media-cell admin-media-cell--visual";
+  visualCell.setAttribute("role", "cell");
+  visualCell.appendChild(renderAdminThumbnail(item));
+
+  const summaryCell = document.createElement("div");
+  summaryCell.className = "admin-media-cell admin-media-cell--summary";
+  summaryCell.setAttribute("role", "cell");
+  const title = document.createElement("h2");
+  title.className = "admin-media-row__title";
+  title.textContent = adminMediaTitle(item);
+  const metadata = document.createElement("p");
+  metadata.className = "admin-media-row__metadata";
+  metadata.textContent = `${formatCatalogKind(item.media_kind)} · ${summarizeAvailability(item.locations)}`;
+  const processed = document.createElement("p");
+  processed.className = "admin-media-processed";
+  processed.textContent = item.processed ? "✓ Processed" : "Not processed";
+  summaryCell.append(title, metadata, processed);
+
+  const readinessCell = document.createElement("div");
+  readinessCell.className = "admin-media-cell admin-media-cell--readiness";
+  readinessCell.setAttribute("role", "cell");
+  const readyForPublication = item.publication_ready && item.content_publication_state !== "published";
+  readinessCell.appendChild(
+    createAdminStateBadge(
+      adminReadinessLabel(item),
+      readyForPublication ? "ready" : "incomplete",
+      readyForPublication ? "✓" : "!",
+    ),
+  );
+  const missing = adminMissingFieldsLabel(item);
+  if (missing) {
+    const missingText = document.createElement("span");
+    missingText.className = "admin-media-cell__detail";
+    missingText.textContent = missing;
+    readinessCell.appendChild(missingText);
+  }
+
+  const analysisCell = document.createElement("div");
+  analysisCell.className = "admin-media-cell admin-media-cell--analysis";
+  analysisCell.setAttribute("role", "cell");
+  const analysisLabel = adminAnalysisLabel(item.analysis_state);
+  analysisCell.appendChild(
+    createAdminStateBadge(
+      analysisLabel,
+      item.analysis_state === "analyzed" ? "analysis-ready" : "neutral",
+      item.analysis_state === "analyzed" ? "✦" : "·",
+    ),
+  );
+
+  const publicationCell = document.createElement("div");
+  publicationCell.className = "admin-media-cell admin-media-cell--publication";
+  publicationCell.setAttribute("role", "cell");
+  publicationCell.appendChild(
+    createAdminStateBadge(
+      adminPublicationLabel(item),
+      item.content_publication_state === "published" ? "published" : "neutral",
+      item.content_publication_state === "published" ? "✓" : "○",
+    ),
+  );
+
+  const actionsCell = document.createElement("div");
+  actionsCell.className = "admin-media-cell admin-media-cell--actions";
+  actionsCell.setAttribute("role", "cell");
+  const inspectButton = document.createElement("button");
+  inspectButton.type = "button";
+  inspectButton.className = "admin-media-action admin-media-action--inspect";
+  inspectButton.textContent = "Inspect";
+  inspectButton.dataset.mediaId = item.media_id;
+  inspectButton.dataset.adminAction = "inspect";
+  inspectButton.addEventListener("click", () => {
+    openDetailsDialog(safeAdminDetailsItem(item), inspectButton);
+  });
+  actionsCell.appendChild(inspectButton);
+
+  const actionStatus = adminCatalogState.actionStatusByMediaId.get(item.media_id);
+  if (item.content_publication_state !== "published") {
+    const publishButton = document.createElement("button");
+    publishButton.type = "button";
+    publishButton.className = "admin-media-action admin-media-action--publish";
+    publishButton.textContent = "Publish";
+    publishButton.dataset.mediaId = item.media_id;
+    publishButton.dataset.adminAction = "publish";
+    publishButton.disabled = !item.publication_ready
+      || adminCatalogState.publishOwners.has(item.media_id)
+      || Boolean(actionStatus);
+    if (!item.publication_ready) publishButton.title = adminMissingFieldsLabel(item);
+    if (actionStatus) publishButton.title = actionStatus.message;
+    if (adminCatalogState.publishOwners.has(item.media_id)) {
+      publishButton.setAttribute("aria-busy", "true");
+      publishButton.textContent = "Publishing…";
+    }
+    publishButton.addEventListener("click", () => publishAdminMediaItem(item, publishButton));
+    actionsCell.appendChild(publishButton);
+  }
+
+  if (actionStatus && actionStatus.retryable) {
+    const retryButton = document.createElement("button");
+    retryButton.type = "button";
+    retryButton.className = "admin-media-action admin-media-action--retry";
+    retryButton.textContent = "Retry publish";
+    retryButton.dataset.mediaId = item.media_id;
+    retryButton.dataset.adminAction = "retry";
+    retryButton.addEventListener("click", () => publishAdminMediaItem(item, retryButton));
+    actionsCell.appendChild(retryButton);
+  }
+
+  row.append(visualCell, summaryCell, readinessCell, analysisCell, publicationCell, actionsCell);
+  return row;
+}
+
+function renderAdminCatalogPage(page) {
+  adminCatalogState.items = Array.isArray(page.items) ? page.items : [];
+  adminCatalogState.items.forEach((item) => {
+    const status = adminCatalogState.actionStatusByMediaId.get(item.media_id);
+    if (status && status.kind === "readiness" && item.publication_ready) {
+      adminCatalogState.actionStatusByMediaId.delete(item.media_id);
+    }
+  });
+  adminCatalogState.total = Number.isInteger(page.total) ? page.total : 0;
+  adminCatalogState.limit = Number.isInteger(page.limit) ? page.limit : ADMIN_MEDIA_PAGE_SIZE;
+  adminCatalogState.offset = Number.isInteger(page.offset) ? page.offset : 0;
+  if (adminMediaResults) {
+    adminMediaResults.replaceChildren(
+      ...adminCatalogState.items.map((item) => renderAdminMediaItem(item)),
+    );
+  }
+  const start = adminCatalogState.total === 0 ? 0 : adminCatalogState.offset + 1;
+  const end = Math.min(adminCatalogState.offset + adminCatalogState.items.length, adminCatalogState.total);
+  if (adminMediaPageSummary) {
+    adminMediaPageSummary.textContent = adminCatalogState.total === 0
+      ? "No workflow results."
+      : `Showing ${start}–${end} of ${adminCatalogState.total}.`;
+  }
+  if (adminMediaPrevButton) adminMediaPrevButton.disabled = !page.has_previous;
+  if (adminMediaNextButton) adminMediaNextButton.disabled = !page.has_next;
+  setAdminCatalogViewState(adminCatalogState.items.length === 0 ? "empty" : "results");
+}
+
+async function loadAdminCatalog({ focusMediaId = null } = {}) {
+  if (!identityAllowsAdminWorkflow()) return false;
+  const owner = claimAdminCatalogRequest();
+  setAdminCatalogViewState("loading");
+  if (adminMediaPrevButton) adminMediaPrevButton.disabled = true;
+  if (adminMediaNextButton) adminMediaNextButton.disabled = true;
+  if (adminMediaPageSummary) adminMediaPageSummary.textContent = "Loading workflow page…";
+  try {
+    const params = buildAdminCatalogQueryParams(owner);
+    const response = await fetch(`${ADMIN_MEDIA_ENDPOINT}?${params.toString()}`, {
+      headers: { Accept: "application/json" },
+      cache: "no-store",
+    });
+    const payload = await response.json();
+    if (!adminCatalogRequestOwnerIsCurrent(owner)) return false;
+    if (!response.ok) {
+      setAdminCatalogViewState("error");
+      if (adminMediaPageSummary) adminMediaPageSummary.textContent = "Workflow page unavailable.";
+      if (response.status === 401 || response.status === 403) {
+        setAdminActionStatus("Your current identity is not authorized for this workflow.");
+      }
+      return false;
+    }
+    if (
+      Array.isArray(payload.items)
+      && payload.items.length === 0
+      && Number.isInteger(payload.total)
+      && payload.total > 0
+      && owner.offset >= payload.total
+    ) {
+      adminCatalogState.offset = Math.floor((payload.total - 1) / owner.limit) * owner.limit;
+      return loadAdminCatalog({ focusMediaId });
+    }
+    renderAdminCatalogPage(payload);
+    if (focusMediaId) {
+      const stableAction = findAdminItemAction(focusMediaId, "inspect");
+      if (stableAction) stableAction.focus();
+      else if (adminMediaHeading) adminMediaHeading.focus();
+    }
+    return true;
+  } catch {
+    if (adminCatalogRequestOwnerIsCurrent(owner)) {
+      setAdminCatalogViewState("error");
+      if (adminMediaPageSummary) adminMediaPageSummary.textContent = "Workflow page unavailable.";
+    }
+    return false;
+  } finally {
+    releaseAdminCatalogRequest(owner);
+  }
+}
+
+async function publishAdminMediaItem(item, opener) {
+  const owner = claimPublicationRequest(item.media_id, opener);
+  if (!owner) return;
+  adminCatalogState.actionStatusByMediaId.delete(item.media_id);
+  opener.disabled = true;
+  opener.setAttribute("aria-busy", "true");
+  opener.textContent = "Publishing…";
+  setAdminActionStatus(`Publishing ${adminMediaTitle(item)}…`);
+  try {
+    const response = await fetch(
+      `${ADMIN_MEDIA_ENDPOINT}/${encodeURIComponent(item.media_id)}/content-publication`,
+      {
+        method: "PUT",
+        headers: framenestMutationHeaders({ Accept: "application/json" }),
+        cache: "no-store",
+      },
+    );
+    const payload = await response.json();
+    if (!publicationOwnerIsCurrent(owner)) return;
+    if (response.ok) {
+      const message = payload.status === "already_published"
+        ? `${adminMediaTitle(item)} was already published.`
+        : `${adminMediaTitle(item)} published.`;
+      setAdminActionStatus(message);
+      releasePublicationRequest(owner);
+      await loadAdminCatalog({ focusMediaId: item.media_id });
+      return;
+    }
+    const error = payload && payload.error ? payload.error : {};
+    if (response.status === 409) {
+      const orderedMissingFields = Array.isArray(error.missing_fields)
+        ? error.missing_fields
+        : [];
+      const missingFields = orderedMissingFields.length > 0
+        ? orderedMissingFields.join(", ")
+        : "metadata";
+      item.publication_ready = false;
+      item.missing_fields = orderedMissingFields;
+      adminCatalogState.actionStatusByMediaId.set(item.media_id, {
+        kind: "readiness",
+        retryable: false,
+        message: `Publication is blocked by incomplete metadata: ${missingFields}.`,
+      });
+      setAdminActionStatus(`Publication is blocked by incomplete metadata: ${missingFields}.`);
+    } else if (response.status === 401 || response.status === 403) {
+      adminCatalogState.actionStatusByMediaId.set(item.media_id, {
+        kind: "authorization",
+        retryable: false,
+        message: "Your current identity is not authorized to publish this item.",
+      });
+      setAdminActionStatus("Your current identity is not authorized to publish this item.");
+    } else {
+      adminCatalogState.actionStatusByMediaId.set(item.media_id, {
+        kind: "transient",
+        retryable: response.status >= 500,
+        message: "Publication failed without changing the durable state.",
+      });
+      setAdminActionStatus("Publication failed without changing the durable state.");
+    }
+  } catch {
+    if (!publicationOwnerIsCurrent(owner)) return;
+    adminCatalogState.actionStatusByMediaId.set(item.media_id, {
+      kind: "transient",
+      retryable: true,
+      message: "Publication could not reach the local server.",
+    });
+    setAdminActionStatus("Publication could not reach the local server. Retry is available.");
+  } finally {
+    if (publicationOwnerIsCurrent(owner)) {
+      releasePublicationRequest(owner);
+      renderAdminCatalogPage({
+        items: adminCatalogState.items,
+        total: adminCatalogState.total,
+        limit: adminCatalogState.limit,
+        offset: adminCatalogState.offset,
+        has_previous: adminCatalogState.offset > 0,
+        has_next: adminCatalogState.offset + adminCatalogState.limit < adminCatalogState.total,
+      });
+      const retry = findAdminItemAction(item.media_id, "retry");
+      const publish = findAdminItemAction(item.media_id, "publish");
+      if (retry) retry.focus();
+      else if (publish && !publish.disabled) publish.focus();
+      else if (adminMediaHeading) adminMediaHeading.focus();
+    }
+  }
+}
+
+function openAdminMediaBrowser() {
+  if (!identityAllowsAdminWorkflow() || !adminMediaBrowser) return;
+  if (catalogBrowser) catalogBrowser.hidden = true;
+  if (headerSearch) headerSearch.hidden = true;
+  adminMediaBrowser.hidden = false;
+  adminCatalogState.offset = 0;
+  setAdminActionStatus("");
+  loadAdminCatalog();
+  if (adminMediaHeading) adminMediaHeading.focus();
+}
+
+function closeAdminMediaBrowser() {
+  adminCatalogRequestToken += 1;
+  adminCatalogState.requestOwner = null;
+  if (adminMediaBrowser) adminMediaBrowser.hidden = true;
+  if (catalogBrowser) catalogBrowser.hidden = false;
+  if (headerSearch) headerSearch.hidden = false;
+  if (adminMediaOpenButton && !adminMediaOpenButton.hidden) adminMediaOpenButton.focus();
+}
+
+function applyAdminCatalogFilters() {
+  adminCatalogState.q = adminMediaSearch ? adminMediaSearch.value : "";
+  adminCatalogState.publication = adminMediaPublicationFilter
+    ? adminMediaPublicationFilter.value
+    : "unpublished";
+  adminCatalogState.readiness = adminMediaReadinessFilter
+    ? adminMediaReadinessFilter.value
+    : "all";
+  adminCatalogState.analysis = adminMediaAnalysisFilter
+    ? adminMediaAnalysisFilter.value
+    : "all";
+  adminCatalogState.offset = 0;
+  loadAdminCatalog();
+}
+
 async function handleImportClick(libraryId, candidate, button, status) {
   button.disabled = true;
   status.textContent = "Importing selected candidate...";
@@ -7589,6 +8153,43 @@ if (metadataCloseButton) {
 if (catalogRetryButton) {
   catalogRetryButton.addEventListener("click", () => {
     loadCatalog();
+  });
+}
+
+if (adminMediaOpenButton) {
+  adminMediaOpenButton.addEventListener("click", openAdminMediaBrowser);
+}
+
+if (adminMediaCloseButton) {
+  adminMediaCloseButton.addEventListener("click", closeAdminMediaBrowser);
+}
+
+if (adminMediaFilters) {
+  adminMediaFilters.addEventListener("submit", (event) => {
+    event.preventDefault();
+    applyAdminCatalogFilters();
+  });
+}
+
+if (adminMediaRetryButton) {
+  adminMediaRetryButton.addEventListener("click", () => {
+    loadAdminCatalog();
+  });
+}
+
+if (adminMediaPrevButton) {
+  adminMediaPrevButton.addEventListener("click", () => {
+    adminCatalogState.offset = Math.max(0, adminCatalogState.offset - adminCatalogState.limit);
+    loadAdminCatalog();
+  });
+}
+
+if (adminMediaNextButton) {
+  adminMediaNextButton.addEventListener("click", () => {
+    const nextOffset = adminCatalogState.offset + adminCatalogState.limit;
+    if (nextOffset >= adminCatalogState.total) return;
+    adminCatalogState.offset = nextOffset;
+    loadAdminCatalog();
   });
 }
 

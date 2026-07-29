@@ -36,6 +36,14 @@
       </div>
       <div class="header-status-group">
         <button
+          id="admin-media-open-button"
+          class="status-button admin-media-nav-button"
+          type="button"
+          hidden
+        >
+          Manage media
+        </button>
+        <button
           id="upload-open-button"
           class="status-button status-button--icon upload-action-button"
           type="button"
@@ -437,6 +445,107 @@
           <div class="catalog-pagination__nav">
             <button id="catalog-prev-button" type="button" aria-label="Previous page">&lt;</button>
             <button id="catalog-next-button" type="button" aria-label="Next page">&gt;</button>
+          </div>
+        </div>
+      </section>
+
+      <section
+        id="admin-media-browser"
+        class="admin-media-browser"
+        aria-labelledby="admin-media-heading"
+        hidden
+      >
+        <div class="admin-media-header">
+          <div>
+            <p class="admin-media-eyebrow">Administrator workflow</p>
+            <h1 id="admin-media-heading" tabindex="-1">Manage media publication</h1>
+            <p class="admin-media-intro">
+              Inspect server-owned readiness and explicitly publish one item at a time.
+            </p>
+          </div>
+          <button id="admin-media-close-button" type="button">Back to Gallery</button>
+        </div>
+
+        <form id="admin-media-filters" class="admin-media-filters" role="search">
+          <label class="admin-media-field admin-media-field--search" for="admin-media-search">
+            <span>Search</span>
+            <input
+              id="admin-media-search"
+              type="search"
+              maxlength="240"
+              autocomplete="off"
+              placeholder="Search canonical titles"
+            >
+          </label>
+          <label class="admin-media-field" for="admin-media-publication-filter">
+            <span>Publication</span>
+            <select id="admin-media-publication-filter">
+              <option value="unpublished" selected>Unpublished</option>
+              <option value="published">Published</option>
+              <option value="all">All</option>
+            </select>
+          </label>
+          <label class="admin-media-field" for="admin-media-readiness-filter">
+            <span>Readiness</span>
+            <select id="admin-media-readiness-filter">
+              <option value="all" selected>All</option>
+              <option value="ready">Ready</option>
+              <option value="incomplete">Incomplete</option>
+            </select>
+          </label>
+          <label class="admin-media-field" for="admin-media-analysis-filter">
+            <span>AI analysis</span>
+            <select id="admin-media-analysis-filter">
+              <option value="all" selected>All</option>
+              <option value="not_requested">Not requested</option>
+              <option value="pending">Queued</option>
+              <option value="analyzing">Analyzing</option>
+              <option value="analyzed">Suggestion ready</option>
+              <option value="failed">Failed</option>
+            </select>
+          </label>
+          <button id="admin-media-refresh-button" type="submit">Refresh</button>
+        </form>
+
+        <p
+          id="admin-media-action-status"
+          class="admin-media-action-status"
+          role="status"
+          aria-live="polite"
+          aria-atomic="true"
+        ></p>
+
+        <div
+          id="admin-media-loading"
+          class="library-state library-state--loading"
+          role="status"
+          aria-live="polite"
+          aria-busy="true"
+        >
+          <span class="library-state__spinner" aria-hidden="true"></span>
+          <span class="library-state__message">Loading publication workflow…</span>
+        </div>
+        <div id="admin-media-empty" class="library-state library-state--empty" hidden role="status">
+          <p class="library-state__message">No media match the workflow filters.</p>
+        </div>
+        <div id="admin-media-error" class="library-state library-state--error" hidden role="alert">
+          <p class="library-state__message">The publication workflow could not be loaded.</p>
+          <button id="admin-media-retry-button" class="library-state__action" type="button">Retry</button>
+        </div>
+
+        <div
+          id="admin-media-results"
+          class="admin-media-results"
+          role="table"
+          aria-label="Media publication workflow"
+          aria-describedby="admin-media-page-summary"
+        ></div>
+
+        <div class="catalog-pagination admin-media-pagination" aria-label="Admin media pagination">
+          <p id="admin-media-page-summary" role="status">No workflow page loaded.</p>
+          <div class="catalog-pagination__nav">
+            <button id="admin-media-prev-button" type="button">Previous</button>
+            <button id="admin-media-next-button" type="button">Next</button>
           </div>
         </div>
       </section>

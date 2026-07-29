@@ -22,6 +22,12 @@ FrameNest is currently in foundation-stage, pre-alpha development.
 
 A minimal Poetry package, runnable loopback FastAPI server, packaged local web shell, explicit SQLite migration foundation, local device and library registries, read-only library scan preview, explicit idempotent scan-candidate import into the minimum persistent media catalog, persistent display-title and canonical-tag core, local media-analysis preview, provider-neutral NVIDIA suggestion prototype, bounded JPEG VLM transport, explicit editable browser AI suggestion review, and owner-operated cookie-free YouTube manual ingestion now exist. YouTube ingestion is CLI-only, durable, loopback-only, and reuses the existing quarantine, validation, byte-identity, publication, and catalog lifecycle.
 
+Durable content-publication truth and a responsive capability-gated
+administrator workflow now also exist. Existing catalog rows are backfilled as
+published; newly cataloged media remains outside the ordinary Gallery until
+persisted title, description, and canonical-tag metadata is ready and an
+authorized administrator publishes that one item.
+
 There is still no completed media application, premium gallery, generalized downloader UI,
 desktop shell, GUI Settings, broad automatic AI workflow beyond optional
 server-enabled post-catalog analysis, media mutation workflow,
@@ -184,10 +190,11 @@ The normal desktop experience must not require Chrome, Brave, Firefox, Safari, o
 
 ## 9. Server Role
 
-The FrameNest server process is authoritative for catalog records, server media
-originals, canonical title, description, and tags, future category and language
-metadata, per-user visibility state, upload and ingest state, server preview
-cache, authentication, and capability decisions.
+The FrameNest server process is authoritative for catalog records, durable
+content-publication state, server media originals, canonical title, description,
+and tags, future category and language metadata, per-user visibility state,
+upload and ingest state, server preview cache, authentication, and capability
+decisions.
 
 Browser, desktop, and remote interfaces are clients. They must not infer
 administrator authority from loopback, source IP, hostname, Tailscale
@@ -229,6 +236,11 @@ validate, limit, safely name, de-duplicate, atomically publish, clean up
 failures, and choose server placement; clients must not select arbitrary server
 filesystem paths. Per-user Trash is server-persisted visibility state and must
 not delete the server original.
+
+Catalog membership and ordinary Gallery publication are separate. Later
+metadata regression must not silently revoke an accepted publication.
+`Processed`, AI-analysis state, upload storage publication, and content
+publication remain independent facts.
 
 ## 11. Library and Storage Experience
 
