@@ -11,6 +11,89 @@ const APP_SOURCE = fs.readFileSync(APP_PATH, "utf8");
 const STYLES_SOURCE = fs.readFileSync(STYLES_PATH, "utf8");
 const INDEX_SOURCE = fs.readFileSync(INDEX_PATH, "utf8");
 
+function cssDeclarationsAfter(source, selector, offset = 0) {
+  const selectorIndex = source.indexOf(selector, offset);
+  assert.notEqual(selectorIndex, -1, `missing production CSS selector ${selector}`);
+  const blockStart = source.indexOf("{", selectorIndex + selector.length);
+  const blockEnd = source.indexOf("}", blockStart);
+  assert.notEqual(blockStart, -1, `missing declaration block for ${selector}`);
+  assert.notEqual(blockEnd, -1, `unterminated declaration block for ${selector}`);
+  return Object.fromEntries(
+    source
+      .slice(blockStart + 1, blockEnd)
+      .split(";")
+      .map((declaration) => declaration.trim())
+      .filter(Boolean)
+      .map((declaration) => {
+        const colon = declaration.indexOf(":");
+        assert.notEqual(colon, -1, `invalid declaration ${declaration}`);
+        return [
+          declaration.slice(0, colon).trim(),
+          declaration.slice(colon + 1).trim(),
+        ];
+      }),
+  );
+}
+
+function catalogActionPresentation(pointer, reveal = false) {
+  const baseOverlay = cssDeclarationsAfter(STYLES_SOURCE, ".catalog-card__actions--overlay");
+  const fineMedia = STYLES_SOURCE.indexOf("@media (hover: hover) and (pointer: fine)");
+  const coarseMedia = STYLES_SOURCE.indexOf("@media (hover: none), (pointer: coarse)");
+  const presentation = {
+    overlay: { ...baseOverlay },
+    action: { opacity: "1", visibility: "visible", "pointer-events": "auto" },
+  };
+
+  if (pointer === "fine") {
+    Object.assign(
+      presentation.overlay,
+      cssDeclarationsAfter(STYLES_SOURCE, ".catalog-card__actions--overlay", fineMedia),
+    );
+    Object.assign(
+      presentation.action,
+      cssDeclarationsAfter(
+        STYLES_SOURCE,
+        ".catalog-card__actions--overlay .catalog-card__action",
+        fineMedia,
+      ),
+    );
+    if (reveal) {
+      Object.assign(
+        presentation.overlay,
+        cssDeclarationsAfter(
+          STYLES_SOURCE,
+          ".catalog-card:hover .catalog-card__actions--overlay",
+          fineMedia,
+        ),
+      );
+      Object.assign(
+        presentation.action,
+        cssDeclarationsAfter(
+          STYLES_SOURCE,
+          ".catalog-card:hover .catalog-card__action,\n"
+            + "  .catalog-card:focus-within .catalog-card__action",
+          fineMedia,
+        ),
+      );
+    }
+  } else {
+    Object.assign(
+      presentation.overlay,
+      cssDeclarationsAfter(STYLES_SOURCE, ".catalog-card__actions--overlay", coarseMedia),
+    );
+    Object.assign(
+      presentation.action,
+      cssDeclarationsAfter(
+        STYLES_SOURCE,
+        ".catalog-card__actions--overlay .catalog-card__action",
+        coarseMedia,
+      ),
+    );
+  }
+
+  return presentation;
+}
+
 function extractFunction(source, name) {
   const markers = [`async function ${name}(`, `function ${name}(`];
   let start = -1;
@@ -623,6 +706,53 @@ test("Gallery card actions reflect ordinary admin and removed capabilities witho
   ]);
   assert.equal(noDownload.card.querySelector(".catalog-card__action--download"), null);
   assert.ok(noDownload.card.querySelector(".catalog-card__action--edit"));
+});
+
+test("Gallery action presentation is hidden by default and renderable on reveal or coarse pointers", () => {
+  const ordinary = renderCatalogCardForCapabilities([
+    "gallery.read",
+    "media.original.read",
+    "media.download",
+  ]);
+  const admin = renderCatalogCardForCapabilities([
+    "gallery.read",
+    "media.original.read",
+    "media.download",
+    "metadata.canonical.write",
+    "analysis.run",
+  ]);
+  const renderedActions = [
+    ordinary.card.querySelector(".catalog-card__action--download"),
+    admin.card.querySelector(".catalog-card__action--analyze"),
+    admin.card.querySelector(".catalog-card__action--edit"),
+    admin.card.querySelector(".catalog-card__action--download"),
+  ];
+  for (const action of renderedActions) {
+    assert.ok(action);
+    assert.equal(action.hidden, false);
+    assert.notEqual(action.getAttribute("aria-hidden"), "true");
+    assert.notEqual(action.getAttribute("tabindex"), "-1");
+    assert.ok(action.classList.contains("catalog-card__action"));
+  }
+
+  const fineDefault = catalogActionPresentation("fine");
+  assert.equal(fineDefault.overlay["z-index"], "3");
+  assert.equal(fineDefault.overlay.opacity, "0");
+  assert.equal(fineDefault.action.opacity, "0");
+  assert.equal(fineDefault.action["pointer-events"], "none");
+
+  const fineReveal = catalogActionPresentation("fine", true);
+  assert.equal(fineReveal.overlay.opacity, "1");
+  assert.equal(fineReveal.action.opacity, "1");
+  assert.equal(fineReveal.action.visibility, "visible");
+  assert.equal(fineReveal.action["pointer-events"], "auto");
+
+  const coarse = catalogActionPresentation("coarse");
+  assert.equal(coarse.overlay.opacity, "1");
+  assert.equal(coarse.overlay.visibility, "visible");
+  assert.equal(coarse.action.opacity, "1");
+  assert.equal(coarse.action.visibility, "visible");
+  assert.equal(coarse.action["pointer-events"], "auto");
 });
 
 test("Gallery Download uses the capability-gated download endpoint and compact placement", () => {
