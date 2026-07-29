@@ -100,6 +100,7 @@ class TestDocument {
 
 function renderAdminPublicationState(item) {
   const document = new TestDocument();
+  const detailsCalls = [];
   const context = {
     document,
     adminCatalogState: {
@@ -110,7 +111,7 @@ function renderAdminPublicationState(item) {
     summarizeAvailability: () => "Available",
     renderAdminThumbnail: () => document.createElement("div"),
     safeAdminDetailsItem: (candidate) => candidate,
-    openDetailsDialog: () => {},
+    openDetailsDialog: (candidate, opener) => detailsCalls.push({ candidate, opener }),
     publishAdminMediaItem: () => {},
     item,
   };
@@ -120,7 +121,7 @@ function renderAdminPublicationState(item) {
     [
       extractFunction(APP_SOURCE, "adminMediaTitle"),
       extractFunction(APP_SOURCE, "adminReadinessLabel"),
-      extractFunction(APP_SOURCE, "adminAnalysisLabel"),
+      extractFunction(APP_SOURCE, "adminAnalysisPresentation"),
       extractFunction(APP_SOURCE, "adminPublicationLabel"),
       extractFunction(APP_SOURCE, "adminMissingFieldsLabel"),
       extractFunction(APP_SOURCE, "createAdminStateBadge"),
@@ -128,7 +129,9 @@ function renderAdminPublicationState(item) {
     ].join("\n"),
     context,
   );
-  return vm.runInContext("renderAdminMediaItem(item)", context);
+  const row = vm.runInContext("renderAdminMediaItem(item)", context);
+  row.detailsCalls = detailsCalls;
+  return row;
 }
 
 function adminPublicationFixture(overrides) {
@@ -302,6 +305,7 @@ test("admin states use literal text and non-color icons without claiming AI appl
     "Incomplete metadata",
     "AI suggestion ready",
     "Analysis queued",
+    "Analysis in progress",
     "Analysis failed",
     "Published",
     "Processed",
@@ -310,6 +314,55 @@ test("admin states use literal text and non-color icons without claiming AI appl
   }
   assert.equal(APP_SOURCE.includes("AI applied"), false);
   assert.match(extractFunction(APP_SOURCE, "createAdminStateBadge"), /aria-hidden/);
+});
+
+test("admin header uses a left icon-only Back action with exact filter and keyboard order", () => {
+  const headerStart = INDEX_SOURCE.indexOf('<div class="admin-media-header">');
+  const headerEnd = INDEX_SOURCE.indexOf("</div>", INDEX_SOURCE.indexOf("</div>", headerStart) + 1);
+  const header = INDEX_SOURCE.slice(headerStart, headerEnd);
+  assert.ok(header.indexOf('id="admin-media-close-button"') < header.indexOf('id="admin-media-heading"'));
+  assert.match(header, /id="admin-media-close-button"[\s\S]*?aria-label="Back to Gallery"/);
+  assert.doesNotMatch(header.replace(/aria-label="Back to Gallery"|title="Back to Gallery"/g, ""), />\s*Back to Gallery\s*</);
+  assert.match(header, /<span aria-hidden="true">&larr;<\/span>/);
+  assert.match(extractFunction(APP_SOURCE, "closeAdminMediaBrowser"), /adminMediaOpenButton\.focus\(\)/);
+
+  const search = INDEX_SOURCE.indexOf('id="admin-media-search"');
+  const readiness = INDEX_SOURCE.indexOf('id="admin-media-readiness-filter"');
+  const analysis = INDEX_SOURCE.indexOf('id="admin-media-analysis-filter"');
+  const publication = INDEX_SOURCE.indexOf('id="admin-media-publication-filter"');
+  assert.ok(search < readiness && readiness < analysis && analysis < publication);
+  assert.match(
+    INDEX_SOURCE,
+    /id="admin-media-analysis-filter"[\s\S]*?value="not_requested"[\s\S]*?value="pending"[\s\S]*?value="analyzing"[\s\S]*?value="analyzed"[\s\S]*?value="failed"/,
+  );
+});
+
+test("five durable AI states keep exact labels cues filters badges and unpublished row modifiers", () => {
+  const expected = [
+    ["not_requested", "Analysis not requested", "·", "analysis-not-requested"],
+    ["pending", "Analysis queued", "◷", "analysis-pending"],
+    ["analyzing", "Analysis in progress", "↻", "analysis-analyzing"],
+    ["analyzed", "AI suggestion ready", "✦", "analysis-ready"],
+    ["failed", "Analysis failed", "!", "analysis-failed"],
+  ];
+  for (const [state, label, icon, badgeModifier] of expected) {
+    const row = renderAdminPublicationState(adminPublicationFixture({ analysis_state: state }));
+    const presentation = badgePresentation(row.children[3]);
+    assert.equal(row.dataset.analysisState, state);
+    assert.equal(row.dataset.publicationState, "unpublished");
+    assert.equal(presentation.label, label);
+    assert.equal(presentation.icon, icon);
+    assert.equal(
+      presentation.className,
+      `admin-media-badge admin-media-badge--${badgeModifier}`,
+    );
+    const rowModifier = state === "analyzed" ? "analysis-analyzed" : badgeModifier;
+    assert.match(row.className, new RegExp(`admin-media-row--${rowModifier}(?:\\s|$)`));
+    assert.ok(INDEX_SOURCE.includes(`value="${state}"`));
+    assert.ok(STYLES_SOURCE.includes(`--admin-row-ai-${state === "not_requested" ? "neutral" : state}`));
+  }
+  assert.match(STYLES_SOURCE, /\.admin-media-row--analysis-analyzed\s*\{/);
+  assert.match(STYLES_SOURCE, /--admin-row-ai-analyzed-bg:\s*rgba\(78, 142, 255,/);
 });
 
 test("ready unpublished DOM presents ready metadata and an active publish action", () => {
@@ -331,6 +384,7 @@ test("ready unpublished DOM presents ready metadata and an active publish action
   });
   assert.equal(actionFor(actions, "publish").disabled, false);
   assert.equal(actionFor(actions, "retry"), undefined);
+  assert.match(row.className, /admin-media-row--unpublished/);
 });
 
 test("ready published DOM keeps ready metadata independent from durable publication", () => {
@@ -354,6 +408,7 @@ test("ready published DOM keeps ready metadata independent from durable publicat
   });
   assert.equal(actionFor(actions, "publish"), undefined);
   assert.equal(actionFor(actions, "retry"), undefined);
+  assert.equal(row.className, "admin-media-row admin-media-row--published");
 });
 
 test("incomplete unpublished DOM presents missing metadata and disables publication", () => {
@@ -403,14 +458,35 @@ test("published metadata regression DOM preserves publication without an active 
   });
   assert.equal(actionFor(actions, "publish"), undefined);
   assert.equal(actionFor(actions, "retry"), undefined);
+  assert.equal(row.className, "admin-media-row admin-media-row--published");
 });
 
-test("Inspect reuses Details through a path-redacted adapter", () => {
+test("clickable title replaces Inspect and reuses Details through a path-redacted adapter", () => {
   const renderItem = extractFunction(APP_SOURCE, "renderAdminMediaItem");
   const adapter = extractFunction(APP_SOURCE, "safeAdminDetailsItem");
-  assert.match(renderItem, /openDetailsDialog\(safeAdminDetailsItem\(item\), inspectButton\)/);
+  assert.doesNotMatch(renderItem, /Inspect|inspectButton|adminAction = "inspect"/);
+  assert.match(renderItem, /openDetailsDialog\(safeAdminDetailsItem\(item\), titleButton\)/);
   assert.match(adapter, /relative_path: "Local catalog location"/);
   assert.doesNotMatch(adapter, /location\.relative_path/);
+
+  const row = renderAdminPublicationState(adminPublicationFixture());
+  const heading = row.children[1].children[0];
+  const titleButton = heading.children[0];
+  assert.equal(titleButton.tagName, "BUTTON");
+  assert.equal(titleButton.type, "button");
+  assert.equal(titleButton.className, "admin-media-row__title-button");
+  assert.equal(titleButton.attributes.get("aria-label"), "Open details for Catalog item");
+  assert.equal(row.children[5].children.some((child) => child.textContent === "Inspect"), false);
+  let propagationStopped = false;
+  titleButton.listeners.get("click")[0]({
+    stopPropagation() {
+      propagationStopped = true;
+    },
+  });
+  assert.equal(propagationStopped, true);
+  assert.equal(row.detailsCalls.length, 1);
+  assert.equal(row.detailsCalls[0].opener, titleButton);
+  assert.equal(actionFor(row.children[5], "publish").disabled, false);
 });
 
 test("admin controls expose loading empty error retry search filters and deterministic pagination", () => {
@@ -442,6 +518,22 @@ test("responsive source contracts cover exact stacked wrapping and full-grid ran
   assert.match(STYLES_SOURCE, /\.admin-media-row \{[\s\S]*?min-width: 0/);
   assert.match(STYLES_SOURCE, /\.admin-media-browser \{[\s\S]*?overflow: hidden/);
   assert.match(STYLES_SOURCE, /min-height: 44px/);
+  assert.match(STYLES_SOURCE, /@media \(max-width: 390px\)\s*\{[\s\S]*?html\s*\{[\s\S]*?min-width: 0/);
+});
+
+test("action and badge classes preserve hierarchy touch targets and publication precedence", () => {
+  assert.match(STYLES_SOURCE, /\.admin-media-filters \.admin-media-action-control,\n\.admin-media-action\s*\{[\s\S]*?font-size: 0\.82rem/);
+  assert.match(STYLES_SOURCE, /\.admin-media-badge\s*\{[\s\S]*?font-size: 0\.7rem/);
+  assert.match(
+    STYLES_SOURCE,
+    /\.admin-media-header button,[\s\S]*?\.admin-media-action,[\s\S]*?min-height: 44px/,
+  );
+  assert.match(STYLES_SOURCE, /\.admin-media-back-button\s*\{[\s\S]*?width: 44px;[\s\S]*?height: 44px/);
+  assert.match(STYLES_SOURCE, /\.admin-media-row--published\s*\{[\s\S]*?--admin-row-published/);
+  assert.doesNotMatch(
+    extractFunction(APP_SOURCE, "renderAdminMediaItem"),
+    /published[\s\S]*?admin-media-row--analysis-\$\{analysisPresentation\.rowModifier\}/,
+  );
 });
 
 test("accessibility contracts include semantic rows, live status, focus recovery, and reduced motion", () => {

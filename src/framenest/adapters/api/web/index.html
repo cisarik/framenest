@@ -456,6 +456,15 @@
         hidden
       >
         <div class="admin-media-header">
+          <button
+            id="admin-media-close-button"
+            class="admin-media-back-button"
+            type="button"
+            aria-label="Back to Gallery"
+            title="Back to Gallery"
+          >
+            <span aria-hidden="true">&larr;</span>
+          </button>
           <div>
             <p class="admin-media-eyebrow">Administrator workflow</p>
             <h1 id="admin-media-heading" tabindex="-1">Manage media publication</h1>
@@ -463,7 +472,6 @@
               Inspect server-owned readiness and explicitly publish one item at a time.
             </p>
           </div>
-          <button id="admin-media-close-button" type="button">Back to Gallery</button>
         </div>
 
         <form id="admin-media-filters" class="admin-media-filters" role="search">
@@ -476,14 +484,6 @@
               autocomplete="off"
               placeholder="Search canonical titles"
             >
-          </label>
-          <label class="admin-media-field" for="admin-media-publication-filter">
-            <span>Publication</span>
-            <select id="admin-media-publication-filter">
-              <option value="unpublished" selected>Unpublished</option>
-              <option value="published">Published</option>
-              <option value="all">All</option>
-            </select>
           </label>
           <label class="admin-media-field" for="admin-media-readiness-filter">
             <span>Readiness</span>
@@ -504,7 +504,15 @@
               <option value="failed">Failed</option>
             </select>
           </label>
-          <button id="admin-media-refresh-button" type="submit">Refresh</button>
+          <label class="admin-media-field" for="admin-media-publication-filter">
+            <span>Publication</span>
+            <select id="admin-media-publication-filter">
+              <option value="unpublished" selected>Unpublished</option>
+              <option value="published">Published</option>
+              <option value="all">All</option>
+            </select>
+          </label>
+          <button id="admin-media-refresh-button" class="admin-media-action-control" type="submit">Refresh</button>
         </form>
 
         <p
