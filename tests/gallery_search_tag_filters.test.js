@@ -406,7 +406,10 @@ function createRequestHarness(fetch) {
   const document = new TestDocument();
   const catalogTagFilters = document.createElement("div");
   const commandSearchInput = document.createElement("input");
-  document.body.append(catalogTagFilters, commandSearchInput);
+  const commandSearchClear = document.createElement("button");
+  const commandSearchSuggestions = document.createElement("ul");
+  commandSearchSuggestions.hidden = true;
+  document.body.append(catalogTagFilters, commandSearchInput, commandSearchClear, commandSearchSuggestions);
   const pendingTimers = new Map();
   let nextTimerId = 1;
   const context = {
@@ -415,7 +418,8 @@ function createRequestHarness(fetch) {
     URLSearchParams,
     catalogTagFilters,
     commandSearchInput,
-    commandSearchClear: null,
+    commandSearchClear,
+    commandSearchSuggestions,
     setTimeout(callback, delay) {
       const timerId = nextTimerId;
       nextTimerId += 1;
@@ -437,6 +441,9 @@ function createRequestHarness(fetch) {
     "releaseCatalogRequest",
     "setCatalogSearchText",
     "removeCatalogTagFilter",
+    "closeCommandSearchSuggestions",
+    "resetCatalogSearchState",
+    "resetCatalogToAllMedia",
     "loadCatalog",
   ].map(productionFunction).join("\n");
   vm.runInContext(`
@@ -458,6 +465,7 @@ function createRequestHarness(fetch) {
     function renderActiveCatalogTagFilters() {}
     function renderCatalogTagFilterStates() {}
     function syncCatalogFilterControls() {}
+    function advanceMetadataWorkspaceRevision() {}
     function showCatalogState(state) { catalogVisibleState = state; }
     function renderCatalogSuccess(page) {
       renderedPages.push(page.marker);
@@ -472,6 +480,8 @@ function createRequestHarness(fetch) {
   return {
     context,
     commandSearchInput,
+    commandSearchClear,
+    commandSearchSuggestions,
     pendingTimers,
     run(code) {
       return vm.runInContext(code, context);
@@ -751,9 +761,9 @@ test("Catalog request owners reject stale success, error, and finally work under
   });
 
   const oldRequest = h.run("loadCatalog()");
-  h.run("setCatalogSearchText('new title'); catalogState.tagKeys = ['alpha', 'beta']; catalogState.collection = 'processed'; catalogState.offset = 30");
+  h.run("setCatalogSearchText('new title'); catalogState.tagKeys = ['alpha', 'beta']; catalogState.collection = 'processed'; catalogState.contentCategory = 'movie'; catalogState.acquisitionSource = 'youtube_manual_claim'; catalogState.offset = 30");
   const newRequest = h.run("loadCatalog()");
-  assert.equal(requests[1].url, "/api/media?q=new+title&tag=alpha&tag=beta&collection=processed&limit=30&offset=30");
+  assert.equal(requests[1].url, "/api/media?q=new+title&tag=alpha&tag=beta&collection=processed&content_category=movie&acquisition_source=youtube_manual_claim&limit=30&offset=30");
 
   requests[0].pending.resolve(response({ marker: "old", items: [], total: 1, limit: 30, offset: 0, q: "" }));
   await oldRequest;
@@ -802,6 +812,69 @@ test("A stale catalog response cannot restore results for a removed active tag",
   requests[1].pending.resolve(response({ marker: "current untagged", items: [], total: 0, limit: 30, offset: 0 }));
   await new Promise((resolve) => setImmediate(resolve));
   assert.deepEqual(JSON.parse(h.run("JSON.stringify(renderedPages)")), ["current untagged"]);
+});
+
+test("All media reset invalidates pending search work and rejects a pre-reset catalog response", async () => {
+  const requests = [];
+  const h = createRequestHarness((url) => {
+    const pending = deferred();
+    requests.push({ url: String(url), pending });
+    return pending.promise;
+  });
+
+  const staleRequest = h.run("setCatalogSearchText('stale'); catalogState.tagKeys = ['alpha']; catalogState.collection = 'processed'; catalogState.contentCategory = 'movie'; catalogState.acquisitionSource = 'youtube_manual_claim'; catalogState.offset = 30; loadCatalog()");
+  h.commandSearchInput.value = "stale";
+  h.commandSearchInput.dispatchEvent(new TestEvent("input"));
+  const staleDebounce = [...h.pendingTimers.values()][0];
+  h.commandSearchSuggestions.hidden = false;
+  h.commandSearchSuggestions.appendChild(h.commandSearchInput.ownerDocument.createElement("li"));
+
+  h.run("resetCatalogToAllMedia()");
+  assert.equal(h.pendingTimers.size, 0);
+  assert.equal(h.commandSearchInput.value, "");
+  assert.equal(h.commandSearchClear.hidden, true);
+  assert.equal(h.commandSearchSuggestions.hidden, true);
+  assert.equal(h.commandSearchSuggestions.children.length, 0);
+  assert.equal(h.run("catalogState.q"), "");
+  assert.equal(h.run("catalogState.tagKeys.length"), 0);
+  assert.equal(h.run("catalogState.collection"), "");
+  assert.equal(h.run("catalogState.contentCategory"), "");
+  assert.equal(h.run("catalogState.acquisitionSource"), "");
+  assert.equal(h.run("catalogState.offset"), 0);
+  assert.equal(requests[1].url, "/api/media?limit=30&offset=0");
+
+  staleDebounce.callback();
+  assert.equal(h.run("catalogState.q"), "", "a cleared debounce cannot restore the old query");
+  assert.equal(requests.length, 2, "a stale debounce cannot issue a duplicate reset load");
+
+  requests[0].pending.resolve(response({ marker: "stale", items: [{ media_id: "old" }], total: 1, limit: 30, offset: 30 }));
+  await staleRequest;
+  assert.deepEqual(JSON.parse(h.run("JSON.stringify(renderedPages)")), []);
+
+  requests[1].pending.resolve(response({ marker: "reset", items: [], total: 0, limit: 30, offset: 0, q: "" }));
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(JSON.parse(h.run("JSON.stringify(renderedPages)")), ["reset"]);
+});
+
+test("A stale catalog response cannot cross Gallery category or source changes", async () => {
+  const requests = [];
+  const h = createRequestHarness((url) => {
+    const pending = deferred();
+    requests.push({ url: String(url), pending });
+    return pending.promise;
+  });
+
+  const staleRequest = h.run("loadCatalog()");
+  h.run("catalogState.contentCategory = 'movie'; catalogState.acquisitionSource = 'youtube_manual_claim'; loadCatalog()");
+  assert.equal(requests[1].url, "/api/media?content_category=movie&acquisition_source=youtube_manual_claim&limit=30&offset=0");
+
+  requests[0].pending.resolve(response({ marker: "stale", items: [], total: 1, limit: 30, offset: 0 }));
+  await staleRequest;
+  assert.deepEqual(JSON.parse(h.run("JSON.stringify(renderedPages)")), []);
+
+  requests[1].pending.resolve(response({ marker: "current", items: [], total: 0, limit: 30, offset: 0 }));
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(JSON.parse(h.run("JSON.stringify(renderedPages)")), ["current"]);
 });
 
 test("Raw Search changes reject the current catalog owner before the debounce claims a successor", async () => {

@@ -219,6 +219,9 @@ function createFilterHarness() {
   catalogTagFilters.hidden = true;
   const catalogResults = document.register(new TestElement(document, "div", "catalog-results"));
   const commandSearchInput = document.register(new TestElement(document, "input", "command-search-input"));
+  const commandSearchClear = document.register(new TestElement(document, "button", "command-search-clear"));
+  const commandSearchSuggestions = document.register(new TestElement(document, "ul", "command-search-suggestions"));
+  commandSearchSuggestions.hidden = true;
 
   const context = {
     console,
@@ -227,6 +230,9 @@ function createFilterHarness() {
     catalogTagFilters,
     catalogResults,
     commandSearchInput,
+    commandSearchClear,
+    commandSearchSuggestions,
+    clearTimeout() {},
   };
   context.globalThis = context;
   vm.createContext(context);
@@ -235,6 +241,7 @@ function createFilterHarness() {
     "catalogHasNarrowingFilters",
     "catalogIsUnfilteredAllMedia",
     "syncCatalogFilterControls",
+    "setCatalogSearchText",
     "setCatalogClassificationFilter",
     "setCatalogScope",
     "resetCatalogToAllMedia",
@@ -246,6 +253,8 @@ function createFilterHarness() {
     "renderCatalogTagFilterStates",
     "activateCatalogTagFilter",
     "removeCatalogTagFilter",
+    "closeCommandSearchSuggestions",
+    "resetCatalogSearchState",
   ].map(productionFunction).join("\n");
 
   vm.runInContext(`
@@ -268,6 +277,12 @@ function createFilterHarness() {
     ];
     let metadataWorkspaceRevision = 0;
     let catalogLoadCalls = 0;
+    let catalogRequestToken = 0;
+    let catalogRequestOwner = null;
+    let commandSearchDebounceTimer = null;
+    let commandSearchRequestToken = 0;
+    let commandSearchActiveIndex = -1;
+    let commandSearchCurrentSuggestions = [];
     function advanceMetadataWorkspaceRevision() { metadataWorkspaceRevision += 1; }
     function loadCatalog() { catalogLoadCalls += 1; }
     ${functions}
@@ -281,6 +296,51 @@ function createFilterHarness() {
     catalogFilterMovies,
     catalogFilterYoutube,
     catalogTagFilters,
+    commandSearchInput,
+    commandSearchClear,
+    commandSearchSuggestions,
+    run(code) {
+      return vm.runInContext(code, context);
+    },
+  };
+}
+
+function createDetailsFilterHarness() {
+  const opener = { focusCalls: 0, focus() { this.focusCalls += 1; } };
+  const context = {
+    document: { activeElement: opener },
+    metadataWorkspace: { openMediaId: null },
+    detailsDialog: {
+      showModal() {},
+      close() {},
+      setAttribute() {},
+      removeAttribute() {},
+    },
+    detailsCloseButton: { focus() {} },
+    detailsLoading: { hidden: true },
+    detailsError: { hidden: true },
+    detailsContent: { hidden: true },
+    detailsOpenerElement: null,
+    detailsCurrentItem: null,
+    detailsMetadataToken: 0,
+    detailsPlayRequested: false,
+    activeCardMediaRestore: null,
+    captureActiveCardVideoPlaybackPosition() {},
+    stopCardPreviewTimer() {},
+    cleanupDetailsMedia() {},
+    populateDetailsDialog() {},
+    confirmDiscardDirtyMetadata: async () => null,
+    catalogState: {},
+    opener,
+  };
+  context.globalThis = context;
+  vm.createContext(context);
+  vm.runInContext(
+    [productionFunction("openDetailsDialog"), productionFunction("closeDetailsDialog")].join("\n"),
+    context,
+  );
+  return {
+    context,
     run(code) {
       return vm.runInContext(code, context);
     },
@@ -298,6 +358,10 @@ test("All media is active only when no narrowing filters remain", () => {
   assert.equal(h.catalogTagFilters.hidden, false);
   assert.equal(h.catalogTagFilters.children.length, 1);
 
+  h.run("setCatalogSearchText('needle'); syncCatalogFilterControls()");
+  assert.equal(h.run("catalogIsUnfilteredAllMedia()"), false);
+  assert.equal(h.catalogScopeAll.classList.contains("scope-active"), false);
+
   h.run("setCatalogClassificationFilter({ contentCategory: 'meme' })");
   assert.equal(h.catalogFilterMemes.getAttribute("aria-pressed"), "true");
   assert.equal(h.catalogScopeAll.classList.contains("scope-active"), false);
@@ -311,6 +375,62 @@ test("All media is active only when no narrowing filters remain", () => {
   assert.equal(h.catalogScopeAll.classList.contains("scope-active"), true);
   assert.equal(h.catalogFilterMemes.getAttribute("aria-pressed"), "false");
   assert.equal(h.catalogTagFilters.hidden, true);
+});
+
+test("Whitespace-only Gallery search is normalized as no narrowing filter", () => {
+  const h = createFilterHarness();
+  h.run("setCatalogSearchText('   '); syncCatalogFilterControls()");
+
+  assert.equal(h.run("catalogState.q"), "");
+  assert.equal(h.run("catalogHasNarrowingFilters()"), false);
+  assert.equal(h.run("catalogIsUnfilteredAllMedia()"), true);
+  assert.equal(h.catalogScopeAll.classList.contains("scope-active"), true);
+});
+
+test("All media reset clears Gallery search UI, pending state, filters, and performs one authoritative load", () => {
+  const h = createFilterHarness();
+  h.run(`catalogState.q = "needle";
+    catalogState.tagKeys = ["alpha"];
+    catalogState.collection = "processed";
+    catalogState.contentCategory = "movie";
+    catalogState.acquisitionSource = "youtube_manual_claim";
+    catalogState.offset = 60;
+    commandSearchInput.value = "needle";
+    commandSearchClear.hidden = false;
+    commandSearchSuggestions.hidden = false;
+    commandSearchSuggestions.appendChild(document.createElement("li"));
+    commandSearchDebounceTimer = 12;
+    commandSearchRequestToken = 7`);
+
+  h.run("resetCatalogToAllMedia()");
+
+  assert.equal(h.run("catalogState.q"), "");
+  assert.equal(h.commandSearchInput.value, "");
+  assert.equal(h.commandSearchClear.hidden, true);
+  assert.equal(h.commandSearchSuggestions.hidden, true);
+  assert.equal(h.commandSearchSuggestions.children.length, 0);
+  assert.equal(h.run("commandSearchDebounceTimer"), null);
+  assert.equal(h.run("commandSearchRequestToken"), 8);
+  assert.equal(h.run("JSON.stringify({ tags: catalogState.tagKeys, collection: catalogState.collection, category: catalogState.contentCategory, source: catalogState.acquisitionSource, offset: catalogState.offset })"), '{"tags":[],"collection":"","category":"","source":"","offset":0}');
+  assert.equal(h.run("catalogIsUnfilteredAllMedia()"), true);
+  assert.equal(h.run("catalogLoadCalls"), 1);
+  assert.equal(h.run("buildCatalogQueryParams().toString()"), "limit=30&offset=0");
+});
+
+test("Details open and close preserve both active Gallery filters and a completed All media reset", async () => {
+  const h = createDetailsFilterHarness();
+  h.run('catalogState = { q: "needle", tagKeys: ["alpha"], collection: "processed", contentCategory: "movie", acquisitionSource: "youtube_manual_claim" }');
+  const activeBefore = h.run("JSON.stringify(catalogState)");
+
+  await h.run("openDetailsDialog({ media_id: 'media-1', media_kind: 'image' }, opener)");
+  h.run("closeDetailsDialog()");
+  assert.equal(h.run("JSON.stringify(catalogState)"), activeBefore);
+  assert.equal(h.context.opener.focusCalls, 1);
+
+  h.run('catalogState = { q: "", tagKeys: [], collection: "", contentCategory: "", acquisitionSource: "" }');
+  await h.run("openDetailsDialog({ media_id: 'media-1', media_kind: 'image' }, opener)");
+  h.run("closeDetailsDialog()");
+  assert.equal(h.run("JSON.stringify(catalogState)"), '{"q":"","tagKeys":[],"collection":"","contentCategory":"","acquisitionSource":""}');
 });
 
 test("All media clears quick collections and selected tags without changing AND query composition", () => {

@@ -3636,7 +3636,7 @@ function renderScanResult(card, payload) {
 function snapshotCatalogQueryState() {
   const tagKeys = Object.freeze([...catalogState.tagKeys]);
   return Object.freeze({
-    q: catalogState.q,
+    q: typeof catalogState.q === "string" ? catalogState.q.trim() : "",
     tagKeys,
     collection: catalogState.collection,
     contentCategory: catalogState.contentCategory || "",
@@ -3684,9 +3684,11 @@ function catalogRequestOwnerIsCurrent(owner) {
   return Boolean(owner)
     && catalogRequestOwner === owner
     && catalogRequestToken === owner.token
-    && catalogState.q === owner.q
+    && (typeof catalogState.q === "string" ? catalogState.q.trim() : "") === owner.q
     && semanticArraysEqual(catalogState.tagKeys, owner.tagKeys)
     && catalogState.collection === owner.collection
+    && catalogState.contentCategory === owner.contentCategory
+    && catalogState.acquisitionSource === owner.acquisitionSource
     && catalogState.limit === owner.limit
     && catalogState.offset === owner.offset;
 }
@@ -3698,8 +3700,9 @@ function releaseCatalogRequest(owner) {
 }
 
 function setCatalogSearchText(query) {
-  if (catalogState.q === query) return false;
-  catalogState.q = query;
+  const normalizedQuery = typeof query === "string" ? query.trim() : "";
+  if (catalogState.q === normalizedQuery) return false;
+  catalogState.q = normalizedQuery;
   catalogState.offset = 0;
   return true;
 }
@@ -6106,7 +6109,7 @@ async function handleDiscardMetadataChanges() {
   await closeMetadataWorkspace();
 }
 
-function closeMetadataWorkspaceWithContext(discardContext) {
+function closeMetadataWorkspaceWithContext(discardContext, { reloadCatalog = true } = {}) {
   if (!metadataDiscardContextIsCurrent(discardContext)) return false;
   if (metadataWorkspace.openMediaId === null) return false;
   metadataSaveOwner = null;
@@ -6151,7 +6154,7 @@ function closeMetadataWorkspaceWithContext(discardContext) {
     metadataOpenerElement.focus();
     metadataOpenerElement = null;
   }
-  loadCatalog();
+  if (reloadCatalog) loadCatalog();
   return true;
 }
 
@@ -7453,7 +7456,8 @@ function syncClassificationControlsFromWorkspace() {
 }
 
 function catalogHasNarrowingFilters() {
-  return catalogState.tagKeys.length > 0
+  return Boolean(typeof catalogState.q === "string" ? catalogState.q.trim() : "")
+    || catalogState.tagKeys.length > 0
     || Boolean(catalogState.contentCategory)
     || Boolean(catalogState.acquisitionSource);
 }
@@ -7505,6 +7509,9 @@ function resetCatalogToAllMedia() {
   if (catalogState.collection !== "") {
     advanceMetadataWorkspaceRevision();
   }
+  resetCatalogSearchState();
+  catalogRequestToken += 1;
+  catalogRequestOwner = null;
   catalogState.collection = "";
   catalogState.tagKeys = [];
   catalogState.contentCategory = "";
@@ -7521,7 +7528,7 @@ document.querySelector("#catalog-scope-all").addEventListener("click", async () 
   const discardContext = await confirmDiscardDirtyMetadata({ action: "change-scope", targetScope });
   if (!discardContext) return;
   if (metadataWorkspace.openMediaId !== null) {
-    if (!closeMetadataWorkspaceWithContext(discardContext)) return;
+    if (!closeMetadataWorkspaceWithContext(discardContext, { reloadCatalog: false })) return;
   } else if (!metadataDiscardContextIsCurrent(discardContext)) {
     return;
   }
@@ -7533,7 +7540,7 @@ document.querySelector("#catalog-scope-processed").addEventListener("click", asy
   const discardContext = await confirmDiscardDirtyMetadata({ action: "change-scope", targetScope });
   if (!discardContext) return;
   if (metadataWorkspace.openMediaId !== null) {
-    if (!closeMetadataWorkspaceWithContext(discardContext)) return;
+    if (!closeMetadataWorkspaceWithContext(discardContext, { reloadCatalog: false })) return;
   } else if (!metadataDiscardContextIsCurrent(discardContext)) {
     return;
   }
@@ -7600,12 +7607,24 @@ let commandSearchActiveIndex = -1;
 let commandSearchCurrentSuggestions = [];
 
 function closeCommandSearchSuggestions() {
+  commandSearchActiveIndex = -1;
+  commandSearchCurrentSuggestions = [];
   if (!commandSearchSuggestions) return;
   commandSearchSuggestions.hidden = true;
   commandSearchSuggestions.replaceChildren();
-  commandSearchInput.setAttribute("aria-expanded", "false");
-  commandSearchActiveIndex = -1;
-  commandSearchCurrentSuggestions = [];
+  if (commandSearchInput) commandSearchInput.setAttribute("aria-expanded", "false");
+}
+
+function resetCatalogSearchState() {
+  if (commandSearchDebounceTimer) {
+    clearTimeout(commandSearchDebounceTimer);
+    commandSearchDebounceTimer = null;
+  }
+  commandSearchRequestToken += 1;
+  if (commandSearchInput) commandSearchInput.value = "";
+  if (commandSearchClear) commandSearchClear.hidden = true;
+  closeCommandSearchSuggestions();
+  setCatalogSearchText("");
 }
 
 function renderCommandSearchSuggestions(titleItems, tagMatches, fallbackItems) {
@@ -7784,9 +7803,9 @@ if (commandSearchInput) {
       return;
     }
     commandSearchDebounceTimer = setTimeout(() => {
-      if (token === commandSearchRequestToken) {
-        performCommandSearch(query, token);
-      }
+      commandSearchDebounceTimer = null;
+      if (token !== commandSearchRequestToken) return;
+      performCommandSearch(query, token);
       loadCatalog();
     }, 200);
   });
@@ -7830,13 +7849,7 @@ if (commandSearchInput) {
 
 if (commandSearchClear) {
   commandSearchClear.addEventListener("click", () => {
-    if (commandSearchDebounceTimer) clearTimeout(commandSearchDebounceTimer);
-    commandSearchRequestToken += 1;
-    commandSearchInput.value = "";
-    commandSearchClear.hidden = true;
-    setCatalogSearchText("");
-    catalogState.offset = 0;
-    closeCommandSearchSuggestions();
+    resetCatalogSearchState();
     loadCatalog();
     commandSearchInput.focus();
   });
