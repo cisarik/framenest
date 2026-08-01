@@ -233,6 +233,7 @@ let youtubeClaimState = {
   submissionResult: null,
   message: "",
   errorMessage: "",
+  urlError: "",
 };
 
 function identityHasCapability(capability) {
@@ -492,6 +493,7 @@ const youtubeClaimStateLabel = document.querySelector("#youtube-claim-state-labe
 const youtubeClaimMessage = document.querySelector("#youtube-claim-message");
 const youtubeClaimDetails = document.querySelector("#youtube-claim-details");
 const youtubeClaimFailure = document.querySelector("#youtube-claim-failure");
+const youtubeClaimUrlError = document.querySelector("#youtube-claim-url-error");
 const youtubeClaimMetadata = document.querySelector("#youtube-claim-metadata");
 const youtubeClaimPublication = document.querySelector("#youtube-claim-publication");
 const metadataWorkspaceElement = document.querySelector("#metadata-workspace");
@@ -832,16 +834,22 @@ function youtubeClaimStatusMessage(snapshot) {
     return "An active claim for this URL was already in progress. Reusing it.";
   }
   if (snapshot.submission_result === "terminal_duplicate_reuse") {
-    return "This URL is already cataloged. The existing media was reused.";
+    return "This source matched existing catalog media. No new download was required, and no second catalog item was created.";
   }
   if (snapshot.state === "failed") {
     return "The claim failed with sanitized server failure information. Retry is available.";
   }
   if (snapshot.state === "duplicate_resolved") {
-    return "This source matched existing catalog media. No second catalog item was created.";
+    return "This source matched existing catalog media. No new download was required, and no second catalog item was created.";
   }
   if (snapshot.state === "cataloged") {
-    return "Cataloged. The media is available in Gallery.";
+    if (snapshot.publication_state === "unpublished") {
+      return "Cataloged. The media is not visible to ordinary Gallery users until it is published in Manage media.";
+    }
+    if (snapshot.publication_state === "published") {
+      return "Cataloged. The media is available in Gallery.";
+    }
+    return "Cataloged. Review publication in Manage media before expecting it in Gallery.";
   }
   if (snapshot.state === "handoff" || snapshot.state === "handed_off") {
     return "Media was acquired and is being handed off to the local catalog.";
@@ -893,6 +901,18 @@ function renderYouTubeClaimCockpit() {
   if (youtubeClaimMessage) {
     youtubeClaimMessage.textContent = youtubeClaimState.errorMessage
       || youtubeClaimStatusMessage(snapshot);
+  }
+  const urlError = youtubeClaimState.urlError || "";
+  if (youtubeClaimUrlInput) {
+    youtubeClaimUrlInput.setAttribute("aria-invalid", String(Boolean(urlError)));
+    youtubeClaimUrlInput.setAttribute(
+      "aria-describedby",
+      urlError ? "youtube-claim-url-note youtube-claim-url-error" : "youtube-claim-url-note",
+    );
+  }
+  if (youtubeClaimUrlError) {
+    youtubeClaimUrlError.hidden = !urlError;
+    youtubeClaimUrlError.textContent = urlError;
   }
   if (youtubeClaimDetails) youtubeClaimDetails.hidden = !snapshot;
   if (youtubeClaimMetadata) youtubeClaimMetadata.textContent = youtubeClaimMetadataLabel(snapshot);
@@ -1065,6 +1085,7 @@ function resetYouTubeClaimState() {
     submissionResult: null,
     message: "",
     errorMessage: "",
+    urlError: "",
   };
   if (youtubeClaimUrlInput) youtubeClaimUrlInput.value = "";
   renderYouTubeClaimCockpit();
@@ -1108,12 +1129,20 @@ function closeYouTubeClaimDialog() {
 async function submitYouTubeClaim() {
   if (!identityAllowsYouTubeClaim() || youtubeClaimState.requestOwner) return;
   const url = youtubeClaimUrlInput ? youtubeClaimUrlInput.value.trim() : "";
-  if (!url) {
-    youtubeClaimState.errorMessage = "Enter a YouTube URL before submitting the claim.";
+  const invalidUrl = !url || (
+    youtubeClaimUrlInput
+      && typeof youtubeClaimUrlInput.checkValidity === "function"
+      && !youtubeClaimUrlInput.checkValidity()
+  );
+  if (invalidUrl) {
+    youtubeClaimState.urlError = url
+      ? "Enter a valid YouTube URL before submitting the claim."
+      : "Enter a YouTube URL before submitting the claim.";
     renderYouTubeClaimCockpit();
     if (youtubeClaimUrlInput) youtubeClaimUrlInput.focus();
     return;
   }
+  youtubeClaimState.urlError = "";
   const accepted = await requestConfirmation({
     title: "Confirm YouTube claim",
     message: "FrameNest will ask the local server to acquire this source and add it to the catalog. Continue?",
@@ -1154,6 +1183,7 @@ async function submitYouTubeClaim() {
       return;
     }
     if (!applyYouTubeClaimSnapshot(snapshot, owner, { allowClaimChange: true })) return;
+    if (youtubeClaimUrlInput) youtubeClaimUrlInput.value = "";
     releaseYouTubeRequest(owner);
     if (youtubeClaimShouldPoll(snapshot)) {
       scheduleYouTubeClaimPolling(youtubeClaimContext(snapshot.claim_id));
@@ -8793,6 +8823,22 @@ if (youtubeClaimForm) {
   youtubeClaimForm.addEventListener("submit", (event) => {
     event.preventDefault();
     submitYouTubeClaim();
+  });
+}
+
+if (youtubeClaimUrlInput) {
+  youtubeClaimUrlInput.addEventListener("input", () => {
+    if (!youtubeClaimState.urlError) return;
+    youtubeClaimState.urlError = "";
+    renderYouTubeClaimCockpit();
+  });
+  youtubeClaimUrlInput.addEventListener("invalid", (event) => {
+    event.preventDefault();
+    const hasValue = Boolean(youtubeClaimUrlInput.value.trim());
+    youtubeClaimState.urlError = hasValue
+      ? "Enter a valid YouTube URL before submitting the claim."
+      : "Enter a YouTube URL before submitting the claim.";
+    renderYouTubeClaimCockpit();
   });
 }
 

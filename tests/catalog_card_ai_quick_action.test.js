@@ -633,9 +633,9 @@ function renderCatalogCardForCapabilities(capabilities, overrides = {}) {
   context.openDetailsDialog = (item, opener) => detailsCalls.push({ item, opener });
   context.handleOpenMetadataWorkspace = (item, opener) => editCalls.push({ item, opener });
   context.editIcon = () => new FakeElement("span");
-  context.downloadIcon = () => new FakeElement("span");
-  context.mediaDownloadUrl = (mediaId, locationId) =>
-    `/api/media/${mediaId}/locations/${locationId}/download`;
+  context.openOriginalIcon = () => new FakeElement("span");
+  context.mediaContentUrl = (mediaId, locationId) =>
+    `/api/media/${mediaId}/locations/${locationId}/content`;
   context.automaticAnalysisStatusMessage = () => "";
   vm.runInContext(extractFunction(APP_SOURCE, "renderCatalogCard"), context);
   const item = sampleItem(overrides);
@@ -654,19 +654,19 @@ test("Gallery card actions reflect ordinary admin and removed capabilities witho
     "media.download",
   ]);
   const ordinaryTitle = ordinary.card.querySelector(".catalog-card__title-button");
-  const ordinaryDownload = ordinary.card.querySelector(".catalog-card__action--download");
+  const ordinaryOriginal = ordinary.card.querySelector(".catalog-card__action--open-original");
   const ordinaryActions = ordinary.card.querySelector(".catalog-card__actions");
   assert.ok(ordinaryTitle);
   ordinaryTitle.click();
   assert.equal(ordinary.detailsCalls.length, 1);
   assert.equal(ordinary.detailsCalls[0].opener, ordinaryTitle);
-  assert.ok(ordinaryDownload);
+  assert.ok(ordinaryOriginal);
   assert.equal(
-    ordinaryDownload.href,
-    `/api/media/${ordinary.item.media_id}/locations/${ordinary.item.locations[0].location_id}/download`,
+    ordinaryOriginal.href,
+    `/api/media/${ordinary.item.media_id}/locations/${ordinary.item.locations[0].location_id}/content`,
   );
-  assert.equal(ordinaryDownload.title, "Download");
-  assert.match(ordinaryDownload.className, /catalog-card__action--bottom-right/);
+  assert.equal(ordinaryOriginal.title, "Open original media");
+  assert.match(ordinaryOriginal.className, /catalog-card__action--bottom-right/);
   assert.equal(ordinary.card.querySelector(".catalog-card__action--edit"), null);
   assert.equal(ordinary.card.querySelector(".catalog-card__action--analyze"), null);
   assert.equal(ordinaryActions.children.length, 1);
@@ -680,7 +680,7 @@ test("Gallery card actions reflect ordinary admin and removed capabilities witho
   ]);
   assert.ok(admin.card.querySelector(".catalog-card__action--edit"));
   assert.ok(admin.card.querySelector(".catalog-card__action--analyze"));
-  assert.ok(admin.card.querySelector(".catalog-card__action--download"));
+  assert.ok(admin.card.querySelector(".catalog-card__action--open-original"));
 
   const noMetadata = renderCatalogCardForCapabilities([
     "gallery.read",
@@ -689,7 +689,7 @@ test("Gallery card actions reflect ordinary admin and removed capabilities witho
   ]);
   assert.equal(noMetadata.card.querySelector(".catalog-card__action--edit"), null);
   assert.equal(noMetadata.card.querySelector(".catalog-card__action--analyze"), null);
-  assert.ok(noMetadata.card.querySelector(".catalog-card__action--download"));
+  assert.ok(noMetadata.card.querySelector(".catalog-card__action--open-original"));
 
   const noAnalysis = renderCatalogCardForCapabilities([
     "gallery.read",
@@ -698,13 +698,13 @@ test("Gallery card actions reflect ordinary admin and removed capabilities witho
   ]);
   assert.ok(noAnalysis.card.querySelector(".catalog-card__action--edit"));
   assert.equal(noAnalysis.card.querySelector(".catalog-card__action--analyze"), null);
-  assert.ok(noAnalysis.card.querySelector(".catalog-card__action--download"));
+  assert.ok(noAnalysis.card.querySelector(".catalog-card__action--open-original"));
 
   const noDownload = renderCatalogCardForCapabilities([
     "gallery.read",
     "metadata.canonical.write",
   ]);
-  assert.equal(noDownload.card.querySelector(".catalog-card__action--download"), null);
+  assert.ok(noDownload.card.querySelector(".catalog-card__action--open-original"));
   assert.ok(noDownload.card.querySelector(".catalog-card__action--edit"));
 });
 
@@ -722,10 +722,10 @@ test("Gallery action presentation is hidden by default and renderable on reveal 
     "analysis.run",
   ]);
   const renderedActions = [
-    ordinary.card.querySelector(".catalog-card__action--download"),
+    ordinary.card.querySelector(".catalog-card__action--open-original"),
     admin.card.querySelector(".catalog-card__action--analyze"),
     admin.card.querySelector(".catalog-card__action--edit"),
-    admin.card.querySelector(".catalog-card__action--download"),
+    admin.card.querySelector(".catalog-card__action--open-original"),
   ];
   for (const action of renderedActions) {
     assert.ok(action);
@@ -755,15 +755,15 @@ test("Gallery action presentation is hidden by default and renderable on reveal 
   assert.equal(coarse.action["pointer-events"], "auto");
 });
 
-test("Gallery Download uses the capability-gated download endpoint and compact placement", () => {
+test("Gallery original media action uses the content endpoint and compact placement", () => {
   const cardBody = extractFunction(APP_SOURCE, "renderCatalogCard");
-  const downloadUrl = extractFunction(APP_SOURCE, "mediaDownloadUrl");
-  assert.match(cardBody, /identityHasCapability\("media\.download"\)/);
-  assert.match(cardBody, /catalog-card__action--download catalog-card__action--bottom-right/);
-  assert.match(cardBody, /downloadLink\.title = "Download"/);
-  assert.doesNotMatch(cardBody, /Open original media/);
-  assert.ok(downloadUrl.includes("/download`"));
-  assert.match(STYLES_SOURCE, /\.catalog-card__action--download\s*\{/);
+  const contentUrl = extractFunction(APP_SOURCE, "mediaContentUrl");
+  assert.doesNotMatch(cardBody, /identityHasCapability\("media\.download"\)/);
+  assert.match(cardBody, /catalog-card__action--open-original catalog-card__action--bottom-right/);
+  assert.match(cardBody, /openOriginalLink\.title = "Open original media"/);
+  assert.match(cardBody, /mediaContentUrl\(item\.media_id, supportedLocation\.location_id\)/);
+  assert.ok(contentUrl.includes("/content`"));
+  assert.match(STYLES_SOURCE, /\.catalog-card__action--open-original\s*\{/);
 });
 
 test("brain eligibility requires metadata need, both capabilities, supported location, and excludes movies", () => {

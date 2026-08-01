@@ -20,8 +20,12 @@ const STYLES_SOURCE = fs.readFileSync(
 const RECOVERY_KEY = "framenest.youtube.currentClaim.v1";
 
 function extractFunction(source, name) {
-  const marker = `function ${name}(`;
-  const start = source.indexOf(marker);
+  const markers = [`async function ${name}(`, `function ${name}(`];
+  let start = -1;
+  for (const marker of markers) {
+    start = source.indexOf(marker);
+    if (start !== -1) break;
+  }
   assert.notEqual(start, -1, `missing production function ${name}`);
   const bodyOpen = source.indexOf("{", source.indexOf(")", start));
   let depth = 0;
@@ -43,16 +47,294 @@ function evaluate(source, prelude, expression) {
   return expression ? vm.runInContext(expression, context) : context;
 }
 
+function createClaimElement(tagName = "div") {
+  const attributes = new Map();
+  const listeners = new Map();
+  return {
+    tagName: String(tagName).toUpperCase(),
+    attributes,
+    listeners,
+    dataset: {},
+    hidden: false,
+    disabled: false,
+    textContent: "",
+    value: "",
+    valid: true,
+    focusCount: 0,
+    setAttribute(name, value) {
+      attributes.set(String(name).toLowerCase(), String(value));
+    },
+    getAttribute(name) {
+      const key = String(name).toLowerCase();
+      return attributes.has(key) ? attributes.get(key) : null;
+    },
+    removeAttribute(name) {
+      attributes.delete(String(name).toLowerCase());
+    },
+    addEventListener(type, listener) {
+      if (!listeners.has(type)) listeners.set(type, []);
+      listeners.get(type).push(listener);
+    },
+    dispatchEvent(event) {
+      event.target = event.target || this;
+      event.currentTarget = this;
+      event.defaultPrevented = false;
+      event.preventDefault = () => {
+        event.defaultPrevented = true;
+      };
+      for (const listener of [...(listeners.get(event.type) || [])]) listener(event);
+      return !event.defaultPrevented;
+    },
+    checkValidity() {
+      return this.valid;
+    },
+    focus() {
+      this.focusCount += 1;
+    },
+  };
+}
+
+function createYouTubeAccessibilityHarness() {
+  const youtubeClaimUrlInput = createClaimElement("input");
+  const youtubeClaimUrlError = createClaimElement("p");
+  youtubeClaimUrlError.hidden = true;
+  const elements = {
+    youtubeClaimForm: createClaimElement("form"),
+    youtubeClaimUrlInput,
+    youtubeClaimUrlError,
+    youtubeClaimRow: createClaimElement("section"),
+    youtubeClaimStateLabel: createClaimElement("h3"),
+    youtubeClaimMessage: createClaimElement("p"),
+    youtubeClaimDetails: createClaimElement("div"),
+    youtubeClaimMetadata: createClaimElement("p"),
+    youtubeClaimPublication: createClaimElement("p"),
+    youtubeClaimFailure: createClaimElement("p"),
+    youtubeClaimSubmitButton: createClaimElement("button"),
+    youtubeClaimRetryButton: createClaimElement("button"),
+    youtubeClaimResetButton: createClaimElement("button"),
+    youtubeClaimManageMediaButton: createClaimElement("button"),
+    youtubeClaimDialogTitle: createClaimElement("h2"),
+  };
+  const state = {
+    generation: 0,
+    claimId: null,
+    snapshot: null,
+    requestOwner: null,
+    pollOwner: null,
+    pollTimer: null,
+    pollRetryDelayMs: 1000,
+    submitting: false,
+    retrying: false,
+    recoveryAttempted: false,
+    submissionResult: null,
+    message: "",
+    errorMessage: "",
+    urlError: "",
+  };
+  const fetchCalls = [];
+  const context = {
+    console,
+    Set,
+    Array,
+    String,
+    Boolean,
+    Object,
+    Number,
+    Math,
+    Promise,
+    encodeURIComponent,
+    clearTimeout,
+    setTimeout,
+    youtubeClaimState: state,
+    YOUTUBE_CLAIMS_ENDPOINT: "/api/admin/youtube/claims",
+    identityAllowsAdminWorkflow: () => true,
+    identityAllowsYouTubeClaim: () => true,
+    framenestMutationHeaders: (headers) => Object.assign({ "X-FrameNest-Request": "1" }, headers),
+    saveYouTubeClaimRecovery() {},
+    stopYouTubeClaimPolling() {
+      state.pollOwner = null;
+      state.pollTimer = null;
+    },
+    scheduleYouTubeClaimPolling() {},
+    requestConfirmation: async () => {
+      context.confirmationCalls += 1;
+      return true;
+    },
+    confirmationCalls: 0,
+    fetch: async (url, options) => {
+      fetchCalls.push({ url: String(url), options });
+      return {
+        ok: true,
+        status: 201,
+        json: async () => ({
+          claim_id: "claim-accepted-1",
+          state: "cataloged",
+          phase: "cataloged",
+          catalog_state: "cataloged",
+          metadata_state: "unknown",
+          publication_state: "unpublished",
+        }),
+      };
+    },
+    ...elements,
+  };
+  context.claimYouTubeRequest = (kind) => {
+    if (state.requestOwner) return null;
+    state.generation += 1;
+    const owner = { generation: state.generation, claimId: state.claimId, kind };
+    state.requestOwner = owner;
+    return owner;
+  };
+  context.releaseYouTubeRequest = (owner) => {
+    if (state.requestOwner !== owner) return false;
+    state.requestOwner = null;
+    return true;
+  };
+  context.youtubeClaimContextStillCurrent = (owner) => Boolean(
+    owner
+      && state.generation === owner.generation
+      && (!owner.claimId || state.claimId === owner.claimId),
+  );
+  context.youtubeClaimContext = (claimId = state.claimId) => ({
+    generation: state.generation,
+    claimId: claimId || null,
+  });
+
+  const functions = [
+    extractFunction(APP_SOURCE, "youtubeClaimStateIsTerminal"),
+    extractFunction(APP_SOURCE, "youtubeClaimShouldPoll"),
+    extractFunction(APP_SOURCE, "normalizeYouTubeClaimSnapshot"),
+    extractFunction(APP_SOURCE, "youtubeClaimPhaseLabel"),
+    extractFunction(APP_SOURCE, "youtubeClaimStatusMessage"),
+    extractFunction(APP_SOURCE, "youtubeClaimMetadataLabel"),
+    extractFunction(APP_SOURCE, "youtubeClaimPublicationLabel"),
+    extractFunction(APP_SOURCE, "renderYouTubeClaimCockpit"),
+    extractFunction(APP_SOURCE, "applyYouTubeClaimSnapshot"),
+    extractFunction(APP_SOURCE, "submitYouTubeClaim"),
+  ].join("\n");
+  context.globalThis = context;
+  vm.createContext(context);
+  vm.runInContext(functions, context);
+  const eventWiringStart = APP_SOURCE.lastIndexOf("if (youtubeClaimForm) {");
+  const eventWiringEnd = APP_SOURCE.indexOf("if (youtubeClaimRetryButton) {", eventWiringStart);
+  assert.ok(eventWiringStart >= 0);
+  assert.ok(eventWiringEnd > eventWiringStart);
+  vm.runInContext(APP_SOURCE.slice(eventWiringStart, eventWiringEnd), context);
+  context.renderYouTubeClaimCockpit = vm.runInContext("renderYouTubeClaimCockpit", context);
+  context.submitYouTubeClaim = vm.runInContext("submitYouTubeClaim", context);
+  context.renderYouTubeClaimCockpit();
+  return { context, elements, state, fetchCalls };
+}
+
 test("YouTube cockpit markup is administrator-gated and accessible", () => {
   assert.match(INDEX_SOURCE, /id="youtube-claim-open-button"[^>]*hidden/);
   assert.match(INDEX_SOURCE, /id="youtube-claim-dialog"[^>]*aria-labelledby="youtube-claim-dialog-title"/);
   assert.match(INDEX_SOURCE, /id="youtube-claim-form"/);
   assert.match(INDEX_SOURCE, /id="youtube-claim-url"[^>]*type="url"/);
+  assert.match(INDEX_SOURCE, /id="youtube-claim-url-error"[^>]*role="alert"[^>]*hidden/);
   assert.match(INDEX_SOURCE, /id="youtube-claim-message"[^>]*role="status"/);
   assert.match(INDEX_SOURCE, /id="youtube-claim-failure"[^>]*role="alert"/);
   assert.match(INDEX_SOURCE, /id="youtube-claim-manage-media-button"/);
   assert.match(APP_SOURCE, /capabilities\.has\("youtube\.acquire"\)/);
   assert.match(APP_SOURCE, /function identityAllowsYouTubeClaim\(\)/);
+  assert.match(APP_SOURCE, /aria-invalid/);
+  assert.match(APP_SOURCE, /youtube-claim-url-note youtube-claim-url-error/);
+
+  const harness = createYouTubeAccessibilityHarness();
+  const { context, elements, state, fetchCalls } = harness;
+  const input = elements.youtubeClaimUrlInput;
+  const error = elements.youtubeClaimUrlError;
+  assert.equal(input.getAttribute("aria-invalid"), "false");
+  assert.equal(input.getAttribute("aria-describedby"), "youtube-claim-url-note");
+  assert.equal(error.hidden, true);
+
+  input.value = "https://www.youtube.com/watch?v=private-test-value";
+  input.valid = false;
+  const invalidEvent = { type: "invalid" };
+  input.dispatchEvent(invalidEvent);
+  assert.equal(invalidEvent.defaultPrevented, true);
+  assert.equal(input.getAttribute("aria-invalid"), "true");
+  assert.equal(
+    input.getAttribute("aria-describedby"),
+    "youtube-claim-url-note youtube-claim-url-error",
+  );
+  assert.equal(error.hidden, false);
+  assert.equal(error.textContent, "Enter a valid YouTube URL before submitting the claim.");
+  assert.equal(error.textContent.includes(input.value), false);
+
+  input.valid = true;
+  input.dispatchEvent({ type: "input" });
+  assert.equal(input.getAttribute("aria-invalid"), "false");
+  assert.equal(input.getAttribute("aria-describedby"), "youtube-claim-url-note");
+  assert.equal(error.hidden, true);
+
+  input.value = "not a URL";
+  input.valid = false;
+  const pointerSubmit = { type: "submit" };
+  elements.youtubeClaimForm.dispatchEvent(pointerSubmit);
+  assert.equal(pointerSubmit.defaultPrevented, true);
+  assert.equal(context.confirmationCalls, 0);
+  assert.equal(fetchCalls.length, 0);
+  assert.equal(input.getAttribute("aria-invalid"), "true");
+
+  const keyboardSubmit = { type: "submit", submitter: elements.youtubeClaimSubmitButton };
+  elements.youtubeClaimForm.dispatchEvent(keyboardSubmit);
+  assert.equal(keyboardSubmit.defaultPrevented, true);
+  assert.equal(context.confirmationCalls, 0);
+  assert.equal(fetchCalls.length, 0);
+
+  input.value = "https://www.youtube.com/watch?v=accepted-test-value";
+  input.valid = true;
+  return context.submitYouTubeClaim().then(() => {
+    assert.equal(fetchCalls.length, 1);
+    assert.deepEqual(
+      JSON.parse(fetchCalls[0].options.body),
+      { url: "https://www.youtube.com/watch?v=accepted-test-value", confirmation_method: "interactive" },
+    );
+    assert.equal(input.value, "");
+    assert.equal(state.urlError, "");
+    assert.equal(input.getAttribute("aria-invalid"), "false");
+    assert.equal(input.getAttribute("aria-describedby"), "youtube-claim-url-note");
+    assert.equal(error.hidden, true);
+    context.renderYouTubeClaimCockpit();
+    assert.equal(input.value, "");
+  });
+});
+
+test("terminal claim copy distinguishes duplicate reuse and unpublished catalog media", () => {
+  const statusMessage = extractFunction(APP_SOURCE, "youtubeClaimStatusMessage");
+  const context = evaluate(
+    statusMessage,
+    "let youtubeClaimState = { message: \"\" };",
+  );
+  assert.match(
+    vm.runInContext(
+      'youtubeClaimStatusMessage({ state: "duplicate_resolved" })',
+      context,
+    ),
+    /No new download was required.*no second catalog item was created/,
+  );
+  assert.match(
+    vm.runInContext(
+      'youtubeClaimStatusMessage({ state: "duplicate_resolved", submission_result: "terminal_duplicate_reuse" })',
+      context,
+    ),
+    /No new download was required.*no second catalog item was created/,
+  );
+  assert.match(
+    vm.runInContext(
+      'youtubeClaimStatusMessage({ state: "cataloged", publication_state: "unpublished" })',
+      context,
+    ),
+    /not visible to ordinary Gallery users.*published in Manage media/,
+  );
+  assert.match(
+    vm.runInContext(
+      'youtubeClaimStatusMessage({ state: "cataloged", publication_state: "published" })',
+      context,
+    ),
+    /available in Gallery/,
+  );
 });
 
 test("YouTube capability fails closed until exact identity resolution", () => {
