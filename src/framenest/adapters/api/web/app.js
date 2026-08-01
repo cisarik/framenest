@@ -611,6 +611,88 @@ function youtubeClaimDialogIsOpen() {
   );
 }
 
+const YOUTUBE_CLAIM_VIDEO_ID_PATTERN = /^[A-Za-z0-9_-]{11}$/;
+const YOUTUBE_CLAIM_HOSTS = new Set(["youtube.com", "www.youtube.com", "m.youtube.com"]);
+const YOUTUBE_CLAIM_WATCH_QUERY_KEYS = new Set(["v", "t", "si", "feature"]);
+const YOUTUBE_CLAIM_PATH_QUERY_KEYS = new Set(["t", "si", "feature"]);
+
+function validateYouTubeClaimUrl(value) {
+  const unsupported = (code = "unsupported") => ({
+    supported: false,
+    code,
+    message: code === "required"
+      ? "Enter a YouTube URL before submitting the claim."
+      : "Enter a supported single-video YouTube URL before submitting the claim.",
+  });
+  if (typeof value !== "string" || !value || !value.trim()) return unsupported("required");
+  if (
+    value.trim() !== value
+    || Array.from(value).length > 2048
+    || /\p{Cc}/u.test(value)
+  ) return unsupported();
+
+  const rawUrl = value.match(/^https:\/\/([^/?#]*)([^?#]*)(?:\?([^#]*))?(?:#(.*))?$/iu);
+  if (!rawUrl) return unsupported();
+  let parsed;
+  try {
+    parsed = new URL(value);
+  } catch {
+    return unsupported();
+  }
+  const host = parsed.hostname.toLowerCase();
+  const rawAuthority = rawUrl[1].toLowerCase();
+  const rawPath = rawUrl[2];
+  if (
+    parsed.protocol !== "https:"
+    || parsed.username
+    || parsed.password
+    || (parsed.port && parsed.port !== "443")
+    || parsed.hash
+    || (rawAuthority !== host && rawAuthority !== `${host}:443`)
+    || parsed.pathname !== rawPath
+  ) return unsupported();
+
+  const rawQuery = rawUrl[3] === undefined ? "" : rawUrl[3];
+  const queryFields = rawQuery ? rawQuery.split("&") : [];
+  if (queryFields.length > 8 || queryFields.some((field) => !field.includes("="))) {
+    return unsupported();
+  }
+  const queryPairs = [...new URLSearchParams(rawQuery).entries()];
+  const query = new Map();
+  for (const [key, queryValue] of queryPairs) {
+    if (query.has(key)) return unsupported();
+    query.set(key, queryValue);
+  }
+
+  let videoId = null;
+  if (host === "youtu.be") {
+    if ([...query.keys()].some((key) => !YOUTUBE_CLAIM_PATH_QUERY_KEYS.has(key))) {
+      return unsupported();
+    }
+    const pathParts = rawPath.split("/");
+    if (pathParts.length === 2 || (pathParts.length === 3 && pathParts[2] === "")) {
+      videoId = pathParts[1];
+    }
+  } else if (YOUTUBE_CLAIM_HOSTS.has(host) && rawPath === "/watch") {
+    if (
+      !query.has("v")
+      || [...query.keys()].some((key) => !YOUTUBE_CLAIM_WATCH_QUERY_KEYS.has(key))
+    ) return unsupported();
+    videoId = query.get("v");
+  } else if (YOUTUBE_CLAIM_HOSTS.has(host)) {
+    if ([...query.keys()].some((key) => !YOUTUBE_CLAIM_PATH_QUERY_KEYS.has(key))) {
+      return unsupported();
+    }
+    const pathParts = rawPath.split("/");
+    if (
+      (pathParts.length === 3 || (pathParts.length === 4 && pathParts[3] === ""))
+      && pathParts[1] === "shorts"
+    ) videoId = pathParts[2];
+  }
+  if (!YOUTUBE_CLAIM_VIDEO_ID_PATTERN.test(videoId || "")) return unsupported();
+  return { supported: true, code: "supported", url: value, videoId };
+}
+
 function youtubeClaimStateIsTerminal(snapshot) {
   return Boolean(snapshot && ["failed", "cataloged", "duplicate_resolved"].includes(snapshot.state));
 }
@@ -1128,20 +1210,14 @@ function closeYouTubeClaimDialog() {
 
 async function submitYouTubeClaim() {
   if (!identityAllowsYouTubeClaim() || youtubeClaimState.requestOwner) return;
-  const url = youtubeClaimUrlInput ? youtubeClaimUrlInput.value.trim() : "";
-  const invalidUrl = !url || (
-    youtubeClaimUrlInput
-      && typeof youtubeClaimUrlInput.checkValidity === "function"
-      && !youtubeClaimUrlInput.checkValidity()
-  );
-  if (invalidUrl) {
-    youtubeClaimState.urlError = url
-      ? "Enter a valid YouTube URL before submitting the claim."
-      : "Enter a YouTube URL before submitting the claim.";
+  const validation = validateYouTubeClaimUrl(youtubeClaimUrlInput ? youtubeClaimUrlInput.value : "");
+  if (!validation.supported) {
+    youtubeClaimState.urlError = validation.message;
     renderYouTubeClaimCockpit();
     if (youtubeClaimUrlInput) youtubeClaimUrlInput.focus();
     return;
   }
+  const url = validation.url;
   youtubeClaimState.urlError = "";
   const accepted = await requestConfirmation({
     title: "Confirm YouTube claim",
@@ -8834,10 +8910,7 @@ if (youtubeClaimUrlInput) {
   });
   youtubeClaimUrlInput.addEventListener("invalid", (event) => {
     event.preventDefault();
-    const hasValue = Boolean(youtubeClaimUrlInput.value.trim());
-    youtubeClaimState.urlError = hasValue
-      ? "Enter a valid YouTube URL before submitting the claim."
-      : "Enter a YouTube URL before submitting the claim.";
+    youtubeClaimState.urlError = validateYouTubeClaimUrl(youtubeClaimUrlInput.value).message;
     renderYouTubeClaimCockpit();
   });
 }

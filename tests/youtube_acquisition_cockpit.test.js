@@ -18,6 +18,7 @@ const STYLES_SOURCE = fs.readFileSync(
 );
 
 const RECOVERY_KEY = "framenest.youtube.currentClaim.v1";
+const VIDEO_ID = "AbCdEf123_-";
 const CREATE_CONFIRMATION_MESSAGE = "FrameNest will start the acquisition in the background. Closing the cockpit will not cancel it. Acquired media remains unpublished until it is reviewed and published in Manage media.";
 
 function extractFunction(source, name) {
@@ -40,8 +41,30 @@ function extractFunction(source, name) {
   throw new Error(`unterminated production function ${name}`);
 }
 
+function extractYouTubeClaimValidationSource() {
+  const constantsStart = APP_SOURCE.indexOf("const YOUTUBE_CLAIM_VIDEO_ID_PATTERN");
+  const functionStart = APP_SOURCE.indexOf("function validateYouTubeClaimUrl(");
+  assert.ok(constantsStart >= 0);
+  assert.ok(functionStart > constantsStart);
+  return `${APP_SOURCE.slice(constantsStart, functionStart)}\n${extractFunction(
+    APP_SOURCE,
+    "validateYouTubeClaimUrl",
+  )}`;
+}
+
 function evaluate(source, prelude, expression) {
-  const context = { console, Set, Array, String, Boolean, Object, Number };
+  const context = {
+    console,
+    Set,
+    Map,
+    Array,
+    String,
+    Boolean,
+    Object,
+    Number,
+    URL,
+    URLSearchParams,
+  };
   context.globalThis = context;
   vm.createContext(context);
   vm.runInContext(`${prelude}\n${source}\n`, context);
@@ -156,9 +179,11 @@ function createYouTubeAccessibilityHarness({ confirmationAccepted = true } = {})
   };
   const fetchCalls = [];
   const confirmationRequests = [];
+  const storageWrites = [];
   const context = {
     console,
     Set,
+    Map,
     Array,
     String,
     Boolean,
@@ -169,12 +194,16 @@ function createYouTubeAccessibilityHarness({ confirmationAccepted = true } = {})
     encodeURIComponent,
     clearTimeout,
     setTimeout,
+    URL,
+    URLSearchParams,
     youtubeClaimState: state,
     YOUTUBE_CLAIMS_ENDPOINT: "/api/admin/youtube/claims",
     identityAllowsAdminWorkflow: () => true,
     identityAllowsYouTubeClaim: () => true,
     framenestMutationHeaders: (headers) => Object.assign({ "X-FrameNest-Request": "1" }, headers),
-    saveYouTubeClaimRecovery() {},
+    saveYouTubeClaimRecovery(claimId) {
+      storageWrites.push(String(claimId));
+    },
     stopYouTubeClaimPolling() {
       state.pollOwner = null;
       state.pollTimer = null;
@@ -226,6 +255,7 @@ function createYouTubeAccessibilityHarness({ confirmationAccepted = true } = {})
   });
 
   const functions = [
+    extractYouTubeClaimValidationSource(),
     extractFunction(APP_SOURCE, "youtubeClaimStateIsTerminal"),
     extractFunction(APP_SOURCE, "youtubeClaimShouldPoll"),
     extractFunction(APP_SOURCE, "normalizeYouTubeClaimSnapshot"),
@@ -248,7 +278,7 @@ function createYouTubeAccessibilityHarness({ confirmationAccepted = true } = {})
   context.renderYouTubeClaimCockpit = vm.runInContext("renderYouTubeClaimCockpit", context);
   context.submitYouTubeClaim = vm.runInContext("submitYouTubeClaim", context);
   context.renderYouTubeClaimCockpit();
-  return { context, elements, state, fetchCalls, confirmationRequests };
+  return { context, elements, state, fetchCalls, confirmationRequests, storageWrites };
 }
 
 test("YouTube cockpit opener has exact visible and accessible identity", () => {
@@ -301,7 +331,10 @@ test("YouTube cockpit markup is administrator-gated and accessible", () => {
     "youtube-claim-url-note youtube-claim-url-error",
   );
   assert.equal(error.hidden, false);
-  assert.equal(error.textContent, "Enter a valid YouTube URL before submitting the claim.");
+  assert.equal(
+    error.textContent,
+    "Enter a supported single-video YouTube URL before submitting the claim.",
+  );
   assert.equal(error.textContent.includes(input.value), false);
 
   input.valid = true;
@@ -325,7 +358,7 @@ test("YouTube cockpit markup is administrator-gated and accessible", () => {
   assert.equal(context.confirmationCalls, 0);
   assert.equal(fetchCalls.length, 0);
 
-  const submittedUrl = "https://www.youtube.com/watch?v=accepted-test-value";
+  const submittedUrl = `https://www.youtube.com/watch?v=${VIDEO_ID}`;
   input.value = submittedUrl;
   input.valid = true;
   return context.submitYouTubeClaim().then(() => {
@@ -340,7 +373,7 @@ test("YouTube cockpit markup is administrator-gated and accessible", () => {
     assert.equal(fetchCalls.length, 1);
     assert.deepEqual(
       JSON.parse(fetchCalls[0].options.body),
-      { url: "https://www.youtube.com/watch?v=accepted-test-value", confirmation_method: "interactive" },
+      { url: submittedUrl, confirmation_method: "interactive" },
     );
     assert.equal(input.value, "");
     assert.equal(state.urlError, "");
@@ -352,11 +385,127 @@ test("YouTube cockpit markup is administrator-gated and accessible", () => {
   });
 });
 
+test("YouTube URL validator rejects the complete unsupported-input contract", () => {
+  const context = evaluate(extractYouTubeClaimValidationSource(), "");
+  const invalidInputs = [
+    ["empty", ""],
+    ["whitespace-only", "   "],
+    ["plain text", "not a URL"],
+    ["relative URL", `/watch?v=${VIDEO_ID}`],
+    ["non-HTTP scheme", `ftp://www.youtube.com/watch?v=${VIDEO_ID}`],
+    ["HTTP YouTube URL", `http://www.youtube.com/watch?v=${VIDEO_ID}`],
+    ["HTTP non-YouTube host", `http://media.example.invalid/watch?v=${VIDEO_ID}`],
+    ["production non-YouTube HTTPS failure", `https://media.example.invalid/watch?v=${VIDEO_ID}`],
+    ["lookalike host", `https://youtube.com.example.invalid/watch?v=${VIDEO_ID}`],
+    ["hostname containing youtube text", `https://notyoutube.example.invalid/watch?v=${VIDEO_ID}`],
+    ["playlist-only production failure", "https://www.youtube.com/playlist?list=PLSynthetic"],
+    ["channel URL", `https://www.youtube.com/channel/${VIDEO_ID}`],
+    ["search URL", "https://www.youtube.com/results?search_query=synthetic"],
+    ["missing video ID", "https://www.youtube.com/watch?t=1"],
+    ["empty video ID", "https://www.youtube.com/watch?v="],
+    ["malformed production video ID", "https://www.youtube.com/watch?v=too-short"],
+    ["invalid video ID length", "https://youtu.be/AbCdEf123_"],
+    ["invalid video ID characters", "https://youtu.be/AbCdEf123!*"],
+    ["duplicate video ID", `https://www.youtube.com/watch?v=${VIDEO_ID}&v=${VIDEO_ID}`],
+    ["conflicting video ID", `https://www.youtube.com/watch?v=${VIDEO_ID}&v=ZyXwVu987_-`],
+    ["playlist query on video", `https://www.youtube.com/watch?v=${VIDEO_ID}&list=PLSynthetic`],
+    ["unsupported embedded URL", `https://www.youtube.com/embed/${VIDEO_ID}`],
+    ["unsupported live URL", `https://www.youtube.com/live/${VIDEO_ID}`],
+    ["surrounding whitespace", ` https://www.youtube.com/watch?v=${VIDEO_ID} `],
+    ["fragment", `https://youtu.be/${VIDEO_ID}#details`],
+    ["userinfo", `https://user@www.youtube.com/watch?v=${VIDEO_ID}`],
+    ["non-standard port", `https://www.youtube.com:444/watch?v=${VIDEO_ID}`],
+    ["query field without value separator", `https://www.youtube.com/watch?v=${VIDEO_ID}&t`],
+    [
+      "too many query fields",
+      `https://www.youtube.com/watch?v=${VIDEO_ID}&t=1&si=a&feature=b&x1=1&x2=2&x3=3&x4=4&x5=5`,
+    ],
+  ];
+
+  for (const [name, submitted] of invalidInputs) {
+    const result = vm.runInContext(`validateYouTubeClaimUrl(${JSON.stringify(submitted)})`, context);
+    assert.equal(result.supported, false, name);
+    assert.match(result.message, /YouTube URL|single-video YouTube URL/, name);
+    if (submitted) assert.equal(result.message.includes(submitted), false, name);
+  }
+});
+
+test("unsupported URL-shaped inputs cannot reach final confirmation or mutation", async () => {
+  const invalidInputs = [
+    `https://media.example.invalid/watch?v=${VIDEO_ID}`,
+    "https://www.youtube.com/playlist?list=PLSynthetic",
+    "https://www.youtube.com/watch?v=too-short",
+    `https://youtube.com.example.invalid/watch?v=${VIDEO_ID}`,
+    `https://www.youtube.com/watch?v=${VIDEO_ID}&v=ZyXwVu987_-`,
+  ];
+  for (const submitted of invalidInputs) {
+    const {
+      context,
+      elements,
+      fetchCalls,
+      confirmationRequests,
+      storageWrites,
+    } = createYouTubeAccessibilityHarness();
+    elements.youtubeClaimUrlInput.value = submitted;
+    elements.youtubeClaimUrlInput.valid = true;
+
+    await context.submitYouTubeClaim();
+
+    assert.equal(confirmationRequests.length, 0, submitted);
+    assert.equal(fetchCalls.length, 0, submitted);
+    assert.equal(storageWrites.length, 0, submitted);
+    assert.equal(elements.youtubeClaimUrlInput.getAttribute("aria-invalid"), "true", submitted);
+    assert.equal(
+      elements.youtubeClaimUrlInput.getAttribute("aria-describedby"),
+      "youtube-claim-url-note youtube-claim-url-error",
+      submitted,
+    );
+    assert.equal(elements.youtubeClaimUrlError.hidden, false, submitted);
+    assert.ok(elements.youtubeClaimUrlInput.focusCount > 0, submitted);
+  }
+});
+
+test("every canonical supported URL form reaches only cancellable confirmation", async () => {
+  const supportedInputs = [
+    `https://www.youtube.com/watch?v=${VIDEO_ID}`,
+    `https://youtube.com/watch?v=${VIDEO_ID}&t=12`,
+    `https://m.youtube.com/watch?v=${VIDEO_ID}&feature=synthetic`,
+    `https://www.youtube.com/shorts/${VIDEO_ID}`,
+    `https://youtube.com/shorts/${VIDEO_ID}/?t=1`,
+    `https://m.youtube.com/shorts/${VIDEO_ID}?si=synthetic`,
+    `https://youtu.be/${VIDEO_ID}`,
+    `https://youtu.be/${VIDEO_ID}/?t=1`,
+    `https://www.youtube.com:443/watch?v=${VIDEO_ID}&si=synthetic`,
+  ];
+
+  for (const submitted of supportedInputs) {
+    const {
+      context,
+      elements,
+      fetchCalls,
+      confirmationRequests,
+      storageWrites,
+    } = createYouTubeAccessibilityHarness({ confirmationAccepted: false });
+    elements.youtubeClaimUrlInput.value = submitted;
+    elements.youtubeClaimUrlInput.valid = true;
+
+    await context.submitYouTubeClaim();
+
+    assert.equal(confirmationRequests.length, 1, submitted);
+    assert.equal(confirmationRequests[0].confirmLabel, "Claim media", submitted);
+    assert.equal(confirmationRequests[0].message.includes(submitted), false, submitted);
+    assert.equal(confirmationRequests[0].focusReturn, elements.youtubeClaimSubmitButton, submitted);
+    assert.equal(fetchCalls.length, 0, submitted);
+    assert.equal(storageWrites.length, 0, submitted);
+    assert.equal(elements.youtubeClaimUrlInput.value, submitted);
+  }
+});
+
 test("cancelling create confirmation preserves URL privacy and sends no request", async () => {
   const { context, elements, fetchCalls, confirmationRequests } = createYouTubeAccessibilityHarness({
     confirmationAccepted: false,
   });
-  const submittedUrl = "https://www.youtube.com/watch?v=private-cancelled-value";
+  const submittedUrl = `https://www.youtube.com/watch?v=${VIDEO_ID}`;
   elements.youtubeClaimUrlInput.value = submittedUrl;
   elements.youtubeClaimUrlInput.valid = true;
 
