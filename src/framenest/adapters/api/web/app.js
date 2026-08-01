@@ -1145,7 +1145,7 @@ async function submitYouTubeClaim() {
   youtubeClaimState.urlError = "";
   const accepted = await requestConfirmation({
     title: "Confirm YouTube claim",
-    message: "FrameNest will ask the local server to acquire this source and add it to the catalog. Continue?",
+    message: "FrameNest will start the acquisition in the background. Closing the cockpit will not cancel it. Acquired media remains unpublished until it is reviewed and published in Manage media.",
     dismissLabel: "Cancel",
     confirmLabel: "Claim media",
     focusReturn: youtubeClaimSubmitButton,

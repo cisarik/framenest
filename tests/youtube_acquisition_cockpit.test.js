@@ -18,6 +18,7 @@ const STYLES_SOURCE = fs.readFileSync(
 );
 
 const RECOVERY_KEY = "framenest.youtube.currentClaim.v1";
+const CREATE_CONFIRMATION_MESSAGE = "FrameNest will start the acquisition in the background. Closing the cockpit will not cancel it. Acquired media remains unpublished until it is reviewed and published in Manage media.";
 
 function extractFunction(source, name) {
   const markers = [`async function ${name}(`, `function ${name}(`];
@@ -45,6 +46,28 @@ function evaluate(source, prelude, expression) {
   vm.createContext(context);
   vm.runInContext(`${prelude}\n${source}\n`, context);
   return expression ? vm.runInContext(expression, context) : context;
+}
+
+function extractMarkupElementById(source, id) {
+  const escapedId = id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const pattern = new RegExp(
+    `<([a-z][a-z0-9-]*)\\b([^>]*\\bid="${escapedId}"[^>]*)>([\\s\\S]*?)<\\/\\1>`,
+    "i",
+  );
+  const match = source.match(pattern);
+  assert.ok(match, `missing markup element ${id}`);
+  return {
+    tagName: match[1].toLowerCase(),
+    attributes: match[2],
+    content: match[3],
+    markup: match[0],
+  };
+}
+
+function markupAttribute(attributes, name) {
+  const escapedName = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = attributes.match(new RegExp(`(?:^|\\s)${escapedName}="([^"]*)"`, "i"));
+  return match ? match[1] : null;
 }
 
 function createClaimElement(tagName = "div") {
@@ -94,7 +117,7 @@ function createClaimElement(tagName = "div") {
   };
 }
 
-function createYouTubeAccessibilityHarness() {
+function createYouTubeAccessibilityHarness({ confirmationAccepted = true } = {}) {
   const youtubeClaimUrlInput = createClaimElement("input");
   const youtubeClaimUrlError = createClaimElement("p");
   youtubeClaimUrlError.hidden = true;
@@ -132,6 +155,7 @@ function createYouTubeAccessibilityHarness() {
     urlError: "",
   };
   const fetchCalls = [];
+  const confirmationRequests = [];
   const context = {
     console,
     Set,
@@ -156,9 +180,10 @@ function createYouTubeAccessibilityHarness() {
       state.pollTimer = null;
     },
     scheduleYouTubeClaimPolling() {},
-    requestConfirmation: async () => {
+    requestConfirmation: async (options) => {
       context.confirmationCalls += 1;
-      return true;
+      confirmationRequests.push(options);
+      return confirmationAccepted;
     },
     confirmationCalls: 0,
     fetch: async (url, options) => {
@@ -223,8 +248,25 @@ function createYouTubeAccessibilityHarness() {
   context.renderYouTubeClaimCockpit = vm.runInContext("renderYouTubeClaimCockpit", context);
   context.submitYouTubeClaim = vm.runInContext("submitYouTubeClaim", context);
   context.renderYouTubeClaimCockpit();
-  return { context, elements, state, fetchCalls };
+  return { context, elements, state, fetchCalls, confirmationRequests };
 }
+
+test("YouTube cockpit opener has exact visible and accessible identity", () => {
+  const opener = extractMarkupElementById(INDEX_SOURCE, "youtube-claim-open-button");
+  assert.equal(opener.tagName, "button");
+  assert.equal(markupAttribute(opener.attributes, "type"), "button");
+  assert.equal(markupAttribute(opener.attributes, "aria-label"), "Acquire YouTube media");
+  assert.match(opener.attributes, /(?:^|\s)hidden(?:\s|$)/);
+  assert.doesNotMatch(opener.attributes, /(?:^|\s)disabled(?:\s|$|=)/);
+  assert.doesNotMatch(opener.attributes, /(?:^|\s)tabindex="-1"/);
+  assert.doesNotMatch(opener.content, /<[^>]+>/);
+  assert.equal(opener.content.trim().replace(/\s+/g, " "), "YouTube");
+  assert.doesNotMatch(opener.markup, /Claim YouTube/);
+  assert.match(
+    APP_SOURCE,
+    /youtubeClaimOpenButton\.addEventListener\("click", openYouTubeClaimDialog\)/,
+  );
+});
 
 test("YouTube cockpit markup is administrator-gated and accessible", () => {
   assert.match(INDEX_SOURCE, /id="youtube-claim-open-button"[^>]*hidden/);
@@ -241,7 +283,7 @@ test("YouTube cockpit markup is administrator-gated and accessible", () => {
   assert.match(APP_SOURCE, /youtube-claim-url-note youtube-claim-url-error/);
 
   const harness = createYouTubeAccessibilityHarness();
-  const { context, elements, state, fetchCalls } = harness;
+  const { context, elements, state, fetchCalls, confirmationRequests } = harness;
   const input = elements.youtubeClaimUrlInput;
   const error = elements.youtubeClaimUrlError;
   assert.equal(input.getAttribute("aria-invalid"), "false");
@@ -283,9 +325,18 @@ test("YouTube cockpit markup is administrator-gated and accessible", () => {
   assert.equal(context.confirmationCalls, 0);
   assert.equal(fetchCalls.length, 0);
 
-  input.value = "https://www.youtube.com/watch?v=accepted-test-value";
+  const submittedUrl = "https://www.youtube.com/watch?v=accepted-test-value";
+  input.value = submittedUrl;
   input.valid = true;
   return context.submitYouTubeClaim().then(() => {
+    assert.equal(confirmationRequests.length, 1);
+    assert.equal(confirmationRequests[0].message, CREATE_CONFIRMATION_MESSAGE);
+    assert.match(confirmationRequests[0].message, /acquisition in the background/);
+    assert.match(confirmationRequests[0].message, /Closing the cockpit will not cancel it/);
+    assert.match(confirmationRequests[0].message, /media remains unpublished/);
+    assert.match(confirmationRequests[0].message, /reviewed and published in Manage media/);
+    assert.equal(confirmationRequests[0].message.includes(submittedUrl), false);
+    assert.equal(confirmationRequests[0].focusReturn, elements.youtubeClaimSubmitButton);
     assert.equal(fetchCalls.length, 1);
     assert.deepEqual(
       JSON.parse(fetchCalls[0].options.body),
@@ -299,6 +350,24 @@ test("YouTube cockpit markup is administrator-gated and accessible", () => {
     context.renderYouTubeClaimCockpit();
     assert.equal(input.value, "");
   });
+});
+
+test("cancelling create confirmation preserves URL privacy and sends no request", async () => {
+  const { context, elements, fetchCalls, confirmationRequests } = createYouTubeAccessibilityHarness({
+    confirmationAccepted: false,
+  });
+  const submittedUrl = "https://www.youtube.com/watch?v=private-cancelled-value";
+  elements.youtubeClaimUrlInput.value = submittedUrl;
+  elements.youtubeClaimUrlInput.valid = true;
+
+  await context.submitYouTubeClaim();
+
+  assert.equal(confirmationRequests.length, 1);
+  assert.equal(confirmationRequests[0].message, CREATE_CONFIRMATION_MESSAGE);
+  assert.equal(confirmationRequests[0].message.includes(submittedUrl), false);
+  assert.doesNotMatch(confirmationRequests[0].message, /https?:\/\//);
+  assert.doesNotMatch(confirmationRequests[0].message, /video ID|claim ID|media ID|metadata|AI analysis/i);
+  assert.equal(fetchCalls.length, 0);
 });
 
 test("terminal claim copy distinguishes duplicate reuse and unpublished catalog media", () => {
@@ -338,20 +407,71 @@ test("terminal claim copy distinguishes duplicate reuse and unpublished catalog 
 });
 
 test("YouTube capability fails closed until exact identity resolution", () => {
-  const predicate = extractFunction(APP_SOURCE, "identityAllowsYouTubeClaim");
+  const functions = [
+    extractFunction(APP_SOURCE, "identityAllowsYouTubeClaim"),
+    extractFunction(APP_SOURCE, "applyIdentityCapabilities"),
+  ].join("\n");
   const context = evaluate(
-    predicate,
+    functions,
     `let identityState = {
       resolved: false,
       available: false,
       capabilities: new Set(),
-    };`,
+    };
+    const uploadOpenButton = null;
+    const detailsEditButton = null;
+    const adminMediaOpenButton = null;
+    const youtubeClaimOpenButton = { hidden: false };
+    const youtubeClaimDialog = null;
+    const adminMediaBrowser = null;
+    function identityHasCapability() { return false; }
+    function identityAllowsAdminWorkflow() { return false; }
+    function closeYouTubeClaimDialog() {}
+    function closeAdminMediaBrowser() {}
+    function updateMetadataControls() {}`,
   );
   assert.equal(vm.runInContext("identityAllowsYouTubeClaim()", context), false);
+  vm.runInContext("applyIdentityCapabilities()", context);
+  assert.equal(vm.runInContext("youtubeClaimOpenButton.hidden", context), true);
   vm.runInContext("identityState = { resolved: true, available: true, capabilities: new Set() }", context);
   assert.equal(vm.runInContext("identityAllowsYouTubeClaim()", context), false);
+  vm.runInContext("applyIdentityCapabilities()", context);
+  assert.equal(vm.runInContext("youtubeClaimOpenButton.hidden", context), true);
   vm.runInContext('identityState.capabilities.add("youtube.acquire")', context);
   assert.equal(vm.runInContext("identityAllowsYouTubeClaim()", context), true);
+  vm.runInContext("applyIdentityCapabilities()", context);
+  assert.equal(vm.runInContext("youtubeClaimOpenButton.hidden", context), false);
+});
+
+test("retry confirmation keeps its existing copy and focus return", async () => {
+  const context = evaluate(
+    extractFunction(APP_SOURCE, "retryYouTubeClaim"),
+    `let youtubeClaimState = {
+      snapshot: { claim_id: "claim-retry-test", state: "failed" },
+      requestOwner: null,
+    };
+    const youtubeClaimRetryButton = { marker: "retry-button" };
+    let retryConfirmation = null;
+    async function requestConfirmation(options) {
+      retryConfirmation = options;
+      return false;
+    }
+    function identityAllowsYouTubeClaim() { return true; }`,
+  );
+
+  await vm.runInContext("retryYouTubeClaim()", context);
+
+  assert.equal(vm.runInContext("retryConfirmation.title", context), "Retry YouTube claim");
+  assert.equal(
+    vm.runInContext("retryConfirmation.message", context),
+    "Retry the failed claim using the same server-owned claim context?",
+  );
+  assert.equal(vm.runInContext("retryConfirmation.dismissLabel", context), "Cancel");
+  assert.equal(vm.runInContext("retryConfirmation.confirmLabel", context), "Retry claim");
+  assert.equal(
+    vm.runInContext("retryConfirmation.focusReturn === youtubeClaimRetryButton", context),
+    true,
+  );
 });
 
 test("claim recovery stores only the opaque claim ID in session storage", () => {
