@@ -11,6 +11,7 @@ from framenest.application.ports.content_publication_repository import (
     AdminMediaQuery,
     AnalysisFilter,
     ContentPublicationRepository,
+    MediaWorkflowStatus,
     PublicationFilter,
     PublishContentResult,
     ReadinessFilter,
@@ -94,6 +95,20 @@ class PublishContent:
         ):
             raise ValueError("Content publication timestamp is invalid.")
         return self.repository.publish(parsed, timestamp)
+
+
+@dataclass(frozen=True, slots=True)
+class GetMediaWorkflowStatus:
+    """Read bounded metadata and publication truth for one media item."""
+
+    repository: ContentPublicationRepository
+
+    def execute(self, media_id: str) -> MediaWorkflowStatus:
+        try:
+            parsed = MediaId.from_string(media_id)
+        except Exception as exc:
+            raise ContentPublicationValidationError() from exc
+        return self.repository.get_media_workflow_status(parsed)
 
 
 def _normalize_query(value: str | None) -> str | None:

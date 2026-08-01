@@ -58,6 +58,10 @@ from framenest.adapters.api.youtube_operator_api import (
     YouTubeOperatorApiDependencies,
     create_youtube_operator_api_router,
 )
+from framenest.adapters.api.youtube_browser_api import (
+    YouTubeBrowserApiDependencies,
+    create_youtube_browser_api_router,
+)
 from framenest.adapters.api.tailscale_ingress import (
     SCOPE_IDENTITY,
     TailscaleIngressMiddleware,
@@ -65,6 +69,7 @@ from framenest.adapters.api.tailscale_ingress import (
 from framenest.application.library_scan import PreviewLibraryScan
 from framenest.application.content_publication import (
     ContentAudiencePolicy,
+    GetMediaWorkflowStatus,
     ListAdminMedia,
     PublishContent,
 )
@@ -216,6 +221,7 @@ def create_app(
     upload_api_dependencies: UploadApiDependencies | None = None,
     youtube_operator_api_dependencies: YouTubeOperatorApiDependencies
     | None = None,
+    youtube_browser_api_dependencies: YouTubeBrowserApiDependencies | None = None,
     youtube_downloader: object | None = None,
     security_audit_recorder: object | None = None,
 ) -> FastAPI:
@@ -691,6 +697,22 @@ def create_app(
                 )
             resolved_audit_recorder = SqliteSecurityAuditRepository(owned_engine)
 
+    if youtube_browser_api_dependencies is None:
+        youtube_browser_api_dependencies = YouTubeBrowserApiDependencies(
+            service=owned_youtube_acquisition_service,
+            workflow_status=(
+                None
+                if owned_content_publication_repository is None
+                else GetMediaWorkflowStatus(owned_content_publication_repository)
+            ),
+            audit_recorder=resolved_audit_recorder,
+            enabled=(
+                owned_youtube_acquisition_service is not None
+                and owned_content_publication_repository is not None
+                and tailscale_ingress_enabled
+            ),
+        )
+
     if tailscale_ingress_enabled:
         app = FastAPI(
             lifespan=lifespan,
@@ -724,6 +746,7 @@ def create_app(
     app.state.youtube_operator_api_dependencies = (
         youtube_operator_api_dependencies
     )
+    app.state.youtube_browser_api_dependencies = youtube_browser_api_dependencies
     app.include_router(create_library_api_router(library_api_dependencies))
     app.include_router(create_media_import_api_router(media_import_api_dependencies))
     app.include_router(create_media_catalog_api_router(media_catalog_api_dependencies))
@@ -745,6 +768,9 @@ def create_app(
     app.include_router(create_upload_api_router(upload_api_dependencies))
     app.include_router(
         create_youtube_operator_api_router(youtube_operator_api_dependencies)
+    )
+    app.include_router(
+        create_youtube_browser_api_router(youtube_browser_api_dependencies)
     )
     if tailscale_ingress_enabled:
         assert identity_mapping is not None

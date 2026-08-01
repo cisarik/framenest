@@ -749,6 +749,11 @@ class YouTubeAcquisitionCoordinator:
             if await self._resolve_byte_duplicate(claim, upload):
                 return
             if upload.state is UploadSessionState.DUPLICATE_PENDING:
+                await self._fail(
+                    claim,
+                    stage=YouTubeFailureStage.DOWNSTREAM,
+                    code="BYTE_DUPLICATE_UNRESOLVED",
+                )
                 return
         failure_code = {
             UploadSessionState.REJECTED: "UPLOAD_REJECTED",

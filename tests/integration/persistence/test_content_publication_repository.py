@@ -9,6 +9,7 @@ import sqlalchemy as sa
 from sqlalchemy import event, text
 
 from framenest.application.ports.content_publication_repository import (
+    ContentPublicationMediaNotFoundError,
     AdminMediaQuery,
 )
 from framenest.configuration import FrameNestSettings
@@ -184,6 +185,40 @@ def test_publication_is_conditional_repeated_and_survives_metadata_regression(
     assert after_regression.status == "already_published"
     assert after_regression.readiness.ready is False
     assert remains_published is True
+
+
+def test_single_media_workflow_status_is_bounded_and_truthful(tmp_path: Path) -> None:
+    repository, engine = _repository(tmp_path)
+    _seed(engine)
+    try:
+        incomplete = repository.get_media_workflow_status(
+            MediaId.from_string(MEDIA_INCOMPLETE)
+        )
+        ready = repository.get_media_workflow_status(MediaId.from_string(MEDIA_READY))
+        repository.publish(MediaId.from_string(MEDIA_READY), 101)
+        published = repository.get_media_workflow_status(
+            MediaId.from_string(MEDIA_READY)
+        )
+        try:
+            repository.get_media_workflow_status(
+                MediaId.from_string("33333333-3333-4333-8333-333333333333")
+            )
+        except ContentPublicationMediaNotFoundError:
+            missing = True
+        else:
+            missing = False
+    finally:
+        engine.dispose()
+
+    assert incomplete.metadata_state == "incomplete"
+    assert incomplete.missing_metadata_fields == ("display_title", "description")
+    assert incomplete.publication_state == "unpublished"
+    assert ready.metadata_state == "complete"
+    assert ready.missing_metadata_fields == ()
+    assert ready.publication_state == "unpublished"
+    assert published.metadata_state == "complete"
+    assert published.publication_state == "published"
+    assert missing is True
 
 
 def test_concurrent_publication_has_one_creator_and_safe_winner_observation(

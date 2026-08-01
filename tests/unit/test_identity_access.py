@@ -6,6 +6,7 @@ import pytest
 
 from framenest.domain.identity_access import (
     CAPABILITIES_BY_ROLE,
+    CAPABILITY_YOUTUBE_ACQUIRE,
     IDENTITY_PROVENANCE_TAILSCALE_SERVE,
     MAPPING_PROVENANCE_CONFIG,
     MAX_IDENTITY_MAPPING_ENTRIES,
@@ -110,6 +111,7 @@ def test_resolve_identity_maps_admin_with_full_capabilities() -> None:
     assert identity.provenance == IDENTITY_PROVENANCE_TAILSCALE_SERVE
     assert identity.has_capability("metadata.canonical.write")
     assert identity.has_capability("upload.manage")
+    assert identity.has_capability(CAPABILITY_YOUTUBE_ACQUIRE)
 
 
 def test_resolve_identity_maps_ordinary_user_with_read_capabilities() -> None:
@@ -127,6 +129,7 @@ def test_resolve_identity_maps_ordinary_user_with_read_capabilities() -> None:
     assert not identity.has_capability("metadata.canonical.write")
     assert not identity.has_capability("upload.manage")
     assert not identity.has_capability("analysis.run")
+    assert not identity.has_capability(CAPABILITY_YOUTUBE_ACQUIRE)
 
 
 def test_resolve_identity_returns_none_for_unmapped_login() -> None:

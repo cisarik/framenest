@@ -25,6 +25,8 @@ AnalysisFilter = Literal[
     "analyzed",
     "failed",
 ]
+MetadataState = Literal["incomplete", "complete"]
+PublicationState = Literal["unpublished", "published"]
 
 
 class FrameNestContentPublicationRepositoryError(RuntimeError):
@@ -95,6 +97,15 @@ class PublishContentResult:
     readiness: ContentPublicationReadiness
 
 
+@dataclass(frozen=True, slots=True)
+class MediaWorkflowStatus:
+    """Bounded status for one known logical medium."""
+
+    metadata_state: MetadataState
+    missing_metadata_fields: tuple[str, ...]
+    publication_state: PublicationState
+
+
 class ContentPublicationRepository(Protocol):
     """Persistence contract for audience reads and explicit publication."""
 
@@ -103,6 +114,9 @@ class ContentPublicationRepository(Protocol):
 
     def is_published(self, media_id: MediaId) -> bool:
         """Return whether a publication row exists."""
+
+    def get_media_workflow_status(self, media_id: MediaId) -> MediaWorkflowStatus:
+        """Return readiness and publication truth for one logical medium."""
 
     def list_admin_media(self, query: AdminMediaQuery) -> AdminMediaPage:
         """Return one filtered admin workflow page."""

@@ -14,6 +14,7 @@ from framenest.application.ports.content_publication_repository import (
     AdminMediaQuery,
     ContentPublicationMediaNotFoundError,
     FrameNestContentPublicationRepositoryError,
+    MediaWorkflowStatus,
     PublishContentResult,
 )
 from framenest.application.ports.media_catalog_repository import (
@@ -85,6 +86,39 @@ class SqliteContentPublicationRepository:
 
         try:
             return run_in_transaction(self._engine, operation)
+        except SQLAlchemyError as exc:
+            raise FrameNestContentPublicationRepositoryError(
+                _REPOSITORY_FAILURE_MESSAGE
+            ) from exc
+
+    def get_media_workflow_status(self, media_id: MediaId) -> MediaWorkflowStatus:
+        def operation(connection: Connection) -> MediaWorkflowStatus:
+            media_id_text = media_id.to_string()
+            if (
+                connection.execute(
+                    select(logical_media.c.id).where(
+                        logical_media.c.id == media_id_text
+                    )
+                ).first()
+                is None
+            ):
+                raise ContentPublicationMediaNotFoundError(
+                    _REPOSITORY_FAILURE_MESSAGE
+                )
+            readiness = _load_readiness(connection, media_id_text)
+            publication = _get_publication(connection, media_id_text)
+            return MediaWorkflowStatus(
+                metadata_state="complete" if readiness.ready else "incomplete",
+                missing_metadata_fields=readiness.missing_fields,
+                publication_state=(
+                    "published" if publication is not None else "unpublished"
+                ),
+            )
+
+        try:
+            return run_in_transaction(self._engine, operation)
+        except ContentPublicationMediaNotFoundError:
+            raise
         except SQLAlchemyError as exc:
             raise FrameNestContentPublicationRepositoryError(
                 _REPOSITORY_FAILURE_MESSAGE

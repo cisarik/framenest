@@ -413,6 +413,64 @@ def test_operator_routes_are_not_remote_routes(tailscale_client) -> None:
         assert _error_code(response) == "NOT_FOUND"
 
 
+def test_browser_youtube_routes_use_authenticated_policy_and_remain_separate(
+    tailscale_client,
+) -> None:
+    client, settings = tailscale_client
+    claim_id = str(uuid.uuid4())
+    admin_status = client.get(
+        f"/api/admin/youtube/claims/{claim_id}",
+        headers=_serve_headers(),
+    )
+    ordinary_status = client.get(
+        f"/api/admin/youtube/claims/{claim_id}",
+        headers=_serve_headers(USER_LOGIN),
+    )
+    missing_origin = client.post(
+        "/api/admin/youtube/claims",
+        headers=_serve_headers(),
+        json={},
+    )
+    missing_mutation_header = client.post(
+        "/api/admin/youtube/claims",
+        headers={**_serve_headers(), "Origin": EXTERNAL_ORIGIN},
+        json={},
+    )
+    audited_but_disabled = client.post(
+        "/api/admin/youtube/claims",
+        headers=_mutation_headers(),
+        json={
+            "url": "https://youtu.be/AbCdEf123_-",
+            "confirmation_method": "interactive",
+        },
+    )
+    configured_policy = find_route_policy(
+        "POST", "/api/admin/youtube/claims"
+    )
+    lookalike_policy = find_route_policy(
+        "GET", "/api/admin/youtube/claims-extra"
+    )
+
+    assert admin_status.status_code == 503
+    assert _error_code(admin_status) == "YOUTUBE_BROWSER_NOT_CONFIGURED"
+    assert ordinary_status.status_code == 403
+    assert _error_code(ordinary_status) == "CAPABILITY_DENIED"
+    assert missing_origin.status_code == 403
+    assert _error_code(missing_origin) == "MUTATION_ORIGIN_FORBIDDEN"
+    assert missing_mutation_header.status_code == 403
+    assert _error_code(missing_mutation_header) == "MUTATION_HEADER_REQUIRED"
+    assert audited_but_disabled.status_code == 503
+    rows = _audit_rows(settings.database_path)
+    assert [row[6] for row in rows if row[5] == "youtube.acquire"] == [
+        "youtube.claim.submit"
+    ]
+    assert rows[-1][10] == 503
+    assert configured_policy[1] is not None
+    assert configured_policy[0].capability == "youtube.acquire"
+    assert configured_policy[0].audit_action == "youtube.claim.submit"
+    assert lookalike_policy[1] is None
+
+
 @pytest.mark.parametrize(
     "path",
     [

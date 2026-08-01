@@ -8,7 +8,7 @@ import itertools
 from pathlib import Path
 import sqlite3
 
-from sqlalchemy import insert, select
+from sqlalchemy import insert, select, text
 
 from framenest.application.ports.upload_media_validation import (
     UploadMediaValidationEvidence,
@@ -880,6 +880,57 @@ def test_terminal_downloader_failure_cleans_staging_and_retry_uses_new_lineage(
         assert retried.id != failed.id
         assert retried.retry_of_claim_id == failed.id
         assert retried.state is YouTubeAcquisitionState.CLAIMED
+        await fixture.close()
+
+    asyncio.run(scenario())
+
+
+def test_unresolved_byte_duplicate_fails_youtube_claim_and_cleans_staging(
+    tmp_path: Path,
+) -> None:
+    fixture = _fixture(tmp_path)
+
+    async def scenario() -> None:
+        manual = await _send_one(fixture.transport, PAYLOAD)
+        manual_id = UploadSessionId.from_string(manual.id)
+        await fixture.validation.drain()
+        await fixture.publication.drain()
+
+        submitted = fixture.service.submit(
+            submitted_url=f"https://youtu.be/{VIDEO_A}",
+            confirmation_method=YouTubeConfirmationMethod.INTERACTIVE,
+        )
+        for _ in range(4):
+            await fixture.acquisition.drain()
+        await fixture.validation.drain()
+        duplicate_id = UploadSessionId.from_string(submitted.snapshot.id)
+        duplicate = fixture.uploads.get(duplicate_id)
+        assert duplicate is not None
+        assert duplicate.state is UploadSessionState.DUPLICATE_PENDING
+
+        # Simulate a downstream loss of the canonical publication before the
+        # YouTube reconciliation pass. No cataloged canonical remains.
+        with fixture.engine.begin() as connection:  # type: ignore[union-attr]
+            connection.execute(
+                text(
+                    "UPDATE upload_sessions SET state = 'failed', "
+                    "failure_code = 'SYNTHETIC_CANONICAL_LOST' "
+                    "WHERE id = :upload_id"
+                ),
+                {"upload_id": manual.id},
+            )
+
+        await fixture.acquisition.drain()
+        failed = fixture.claims.get(
+            YouTubeAcquisitionClaimId.from_string(submitted.snapshot.id)
+        )
+        assert failed is not None
+        assert failed.state is YouTubeAcquisitionState.FAILED
+        assert failed.failure_stage.value == "downstream"
+        assert failed.failure_code == "BYTE_DUPLICATE_UNRESOLVED"
+        assert failed.cleanup_state.value == "complete"
+        assert not (fixture.staging_root / failed.staging_key).exists()
+        assert fixture.uploads.get(manual_id).state is UploadSessionState.FAILED  # type: ignore[union-attr]
         await fixture.close()
 
     asyncio.run(scenario())
