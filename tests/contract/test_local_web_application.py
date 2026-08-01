@@ -590,7 +590,7 @@ def test_browser_does_not_store_frame_payloads_or_add_external_runtime_urls(
     html = client.get("/").text
 
     assert "payload_base64" not in script[script.index("function restoredCatalogPageSize") : script.index("function setStatusClass")]
-    assert "sessionStorage" not in script
+    assert "framenest.youtube.currentClaim.v1" in script
     assert "indexedDB" not in script
     assert "data:image" not in script
     assert "http://" not in html + script
@@ -1015,7 +1015,7 @@ def test_browser_review_uses_no_persistence_or_hidden_complete_suggestion(
     script = client.get("/assets/app.js").text
 
     assert "framenest.catalog.pageSize" in script
-    assert "sessionStorage" not in script
+    assert "framenest.youtube.currentClaim.v1" in script
     assert "indexedDB" not in script
     assert "location.search" not in script
     assert "complete suggestion" not in script.lower()
@@ -1939,7 +1939,7 @@ def test_preview_cache_does_not_use_persistent_storage(client: TestClient) -> No
     script = client.get("/assets/app.js").text
     preview_section = script[script.index("function renderCardPreviewFrames") : script.index("function selectPlaybackLocation")]
     assert "localStorage" not in preview_section
-    assert "sessionStorage" not in script
+    assert "framenest.youtube.currentClaim.v1" in script
     assert "indexedDB" not in script
 
 
@@ -2378,7 +2378,7 @@ def test_javascript_preview_does_not_persist_frames(client: TestClient) -> None:
     script = client.get("/assets/app.js").text
     preview_section = script[script.index("function renderCardPreviewFrames") : script.index("function selectPlaybackLocation")]
     assert "localStorage" not in preview_section
-    assert "sessionStorage" not in script
+    assert "framenest.youtube.currentClaim.v1" in script
     assert "indexedDB" not in script
 
 
@@ -2834,7 +2834,7 @@ def test_javascript_upload_uses_capability_registry_and_no_file_byte_persistence
         assert recovery_field in upload_block
     assert "file_bytes" not in upload_block
     assert "payload_base64" not in upload_block
-    assert "sessionStorage" not in script
+    assert "framenest.youtube.currentClaim.v1" in script
     assert "indexedDB" not in script
 
 

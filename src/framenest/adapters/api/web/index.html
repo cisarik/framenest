@@ -44,6 +44,14 @@
           Manage media
         </button>
         <button
+          id="youtube-claim-open-button"
+          class="status-button youtube-claim-nav-button"
+          type="button"
+          hidden
+        >
+          Claim YouTube
+        </button>
+        <button
           id="upload-open-button"
           class="status-button status-button--icon upload-action-button"
           type="button"
@@ -129,6 +137,57 @@
         <button id="upload-duplicate-keep-button" type="button" hidden disabled>Keep as separate item</button>
         <button id="upload-duplicate-discard-button" class="danger-button" type="button" hidden disabled>Discard duplicate</button>
         <button id="upload-cancel-button" class="danger-button" type="button" hidden disabled>Cancel</button>
+      </div>
+    </dialog>
+
+    <dialog
+      id="youtube-claim-dialog"
+      class="upload-dialog youtube-claim-dialog"
+      aria-labelledby="youtube-claim-dialog-title"
+      aria-describedby="youtube-claim-guidance"
+    >
+      <div class="upload-dialog__header">
+        <h2 id="youtube-claim-dialog-title" class="upload-dialog__title" tabindex="-1">Claim YouTube media</h2>
+        <button id="youtube-claim-close-button" class="upload-dialog__close" type="button" aria-label="Close YouTube claim cockpit">✕</button>
+      </div>
+      <div class="upload-dialog__body youtube-claim-dialog__body">
+        <p id="youtube-claim-guidance" class="youtube-claim-guidance">
+          Paste one YouTube URL. FrameNest will use the local server to inspect and acquire the source after you confirm this action.
+        </p>
+        <form id="youtube-claim-form" class="youtube-claim-form">
+          <label class="youtube-claim-field" for="youtube-claim-url">
+            <span>YouTube URL</span>
+            <input
+              id="youtube-claim-url"
+              type="url"
+              inputmode="url"
+              autocomplete="off"
+              maxlength="2048"
+              placeholder="YouTube URL, for example youtube.com/watch?v=..."
+              required
+              aria-describedby="youtube-claim-url-note"
+            >
+          </label>
+          <p id="youtube-claim-url-note" class="youtube-claim-note">Only the confirmed claim is sent to the local FrameNest server. The URL is not saved in browser recovery storage.</p>
+          <button id="youtube-claim-submit-button" class="youtube-claim-submit" type="submit">Review claim</button>
+        </form>
+
+        <section id="youtube-claim-row" class="youtube-claim-row" data-state="idle" aria-labelledby="youtube-claim-state-label">
+          <div class="youtube-claim-row__header">
+            <h3 id="youtube-claim-state-label" class="youtube-claim-state-label">Ready</h3>
+          </div>
+          <p id="youtube-claim-message" class="youtube-claim-message" role="status" aria-live="polite" aria-atomic="true">Paste a YouTube URL to begin.</p>
+          <div id="youtube-claim-details" class="youtube-claim-details" hidden>
+            <p id="youtube-claim-metadata" class="youtube-claim-detail">Metadata: Not cataloged yet</p>
+            <p id="youtube-claim-publication" class="youtube-claim-detail">Publication: Not cataloged yet</p>
+          </div>
+          <p id="youtube-claim-failure" class="youtube-claim-failure" role="alert" hidden></p>
+        </section>
+      </div>
+      <div class="upload-dialog__footer youtube-claim-dialog__footer">
+        <button id="youtube-claim-retry-button" class="youtube-claim-retry danger-button" type="button" hidden>Retry claim</button>
+        <button id="youtube-claim-manage-media-button" class="youtube-claim-manage" type="button" hidden>Manage media</button>
+        <button id="youtube-claim-reset-button" type="button" hidden>Claim another URL</button>
       </div>
     </dialog>
 

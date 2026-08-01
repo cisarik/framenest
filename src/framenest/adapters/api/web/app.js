@@ -12,6 +12,8 @@ const CLOUD_STATUS_ENDPOINT = "/api/status/cloud";
 const IDENTITY_ENDPOINT = "/api/identity/me";
 const UPLOADS_ENDPOINT = "/api/uploads";
 const UPLOAD_CAPABILITY_ENDPOINT = "/api/uploads/capability";
+const YOUTUBE_CLAIMS_ENDPOINT = "/api/admin/youtube/claims";
+const YOUTUBE_CLAIM_RECOVERY_STORAGE_KEY = "framenest.youtube.currentClaim.v1";
 const MEDIA_IMPORTS_ENDPOINT = "media-imports";
 const CATALOG_PAGE_SIZE_OPTIONS = [10, 30, 60, 90];
 const CATALOG_PAGE_SIZE_STORAGE_KEY = "framenest.catalog.pageSize";
@@ -21,6 +23,8 @@ const ADMIN_MEDIA_PAGE_SIZE = 24;
 const DEFAULT_UPLOAD_CHUNK_BYTES = 1024 * 1024;
 const UPLOAD_POLL_INTERVAL_MS = 1200;
 const UPLOAD_POLL_RETRY_MAX_MS = 10000;
+const YOUTUBE_CLAIM_POLL_INTERVAL_MS = 1000;
+const YOUTUBE_CLAIM_POLL_RETRY_MAX_MS = 10000;
 const UPLOAD_PUBLICATION_POLL_MAX_ATTEMPTS = 25;
 const AUTOMATIC_ANALYSIS_POLL_INTERVAL_MS = 1500;
 const AUTOMATIC_ANALYSIS_POLL_MAX_ATTEMPTS = 40;
@@ -215,6 +219,22 @@ let identityState = {
   capabilities: new Set(),
 };
 
+let youtubeClaimState = {
+  generation: 0,
+  claimId: null,
+  snapshot: null,
+  requestOwner: null,
+  pollOwner: null,
+  pollTimer: null,
+  pollRetryDelayMs: YOUTUBE_CLAIM_POLL_INTERVAL_MS,
+  submitting: false,
+  retrying: false,
+  recoveryAttempted: false,
+  submissionResult: null,
+  message: "",
+  errorMessage: "",
+};
+
 function identityHasCapability(capability) {
   if (!identityState.available) return true;
   return identityState.capabilities.has(capability);
@@ -224,6 +244,12 @@ function identityAllowsAdminWorkflow() {
   return identityState.resolved
     && identityState.available
     && identityState.capabilities.has("media.workflow.read");
+}
+
+function identityAllowsYouTubeClaim() {
+  return identityState.resolved
+    && identityState.available
+    && identityState.capabilities.has("youtube.acquire");
 }
 
 function framenestMutationHeaders(headers) {
@@ -273,6 +299,8 @@ async function loadIdentity() {
 }
 
 function applyIdentityCapabilities() {
+  const youtubeClaimAllowed = typeof identityAllowsYouTubeClaim === "function"
+    && identityAllowsYouTubeClaim();
   if (uploadOpenButton) {
     uploadOpenButton.hidden = !identityHasCapability("upload.manage");
   }
@@ -281,6 +309,17 @@ function applyIdentityCapabilities() {
   }
   if (adminMediaOpenButton) {
     adminMediaOpenButton.hidden = !identityAllowsAdminWorkflow();
+  }
+  if (typeof youtubeClaimOpenButton !== "undefined" && youtubeClaimOpenButton) {
+    youtubeClaimOpenButton.hidden = !youtubeClaimAllowed;
+  }
+  if (
+    !youtubeClaimAllowed
+    && typeof youtubeClaimDialog !== "undefined"
+    && youtubeClaimDialog
+    && youtubeClaimDialog.hasAttribute("open")
+  ) {
+    closeYouTubeClaimDialog();
   }
   if (!identityAllowsAdminWorkflow() && adminMediaBrowser && !adminMediaBrowser.hidden) {
     closeAdminMediaBrowser();
@@ -392,6 +431,7 @@ const confirmationConfirmButton = document.querySelector("#confirmation-confirm-
 let healthCheckInFlight = false;
 let lastFocusedElementBeforeStatus = null;
 let uploadOpenerElement = null;
+let youtubeClaimOpenerElement = null;
 let confirmationRequestSequence = 0;
 let activeConfirmationRequest = null;
 const libraryList = document.querySelector("#library-list");
@@ -437,6 +477,23 @@ const adminMediaResults = document.querySelector("#admin-media-results");
 const adminMediaPageSummary = document.querySelector("#admin-media-page-summary");
 const adminMediaPrevButton = document.querySelector("#admin-media-prev-button");
 const adminMediaNextButton = document.querySelector("#admin-media-next-button");
+const youtubeClaimOpenButton = document.querySelector("#youtube-claim-open-button");
+const youtubeClaimDialog = document.querySelector("#youtube-claim-dialog");
+const youtubeClaimDialogTitle = document.querySelector("#youtube-claim-dialog-title");
+const youtubeClaimCloseButton = document.querySelector("#youtube-claim-close-button");
+const youtubeClaimForm = document.querySelector("#youtube-claim-form");
+const youtubeClaimUrlInput = document.querySelector("#youtube-claim-url");
+const youtubeClaimSubmitButton = document.querySelector("#youtube-claim-submit-button");
+const youtubeClaimResetButton = document.querySelector("#youtube-claim-reset-button");
+const youtubeClaimRetryButton = document.querySelector("#youtube-claim-retry-button");
+const youtubeClaimManageMediaButton = document.querySelector("#youtube-claim-manage-media-button");
+const youtubeClaimRow = document.querySelector("#youtube-claim-row");
+const youtubeClaimStateLabel = document.querySelector("#youtube-claim-state-label");
+const youtubeClaimMessage = document.querySelector("#youtube-claim-message");
+const youtubeClaimDetails = document.querySelector("#youtube-claim-details");
+const youtubeClaimFailure = document.querySelector("#youtube-claim-failure");
+const youtubeClaimMetadata = document.querySelector("#youtube-claim-metadata");
+const youtubeClaimPublication = document.querySelector("#youtube-claim-publication");
 const metadataWorkspaceElement = document.querySelector("#metadata-workspace");
 const metadataWorkspaceTitle = document.querySelector("#metadata-workspace-title");
 const metadataWorkspaceContext = document.querySelector("#metadata-workspace-context");
@@ -539,6 +596,650 @@ function restoreConfirmationFocus(target) {
       statusPanelAi;
     if (activePanel) activePanel.focus();
   }
+}
+
+function youtubeClaimDialogIsOpen() {
+  return Boolean(
+    youtubeClaimDialog
+      && (
+        (typeof youtubeClaimDialog.hasAttribute === "function"
+          && youtubeClaimDialog.hasAttribute("open"))
+        || youtubeClaimDialog.open === true
+      ),
+  );
+}
+
+function youtubeClaimStateIsTerminal(snapshot) {
+  return Boolean(snapshot && ["failed", "cataloged", "duplicate_resolved"].includes(snapshot.state));
+}
+
+function youtubeClaimShouldPoll(snapshot) {
+  return Boolean(snapshot && !youtubeClaimStateIsTerminal(snapshot));
+}
+
+function normalizeYouTubeClaimSnapshot(payload) {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return null;
+  const claimId = typeof payload.claim_id === "string" ? payload.claim_id.trim() : "";
+  if (!claimId || claimId.length > 256 || /[\u0000-\u001f\u007f]/u.test(claimId)) return null;
+  const failure = payload.failure && typeof payload.failure === "object"
+    ? {
+      stage: typeof payload.failure.stage === "string" ? payload.failure.stage : "",
+      code: typeof payload.failure.code === "string" ? payload.failure.code : "",
+    }
+    : null;
+  return {
+    claim_id: claimId,
+    state: typeof payload.state === "string" ? payload.state : "unknown",
+    phase: typeof payload.phase === "string" ? payload.phase : "unknown",
+    submission_result: typeof payload.submission_result === "string"
+      ? payload.submission_result
+      : null,
+    media_id: payload.media_id === null || payload.media_id === undefined
+      ? null
+      : String(payload.media_id),
+    catalog_state: typeof payload.catalog_state === "string" ? payload.catalog_state : "not_cataloged",
+    metadata_state: typeof payload.metadata_state === "string" ? payload.metadata_state : "unknown",
+    missing_metadata_fields: Array.isArray(payload.missing_metadata_fields)
+      ? payload.missing_metadata_fields
+        .filter((field) => typeof field === "string")
+        .slice(0, 16)
+      : [],
+    publication_state: typeof payload.publication_state === "string"
+      ? payload.publication_state
+      : "unknown",
+    failure: failure && (failure.stage || failure.code) ? failure : null,
+    retry_of_claim_id: typeof payload.retry_of_claim_id === "string"
+      ? payload.retry_of_claim_id
+      : null,
+  };
+}
+
+function youtubeClaimStorage() {
+  return typeof window !== "undefined" && window.sessionStorage
+    ? window.sessionStorage
+    : null;
+}
+
+function saveYouTubeClaimRecovery(claimId = youtubeClaimState.claimId) {
+  if (typeof claimId !== "string" || !claimId) return;
+  try {
+    const storage = youtubeClaimStorage();
+    if (storage) storage.setItem(YOUTUBE_CLAIM_RECOVERY_STORAGE_KEY, claimId);
+  } catch {
+    youtubeClaimState.message = "Claim recovery could not be saved in this browser.";
+  }
+}
+
+function clearYouTubeClaimRecovery() {
+  try {
+    const storage = youtubeClaimStorage();
+    if (storage) storage.removeItem(YOUTUBE_CLAIM_RECOVERY_STORAGE_KEY);
+  } catch {
+    // The in-memory claim remains authoritative for this browser view.
+  }
+}
+
+function loadYouTubeClaimRecovery() {
+  try {
+    const storage = youtubeClaimStorage();
+    const claimId = storage ? storage.getItem(YOUTUBE_CLAIM_RECOVERY_STORAGE_KEY) : null;
+    if (
+      typeof claimId !== "string"
+      || !claimId
+      || claimId.length > 256
+      || /[\u0000-\u001f\u007f]/u.test(claimId)
+    ) {
+      if (claimId !== null) clearYouTubeClaimRecovery();
+      return null;
+    }
+    return claimId;
+  } catch {
+    clearYouTubeClaimRecovery();
+    return null;
+  }
+}
+
+function clearYouTubeClaimPollTimer() {
+  if (youtubeClaimState.pollTimer) {
+    clearTimeout(youtubeClaimState.pollTimer);
+    youtubeClaimState.pollTimer = null;
+  }
+}
+
+function stopYouTubeClaimPolling() {
+  clearYouTubeClaimPollTimer();
+  youtubeClaimState.pollOwner = null;
+  youtubeClaimState.pollRetryDelayMs = YOUTUBE_CLAIM_POLL_INTERVAL_MS;
+}
+
+function nextYouTubeClaimGeneration() {
+  youtubeClaimState.generation += 1;
+  return youtubeClaimState.generation;
+}
+
+function youtubeClaimContext(claimId = youtubeClaimState.claimId) {
+  return {
+    generation: youtubeClaimState.generation,
+    claimId: claimId || null,
+  };
+}
+
+function youtubeClaimContextStillCurrent(owner) {
+  return Boolean(
+    owner
+      && youtubeClaimState.generation === owner.generation
+      && (!owner.claimId || youtubeClaimState.claimId === owner.claimId),
+  );
+}
+
+function claimYouTubeRequest(kind) {
+  if (youtubeClaimState.requestOwner) return null;
+  stopYouTubeClaimPolling();
+  const owner = Object.freeze({
+    generation: nextYouTubeClaimGeneration(),
+    claimId: youtubeClaimState.claimId,
+    kind,
+  });
+  youtubeClaimState.requestOwner = owner;
+  return owner;
+}
+
+function releaseYouTubeRequest(owner) {
+  if (youtubeClaimState.requestOwner !== owner) return false;
+  youtubeClaimState.requestOwner = null;
+  return true;
+}
+
+function invalidateYouTubeClaimOwnership() {
+  stopYouTubeClaimPolling();
+  nextYouTubeClaimGeneration();
+  youtubeClaimState.requestOwner = null;
+  youtubeClaimState.submitting = false;
+  youtubeClaimState.retrying = false;
+}
+
+function youtubeClaimErrorMessage(payload, status = 0) {
+  const code = payload && payload.error && typeof payload.error.code === "string"
+    ? payload.error.code
+    : "";
+  const messages = {
+    YOUTUBE_BROWSER_NOT_CONFIGURED: "YouTube acquisition is not configured on this local server.",
+    YOUTUBE_BROWSER_IDENTITY_REQUIRED: "A verified application identity is required.",
+    IDENTITY_REQUIRED: "A verified application identity is required.",
+    YOUTUBE_BROWSER_CAPABILITY_DENIED: "Your current identity is not authorized to claim YouTube media.",
+    CAPABILITY_DENIED: "Your current identity is not authorized to claim YouTube media.",
+    YOUTUBE_BROWSER_INVALID_URL: "The server rejected this YouTube URL.",
+    YOUTUBE_BROWSER_INVALID_REQUEST: "The claim request was invalid.",
+    YOUTUBE_BROWSER_CLAIM_NOT_FOUND: "This claim is no longer available on the server.",
+    YOUTUBE_BROWSER_STATE_CONFLICT: "This claim changed state and cannot be retried yet.",
+    YOUTUBE_BROWSER_UNAVAILABLE: "YouTube acquisition is temporarily unavailable.",
+    YOUTUBE_BROWSER_AUDIT_UNAVAILABLE: "The privileged action could not be recorded.",
+  };
+  if (messages[code]) return messages[code];
+  if (status === 401) return "A verified application identity is required.";
+  if (status === 403) return "Your current identity is not authorized for this action.";
+  if (status >= 500) return "The local server could not complete the YouTube claim.";
+  return "The YouTube claim request could not be completed.";
+}
+
+async function requestYouTubeClaimStatus(claimId) {
+  if (typeof claimId !== "string" || !claimId) {
+    return { ok: false, status: 404, payload: null, notFound: true };
+  }
+  try {
+    const response = await fetch(
+      `${YOUTUBE_CLAIMS_ENDPOINT}/${encodeURIComponent(claimId)}`,
+      { headers: { Accept: "application/json" }, cache: "no-store" },
+    );
+    let payload = null;
+    try {
+      payload = await response.json();
+    } catch {
+      payload = null;
+    }
+    if (!response.ok) {
+      return {
+        ok: false,
+        status: response.status,
+        payload,
+        notFound: response.status === 404,
+      };
+    }
+    const snapshot = normalizeYouTubeClaimSnapshot(payload);
+    return snapshot
+      ? { ok: true, snapshot }
+      : { ok: false, status: response.status, payload, parseFailed: true };
+  } catch {
+    return { ok: false, status: 0, payload: null, networkError: true };
+  }
+}
+
+function youtubeClaimPhaseLabel(snapshot) {
+  if (!snapshot) return "Ready";
+  if (snapshot.state === "claimed" || snapshot.phase === "queued") return "Queued";
+  if (snapshot.state === "inspecting" || snapshot.phase === "inspecting") return "Inspecting";
+  if (snapshot.state === "download_pending" || snapshot.state === "downloading") return "Downloading";
+  if (["downloaded", "handoff", "handed_off"].includes(snapshot.state)) return "Handing off";
+  if (snapshot.state === "duplicate_resolved") return "Duplicate resolved";
+  if (snapshot.state === "cataloged") return "Cataloged";
+  if (snapshot.state === "failed") return "Failed";
+  return snapshot.phase ? String(snapshot.phase).replaceAll("_", " ") : "Status unavailable";
+}
+
+function youtubeClaimStatusMessage(snapshot) {
+  if (!snapshot) return youtubeClaimState.message || "Paste a YouTube URL to begin.";
+  if (snapshot.submission_result === "active_reuse") {
+    return "An active claim for this URL was already in progress. Reusing it.";
+  }
+  if (snapshot.submission_result === "terminal_duplicate_reuse") {
+    return "This URL is already cataloged. The existing media was reused.";
+  }
+  if (snapshot.state === "failed") {
+    return "The claim failed with sanitized server failure information. Retry is available.";
+  }
+  if (snapshot.state === "duplicate_resolved") {
+    return "This source matched existing catalog media. No second catalog item was created.";
+  }
+  if (snapshot.state === "cataloged") {
+    return "Cataloged. The media is available in Gallery.";
+  }
+  if (snapshot.state === "handoff" || snapshot.state === "handed_off") {
+    return "Media was acquired and is being handed off to the local catalog.";
+  }
+  if (snapshot.state === "downloading" || snapshot.state === "download_pending") {
+    return "The server is acquiring media from the confirmed source.";
+  }
+  if (snapshot.state === "inspecting") {
+    return "The server is inspecting the confirmed source.";
+  }
+  return "The server accepted the claim and is processing it.";
+}
+
+function youtubeClaimMetadataLabel(snapshot) {
+  if (!snapshot || snapshot.catalog_state !== "cataloged") return "Metadata: Not cataloged yet";
+  if (snapshot.metadata_state === "complete") return "Metadata: Complete";
+  if (snapshot.metadata_state === "incomplete") {
+    const missing = snapshot.missing_metadata_fields.length > 0
+      ? ` Missing: ${snapshot.missing_metadata_fields.join(", ")}.`
+      : "";
+    return `Metadata: Incomplete.${missing}`;
+  }
+  return "Metadata: Unknown";
+}
+
+function youtubeClaimPublicationLabel(snapshot) {
+  if (!snapshot || snapshot.catalog_state !== "cataloged") return "Publication: Not cataloged yet";
+  if (snapshot.publication_state === "published") return "Publication: Published";
+  if (snapshot.publication_state === "unpublished") return "Publication: Unpublished; review in Manage media.";
+  return "Publication: Unknown";
+}
+
+function renderYouTubeClaimCockpit() {
+  const snapshot = youtubeClaimState.snapshot;
+  const hasClaim = Boolean(snapshot || youtubeClaimState.claimId);
+  const busy = youtubeClaimState.submitting || youtubeClaimState.retrying;
+  const canManageMedia = Boolean(
+    snapshot
+      && snapshot.media_id
+      && identityAllowsAdminWorkflow()
+      && (snapshot.state === "cataloged" || snapshot.state === "duplicate_resolved"),
+  );
+  if (youtubeClaimRow) youtubeClaimRow.dataset.state = snapshot ? snapshot.state : "idle";
+  if (youtubeClaimStateLabel) {
+    youtubeClaimStateLabel.textContent = busy
+      ? (youtubeClaimState.retrying ? "Retrying" : "Submitting")
+      : youtubeClaimPhaseLabel(snapshot);
+  }
+  if (youtubeClaimMessage) {
+    youtubeClaimMessage.textContent = youtubeClaimState.errorMessage
+      || youtubeClaimStatusMessage(snapshot);
+  }
+  if (youtubeClaimDetails) youtubeClaimDetails.hidden = !snapshot;
+  if (youtubeClaimMetadata) youtubeClaimMetadata.textContent = youtubeClaimMetadataLabel(snapshot);
+  if (youtubeClaimPublication) youtubeClaimPublication.textContent = youtubeClaimPublicationLabel(snapshot);
+  if (youtubeClaimFailure) {
+    const failure = snapshot && snapshot.failure;
+    youtubeClaimFailure.hidden = !failure;
+    youtubeClaimFailure.textContent = failure
+      ? `Failure stage: ${failure.stage || "unknown"}. Sanitized failure code: ${failure.code || "unknown"}.`
+      : "";
+  }
+  if (youtubeClaimUrlInput) youtubeClaimUrlInput.disabled = hasClaim || busy;
+  if (youtubeClaimSubmitButton) {
+    youtubeClaimSubmitButton.hidden = hasClaim;
+    youtubeClaimSubmitButton.disabled = busy || hasClaim;
+  }
+  if (youtubeClaimRetryButton) {
+    youtubeClaimRetryButton.hidden = !snapshot || snapshot.state !== "failed";
+    youtubeClaimRetryButton.disabled = busy;
+  }
+  if (youtubeClaimResetButton) {
+    youtubeClaimResetButton.hidden = !hasClaim;
+    youtubeClaimResetButton.disabled = busy;
+  }
+  if (youtubeClaimManageMediaButton) {
+    youtubeClaimManageMediaButton.hidden = !canManageMedia;
+    youtubeClaimManageMediaButton.disabled = busy;
+  }
+  if (youtubeClaimDialogTitle) {
+    youtubeClaimDialogTitle.textContent = hasClaim ? "YouTube claim status" : "Claim YouTube media";
+  }
+}
+
+function applyYouTubeClaimSnapshot(snapshot, owner, { allowClaimChange = false } = {}) {
+  if (!snapshot || !youtubeClaimContextStillCurrent(owner)) return false;
+  if (owner.claimId && snapshot.claim_id !== owner.claimId && !allowClaimChange) return false;
+  youtubeClaimState.claimId = snapshot.claim_id;
+  youtubeClaimState.snapshot = snapshot;
+  if (snapshot.submission_result) {
+    youtubeClaimState.submissionResult = snapshot.submission_result;
+  }
+  youtubeClaimState.errorMessage = "";
+  saveYouTubeClaimRecovery(snapshot.claim_id);
+  renderYouTubeClaimCockpit();
+  if (youtubeClaimStateIsTerminal(snapshot)) stopYouTubeClaimPolling();
+  return true;
+}
+
+function scheduleYouTubeClaimPolling(
+  owner = youtubeClaimContext(),
+  requestedDelayMs = youtubeClaimState.pollRetryDelayMs,
+) {
+  clearYouTubeClaimPollTimer();
+  const snapshot = youtubeClaimState.snapshot;
+  if (!youtubeClaimShouldPoll(snapshot)) return;
+  if (!youtubeClaimDialogIsOpen()) return;
+  if (!youtubeClaimContextStillCurrent(owner)) return;
+  const pollOwner = Object.freeze({ ...owner });
+  youtubeClaimState.pollOwner = pollOwner;
+  const delay = Math.min(requestedDelayMs, YOUTUBE_CLAIM_POLL_RETRY_MAX_MS);
+  youtubeClaimState.pollTimer = window.setTimeout(() => {
+    youtubeClaimState.pollTimer = null;
+    pollYouTubeClaimStatus(pollOwner);
+  }, delay);
+}
+
+async function pollYouTubeClaimStatus(owner = youtubeClaimState.pollOwner) {
+  if (owner !== youtubeClaimState.pollOwner || !youtubeClaimContextStillCurrent(owner)) return;
+  const result = await requestYouTubeClaimStatus(owner.claimId || youtubeClaimState.claimId);
+  if (owner !== youtubeClaimState.pollOwner || !youtubeClaimContextStillCurrent(owner)) return;
+  if (result.ok) {
+    youtubeClaimState.pollRetryDelayMs = YOUTUBE_CLAIM_POLL_INTERVAL_MS;
+    if (!applyYouTubeClaimSnapshot(result.snapshot, owner)) return;
+    if (youtubeClaimShouldPoll(result.snapshot)) {
+      scheduleYouTubeClaimPolling(youtubeClaimContext(result.snapshot.claim_id));
+    } else {
+      stopYouTubeClaimPolling();
+    }
+    return;
+  }
+  if (result.notFound) {
+    stopYouTubeClaimPolling();
+    clearYouTubeClaimRecovery();
+    youtubeClaimState.claimId = null;
+    youtubeClaimState.snapshot = null;
+    youtubeClaimState.errorMessage = "This saved claim was not found on the local server.";
+    renderYouTubeClaimCockpit();
+    return;
+  }
+  youtubeClaimState.errorMessage = result.networkError
+    ? "Claim status is temporarily unavailable; retrying."
+    : youtubeClaimErrorMessage(result.payload, result.status);
+  renderYouTubeClaimCockpit();
+  if (
+    youtubeClaimShouldPoll(youtubeClaimState.snapshot)
+    && youtubeClaimDialogIsOpen()
+    && result.status !== 401
+    && result.status !== 403
+  ) {
+    const retryDelayMs = Math.min(
+      YOUTUBE_CLAIM_POLL_RETRY_MAX_MS,
+      Math.max(
+        YOUTUBE_CLAIM_POLL_INTERVAL_MS,
+        youtubeClaimState.pollRetryDelayMs * 2,
+      ),
+    );
+    scheduleYouTubeClaimPolling(owner, youtubeClaimState.pollRetryDelayMs);
+    youtubeClaimState.pollRetryDelayMs = retryDelayMs;
+  } else {
+    stopYouTubeClaimPolling();
+  }
+}
+
+async function refreshYouTubeClaimStatus(owner = youtubeClaimContext()) {
+  if (!owner || !owner.claimId) return null;
+  const result = await requestYouTubeClaimStatus(owner.claimId);
+  if (!youtubeClaimContextStillCurrent(owner)) return null;
+  if (!result.ok) {
+    if (result.notFound) {
+      clearYouTubeClaimRecovery();
+      youtubeClaimState.claimId = null;
+      youtubeClaimState.snapshot = null;
+      youtubeClaimState.errorMessage = "This saved claim was not found on the local server.";
+    } else {
+      youtubeClaimState.errorMessage = result.networkError
+        ? "Claim status could not be loaded from the local server."
+        : youtubeClaimErrorMessage(result.payload, result.status);
+    }
+    renderYouTubeClaimCockpit();
+    return null;
+  }
+  if (!applyYouTubeClaimSnapshot(result.snapshot, owner)) return null;
+  if (youtubeClaimShouldPoll(result.snapshot) && youtubeClaimDialogIsOpen()) {
+    scheduleYouTubeClaimPolling(youtubeClaimContext(result.snapshot.claim_id));
+  }
+  return result.snapshot;
+}
+
+async function restoreYouTubeClaim() {
+  if (youtubeClaimState.recoveryAttempted || !identityAllowsYouTubeClaim()) return;
+  youtubeClaimState.recoveryAttempted = true;
+  const claimId = loadYouTubeClaimRecovery();
+  if (!claimId || youtubeClaimState.claimId) {
+    renderYouTubeClaimCockpit();
+    return;
+  }
+  invalidateYouTubeClaimOwnership();
+  youtubeClaimState.claimId = claimId;
+  youtubeClaimState.snapshot = null;
+  youtubeClaimState.message = "Recovering saved YouTube claim...";
+  renderYouTubeClaimCockpit();
+  await refreshYouTubeClaimStatus(youtubeClaimContext(claimId));
+}
+
+function resetYouTubeClaimState() {
+  const generation = youtubeClaimState.generation;
+  invalidateYouTubeClaimOwnership();
+  clearYouTubeClaimRecovery();
+  youtubeClaimState = {
+    generation: youtubeClaimState.generation || generation,
+    claimId: null,
+    snapshot: null,
+    requestOwner: null,
+    pollOwner: null,
+    pollTimer: null,
+    pollRetryDelayMs: YOUTUBE_CLAIM_POLL_INTERVAL_MS,
+    submitting: false,
+    retrying: false,
+    recoveryAttempted: true,
+    submissionResult: null,
+    message: "",
+    errorMessage: "",
+  };
+  if (youtubeClaimUrlInput) youtubeClaimUrlInput.value = "";
+  renderYouTubeClaimCockpit();
+}
+
+function openYouTubeClaimDialog() {
+  if (!identityAllowsYouTubeClaim() || !youtubeClaimDialog) return;
+  youtubeClaimOpenerElement = document.activeElement;
+  if (typeof youtubeClaimDialog.showModal === "function") {
+    youtubeClaimDialog.showModal();
+  } else {
+    youtubeClaimDialog.setAttribute("open", "");
+  }
+  renderYouTubeClaimCockpit();
+  if (youtubeClaimState.claimId) {
+    refreshYouTubeClaimStatus(youtubeClaimContext(youtubeClaimState.claimId));
+  }
+  if (youtubeClaimState.claimId) {
+    if (youtubeClaimDialogTitle) youtubeClaimDialogTitle.focus();
+  } else if (youtubeClaimUrlInput) {
+    youtubeClaimUrlInput.focus();
+  }
+}
+
+function closeYouTubeClaimDialog() {
+  if (!youtubeClaimDialog) return;
+  invalidateYouTubeClaimOwnership();
+  if (typeof youtubeClaimDialog.close === "function") {
+    youtubeClaimDialog.close();
+  } else {
+    youtubeClaimDialog.removeAttribute("open");
+  }
+  if (youtubeClaimOpenerElement && !youtubeClaimOpenerElement.hidden) {
+    youtubeClaimOpenerElement.focus();
+  } else if (youtubeClaimOpenButton && !youtubeClaimOpenButton.hidden) {
+    youtubeClaimOpenButton.focus();
+  }
+  youtubeClaimOpenerElement = null;
+}
+
+async function submitYouTubeClaim() {
+  if (!identityAllowsYouTubeClaim() || youtubeClaimState.requestOwner) return;
+  const url = youtubeClaimUrlInput ? youtubeClaimUrlInput.value.trim() : "";
+  if (!url) {
+    youtubeClaimState.errorMessage = "Enter a YouTube URL before submitting the claim.";
+    renderYouTubeClaimCockpit();
+    if (youtubeClaimUrlInput) youtubeClaimUrlInput.focus();
+    return;
+  }
+  const accepted = await requestConfirmation({
+    title: "Confirm YouTube claim",
+    message: "FrameNest will ask the local server to acquire this source and add it to the catalog. Continue?",
+    dismissLabel: "Cancel",
+    confirmLabel: "Claim media",
+    focusReturn: youtubeClaimSubmitButton,
+  });
+  if (!accepted || !identityAllowsYouTubeClaim()) return;
+  const owner = claimYouTubeRequest("create");
+  if (!owner) return;
+  youtubeClaimState.submitting = true;
+  youtubeClaimState.errorMessage = "";
+  youtubeClaimState.message = "Submitting confirmed YouTube claim...";
+  renderYouTubeClaimCockpit();
+  try {
+    const response = await fetch(YOUTUBE_CLAIMS_ENDPOINT, {
+      method: "POST",
+      headers: framenestMutationHeaders({
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      }),
+      body: JSON.stringify({ url, confirmation_method: "interactive" }),
+      cache: "no-store",
+    });
+    let payload = null;
+    try {
+      payload = await response.json();
+    } catch {
+      payload = null;
+    }
+    if (!youtubeClaimState.requestOwner || !youtubeClaimContextStillCurrent(owner)) return;
+    const snapshot = normalizeYouTubeClaimSnapshot(payload);
+    if (!response.ok || !snapshot) {
+      youtubeClaimState.errorMessage = response.ok
+        ? "The local server returned an invalid claim response."
+        : youtubeClaimErrorMessage(payload, response.status);
+      youtubeClaimState.message = "Claim was not started.";
+      return;
+    }
+    if (!applyYouTubeClaimSnapshot(snapshot, owner, { allowClaimChange: true })) return;
+    releaseYouTubeRequest(owner);
+    if (youtubeClaimShouldPoll(snapshot)) {
+      scheduleYouTubeClaimPolling(youtubeClaimContext(snapshot.claim_id));
+    }
+  } catch {
+    if (youtubeClaimState.requestOwner === owner) {
+      youtubeClaimState.errorMessage = "The claim could not reach the local server.";
+      youtubeClaimState.message = "Claim was not started.";
+    }
+  } finally {
+    if (youtubeClaimState.requestOwner === owner) releaseYouTubeRequest(owner);
+    if (youtubeClaimContextStillCurrent(owner)) {
+      youtubeClaimState.submitting = false;
+      renderYouTubeClaimCockpit();
+    }
+  }
+}
+
+async function retryYouTubeClaim() {
+  const snapshot = youtubeClaimState.snapshot;
+  if (!snapshot || snapshot.state !== "failed" || youtubeClaimState.requestOwner) return;
+  const accepted = await requestConfirmation({
+    title: "Retry YouTube claim",
+    message: "Retry the failed claim using the same server-owned claim context?",
+    dismissLabel: "Cancel",
+    confirmLabel: "Retry claim",
+    focusReturn: youtubeClaimRetryButton,
+  });
+  if (!accepted || !identityAllowsYouTubeClaim()) return;
+  const owner = claimYouTubeRequest("retry");
+  if (!owner) return;
+  youtubeClaimState.retrying = true;
+  youtubeClaimState.errorMessage = "";
+  youtubeClaimState.message = "Submitting claim retry...";
+  renderYouTubeClaimCockpit();
+  try {
+    const response = await fetch(
+      `${YOUTUBE_CLAIMS_ENDPOINT}/${encodeURIComponent(snapshot.claim_id)}/retry`,
+      {
+        method: "POST",
+        headers: framenestMutationHeaders({
+          Accept: "application/json",
+          "Content-Type": "application/json",
+        }),
+        body: JSON.stringify({ confirmation_method: "interactive" }),
+        cache: "no-store",
+      },
+    );
+    let payload = null;
+    try {
+      payload = await response.json();
+    } catch {
+      payload = null;
+    }
+    if (!youtubeClaimState.requestOwner || !youtubeClaimContextStillCurrent(owner)) return;
+    const nextSnapshot = normalizeYouTubeClaimSnapshot(payload);
+    if (!response.ok || !nextSnapshot) {
+      youtubeClaimState.errorMessage = response.ok
+        ? "The local server returned an invalid retry response."
+        : youtubeClaimErrorMessage(payload, response.status);
+      youtubeClaimState.message = "Retry was not started.";
+      return;
+    }
+    if (!applyYouTubeClaimSnapshot(nextSnapshot, owner, { allowClaimChange: true })) return;
+    releaseYouTubeRequest(owner);
+    if (youtubeClaimShouldPoll(nextSnapshot)) {
+      scheduleYouTubeClaimPolling(youtubeClaimContext(nextSnapshot.claim_id));
+    }
+  } catch {
+    if (youtubeClaimState.requestOwner === owner) {
+      youtubeClaimState.errorMessage = "The retry could not reach the local server.";
+      youtubeClaimState.message = "Retry was not started.";
+    }
+  } finally {
+    if (youtubeClaimState.requestOwner === owner) releaseYouTubeRequest(owner);
+    if (youtubeClaimState.generation === owner.generation) {
+      youtubeClaimState.retrying = false;
+      renderYouTubeClaimCockpit();
+    }
+  }
+}
+
+function handoffYouTubeClaimToManageMedia() {
+  if (!youtubeClaimState.snapshot || !youtubeClaimState.snapshot.media_id) return;
+  closeYouTubeClaimDialog();
+  openAdminMediaBrowser();
 }
 
 function settleConfirmation(request, accepted) {
@@ -1236,6 +1937,10 @@ function editIcon() {
 
 function downloadIcon() {
   return inlineIcon("M12 3v12M7 10l5 5 5-5M5 20h14", "Download");
+}
+
+function openOriginalIcon() {
+  return inlineIcon("M14 5h5v5M19 5l-8 8M17 13v5H5V6h5", "Open original media");
 }
 
 function metadataEndpoint(mediaId) {
@@ -4616,14 +5321,16 @@ function renderCatalogCard(item) {
     editButton.addEventListener("click", () => handleOpenMetadataWorkspace(item, editButton));
     actions.appendChild(editButton);
   }
-  if (supportedLocation && identityHasCapability("media.download")) {
-    const downloadLink = document.createElement("a");
-    downloadLink.className = "catalog-card__action catalog-card__action--overlay catalog-card__action--download catalog-card__action--bottom-right";
-    downloadLink.href = mediaDownloadUrl(item.media_id, supportedLocation.location_id);
-    downloadLink.setAttribute("aria-label", `Download ${displayTitle}`);
-    downloadLink.title = "Download";
-    downloadLink.appendChild(downloadIcon());
-    actions.appendChild(downloadLink);
+  if (supportedLocation) {
+    const openOriginalLink = document.createElement("a");
+    openOriginalLink.className = "catalog-card__action catalog-card__action--overlay catalog-card__action--open-original catalog-card__action--bottom-right";
+    openOriginalLink.href = mediaContentUrl(item.media_id, supportedLocation.location_id);
+    openOriginalLink.target = "_blank";
+    openOriginalLink.rel = "noopener noreferrer";
+    openOriginalLink.setAttribute("aria-label", `Open original media ${displayTitle}`);
+    openOriginalLink.title = "Open original media";
+    openOriginalLink.appendChild(openOriginalIcon());
+    actions.appendChild(openOriginalLink);
   }
   mediaFrame.appendChild(actions);
   const analysisStatus = document.createElement("p");
@@ -8074,6 +8781,49 @@ if (uploadOpenButton) {
   uploadOpenButton.addEventListener("click", openUploadDialog);
 }
 
+if (youtubeClaimOpenButton) {
+  youtubeClaimOpenButton.addEventListener("click", openYouTubeClaimDialog);
+}
+
+if (youtubeClaimCloseButton) {
+  youtubeClaimCloseButton.addEventListener("click", closeYouTubeClaimDialog);
+}
+
+if (youtubeClaimForm) {
+  youtubeClaimForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    submitYouTubeClaim();
+  });
+}
+
+if (youtubeClaimRetryButton) {
+  youtubeClaimRetryButton.addEventListener("click", retryYouTubeClaim);
+}
+
+if (youtubeClaimResetButton) {
+  youtubeClaimResetButton.addEventListener("click", resetYouTubeClaimState);
+}
+
+if (youtubeClaimManageMediaButton) {
+  youtubeClaimManageMediaButton.addEventListener("click", handoffYouTubeClaimToManageMedia);
+}
+
+if (youtubeClaimDialog) {
+  youtubeClaimDialog.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      if (confirmationOwnsTopmostModal()) return;
+      closeYouTubeClaimDialog();
+    }
+  });
+  youtubeClaimDialog.addEventListener("cancel", (event) => {
+    handleParentDialogCancel(event, closeYouTubeClaimDialog);
+  });
+  youtubeClaimDialog.addEventListener("click", (event) => {
+    if (event.target === youtubeClaimDialog) closeYouTubeClaimDialog();
+  });
+}
+
 if (uploadCloseButton) {
   uploadCloseButton.addEventListener("click", closeUploadDialog);
 }
@@ -8251,9 +9001,13 @@ checkHealth();
 loadAiCapability();
 loadUploadCapability();
 restoreUploadRecovery();
+renderYouTubeClaimCockpit();
 loadCatalogTags();
 identityReady.then(() => {
   loadCatalog();
+});
+identityReady.then(() => {
+  restoreYouTubeClaim();
 });
 loadLibraries();
 if (commandSearchInput) {
@@ -8261,3 +9015,4 @@ if (commandSearchInput) {
 }
 window.addEventListener("pagehide", revokePreviewObjectUrls);
 window.addEventListener("pagehide", cleanupUploadRuntime);
+window.addEventListener("pagehide", invalidateYouTubeClaimOwnership);
