@@ -92,12 +92,14 @@ ANALYSIS_PROFILE_BY_DEFINITION: dict[str, AnalysisProfile] = {
 MOVIE_IDENTIFICATION_RESULT_SCHEMA_VERSION = "framenest-movie-identification-result-v1"
 MOVIE_IDENTIFICATION_PROMPT_VERSION = "framenest-movie-identification-prompt-v2"
 
-# Bounded reasoning budget for movie identification (NVIDIA chat_template_kwargs).
-# With thinking enabled, max_tokens must leave room for the final structured answer;
-# top-level thinking_token_budget tracks reasoning_budget plus a small grace margin.
+# Bounded reasoning budget for movie identification on integrate.api.nvidia.com.
+# Official Thinking-mode sampling uses temperature/top_p (no instruct-mode top_k).
+# Canonical budget control is top-level reasoning_budget; max_tokens must leave
+# room for the final structured answer after the reasoning phase.
 MOVIE_IDENTIFICATION_REASONING_BUDGET = 2048
-MOVIE_IDENTIFICATION_REASONING_GRACE_TOKENS = 256
 MOVIE_IDENTIFICATION_MAX_TOKENS = 4096
+MOVIE_IDENTIFICATION_TEMPERATURE = 0.6
+MOVIE_IDENTIFICATION_TOP_P = 0.95
 
 CONTACT_SHEET_REQUESTED_FRAME_COUNT = 6
 CONTACT_SHEET_DERIVATIVE_STRATEGY = "bounded_contact_sheet_jpeg_v1"

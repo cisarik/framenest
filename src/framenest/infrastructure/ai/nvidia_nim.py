@@ -12,19 +12,25 @@ from framenest.application.media_suggestion import (
     FrameNestMediaSuggestionError,
     MediaSuggestion,
     MediaSuggestionProviderAuthError,
+    MediaSuggestionProviderEmptyResponseError,
     MediaSuggestionProviderFailedError,
     MediaSuggestionProviderInvalidResponseError,
     MediaSuggestionProviderModelUnavailableError,
+    MediaSuggestionProviderPendingTimeoutError,
     MediaSuggestionProviderRateLimitedError,
+    MediaSuggestionProviderRefusalError,
     MediaSuggestionProviderTruncatedResponseError,
     MediaSuggestionProviderUnavailableError,
     MediaSuggestionRequest,
     PROMPT_VERSION,
     SUGGESTION_PROVIDER_AUTH_MESSAGE,
+    SUGGESTION_PROVIDER_EMPTY_RESPONSE_MESSAGE,
     SUGGESTION_PROVIDER_FAILED_MESSAGE,
     SUGGESTION_PROVIDER_INVALID_RESPONSE_MESSAGE,
     SUGGESTION_PROVIDER_MODEL_UNAVAILABLE_MESSAGE,
+    SUGGESTION_PROVIDER_PENDING_TIMEOUT_MESSAGE,
     SUGGESTION_PROVIDER_RATE_LIMITED_MESSAGE,
+    SUGGESTION_PROVIDER_REFUSAL_MESSAGE,
     SUGGESTION_PROVIDER_UNAVAILABLE_MESSAGE,
     validate_suggested_filename,
 )
@@ -223,13 +229,11 @@ def build_nvidia_movie_identification_body(
     from framenest.domain.media_classification import (
         MOVIE_IDENTIFICATION_MAX_TOKENS,
         MOVIE_IDENTIFICATION_REASONING_BUDGET,
-        MOVIE_IDENTIFICATION_REASONING_GRACE_TOKENS,
+        MOVIE_IDENTIFICATION_TEMPERATURE,
+        MOVIE_IDENTIFICATION_TOP_P,
     )
 
-    thinking_token_budget = (
-        MOVIE_IDENTIFICATION_REASONING_BUDGET + MOVIE_IDENTIFICATION_REASONING_GRACE_TOKENS
-    )
-    if MOVIE_IDENTIFICATION_MAX_TOKENS <= thinking_token_budget:
+    if MOVIE_IDENTIFICATION_MAX_TOKENS <= MOVIE_IDENTIFICATION_REASONING_BUDGET:
         raise MediaSuggestionProviderInvalidResponseError(
             SUGGESTION_PROVIDER_INVALID_RESPONSE_MESSAGE
         )
@@ -246,20 +250,20 @@ def build_nvidia_movie_identification_body(
             },
         },
     ]
+    # integrate.api.nvidia.com: Thinking-mode sampling + top-level reasoning_budget.
+    # Do not duplicate nested/budget aliases or instruct-mode top_k.
     return {
         "model": model_id,
         "messages": [
             {"role": "user", "content": content},
         ],
         "stream": False,
-        "temperature": TEMPERATURE,
-        "top_k": TOP_K,
+        "temperature": MOVIE_IDENTIFICATION_TEMPERATURE,
+        "top_p": MOVIE_IDENTIFICATION_TOP_P,
         "max_tokens": MOVIE_IDENTIFICATION_MAX_TOKENS,
         "reasoning_budget": MOVIE_IDENTIFICATION_REASONING_BUDGET,
-        "thinking_token_budget": thinking_token_budget,
         "chat_template_kwargs": {
             "enable_thinking": True,
-            "reasoning_budget": MOVIE_IDENTIFICATION_REASONING_BUDGET,
         },
     }
 
@@ -294,6 +298,7 @@ def classify_chat_completion_choice(payload: dict[str, Any]) -> dict[str, Any]:
         "final_content_empty": None,
         "has_reasoning_field": None,
         "reasoning_repr": None,
+        "has_refusal_field": None,
         "top_level_keys": _bounded_key_names(payload),
         "message_keys": None,
         "detected_wrapper_category": "not_inspected",
@@ -336,6 +341,8 @@ def classify_chat_completion_choice(payload: dict[str, Any]) -> dict[str, Any]:
     facts["reasoning_repr"] = (
         _representation_type(reasoning_values[0]) if reasoning_values else None
     )
+    refusal = message.get("refusal")
+    facts["has_refusal_field"] = isinstance(refusal, str) and bool(refusal.strip())
     if content is None:
         content_repr = "null"
         final_empty = True
@@ -452,11 +459,7 @@ def extract_message_content(payload: dict[str, Any]) -> str:
         )
     content = message.get("content")
     if not isinstance(content, str) or not content.strip():
-        # Empty final content after reasoning or length stop is distinct from
-        # opaque invalid envelopes; never parse reasoning text as the answer.
-        if facts.get("final_content_empty") and (
-            facts.get("finish_reason") == "length" or facts.get("has_reasoning_field")
-        ):
+        if facts.get("finish_reason") == "length":
             raise MediaSuggestionProviderTruncatedResponseError(
                 SUGGESTION_PROVIDER_INVALID_RESPONSE_MESSAGE
             )
@@ -491,16 +494,23 @@ def extract_movie_message_content(
         raise MediaSuggestionProviderInvalidResponseError(
             SUGGESTION_PROVIDER_INVALID_RESPONSE_MESSAGE
         )
-    content = message.get("content")
-    if not isinstance(content, str) or not content.strip():
+    refusal = message.get("refusal")
+    if isinstance(refusal, str) and refusal.strip():
         structural["parser_stage"] = "final_content_extraction"
-        if structural.get("final_content_empty") and (
-            structural.get("finish_reason") == "length"
-            or structural.get("has_reasoning_field")
-        ):
+        structural["detected_wrapper_category"] = "refusal"
+        raise MediaSuggestionProviderRefusalError(SUGGESTION_PROVIDER_REFUSAL_MESSAGE)
+    content = message.get("content")
+    if content is None or (isinstance(content, str) and not content.strip()):
+        structural["parser_stage"] = "final_content_extraction"
+        if structural.get("finish_reason") == "length":
             raise MediaSuggestionProviderTruncatedResponseError(
                 SUGGESTION_PROVIDER_INVALID_RESPONSE_MESSAGE
             )
+        raise MediaSuggestionProviderEmptyResponseError(
+            SUGGESTION_PROVIDER_EMPTY_RESPONSE_MESSAGE
+        )
+    if not isinstance(content, str):
+        structural["parser_stage"] = "final_content_extraction"
         raise MediaSuggestionProviderInvalidResponseError(
             SUGGESTION_PROVIDER_INVALID_RESPONSE_MESSAGE
         )
@@ -523,8 +533,12 @@ def extract_movie_message_content(
         final_answer = candidate[closing_tag_index + len("</think>") :]
         if closing_tag_index < 0 or not final_answer.strip():
             structural["detected_wrapper_category"] = "embedded_think_without_final"
-            raise MediaSuggestionProviderTruncatedResponseError(
-                SUGGESTION_PROVIDER_INVALID_RESPONSE_MESSAGE
+            if structural.get("finish_reason") == "length":
+                raise MediaSuggestionProviderTruncatedResponseError(
+                    SUGGESTION_PROVIDER_INVALID_RESPONSE_MESSAGE
+                )
+            raise MediaSuggestionProviderEmptyResponseError(
+                SUGGESTION_PROVIDER_EMPTY_RESPONSE_MESSAGE
             )
         candidate = final_answer.strip()
         if "<think>" in candidate or "</think>" in candidate:
@@ -797,7 +811,8 @@ def _movie_request_diagnostics() -> dict[str, Any]:
     from framenest.domain.media_classification import (
         MOVIE_IDENTIFICATION_MAX_TOKENS,
         MOVIE_IDENTIFICATION_REASONING_BUDGET,
-        MOVIE_IDENTIFICATION_REASONING_GRACE_TOKENS,
+        MOVIE_IDENTIFICATION_TEMPERATURE,
+        MOVIE_IDENTIFICATION_TOP_P,
     )
 
     return {
@@ -805,10 +820,8 @@ def _movie_request_diagnostics() -> dict[str, Any]:
         "reasoning_enabled": True,
         "reasoning_budget": MOVIE_IDENTIFICATION_REASONING_BUDGET,
         "max_tokens": MOVIE_IDENTIFICATION_MAX_TOKENS,
-        "thinking_token_budget": (
-            MOVIE_IDENTIFICATION_REASONING_BUDGET
-            + MOVIE_IDENTIFICATION_REASONING_GRACE_TOKENS
-        ),
+        "temperature": MOVIE_IDENTIFICATION_TEMPERATURE,
+        "top_p": MOVIE_IDENTIFICATION_TOP_P,
         "provider_submission_occurred": True,
         "initial_http_status_class": None,
         "http_status_class": None,
@@ -1020,6 +1033,22 @@ class NvidiaNimMediaSuggestionProvider:
                 error_code="PROVIDER_RESPONSE_TRUNCATED",
             )
             raise
+        except MediaSuggestionProviderEmptyResponseError:
+            facts["terminal_domain_error"] = "PROVIDER_RESPONSE_EMPTY"
+            _emit_movie_response_diagnostics(
+                facts,
+                level="WARNING",
+                error_code="PROVIDER_RESPONSE_EMPTY",
+            )
+            raise
+        except MediaSuggestionProviderRefusalError:
+            facts["terminal_domain_error"] = "PROVIDER_REFUSAL"
+            _emit_movie_response_diagnostics(
+                facts,
+                level="WARNING",
+                error_code="PROVIDER_REFUSAL",
+            )
+            raise
         except MediaSuggestionProviderInvalidResponseError:
             if facts.get("schema_validation_stage") == "not_started":
                 facts["schema_validation_stage"] = "not_reached"
@@ -1103,8 +1132,8 @@ class NvidiaNimMediaSuggestionProvider:
         deadline = self._monotonic_clock() + self._pending_timeout_seconds
         while True:
             if self._monotonic_clock() >= deadline:
-                raise MediaSuggestionProviderUnavailableError(
-                    SUGGESTION_PROVIDER_UNAVAILABLE_MESSAGE
+                raise MediaSuggestionProviderPendingTimeoutError(
+                    SUGGESTION_PROVIDER_PENDING_TIMEOUT_MESSAGE
                 )
             self._sleep(self._pending_poll_interval_seconds)
             status_response = self._transport.get_json(status_url, headers=headers)

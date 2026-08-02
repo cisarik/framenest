@@ -478,6 +478,8 @@ def create_app(
                 owned_library_repository,
                 LocalMovieIdentificationAdapter(),
                 analysis_provider,
+                provider_id=resolved_analysis_ai.provider_id,
+                model_id=resolved_analysis_ai.model_id,
             )
 
             def _request_movie_identification(media_id, location_id):
@@ -506,9 +508,7 @@ def create_app(
             read_movie_identification=ReadAutomaticMediaAnalysis(
                 owned_media_analysis_run_repository,
                 analysis_definition=MOVIE_IDENTIFICATION_ANALYSIS_DEFINITION,
-            ).execute
-            if movie_identification_requester is not None
-            else None,
+            ).execute,
             execute_movie_identification=(
                 movie_identification_executor.execute
                 if movie_identification_executor is not None

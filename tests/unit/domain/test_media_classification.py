@@ -245,11 +245,13 @@ def test_nvidia_generic_reasoning_off_movie_reasoning_on() -> None:
         ),
     )
     movie_body = build_nvidia_movie_identification_body(movie_request, model_id="test-model")
-    assert movie_body["chat_template_kwargs"]["enable_thinking"] is True
-    assert movie_body["chat_template_kwargs"]["reasoning_budget"] == 2048
+    assert movie_body["chat_template_kwargs"] == {"enable_thinking": True}
     assert movie_body["reasoning_budget"] == 2048
     assert movie_body["max_tokens"] == 4096
-    assert movie_body["thinking_token_budget"] == 2048 + 256
+    assert movie_body["temperature"] == 0.6
+    assert movie_body["top_p"] == 0.95
+    assert "top_k" not in movie_body
+    assert "thinking_token_budget" not in movie_body
     images = [
         part for part in movie_body["messages"][0]["content"] if part.get("type") == "image_url"
     ]

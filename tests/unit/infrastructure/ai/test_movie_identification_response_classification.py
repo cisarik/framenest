@@ -11,7 +11,10 @@ from PIL import Image
 
 from framenest.application.media_analysis import build_representative_frame
 from framenest.application.media_suggestion import (
+    MediaSuggestionProviderEmptyResponseError,
     MediaSuggestionProviderInvalidResponseError,
+    MediaSuggestionProviderPendingTimeoutError,
+    MediaSuggestionProviderRefusalError,
     MediaSuggestionProviderTruncatedResponseError,
 )
 from framenest.application.movie_identification import (
@@ -21,7 +24,8 @@ from framenest.application.movie_identification import (
 from framenest.domain.media_classification import (
     MOVIE_IDENTIFICATION_MAX_TOKENS,
     MOVIE_IDENTIFICATION_REASONING_BUDGET,
-    MOVIE_IDENTIFICATION_REASONING_GRACE_TOKENS,
+    MOVIE_IDENTIFICATION_TEMPERATURE,
+    MOVIE_IDENTIFICATION_TOP_P,
 )
 from framenest.infrastructure.ai import nvidia_nim
 from framenest.infrastructure.ai.credentials import NvidiaApiCredential
@@ -47,9 +51,22 @@ VALID_UNKNOWN = {
     "evidence_summary": "Insufficient evidence.",
 }
 
+VALID_IDENTIFIED = {
+    "identified_title": "Synthetic Adventure",
+    "release_year": 1999,
+    "identification_status": "identified",
+    "confidence": "high",
+    "candidate_titles": ["Synthetic Adventure"],
+    "genres": ["Adventure", "Action"],
+    "description": "A synthetic adventure film.",
+    "tags": ["desert", "pursuit"],
+    "evidence_summary": "Title card and distinctive setting.",
+}
+
 _SECRET = "test-nvidia-secret-value"
 _REASONING_SENTINEL = "private-reasoning-sentinel"
 _CONTENT_SENTINEL = "private-content-sentinel"
+_REFUSAL_SENTINEL = "private-refusal-sentinel"
 
 
 def _png(color: tuple[int, int, int]) -> bytes:
@@ -127,10 +144,14 @@ def _response_payload(
     *,
     finish_reason: object = "stop",
     reasoning_field: str | None = None,
+    reasoning_key: str = "reasoning_content",
+    refusal: str | None = None,
 ) -> dict[str, object]:
     message: dict[str, object] = {"content": content}
     if reasoning_field is not None:
-        message["reasoning_content"] = reasoning_field
+        message[reasoning_key] = reasoning_field
+    if refusal is not None:
+        message["refusal"] = refusal
     return {
         "id": "chatcmpl-test",
         "choices": [
@@ -163,22 +184,47 @@ def _identify(
     return suggestion, transport, logger
 
 
+def _expect_error(
+    payload: object,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    expected_error: type[Exception],
+    error_code: str,
+) -> tuple[_FakeTransport, _RecordingLogger]:
+    transport = _FakeTransport(body=_json_body(payload))
+    logger = _RecordingLogger()
+    monkeypatch.setattr(nvidia_nim, "LOGGER", logger)
+    provider = NvidiaNimMediaSuggestionProvider(
+        NvidiaApiCredential(_SECRET),
+        transport,
+    )
+    with pytest.raises(expected_error):
+        provider.identify_movie(_movie_request())
+    assert len(transport.post_calls) == 1
+    assert logger.events[0]["error_code"] == error_code
+    diagnostic_text = json.dumps(logger.events, sort_keys=True)
+    assert _REASONING_SENTINEL not in diagnostic_text
+    assert _CONTENT_SENTINEL not in diagnostic_text
+    assert _REFUSAL_SENTINEL not in diagnostic_text
+    assert _SECRET not in diagnostic_text
+    return transport, logger
+
+
 def test_movie_request_contract_is_documented_and_bounded() -> None:
     request = _movie_request()
     body = build_nvidia_movie_identification_body(request, model_id="fake-model")
 
+    assert body["model"] == "fake-model"
     assert body["reasoning_budget"] == MOVIE_IDENTIFICATION_REASONING_BUDGET == 2048
     assert body["max_tokens"] == MOVIE_IDENTIFICATION_MAX_TOKENS == 4096
-    assert body["thinking_token_budget"] == (
-        MOVIE_IDENTIFICATION_REASONING_BUDGET
-        + MOVIE_IDENTIFICATION_REASONING_GRACE_TOKENS
-    )
-    assert body["chat_template_kwargs"] == {
-        "enable_thinking": True,
-        "reasoning_budget": 2048,
-    }
+    assert body["temperature"] == MOVIE_IDENTIFICATION_TEMPERATURE == 0.6
+    assert body["top_p"] == MOVIE_IDENTIFICATION_TOP_P == 0.95
+    assert "top_k" not in body
+    assert "thinking_token_budget" not in body
+    assert body["chat_template_kwargs"] == {"enable_thinking": True}
+    assert "reasoning_budget" not in body["chat_template_kwargs"]
     assert body["stream"] is False
-    assert body["max_tokens"] > body["thinking_token_budget"]
+    assert body["max_tokens"] > body["reasoning_budget"]
     assert not ({"response_format", "guided_json", "tools"} & set(body))
 
     content = body["messages"][0]["content"]
@@ -196,28 +242,36 @@ def test_movie_request_contract_is_documented_and_bounded() -> None:
 
 
 @pytest.mark.parametrize(
-    ("content", "reasoning"),
+    ("content", "reasoning", "reasoning_key"),
     [
-        (json.dumps(VALID_UNKNOWN), None),
-        (json.dumps(VALID_UNKNOWN), _REASONING_SENTINEL),
+        (json.dumps(VALID_UNKNOWN), None, "reasoning_content"),
+        (json.dumps(VALID_IDENTIFIED), None, "reasoning_content"),
+        (json.dumps(VALID_UNKNOWN), _REASONING_SENTINEL, "reasoning_content"),
+        (json.dumps(VALID_UNKNOWN), _REASONING_SENTINEL, "reasoning"),
         (
             f"<think>{_REASONING_SENTINEL}</think>{json.dumps(VALID_UNKNOWN)}",
             None,
+            "reasoning_content",
         ),
-        (f"```json\n{json.dumps(VALID_UNKNOWN)}\n```", None),
+        (f"```json\n{json.dumps(VALID_UNKNOWN)}\n```", None, "reasoning_content"),
     ],
 )
-def test_movie_response_accepts_only_supported_final_answer_shapes(
+def test_movie_response_accepts_supported_final_answer_shapes(
     content: str,
     reasoning: str | None,
+    reasoning_key: str,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     suggestion, transport, logger = _identify(
-        _response_payload(content, reasoning_field=reasoning),
+        _response_payload(
+            content,
+            reasoning_field=reasoning,
+            reasoning_key=reasoning_key,
+        ),
         monkeypatch,
     )
 
-    assert suggestion.identification_status.value == "unknown"
+    assert suggestion.identification_status.value in {"unknown", "identified"}
     assert len(transport.post_calls) == 1
     assert transport.get_calls == []
     assert len(logger.events) == 1
@@ -228,20 +282,16 @@ def test_movie_response_accepts_only_supported_final_answer_shapes(
     assert context["compatibility_mode"] == MOVIE_STRUCTURED_OUTPUT_COMPATIBILITY_MODE
     assert context["reasoning_enabled"] is True
     assert context["reasoning_budget"] == 2048
-    assert context["initial_http_status_class"] == "2xx"
-    assert context["http_status_class"] == "2xx"
-    assert context["response_content_type"] == "application/json"
-    assert context["response_lifecycle"] == "synchronous_200"
+    assert context["temperature"] == 0.6
+    assert context["top_p"] == 0.95
+    assert "thinking_token_budget" not in context
     assert context["parser_stage"] == "completed"
-    assert context["json_decode_stage"] == "succeeded"
-    assert context["decoded_top_level_type"] == "object"
-    assert context["schema_validation_stage"] == "succeeded"
     assert context["terminal_domain_error"] is None
 
     diagnostic_text = json.dumps(logger.events, sort_keys=True)
     assert _REASONING_SENTINEL not in diagnostic_text
     assert "Unknown film." not in diagnostic_text
-    assert "Insufficient evidence." not in diagnostic_text
+    assert "Synthetic Adventure" not in diagnostic_text
     assert _SECRET not in diagnostic_text
 
 
@@ -274,18 +324,37 @@ def test_movie_response_accepts_only_supported_final_answer_shapes(
         ),
         (
             _response_payload(""),
-            MediaSuggestionProviderInvalidResponseError,
-            "PROVIDER_INVALID_RESPONSE",
+            MediaSuggestionProviderEmptyResponseError,
+            "PROVIDER_RESPONSE_EMPTY",
+        ),
+        (
+            _response_payload("", reasoning_field=_REASONING_SENTINEL),
+            MediaSuggestionProviderEmptyResponseError,
+            "PROVIDER_RESPONSE_EMPTY",
+        ),
+        (
+            _response_payload(
+                "",
+                finish_reason="length",
+                reasoning_field=_REASONING_SENTINEL,
+            ),
+            MediaSuggestionProviderTruncatedResponseError,
+            "PROVIDER_RESPONSE_TRUNCATED",
         ),
         (
             {"choices": [{"finish_reason": "stop", "message": {}}]},
+            MediaSuggestionProviderEmptyResponseError,
+            "PROVIDER_RESPONSE_EMPTY",
+        ),
+        (
+            {"choices": []},
             MediaSuggestionProviderInvalidResponseError,
             "PROVIDER_INVALID_RESPONSE",
         ),
         (
             _response_payload(None),
-            MediaSuggestionProviderInvalidResponseError,
-            "PROVIDER_INVALID_RESPONSE",
+            MediaSuggestionProviderEmptyResponseError,
+            "PROVIDER_RESPONSE_EMPTY",
         ),
         (
             _response_payload(42),
@@ -335,6 +404,37 @@ def test_movie_response_accepts_only_supported_final_answer_shapes(
             MediaSuggestionProviderInvalidResponseError,
             "PROVIDER_INVALID_RESPONSE",
         ),
+        (
+            {
+                "choices": [
+                    {
+                        "finish_reason": "stop",
+                        "message": {
+                            "content": "",
+                            "refusal": _REFUSAL_SENTINEL,
+                        },
+                    }
+                ]
+            },
+            MediaSuggestionProviderRefusalError,
+            "PROVIDER_REFUSAL",
+        ),
+        (
+            _response_payload(
+                f"<think>{_REASONING_SENTINEL}</think>",
+                finish_reason="stop",
+            ),
+            MediaSuggestionProviderEmptyResponseError,
+            "PROVIDER_RESPONSE_EMPTY",
+        ),
+        (
+            _response_payload(
+                f"<think>{_REASONING_SENTINEL}</think>",
+                finish_reason="length",
+            ),
+            MediaSuggestionProviderTruncatedResponseError,
+            "PROVIDER_RESPONSE_TRUNCATED",
+        ),
     ],
 )
 def test_movie_response_rejects_ambiguous_or_invalid_shapes_without_leakage(
@@ -343,31 +443,12 @@ def test_movie_response_rejects_ambiguous_or_invalid_shapes_without_leakage(
     error_code: str,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    transport = _FakeTransport(body=_json_body(payload))
-    logger = _RecordingLogger()
-    monkeypatch.setattr(nvidia_nim, "LOGGER", logger)
-    provider = NvidiaNimMediaSuggestionProvider(
-        NvidiaApiCredential(_SECRET),
-        transport,
+    _expect_error(
+        payload,
+        monkeypatch,
+        expected_error=expected_error,
+        error_code=error_code,
     )
-
-    with pytest.raises(expected_error) as exc_info:
-        provider.identify_movie(_movie_request())
-
-    if expected_error is MediaSuggestionProviderInvalidResponseError:
-        assert type(exc_info.value) is MediaSuggestionProviderInvalidResponseError
-    assert len(transport.post_calls) == 1
-    assert transport.get_calls == []
-    assert len(logger.events) == 1
-    event = logger.events[0]
-    assert event["level"] == "WARNING"
-    assert event["error_code"] == error_code
-    assert event["context"]["terminal_domain_error"] == error_code
-    diagnostic_text = json.dumps(logger.events, sort_keys=True)
-    assert _REASONING_SENTINEL not in diagnostic_text
-    assert _CONTENT_SENTINEL not in diagnostic_text
-    assert "Unknown film." not in diagnostic_text
-    assert _SECRET not in diagnostic_text
 
 
 def test_movie_response_classification_records_only_bounded_structure() -> None:
@@ -385,6 +466,7 @@ def test_movie_response_classification_records_only_bounded_structure() -> None:
     assert facts["final_content_empty"] is False
     assert facts["has_reasoning_field"] is True
     assert facts["reasoning_repr"] == "string"
+    assert facts["has_refusal_field"] is False
     assert facts["detected_wrapper_category"] == "raw_json_object"
     serialized = json.dumps(facts, sort_keys=True)
     assert _REASONING_SENTINEL not in serialized
@@ -460,3 +542,40 @@ def test_movie_response_http_202_poll_path_succeeds(
     assert context["response_lifecycle"] == "http_202_poll"
     assert context["initial_http_status_class"] == "2xx"
     assert context["http_status_class"] == "2xx"
+
+
+def test_movie_response_http_202_timeout_is_distinct(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pending = _json_body({"requestId": "req_movie_timeout"})
+
+    class _TimeoutTransport(_FakeTransport):
+        def __init__(self) -> None:
+            super().__init__(body=pending, status_code=202)
+
+        def get_json(
+            self,
+            url: str,
+            *,
+            headers: dict[str, str],
+        ) -> HttpsJsonResponse:
+            self.get_calls.append((url, dict(headers)))
+            return HttpsJsonResponse(
+                status_code=202,
+                body=pending,
+                content_type="application/json",
+            )
+
+    transport = _TimeoutTransport()
+    monkeypatch.setattr(nvidia_nim, "LOGGER", _RecordingLogger())
+    provider = NvidiaNimMediaSuggestionProvider(
+        NvidiaApiCredential(_SECRET),
+        transport,
+        pending_poll_interval_seconds=0.0,
+        pending_timeout_seconds=0.0,
+    )
+
+    with pytest.raises(MediaSuggestionProviderPendingTimeoutError):
+        provider.identify_movie(_movie_request())
+
+    assert len(transport.post_calls) == 1

@@ -316,10 +316,13 @@ def test_movie_identification_accepts_eligible_published_video(
     request = provider.calls[0]
     body = build_nvidia_movie_identification_body(request, model_id="fake-model")
     assert body["chat_template_kwargs"]["enable_thinking"] is True
-    assert body["chat_template_kwargs"]["reasoning_budget"] == 2048
+    assert body["chat_template_kwargs"] == {"enable_thinking": True}
     assert body["reasoning_budget"] == 2048
     assert body["max_tokens"] == 4096
-    assert body["thinking_token_budget"] == 2304
+    assert body["temperature"] == 0.6
+    assert body["top_p"] == 0.95
+    assert "top_k" not in body
+    assert "thinking_token_budget" not in body
     images = [
         part for part in body["messages"][0]["content"] if part.get("type") == "image_url"
     ]
@@ -379,6 +382,49 @@ def test_provider_unavailable_marks_submission_attempted() -> None:
     assert repository.failed_kwargs["reasoning_enabled"] is True
     assert repository.failed_kwargs["derivative_strategy"] == CONTACT_SHEET_DERIVATIVE_STRATEGY
     assert repository.failed_kwargs["derivative_count"] == 1
+    assert repository.failed_kwargs["provider_id"] is None
+    assert repository.failed_kwargs["model_id"] is None
+    assert repository.failed_kwargs["prompt_version"] == (
+        "framenest-movie-identification-prompt-v2"
+    )
+
+
+def test_submitted_failure_persists_safe_provider_provenance() -> None:
+    from framenest.domain.media_classification import MOVIE_IDENTIFICATION_PROMPT_VERSION
+
+    executor, repository, provider, preparer = _executor(
+        provider_error=MediaSuggestionProviderUnavailableError("unavailable")
+    )
+    object.__setattr__(executor, "provider_id", "nvidia-nim")
+    object.__setattr__(executor, "model_id", "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning")
+    result = executor.execute(repository.run)
+
+    assert result.state is MediaAnalysisRunState.FAILED
+    assert repository.failed_kwargs is not None
+    assert repository.failed_kwargs["provider_submission_occurred"] is True
+    assert repository.failed_kwargs["provider_id"] == "nvidia-nim"
+    assert repository.failed_kwargs["model_id"] == (
+        "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning"
+    )
+    assert repository.failed_kwargs["prompt_version"] == MOVIE_IDENTIFICATION_PROMPT_VERSION
+    assert len(preparer.calls) == 1
+    assert len(provider.calls) == 1
+
+
+def test_empty_provider_response_classified_distinctly() -> None:
+    from framenest.application.media_suggestion import (
+        MediaSuggestionProviderEmptyResponseError,
+    )
+
+    executor, repository, provider, preparer = _executor(
+        provider_error=MediaSuggestionProviderEmptyResponseError("empty")
+    )
+    result = executor.execute(repository.run)
+
+    assert result.state is MediaAnalysisRunState.FAILED
+    assert result.error_code == "PROVIDER_RESPONSE_EMPTY"
+    assert repository.failed_kwargs is not None
+    assert repository.failed_kwargs["provider_submission_occurred"] is True
 
 
 def test_truncated_provider_response_classified_distinctly() -> None:

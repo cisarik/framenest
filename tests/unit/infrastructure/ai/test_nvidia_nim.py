@@ -343,6 +343,10 @@ def test_provider_rejects_invalid_pending_envelopes_without_leaking_id(
 
 
 def test_provider_times_out_pending_status_without_leaking_request_id() -> None:
+    from framenest.application.media_suggestion import (
+        MediaSuggestionProviderPendingTimeoutError,
+    )
+
     transport = _FakeTransport(
         status_code=202,
         body=json.dumps({"requestId": _REQUEST_ID}, separators=(",", ":")).encode("utf-8"),
@@ -359,9 +363,9 @@ def test_provider_times_out_pending_status_without_leaking_request_id() -> None:
         monotonic_clock=iter((0.0, 0.0, 0.6)).__next__,
         sleep=lambda _seconds: None,
     )
-    with pytest.raises(MediaSuggestionProviderUnavailableError) as exc_info:
+    with pytest.raises(MediaSuggestionProviderPendingTimeoutError) as exc_info:
         provider.suggest(_sample_request())
-    assert str(exc_info.value) == "Media suggestion provider is not available."
+    assert str(exc_info.value) == "Media suggestion provider pending result timed out."
     assert _REQUEST_ID not in str(exc_info.value)
     assert len(transport.post_calls) == 1
     assert len(transport.get_calls) == 1
@@ -646,9 +650,10 @@ def test_reasoning_content_is_not_used_as_final_content() -> None:
         image_encoder=_FakeImageEncoder(),
     )
 
-    with pytest.raises(MediaSuggestionProviderTruncatedResponseError):
+    with pytest.raises(MediaSuggestionProviderInvalidResponseError) as exc_info:
         provider.suggest(_sample_request())
-
+    assert type(exc_info.value) is MediaSuggestionProviderInvalidResponseError
+    assert not isinstance(exc_info.value, MediaSuggestionProviderTruncatedResponseError)
 
 def test_valid_v2_json_produces_validated_suggestion() -> None:
     transport = _FakeTransport(body=_provider_response_payload(_valid_suggestion_json()))

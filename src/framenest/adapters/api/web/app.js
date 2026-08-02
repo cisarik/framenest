@@ -205,6 +205,7 @@ let metadataDurableAnalysis = {
   state: null,
   analysisDefinition: null,
   result: null,
+  movieResult: null,
   statusMessage: "",
   errorMessage: "",
   detailsExpanded: false,
@@ -1809,6 +1810,10 @@ function automaticAnalysisEndpoint(mediaId) {
   return `${MEDIA_METADATA_ENDPOINT_PREFIX}/${encodeURIComponent(mediaId)}/automatic-analysis`;
 }
 
+function movieIdentificationEndpoint(mediaId) {
+  return `${MEDIA_METADATA_ENDPOINT_PREFIX}/${encodeURIComponent(mediaId)}/movie-identification`;
+}
+
 function automaticAnalysisStatusMessage(payload) {
   if (!payload || !payload.state) return "";
   if (payload.state === "pending") return "AI analysis queued.";
@@ -1816,6 +1821,26 @@ function automaticAnalysisStatusMessage(payload) {
   if (payload.state === "analyzed") return "AI suggestion ready for review.";
   if (payload.state === "failed") {
     return payload.error_message || "AI analysis failed.";
+  }
+  return "";
+}
+
+function movieIdentificationStatusMessage(payload) {
+  if (!payload || !payload.state) return "";
+  if (payload.state === "pending") return "Movie identification queued.";
+  if (payload.state === "analyzing") return "Movie identification in progress.";
+  if (payload.state === "analyzed") {
+    const result = payload.movie_identification_result;
+    if (result && result.identification_status === "unknown") {
+      return "Movie identification returned unknown. Load is disabled for empty unknown results.";
+    }
+    if (result && result.identification_status === "identified") {
+      return "Movie identification ready for review.";
+    }
+    return "Movie identification ready for review.";
+  }
+  if (payload.state === "failed") {
+    return payload.error_message || "Movie identification failed.";
   }
   return "";
 }
@@ -5179,6 +5204,83 @@ function applyResolvedAiSuggestionToMetadataWorkspace(suggestion, tagKeys) {
   metadataAiStatus.textContent = "AI suggestion loaded into draft.";
 }
 
+function applyMovieIdentificationToMetadataWorkspace(movieResult, tagKeys) {
+  const title = typeof movieResult.identified_title === "string"
+    ? movieResult.identified_title.trim()
+    : "";
+  const description = typeof movieResult.description === "string"
+    ? movieResult.description.trim()
+    : "";
+  const genres = Array.isArray(movieResult.genres)
+    ? movieResult.genres
+      .map((genre) => String(genre))
+      .filter((genre) => MOVIE_GENRE_OPTIONS.includes(genre))
+    : [];
+  if (title) {
+    metadataWorkspace.current.displayTitle = title;
+  }
+  if (description) {
+    metadataWorkspace.current.description = description;
+  }
+  if (genres.length > 0) {
+    metadataWorkspace.current.genres = genres;
+  }
+  if (Array.isArray(tagKeys) && tagKeys.length > 0) {
+    metadataWorkspace.current.tagKeys = tagKeys;
+  }
+  metadataWorkspace.aiSuggestionApplied = true;
+  metadataWorkspace.statusOverride = null;
+  advanceMetadataWorkspaceRevision();
+  if (typeof syncClassificationControlsFromWorkspace === "function") {
+    syncClassificationControlsFromWorkspace();
+  }
+  metadataAiStatus.textContent = "Movie identification loaded into draft.";
+}
+
+function movieIdentificationIsPureUnknown(result) {
+  if (!result || typeof result !== "object") return false;
+  if (String(result.identification_status || "") !== "unknown") return false;
+  const title = typeof result.identified_title === "string"
+    ? result.identified_title.trim()
+    : "";
+  const genres = Array.isArray(result.genres) ? result.genres.filter(Boolean) : [];
+  const tags = Array.isArray(result.tags) ? result.tags.filter(Boolean) : [];
+  return !title && genres.length === 0 && tags.length === 0;
+}
+
+function movieIdentificationHasLoadableFields(result) {
+  if (!result || typeof result !== "object") return false;
+  if (movieIdentificationIsPureUnknown(result)) return false;
+  const title = typeof result.identified_title === "string"
+    ? result.identified_title.trim()
+    : "";
+  const description = typeof result.description === "string"
+    ? result.description.trim()
+    : "";
+  const genres = Array.isArray(result.genres)
+    ? result.genres.filter((genre) => MOVIE_GENRE_OPTIONS.includes(String(genre)))
+    : [];
+  const tags = Array.isArray(result.tags) ? result.tags.filter(Boolean) : [];
+  return Boolean(title || description || genres.length > 0 || tags.length > 0);
+}
+
+function movieSuggestionFromResult(result) {
+  if (!movieIdentificationHasLoadableFields(result)) return null;
+  return {
+    title: typeof result.identified_title === "string" ? result.identified_title : "",
+    description: typeof result.description === "string" ? result.description : "",
+    tags: Array.isArray(result.tags) ? result.tags.map((tag) => String(tag)) : [],
+    genres: Array.isArray(result.genres)
+      ? result.genres
+        .map((genre) => String(genre))
+        .filter((genre) => MOVIE_GENRE_OPTIONS.includes(genre))
+      : [],
+    identificationStatus: String(result.identification_status || ""),
+    confidence: String(result.confidence || ""),
+    suggestedFilename: "",
+  };
+}
+
 function suggestionIsUsableForCanonicalSave(suggestion) {
   return Boolean(
     suggestion
@@ -6264,6 +6366,7 @@ function resetMetadataDurableAnalysisState() {
     state: null,
     analysisDefinition: null,
     result: null,
+    movieResult: null,
     statusMessage: "",
     errorMessage: "",
     detailsExpanded: false,
@@ -6271,19 +6374,29 @@ function resetMetadataDurableAnalysisState() {
 }
 
 function durableAnalysisLoadAvailable() {
-  return Boolean(
-    metadataWorkspace.openMediaId !== null
-    && metadataDurableAnalysis.mediaId === metadataWorkspace.openMediaId
-    && metadataDurableAnalysis.state === "analyzed"
-    && aiSuggestionFromAutomaticAnalysisResult(metadataDurableAnalysis.result),
-  );
+  if (
+    metadataWorkspace.openMediaId === null
+    || metadataDurableAnalysis.mediaId !== metadataWorkspace.openMediaId
+    || metadataDurableAnalysis.state !== "analyzed"
+  ) {
+    return false;
+  }
+  if (metadataDurableAnalysis.analysisDefinition === "movie_identification") {
+    return movieIdentificationHasLoadableFields(metadataDurableAnalysis.movieResult);
+  }
+  return Boolean(aiSuggestionFromAutomaticAnalysisResult(metadataDurableAnalysis.result));
 }
 
 function renderMetadataDurableAnalysis() {
   if (!metadataDurableAiSuggestion) return;
   const open = metadataWorkspace.openMediaId !== null
     && metadataDurableAnalysis.mediaId === metadataWorkspace.openMediaId;
-  const suggestion = open ? aiSuggestionFromAutomaticAnalysisResult(metadataDurableAnalysis.result) : null;
+  const isMovie = metadataDurableAnalysis.analysisDefinition === "movie_identification";
+  const suggestion = open
+    ? (isMovie
+      ? movieSuggestionFromResult(metadataDurableAnalysis.movieResult)
+      : aiSuggestionFromAutomaticAnalysisResult(metadataDurableAnalysis.result))
+    : null;
   const hasSuggestion = Boolean(open && suggestion && metadataDurableAnalysis.state === "analyzed");
   const expanded = Boolean(hasSuggestion && metadataDurableAnalysis.detailsExpanded);
   if (metadataAiDetailsToggle) {
@@ -6299,10 +6412,15 @@ function renderMetadataDurableAnalysis() {
   if (expanded && suggestion) {
     metadataDurableAiTitle.textContent = suggestion.title || "(No title)";
     metadataDurableAiDescription.textContent = suggestion.description || "(No description)";
-    metadataDurableAiTags.textContent = suggestion.tags.length > 0
-      ? suggestion.tags.join(", ")
+    const detailTags = isMovie && suggestion.genres && suggestion.genres.length > 0
+      ? [...suggestion.genres, ...suggestion.tags]
+      : suggestion.tags;
+    metadataDurableAiTags.textContent = detailTags.length > 0
+      ? detailTags.join(", ")
       : "(none)";
-    const collection = metadataDurableAnalysis.result && metadataDurableAnalysis.result.collection
+    const collection = !isMovie
+      && metadataDurableAnalysis.result
+      && metadataDurableAnalysis.result.collection
       ? String(metadataDurableAnalysis.result.collection)
       : "";
     if (metadataDurableAiCollectionRow) {
@@ -6336,6 +6454,7 @@ function handleMetadataAiDetailsToggle() {
 
 async function refreshMetadataDurableAnalysis(mediaId, requestToken) {
   if (!mediaId) return;
+  const preferMovie = (metadataWorkspace.current.contentCategory || "general") === "movie";
   metadataDurableAnalysis = {
     mediaId,
     fetching: true,
@@ -6343,13 +6462,17 @@ async function refreshMetadataDurableAnalysis(mediaId, requestToken) {
     state: null,
     analysisDefinition: null,
     result: null,
+    movieResult: null,
     statusMessage: "",
     errorMessage: "",
     detailsExpanded: false,
   };
   updateMetadataControls();
   try {
-    const response = await fetch(automaticAnalysisEndpoint(mediaId), {
+    const endpoint = preferMovie
+      ? movieIdentificationEndpoint(mediaId)
+      : automaticAnalysisEndpoint(mediaId);
+    const response = await fetch(endpoint, {
       headers: { Accept: "application/json" },
       cache: "no-store",
     });
@@ -6363,8 +6486,11 @@ async function refreshMetadataDurableAnalysis(mediaId, requestToken) {
         state: null,
         analysisDefinition: null,
         result: null,
+        movieResult: null,
         statusMessage: "",
-        errorMessage: "Automatic analysis status could not be loaded.",
+        errorMessage: preferMovie
+          ? "Movie identification status could not be loaded."
+          : "Automatic analysis status could not be loaded.",
         detailsExpanded: false,
       };
       renderMetadataWorkspace();
@@ -6373,39 +6499,7 @@ async function refreshMetadataDurableAnalysis(mediaId, requestToken) {
     const payload = await response.json();
     if (requestToken !== metadataDurableAnalysisToken) return;
     if (metadataWorkspace.openMediaId !== mediaId) return;
-    const state = payload && payload.state ? String(payload.state) : null;
-    const analysisDefinition = payload && payload.analysis_definition
-      ? String(payload.analysis_definition)
-      : null;
-    let statusMessage = "";
-    let errorMessage = "";
-    let result = null;
-    if (state === "pending" || state === "analyzing" || state === "failed" || state === "analyzed") {
-      statusMessage = automaticAnalysisStatusMessage(payload);
-    } else if (state === "not_requested") {
-      statusMessage = "";
-    } else if (state) {
-      errorMessage = "Automatic analysis status is incomplete.";
-    }
-    if (state === "analyzed") {
-      result = payload.result || null;
-      if (!aiSuggestionFromAutomaticAnalysisResult(result)) {
-        result = null;
-        errorMessage = "Automatic analysis result is incomplete.";
-        statusMessage = "";
-      }
-    }
-    metadataDurableAnalysis = {
-      mediaId,
-      fetching: false,
-      loadingIntoDraft: false,
-      state,
-      analysisDefinition,
-      result,
-      statusMessage,
-      errorMessage,
-      detailsExpanded: false,
-    };
+    metadataDurableAnalysis = applyAnalysisStatusPayload(mediaId, payload, preferMovie);
     renderMetadataWorkspace();
   } catch {
     if (requestToken !== metadataDurableAnalysisToken) return;
@@ -6417,12 +6511,69 @@ async function refreshMetadataDurableAnalysis(mediaId, requestToken) {
       state: null,
       analysisDefinition: null,
       result: null,
+      movieResult: null,
       statusMessage: "",
-      errorMessage: "Automatic analysis status could not be loaded.",
+      errorMessage: preferMovie
+        ? "Movie identification status could not be loaded."
+        : "Automatic analysis status could not be loaded.",
       detailsExpanded: false,
     };
     renderMetadataWorkspace();
   }
+}
+
+function applyAnalysisStatusPayload(mediaId, payload, preferMovie) {
+  const state = payload && payload.state ? String(payload.state) : null;
+  const analysisDefinition = payload && payload.analysis_definition
+    ? String(payload.analysis_definition)
+    : (preferMovie ? "movie_identification" : null);
+  const isMovie = analysisDefinition === "movie_identification" || preferMovie;
+  let statusMessage = "";
+  let errorMessage = "";
+  let result = null;
+  let movieResult = null;
+  if (state === "pending" || state === "analyzing" || state === "failed" || state === "analyzed") {
+    statusMessage = isMovie
+      ? movieIdentificationStatusMessage(payload)
+      : automaticAnalysisStatusMessage(payload);
+  } else if (state === "not_requested") {
+    statusMessage = "";
+  } else if (state) {
+    errorMessage = isMovie
+      ? "Movie identification status is incomplete."
+      : "Automatic analysis status is incomplete.";
+  }
+  if (state === "analyzed") {
+    if (isMovie) {
+      movieResult = payload.movie_identification_result || null;
+      if (!movieResult || typeof movieResult !== "object") {
+        movieResult = null;
+        errorMessage = "Movie identification result is incomplete.";
+        statusMessage = "";
+      } else if (movieIdentificationIsPureUnknown(movieResult)) {
+        statusMessage = movieIdentificationStatusMessage(payload);
+      }
+    } else {
+      result = payload.result || null;
+      if (!aiSuggestionFromAutomaticAnalysisResult(result)) {
+        result = null;
+        errorMessage = "Automatic analysis result is incomplete.";
+        statusMessage = "";
+      }
+    }
+  }
+  return {
+    mediaId,
+    fetching: false,
+    loadingIntoDraft: false,
+    state,
+    analysisDefinition,
+    result,
+    movieResult,
+    statusMessage,
+    errorMessage,
+    detailsExpanded: false,
+  };
 }
 
 async function handleLoadDurableAiSuggestion() {
@@ -6439,15 +6590,22 @@ async function handleLoadDurableAiSuggestion() {
   const mediaId = metadataWorkspace.openMediaId;
   const openItemMediaId = metadataOpenItemMediaId();
   const invokeElement = metadataLoadAiSuggestionButton;
+  const preferMovie = (metadataWorkspace.current.contentCategory || "general") === "movie"
+    || metadataDurableAnalysis.analysisDefinition === "movie_identification";
   const token = ++metadataDurableLoadToken;
   metadataDurableAnalysis.loadingIntoDraft = true;
   updateMetadataControls();
-  metadataAiStatus.textContent = "Loading AI suggestion…";
+  metadataAiStatus.textContent = preferMovie
+    ? "Loading movie identification…"
+    : "Loading AI suggestion…";
   try {
-    const response = await fetch(automaticAnalysisEndpoint(mediaId), {
-      headers: { Accept: "application/json" },
-      cache: "no-store",
-    });
+    const response = await fetch(
+      preferMovie ? movieIdentificationEndpoint(mediaId) : automaticAnalysisEndpoint(mediaId),
+      {
+        headers: { Accept: "application/json" },
+        cache: "no-store",
+      },
+    );
     if (
       token !== metadataDurableLoadToken
       || metadataWorkspace.openMediaId !== mediaId
@@ -6457,7 +6615,9 @@ async function handleLoadDurableAiSuggestion() {
     }
     if (!response.ok) {
       metadataDurableAnalysis.loadingIntoDraft = false;
-      metadataAiStatus.textContent = "Automatic analysis status could not be loaded.";
+      metadataAiStatus.textContent = preferMovie
+        ? "Movie identification status could not be loaded."
+        : "Automatic analysis status could not be loaded.";
       updateMetadataControls();
       return;
     }
@@ -6469,50 +6629,50 @@ async function handleLoadDurableAiSuggestion() {
     ) {
       return;
     }
-    const state = payload && payload.state ? String(payload.state) : null;
-    metadataDurableAnalysis.state = state;
-    metadataDurableAnalysis.analysisDefinition = payload && payload.analysis_definition
-      ? String(payload.analysis_definition)
-      : metadataDurableAnalysis.analysisDefinition;
-    metadataDurableAnalysis.result = state === "analyzed" ? (payload.result || null) : null;
-    metadataDurableAnalysis.statusMessage = automaticAnalysisStatusMessage(payload);
-    metadataDurableAnalysis.errorMessage = "";
-    const suggestion = state === "analyzed"
-      ? aiSuggestionFromAutomaticAnalysisResult(payload.result)
-      : null;
+    const nextState = applyAnalysisStatusPayload(mediaId, payload, preferMovie);
+    metadataDurableAnalysis = {
+      ...nextState,
+      loadingIntoDraft: true,
+      detailsExpanded: metadataDurableAnalysis.detailsExpanded,
+    };
+    const isMovie = metadataDurableAnalysis.analysisDefinition === "movie_identification";
+    const movieResult = isMovie ? metadataDurableAnalysis.movieResult : null;
+    const suggestion = isMovie
+      ? movieSuggestionFromResult(movieResult)
+      : aiSuggestionFromAutomaticAnalysisResult(metadataDurableAnalysis.result);
     if (!suggestion) {
       metadataDurableAnalysis.loadingIntoDraft = false;
-      if (state === "pending") {
-        metadataDurableAnalysis.statusMessage = "AI analysis is still queued.";
+      if (isMovie && movieIdentificationIsPureUnknown(movieResult)) {
+        metadataDurableAnalysis.statusMessage = movieIdentificationStatusMessage(payload);
         metadataDurableAnalysis.errorMessage = "";
         metadataAiStatus.textContent = metadataDurableAnalysis.statusMessage;
-      } else if (state === "analyzing") {
-        metadataDurableAnalysis.statusMessage = "AI analysis is still in progress.";
-        metadataDurableAnalysis.errorMessage = "";
-        metadataAiStatus.textContent = metadataDurableAnalysis.statusMessage;
-      } else if (state === "failed") {
-        metadataDurableAnalysis.statusMessage = payload.error_message || "AI analysis failed.";
-        metadataDurableAnalysis.errorMessage = "";
-        metadataAiStatus.textContent = metadataDurableAnalysis.statusMessage;
-      } else if (state === "not_requested" || !state) {
-        metadataDurableAnalysis.statusMessage = "";
-        metadataDurableAnalysis.errorMessage = "No automatic AI suggestion is available.";
-        metadataAiStatus.textContent = metadataDurableAnalysis.errorMessage;
+      } else if (metadataDurableAnalysis.state === "pending") {
+        metadataAiStatus.textContent = isMovie
+          ? "Movie identification is still queued."
+          : "AI analysis is still queued.";
+      } else if (metadataDurableAnalysis.state === "analyzing") {
+        metadataAiStatus.textContent = isMovie
+          ? "Movie identification is still in progress."
+          : "AI analysis is still in progress.";
+      } else if (metadataDurableAnalysis.state === "failed") {
+        metadataAiStatus.textContent = payload.error_message
+          || (isMovie ? "Movie identification failed." : "AI analysis failed.");
       } else {
-        metadataDurableAnalysis.statusMessage = "";
-        metadataDurableAnalysis.errorMessage = "Automatic analysis result is incomplete.";
-        metadataAiStatus.textContent = metadataDurableAnalysis.errorMessage;
+        metadataAiStatus.textContent = isMovie
+          ? "No loadable movie identification is available."
+          : "No automatic AI suggestion is available.";
       }
       renderMetadataWorkspace();
       return;
     }
-    metadataDurableAnalysis.result = payload.result;
     if (metadataIsDirty()) {
       metadataDurableAnalysis.loadingIntoDraft = false;
       updateMetadataControls();
       const accepted = await requestConfirmation({
         title: "Replace current draft?",
-        message: "Unsaved metadata edits will be replaced by the AI suggestion.",
+        message: isMovie
+          ? "Unsaved metadata edits will be updated by the movie identification suggestion. Empty suggestion fields will not clear existing draft values."
+          : "Unsaved metadata edits will be replaced by the AI suggestion.",
         dismissLabel: "No",
         confirmLabel: "Yes",
         destructive: false,
@@ -6541,7 +6701,9 @@ async function handleLoadDurableAiSuggestion() {
     ) {
       return;
     }
-    const tagKeys = await metadataTagKeysFromSuggestion(suggestion.tags);
+    const tagKeys = suggestion.tags.length > 0
+      ? await metadataTagKeysFromSuggestion(suggestion.tags)
+      : [];
     if (
       token !== metadataDurableLoadToken
       || metadataWorkspace.openMediaId !== mediaId
@@ -6551,14 +6713,20 @@ async function handleLoadDurableAiSuggestion() {
     }
     metadataDurableAnalysis.loadingIntoDraft = false;
     metadataDurableAnalysis.detailsExpanded = false;
-    applyResolvedAiSuggestionToMetadataWorkspace(suggestion, tagKeys);
+    if (isMovie) {
+      applyMovieIdentificationToMetadataWorkspace(movieResult, tagKeys);
+    } else {
+      applyResolvedAiSuggestionToMetadataWorkspace(suggestion, tagKeys);
+    }
     renderMetadataWorkspace();
     metadataTitleInput.focus();
   } catch {
     if (token !== metadataDurableLoadToken) return;
     if (metadataWorkspace.openMediaId !== mediaId) return;
     metadataDurableAnalysis.loadingIntoDraft = false;
-    metadataAiStatus.textContent = "Automatic analysis status could not be loaded.";
+    metadataAiStatus.textContent = preferMovie
+      ? "Movie identification status could not be loaded."
+      : "Automatic analysis status could not be loaded.";
     updateMetadataControls();
   }
 }
@@ -8497,9 +8665,11 @@ document.querySelector("#metadata-movie-identify-button")?.addEventListener("cli
       metadataAiStatus.textContent = (payload.error && payload.error.message) || "Movie identification failed.";
       return;
     }
-    metadataAiStatus.textContent = payload.state === "analyzed"
-      ? "Movie identification ready for review."
-      : `Movie identification state: ${payload.state}.`;
+    metadataDurableAnalysis = applyAnalysisStatusPayload(mediaId, payload, true);
+    metadataAiStatus.textContent = metadataDurableAnalysis.statusMessage
+      || metadataDurableAnalysis.errorMessage
+      || `Movie identification state: ${payload.state}.`;
+    renderMetadataWorkspace();
   } catch {
     metadataAiStatus.textContent = "Movie identification failed.";
   } finally {

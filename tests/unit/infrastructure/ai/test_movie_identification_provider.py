@@ -95,11 +95,13 @@ def test_fake_provider_single_call_and_no_path_leak() -> None:
         ),
     )
     body = build_nvidia_movie_identification_body(request, model_id="fake-model")
-    assert body["chat_template_kwargs"]["enable_thinking"] is True
-    assert body["chat_template_kwargs"]["reasoning_budget"] == 2048
+    assert body["chat_template_kwargs"] == {"enable_thinking": True}
     assert body["reasoning_budget"] == 2048
     assert body["max_tokens"] == 4096
-    assert body["thinking_token_budget"] == 2304
+    assert body["temperature"] == 0.6
+    assert body["top_p"] == 0.95
+    assert "top_k" not in body
+    assert "thinking_token_budget" not in body
     assert body["stream"] is False
     assert sum(1 for part in body["messages"][0]["content"] if part.get("type") == "image_url") == 1
     assert "/home/" not in str(body)

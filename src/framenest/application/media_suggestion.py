@@ -41,6 +41,13 @@ SUGGESTION_PROVIDER_AUTH_MESSAGE = "Media suggestion provider authentication was
 SUGGESTION_PROVIDER_RATE_LIMITED_MESSAGE = "Media suggestion provider rate limit was reached."
 SUGGESTION_PROVIDER_MODEL_UNAVAILABLE_MESSAGE = "Media suggestion provider model is not available."
 SUGGESTION_PROVIDER_INVALID_RESPONSE_MESSAGE = "Media suggestion provider response was invalid."
+SUGGESTION_PROVIDER_EMPTY_RESPONSE_MESSAGE = (
+    "Media suggestion provider returned empty final content."
+)
+SUGGESTION_PROVIDER_REFUSAL_MESSAGE = "Media suggestion provider refused the request."
+SUGGESTION_PROVIDER_PENDING_TIMEOUT_MESSAGE = (
+    "Media suggestion provider pending result timed out."
+)
 SUGGESTION_PROVIDER_FAILED_MESSAGE = "Media suggestion provider request failed."
 
 TITLE_MAX_LENGTH = 120
@@ -106,7 +113,19 @@ class MediaSuggestionProviderInvalidResponseError(RuntimeError):
 
 
 class MediaSuggestionProviderTruncatedResponseError(MediaSuggestionProviderInvalidResponseError):
-    """Raised when final content is empty or cut off after token exhaustion."""
+    """Raised when truncation evidence shows the final answer was cut off."""
+
+
+class MediaSuggestionProviderEmptyResponseError(MediaSuggestionProviderInvalidResponseError):
+    """Raised when the final answer field is empty without truncation evidence."""
+
+
+class MediaSuggestionProviderRefusalError(MediaSuggestionProviderInvalidResponseError):
+    """Raised when the provider safely signals a refusal."""
+
+
+class MediaSuggestionProviderPendingTimeoutError(MediaSuggestionProviderUnavailableError):
+    """Raised when HTTP 202 polling exceeds the configured pending timeout."""
 
 
 class MediaSuggestionProviderFailedError(RuntimeError):

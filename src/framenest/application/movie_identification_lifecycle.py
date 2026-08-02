@@ -23,10 +23,13 @@ from framenest.application.media_suggestion import (
     MediaSuggestionPreparationFailedError,
     MediaSuggestionPreparationUnavailableError,
     MediaSuggestionProviderAuthError,
+    MediaSuggestionProviderEmptyResponseError,
     MediaSuggestionProviderFailedError,
     MediaSuggestionProviderInvalidResponseError,
     MediaSuggestionProviderModelUnavailableError,
+    MediaSuggestionProviderPendingTimeoutError,
     MediaSuggestionProviderRateLimitedError,
+    MediaSuggestionProviderRefusalError,
     MediaSuggestionProviderTruncatedResponseError,
     MediaSuggestionProviderUnavailableError,
     source_extension,
@@ -55,6 +58,7 @@ from framenest.domain.media_classification import (
     AnalysisProfile,
     CONTACT_SHEET_DERIVATIVE_STRATEGY,
     MOVIE_IDENTIFICATION_ANALYSIS_DEFINITION,
+    MOVIE_IDENTIFICATION_PROMPT_VERSION,
     MOVIE_IDENTIFICATION_RESULT_SCHEMA_VERSION,
 )
 from framenest.structured_logging import get_logger
@@ -82,6 +86,8 @@ class ExecuteMovieIdentificationRun:
     provider: MovieIdentificationProvider
     now_ms: Callable[[], int] = default_now_ms
     in_transaction: Callable[[], bool] | None = None
+    provider_id: str | None = None
+    model_id: str | None = None
 
     def execute(self, run: MediaAnalysisRun) -> MediaAnalysisRun:
         if run.analysis_definition != MOVIE_IDENTIFICATION_ANALYSIS_DEFINITION:
@@ -190,15 +196,22 @@ class ExecuteMovieIdentificationRun:
     ) -> MediaAnalysisRun:
         error_code, error_message = _classify_movie_failure(exc)
         provider_submission_occurred = _provider_submission_occurred(error_code)
+        provider_id = None
+        model_id = None
+        prompt_version = None
+        if provider_submission_occurred:
+            provider_id = self.provider_id
+            model_id = self.model_id
+            prompt_version = MOVIE_IDENTIFICATION_PROMPT_VERSION
         try:
             failed = self.repository.record_failed(
                 run_id=claimed.id.to_string(),
                 expected_version=claimed.version,
                 error_code=error_code,
                 error_message=error_message,
-                provider_id=None,
-                model_id=None,
-                prompt_version=None,
+                provider_id=provider_id,
+                model_id=model_id,
+                prompt_version=prompt_version,
                 completed_at_ms=self.now_ms(),
                 provider_submission_occurred=provider_submission_occurred,
                 analysis_profile=AnalysisProfile.MOVIE_IDENTIFICATION.value,
@@ -245,10 +258,16 @@ def _classify_movie_failure(exc: Exception) -> tuple[str, str]:
         return "PROVIDER_RATE_LIMITED", "Provider rate limited the request."
     if isinstance(exc, MediaSuggestionProviderModelUnavailableError):
         return "PROVIDER_MODEL_UNAVAILABLE", "Provider model is unavailable."
+    if isinstance(exc, MediaSuggestionProviderPendingTimeoutError):
+        return "PROVIDER_PENDING_TIMEOUT", "Provider pending result timed out."
     if isinstance(exc, MediaSuggestionProviderUnavailableError):
         return "PROVIDER_UNAVAILABLE", "Provider is unavailable."
     if isinstance(exc, MediaSuggestionProviderTruncatedResponseError):
         return "PROVIDER_RESPONSE_TRUNCATED", "Provider exhausted tokens before a final answer."
+    if isinstance(exc, MediaSuggestionProviderEmptyResponseError):
+        return "PROVIDER_RESPONSE_EMPTY", "Provider returned empty final content."
+    if isinstance(exc, MediaSuggestionProviderRefusalError):
+        return "PROVIDER_REFUSAL", "Provider refused the request."
     if isinstance(exc, MediaSuggestionProviderInvalidResponseError):
         return "PROVIDER_INVALID_RESPONSE", "Provider returned an invalid response."
     if isinstance(exc, MediaSuggestionProviderFailedError):
@@ -262,8 +281,11 @@ _PROVIDER_SUBMISSION_ERROR_CODES = frozenset(
         "PROVIDER_RATE_LIMITED",
         "PROVIDER_MODEL_UNAVAILABLE",
         "PROVIDER_UNAVAILABLE",
+        "PROVIDER_PENDING_TIMEOUT",
         "PROVIDER_INVALID_RESPONSE",
         "PROVIDER_RESPONSE_TRUNCATED",
+        "PROVIDER_RESPONSE_EMPTY",
+        "PROVIDER_REFUSAL",
         "PROVIDER_FAILED",
     }
 )
