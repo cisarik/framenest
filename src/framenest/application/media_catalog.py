@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from collections.abc import Callable
+from dataclasses import dataclass, replace
 import unicodedata
 
 from framenest.application.ports.media_catalog_repository import (
@@ -32,6 +33,7 @@ class ListMediaCatalog:
     """List persisted logical media through a normalized read query."""
 
     repository: MediaCatalogRepository
+    cover_states: Callable[[tuple[str, ...]], dict[str, bool]] | None = None
 
     def execute(
         self,
@@ -54,7 +56,16 @@ class ListMediaCatalog:
             acquisition_source=_normalize_acquisition_source(acquisition_source),
             published_only=True,
         )
-        return self.repository.list_media(query)
+        page = self.repository.list_media(query)
+        if self.cover_states is None or not page.items:
+            return page
+        media_ids = tuple(item.media_id for item in page.items)
+        states = self.cover_states(media_ids)
+        items = tuple(
+            replace(item, cover_ready=states.get(item.media_id, False))
+            for item in page.items
+        )
+        return replace(page, items=items)
 
 
 def _normalize_title_query(value: str | None) -> str | None:

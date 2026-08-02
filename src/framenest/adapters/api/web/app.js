@@ -253,6 +253,10 @@ function identityAllowsYouTubeClaim() {
     && identityState.capabilities.has("youtube.acquire");
 }
 
+function identityAllowsCoverEditing() {
+  return identityHasCapability("metadata.canonical.write");
+}
+
 function framenestMutationHeaders(headers) {
   return Object.assign({ "X-FrameNest-Request": "1" }, headers);
 }
@@ -307,6 +311,9 @@ function applyIdentityCapabilities() {
   }
   if (detailsEditButton) {
     detailsEditButton.hidden = !identityHasCapability("metadata.canonical.write");
+  }
+  if (typeof detailsChooseCoverButton !== "undefined" && detailsChooseCoverButton) {
+    detailsChooseCoverButton.hidden = !identityAllowsCoverEditing();
   }
   if (adminMediaOpenButton) {
     adminMediaOpenButton.hidden = !identityAllowsAdminWorkflow();
@@ -545,6 +552,31 @@ let detailsOpenerElement = null;
 let detailsCurrentItem = null;
 let detailsMetadataToken = 0;
 let detailsPlayRequested = false;
+const detailsChooseCoverButton = document.querySelector("#media-details-choose-cover");
+const coverDialog = document.querySelector("#cover-dialog");
+const coverDialogCloseButton = document.querySelector("#cover-dialog-close");
+const coverDialogTitle = document.querySelector("#cover-dialog-title");
+const coverDialogLoading = document.querySelector("#cover-dialog-loading");
+const coverDialogError = document.querySelector("#cover-dialog-error");
+const coverDialogContent = document.querySelector("#cover-dialog-content");
+const coverCurrent = document.querySelector("#cover-current");
+const coverCurrentThumbnail = document.querySelector("#cover-current-thumbnail");
+const coverCurrentTimestamp = document.querySelector("#cover-current-timestamp");
+const coverTimelineRange = document.querySelector("#cover-timeline-range");
+const coverTimestampReadout = document.querySelector("#cover-timestamp-readout");
+const coverDurationReadout = document.querySelector("#cover-duration-readout");
+const coverStepBackButton = document.querySelector("#cover-step-back");
+const coverStepForwardButton = document.querySelector("#cover-step-forward");
+const coverPreviewButton = document.querySelector("#cover-preview-button");
+const coverPreviewRegion = document.querySelector("#cover-preview-region");
+const coverPreviewContainer = document.querySelector("#cover-preview-container");
+const coverPreviewStatus = document.querySelector("#cover-preview-status");
+const coverReplaceConfirm = document.querySelector("#cover-replace-confirm");
+const coverReplaceYesButton = document.querySelector("#cover-replace-yes");
+const coverReplaceNoButton = document.querySelector("#cover-replace-no");
+const coverSetButton = document.querySelector("#cover-set-button");
+const coverCancelButton = document.querySelector("#cover-cancel-button");
+const coverDialogStatus = document.querySelector("#cover-dialog-status");
 const metadataSaveButton = document.querySelector("#metadata-save-button");
 const metadataDiscardButton = document.querySelector("#metadata-discard-button");
 let confirmationEscapeDismissalInProgress = false;
@@ -4060,6 +4092,26 @@ function mediaGalleryPreviewUrl(mediaId, locationId) {
   return `${MEDIA_CATALOG_ENDPOINT}/${encodeURIComponent(mediaId)}/locations/${encodeURIComponent(locationId)}/gallery-preview`;
 }
 
+function mediaCoverThumbnailUrl(mediaId) {
+  return `${MEDIA_CATALOG_ENDPOINT}/${encodeURIComponent(mediaId)}/cover-thumbnail`;
+}
+
+function coverTimelineEndpoint(mediaId, locationId) {
+  return `${MEDIA_CATALOG_ENDPOINT}/${encodeURIComponent(mediaId)}/locations/${encodeURIComponent(locationId)}/cover-timeline`;
+}
+
+function coverFrameEndpoint(mediaId, locationId) {
+  return `${MEDIA_CATALOG_ENDPOINT}/${encodeURIComponent(mediaId)}/locations/${encodeURIComponent(locationId)}/cover-frame`;
+}
+
+function coverMutationEndpoint(mediaId, locationId) {
+  return `${MEDIA_CATALOG_ENDPOINT}/${encodeURIComponent(mediaId)}/locations/${encodeURIComponent(locationId)}/cover`;
+}
+
+function coverAdminStateEndpoint(mediaId) {
+  return `/api/admin/media/${encodeURIComponent(mediaId)}/cover`;
+}
+
 function renderDetailsMediaUnavailable(container) {
   if (!container) return;
   container.replaceChildren();
@@ -4596,6 +4648,26 @@ function renderPreviewFallback(surface, title) {
   surface.appendChild(text);
 }
 
+function isCoverReadyItem(item) {
+  return Boolean(item) && item.cover_ready === true;
+}
+
+function coverPreviewCandidates(item, location) {
+  const candidates = [];
+  if (
+    isCoverReadyItem(item)
+    && (item.media_kind === "video" || item.media_kind === "animated_image")
+  ) {
+    candidates.push(mediaCoverThumbnailUrl(item.media_id));
+  }
+  if (location && item.media_kind === "image") {
+    candidates.push(mediaContentUrl(item.media_id, location.location_id));
+  } else if (location) {
+    candidates.push(mediaGalleryPreviewUrl(item.media_id, location.location_id));
+  }
+  return candidates;
+}
+
 function renderPersistentPreview(surface, item, location, title) {
   surface.replaceChildren();
   surface.className = `media-placeholder media-placeholder--preview media-placeholder--${item.media_kind}`;
@@ -4608,15 +4680,35 @@ function renderPersistentPreview(surface, item, location, title) {
     : `Gallery preview for ${title}`;
   image.loading = "lazy";
   image.decoding = "async";
+
+  const candidates = typeof coverPreviewCandidates === "function"
+    ? coverPreviewCandidates(item, location)
+    : [];
+  if (!candidates.length && typeof location !== "undefined" && location) {
+    if (item.media_kind === "image") {
+      candidates.push(mediaContentUrl(item.media_id, location.location_id));
+    } else {
+      candidates.push(mediaGalleryPreviewUrl(item.media_id, location.location_id));
+    }
+  }
+
+  let candidateIndex = 0;
   image.onerror = () => {
+    candidateIndex += 1;
+    if (candidateIndex < candidates.length) {
+      image.src = candidates[candidateIndex];
+      return;
+    }
     image.onerror = null;
     image.removeAttribute("src");
     renderPreviewFallback(surface, title);
   };
-  image.src = item.media_kind === "image"
-    ? mediaContentUrl(item.media_id, location.location_id)
-    : mediaGalleryPreviewUrl(item.media_id, location.location_id);
-  surface.appendChild(image);
+  if (candidates.length) {
+    image.src = candidates[0];
+    surface.appendChild(image);
+  } else {
+    renderPreviewFallback(surface, title);
+  }
 }
 
 function renderCardOriginalPlayback(surface, item, location, title) {
@@ -9016,6 +9108,569 @@ if (confirmationConfirmButton) {
   confirmationConfirmButton.addEventListener("click", () => {
     settleConfirmation(activeConfirmationRequest, true);
   });
+}
+
+// --- Durable manual cover chooser -----------------------------------------
+
+let coverOpenerElement = null;
+let coverPreviewAbortController = null;
+let coverDialogState = {
+  available: false,
+  openItem: null,
+  currentLocation: null,
+  durationMs: 0,
+  sourceVersion: "",
+  currentCover: null,
+  requestToken: 0,
+  previewToken: 0,
+  acceptToken: 0,
+  selectedTimestampMs: 0,
+  confirmingReplace: false,
+  submitting: false,
+};
+
+function coverContextStillCurrent(owner) {
+  return Boolean(owner)
+    && coverDialogState.available
+    && coverDialogState.openItem
+    && coverDialogState.openItem.media_id === owner.mediaId
+    && coverDialogState.requestToken === owner.token;
+}
+
+function coverReadoutText(ms) {
+  const safe = Number.isFinite(ms) && ms >= 0 ? Math.floor(ms) : 0;
+  const hours = Math.floor(safe / 3600000);
+  const minutes = Math.floor((safe % 3600000) / 60000);
+  const seconds = Math.floor((safe % 60000) / 1000);
+  const millis = safe % 1000;
+  const pad = (value, width) => String(value).padStart(width, "0");
+  return `${pad(hours, 2)}:${pad(minutes, 2)}:${pad(seconds, 2)}.${pad(millis, 3)}`;
+}
+
+function coverDurationText(ms) {
+  return `/ ${coverReadoutText(ms)}`;
+}
+
+function resetCoverDialogView() {
+  if (coverDialogLoading) coverDialogLoading.hidden = false;
+  if (coverDialogError) coverDialogError.hidden = true;
+  if (coverDialogContent) coverDialogContent.hidden = true;
+  if (coverCurrent) coverCurrent.hidden = true;
+  if (coverReplaceConfirm) coverReplaceConfirm.hidden = true;
+  if (coverPreviewContainer) {
+    coverPreviewContainer.replaceChildren();
+    coverPreviewContainer.hidden = true;
+  }
+  hideCoverPreviewStatus();
+  clearCoverStatus();
+  if (coverSetButton) coverSetButton.disabled = true;
+  if (coverPreviewButton) coverPreviewButton.disabled = true;
+  if (coverTimelineRange) coverTimelineRange.value = "0";
+  if (coverTimestampReadout) coverTimestampReadout.textContent = "00:00:00.000";
+  if (coverDurationReadout) coverDurationReadout.textContent = "";
+}
+
+function showCoverLoading() {
+  if (coverDialogLoading) coverDialogLoading.hidden = false;
+  if (coverDialogError) coverDialogError.hidden = true;
+  if (coverDialogContent) coverDialogContent.hidden = true;
+}
+
+function showCoverContent() {
+  if (coverDialogLoading) coverDialogLoading.hidden = true;
+  if (coverDialogError) coverDialogError.hidden = true;
+  if (coverDialogContent) coverDialogContent.hidden = false;
+  if (coverPreviewButton) coverPreviewButton.disabled = false;
+}
+
+function showCoverError(message) {
+  if (coverDialogLoading) coverDialogLoading.hidden = true;
+  if (coverDialogError) {
+    coverDialogError.hidden = false;
+    coverDialogError.textContent = message;
+  }
+  if (coverDialogContent) coverDialogContent.hidden = true;
+}
+
+function showCoverPreviewStatus(message) {
+  if (!coverPreviewStatus) return;
+  coverPreviewStatus.hidden = false;
+  coverPreviewStatus.textContent = message;
+}
+
+function hideCoverPreviewStatus() {
+  if (coverPreviewStatus) coverPreviewStatus.hidden = true;
+  coverDialogState.previewReady = false;
+}
+
+function showCoverStatus(message) {
+  if (coverDialogStatus) {
+    coverDialogStatus.hidden = false;
+    coverDialogStatus.textContent = message;
+  }
+}
+
+function clearCoverStatus() {
+  if (coverDialogStatus) {
+    coverDialogStatus.hidden = true;
+    coverDialogStatus.textContent = "";
+  }
+}
+
+function hideCoverReplaceConfirm() {
+  coverDialogState.confirmingReplace = false;
+  if (coverReplaceConfirm) coverReplaceConfirm.hidden = true;
+}
+
+async function handleCoverErrorResponse(response) {
+  let payload = null;
+  try {
+    payload = await response.json();
+  } catch {
+    payload = null;
+  }
+  return payload;
+}
+
+function sanitizedCoverMessage(payload) {
+  if (payload && payload.error && typeof payload.error.message === "string" && payload.error.message) {
+    return payload.error.message;
+  }
+  return "The cover operation could not be completed.";
+}
+
+async function openCoverDialog(item, openerElement) {
+  if (!coverDialog) return;
+  const targetMediaId = item.media_id;
+  const location = selectSupportedAvailableLocation(item);
+  if (!location) {
+    showCoverStatus("No available source location is present for a cover.");
+    return;
+  }
+  coverOpenerElement = openerElement || document.activeElement;
+  const token = ++coverDialogState.requestToken;
+  coverDialogState.available = true;
+  coverDialogState.openItem = item;
+  coverDialogState.currentLocation = location;
+  coverDialogState.currentCover = null;
+  coverDialogState.durationMs = 0;
+  coverDialogState.sourceVersion = "";
+  coverDialogState.selectedTimestampMs = 0;
+  coverDialogState.previewReady = false;
+  coverDialogState.confirmingReplace = false;
+  coverDialogState.submitting = false;
+  resetCoverDialogView();
+  if (typeof coverDialog.showModal === "function") {
+    coverDialog.showModal();
+  } else {
+    coverDialog.setAttribute("open", "");
+  }
+  if (coverDialogTitle) {
+    coverDialogTitle.focus();
+  }
+  await loadCoverTimeline(token);
+}
+
+function closeCoverDialog({ restoreFocus = true } = {}) {
+  if (coverPreviewAbortController) {
+    coverPreviewAbortController.abort();
+    coverPreviewAbortController = null;
+  }
+  coverDialogState.available = false;
+  coverDialogState.openItem = null;
+  coverDialogState.currentLocation = null;
+  coverDialogState.sourceVersion = "";
+  coverDialogState.currentCover = null;
+  coverDialogState.requestToken += 1;
+  coverDialogState.previewToken += 1;
+  coverDialogState.acceptToken += 1;
+  if (coverDialog && typeof coverDialog.close === "function") {
+    coverDialog.close();
+  } else if (coverDialog) {
+    coverDialog.removeAttribute("open");
+  }
+  if (restoreFocus && coverOpenerElement) {
+    coverOpenerElement.focus();
+  }
+  coverOpenerElement = null;
+}
+
+async function loadCoverTimeline(token) {
+  const item = coverDialogState.openItem;
+  const location = coverDialogState.currentLocation;
+  if (!item || !location) return;
+  showCoverLoading();
+  try {
+    const response = await fetch(
+      coverTimelineEndpoint(item.media_id, location.location_id),
+      { headers: { Accept: "application/json" }, cache: "no-store" },
+    );
+    if (!coverContextStillCurrent({ mediaId: item.media_id, token })) return;
+    const payload = await response.json();
+    if (!coverContextStillCurrent({ mediaId: item.media_id, token })) return;
+    if (!response.ok) {
+      showCoverError(sanitizedCoverMessage(payload));
+      return;
+    }
+    coverDialogState.durationMs = Number(payload.duration_ms) || 0;
+    coverDialogState.sourceVersion = typeof payload.source_version === "string"
+      ? payload.source_version
+      : "";
+    if (coverTimelineRange) {
+      coverTimelineRange.max = String(Math.max(0, coverDialogState.durationMs - 1));
+    }
+    updateCoverTimestampReadout(0);
+    if (coverDurationReadout) {
+      coverDurationReadout.textContent = coverDurationText(coverDialogState.durationMs);
+    }
+    if (coverSetButton) coverSetButton.disabled = true;
+    await loadCoverState(token);
+    if (coverContextStillCurrent({ mediaId: item.media_id, token })) {
+      showCoverContent();
+    }
+  } catch {
+    if (coverContextStillCurrent({ mediaId: item.media_id, token })) {
+      showCoverError("Cover options could not be loaded.");
+    }
+  }
+}
+
+async function loadCoverState(token) {
+  const item = coverDialogState.openItem;
+  if (!item) return;
+  try {
+    const response = await fetch(coverAdminStateEndpoint(item.media_id), {
+      headers: { Accept: "application/json" },
+      cache: "no-store",
+    });
+    if (!coverContextStillCurrent({ mediaId: item.media_id, token })) return;
+    const payload = await response.json();
+    if (!coverContextStillCurrent({ mediaId: item.media_id, token })) return;
+    if (response.ok && payload && payload.has_cover) {
+      coverDialogState.currentCover = {
+        revision: payload.revision,
+        timestamp_ms: payload.timestamp_ms,
+        artifact_digest: payload.artifact_digest,
+        source_reference: payload.source_reference,
+        source_kind: payload.source_kind,
+        accepted_at_ms: payload.accepted_at_ms,
+        thumbnail_state: payload.thumbnail_state,
+        artifact_state: payload.artifact_state,
+      };
+    } else {
+      coverDialogState.currentCover = null;
+    }
+    renderCoverCurrent();
+  } catch {
+    coverDialogState.currentCover = null;
+    renderCoverCurrent();
+  }
+}
+
+function renderCoverCurrent() {
+  if (!coverCurrent) return;
+  const cover = coverDialogState.currentCover;
+  if (!cover) {
+    coverCurrent.hidden = true;
+    return;
+  }
+  coverCurrent.hidden = false;
+  if (coverCurrentThumbnail) {
+    coverCurrentThumbnail.replaceChildren();
+    if (cover.thumbnail_state === "ready" && coverDialogState.openItem) {
+      const image = document.createElement("img");
+      image.src = mediaCoverThumbnailUrl(coverDialogState.openItem.media_id);
+      image.alt = "Current cover";
+      image.loading = "lazy";
+      image.onerror = () => {
+        image.remove();
+      };
+      coverCurrentThumbnail.appendChild(image);
+    } else {
+      const note = document.createElement("span");
+      note.textContent = "Cover selected";
+      coverCurrentThumbnail.appendChild(note);
+    }
+  }
+  if (coverCurrentTimestamp) {
+    coverCurrentTimestamp.textContent = `Set at ${coverReadoutText(cover.timestamp_ms)}`;
+  }
+}
+
+function updateCoverTimestampReadout(ms) {
+  const maximum = Math.max(0, coverDialogState.durationMs - 1);
+  const bounded = Math.max(0, Math.min(Number.isFinite(ms) ? ms : 0, maximum));
+  coverDialogState.selectedTimestampMs = bounded;
+  if (coverTimelineRange) coverTimelineRange.value = String(bounded);
+  if (coverTimestampReadout) coverTimestampReadout.textContent = coverReadoutText(bounded);
+  if (coverSetButton) {
+    coverSetButton.disabled = coverDialogState.submitting || !coverDialogState.sourceVersion;
+  }
+}
+
+function handleCoverRangeInput() {
+  if (!coverTimelineRange) return;
+  updateCoverTimestampReadout(Number(coverTimelineRange.value) || 0);
+  hideCoverReplaceConfirm();
+}
+
+function stepCoverTimestamp(deltaMs) {
+  updateCoverTimestampReadout(coverDialogState.selectedTimestampMs + deltaMs);
+  hideCoverReplaceConfirm();
+}
+
+async function requestCoverPreview() {
+  const item = coverDialogState.openItem;
+  const location = coverDialogState.currentLocation;
+  if (!item || !location || !coverDialogState.sourceVersion) return;
+  const token = coverDialogState.requestToken;
+  const previewToken = ++coverDialogState.previewToken;
+  if (coverPreviewAbortController) coverPreviewAbortController.abort();
+  const controller = new AbortController();
+  coverPreviewAbortController = controller;
+  if (coverPreviewButton) coverPreviewButton.disabled = true;
+  showCoverPreviewStatus("Preparing preview…");
+  const params = new URLSearchParams({
+    timestamp_ms: String(coverDialogState.selectedTimestampMs),
+    source_version: coverDialogState.sourceVersion,
+  });
+  try {
+    const response = await fetch(
+      `${coverFrameEndpoint(item.media_id, location.location_id)}?${params.toString()}`,
+      { headers: { Accept: "image/png" }, cache: "no-store", signal: controller.signal },
+    );
+    if (!coverContextStillCurrent({ mediaId: item.media_id, token })) return;
+    if (previewToken !== coverDialogState.previewToken) return;
+    if (!response.ok) {
+      const payload = await handleCoverErrorResponse(response);
+      if (previewToken !== coverDialogState.previewToken) return;
+      showCoverPreviewStatus(sanitizedCoverMessage(payload));
+      if (payload && payload.error && payload.error.code === "COVER_SOURCE_CHANGED") {
+        void reloadCoverContext();
+      }
+      return;
+    }
+    const blob = await response.blob();
+    if (previewToken !== coverDialogState.previewToken) return;
+    if (!coverContextStillCurrent({ mediaId: item.media_id, token })) return;
+    renderCoverPreview(URL.createObjectURL(blob));
+    coverDialogState.previewReady = true;
+    showCoverPreviewStatus("Frame preview is available but not saved. Use Set as cover to accept it.");
+    if (coverSetButton) coverSetButton.disabled = coverDialogState.submitting;
+  } catch {
+    if (previewToken === coverDialogState.previewToken && coverContextStillCurrent({ mediaId: item.media_id, token })) {
+      showCoverPreviewStatus("Frame preview is not available.");
+    }
+  } finally {
+    if (coverPreviewAbortController === controller) {
+      coverPreviewAbortController = null;
+    }
+    if (coverContextStillCurrent({ mediaId: item.media_id, token })) {
+      if (coverPreviewButton) coverPreviewButton.disabled = false;
+    }
+  }
+}
+
+function renderCoverPreview(objectUrl) {
+  if (!coverPreviewContainer) return;
+  coverPreviewContainer.replaceChildren();
+  const image = document.createElement("img");
+  image.className = "cover-preview__image";
+  image.src = objectUrl;
+  image.alt = "Selected cover frame preview";
+  image.onload = () => {
+    if (coverPreviewContainer) coverPreviewContainer.hidden = false;
+  };
+  image.onerror = () => {
+    if (coverPreviewContainer) coverPreviewContainer.hidden = true;
+    showCoverPreviewStatus("Frame preview is not available.");
+  };
+  coverPreviewContainer.appendChild(image);
+}
+
+function handleSetAsCover() {
+  if (coverDialogState.submitting) return;
+  if (!coverDialogState.sourceVersion) return;
+  if (coverDialogState.currentCover && !coverDialogState.confirmingReplace) {
+    coverDialogState.confirmingReplace = true;
+    if (coverReplaceConfirm) coverReplaceConfirm.hidden = false;
+    return;
+  }
+  void submitCoverAccept();
+}
+
+function confirmCoverReplace() {
+  coverDialogState.confirmingReplace = true;
+  void submitCoverAccept();
+}
+
+function cancelCoverReplace() {
+  hideCoverReplaceConfirm();
+}
+
+async function submitCoverAccept() {
+  const item = coverDialogState.openItem;
+  const location = coverDialogState.currentLocation;
+  if (!item || !location || coverDialogState.submitting) return;
+  const token = coverDialogState.requestToken;
+  const acceptToken = ++coverDialogState.acceptToken;
+  coverDialogState.submitting = true;
+  if (coverSetButton) coverSetButton.disabled = true;
+  showCoverStatus("Setting cover…");
+  const expectedCover = coverDialogState.currentCover
+    ? coverDialogState.currentCover.revision
+    : 0;
+  try {
+    const response = await fetch(
+      coverMutationEndpoint(item.media_id, location.location_id),
+      {
+        method: "PUT",
+        headers: framenestMutationHeaders({
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        }),
+        body: JSON.stringify({
+          timestamp_ms: coverDialogState.selectedTimestampMs,
+          expected_revision: expectedCover,
+          expected_source_version: coverDialogState.sourceVersion,
+        }),
+      },
+    );
+    if (!coverContextStillCurrent({ mediaId: item.media_id, token })) return;
+    if (acceptToken !== coverDialogState.acceptToken) return;
+    if (response.status === 201 || response.status === 200) {
+      const payload = await response.json();
+      if (!coverContextStillCurrent({ mediaId: item.media_id, token })) return;
+      handleCoverAcceptSuccess(payload);
+      return;
+    }
+    const payload = await handleCoverErrorResponse(response);
+    if (!coverContextStillCurrent({ mediaId: item.media_id, token })) return;
+    handleCoverAcceptFailure(payload);
+  } catch {
+    if (coverContextStillCurrent({ mediaId: item.media_id, token }) && acceptToken === coverDialogState.acceptToken) {
+      coverDialogState.submitting = false;
+      if (coverSetButton) coverSetButton.disabled = false;
+      showCoverStatus("The cover could not be set. Check the server connection and retry.");
+    }
+  }
+}
+
+function handleCoverAcceptSuccess(payload) {
+  coverDialogState.submitting = false;
+  coverDialogState.confirmingReplace = false;
+  if (coverReplaceConfirm) coverReplaceConfirm.hidden = true;
+  const replaced = payload && payload.status === "replaced";
+  const created = payload && payload.status === "created";
+  showCoverStatus(
+    created ? "Cover set."
+      : replaced ? "Cover replaced."
+        : "Cover unchanged.",
+  );
+  coverDialogState.currentCover = {
+    revision: payload ? payload.revision : null,
+    timestamp_ms: payload ? payload.timestamp_ms : null,
+    artifact_digest: payload ? payload.artifact_digest : null,
+    thumbnail_state: payload ? payload.thumbnail_state : "missing",
+    source_reference: null,
+    source_kind: null,
+    accepted_at_ms: null,
+    artifact_state: null,
+  };
+  renderCoverCurrent();
+  if (typeof loadCatalog === "function") {
+    loadCatalog();
+  }
+  window.setTimeout(() => {
+    if (coverDialogState.available) closeCoverDialog();
+  }, 480);
+}
+
+function handleCoverAcceptFailure(payload) {
+  coverDialogState.submitting = false;
+  coverDialogState.confirmingReplace = false;
+  if (coverReplaceConfirm) coverReplaceConfirm.hidden = true;
+  const code = payload && payload.error && payload.error.code;
+  if (code === "COVER_CONFLICT" || code === "COVER_SOURCE_CHANGED") {
+    showCoverStatus(sanitizedCoverMessage(payload));
+    void reloadCoverContext();
+    return;
+  }
+  showCoverStatus(sanitizedCoverMessage(payload));
+  if (code === "COVER_TIMESTAMP_INVALID" || code === "COVER_SOURCE_UNAVAILABLE") {
+    if (coverSetButton) coverSetButton.disabled = true;
+    return;
+  }
+  if (coverSetButton) coverSetButton.disabled = false;
+}
+
+async function reloadCoverContext() {
+  const token = ++coverDialogState.requestToken;
+  await loadCoverTimeline(token);
+}
+
+if (detailsChooseCoverButton) {
+  detailsChooseCoverButton.addEventListener("click", () => {
+    if (detailsCurrentItem) {
+      openCoverDialog(detailsCurrentItem, detailsChooseCoverButton);
+    }
+  });
+}
+
+if (coverDialog) {
+  coverDialog.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      if (confirmationOwnsTopmostModal()) return;
+      closeCoverDialog();
+    }
+  });
+  coverDialog.addEventListener("cancel", (event) => {
+    handleParentDialogCancel(event, closeCoverDialog);
+  });
+  coverDialog.addEventListener("click", (event) => {
+    if (event.target === coverDialog) {
+      closeCoverDialog();
+    }
+  });
+}
+
+if (coverDialogCloseButton) {
+  coverDialogCloseButton.addEventListener("click", () => closeCoverDialog());
+}
+
+if (coverCancelButton) {
+  coverCancelButton.addEventListener("click", () => closeCoverDialog());
+}
+
+if (coverTimelineRange) {
+  coverTimelineRange.addEventListener("input", handleCoverRangeInput);
+}
+
+if (coverStepBackButton) {
+  coverStepBackButton.addEventListener("click", () => stepCoverTimestamp(-250));
+}
+
+if (coverStepForwardButton) {
+  coverStepForwardButton.addEventListener("click", () => stepCoverTimestamp(250));
+}
+
+if (coverPreviewButton) {
+  coverPreviewButton.addEventListener("click", () => {
+    void requestCoverPreview();
+  });
+}
+
+if (coverSetButton) {
+  coverSetButton.addEventListener("click", handleSetAsCover);
+}
+
+if (coverReplaceYesButton) {
+  coverReplaceYesButton.addEventListener("click", confirmCoverReplace);
+}
+
+if (coverReplaceNoButton) {
+  coverReplaceNoButton.addEventListener("click", cancelCoverReplace);
 }
 
 if (detailsCloseButton) {

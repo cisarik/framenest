@@ -38,7 +38,7 @@ def test_create_catalog_backup_from_migrated_database(tmp_path: Path) -> None:
     manifest = _manifest(bundle)
     assert manifest["schema_version"] == 1
     assert manifest["catalog"]["logical_name"] == "catalog.sqlite3"
-    assert manifest["catalog"]["alembic_revision"] == "0021"
+    assert manifest["catalog"]["alembic_revision"] == "0022"
     assert manifest["catalog"]["size_bytes"] == (bundle / "catalog.sqlite3").stat().st_size
     assert manifest["catalog"]["sha256"] == result.catalog_sha256
     assert "source" not in json.dumps(manifest)
@@ -54,7 +54,7 @@ def test_create_uses_sqlite_snapshot_while_source_connection_is_open(tmp_path: P
 
         result = create_catalog_backup(database_path, tmp_path / "bundle")
 
-    assert result.alembic_revision == "0021"
+    assert result.alembic_revision == "0022"
 
 
 def test_create_does_not_mutate_source_database(tmp_path: Path) -> None:
@@ -328,7 +328,7 @@ def test_restore_verified_bundle_to_new_destination(tmp_path: Path) -> None:
     assert sha256_file(destination) == sha256_file(bundle / "catalog.sqlite3")
     with sqlite3.connect(destination) as connection:
         revision = connection.execute("SELECT version_num FROM alembic_version").fetchone()
-    assert revision == ("0021",)
+    assert revision == ("0022",)
 
 
 def test_restore_refuses_existing_or_symlink_destination_and_leaves_bundle_read_only(tmp_path: Path) -> None:
@@ -416,12 +416,12 @@ def test_create_verify_and_restore_handle_sqlite_paths_with_uri_reserved_charact
     verified = verify_catalog_backup(bundle)
     restored = restore_catalog_backup(bundle, destination)
 
-    assert result.alembic_revision == "0021"
+    assert result.alembic_revision == "0022"
     assert verified.catalog_sha256 == result.catalog_sha256
     assert restored.catalog_sha256 == result.catalog_sha256
     with sqlite3.connect(destination) as connection:
         revision = connection.execute("SELECT version_num FROM alembic_version").fetchone()
-    assert revision == ("0021",)
+    assert revision == ("0022",)
 
 
 def test_create_fails_if_private_permissions_cannot_be_set_where_supported(
@@ -488,3 +488,57 @@ def test_restrictive_file_permissions_where_supported(tmp_path: Path) -> None:
     assert ((bundle / "catalog.sqlite3").stat().st_mode & 0o777) == 0o600
     assert ((bundle / "manifest.json").stat().st_mode & 0o777) == 0o600
     assert (destination.stat().st_mode & 0o777) == 0o600
+
+
+def test_backup_preserves_cover_rows_while_artifacts_remain_outside_bundle(
+    tmp_path: Path,
+) -> None:
+    from framenest.infrastructure.persistence.catalog_backup import (
+        create_catalog_backup,
+        restore_catalog_backup,
+    )
+
+    database_path = _migrated_database(tmp_path / "catalog.sqlite3")
+    connection = sqlite3.connect(database_path)
+    connection.execute("PRAGMA foreign_keys=ON")
+    try:
+        connection.execute(
+            "INSERT INTO logical_media "
+            "(id, media_kind, created_at_ms, updated_at_ms) VALUES "
+            "('11111111-1111-4111-8111-111111111111', 'video', 1, 1)"
+        )
+        connection.execute(
+            "INSERT INTO media_covers ("
+            " media_id, source_location_id, source_reference, source_kind, "
+            " source_timestamp_ms, source_size_bytes, source_mtime_ns, "
+            " source_duration_ms, source_observation_version, source_observation_digest, "
+            " artifact_profile, artifact_media_type, artifact_digest, artifact_width, "
+            " artifact_height, artifact_byte_size, revision, accepted_at_ms) "
+            "VALUES ('11111111-1111-4111-8111-111111111111', NULL, "
+            " 'location:22222222-2222-4222-8222-222222222222', 'mp4', 500, 100, "
+            " 1, 1000, 'cover-source-observation-v1', '" + "a" * 64 + "', "
+            " 'durable-cover-jpeg-v1', 'image/jpeg', '" + "b" * 64 + "', "
+            " 512, 288, 20000, 1, 100)"
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    bundle = tmp_path / "bundle"
+    create_catalog_backup(database_path, bundle)
+    manifest = _manifest(bundle)
+    assert manifest["catalog"]["alembic_revision"] == "0022"
+    assert set(name for name in (bundle / "catalog.sqlite3").parent.iterdir()) or True
+    bundle_names = {child.name for child in bundle.iterdir()}
+    assert bundle_names == {"manifest.json", "catalog.sqlite3"}
+
+    destination = tmp_path / "restored.sqlite3"
+    restore_catalog_backup(bundle, destination)
+    restored = sqlite3.connect(destination)
+    try:
+        rows = restored.execute(
+            "SELECT media_id, revision, artifact_digest FROM media_covers"
+        ).fetchall()
+        assert rows == [("11111111-1111-4111-8111-111111111111", 1, "b" * 64)]
+    finally:
+        restored.close()

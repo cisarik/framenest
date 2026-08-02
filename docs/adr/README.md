@@ -74,3 +74,4 @@ An accepted ADR may only be changed by a later ADR that supersedes it. Editing a
 | 0047 | Operator CLI Configuration and Working-Directory Hygiene | Accepted | 2026-07-23 | [0047-operator-cli-configuration-and-working-directory-hygiene.md](0047-operator-cli-configuration-and-working-directory-hygiene.md) |
 | 0048 | Tailscale Remote Access and Identity Foundation | Accepted | 2026-07-25 | [0048-tailscale-remote-access-and-identity-foundation.md](0048-tailscale-remote-access-and-identity-foundation.md) |
 | 0049 | Durable Content Publication Boundary | Accepted | 2026-07-29 | [0049-durable-content-publication-boundary.md](0049-durable-content-publication-boundary.md) |
+| 0050 | Durable Manual Cover Foundation | Accepted | 2026-08-02 | [0050-durable-manual-cover-foundation.md](0050-durable-manual-cover-foundation.md) |

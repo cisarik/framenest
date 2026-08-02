@@ -169,6 +169,25 @@ The `GET /api/media/{media_id}/locations/{location_id}/content` endpoint serves 
 - **Read-only behavior**: The endpoint performs no database or filesystem mutation. Repository calls are read-only.
 - **Streaming safety**: Successful responses send `X-Content-Type-Options: nosniff`, `Cache-Control: private, no-store`, and `Accept-Ranges: bytes`. File handles are closed reliably including interrupted streaming.
 
+### Durable Cover Endpoints
+
+The first durable manual cover workflow ([ADR-0050](docs/adr/0050-durable-manual-cover-foundation.md))
+adds identity-only authoring and delivery endpoints:
+
+- Timeline, ephemeral frame preview, and the accepted-cover mutation require the
+  `metadata.canonical.write` capability and expose no filesystem paths.
+- The accepted-cover mutation requires origin/mutation-header proof and an
+  audit record (`media.cover_set`) established before mutation, per the current
+  ingress architecture.
+- The cover thumbnail endpoint is identity-only (`/api/media/{media_id}/cover-thumbnail`),
+  requires `gallery.read`, enforces the shared content-publication audience
+  policy (unpublished media returns the same sanitized not-found as unknown
+  media), performs no generation or mutation on read, and never discloses
+  absolute paths, storage roots, filenames, or raw ffmpeg output.
+- Durable cover artifacts are stored under a server-owned root disjoint from
+  the database, registered media roots, Gallery preview cache, upload
+  quarantine, and YouTube acquisition storage.
+
 ## Dependencies and Updates
 
 Dependencies, update mechanisms, packaging flows, and production deployment procedures must be pinned where appropriate, reviewed, tested, and documented before production use.

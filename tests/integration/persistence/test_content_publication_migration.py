@@ -219,7 +219,7 @@ def test_downgrade_is_allowed_only_when_every_medium_is_published(
         unsafe.close()
 
 
-def test_packaged_head_is_0021(tmp_path: Path) -> None:
+def test_packaged_head_is_0022(tmp_path: Path) -> None:
     from framenest.infrastructure.persistence.migrations import (
         inspect_database_migration_status,
         upgrade_database_to_head,
@@ -231,5 +231,5 @@ def test_packaged_head_is_0021(tmp_path: Path) -> None:
     )
     status = upgrade_database_to_head(settings)
 
-    assert status.current_revision == status.head_revision == "0021"
+    assert status.current_revision == status.head_revision == "0022"
     assert inspect_database_migration_status(settings) == status

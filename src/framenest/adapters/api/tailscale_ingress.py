@@ -250,6 +250,34 @@ ROUTE_POLICIES: tuple[RoutePolicy, ...] = (
         capability=CAPABILITY_GALLERY_READ,
     ),
     RoutePolicy(
+        method="GET",
+        template="/api/media/{media_id}/locations/{location_id}/cover-timeline",
+        capability=CAPABILITY_METADATA_CANONICAL_WRITE,
+    ),
+    RoutePolicy(
+        method="GET",
+        template="/api/media/{media_id}/locations/{location_id}/cover-frame",
+        capability=CAPABILITY_METADATA_CANONICAL_WRITE,
+    ),
+    RoutePolicy(
+        method="PUT",
+        template="/api/media/{media_id}/locations/{location_id}/cover",
+        capability=CAPABILITY_METADATA_CANONICAL_WRITE,
+        audit_action="media.cover_set",
+        audit_target_type="media",
+        audit_target_group="media_id",
+    ),
+    RoutePolicy(
+        method="GET",
+        template="/api/media/{media_id}/cover-thumbnail",
+        capability=CAPABILITY_GALLERY_READ,
+    ),
+    RoutePolicy(
+        method="GET",
+        template="/api/admin/media/{media_id}/cover",
+        capability=CAPABILITY_METADATA_CANONICAL_WRITE,
+    ),
+    RoutePolicy(
         method="POST",
         template="/api/libraries/{library_id}/media-analysis-preview",
         capability=CAPABILITY_ANALYSIS_RUN,

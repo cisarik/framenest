@@ -63,6 +63,7 @@ class CatalogMediaItem:
     content_category: str = "general"
     acquisition_source: str = "unknown"
     description: str | None = None
+    cover_ready: bool = False
 
 
 @dataclass(frozen=True, slots=True)

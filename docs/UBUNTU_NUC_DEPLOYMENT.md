@@ -69,6 +69,8 @@ production executable: /opt/framenest/current/.venv/bin/framenest-production
 operator environment: /etc/framenest/framenest.env
 database: /var/lib/framenest/catalog.sqlite3
 non-secret AI configuration: /var/lib/framenest/ai/config.json
+durable cover storage: /var/lib/framenest/covers
+cover thumbnails: /var/cache/framenest/cover-thumbnails
 YouTube acquisition staging: /var/lib/framenest/youtube-acquisition
 Gallery preview cache: /var/cache/framenest/gallery-previews
 runtime root: /run/framenest

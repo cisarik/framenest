@@ -144,9 +144,13 @@ one model or prompt can serve every workflow.
 
 ## Current Implementation Boundary
 
-No Cover Studio, cover persistence, cover candidate storage, imported cover
-workflow, AI cover generation, or thumbnail cache is currently implemented.
-This ADR records accepted architecture for future work only.
+No Cover Studio, cover candidate storage, imported cover workflow, AI cover
+generation, or thumbnail cache life cycle is currently implemented beyond the
+bounded durable manual cover foundation recorded in
+[ADR-0050](0050-durable-manual-cover-foundation.md) (migration `0022`): one
+accepted manually selected cover per logical medium with durable artifacts and
+regenerable cover thumbnails. This ADR's manual Cover Studio direction and its
+deferred candidate/import/AI contracts remain authoritative for future work.
 
 ## Artifact Lifecycle
 

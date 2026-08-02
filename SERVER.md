@@ -35,6 +35,7 @@ process is authoritative for:
 - per-user visibility state;
 - upload and ingest state;
 - server preview cache;
+- durable accepted covers and cover artifacts;
 - authentication and capability decisions.
 
 Browser, desktop, local NUC browser, and future remote interfaces are clients
@@ -118,6 +119,17 @@ The server may provide:
 
 Original covers and reproducible derived thumbnails remain separate concepts.
 The full video must not be downloaded merely to render a gallery card.
+
+The first durable manual cover foundation is implemented ([ADR-0050](docs/adr/0050-durable-manual-cover-foundation.md),
+migration `0022`). Durable accepted-cover facts live in the authoritative SQLite
+catalog; immutable cover artifacts live under `FRAMENEST_COVER_STORAGE_ROOT`
+(production-oriented `/var/lib/framenest/covers`) and regenerable cover
+thumbnails under `FRAMENEST_COVER_THUMBNAIL_CACHE_PATH` (production-oriented
+`/var/cache/framenest/cover-thumbnails`). A Gallery cover thumbnail is served
+through an identity-only endpoint gated by `gallery.read` and the shared
+content-publication audience policy, so unpublished media never leaks cover
+bytes to ordinary users. Complete Cover Studio, imported/AI/series covers, and
+candidate management remain future work.
 
 ## Location And Availability Tracking
 

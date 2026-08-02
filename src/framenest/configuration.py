@@ -29,6 +29,8 @@ EXPLICIT_ENV_FILE_MESSAGE = (
 DEVELOPMENT_DATABASE_DIRECTORY = "framenest-development"
 DEVELOPMENT_DATABASE_FILENAME = "catalog.sqlite3"
 DEVELOPMENT_GALLERY_PREVIEW_DIRECTORY = "gallery-previews"
+DEVELOPMENT_COVER_STORAGE_DIRECTORY = "covers"
+DEVELOPMENT_COVER_THUMBNAILS_DIRECTORY = "cover-thumbnails"
 DEFAULT_UPLOAD_MAX_TOTAL_BYTES = 1_073_741_824
 DEFAULT_UPLOAD_MAX_PATCH_BYTES = 8_388_608
 DEFAULT_UPLOAD_SESSION_TTL_SECONDS = 86_400
@@ -58,6 +60,22 @@ def _default_gallery_preview_cache_path() -> Path:
         Path(tempfile.gettempdir())
         / DEVELOPMENT_DATABASE_DIRECTORY
         / DEVELOPMENT_GALLERY_PREVIEW_DIRECTORY
+    )
+
+
+def _default_cover_storage_root() -> Path:
+    return _normalize_absolute_path(
+        Path(tempfile.gettempdir())
+        / DEVELOPMENT_DATABASE_DIRECTORY
+        / DEVELOPMENT_COVER_STORAGE_DIRECTORY
+    )
+
+
+def _default_cover_thumbnail_cache_path() -> Path:
+    return _normalize_absolute_path(
+        Path(tempfile.gettempdir())
+        / DEVELOPMENT_DATABASE_DIRECTORY
+        / DEVELOPMENT_COVER_THUMBNAILS_DIRECTORY
     )
 
 
@@ -97,6 +115,14 @@ class FrameNestSettings(BaseSettings):
     database_path: Path = Field(default_factory=_default_database_path, repr=False)
     gallery_preview_cache_path: Path = Field(
         default_factory=_default_gallery_preview_cache_path,
+        repr=False,
+    )
+    cover_storage_root: Path = Field(
+        default_factory=_default_cover_storage_root,
+        repr=False,
+    )
+    cover_thumbnail_cache_path: Path = Field(
+        default_factory=_default_cover_thumbnail_cache_path,
         repr=False,
     )
     upload_quarantine_root: Path | None = Field(default=None, repr=False)
@@ -151,6 +177,24 @@ class FrameNestSettings(BaseSettings):
         except ValueError as exc:
             raise ValueError("gallery preview cache path must be an absolute path") from exc
 
+    @field_validator("cover_storage_root", mode="before")
+    @classmethod
+    def validate_cover_storage_root(cls, value: Any) -> Path:
+        try:
+            return _normalize_absolute_path(value)
+        except ValueError as exc:
+            raise ValueError("cover storage root must be an absolute path") from exc
+
+    @field_validator("cover_thumbnail_cache_path", mode="before")
+    @classmethod
+    def validate_cover_thumbnail_cache_path(cls, value: Any) -> Path:
+        try:
+            return _normalize_absolute_path(value)
+        except ValueError as exc:
+            raise ValueError(
+                "cover thumbnail cache path must be an absolute path"
+            ) from exc
+
     @field_validator("upload_quarantine_root", mode="before")
     @classmethod
     def validate_upload_quarantine_root(cls, value: Any) -> Path | None:
@@ -180,17 +224,18 @@ class FrameNestSettings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_private_storage_roots(self) -> "FrameNestSettings":
-        youtube_root = self.youtube_acquisition_root
-        if youtube_root is None:
-            return self
-        for other_root in (
-            self.upload_quarantine_root,
-            self.gallery_preview_cache_path,
+        storage_paths = (
             self.database_path,
-        ):
-            if _paths_overlap(youtube_root, other_root):
+            self.gallery_preview_cache_path,
+            self.cover_storage_root,
+            self.cover_thumbnail_cache_path,
+            self.upload_quarantine_root,
+            self.youtube_acquisition_root,
+        )
+        for first, second in _disjoint_pairs(storage_paths):
+            if _paths_overlap(first, second):
                 raise ValueError(
-                    "YouTube acquisition root must not overlap other FrameNest storage"
+                    "FrameNest private storage paths must not overlap"
                 )
         return self
 
@@ -352,6 +397,15 @@ def _paths_overlap(first: Path, second: Path | None) -> bool:
     if second is None:
         return False
     return first == second or first in second.parents or second in first.parents
+
+
+def _disjoint_pairs(paths: tuple[Path | None, ...]) -> list[tuple[Path, Path]]:
+    concrete = [path for path in paths if path is not None]
+    pairs: list[tuple[Path, Path]] = []
+    for index, first in enumerate(concrete):
+        for second in concrete[index + 1 :]:
+            pairs.append((first, second))
+    return pairs
 
 
 def _is_exact_https_origin(value: str) -> bool:

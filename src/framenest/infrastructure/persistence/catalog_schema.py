@@ -156,6 +156,129 @@ media_content_publications = Table(
     ),
 )
 
+media_covers = Table(
+    "media_covers",
+    metadata,
+    Column(
+        "media_id",
+        Text(),
+        ForeignKey(
+            "logical_media.id",
+            ondelete="CASCADE",
+            name="fk_media_covers_media_id",
+        ),
+        primary_key=True,
+        nullable=False,
+    ),
+    Column(
+        "source_location_id",
+        Text(),
+        ForeignKey(
+            "physical_media_locations.id",
+            ondelete="SET NULL",
+            name="fk_media_covers_source_location_id",
+        ),
+        nullable=True,
+    ),
+    Column("source_reference", Text(), nullable=False),
+    Column("source_kind", Text(), nullable=False),
+    Column("source_timestamp_ms", Integer(), nullable=False),
+    Column("source_size_bytes", Integer(), nullable=False),
+    Column("source_mtime_ns", Integer(), nullable=True),
+    Column("source_duration_ms", Integer(), nullable=True),
+    Column("source_observation_version", Text(), nullable=False),
+    Column("source_observation_digest", Text(), nullable=False),
+    Column("artifact_profile", Text(), nullable=False),
+    Column("artifact_media_type", Text(), nullable=False),
+    Column("artifact_digest", Text(), nullable=False),
+    Column("artifact_width", Integer(), nullable=False),
+    Column("artifact_height", Integer(), nullable=False),
+    Column("artifact_byte_size", Integer(), nullable=False),
+    Column("revision", Integer(), nullable=False),
+    Column("accepted_at_ms", Integer(), nullable=False),
+    CheckConstraint(
+        "length(media_id) = 36",
+        name="ck_media_covers_media_id_length",
+    ),
+    CheckConstraint(
+        "source_location_id IS NULL OR length(source_location_id) = 36",
+        name="ck_media_covers_source_location_id_length",
+    ),
+    CheckConstraint(
+        "substr(source_reference, 1, 9) = 'location:' "
+        "AND length(source_reference) = 45",
+        name="ck_media_covers_source_reference_shape",
+    ),
+    CheckConstraint(
+        "source_kind IN ('gif', 'mp4')",
+        name="ck_media_covers_source_kind",
+    ),
+    CheckConstraint(
+        "source_timestamp_ms >= 0",
+        name="ck_media_covers_source_timestamp_non_negative",
+    ),
+    CheckConstraint(
+        "source_size_bytes > 0",
+        name="ck_media_covers_source_size_positive",
+    ),
+    CheckConstraint(
+        "source_mtime_ns IS NULL OR source_mtime_ns >= 0",
+        name="ck_media_covers_source_mtime_non_negative",
+    ),
+    CheckConstraint(
+        "source_duration_ms IS NULL OR source_duration_ms >= 0",
+        name="ck_media_covers_source_duration_non_negative",
+    ),
+    CheckConstraint(
+        "source_observation_version = 'cover-source-observation-v1'",
+        name="ck_media_covers_source_observation_version",
+    ),
+    CheckConstraint(
+        "length(source_observation_digest) = 64 "
+        "AND source_observation_digest = lower(source_observation_digest) "
+        "AND source_observation_digest NOT GLOB '*[^0-9a-f]*'",
+        name="ck_media_covers_source_observation_digest",
+    ),
+    CheckConstraint(
+        "artifact_profile = 'durable-cover-jpeg-v1'",
+        name="ck_media_covers_artifact_profile",
+    ),
+    CheckConstraint(
+        "artifact_media_type = 'image/jpeg'",
+        name="ck_media_covers_artifact_media_type",
+    ),
+    CheckConstraint(
+        "length(artifact_digest) = 64 "
+        "AND artifact_digest = lower(artifact_digest) "
+        "AND artifact_digest NOT GLOB '*[^0-9a-f]*'",
+        name="ck_media_covers_artifact_digest",
+    ),
+    CheckConstraint(
+        "artifact_width > 0",
+        name="ck_media_covers_artifact_width_positive",
+    ),
+    CheckConstraint(
+        "artifact_height > 0",
+        name="ck_media_covers_artifact_height_positive",
+    ),
+    CheckConstraint(
+        "artifact_byte_size > 0",
+        name="ck_media_covers_artifact_byte_size_positive",
+    ),
+    CheckConstraint(
+        "revision >= 1",
+        name="ck_media_covers_revision_positive",
+    ),
+    CheckConstraint(
+        "accepted_at_ms >= 0",
+        name="ck_media_covers_accepted_at_non_negative",
+    ),
+    Index(
+        "ix_media_covers_source_location_id",
+        "source_location_id",
+    ),
+)
+
 physical_media_locations = Table(
     "physical_media_locations",
     metadata,

@@ -21,6 +21,10 @@ from framenest.adapters.api.content_publication_api import (
     ContentPublicationApiDependencies,
     create_content_publication_api_router,
 )
+from framenest.adapters.api.cover_api import (
+    CoverApiDependencies,
+    create_cover_api_router,
+)
 from framenest.adapters.api.gallery_preview_api import (
     GalleryPreviewApiDependencies,
     create_gallery_preview_api_router,
@@ -84,6 +88,7 @@ from framenest.application.media_metadata import (
 from framenest.application.media_analysis import PrepareLocalMediaAnalysis
 from framenest.application.media_content import ResolveMediaContent
 from framenest.application.gallery_preview import GalleryPreviewService
+from framenest.application.media_cover import CoverService
 from framenest.application.media_suggestion import PreviewMediaSuggestion
 from framenest.application.media_suggestion import PreviewImportedMediaSuggestion
 from framenest.application.upload_transport import UploadTransportLimits, UploadTransportService
@@ -135,7 +140,13 @@ from framenest.infrastructure.filesystem.quarantine_storage import FilesystemQua
 from framenest.infrastructure.filesystem.published_media_storage import (
     FilesystemPublishedMediaStorage,
 )
+from framenest.infrastructure.filesystem.cover_storage import (
+    FilesystemCoverThumbnailCache,
+    FilesystemDurableCoverStorage,
+    PillowCoverEncoder,
+)
 from framenest.infrastructure.media_analysis import LocalMediaAnalysisAdapter
+from framenest.infrastructure.media_analysis.cover_frame import LocalCoverSourceAdapter
 from framenest.infrastructure.media_validation import BoundedUploadMediaValidator
 from framenest.infrastructure.media_analysis.gallery_preview import (
     FilesystemGalleryPreviewCache,
@@ -146,6 +157,9 @@ from framenest.infrastructure.persistence.content_publication_repository import 
     SqliteContentPublicationRepository,
 )
 from framenest.infrastructure.persistence.library_repository import SqliteLibraryRepository
+from framenest.infrastructure.persistence.media_cover_repository import (
+    SqliteMediaCoverRepository,
+)
 from framenest.infrastructure.persistence.media_repository import SqliteMediaRepository
 from framenest.infrastructure.persistence.media_catalog_repository import (
     SqliteMediaCatalogRepository,
@@ -218,6 +232,7 @@ def create_app(
     ) = None,
     content_publication_api_dependencies: ContentPublicationApiDependencies
     | None = None,
+    cover_api_dependencies: CoverApiDependencies | None = None,
     upload_api_dependencies: UploadApiDependencies | None = None,
     youtube_operator_api_dependencies: YouTubeOperatorApiDependencies
     | None = None,
@@ -244,6 +259,8 @@ def create_app(
     owned_media_analysis_run_repository = None
     owned_content_publication_repository = None
     owned_content_audience_policy = None
+    owned_cover_repository = None
+    owned_cover_service = None
     owned_media_analysis_coordinator = None
     owned_youtube_claim_repository = None
     owned_youtube_staging = None
@@ -260,6 +277,7 @@ def create_app(
         or media_suggestion_api_dependencies is None
         or media_analysis_lifecycle_api_dependencies is None
         or content_publication_api_dependencies is None
+        or cover_api_dependencies is None
         or upload_api_dependencies is None
     ):
         owned_engine = create_sqlite_engine(resolved_settings.database_path)
@@ -277,8 +295,26 @@ def create_app(
         owned_content_audience_policy = ContentAudiencePolicy(
             owned_content_publication_repository
         )
+        owned_cover_repository = SqliteMediaCoverRepository(owned_engine)
         owned_youtube_claim_repository = (
             SqliteYouTubeAcquisitionClaimRepository(owned_engine)
+        )
+    if cover_api_dependencies is None:
+        assert owned_media_repository is not None
+        assert owned_library_repository is not None
+        assert owned_cover_repository is not None
+        cover_storage, cover_thumbnail_cache = _resolve_cover_storage(
+            resolved_settings,
+            owned_library_repository,
+        )
+        owned_cover_service = CoverService(
+            owned_media_repository,
+            owned_library_repository,
+            LocalCoverSourceAdapter(),
+            PillowCoverEncoder(),
+            cover_storage,
+            cover_thumbnail_cache,
+            owned_cover_repository,
         )
     if library_api_dependencies is None:
         assert owned_library_repository is not None
@@ -304,7 +340,14 @@ def create_app(
     if media_catalog_api_dependencies is None:
         assert owned_media_catalog_repository is not None
         media_catalog_api_dependencies = MediaCatalogApiDependencies(
-            list_media=ListMediaCatalog(owned_media_catalog_repository),
+            list_media=ListMediaCatalog(
+                owned_media_catalog_repository,
+                cover_states=(
+                    owned_cover_service.cover_ready_map
+                    if owned_cover_service is not None
+                    else None
+                ),
+            ),
             catalog_available=resolved_settings.database_path.exists,
         )
     if media_metadata_api_dependencies is None:
@@ -483,6 +526,13 @@ def create_app(
                 owned_content_publication_repository
             ),
             catalog_available=resolved_settings.database_path.exists,
+        )
+    if cover_api_dependencies is None:
+        assert owned_cover_service is not None
+        cover_api_dependencies = CoverApiDependencies(
+            cover_service=owned_cover_service,
+            catalog_available=resolved_settings.database_path.exists,
+            audience_policy=owned_content_audience_policy,
         )
     if upload_api_dependencies is None:
         assert owned_upload_session_repository is not None
@@ -765,6 +815,7 @@ def create_app(
             content_publication_api_dependencies
         )
     )
+    app.include_router(create_cover_api_router(cover_api_dependencies))
     app.include_router(create_upload_api_router(upload_api_dependencies))
     app.include_router(
         create_youtube_operator_api_router(youtube_operator_api_dependencies)
@@ -838,6 +889,47 @@ def _upload_publication_coordinator(
     dependencies: UploadApiDependencies,
 ) -> object | None:
     return dependencies.publication_coordinator
+
+
+def _resolve_cover_storage(
+    settings: FrameNestSettings,
+    library_repository: SqliteLibraryRepository,
+) -> tuple[FilesystemDurableCoverStorage, FilesystemCoverThumbnailCache]:
+    """Resolve durable cover storage and thumbnail cache with library disjointness."""
+    try:
+        storage = FilesystemDurableCoverStorage(settings.cover_storage_root)
+        thumbnail = FilesystemCoverThumbnailCache(settings.cover_thumbnail_cache_path)
+        if _cover_paths_overlap(storage.root, thumbnail.root):
+            raise ValueError("Cover storage configuration is invalid.")
+        library_roots: list[Path] = []
+        if settings.database_path.exists():
+            try:
+                library_roots = [
+                    Path(library.root.path)
+                    for library in library_repository.list_all()
+                    if library.root.flavor is LibraryPathFlavor.POSIX
+                ]
+            except Exception:
+                # An absent or unmigrated catalog has no registered libraries to
+                # conflict with; runtime publish paths always serve a migrated DB.
+                library_roots = []
+        _require_cover_root_disjoint(storage.root, library_roots)
+        _require_cover_root_disjoint(thumbnail.root, library_roots)
+    except ValueError:
+        raise
+    except Exception as exc:
+        raise ValueError("Cover storage configuration is invalid.") from exc
+    return storage, thumbnail
+
+
+def _require_cover_root_disjoint(root: Path, others: list[Path]) -> None:
+    for other in others:
+        if _cover_paths_overlap(root, other):
+            raise ValueError("Cover storage configuration is invalid.")
+
+
+def _cover_paths_overlap(first: Path, second: Path) -> bool:
+    return first == second or first in second.parents or second in first.parents
 
 
 def _resolve_published_storage(

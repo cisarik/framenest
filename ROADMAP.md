@@ -113,7 +113,7 @@ The initial scaffold decision gate is complete. A Poetry package scaffold, centr
 
 Broader architecture decisions still open include sidecar manifest format and versioning, category and language metadata schema, metadata/tag/search schema, cover and thumbnail cache implementation details, desktop sidecar IPC, initial authentication boundary, offline client cache semantics, multiprocess publication or catalog leases or fencing, media-tool distribution strategy, and Ubuntu NUC host-acceptance details beyond the initial systemd service foundation.
 
-Persistence strategy is accepted through [ADR-0010](docs/adr/0010-initial-persistence-foundation.md). The minimal SQLAlchemy/Alembic migration foundation is implemented. The current schema head is revision `0021`: catalog tables and the automatic built-in `Processed` collection are established through `0007`; `0008` through `0018` add durable upload, validation, byte identity, duplicate disposition, storage publication, catalog, automatic-analysis, still-image, classification, movie-identification, and analysis-history foundations; `0019` adds durable YouTube manual-acquisition provenance; `0020` adds durable security audit events; and `0021` adds durable content publication with legacy backfill.
+Persistence strategy is accepted through [ADR-0010](docs/adr/0010-initial-persistence-foundation.md). The minimal SQLAlchemy/Alembic migration foundation is implemented. The current schema head is revision `0021`: catalog tables and the automatic built-in `Processed` collection are established through `0007`; `0008` through `0018` add durable upload, validation, byte identity, duplicate disposition, storage publication, catalog, automatic-analysis, still-image, classification, movie-identification, and analysis-history foundations; `0019` adds durable YouTube manual-acquisition provenance; `0020` adds durable security audit events; and `0021` adds durable content publication with legacy backfill. Revision `0022` adds the durable manual cover foundation per [ADR-0050](docs/adr/0050-durable-manual-cover-foundation.md).
 
 Stable identity strategy is accepted through [ADR-0011](docs/adr/0011-stable-domain-identities.md). Pure domain identity primitives exist, and minimal logical media, physical location, device, and library entities exist. Storage volume and series entities remain future work beyond identity values.
 
@@ -271,11 +271,26 @@ Boundaries: domain logic must not depend directly on yt-dlp and no unnecessary t
 
 ## Phase 8 — Covers and Thumbnail Pipeline
 
-Status: planned.
+Status: partially started.
+
+The durable manual cover foundation is implemented (migration `0022`,
+[ADR-0050](docs/adr/0050-durable-manual-cover-foundation.md)): one accepted
+manually selected cover per logical medium from an available GIF or MP4 source,
+durable immutable artifacts, regenerable `cover-thumbnail-jpeg-v1` derivatives,
+source-version fencing, optimistic-concurrency replacement, admin-only
+authoring via `metadata.canonical.write` with `media.cover_set` audit, and
+publication-visibility-gated thumbnail delivery with Gallery cover priority and
+existing fallback. Timeline selection, the explicit `Set as cover` action,
+replacement confirmation, and ephemeral preview are implemented for the manual
+GIF/MP4 slice.
 
 Goal: support durable covers and reproducible derived thumbnails.
 
 Key deliverables: timeline selection, cover import, durable original cover storage, derived cache, reproducibility checks, series covers, and tests.
+
+Still required for phase exit: complete Cover Studio, imported-image covers,
+series covers, cover candidates, full thumbnail lifecycle/eviction, and
+still-image manual cover authoring.
 
 Entry conditions: media metadata and storage layout are stable enough for cover references.
 

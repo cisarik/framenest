@@ -153,6 +153,7 @@ def test_successful_default_listing_exposes_complete_catalog_safe_fields() -> No
                 ],
                 "content_category": "general",
                 "acquisition_source": "unknown",
+                "cover_ready": False,
             }
         ],
         "total": 1,

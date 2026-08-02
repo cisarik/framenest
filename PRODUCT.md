@@ -44,8 +44,12 @@ canonical tag: the first such save records a `processed_at_ms` tagging
 timestamp, non-empty tag edits and title/description edits preserve it, and
 removing all tags clears Processed membership and the timestamp. The catalog
 does not yet include arbitrary user-created collections, a general collection
-manager, suggested filenames, covers, thumbnails, gallery data, or filesystem
-rename workflows. Tauri v2 is accepted as the future desktop shell, but no
+manager, suggested filenames, complete Cover Studio, imported/AI/series covers,
+cover candidates, premium gallery data, or filesystem
+rename workflows. A durable manual cover foundation is implemented (migration
+`0022`): one accepted manually selected cover per logical medium with durable
+artifacts and regenerable cover thumbnails
+([ADR-0050](docs/adr/0050-durable-manual-cover-foundation.md)). Tauri v2 is accepted as the future desktop shell, but no
 Tauri scaffold exists yet. Development remains MacBook-first; Ubuntu Server
 24.04 on the Intel NUC6i5SYH is now the current personal production server
 preparation target for a future authoritative FrameNest server. This document
@@ -304,7 +308,11 @@ Reinventing Entropy - Compression is Intelligence [Math] [Compression] [YouTube]
 
 FrameNest should support timeline frame selection, importing a cover from disk, series and episode covers, durable original covers, and reproducible derived thumbnails.
 
-Manual cover selection comes before AI cover generation. Future Cover Studio
+Manual cover selection comes before AI cover generation. The first durable
+manual cover foundation is implemented ([ADR-0050](docs/adr/0050-durable-manual-cover-foundation.md)):
+an administrator can select a source frame from an available GIF or MP4,
+preview it, and explicitly set it as the accepted cover, retaining an exact
+integer-millisecond cover timestamp. Future Cover Studio
 should let the user select a source frame and explicitly set it as cover while
 retaining an exact cover timestamp. Future AI-generated covers are roadmap
 scope, must create reviewable cover candidates, and must require explicit human

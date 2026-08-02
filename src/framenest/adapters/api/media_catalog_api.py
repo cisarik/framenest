@@ -60,6 +60,7 @@ class CatalogMediaResponse(BaseModel):
     content_category: str = "general"
     acquisition_source: str = "unknown"
     description: str | None = None
+    cover_ready: bool = False
 
 
 class MediaCatalogResponse(BaseModel):
@@ -181,6 +182,7 @@ def _media_response(item: object) -> CatalogMediaResponse:
         content_category=getattr(item, "content_category", "general"),
         acquisition_source=getattr(item, "acquisition_source", "unknown"),
         description=getattr(item, "description", None),
+        cover_ready=getattr(item, "cover_ready", False),
         tags=[
             CatalogTagResponse(
                 key=tag.key,

@@ -21,6 +21,9 @@ acceptance.
 | State | Path | Backup treatment |
 |---|---|---|
 | Catalog database | `/var/lib/framenest/catalog.sqlite3` | Included in catalog backup bundle |
+| Durable accepted cover facts (migration `0022`) | catalog database | Included in catalog backup bundle |
+| Durable cover artifacts | `/var/lib/framenest/covers` | Excluded; regenerable while source is available |
+| Cover thumbnails | `/var/cache/framenest/cover-thumbnails` | Excluded; regenerate |
 | Non-secret AI configuration | `/var/lib/framenest/ai/config.json` | Manual recovery for now |
 | Gallery preview cache | `/var/cache/framenest/gallery-previews` | Excluded; regenerate |
 | Original media | `/srv/media` | Excluded; needs separate second copy |
@@ -46,6 +49,15 @@ final media/location links are likewise catalog data included in the SQLite
 artifact. Claim staging bytes, partial downloads, quarantine bytes, and
 published originals are excluded. A restore therefore preserves durable
 provenance but does not resume or recreate missing media bytes by itself.
+
+Revision `0022` durable accepted-cover rows are also catalog data and travel
+inside the SQLite artifact. Durable cover artifacts and cover thumbnails are
+not included in the bundle. A restore therefore preserves accepted-cover facts
+but not the cover artifact bytes; an artifact may be regenerated only while the
+recorded source location and source version remain available, otherwise manual
+re-selection is required. FrameNest does not claim complete disaster durability
+for cover artifacts in this slice (see
+[ADR-0050](adr/0050-durable-manual-cover-foundation.md)).
 
 ## Check
 

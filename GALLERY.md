@@ -18,7 +18,8 @@ Inbound links: [README.md](README.md), [PRODUCT.md](PRODUCT.md),
 [ADR-0021](docs/adr/0021-tauri-desktop-shell.md),
 [AI_WORKSPACE.md](AI_WORKSPACE.md), [COVER_PIPELINE.md](COVER_PIPELINE.md),
 [ADR-0023](docs/adr/0023-manual-first-metadata-and-multi-model-ai-drafts.md),
-and [ADR-0024](docs/adr/0024-cover-studio-and-ai-cover-candidates.md).
+[ADR-0024](docs/adr/0024-cover-studio-and-ai-cover-candidates.md), and
+[ADR-0050](docs/adr/0050-durable-manual-cover-foundation.md).
 
 Cleanup/update owner: future explicitly authorized Worker under an Orchestrator
 task. Git history remains the archive.
@@ -186,6 +187,16 @@ download.
 Covers are durable user-visible representative images. Derived thumbnails are
 cache artifacts derived from durable sources. Original approved covers and
 reproducible derived thumbnails remain separate concepts.
+
+The first durable manual cover foundation is implemented ([ADR-0050](docs/adr/0050-durable-manual-cover-foundation.md),
+migration `0022`): an administrator can open `Choose cover` from the Details
+surface, select a source frame on a server-authoritative timeline, preview the
+ephemeral frame, and explicitly `Set as cover`. At most one accepted cover
+exists per logical medium. Gallery cards prefer the validated `cover-thumbnail`
+derivative when `cover_ready` is true and fall back to the existing
+`gallery-preview`/fallback path; the existing preview is never reclassified as
+the accepted cover. Full Cover Studio, imported-image covers, AI-generated
+covers, series covers, and candidate management remain future work.
 
 Remote-only cards may use synchronized cover identity/provenance and derived
 JPEG thumbnails. The full video must not be downloaded merely to render a card.

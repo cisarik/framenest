@@ -155,6 +155,8 @@ def test_non_secret_environment_template_is_loopback_first_and_path_explicit() -
         "FRAMENEST_PORT": "8000",
         "FRAMENEST_DATABASE_PATH": "/var/lib/framenest/catalog.sqlite3",
         "FRAMENEST_GALLERY_PREVIEW_CACHE_PATH": "/var/cache/framenest/gallery-previews",
+        "FRAMENEST_COVER_STORAGE_ROOT": "/var/lib/framenest/covers",
+        "FRAMENEST_COVER_THUMBNAIL_CACHE_PATH": "/var/cache/framenest/cover-thumbnails",
         "FRAMENEST_AI_CONFIG_PATH": "/var/lib/framenest/ai/config.json",
     }
 

@@ -26,12 +26,15 @@ FrameNest currently has deterministic local media-analysis preparation,
 representative PNG frames for explicit preview, ephemeral JPEG derivatives for
 VLM transport per
 [ADR-0019](docs/adr/0019-vlm-image-derivatives-and-nvidia-instruct-mode.md),
-and persistent server-owned gallery preview derivatives for imported available
-GIF and MP4 locations.
+persistent server-owned gallery preview derivatives for imported available GIF
+and MP4 locations, and a durable manual cover foundation (migration `0022`):
+at most one accepted manually selected cover per logical medium, an immutable
+server-owned durable JPEG artifact, and a separate regenerable cover thumbnail,
+per [ADR-0050](docs/adr/0050-durable-manual-cover-foundation.md).
 
-FrameNest does not currently implement Cover Studio, persistent accepted
-covers, accepted cover state, cover candidates, imported image covers, or
-AI-generated covers.
+FrameNest does not currently implement the complete Cover Studio, persistent
+cover candidates or candidate history, imported image covers, or AI-generated
+covers.
 
 ## Cover Concepts
 
@@ -170,6 +173,43 @@ cache paths, database paths, or cache filenames.
 Deferred scope remains cleanup, eviction, accepted covers, Cover Studio, cover
 candidates, AI cover generation, animated previews, background generation, and
 arbitrary collection or cover management.
+
+## Durable Manual Cover Foundation (Implemented)
+
+The first durable manually selected cover workflow is implemented and recorded
+in [ADR-0050](docs/adr/0050-durable-manual-cover-foundation.md):
+
+- one accepted cover per logical medium at most, stored in `media_covers`
+  (migration `0022`); absence means no accepted cover;
+- manual source-frame selection only for existing available GIF and MP4
+  locations;
+- server-authoritative duration, source observation, and arbitrary-timestamp
+  extraction through the existing ffprobe/ffmpeg/process boundary;
+- an opaque versioned `source_version` that fences preview and acceptance
+  against source replacement before and during extraction;
+- explicit `Set as cover` (preview never accepts); the previous accepted cover
+  remains authoritative until replacement fully succeeds;
+- optimistic concurrency via `expected_revision`; a stale browser tab cannot
+  silently overwrite a newer cover;
+- durable immutable content-addressed JPEG artifacts under
+  `FRAMENEST_COVER_STORAGE_ROOT` (production-oriented
+  `/var/lib/framenest/covers`);
+- regenerable `cover-thumbnail-jpeg-v1` derivatives under
+  `FRAMENEST_COVER_THUMBNAIL_CACHE_PATH` (production-oriented
+  `/var/cache/framenest/cover-thumbnails`), generated only on acceptance or via
+  the explicit `framenest-covers` operator CLI;
+- admin-only authoring through `metadata.canonical.write` with `media.cover_set`
+  security-audit-before-mutation;
+- ordinary cover thumbnail reads require `gallery.read` and obey the shared
+  content-publication audience policy;
+- Gallery `cover_ready` means a validated cover thumbnail is present; cards
+  prefer it and fall back to the existing `gallery-preview`/fallback path;
+- normal Play still begins at `00:00`; cover timestamps never become playback
+  state.
+
+Durable artifacts are excluded from the catalog backup bundle (cf.
+[docs/BACKUP_AND_RECOVERY.md](docs/BACKUP_AND_RECOVERY.md)); the system does not
+claim complete disaster durability for cover artifacts in this slice.
 
 ## Imported Image Covers
 
