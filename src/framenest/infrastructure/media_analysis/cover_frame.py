@@ -28,6 +28,7 @@ from framenest.infrastructure.media_analysis.process import (
     ProcessRunner,
     SubprocessRunner,
 )
+from framenest.infrastructure.media_analysis.still_image import prepare_still_image_analysis
 from framenest.infrastructure.media_analysis.tools import (
     sanitize_retained_stderr,
     resolve_ffmpeg,
@@ -63,6 +64,18 @@ class LocalCoverSourceAdapter:
     ) -> CoverSourceProbe:
         try:
             candidate_path, _extension = resolve_safe_candidate_path(root, relative_path)
+            if kind is MediaKind.IMAGE:
+                opened = self._content_reader.open(root, relative_path, kind)
+                try:
+                    byte_size = opened.byte_size
+                    mtime_ns = opened.mtime_ns
+                finally:
+                    opened.close()
+                return CoverSourceProbe(
+                    duration_ms=None,
+                    source_size_bytes=byte_size,
+                    source_mtime_ns=mtime_ns,
+                )
             absolute_media_path = str(candidate_path)
             ffprobe_executable, _version = resolve_ffprobe(self._runner)
             metadata = probe_media_metadata(
@@ -99,6 +112,12 @@ class LocalCoverSourceAdapter:
     ) -> RepresentativeFrame:
         try:
             candidate_path, _extension = resolve_safe_candidate_path(root, relative_path)
+            if kind is MediaKind.IMAGE:
+                prepared = prepare_still_image_analysis(candidate_path, relative_path)
+                frames = prepared.representative_frames
+                if len(frames) != 1 or frames[0].timestamp_ms != 0:
+                    raise _FAILED from None
+                return frames[0]
             absolute_media_path = str(candidate_path)
             ffmpeg_executable, _version = resolve_ffmpeg(self._runner)
             result = self._runner.run(

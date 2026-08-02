@@ -306,8 +306,10 @@ The first durable manual cover foundation is implemented through migration
 
 - keep at most one currently accepted cover per logical medium, with sparse
   absence meaning no accepted cover;
-- allow manual source-frame selection only from an existing available GIF or
-  MP4 physical location;
+- allow manual cover selection only from an existing available GIF, MP4, or
+  still-image (JPEG/PNG) physical location; a still-image source is timeless,
+  has no selectable timeline, and uses the canonical source timestamp `0`,
+  which is never presented as a selected temporal frame;
 - require explicit acceptance such as `Set as cover`; a previewed frame MUST
   NOT become the accepted cover;
 - persist an exact integer-millisecond source timestamp and never use frame
@@ -853,7 +855,12 @@ Migration `0022` adds the durable manual cover foundation per
 `media_covers` relation, admin-only manual source-frame authoring from an
 available GIF or MP4 source, durable immutable cover artifacts, regenerable
 cover thumbnails, source-version fencing, optimistic-concurrency replacement,
-and publication-visibility-gated thumbnail delivery.
+and publication-visibility-gated thumbnail delivery. Migration `0023` extends
+the accepted cover source contract to still-image (JPEG/PNG) sources: such
+sources are timeless, keep the canonical source timestamp `0` (never presented
+as a selected temporal frame), carry no fabricated duration, and flow through
+the same durable-artifact, thumbnail, fencing, replacement, audit, and audience
+boundaries as GIF and MP4 covers.
 
 Domain and application logic MUST remain independent of FastAPI and MUST be testable without starting an HTTP server.
 

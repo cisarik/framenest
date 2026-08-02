@@ -46,6 +46,11 @@ class _SyntheticUploadValidator:
                 UploadValidatedMediaKind.ANIMATED_IMAGE,
                 UploadValidatedFormat.GIF,
             )
+        if prefix.startswith(b"\xff\xd8\xff"):
+            return UploadMediaValidationEvidence(
+                UploadValidatedMediaKind.IMAGE,
+                UploadValidatedFormat.JPEG,
+            )
         if len(prefix) >= 8 and prefix[4:8] == b"ftyp":
             return UploadMediaValidationEvidence(
                 UploadValidatedMediaKind.VIDEO,
@@ -149,6 +154,7 @@ def _upload_and_validate(
     [
         ("synthetic.gif", b"GIF89a" + b"\x00" * 10, "animated_image", "gif"),
         ("synthetic.mp4", b"\x00\x00\x00\x18ftypmp42" + b"\x00" * 8, "video", "mp4"),
+        ("synthetic.jpg", b"\xff\xd8\xff" + b"\x00" * 10, "image", "jpg"),
     ],
 )
 def test_local_upload_api_flow_reaches_publish_pending_without_catalog_visibility(

@@ -113,8 +113,9 @@
       <div class="upload-dialog__body">
         <div class="upload-file-field">
           <span id="upload-file-field-label" class="visually-hidden">Source file</span>
-          <input id="upload-file-input" class="upload-file-input visually-hidden" type="file" accept=".gif,.mp4,image/gif,video/mp4" aria-labelledby="upload-file-field-label upload-file-trigger" aria-describedby="upload-file-name">
+          <input id="upload-file-input" class="upload-file-input visually-hidden" type="file" accept=".gif,.mp4,.jpg,.jpeg,.png,image/gif,video/mp4,image/jpeg,image/png" aria-labelledby="upload-file-field-label upload-file-trigger" aria-describedby="upload-file-name upload-file-hint">
           <label id="upload-file-trigger" class="upload-file-trigger" for="upload-file-input">Choose file</label>
+          <p id="upload-file-hint" class="upload-file-hint">Supported: GIF, MP4, JPEG, and PNG.</p>
         </div>
         <div id="upload-row" class="upload-row" data-state="idle">
           <div class="upload-row__summary">

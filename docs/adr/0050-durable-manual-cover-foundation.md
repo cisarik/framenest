@@ -163,6 +163,38 @@ candidates, bulk cover operations, artifact eviction/cleanup, cover inclusion
 in the backup bundle, still-image cover authoring, background generation, or
 thumbnail lifecycle automation.
 
+## Addendum (2026-08-02): Still-Image Manual Cover Authoring
+
+A bounded follow-on slice extends this accepted foundation to still-image
+(JPEG/PNG) cover sources without changing the durability, fencing, replacement,
+audit, storage, or audience contracts recorded above. This addendum supersedes
+the "still-image manual cover authoring" out-of-scope statements in
+[Costs and limitations](#costs-and-limitations) and
+[Revisit Triggers](#revisit-triggers) for exactly this slice.
+
+- Migration `0023` widens the `media_covers.source_kind` check constraint to
+  `('gif', 'mp4', 'image')`; existing GIF and MP4 cover rows are preserved and
+  no other column or table changes.
+- A still-image source is timeless: it carries no fabricated duration, exposes
+  no selectable timeline, and reuses the existing non-null integer
+  `source_timestamp_ms` with the explicit canonical value `0`. The value and
+  the API/UI never present it as a selected temporal frame.
+- Still-image sources are observed for size, mtime, kind, reference, and
+  availability and fenced by the same deterministic source-version digest; the
+  existing optimistic-concurrency and source-change protection applies
+  unchanged.
+- The accepted artifact remains the normalized `durable-cover-jpeg-v1` JPEG and
+  its `cover-thumbnail-jpeg-v1` derivative; the original still-image bytes and
+  location are never modified.
+- Still-image decoding reuses the existing bounded Pillow still-image
+  preparation boundary (no ffprobe/ffmpeg invocation), consistent with the
+  accepted still-image media foundations from migration `0016`.
+- The browser upload cockpit truthfully accepts `.jpg`/`.jpeg`/`.png` and
+  `image/jpeg`/`image/png`; server-authoritative validation remains unchanged.
+- Authoring stays administrator-only through `metadata.canonical.write` with
+  the existing `media.cover_set` security-audit action; ordinary users retain
+  read/download visibility and no mutation action.
+
 ## Related Documents
 
 - [ADR index](README.md)

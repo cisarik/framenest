@@ -193,3 +193,86 @@ def test_probe_rejects_escaping_and_missing_paths(tmp_path: Path) -> None:
             MediaRelativePath("missing.mp4"),
             MediaKind.VIDEO,
         )
+
+
+def _jpeg_bytes() -> bytes:
+    buffer = io.BytesIO()
+    Image.new("RGB", (120, 80), (5, 15, 25)).save(buffer, format="JPEG", quality=90)
+    return buffer.getvalue()
+
+
+def _image_bytes() -> bytes:
+    buffer = io.BytesIO()
+    Image.new("RGB", (96, 64), (5, 15, 25)).save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
+def _image_fixtures(tmp_path: Path, filename: str, payload: bytes = _jpeg_bytes()) -> tuple[LibraryRoot, MediaRelativePath]:
+    root = tmp_path / "root"
+    root.mkdir()
+    (root / filename).write_bytes(payload)
+    library_root = LibraryRoot(flavor=LibraryPathFlavor.POSIX, path=str(root))
+    return library_root, MediaRelativePath(filename)
+
+
+def test_still_image_probe_is_timeless_without_ffprobe(tmp_path: Path) -> None:
+    library_root, relative_path = _image_fixtures(tmp_path, "still.jpg")
+    runner = _FakeRunner(
+        probe_json={"streams": []},
+        frame_payload=b"",
+    )
+    content_reader = _FakeContentReader(byte_size=len(_jpeg_bytes()), mtime_ns=404)
+    adapter = LocalCoverSourceAdapter(runner=runner, content_reader=content_reader)
+    probe = adapter.probe(library_root, relative_path, MediaKind.IMAGE)
+    assert probe.duration_ms is None
+    assert probe.source_size_bytes == len(_jpeg_bytes())
+    assert probe.source_mtime_ns == 404
+    assert runner.calls == []
+
+
+def test_still_image_extract_returns_bounded_png_frame_without_ffmpeg(tmp_path: Path) -> None:
+    library_root, relative_path = _image_fixtures(tmp_path, "still.png", payload=_image_bytes())
+    runner = _FakeRunner(
+        probe_json={"streams": []},
+        frame_payload=b"",
+    )
+    adapter = LocalCoverSourceAdapter(
+        runner=runner,
+        content_reader=_FakeContentReader(byte_size=1, mtime_ns=None),
+    )
+    frame = adapter.extract_frame(library_root, relative_path, MediaKind.IMAGE, 0)
+    assert frame.timestamp_ms == 0
+    assert frame.mime_type == "image/png"
+    assert frame.payload.startswith(b"\x89PNG")
+    assert runner.calls == []
+
+
+def test_still_image_extract_rejects_malformed_content(tmp_path: Path) -> None:
+    library_root, relative_path = _image_fixtures(
+        tmp_path,
+        "broken.jpg",
+        payload=b"\x00" * 64,
+    )
+    runner = _FakeRunner(probe_json={"streams": []}, frame_payload=b"")
+    adapter = LocalCoverSourceAdapter(
+        runner=runner,
+        content_reader=_FakeContentReader(byte_size=64, mtime_ns=None),
+    )
+    with pytest.raises(MediaAnalysisFailedError):
+        adapter.extract_frame(library_root, relative_path, MediaKind.IMAGE, 0)
+
+
+def test_still_image_probe_rejects_mismatched_extension_kind(tmp_path: Path) -> None:
+    library_root, relative_path = _image_fixtures(tmp_path, "still.png")
+    runner = _FakeRunner(probe_json={"streams": []}, frame_payload=b"")
+    content_reader = _FakeContentReader(byte_size=1, mtime_ns=None)
+
+    class _RejectingReader(_FakeContentReader):
+        def open(self, root, relative_path, kind):
+            if kind is not MediaKind.IMAGE:
+                raise AssertionError("unexpected kind")
+            return super().open(root, relative_path, kind)
+
+    adapter = LocalCoverSourceAdapter(runner=runner, content_reader=_RejectingReader(byte_size=1, mtime_ns=None))
+    probe = adapter.probe(library_root, relative_path, MediaKind.IMAGE)
+    assert probe.source_size_bytes == 1

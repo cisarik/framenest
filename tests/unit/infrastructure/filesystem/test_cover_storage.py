@@ -71,6 +71,62 @@ def test_encoder_produces_bounded_durable_artifact() -> None:
     assert len(artifact.digest) == 64
 
 
+def test_still_image_pipeline_normalizes_jpeg_and_png_sources_deterministically(
+    tmp_path: Path,
+) -> None:
+    import hashlib
+
+    from framenest.application.media_analysis import MediaRelativePath
+    from framenest.infrastructure.media_analysis.still_image import prepare_still_image_analysis
+
+    def prepared_frame(filename: str, payload: bytes) -> RepresentativeFrame:
+        source = tmp_path / filename
+        source.write_bytes(payload)
+        return prepare_still_image_analysis(
+            source,
+            MediaRelativePath(filename),
+        ).representative_frames[0]
+
+    def still_bytes(fmt: str) -> bytes:
+        buffer = io.BytesIO()
+        Image.new("RGB", (96, 64), (5, 15, 25)).save(buffer, format=fmt)
+        return buffer.getvalue()
+
+    jpeg_bytes = still_bytes("JPEG")
+    png_bytes = still_bytes("PNG")
+    encoder = PillowCoverEncoder()
+
+    jpeg_artifact = encoder.encode_artifact_frame(prepared_frame("source.jpg", jpeg_bytes))
+    png_artifact = encoder.encode_artifact_frame(prepared_frame("source.png", png_bytes))
+
+    # Both source formats normalize to the identical durable JPEG artifact.
+    assert jpeg_artifact.digest == png_artifact.digest
+    assert jpeg_artifact.width == png_artifact.width == 96
+    assert jpeg_artifact.height == png_artifact.height == 64
+    assert jpeg_artifact.byte_size == png_artifact.byte_size
+    assert jpeg_artifact.width <= COVER_ARTIFACT_MAX_LONG_EDGE
+    assert jpeg_artifact.byte_size <= COVER_ARTIFACT_MAX_BYTES
+
+    with Image.open(io.BytesIO(jpeg_artifact.payload)) as decoded:
+        assert decoded.format == "JPEG"
+        assert decoded.size == (jpeg_artifact.width, jpeg_artifact.height)
+
+    # Deterministic artifact digest for identical source.
+    assert (
+        encoder.encode_artifact_frame(prepared_frame("source2.jpg", jpeg_bytes)).digest
+        == jpeg_artifact.digest
+    )
+
+    # Original fixture bytes are never modified.
+    assert (tmp_path / "source.jpg").read_bytes() == jpeg_bytes
+    assert (tmp_path / "source.png").read_bytes() == png_bytes
+
+    # Thumbnail generation succeeds from the normalized artifact.
+    thumbnail = encoder.encode_thumbnail(jpeg_artifact.payload)
+    assert thumbnail.media_type == COVER_ARTIFACT_MEDIA_TYPE
+    assert thumbnail.sha256 == hashlib.sha256(thumbnail.payload).hexdigest()
+
+
 def test_encoder_produces_bounded_thumbnail_from_artifact() -> None:
     encoder = PillowCoverEncoder()
     artifact = encoder.encode_artifact_frame(_png_frame())

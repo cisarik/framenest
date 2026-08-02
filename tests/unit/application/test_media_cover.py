@@ -50,6 +50,7 @@ from framenest.domain.media_cover import (
     COVER_ARTIFACT_MEDIA_TYPE,
     COVER_ARTIFACT_PROFILE,
     SOURCE_OBSERVATION_ALGORITHM,
+    TIMELESS_IMAGE_TIMESTAMP_MS,
     CoverSourceKind,
     MediaCover,
     source_reference_for_location,
@@ -322,13 +323,17 @@ def test_unknown_or_mismatched_media_location_is_not_found() -> None:
 
 
 def test_unsupported_or_unavailable_source_is_rejected() -> None:
-    service, _, _ = _make_service(media_kind=MediaKind.IMAGE, extension=".png")
+    service, _, _ = _make_service(media_kind=MediaKind.VIDEO, extension=".mkv")
     with pytest.raises(CoverSourceUnavailableError):
         service.timeline(MEDIA_ID, LOCATION_ID)
 
-    service2, _, _ = _make_service(availability=MediaLocationAvailability.OFFLINE)
+    service2, _, _ = _make_service(media_kind=MediaKind.IMAGE, extension=".webp")
     with pytest.raises(CoverSourceUnavailableError):
         service2.timeline(MEDIA_ID, LOCATION_ID)
+
+    service3, _, _ = _make_service(availability=MediaLocationAvailability.OFFLINE)
+    with pytest.raises(CoverSourceUnavailableError):
+        service3.timeline(MEDIA_ID, LOCATION_ID)
 
 
 def test_preview_requires_expected_source_version() -> None:
@@ -466,6 +471,195 @@ def test_open_thumbnail_and_missing_derivative() -> None:
 
     with pytest.raises(CoverMediaNotFoundError):
         service.open_thumbnail(DISTANT_ID)
+
+
+class _TwoPhaseAnalyzer:
+    """Probe/extract fake whose observed source identity changes on request."""
+
+    def __init__(self) -> None:
+        self.changed = False
+        self.calls = 0
+
+    def probe(self, root, relative_path, kind):
+        self.calls += 1
+        if self.changed:
+            return CoverSourceProbe(
+                duration_ms=None,
+                source_size_bytes=4322,
+                source_mtime_ns=7777,
+            )
+        return CoverSourceProbe(
+            duration_ms=None,
+            source_size_bytes=4321,
+            source_mtime_ns=1234,
+        )
+
+    def extract_frame(self, root, relative_path, kind, timestamp_ms):
+        self.calls += 1
+        if self.changed:
+            return _frame(0)
+        return _frame(0)
+
+
+def test_timeless_image_timeline_reports_zero_duration_and_no_temporal_contract() -> None:
+    service, _, _ = _make_service(media_kind=MediaKind.IMAGE, extension=".png")
+    timeline = service.timeline(MEDIA_ID, LOCATION_ID)
+    assert timeline.media_kind is MediaKind.IMAGE
+    assert timeline.duration_ms == 0
+    assert len(timeline.source_version) == 64
+    assert "/" not in timeline.source_version
+
+
+def test_timeless_image_preview_and_accept_use_canonical_zero_timestamp() -> None:
+    service, _, _ = _make_service(media_kind=MediaKind.IMAGE, extension=".png")
+    timeline = service.timeline(MEDIA_ID, LOCATION_ID)
+    preview = service.preview(
+        MEDIA_ID,
+        LOCATION_ID,
+        TIMELESS_IMAGE_TIMESTAMP_MS,
+        expected_source_version=timeline.source_version,
+    )
+    assert preview.media_type == "image/png"
+    assert preview.payload
+
+    created = service.accept(
+        MEDIA_ID,
+        LOCATION_ID,
+        timestamp_ms=TIMELESS_IMAGE_TIMESTAMP_MS,
+        expected_revision=0,
+        expected_source_version=timeline.source_version,
+    )
+    assert created.status == "created"
+    assert created.revision == 1
+    assert created.timestamp_ms == TIMELESS_IMAGE_TIMESTAMP_MS
+    assert created.thumbnail_state == "ready"
+
+    state = service.admin_state(MEDIA_ID)
+    assert state.has_cover is True
+    assert state.source_kind == CoverSourceKind.IMAGE.value
+    assert state.timestamp_ms == TIMELESS_IMAGE_TIMESTAMP_MS
+
+
+def test_timeless_image_rejects_nonzero_or_invalid_timestamp() -> None:
+    service, _, _ = _make_service(media_kind=MediaKind.IMAGE, extension=".png")
+    timeline = service.timeline(MEDIA_ID, LOCATION_ID)
+    with pytest.raises(CoverTimestampInvalidError):
+        service.preview(
+            MEDIA_ID,
+            LOCATION_ID,
+            500,
+            expected_source_version=timeline.source_version,
+        )
+    with pytest.raises(CoverTimestampInvalidError):
+        service.accept(
+            MEDIA_ID,
+            LOCATION_ID,
+            timestamp_ms=500,
+            expected_revision=0,
+            expected_source_version=timeline.source_version,
+        )
+    assert service.admin_state(MEDIA_ID).has_cover is False
+
+
+def test_timeless_image_accept_is_idempotent_and_original_facts_are_sanitized() -> None:
+    service, _, _ = _make_service(media_kind=MediaKind.IMAGE, extension=".png")
+    timeline = service.timeline(MEDIA_ID, LOCATION_ID)
+    created = service.accept(
+        MEDIA_ID,
+        LOCATION_ID,
+        timestamp_ms=TIMELESS_IMAGE_TIMESTAMP_MS,
+        expected_revision=0,
+        expected_source_version=timeline.source_version,
+    )
+    assert created.status == "created"
+
+    unchanged = service.accept(
+        MEDIA_ID,
+        LOCATION_ID,
+        timestamp_ms=TIMELESS_IMAGE_TIMESTAMP_MS,
+        expected_revision=1,
+        expected_source_version=timeline.source_version,
+    )
+    assert unchanged.status == "unchanged"
+    assert unchanged.revision == 1
+
+    state = service.admin_state(MEDIA_ID)
+    assert state.source_reference == f"location:{LOCATION_ID.to_string()}"
+    assert "/" not in (state.source_reference or "")
+    assert state.artifact_state == "available"
+
+
+def test_timeless_image_replaces_old_cover_under_correct_revision_after_source_change() -> None:
+    analyzer = _TwoPhaseAnalyzer()
+    service, _, _ = _make_service(
+        media_kind=MediaKind.IMAGE,
+        extension=".png",
+        analyzer=analyzer,
+    )
+    first = service.timeline(MEDIA_ID, LOCATION_ID)
+    created = service.accept(
+        MEDIA_ID,
+        LOCATION_ID,
+        timestamp_ms=TIMELESS_IMAGE_TIMESTAMP_MS,
+        expected_revision=0,
+        expected_source_version=first.source_version,
+    )
+    assert created.status == "created"
+    assert created.revision == 1
+
+    analyzer.changed = True
+    second = service.timeline(MEDIA_ID, LOCATION_ID)
+    assert second.source_version != first.source_version
+
+    replaced = service.accept(
+        MEDIA_ID,
+        LOCATION_ID,
+        timestamp_ms=TIMELESS_IMAGE_TIMESTAMP_MS,
+        expected_revision=1,
+        expected_source_version=second.source_version,
+    )
+    assert replaced.status == "replaced"
+    assert replaced.revision == 2
+
+    with pytest.raises(CoverConflictError):
+        service.accept(
+            MEDIA_ID,
+            LOCATION_ID,
+            timestamp_ms=TIMELESS_IMAGE_TIMESTAMP_MS,
+            expected_revision=1,
+            expected_source_version=second.source_version,
+        )
+    assert service.admin_state(MEDIA_ID).revision == 2
+
+
+def test_timeless_image_source_change_before_accept_is_rejected() -> None:
+    service, _, _ = _make_service(media_kind=MediaKind.IMAGE, extension=".png")
+    timeline = service.timeline(MEDIA_ID, LOCATION_ID)
+    with pytest.raises(CoverSourceChangedError):
+        service.accept(
+            MEDIA_ID,
+            LOCATION_ID,
+            timestamp_ms=TIMELESS_IMAGE_TIMESTAMP_MS,
+            expected_revision=0,
+            expected_source_version="f" * 64,
+        )
+    assert service.admin_state(MEDIA_ID).has_cover is False
+
+
+def test_timeless_image_persisted_cover_uses_image_kind_and_no_duration() -> None:
+    service, _, _ = _make_service(media_kind=MediaKind.IMAGE, extension=".jpg")
+    timeline = service.timeline(MEDIA_ID, LOCATION_ID)
+    service.accept(
+        MEDIA_ID,
+        LOCATION_ID,
+        timestamp_ms=TIMELESS_IMAGE_TIMESTAMP_MS,
+        expected_revision=0,
+        expected_source_version=timeline.source_version,
+    )
+    state = service.admin_state(MEDIA_ID)
+    assert state.has_cover is True
+    assert state.source_kind == CoverSourceKind.IMAGE.value
+    assert state.timestamp_ms == TIMELESS_IMAGE_TIMESTAMP_MS
 
 
 def test_source_facts_are_sanitized() -> None:

@@ -121,6 +121,41 @@ def test_observation_rejects_negative_and_zero_observations() -> None:
         )
 
 
+def test_timeless_image_source_kind_is_explicit() -> None:
+    image = CoverSourceObservation(
+        source_location_id=LOCATION_ID,
+        source_kind=CoverSourceKind.IMAGE,
+        source_size_bytes=4321,
+        source_mtime_ns=123456,
+        source_duration_ms=None,
+    )
+    assert image.source_kind is CoverSourceKind.IMAGE
+    assert image.source_duration_ms is None
+
+
+def test_timeless_image_cover_uses_canonical_zero_timestamp() -> None:
+    cover = _base_cover(
+        source_kind=CoverSourceKind.IMAGE,
+        source_timestamp_ms=0,
+        source_duration_ms=None,
+    )
+    assert cover.source_kind is CoverSourceKind.IMAGE
+    assert cover.source_timestamp_ms == 0
+    assert cover.source_duration_ms is None
+
+
+def test_timeless_image_cover_rejects_nonzero_timestamp() -> None:
+    from framenest.domain.media_cover import TIMELESS_IMAGE_TIMESTAMP_MS
+
+    assert TIMELESS_IMAGE_TIMESTAMP_MS == 0
+    with pytest.raises(FrameNestMediaCoverError):
+        _base_cover(
+            source_kind=CoverSourceKind.IMAGE,
+            source_timestamp_ms=-1,
+            source_duration_ms=None,
+        )
+
+
 def test_source_reference_for_location_is_opaque_and_sanitized() -> None:
     reference = source_reference_for_location(LOCATION_ID)
     assert reference == f"location:{LOCATION_ID.to_string()}"

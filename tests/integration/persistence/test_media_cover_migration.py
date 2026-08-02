@@ -85,6 +85,9 @@ def _insert_cover(
     *,
     source_location_id: str | None,
     revision: int = 1,
+    source_kind: str = "mp4",
+    timestamp_ms: int = 500,
+    duration_ms: int | None = 1000,
 ) -> None:
     connection.execute(
         "INSERT INTO media_covers ("
@@ -93,19 +96,28 @@ def _insert_cover(
         " source_duration_ms, source_observation_version, source_observation_digest, "
         " artifact_profile, artifact_media_type, artifact_digest, artifact_width, "
         " artifact_height, artifact_byte_size, revision, accepted_at_ms) "
-        "VALUES (?, ?, ?, 'mp4', 500, 12345, 123, 1000, "
+        "VALUES (?, ?, ?, ?, ?, 12345, 123, ?, "
         " 'cover-source-observation-v1', ?, 'durable-cover-jpeg-v1', "
         " 'image/jpeg', ?, 512, 288, 20000, ?, 100)",
         (
             media_id,
             source_location_id,
             f"location:{source_location_id}" if source_location_id else "location:" + "0" * 36,
+            source_kind,
+            timestamp_ms,
+            duration_ms,
             SOURCE_OBS,
             DIGEST,
             revision,
         ),
     )
     connection.commit()
+
+
+def _media_covers_sql(connection: sqlite3.Connection) -> str:
+    return connection.execute(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'media_covers'"
+    ).fetchone()[0]
 
 
 def test_empty_and_populated_0021_databases_upgrade_without_backfill(
@@ -283,7 +295,7 @@ def test_downgrade_is_guarded_against_populated_cover_state(tmp_path: Path) -> N
         populated.close()
 
 
-def test_packaged_head_is_0022(tmp_path: Path) -> None:
+def test_packaged_head_is_0023(tmp_path: Path) -> None:
     from framenest.infrastructure.persistence.migrations import (
         inspect_database_migration_status,
         upgrade_database_to_head,
@@ -291,5 +303,145 @@ def test_packaged_head_is_0022(tmp_path: Path) -> None:
 
     settings = FrameNestSettings(database_path=tmp_path / "head.sqlite3", _env_file=None)
     status = upgrade_database_to_head(settings)
-    assert status.current_revision == status.head_revision == "0022"
+    assert status.current_revision == status.head_revision == "0023"
     assert inspect_database_migration_status(settings) == status
+
+
+def test_0023_upgrade_widens_source_kind_and_preserves_existing_rows(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "upgrade.sqlite3"
+    _migrate(database_path, "0022")
+    connection = _connect(database_path)
+    try:
+        _seed_catalog(connection)
+        _insert_cover(connection, MEDIA_A, source_location_id=LOCATION_A, source_kind="mp4")
+        _insert_cover(connection, MEDIA_B, source_location_id=None, source_kind="gif")
+        preserved = connection.execute(
+            "SELECT media_id, source_reference, source_kind, source_timestamp_ms, "
+            " source_size_bytes, source_mtime_ns, source_duration_ms, "
+            " source_observation_version, source_observation_digest, "
+            " artifact_profile, artifact_media_type, artifact_digest, "
+            " artifact_width, artifact_height, artifact_byte_size, revision, "
+            " accepted_at_ms FROM media_covers ORDER BY media_id"
+        ).fetchall()
+    finally:
+        connection.close()
+
+    _migrate(database_path, "0023")
+    connection = _connect(database_path)
+    try:
+        sql = _media_covers_sql(connection)
+        assert "'gif'" in sql and "'mp4'" in sql and "'image'" in sql
+        after = connection.execute(
+            "SELECT media_id, source_reference, source_kind, source_timestamp_ms, "
+            " source_size_bytes, source_mtime_ns, source_duration_ms, "
+            " source_observation_version, source_observation_digest, "
+            " artifact_profile, artifact_media_type, artifact_digest, "
+            " artifact_width, artifact_height, artifact_byte_size, revision, "
+            " accepted_at_ms FROM media_covers ORDER BY media_id"
+        ).fetchall()
+        assert after == preserved
+        assert connection.execute("PRAGMA integrity_check").fetchone() == ("ok",)
+        assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
+
+        # A timeless still-image cover row persists at head.
+        connection.execute(
+            "INSERT INTO logical_media (id, media_kind, created_at_ms, updated_at_ms) "
+            "VALUES ('99999999-9999-4999-8999-999999999999', 'image', 1, 1)"
+        )
+        _insert_cover(
+            connection,
+            "99999999-9999-4999-8999-999999999999",
+            source_location_id=None,
+            source_kind="image",
+            timestamp_ms=0,
+            duration_ms=None,
+        )
+        row = connection.execute(
+            "SELECT source_kind, source_timestamp_ms, source_duration_ms "
+            "FROM media_covers WHERE media_id = '99999999-9999-4999-8999-999999999999'"
+        ).fetchone()
+        assert row == ("image", 0, None)
+        # One accepted cover per logical medium remains enforced.
+        with pytest.raises(sqlite3.IntegrityError):
+            connection.execute(
+                "INSERT INTO media_covers ("
+                " media_id, source_reference, source_kind, source_timestamp_ms, "
+                " source_size_bytes, source_observation_version, "
+                " source_observation_digest, artifact_profile, artifact_media_type, "
+                " artifact_digest, artifact_width, artifact_height, "
+                " artifact_byte_size, revision, accepted_at_ms) "
+                "VALUES ('99999999-9999-4999-8999-999999999999', "
+                " 'location:' || '0' * 36, 'image', 0, 100, "
+                " 'cover-source-observation-v1', ?, 'durable-cover-jpeg-v1', "
+                " 'image/jpeg', ?, 100, 100, 100, 2, 101)",
+                (SOURCE_OBS, DIGEST),
+            )
+        connection.rollback()
+    finally:
+        connection.close()
+
+
+def test_0023_downgrade_is_guarded_against_image_source_rows(tmp_path: Path) -> None:
+    empty_path = tmp_path / "empty.sqlite3"
+    _migrate(empty_path, "0023")
+    _migrate(empty_path, "0022", downgrade=True)
+    empty = _connect(empty_path)
+    try:
+        assert empty.execute(
+            "SELECT version_num FROM alembic_version"
+        ).fetchone() == ("0022",)
+        assert "'image'" not in _media_covers_sql(empty)
+    finally:
+        empty.close()
+
+    gif_only_path = tmp_path / "gif-only.sqlite3"
+    _migrate(gif_only_path, "0023")
+    connection = _connect(gif_only_path)
+    try:
+        _seed_catalog(connection)
+        _insert_cover(connection, MEDIA_A, source_location_id=LOCATION_A, source_kind="mp4")
+        _insert_cover(connection, MEDIA_B, source_location_id=None, source_kind="gif")
+    finally:
+        connection.close()
+    _migrate(gif_only_path, "0022", downgrade=True)
+    connection = _connect(gif_only_path)
+    try:
+        assert "'image'" not in _media_covers_sql(connection)
+        assert connection.execute(
+            "SELECT COUNT(*) FROM media_covers"
+        ).fetchone() == (2,)
+    finally:
+        connection.close()
+
+    image_path = tmp_path / "image.sqlite3"
+    _migrate(image_path, "0023")
+    connection = _connect(image_path)
+    try:
+        _seed_catalog(connection)
+        _insert_cover(
+            connection,
+            MEDIA_A,
+            source_location_id=LOCATION_A,
+            source_kind="image",
+            timestamp_ms=0,
+            duration_ms=None,
+        )
+    finally:
+        connection.close()
+    with pytest.raises(
+        RuntimeError,
+        match="Cannot downgrade still-image covers while image-source covers exist",
+    ):
+        _migrate(image_path, "0022", downgrade=True)
+    connection = _connect(image_path)
+    try:
+        assert connection.execute(
+            "SELECT version_num FROM alembic_version"
+        ).fetchone() == ("0023",)
+        assert connection.execute(
+            "SELECT COUNT(*) FROM media_covers"
+        ).fetchone() == (1,)
+    finally:
+        connection.close()

@@ -24,15 +24,24 @@ _SOURCE_REFERENCE_PATTERN = re.compile(r"^location:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a
 _MACHINE_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+-]{0,62}$")
 
 
+TIMELESS_IMAGE_TIMESTAMP_MS = 0
+
+
 class FrameNestMediaCoverError(ValueError):
     """Sanitized error raised when accepted-cover construction is invalid."""
 
 
 class CoverSourceKind(StrEnum):
-    """Supported physical source kinds for the first manual cover workflow."""
+    """Supported physical source kinds for the manual cover workflow.
+
+    ``IMAGE`` is a timeless still-image source: it has no video duration and
+    always uses the canonical source timestamp ``0``, which is never presented
+    as a selected temporal frame.
+    """
 
     GIF = "gif"
     MP4 = "mp4"
+    IMAGE = "image"
 
 
 def _validate_non_negative_int(value: object, *, message: str) -> int:

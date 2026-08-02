@@ -2666,10 +2666,14 @@ def test_web_shell_contains_local_upload_cockpit_without_gallery_publication_cla
     assert "Upload media" not in upload_dialog
     assert "upload-file-input" in upload_dialog
     assert 'class="upload-file-input visually-hidden"' in upload_dialog
-    assert 'accept=".gif,.mp4,image/gif,video/mp4"' in upload_dialog
+    assert (
+        'accept=".gif,.mp4,.jpg,.jpeg,.png,image/gif,video/mp4,image/jpeg,image/png"'
+        in upload_dialog
+    )
     assert 'id="upload-file-field-label" class="visually-hidden">Source file</span>' in upload_dialog
     assert 'aria-labelledby="upload-file-field-label upload-file-trigger"' in upload_dialog
-    assert 'aria-describedby="upload-file-name"' in upload_dialog
+    assert 'aria-describedby="upload-file-name upload-file-hint"' in upload_dialog
+    assert '>Supported: GIF, MP4, JPEG, and PNG.</p>' in upload_dialog
     assert 'for="upload-file-input">Choose file</label>' in upload_dialog
     assert upload_dialog.count('id="upload-file-name"') == 1
     assert 'id="upload-state-label"' in upload_dialog

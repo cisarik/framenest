@@ -82,6 +82,8 @@ function coverHarness(overrides = {}) {
     URLSearchParams,
     clearTimeout() {},
     setTimeout() {},
+    coverTimeline: { hidden: false },
+    coverCurrentTimestamp: { hidden: false },
     coverDialogState: {
       available: true,
       openItem: { media_id: "11111111-1111-4111-8111-111111111111" },
@@ -93,6 +95,7 @@ function coverHarness(overrides = {}) {
       previewToken: 0,
       acceptToken: 0,
       selectedTimestampMs: 0,
+      isImage: false,
       confirmingReplace: false,
       submitting: false,
     },
@@ -114,6 +117,9 @@ function coverHarness(overrides = {}) {
     "coverContextStillCurrent",
     "sanitizedCoverMessage",
     "handleCoverErrorResponse",
+    "coverTimelineFromPayload",
+    "coverSubmittedTimestampMs",
+    "applyCoverImageMode",
   ].map(productionFunction).join("\n");
 
   vm.runInContext(`
@@ -244,6 +250,38 @@ test("cover error messages are sanitized", () => {
   );
 });
 
+test("image timeline payload selects timeless image mode without a scrubber", () => {
+  const h = coverHarness();
+  assert.equal(
+    h.run(`coverTimelineFromPayload({ media_kind: "image", duration_ms: 0 })`),
+    true,
+  );
+  assert.equal(
+    h.run(`coverTimelineFromPayload({ media_kind: "video", duration_ms: 2000 })`),
+    false,
+  );
+  assert.equal(
+    h.run(`coverTimelineFromPayload({ media_kind: "animated_image", duration_ms: 1000 })`),
+    false,
+  );
+  assert.equal(h.run(`coverTimelineFromPayload(null)`), false);
+});
+
+test("timeless image mode hides the timeline and never submits a nonzero timestamp", () => {
+  const h = coverHarness();
+  h.run(`applyCoverImageMode(true)`);
+  assert.equal(h.context.coverDialogState.isImage, true);
+  assert.equal(h.context.coverTimeline.hidden, true);
+  assert.equal(h.context.coverCurrentTimestamp.hidden, true);
+  h.run(`applyCoverImageMode(false)`);
+  assert.equal(h.context.coverDialogState.isImage, false);
+  assert.equal(h.context.coverTimeline.hidden, false);
+  assert.equal(h.context.coverCurrentTimestamp.hidden, false);
+  assert.equal(h.run(`coverSubmittedTimestampMs(true, 500)`), 0);
+  assert.equal(h.run(`coverSubmittedTimestampMs(false, 500)`), 500);
+  assert.equal(h.run(`coverSubmittedTimestampMs(false, 0)`), 0);
+});
+
 test("cover dialog markup and styles are present and accessible", () => {
   for (const id of [
     "media-details-choose-cover",
@@ -261,6 +299,8 @@ test("cover dialog markup and styles are present and accessible", () => {
   ]) {
     assert.ok(INDEX_SOURCE.includes(`id="${id}"`), `missing id ${id}`);
   }
+  assert.ok(INDEX_SOURCE.includes(`class="cover-timeline"`));
+  assert.ok(INDEX_SOURCE.includes(`id="upload-file-hint"`));
   assert.ok(STYLES_SOURCE.includes(".cover-dialog"));
   assert.ok(STYLES_SOURCE.includes("prefers-reduced-motion"));
   assert.ok(INDEX_SOURCE.includes(`aria-live="polite"`));

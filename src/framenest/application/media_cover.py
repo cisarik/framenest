@@ -45,6 +45,7 @@ from framenest.domain.media_cover import (
     COVER_ARTIFACT_MEDIA_TYPE,
     COVER_ARTIFACT_PROFILE,
     SOURCE_OBSERVATION_ALGORITHM,
+    TIMELESS_IMAGE_TIMESTAMP_MS,
     CoverSourceKind,
     CoverSourceObservation,
     MediaCover,
@@ -160,7 +161,11 @@ class CoverService:
     def timeline(self, media_id: MediaId, location_id: MediaLocationId) -> CoverTimeline:
         media, location, library = self._resolve_supported(media_id, location_id)
         probe = self._probe(media, location, library)
-        duration_ms = _require_positive_duration(probe.duration_ms)
+        source_kind = _required_source_kind(media, location)
+        if _is_timeless_kind(source_kind):
+            duration_ms = 0
+        else:
+            duration_ms = _require_positive_duration(probe.duration_ms)
         return CoverTimeline(
             media_id=media.id,
             location_id=location.id,
@@ -179,14 +184,18 @@ class CoverService:
         media, location, library = self._resolve_supported(media_id, location_id)
         probe = self._probe(media, location, library)
         _ensure_source_version(media, location, probe, expected_source_version)
-        duration_ms = _require_positive_duration(probe.duration_ms)
-        _ensure_timestamp(timestamp_ms, duration_ms)
+        requested_timestamp_ms = _validated_timestamp_ms(
+            media=media,
+            location=location,
+            probe=probe,
+            requested_timestamp_ms=timestamp_ms,
+        )
         try:
             frame = self._analyzer.extract_frame(
                 library.root,
                 AnalysisRelativePath(location.relative_path.value),
                 media.kind,
-                timestamp_ms,
+                requested_timestamp_ms,
             )
         except (MediaAnalysisUnavailableError, MediaAnalysisFailedError):
             raise CoverSourceUnavailableError(MEDIA_CONTENT_UNAVAILABLE_MESSAGE) from None
@@ -204,15 +213,19 @@ class CoverService:
         media, location, library = self._resolve_supported(media_id, location_id)
         probe = self._probe(media, location, library)
         _ensure_source_version(media, location, probe, expected_source_version)
-        duration_ms = _require_positive_duration(probe.duration_ms)
-        _ensure_timestamp(timestamp_ms, duration_ms)
+        requested_timestamp_ms = _validated_timestamp_ms(
+            media=media,
+            location=location,
+            probe=probe,
+            requested_timestamp_ms=timestamp_ms,
+        )
         observation = _observation(media, location, probe)
         try:
             frame = self._analyzer.extract_frame(
                 library.root,
                 AnalysisRelativePath(location.relative_path.value),
                 media.kind,
-                timestamp_ms,
+                requested_timestamp_ms,
             )
         except (MediaAnalysisUnavailableError, MediaAnalysisFailedError):
             raise CoverSourceUnavailableError(MEDIA_CONTENT_UNAVAILABLE_MESSAGE) from None
@@ -237,7 +250,7 @@ class CoverService:
             media=media,
             location=location,
             observation=observation,
-            timestamp_ms=timestamp_ms,
+            timestamp_ms=requested_timestamp_ms,
             artifact_digest=artifact.digest,
             artifact_width=artifact.width,
             artifact_height=artifact.height,
@@ -424,7 +437,57 @@ def _source_kind_for(media: LogicalMedia, location: MediaLocation) -> CoverSourc
         return CoverSourceKind.MP4
     if media.kind is MediaKind.ANIMATED_IMAGE and extension == ".gif":
         return CoverSourceKind.GIF
+    if (
+        media.kind is MediaKind.IMAGE
+        and extension in (".jpg", ".jpeg", ".png")
+    ):
+        return CoverSourceKind.IMAGE
     return None
+
+
+def _required_source_kind(media: LogicalMedia, location: MediaLocation) -> CoverSourceKind:
+    source_kind = _source_kind_for(media, location)
+    if source_kind is None:
+        raise CoverSourceUnavailableError(MEDIA_CONTENT_UNAVAILABLE_MESSAGE)
+    return source_kind
+
+
+def _is_timeless_kind(source_kind: CoverSourceKind) -> bool:
+    """Return whether the source kind is a timeless still image.
+
+    A timeless still image has no video duration and no selectable frame time;
+    its canonical source timestamp is ``0`` and must never be presented as a
+    chosen temporal frame.
+    """
+    return source_kind is CoverSourceKind.IMAGE
+
+
+def _validated_timestamp_ms(
+    *,
+    media: LogicalMedia,
+    location: MediaLocation,
+    probe: CoverSourceProbe,
+    requested_timestamp_ms: int,
+) -> int:
+    """Return the validated extraction timestamp for the requested source.
+
+    Temporal GIF/MP4 sources require an integer millisecond within the probe
+    duration. Timeless still-image sources accept only the canonical ``0``.
+    """
+    source_kind = _required_source_kind(media, location)
+    if _is_timeless_kind(source_kind):
+        return _ensure_timeless_timestamp(requested_timestamp_ms)
+    duration_ms = _require_positive_duration(probe.duration_ms)
+    _ensure_timestamp(requested_timestamp_ms, duration_ms)
+    return requested_timestamp_ms
+
+
+def _ensure_timeless_timestamp(timestamp_ms: int) -> int:
+    if isinstance(timestamp_ms, bool) or not isinstance(timestamp_ms, int):
+        raise CoverTimestampInvalidError("The selected timestamp is invalid.")
+    if timestamp_ms != TIMELESS_IMAGE_TIMESTAMP_MS:
+        raise CoverTimestampInvalidError("The selected timestamp is invalid.")
+    return TIMELESS_IMAGE_TIMESTAMP_MS
 
 
 def _observation(

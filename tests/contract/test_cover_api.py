@@ -207,6 +207,30 @@ def test_timeline_maps_missing_and_unavailable_sources() -> None:
         assert "path" not in response.text.lower()
 
 
+def test_timeline_reports_timeless_image_without_fabricated_duration() -> None:
+    from framenest.domain.identities import MediaId, MediaLocationId
+    from framenest.domain.media import MediaKind
+
+    image_timeline = CoverTimeline(
+        media_id=MediaId.from_string(MEDIA_ID),
+        location_id=MediaLocationId.from_string(LOCATION_ID),
+        media_kind=MediaKind.IMAGE,
+        duration_ms=0,
+        source_version="c" * 64,
+    )
+    client, _ = _client(
+        identity=_identity(ROLE_ADMIN),
+        service=_DefaultService(result=image_timeline),
+    )
+    response = client.get(TIMELINE_PATH)
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["media_kind"] == "image"
+    assert payload["duration_ms"] == 0
+    assert payload["source_version"] == "c" * 64
+    assert "path" not in response.text.lower()
+
+
 def test_frame_preview_is_ephemeral_and_no_store() -> None:
     client, _ = _client(identity=_identity(ROLE_ADMIN))
     response = client.get(FRAME_PATH, params={"timestamp_ms": 500, "source_version": "a" * 64})

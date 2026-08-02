@@ -1051,6 +1051,38 @@ test("Production Upload cancellation contains no native browser confirmation", (
   assert.equal(/(^|[^A-Za-z0-9_.])confirm\s*\(/m.test(APP_SOURCE), false);
 });
 
+test("Upload picker accepts GIF, MP4, JPEG, and PNG with truthful guidance", () => {
+  const acceptMatch = INDEX_SOURCE.match(
+    /<input id="upload-file-input"[^>]*accept="([^"]+)"/,
+  );
+  assert.ok(acceptMatch, "upload-file-input with accept attribute present");
+  const accept = acceptMatch[1].split(",").map((token) => token.trim()).filter(Boolean);
+  for (const expected of [
+    ".gif",
+    ".mp4",
+    ".jpg",
+    ".jpeg",
+    ".png",
+    "image/gif",
+    "video/mp4",
+    "image/jpeg",
+    "image/png",
+  ]) {
+    assert.ok(accept.includes(expected), `accept missing ${expected}`);
+  }
+  assert.ok(INDEX_SOURCE.includes(`id="upload-file-hint"`));
+  const hint = INDEX_SOURCE.match(
+    /<p id="upload-file-hint"[^>]*>(.*?)<\/p>/,
+  );
+  assert.ok(hint, "upload file hint present");
+  assert.match(hint[1], /GIF/);
+  assert.match(hint[1], /MP4/);
+  assert.match(hint[1], /JPEG/);
+  assert.match(hint[1], /PNG/);
+  assert.equal(APP_SOURCE.includes("Select one local GIF or MP4."), false);
+  assert.ok(APP_SOURCE.includes("Select one local GIF, MP4, JPEG, or PNG."));
+});
+
 test("Upload controls expose the exact action set for every accepted lifecycle state", async () => {
   const h = await createHarness();
   const scenarios = [

@@ -24,6 +24,7 @@ const REPO_ROOT = path.resolve(__dirname, "..");
 const VENV_PYTHON = path.join(REPO_ROOT, ".venv", "bin", "python");
 const SERVER_APP_JS = path.join(REPO_ROOT, "src", "framenest", "adapters", "api", "web", "app.js");
 const CHROME = process.env.FRAMENEST_CHROME_BIN || "google-chrome-stable";
+const MEDIA_IMG = "99999999-9999-4999-8999-999999999999";
 
 const gated = process.env.FRAMENEST_RUN_BROWSER_EVIDENCE !== "1";
 
@@ -48,6 +49,7 @@ function generateMedia(dir) {
   assert.ok(ffmpegBin, "ffmpeg is required for browser cover evidence");
   const mp4 = path.join(dir, "clip.mp4");
   const gif = path.join(dir, "clip.gif");
+  const jpg = path.join(dir, "still.jpg");
   for (const [output, extra] of [
     [mp4, ["-pix_fmt", "yuv420p"]],
     [gif, []],
@@ -60,7 +62,14 @@ function generateMedia(dir) {
     ], { encoding: "utf8", timeout: 60000 });
     assert.equal(result.status, 0, `ffmpeg failed: ${result.stderr}`);
   }
-  return { mp4, gif };
+  const still = spawnSync(ffmpegBin, [
+    "-nostdin", "-hide_banner", "-loglevel", "error", "-y",
+    "-f", "lavfi", "-i", "color=c=green:s=200x150",
+    "-frames:v", "1",
+    jpg,
+  ], { encoding: "utf8", timeout: 60000 });
+  assert.equal(still.status, 0, `ffmpeg still failed: ${still.stderr}`);
+  return { mp4, gif, jpg };
 }
 
 function pythonBootstrapScript() {
@@ -86,8 +95,10 @@ upgrade_database_to_head(settings_pre)
 
 MEDIA_MP4 = "11111111-1111-4111-8111-111111111111"
 MEDIA_GIF = "22222222-2222-4222-8222-222222222222"
+MEDIA_IMG = "99999999-9999-4999-8999-999999999999"
 LOC_MP4 = "33333333-3333-4333-8333-333333333333"
 LOC_GIF = "44444444-4444-4444-8444-444444444444"
+LOC_IMG = "88888888-8888-4888-8888-888888888888"
 LIB = "55555555-5555-4555-8555-555555555555"
 DEV = "66666666-6666-4666-8666-666666666666"
 
@@ -96,7 +107,7 @@ conn.execute("PRAGMA foreign_keys=ON")
 try:
     conn.executemany(
         "INSERT INTO logical_media (id, media_kind, created_at_ms, updated_at_ms) VALUES (?, ?, 1, 1)",
-        ((MEDIA_MP4, "video"), (MEDIA_GIF, "animated_image")),
+        ((MEDIA_MP4, "video"), (MEDIA_GIF, "animated_image"), (MEDIA_IMG, "image")),
     )
     conn.execute("INSERT INTO devices (id, display_name) VALUES (?, 'device')", (DEV,))
     conn.execute(
@@ -107,11 +118,11 @@ try:
         "INSERT INTO physical_media_locations "
         "(id, media_id, library_id, relative_path, availability, observed_size_bytes, observed_mtime_ns, created_at_ms, updated_at_ms) "
         "VALUES (?, ?, ?, ?, 'available', 1, 1, 1, 1)",
-        ((LOC_MP4, MEDIA_MP4, LIB, "clip.mp4"), (LOC_GIF, MEDIA_GIF, LIB, "clip.gif")),
+        ((LOC_MP4, MEDIA_MP4, LIB, "clip.mp4"), (LOC_GIF, MEDIA_GIF, LIB, "clip.gif"), (LOC_IMG, MEDIA_IMG, LIB, "still.jpg")),
     )
     conn.executemany(
         "INSERT INTO media_content_publications (media_id, published_at_ms, publication_origin) VALUES (?, 1, 'legacy_backfill')",
-        ((MEDIA_MP4,), (MEDIA_GIF,)),
+        ((MEDIA_MP4,), (MEDIA_GIF,), (MEDIA_IMG,)),
     )
     conn.commit()
 finally:
@@ -342,7 +353,15 @@ test("real browser evidence: manual cover authoring flow", { skip: gated, timeou
     });
 
     await cdp.send("Page.navigate", { url: appUrl });
-    await waitFor(cdp, `document.querySelectorAll(".catalog-card").length >= 2`, { label: "two cards" });
+    await waitFor(cdp, `document.querySelectorAll(".catalog-card").length >= 3`, { label: "three cards" });
+
+    // Upload picker framing truthfully includes still-image formats.
+    const pickerAccept = await evaluate(cdp, `document.querySelector("#upload-file-input") ? document.querySelector("#upload-file-input").accept : ""`);
+    for (const token of [".gif", ".mp4", ".jpg", ".jpeg", ".png", "image/gif", "video/mp4", "image/jpeg", "image/png"]) {
+      assert.ok(pickerAccept.includes(token), `picker accept missing ${token}`);
+    }
+    const pickerHint = await evaluate(cdp, `document.querySelector("#upload-file-hint") ? document.querySelector("#upload-file-hint").textContent : ""`);
+    assert.match(pickerHint, /GIF, MP4, JPEG, and PNG/);
 
     const card = await evaluate(cdp, `(() => {
       const cards = [...document.querySelectorAll(".catalog-card")];
@@ -353,7 +372,7 @@ test("real browser evidence: manual cover authoring flow", { skip: gated, timeou
 
     // Open Details and the Choose cover dialog.
     const titleButtonCount = await evaluate(cdp, `document.querySelectorAll(".catalog-card__title-button").length`);
-    assert.equal(titleButtonCount, 2, "two title buttons exist");
+    assert.equal(titleButtonCount, 3, "three title buttons exist");
     await evaluate(cdp, `(() => {
       const buttons = [...document.querySelectorAll(".catalog-card__title-button")];
       const button = buttons.find((b) => b.textContent.includes("clip")) || buttons[0];
@@ -431,7 +450,7 @@ test("real browser evidence: manual cover authoring flow", { skip: gated, timeou
 
     // Playback independence: opening Details still lets video start at 00:00.
     const afterReloadButtons = await evaluate(cdp, `document.querySelectorAll(".catalog-card__title-button").length`);
-    assert.equal(afterReloadButtons, 2, "title buttons present after reload");
+    assert.equal(afterReloadButtons, 3, "title buttons present after reload");
     await evaluate(cdp, `(() => {
       const buttons = [...document.querySelectorAll(".catalog-card__title-button")];
       buttons[0].click();
@@ -443,6 +462,55 @@ test("real browser evidence: manual cover authoring flow", { skip: gated, timeou
       return video ? video.currentTime <= 0.2 : null;
     })()`);
     assert.ok(playbackStillAtStart === null || playbackStillAtStart === true, "playback starts near 00:00");
+
+    // ---- Still-image cover authoring: timeless, no timeline, no scrubber. ----
+    // Close the mp4 Details surface.
+    await evaluate(cdp, `(() => {
+      const d = document.querySelector("#media-details-dialog");
+      if (d && d.hasAttribute("open")) {
+        const ev = new KeyboardEvent("keydown", { key: "Escape", bubbles: true });
+        d.dispatchEvent(ev);
+      }
+      return true;
+    })()`);
+    await waitFor(cdp, `!(document.querySelector("#media-details-dialog") && document.querySelector("#media-details-dialog").hasAttribute("open"))`, { label: "details close before still flow" });
+    // Open the still-image card Details and Choose cover.
+    await evaluate(cdp, `(() => {
+      const buttons = [...document.querySelectorAll(".catalog-card__title-button")];
+      const button = buttons.find((b) => b.textContent.includes("still")) || buttons[2];
+      button.click();
+      return true;
+    })()`);
+    await waitFor(cdp, `Boolean(document.querySelector("#media-details-dialog") && document.querySelector("#media-details-dialog").hasAttribute("open"))`, { label: "image details open" });
+    await evaluate(cdp, `(() => { const b = document.querySelector("#media-details-choose-cover"); if (b) b.click(); })()`);
+    await waitFor(cdp, `Boolean(document.querySelector("#cover-dialog") && document.querySelector("#cover-dialog").hasAttribute("open"))`, { label: "image cover dialog open" });
+
+    // Timeless still-image authoring state: the timeline is hidden and no
+    // HH:MM:SS.mmm selector or fabricated duration is exposed. The bounded
+    // preview loads automatically once the server timeline resolves (image mode).
+    await waitFor(cdp, `(() => { const img = document.querySelector("#cover-preview-container img"); return Boolean(img && img.complete && img.naturalWidth > 0); })()`, { label: "image cover preview" });
+    const timelineHidden = await evaluate(cdp, `document.querySelector(".cover-timeline") ? document.querySelector(".cover-timeline").hidden === true : false`);
+    assert.equal(timelineHidden, true, "still image hides the timeline/scrubber");
+    const imageDuration = await evaluate(cdp, `document.querySelector("#cover-duration-readout").textContent`);
+    assert.equal(imageDuration, "", `still image exposes no fabricated duration: ${imageDuration}`);
+    const imageReadout = await evaluate(cdp, `document.querySelector("#cover-timestamp-readout").textContent`);
+    assert.equal(imageReadout, "", `still image exposes no timestamp selector readout: ${imageReadout}`);
+
+    // Set the still image itself as its durable cover.
+    await evaluate(cdp, `document.querySelector("#cover-set-button").click()`);
+    await waitFor(cdp, `document.querySelector("#cover-dialog-status") ? document.querySelector("#cover-dialog-status").textContent.includes("Cover set") : false`, { label: "image cover set status" });
+    await waitFor(cdp, `!(document.querySelector("#cover-dialog") && document.querySelector("#cover-dialog").hasAttribute("open"))`, { label: "image dialog closes after success" });
+
+    // Gallery renders the still image inline and the durable cover thumbnail is served.
+    const imageCardSrc = await evaluate(cdp, `(() => {
+      const card = [...document.querySelectorAll(".catalog-card")].find((c) => c.textContent.includes("still"));
+      return card ? (card.querySelector("img") || { src: "" }).src : "";
+    })()`);
+    assert.match(imageCardSrc, /\/content$/, `still card renders inline image content: ${imageCardSrc}`);
+    const imageThumbResponse = await fetch(`${appUrl}api/media/${MEDIA_IMG}/cover-thumbnail`);
+    assert.equal(imageThumbResponse.status, 200, "still-image cover thumbnail is served");
+    const imageThumbType = imageThumbResponse.headers.get("content-type");
+    assert.equal(imageThumbType, "image/jpeg", "still-image cover thumbnail is a durable JPEG");
 
     assert.deepEqual(unexpectedFailures, [], `unexpected network failures: ${JSON.stringify(unexpectedFailures)}`);
     assert.deepEqual(pageExceptions, [], `unexpected page exceptions: ${JSON.stringify(pageExceptions.slice(0, 3))}`);

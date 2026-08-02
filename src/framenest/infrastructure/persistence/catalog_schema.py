@@ -210,7 +210,7 @@ media_covers = Table(
         name="ck_media_covers_source_reference_shape",
     ),
     CheckConstraint(
-        "source_kind IN ('gif', 'mp4')",
+        "source_kind IN ('gif', 'mp4', 'image')",
         name="ck_media_covers_source_kind",
     ),
     CheckConstraint(

@@ -191,8 +191,12 @@ reproducible derived thumbnails remain separate concepts.
 The first durable manual cover foundation is implemented ([ADR-0050](docs/adr/0050-durable-manual-cover-foundation.md),
 migration `0022`): an administrator can open `Choose cover` from the Details
 surface, select a source frame on a server-authoritative timeline, preview the
-ephemeral frame, and explicitly `Set as cover`. At most one accepted cover
-exists per logical medium. Gallery cards prefer the validated `cover-thumbnail`
+ephemeral frame, and explicitly `Set as cover`. Still-image (JPEG/PNG) media
+also support manual cover authoring (migration `0023`): the dialog renders a
+bounded preview of the source image with no timeline, scrubber, or timestamp
+selector, and `Set as cover` accepts the still image itself as its durable
+cover. At most one accepted cover exists per logical medium. Gallery cards
+prefer the validated `cover-thumbnail`
 derivative when `cover_ready` is true and fall back to the existing
 `gallery-preview`/fallback path; the existing preview is never reclassified as
 the accepted cover. Full Cover Studio, imported-image covers, AI-generated

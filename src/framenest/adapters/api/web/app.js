@@ -563,6 +563,7 @@ const coverCurrent = document.querySelector("#cover-current");
 const coverCurrentThumbnail = document.querySelector("#cover-current-thumbnail");
 const coverCurrentTimestamp = document.querySelector("#cover-current-timestamp");
 const coverTimelineRange = document.querySelector("#cover-timeline-range");
+const coverTimeline = document.querySelector(".cover-timeline");
 const coverTimestampReadout = document.querySelector("#cover-timestamp-readout");
 const coverDurationReadout = document.querySelector("#cover-duration-readout");
 const coverStepBackButton = document.querySelector("#cover-step-back");
@@ -2516,7 +2517,7 @@ function uploadStatusMessage(snapshot) {
   if (!snapshot) {
     const fileLimitMessage = selectedUploadLimitMessage();
     if (fileLimitMessage) return fileLimitMessage;
-    return uploadState.message || "Select one local GIF or MP4.";
+    return uploadState.message || "Select one local GIF, MP4, JPEG, or PNG.";
   }
   if (snapshot.state === "publish_pending") {
     if (uploadState.publicationPollAttempts >= UPLOAD_PUBLICATION_POLL_MAX_ATTEMPTS) {
@@ -2784,7 +2785,7 @@ function resetUploadForFile(file) {
     pollRetryDelayMs: UPLOAD_POLL_INTERVAL_MS,
     publicationPollAttempts: 0,
     galleryCatalogRefreshUploadId: null,
-    message: file ? "Ready to upload." : "Select one local GIF or MP4.",
+    message: file ? "Ready to upload." : "Select one local GIF, MP4, JPEG, or PNG.",
     failureMessage: "",
   };
   renderUploadCockpit();
@@ -3602,7 +3603,7 @@ function handleUploadFileSelection() {
     if (uploadIsByteReceiving(activeUploadSnapshot())) {
       uploadState.needsReselection = true;
     }
-    uploadState.message = "Select one local GIF or MP4.";
+    uploadState.message = "Select one local GIF, MP4, JPEG, or PNG.";
     renderUploadCockpit();
     return;
   }
@@ -9125,6 +9126,7 @@ let coverDialogState = {
   previewToken: 0,
   acceptToken: 0,
   selectedTimestampMs: 0,
+  isImage: false,
   confirmingReplace: false,
   submitting: false,
 };
@@ -9152,6 +9154,8 @@ function coverDurationText(ms) {
 }
 
 function resetCoverDialogView() {
+  if (coverTimeline) coverTimeline.hidden = false;
+  if (coverCurrentTimestamp) coverCurrentTimestamp.hidden = false;
   if (coverDialogLoading) coverDialogLoading.hidden = false;
   if (coverDialogError) coverDialogError.hidden = true;
   if (coverDialogContent) coverDialogContent.hidden = true;
@@ -9168,6 +9172,22 @@ function resetCoverDialogView() {
   if (coverTimelineRange) coverTimelineRange.value = "0";
   if (coverTimestampReadout) coverTimestampReadout.textContent = "00:00:00.000";
   if (coverDurationReadout) coverDurationReadout.textContent = "";
+}
+
+function coverTimelineFromPayload(payload) {
+  return Boolean(payload) && payload.media_kind === "image";
+}
+
+function coverSubmittedTimestampMs(isImage, selectedTimestampMs) {
+  return isImage ? 0 : selectedTimestampMs;
+}
+
+function applyCoverImageMode(isImage) {
+  coverDialogState.isImage = Boolean(isImage);
+  if (coverTimeline) coverTimeline.hidden = coverDialogState.isImage;
+  if (coverCurrentTimestamp) {
+    coverCurrentTimestamp.hidden = coverDialogState.isImage;
+  }
 }
 
 function showCoverLoading() {
@@ -9260,6 +9280,7 @@ async function openCoverDialog(item, openerElement) {
   coverDialogState.confirmingReplace = false;
   coverDialogState.submitting = false;
   resetCoverDialogView();
+  applyCoverImageMode(Boolean(item && item.media_kind === "image"));
   if (typeof coverDialog.showModal === "function") {
     coverDialog.showModal();
   } else {
@@ -9316,17 +9337,26 @@ async function loadCoverTimeline(token) {
     coverDialogState.sourceVersion = typeof payload.source_version === "string"
       ? payload.source_version
       : "";
-    if (coverTimelineRange) {
+    applyCoverImageMode(coverTimelineFromPayload(payload));
+    if (!coverDialogState.isImage && coverTimelineRange) {
       coverTimelineRange.max = String(Math.max(0, coverDialogState.durationMs - 1));
     }
     updateCoverTimestampReadout(0);
+    if (coverTimestampReadout && coverDialogState.isImage) {
+      coverTimestampReadout.textContent = "";
+    }
     if (coverDurationReadout) {
-      coverDurationReadout.textContent = coverDurationText(coverDialogState.durationMs);
+      coverDurationReadout.textContent = coverDialogState.isImage
+        ? ""
+        : coverDurationText(coverDialogState.durationMs);
     }
     if (coverSetButton) coverSetButton.disabled = true;
     await loadCoverState(token);
     if (coverContextStillCurrent({ mediaId: item.media_id, token })) {
       showCoverContent();
+      if (coverDialogState.isImage) {
+        void requestCoverPreview();
+      }
     }
   } catch {
     if (coverContextStillCurrent({ mediaId: item.media_id, token })) {
@@ -9393,7 +9423,13 @@ function renderCoverCurrent() {
     }
   }
   if (coverCurrentTimestamp) {
-    coverCurrentTimestamp.textContent = `Set at ${coverReadoutText(cover.timestamp_ms)}`;
+    if (coverDialogState.isImage) {
+      coverCurrentTimestamp.hidden = true;
+      coverCurrentTimestamp.textContent = "";
+    } else {
+      coverCurrentTimestamp.hidden = false;
+      coverCurrentTimestamp.textContent = `Set at ${coverReadoutText(cover.timestamp_ms)}`;
+    }
   }
 }
 
@@ -9530,7 +9566,10 @@ async function submitCoverAccept() {
           Accept: "application/json",
         }),
         body: JSON.stringify({
-          timestamp_ms: coverDialogState.selectedTimestampMs,
+          timestamp_ms: coverSubmittedTimestampMs(
+            coverDialogState.isImage,
+            coverDialogState.selectedTimestampMs,
+          ),
           expected_revision: expectedCover,
           expected_source_version: coverDialogState.sourceVersion,
         }),

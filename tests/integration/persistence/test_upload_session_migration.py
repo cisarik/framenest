@@ -14,7 +14,7 @@ from framenest.infrastructure.persistence.catalog_schema import upload_sessions
 PRODUCTION_VERSIONS_PACKAGE = (
     "framenest.infrastructure.persistence.alembic_environment.versions"
 )
-CURRENT_HEAD_REVISION = "0022"
+CURRENT_HEAD_REVISION = "0023"
 TARGET_DUPLICATE_DISPOSITION_REVISION = "0012"
 TARGET_BYTE_IDENTITY_REVISION = "0011"
 TARGET_VALIDATION_REVISION = "0010"

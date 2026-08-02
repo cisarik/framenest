@@ -27,10 +27,14 @@ representative PNG frames for explicit preview, ephemeral JPEG derivatives for
 VLM transport per
 [ADR-0019](docs/adr/0019-vlm-image-derivatives-and-nvidia-instruct-mode.md),
 persistent server-owned gallery preview derivatives for imported available GIF
-and MP4 locations, and a durable manual cover foundation (migration `0022`):
-at most one accepted manually selected cover per logical medium, an immutable
-server-owned durable JPEG artifact, and a separate regenerable cover thumbnail,
-per [ADR-0050](docs/adr/0050-durable-manual-cover-foundation.md).
+and MP4 locations, and a durable manual cover foundation (migration `0022`,
+extended by migration `0023`): at most one accepted manually selected cover per
+logical medium, an immutable server-owned durable JPEG artifact, and a separate
+regenerable cover thumbnail, per
+[ADR-0050](docs/adr/0050-durable-manual-cover-foundation.md). Manual cover
+authoring accepts available GIF, MP4, and still-image (JPEG/PNG) sources;
+still-image sources are timeless and render without a timeline, scrubber, or
+timestamp selector.
 
 FrameNest does not currently implement the complete Cover Studio, persistent
 cover candidates or candidate history, imported image covers, or AI-generated
@@ -181,10 +185,16 @@ in [ADR-0050](docs/adr/0050-durable-manual-cover-foundation.md):
 
 - one accepted cover per logical medium at most, stored in `media_covers`
   (migration `0022`); absence means no accepted cover;
-- manual source-frame selection only for existing available GIF and MP4
-  locations;
+- manual source-frame selection for existing available GIF and MP4 locations,
+  and manual still-image selection for available JPEG/PNG locations (migration
+  `0023`); still-image sources are timeless, keep the canonical source
+  timestamp `0` that is never presented as a selected temporal frame, and
+  carry no fabricated duration;
 - server-authoritative duration, source observation, and arbitrary-timestamp
-  extraction through the existing ffprobe/ffmpeg/process boundary;
+  extraction through the existing ffprobe/ffmpeg/process boundary for GIF/MP4
+  sources; still-image sources are observed and decoded through the existing
+  Pillow still-image boundary with no ffprobe/ffmpeg invocation and no fake
+  timeline;
 - an opaque versioned `source_version` that fences preview and acceptance
   against source replacement before and during extraction;
 - explicit `Set as cover` (preview never accepts); the previous accepted cover
