@@ -72,9 +72,9 @@ content category is `movie`.
 
 ### Movie-identification derivative
 
-Locally extract a bounded set of temporally diverse frames (about six
-targets), reject near-black and duplicate frames, compose one bounded JPEG
-contact sheet, and send only that single derivative. Temporary work is cleaned
+Locally extract a bounded set of five timeline-stratified movie targets,
+reject near-black and duplicate frames, compose one bounded JPEG contact
+sheet, and send only that single derivative. Temporary work is cleaned
 deterministically. Absolute paths and audio never leave the local process.
 Chain-of-thought is neither persisted nor displayed.
 

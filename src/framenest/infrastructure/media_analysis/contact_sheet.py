@@ -75,18 +75,15 @@ class ContactSheetDerivative:
 
 
 def compute_movie_identification_timestamps_ms(duration_ms: int | None) -> tuple[int, ...]:
-    """Return temporally diverse targets including early and late evidence."""
+    """Return five timeline-stratified targets (opening through ending)."""
     if duration_ms is None or duration_ms <= 0:
         return (0,)
-    fractions = (0.03, 0.18, 0.36, 0.54, 0.72, 0.93)
+    # Variant B: opening, early-middle, middle, late-middle, ending.
+    fractions = (0.02, 0.22, 0.45, 0.70, 0.96)
     seen: set[int] = set()
     ordered: list[int] = []
     for fraction in fractions:
-        target = int(duration_ms * fraction)
-        if target >= duration_ms:
-            target = duration_ms - 1
-        if target < 0:
-            target = 0
+        target = min(duration_ms - 1, max(0, int(duration_ms * fraction)))
         if target not in seen:
             seen.add(target)
             ordered.append(target)
@@ -148,7 +145,7 @@ def extract_movie_identification_frames(
     media_path: str,
     duration_ms: int | None,
 ) -> tuple[tuple[RepresentativeFrame, ...], tuple[str, ...]]:
-    """Extract up to six frames for contact-sheet composition."""
+    """Extract up to five timeline-stratified frames for contact-sheet composition."""
     targets = compute_movie_identification_timestamps_ms(duration_ms)
     frames: list[RepresentativeFrame] = []
     warnings: list[str] = []

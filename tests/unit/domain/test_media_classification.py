@@ -80,7 +80,7 @@ def test_movie_timestamps_include_early_and_late() -> None:
     assert targets[0] < targets[-1]
     assert targets[0] < 10_000
     assert targets[-1] > 80_000
-    assert len(targets) == 6
+    assert len(targets) == 5
 
 
 def test_near_black_and_contact_sheet_bounds() -> None:
