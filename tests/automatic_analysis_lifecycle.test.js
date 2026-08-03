@@ -190,6 +190,8 @@ test("compact AI panel uses progressive disclosure and omits Saved AI suggestion
   assert.match(INDEX_SOURCE, /aria-controls="metadata-durable-ai-suggestion"/);
   assert.match(INDEX_SOURCE, /Proposed values — not saved yet/);
   assert.match(INDEX_SOURCE, /id="metadata-durable-ai-filename"/);
+  assert.match(INDEX_SOURCE, /id="metadata-durable-ai-genres"/);
+  assert.match(INDEX_SOURCE, /Suggested genres/);
   assert.equal(INDEX_SOURCE.includes("metadata-ai-filename-input"), false);
   assert.equal(INDEX_SOURCE.includes('id="metadata-ai-filename-display"'), false);
   const panelBody = extractFunction("renderMetadataAiPanel");

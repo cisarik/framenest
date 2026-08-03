@@ -530,6 +530,7 @@ const metadataAiFilenameNote = document.querySelector("#metadata-ai-filename-not
 const metadataDurableAiSuggestion = document.querySelector("#metadata-durable-ai-suggestion");
 const metadataDurableAiTitle = document.querySelector("#metadata-durable-ai-title");
 const metadataDurableAiDescription = document.querySelector("#metadata-durable-ai-description");
+const metadataDurableAiGenres = document.querySelector("#metadata-durable-ai-genres");
 const metadataDurableAiTags = document.querySelector("#metadata-durable-ai-tags");
 const metadataDurableAiCollectionRow = document.querySelector("#metadata-durable-ai-collection-row");
 const metadataDurableAiCollection = document.querySelector("#metadata-durable-ai-collection");
@@ -6412,12 +6413,18 @@ function renderMetadataDurableAnalysis() {
   if (expanded && suggestion) {
     metadataDurableAiTitle.textContent = suggestion.title || "(No title)";
     metadataDurableAiDescription.textContent = suggestion.description || "(No description)";
-    const detailTags = isMovie && suggestion.genres && suggestion.genres.length > 0
-      ? [...suggestion.genres, ...suggestion.tags]
-      : suggestion.tags;
-    metadataDurableAiTags.textContent = detailTags.length > 0
-      ? detailTags.join(", ")
-      : "(none)";
+    const detailGenres = Array.isArray(suggestion.genres) ? suggestion.genres : [];
+    const detailTags = Array.isArray(suggestion.tags) ? suggestion.tags : [];
+    if (metadataDurableAiGenres) {
+      metadataDurableAiGenres.textContent = detailGenres.length > 0
+        ? detailGenres.join(", ")
+        : "(none)";
+    }
+    if (metadataDurableAiTags) {
+      metadataDurableAiTags.textContent = detailTags.length > 0
+        ? detailTags.join(", ")
+        : "(none)";
+    }
     const collection = !isMovie
       && metadataDurableAnalysis.result
       && metadataDurableAnalysis.result.collection
@@ -6438,6 +6445,7 @@ function renderMetadataDurableAnalysis() {
   } else {
     if (metadataDurableAiTitle) metadataDurableAiTitle.textContent = "";
     if (metadataDurableAiDescription) metadataDurableAiDescription.textContent = "";
+    if (metadataDurableAiGenres) metadataDurableAiGenres.textContent = "";
     if (metadataDurableAiTags) metadataDurableAiTags.textContent = "";
     if (metadataDurableAiCollectionRow) metadataDurableAiCollectionRow.hidden = true;
     if (metadataDurableAiCollection) metadataDurableAiCollection.textContent = "";

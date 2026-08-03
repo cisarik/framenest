@@ -375,6 +375,7 @@ function createDocument() {
     ["#metadata-durable-ai-suggestion", "#metadata-dialog"],
     ["#metadata-durable-ai-title", "#metadata-dialog"],
     ["#metadata-durable-ai-description", "#metadata-dialog"],
+    ["#metadata-durable-ai-genres", "#metadata-dialog"],
     ["#metadata-durable-ai-tags", "#metadata-dialog"],
     ["#metadata-durable-ai-collection-row", "#metadata-dialog"],
     ["#metadata-durable-ai-collection", "#metadata-dialog"],
