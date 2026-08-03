@@ -648,6 +648,32 @@
           aria-atomic="true"
         ></p>
 
+        <div id="admin-media-batch-bar" class="admin-batch" hidden>
+          <div class="admin-batch__controls">
+            <label class="admin-batch__select-all" for="admin-batch-select-all">
+              <input id="admin-batch-select-all" type="checkbox">
+              <span>Select all on this page</span>
+            </label>
+            <p id="admin-batch-selection-count" class="admin-batch__count">0 selected</p>
+            <div class="admin-batch__actions">
+              <button id="admin-batch-publish-button" class="admin-media-action-control" type="button">Publish selected</button>
+              <button id="admin-batch-analyze-button" class="admin-media-action-control" type="button">Analyze selected</button>
+              <button id="admin-batch-clear-button" class="admin-media-action-control" type="button">Clear selection</button>
+              <button id="admin-batch-stop-button" class="admin-media-action-control admin-batch__stop" type="button" hidden>Stop</button>
+            </div>
+          </div>
+          <p id="admin-batch-hint" class="admin-batch__hint" hidden></p>
+          <p
+            id="admin-batch-progress"
+            class="admin-batch__progress"
+            role="status"
+            aria-live="polite"
+            aria-atomic="true"
+            hidden
+          ></p>
+          <ul id="admin-batch-outcomes" class="admin-batch__outcomes" hidden></ul>
+        </div>
+
         <div
           id="admin-media-loading"
           class="library-state library-state--loading"

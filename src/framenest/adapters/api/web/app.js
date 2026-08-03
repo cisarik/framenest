@@ -20,6 +20,7 @@ const CATALOG_PAGE_SIZE_STORAGE_KEY = "framenest.catalog.pageSize";
 const UPLOAD_RECOVERY_STORAGE_KEY = "framenest.upload.recovery.v1";
 const CATALOG_PAGE_SIZE = 30;
 const ADMIN_MEDIA_PAGE_SIZE = 24;
+const ADMIN_ANALYSIS_BATCH_MAX_ITEMS = 10;
 const DEFAULT_UPLOAD_CHUNK_BYTES = 1024 * 1024;
 const UPLOAD_POLL_INTERVAL_MS = 1200;
 const UPLOAD_POLL_RETRY_MAX_MS = 10000;
@@ -236,6 +237,12 @@ let youtubeClaimState = {
   errorMessage: "",
   urlError: "",
 };
+
+let adminBatchState = {
+  selectedMediaIds: new Set(),
+  driver: null,
+};
+let adminBatchTeardown = false;
 
 function identityHasCapability(capability) {
   if (!identityState.available) return true;
@@ -486,6 +493,16 @@ const adminMediaResults = document.querySelector("#admin-media-results");
 const adminMediaPageSummary = document.querySelector("#admin-media-page-summary");
 const adminMediaPrevButton = document.querySelector("#admin-media-prev-button");
 const adminMediaNextButton = document.querySelector("#admin-media-next-button");
+const adminBatchBar = document.querySelector("#admin-media-batch-bar");
+const adminBatchSelectAll = document.querySelector("#admin-batch-select-all");
+const adminBatchSelectionCount = document.querySelector("#admin-batch-selection-count");
+const adminBatchPublishButton = document.querySelector("#admin-batch-publish-button");
+const adminBatchAnalyzeButton = document.querySelector("#admin-batch-analyze-button");
+const adminBatchClearButton = document.querySelector("#admin-batch-clear-button");
+const adminBatchStopButton = document.querySelector("#admin-batch-stop-button");
+const adminBatchHint = document.querySelector("#admin-batch-hint");
+const adminBatchProgress = document.querySelector("#admin-batch-progress");
+const adminBatchOutcomes = document.querySelector("#admin-batch-outcomes");
 const youtubeClaimOpenButton = document.querySelector("#youtube-claim-open-button");
 const youtubeClaimDialog = document.querySelector("#youtube-claim-dialog");
 const youtubeClaimDialogTitle = document.querySelector("#youtube-claim-dialog-title");
@@ -1809,6 +1826,10 @@ async function loadAutomaticAnalysisCapability() {
 
 function automaticAnalysisEndpoint(mediaId) {
   return `${MEDIA_METADATA_ENDPOINT_PREFIX}/${encodeURIComponent(mediaId)}/automatic-analysis`;
+}
+
+function durableAnalysisEndpoint(mediaId, locationId) {
+  return `${MEDIA_METADATA_ENDPOINT_PREFIX}/${encodeURIComponent(mediaId)}/locations/${encodeURIComponent(locationId)}/durable-analysis`;
 }
 
 function movieIdentificationEndpoint(mediaId) {
@@ -7703,6 +7724,7 @@ function renderAdminMediaItem(item) {
   visualCell.className = "admin-media-cell admin-media-cell--visual";
   visualCell.setAttribute("role", "cell");
   visualCell.appendChild(renderAdminThumbnail(item));
+  visualCell.appendChild(renderAdminSelectControl(item));
 
   const summaryCell = document.createElement("div");
   summaryCell.className = "admin-media-cell admin-media-cell--summary";
@@ -7782,7 +7804,8 @@ function renderAdminMediaItem(item) {
     publishButton.dataset.adminAction = "publish";
     publishButton.disabled = !item.publication_ready
       || adminCatalogState.publishOwners.has(item.media_id)
-      || Boolean(actionStatus);
+      || Boolean(actionStatus)
+      || adminBatchDriverActive();
     if (!item.publication_ready) publishButton.title = adminMissingFieldsLabel(item);
     if (actionStatus) publishButton.title = actionStatus.message;
     if (adminCatalogState.publishOwners.has(item.media_id)) {
@@ -7819,6 +7842,7 @@ function renderAdminCatalogPage(page) {
   adminCatalogState.total = Number.isInteger(page.total) ? page.total : 0;
   adminCatalogState.limit = Number.isInteger(page.limit) ? page.limit : ADMIN_MEDIA_PAGE_SIZE;
   adminCatalogState.offset = Number.isInteger(page.offset) ? page.offset : 0;
+  reconcileAdminBatchSelection();
   if (adminMediaResults) {
     adminMediaResults.replaceChildren(
       ...adminCatalogState.items.map((item) => renderAdminMediaItem(item)),
@@ -7834,6 +7858,7 @@ function renderAdminCatalogPage(page) {
   if (adminMediaPrevButton) adminMediaPrevButton.disabled = !page.has_previous;
   if (adminMediaNextButton) adminMediaNextButton.disabled = !page.has_next;
   setAdminCatalogViewState(adminCatalogState.items.length === 0 ? "empty" : "results");
+  renderAdminBatchBar();
 }
 
 async function loadAdminCatalog({ focusMediaId = null } = {}) {
@@ -7974,12 +7999,637 @@ async function publishAdminMediaItem(item, opener) {
   }
 }
 
+function adminBatchDriverActive() {
+  return Boolean(adminBatchState.driver)
+    && adminBatchState.driver.lifecycle !== "done"
+    && adminBatchState.driver.lifecycle !== "stopped";
+}
+
+function adminPageItemById(mediaId) {
+  return adminCatalogState.items.find((item) => item.media_id === mediaId) || null;
+}
+
+function adminPageSelectedIds() {
+  return adminCatalogState.items
+    .filter((item) => adminBatchState.selectedMediaIds.has(item.media_id))
+    .map((item) => item.media_id);
+}
+
+function reconcileAdminBatchSelection() {
+  if (adminBatchDriverActive()) return;
+  const pageIds = new Set(adminCatalogState.items.map((item) => item.media_id));
+  [...adminBatchState.selectedMediaIds].forEach((mediaId) => {
+    if (!pageIds.has(mediaId)) adminBatchState.selectedMediaIds.delete(mediaId);
+  });
+}
+
+function resetAdminBatchForQueryChange() {
+  if (adminBatchDriverActive()) return false;
+  adminBatchState.selectedMediaIds.clear();
+  adminBatchState.driver = null;
+  renderAdminBatchBar();
+  return true;
+}
+
+function clearAdminBatchSelection() {
+  if (adminBatchDriverActive()) return false;
+  adminBatchState.selectedMediaIds.clear();
+  if (adminBatchState.driver) adminBatchState.driver = null;
+  renderAdminBatchBar();
+  return true;
+}
+
+function setAdminItemSelection(mediaId, selected, control) {
+  if (adminBatchDriverActive() || !adminPageItemById(mediaId)) {
+    if (control) control.checked = adminBatchState.selectedMediaIds.has(mediaId);
+    return false;
+  }
+  if (selected) adminBatchState.selectedMediaIds.add(mediaId);
+  else adminBatchState.selectedMediaIds.delete(mediaId);
+  renderAdminBatchBar();
+  return true;
+}
+
+function setAdminPageSelection(selected) {
+  if (adminBatchDriverActive()) return false;
+  adminCatalogState.items.forEach((item) => {
+    if (selected) adminBatchState.selectedMediaIds.add(item.media_id);
+    else adminBatchState.selectedMediaIds.delete(item.media_id);
+  });
+  renderAdminBatchBar();
+  return true;
+}
+
+function adminAnalysisEligibility() {
+  const eligible = [];
+  const ineligible = [];
+  adminCatalogState.items.forEach((item) => {
+    if (!adminBatchState.selectedMediaIds.has(item.media_id)) return;
+    if (item.analysis_state === "not_requested") eligible.push(item.media_id);
+    else ineligible.push(item.media_id);
+  });
+  return { eligible, ineligible };
+}
+
+function renderAdminSelectControl(item) {
+  const label = document.createElement("label");
+  label.className = "admin-media-select";
+  const checkbox = document.createElement("input");
+  checkbox.type = "checkbox";
+  checkbox.className = "admin-media-select__input";
+  checkbox.dataset.mediaId = item.media_id;
+  checkbox.checked = adminBatchState.selectedMediaIds.has(item.media_id);
+  checkbox.disabled = adminBatchDriverActive();
+  checkbox.setAttribute("aria-label", `Select ${adminMediaTitle(item)}`);
+  checkbox.addEventListener("change", () => {
+    setAdminItemSelection(item.media_id, checkbox.checked, checkbox);
+  });
+  label.appendChild(checkbox);
+  return label;
+}
+
+const ADMIN_BATCH_OUTCOME_LABELS = {
+  pending: "Waiting",
+  publishing: "Publishing…",
+  published: "Published",
+  already_published: "Already published",
+  not_ready: "Not ready",
+  failed: "Failed",
+  not_started_due_to_stop: "Not started (stopped)",
+  ineligible: "Skipped",
+  location_unavailable: "No available location",
+  queueing: "Queueing…",
+  queued: "Queued",
+  analyzing: "Analyzing",
+  analyzed: "Analyzed",
+  provider_unavailable: "Provider unavailable",
+  status_unavailable: "Status unavailable",
+  not_started_provider_halt: "Not queued (provider unavailable)",
+};
+
+function adminBatchOutcomeLabel(record) {
+  return ADMIN_BATCH_OUTCOME_LABELS[record.status] || record.status;
+}
+
+function adminBatchProgressText(driver) {
+  const counts = {};
+  driver.items.forEach((record) => {
+    counts[record.status] = (counts[record.status] || 0) + 1;
+  });
+  if (driver.lifecycle === "running" || driver.lifecycle === "stopping") {
+    const activeStatuses = ["publishing", "queueing", "queued", "analyzing"];
+    const currentIndex = driver.items.findIndex(
+      (record) => activeStatuses.includes(record.status) || record.status === "pending",
+    );
+    const position = currentIndex === -1 ? driver.items.length : currentIndex + 1;
+    const verb = driver.type === "publish" ? "Publishing" : "Queueing first analysis";
+    const base = `${verb} item ${position} of ${driver.items.length}…`;
+    return driver.lifecycle === "stopping"
+      ? `${base} Stopping after the current item…`
+      : base;
+  }
+  const parts = [];
+  if (driver.type === "publish") {
+    if (counts.published) parts.push(`${counts.published} published`);
+    if (counts.already_published) parts.push(`${counts.already_published} already published`);
+    if (counts.not_ready) parts.push(`${counts.not_ready} not ready`);
+    if (counts.failed) parts.push(`${counts.failed} failed`);
+  } else {
+    if (counts.analyzed) parts.push(`${counts.analyzed} analyzed`);
+    if (counts.failed) parts.push(`${counts.failed} failed`);
+    if (counts.provider_unavailable) parts.push("provider unavailable");
+    if (counts.location_unavailable) parts.push(`${counts.location_unavailable} without an available location`);
+    if (counts.ineligible) parts.push(`${counts.ineligible} skipped (not eligible)`);
+    if (counts.status_unavailable) parts.push(`${counts.status_unavailable} with unavailable status`);
+    if (counts.not_started_provider_halt) {
+      parts.push(`${counts.not_started_provider_halt} not queued (provider unavailable)`);
+    }
+    const stillQueued = (counts.queueing || 0) + (counts.queued || 0) + (counts.analyzing || 0);
+    if (driver.lifecycle === "stopped" && stillQueued > 0) {
+      parts.push(`${stillQueued} still queued or analyzing`);
+    }
+  }
+  if (counts.not_started_due_to_stop) {
+    parts.push(`${counts.not_started_due_to_stop} not started`);
+  }
+  const summary = parts.length > 0 ? parts.join(", ") : "no items processed";
+  if (driver.lifecycle === "stopped") {
+    const suffix = driver.type === "publish"
+      ? "Completed changes remain applied."
+      : "Already queued analysis continues under the server lifecycle.";
+    return `Stopped: ${summary}. ${suffix}`;
+  }
+  if (driver.type === "analysis" && driver.providerUnavailable) {
+    return `Finished: ${summary}. The AI provider is unavailable, so remaining eligible items were not queued.`;
+  }
+  return `Finished: ${summary}.`;
+}
+
+function renderAdminBatchOutcomes(driver) {
+  if (adminBatchProgress) {
+    const showProgress = Boolean(driver) && driver.lifecycle !== "confirming";
+    adminBatchProgress.hidden = !showProgress;
+    adminBatchProgress.textContent = showProgress ? adminBatchProgressText(driver) : "";
+  }
+  if (!adminBatchOutcomes) return;
+  if (!driver) {
+    adminBatchOutcomes.hidden = true;
+    adminBatchOutcomes.replaceChildren();
+    return;
+  }
+  adminBatchOutcomes.hidden = false;
+  adminBatchOutcomes.replaceChildren(
+    ...driver.items.map((record) => {
+      const entry = document.createElement("li");
+      entry.className = `admin-batch__outcome admin-batch__outcome--${record.status}`;
+      const title = document.createElement("span");
+      title.className = "admin-batch__outcome-title";
+      title.textContent = record.title;
+      const state = document.createElement("span");
+      state.className = "admin-batch__outcome-state";
+      state.textContent = record.message
+        ? `${adminBatchOutcomeLabel(record)} — ${record.message}`
+        : adminBatchOutcomeLabel(record);
+      entry.append(title, state);
+      return entry;
+    }),
+  );
+}
+
+function syncAdminSelectControls() {
+  if (!adminMediaResults) return;
+  const active = adminBatchDriverActive();
+  adminMediaResults.querySelectorAll(".admin-media-select__input").forEach((checkbox) => {
+    checkbox.checked = adminBatchState.selectedMediaIds.has(checkbox.dataset.mediaId);
+    checkbox.disabled = active;
+  });
+}
+
+function renderAdminBatchBar() {
+  if (!adminBatchBar) return;
+  const driver = adminBatchState.driver;
+  const active = adminBatchDriverActive();
+  const pageIds = adminCatalogState.items.map((item) => item.media_id);
+  const selectedCount = adminBatchState.selectedMediaIds.size;
+  adminBatchBar.hidden = pageIds.length === 0 && !driver;
+  if (adminBatchSelectAll) {
+    const selectedOnPage = pageIds.filter(
+      (mediaId) => adminBatchState.selectedMediaIds.has(mediaId),
+    ).length;
+    adminBatchSelectAll.checked = pageIds.length > 0 && selectedOnPage === pageIds.length;
+    adminBatchSelectAll.indeterminate = selectedOnPage > 0 && selectedOnPage < pageIds.length;
+    adminBatchSelectAll.disabled = active || pageIds.length === 0;
+  }
+  if (adminBatchSelectionCount) {
+    adminBatchSelectionCount.textContent = `${selectedCount} selected`;
+  }
+  const eligibility = adminAnalysisEligibility();
+  if (adminBatchPublishButton) {
+    adminBatchPublishButton.disabled = active || selectedCount === 0;
+  }
+  if (adminBatchAnalyzeButton) {
+    adminBatchAnalyzeButton.disabled = active
+      || eligibility.eligible.length === 0
+      || eligibility.eligible.length > ADMIN_ANALYSIS_BATCH_MAX_ITEMS;
+  }
+  if (adminBatchClearButton) {
+    adminBatchClearButton.disabled = active || (selectedCount === 0 && !driver);
+  }
+  if (adminBatchHint) {
+    let hint = "";
+    if (selectedCount > 0 && eligibility.eligible.length === 0) {
+      hint = "No selected item is eligible for first analysis; every selected item already has a requested or finished analysis.";
+    } else if (eligibility.eligible.length > ADMIN_ANALYSIS_BATCH_MAX_ITEMS) {
+      hint = `${eligibility.eligible.length} selected items are eligible for first analysis. Narrow the selection to at most ${ADMIN_ANALYSIS_BATCH_MAX_ITEMS} eligible items.`;
+    }
+    adminBatchHint.hidden = hint === "";
+    adminBatchHint.textContent = hint;
+  }
+  if (adminBatchStopButton) {
+    const running = driver && driver.lifecycle === "running";
+    const stopping = driver && driver.lifecycle === "stopping";
+    adminBatchStopButton.hidden = !running && !stopping;
+    adminBatchStopButton.disabled = !running;
+    adminBatchStopButton.textContent = stopping ? "Stopping…" : "Stop";
+  }
+  renderAdminBatchOutcomes(driver);
+  syncAdminSelectControls();
+}
+
+function setAdminBatchInteractionLock(locked) {
+  [
+    adminMediaSearch,
+    adminMediaPublicationFilter,
+    adminMediaReadinessFilter,
+    adminMediaAnalysisFilter,
+    adminMediaRefreshButton,
+    adminMediaPrevButton,
+    adminMediaNextButton,
+    adminMediaCloseButton,
+  ].forEach((control) => {
+    if (control) control.disabled = locked;
+  });
+  if (adminMediaResults) {
+    adminMediaResults.querySelectorAll(".admin-media-select__input").forEach((checkbox) => {
+      checkbox.disabled = locked;
+    });
+    adminMediaResults.querySelectorAll("button[data-admin-action]").forEach((button) => {
+      button.disabled = locked || button.disabled;
+    });
+  }
+}
+
+function createAdminBatchDriver(type, records) {
+  return {
+    type,
+    lifecycle: "confirming",
+    stopRequested: false,
+    providerUnavailable: false,
+    items: records,
+  };
+}
+
+function adminBatchRecordForItem(item) {
+  return {
+    mediaId: item.media_id,
+    title: adminMediaTitle(item),
+    status: "pending",
+    message: "",
+  };
+}
+
+function cancelAdminBatchConfirmation(driver, opener) {
+  const cleared = adminBatchState.driver === driver;
+  if (cleared) adminBatchState.driver = null;
+  renderAdminBatchBar();
+  if (
+    cleared
+    && opener
+    && typeof opener.focus === "function"
+    && document.contains(opener)
+    && !opener.disabled
+    && !opener.hidden
+  ) {
+    opener.focus();
+  }
+}
+
+async function startAdminPublishBatch(opener) {
+  if (adminBatchDriverActive() || !identityAllowsAdminWorkflow()) return;
+  const ids = adminPageSelectedIds();
+  if (ids.length === 0) return;
+  const driver = createAdminBatchDriver(
+    "publish",
+    ids.map((mediaId) => adminBatchRecordForItem(adminPageItemById(mediaId))),
+  );
+  adminBatchState.driver = driver;
+  renderAdminBatchBar();
+  const accepted = await requestConfirmation({
+    title: `Publish ${ids.length} selected ${ids.length === 1 ? "item" : "items"}?`,
+    message: "Items are published one at a time in the current page order. Already published items keep their existing state and report it. Items blocked by incomplete metadata report the server readiness reason. You can stop after the current item; completed changes remain applied.",
+    dismissLabel: "Cancel",
+    confirmLabel: "Publish selected",
+    destructive: false,
+    focusReturn: opener,
+  });
+  if (!accepted || adminBatchState.driver !== driver) {
+    cancelAdminBatchConfirmation(driver, opener);
+    return;
+  }
+  driver.lifecycle = "running";
+  setAdminBatchInteractionLock(true);
+  renderAdminBatchBar();
+  if (adminBatchStopButton) adminBatchStopButton.focus();
+  await runAdminPublishBatch(driver);
+}
+
+async function runAdminPublishBatch(driver) {
+  for (let index = 0; index < driver.items.length; index += 1) {
+    const record = driver.items[index];
+    if (driver.stopRequested || adminBatchTeardown || adminBatchState.driver !== driver) {
+      markAdminBatchItemsNotStarted(driver, index);
+      break;
+    }
+    record.status = "publishing";
+    renderAdminBatchOutcomes(driver);
+    await executeAdminPublishBatchItem(record);
+    renderAdminBatchOutcomes(driver);
+  }
+  await finalizeAdminBatch(driver, driver.stopRequested ? "stopped" : "done");
+}
+
+async function executeAdminPublishBatchItem(record) {
+  try {
+    const response = await fetch(
+      `${ADMIN_MEDIA_ENDPOINT}/${encodeURIComponent(record.mediaId)}/content-publication`,
+      {
+        method: "PUT",
+        headers: framenestMutationHeaders({ Accept: "application/json" }),
+        cache: "no-store",
+      },
+    );
+    const payload = await response.json();
+    if (response.ok) {
+      if (payload && payload.status === "already_published") {
+        record.status = "already_published";
+        record.message = "The server already lists this item as published.";
+      } else {
+        record.status = "published";
+        record.message = "Published by the server.";
+      }
+      return;
+    }
+    const error = payload && payload.error ? payload.error : {};
+    if (response.status === 409) {
+      const missingFields = adminMissingFieldsLabel({ missing_fields: error.missing_fields });
+      record.status = "not_ready";
+      record.message = missingFields || "Publication is blocked by incomplete metadata.";
+    } else if (response.status === 401 || response.status === 403) {
+      record.status = "failed";
+      record.message = "The current identity is not authorized to publish this item.";
+    } else {
+      record.status = "failed";
+      record.message = "Publication failed without changing the durable state.";
+    }
+  } catch {
+    record.status = "failed";
+    record.message = "Publication could not reach the local server.";
+  }
+}
+
+async function startAdminAnalysisBatch(opener) {
+  if (adminBatchDriverActive() || !identityAllowsAdminWorkflow()) return;
+  const eligibility = adminAnalysisEligibility();
+  if (
+    eligibility.eligible.length === 0
+    || eligibility.eligible.length > ADMIN_ANALYSIS_BATCH_MAX_ITEMS
+  ) {
+    return;
+  }
+  const eligibleIds = new Set(eligibility.eligible);
+  const records = adminPageSelectedIds().map((mediaId) => {
+    const item = adminPageItemById(mediaId);
+    const record = adminBatchRecordForItem(item);
+    if (!eligibleIds.has(mediaId)) {
+      record.status = "ineligible";
+      record.message = `First analysis is only available before any analysis request; current state is "${adminAnalysisPresentation(item.analysis_state).label}".`;
+    }
+    return record;
+  });
+  const driver = createAdminBatchDriver("analysis", records);
+  adminBatchState.driver = driver;
+  renderAdminBatchBar();
+  const skippedNote = eligibility.ineligible.length > 0
+    ? ` ${eligibility.ineligible.length} selected ${eligibility.ineligible.length === 1 ? "item is" : "items are"} not eligible and will be skipped.`
+    : "";
+  const accepted = await requestConfirmation({
+    title: `Queue first analysis for ${eligibility.eligible.length} eligible ${eligibility.eligible.length === 1 ? "item" : "items"}?`,
+    message: `Eligible items are queued one at a time in the current page order.${skippedNote} Each eligible item may create one durable analysis run. Provider retries, when required, remain governed and recorded by the existing server policy. You can stop after the current item; already queued analysis continues under the server lifecycle.`,
+    dismissLabel: "Cancel",
+    confirmLabel: "Analyze selected",
+    destructive: false,
+    focusReturn: opener,
+  });
+  if (!accepted || adminBatchState.driver !== driver) {
+    cancelAdminBatchConfirmation(driver, opener);
+    return;
+  }
+  driver.lifecycle = "running";
+  setAdminBatchInteractionLock(true);
+  renderAdminBatchBar();
+  if (adminBatchStopButton) adminBatchStopButton.focus();
+  await runAdminAnalysisBatch(driver);
+}
+
+async function runAdminAnalysisBatch(driver) {
+  for (let index = 0; index < driver.items.length; index += 1) {
+    const record = driver.items[index];
+    if (record.status === "ineligible") continue;
+    if (driver.stopRequested || adminBatchTeardown || adminBatchState.driver !== driver) {
+      markAdminBatchItemsNotStarted(driver, index);
+      break;
+    }
+    const item = adminPageItemById(record.mediaId);
+    const location = item ? selectSupportedAvailableLocation(item) : null;
+    if (!location) {
+      record.status = "location_unavailable";
+      record.message = "No supported and available location exists for this item.";
+      renderAdminBatchOutcomes(driver);
+      continue;
+    }
+    record.status = "queueing";
+    renderAdminBatchOutcomes(driver);
+    const enqueue = await executeAdminAnalysisEnqueue(record, location.location_id);
+    renderAdminBatchOutcomes(driver);
+    if (enqueue === "halt") {
+      driver.providerUnavailable = true;
+      markAdminBatchItemsNotStarted(
+        driver,
+        index + 1,
+        "not_started_provider_halt",
+        "Not queued; the AI provider is unavailable.",
+      );
+      break;
+    }
+    if (enqueue === "failed") continue;
+    if (AUTOMATIC_ANALYSIS_TERMINAL_STATES.has(record.serverState)) {
+      applyAdminAnalysisTerminalState(record, record.serverPayload);
+      renderAdminBatchOutcomes(driver);
+      continue;
+    }
+    await pollAdminAnalysisBatchItem(driver, record);
+    renderAdminBatchOutcomes(driver);
+  }
+  await finalizeAdminBatch(driver, driver.stopRequested ? "stopped" : "done");
+}
+
+async function executeAdminAnalysisEnqueue(record, locationId) {
+  try {
+    const response = await fetch(durableAnalysisEndpoint(record.mediaId, locationId), {
+      method: "POST",
+      headers: framenestMutationHeaders({
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      }),
+      body: JSON.stringify({ confirm_cloud_upload: true }),
+      cache: "no-store",
+    });
+    const payload = await response.json();
+    if (response.ok) {
+      record.serverState = payload && payload.state ? String(payload.state) : "";
+      record.serverPayload = payload || null;
+      record.status = record.serverState === "analyzing" ? "analyzing" : "queued";
+      record.message = "Analysis request accepted by the server.";
+      return "accepted";
+    }
+    const code = payload && payload.error ? payload.error.code : "";
+    if (code === "AI_PROVIDER_NOT_CONFIGURED" || code === "AI_PROVIDER_UNAVAILABLE") {
+      record.status = "provider_unavailable";
+      record.message = "The AI provider is unavailable; no further items were queued.";
+      return "halt";
+    }
+    record.status = "failed";
+    if (code === "MEDIA_NOT_FOUND") {
+      record.message = "Media was not found.";
+    } else if (code === "CLOUD_CONFIRMATION_REQUIRED") {
+      record.message = "The server rejected the request without the required confirmation.";
+    } else {
+      record.message = "The analysis request was not accepted; no run was created by this item.";
+    }
+    return "failed";
+  } catch {
+    record.status = "failed";
+    record.message = "The analysis request could not reach the local server.";
+    return "failed";
+  }
+}
+
+async function pollAdminAnalysisBatchItem(driver, record) {
+  let attempts = 0;
+  while (attempts < AUTOMATIC_ANALYSIS_POLL_MAX_ATTEMPTS) {
+    if (driver.stopRequested || adminBatchTeardown || adminBatchState.driver !== driver) return;
+    attempts += 1;
+    let payload;
+    try {
+      const response = await fetch(automaticAnalysisEndpoint(record.mediaId), {
+        headers: { Accept: "application/json" },
+        cache: "no-store",
+      });
+      if (!response.ok) {
+        record.status = "status_unavailable";
+        record.message = "Analysis status is unavailable; any queued run continues under the server lifecycle.";
+        return;
+      }
+      payload = await response.json();
+    } catch {
+      record.status = "status_unavailable";
+      record.message = "Analysis status is unavailable; any queued run continues under the server lifecycle.";
+      return;
+    }
+    const state = payload && payload.state ? String(payload.state) : "";
+    if (state === "pending" || state === "analyzing") {
+      const nextStatus = state === "analyzing" ? "analyzing" : "queued";
+      if (record.status !== nextStatus) {
+        record.status = nextStatus;
+        record.message = automaticAnalysisStatusMessage(payload);
+        renderAdminBatchOutcomes(driver);
+      }
+    } else if (AUTOMATIC_ANALYSIS_TERMINAL_STATES.has(state)) {
+      applyAdminAnalysisTerminalState(record, payload);
+      return;
+    } else {
+      record.status = "status_unavailable";
+      record.message = "Analysis status is incomplete; any queued run continues under the server lifecycle.";
+      return;
+    }
+    await new Promise((resolve) => {
+      window.setTimeout(resolve, AUTOMATIC_ANALYSIS_POLL_INTERVAL_MS);
+    });
+  }
+  record.status = "status_unavailable";
+  record.message = "Analysis did not reach a terminal state within the polling window; the server run continues under its own lifecycle.";
+}
+
+function applyAdminAnalysisTerminalState(record, payload) {
+  const state = payload && payload.state ? String(payload.state) : "";
+  if (state === "analyzed") {
+    record.status = "analyzed";
+    record.message = automaticAnalysisStatusMessage(payload);
+  } else if (state === "failed") {
+    record.status = "failed";
+    record.message = automaticAnalysisStatusMessage(payload) || "AI analysis failed.";
+  } else {
+    record.status = "status_unavailable";
+    record.message = "Analysis returned an unexpected state; any queued run continues under the server lifecycle.";
+  }
+}
+
+function markAdminBatchItemsNotStarted(
+  driver,
+  fromIndex,
+  status = "not_started_due_to_stop",
+  message = "Not started; the batch was stopped before this item.",
+) {
+  for (let index = fromIndex; index < driver.items.length; index += 1) {
+    const record = driver.items[index];
+    if (record.status !== "pending") continue;
+    record.status = status;
+    record.message = message;
+  }
+}
+
+function requestAdminBatchStop() {
+  const driver = adminBatchState.driver;
+  if (!driver || driver.lifecycle !== "running") return;
+  driver.stopRequested = true;
+  driver.lifecycle = "stopping";
+  renderAdminBatchBar();
+}
+
+async function finalizeAdminBatch(driver, lifecycle) {
+  driver.lifecycle = lifecycle;
+  if (adminBatchState.driver !== driver) return;
+  adminBatchState.selectedMediaIds.clear();
+  setAdminBatchInteractionLock(false);
+  renderAdminBatchBar();
+  await loadAdminCatalog();
+  if (adminBatchClearButton && !adminBatchClearButton.disabled) {
+    adminBatchClearButton.focus();
+  }
+}
+
+function invalidateAdminBatchOnTeardown() {
+  adminBatchTeardown = true;
+  if (adminBatchState.driver) adminBatchState.driver.stopRequested = true;
+}
+
 function openAdminMediaBrowser() {
   if (!identityAllowsAdminWorkflow() || !adminMediaBrowser) return;
   if (catalogBrowser) catalogBrowser.hidden = true;
   if (headerSearch) headerSearch.hidden = true;
   adminMediaBrowser.hidden = false;
   adminCatalogState.offset = 0;
+  resetAdminBatchForQueryChange();
   setAdminActionStatus("");
   loadAdminCatalog();
   if (adminMediaHeading) adminMediaHeading.focus();
@@ -8006,6 +8656,7 @@ function applyAdminCatalogFilters() {
     ? adminMediaAnalysisFilter.value
     : "all";
   adminCatalogState.offset = 0;
+  resetAdminBatchForQueryChange();
   loadAdminCatalog();
 }
 
@@ -9974,6 +10625,7 @@ if (adminMediaRetryButton) {
 if (adminMediaPrevButton) {
   adminMediaPrevButton.addEventListener("click", () => {
     adminCatalogState.offset = Math.max(0, adminCatalogState.offset - adminCatalogState.limit);
+    resetAdminBatchForQueryChange();
     loadAdminCatalog();
   });
 }
@@ -9983,7 +10635,38 @@ if (adminMediaNextButton) {
     const nextOffset = adminCatalogState.offset + adminCatalogState.limit;
     if (nextOffset >= adminCatalogState.total) return;
     adminCatalogState.offset = nextOffset;
+    resetAdminBatchForQueryChange();
     loadAdminCatalog();
+  });
+}
+
+if (adminBatchSelectAll) {
+  adminBatchSelectAll.addEventListener("change", () => {
+    setAdminPageSelection(adminBatchSelectAll.checked);
+  });
+}
+
+if (adminBatchPublishButton) {
+  adminBatchPublishButton.addEventListener("click", () => {
+    startAdminPublishBatch(adminBatchPublishButton);
+  });
+}
+
+if (adminBatchAnalyzeButton) {
+  adminBatchAnalyzeButton.addEventListener("click", () => {
+    startAdminAnalysisBatch(adminBatchAnalyzeButton);
+  });
+}
+
+if (adminBatchClearButton) {
+  adminBatchClearButton.addEventListener("click", () => {
+    clearAdminBatchSelection();
+  });
+}
+
+if (adminBatchStopButton) {
+  adminBatchStopButton.addEventListener("click", () => {
+    requestAdminBatchStop();
   });
 }
 
@@ -10006,4 +10689,5 @@ if (commandSearchInput) {
 }
 window.addEventListener("pagehide", revokePreviewObjectUrls);
 window.addEventListener("pagehide", cleanupUploadRuntime);
+window.addEventListener("pagehide", invalidateAdminBatchOnTeardown);
 window.addEventListener("pagehide", invalidateYouTubeClaimOwnership);

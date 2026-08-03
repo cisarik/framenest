@@ -444,18 +444,20 @@ Boundaries: not part of early implementation beyond the current catalog-only fou
 
 ## Current Active Logical Whole
 
-Active logical whole: `Admin AI Quick Action and Edit Surface Polish`.
+Active logical whole: `Admin Media Selection and Bounded Batch Actions`.
 
-Technical implementation candidate HEAD at documentation time:
-`127c7d7f698f1d612cb267333ff3425e8521f6da`.
+This whole adds page-scoped administrator selection, bounded sequential
+publish-selected behavior, bounded sequential first-analysis-selected behavior,
+truthful per-item and aggregate progress, and honest stop and partial-failure
+behavior on top of the closed `Processed Publish Workflow and Responsive Admin
+List View + production deployment` whole.
 
-Deterministic verification for the technical implementation and bounded
-corrections has passed. This logical whole is **not closed**. Closure still
-requires:
+Implementation is in progress under bounded Worker authority. This logical
+whole is **not accepted and not closed**. Closure still requires:
 
+- independent acceptance of the exact implementation candidate;
 - immutable NUC deployment;
 - no-provider owner visual acceptance;
-- at most one explicitly authorized live provider-backed acceptance;
 - exact provider-count and durable-state explanation;
 - ORCHESTRATOR closure.
 
@@ -521,10 +523,14 @@ This frozen whole does not amend that ADR.
 
 ### Processed Publish Workflow and Admin List View
 
-Status: `FROZEN — recommended future product logical whole after the current
-individual AI workflow is fully closed`
+Status: `CLOSED — delivered as Processed Publish Workflow and Responsive Admin
+List View + production deployment`
 
-Owner goals when reopened:
+Page-scoped administrator selection and bounded batch actions continue as the
+current active logical whole `Admin Media Selection and Bounded Batch Actions`
+and are not part of this closed whole.
+
+Owner goals recorded for this whole:
 
 - responsive admin-only list view;
 - compact small thumbnails;
@@ -543,8 +549,8 @@ Owner goals when reopened:
 - analysis must never automatically publish;
 - publishing remains an explicit admin action.
 
-Likely future concerns to address only when reopened, without pre-designing
-implementation now:
+Likely concerns recorded for this whole and its successor, without
+pre-designing beyond the active logical whole:
 
 - durable publish state;
 - authorization and audit actions;
@@ -557,9 +563,8 @@ implementation now:
 - provider cost control;
 - selective owner acceptance.
 
-Explicit boundaries:
+Explicit boundaries recorded for this whole:
 
-- do not implement this now;
 - do not retrofit bulk architecture into the individual card quick action;
 - do not claim that canonical AI metadata save equals publication;
 - do not mix YouTube acquisition;
