@@ -153,6 +153,15 @@ def restore_catalog_backup(bundle: Path | str, destination_database: Path | str)
         if destination.exists() or destination.is_symlink():
             raise BackupError("Restore destination already exists.", error_code="DESTINATION_EXISTS")
         _publish_file_no_replace(temp_path, destination)
+        # Hardlink publish leaves both names on the same inode. Remove the
+        # implementation-private temporary sibling so a successful restore
+        # leaves only the requested destination.
+        _unlink_owned_temp_file(temp_path)
+        if temp_path.exists():
+            raise BackupError(
+                "Restore temporary could not be removed.",
+                error_code="RESTORE_TEMP_CLEANUP_FAILED",
+            )
         temp_path = None
         return BackupResult(
             state="restored",

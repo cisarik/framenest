@@ -76,3 +76,4 @@ An accepted ADR may only be changed by a later ADR that supersedes it. Editing a
 | 0049 | Durable Content Publication Boundary | Accepted | 2026-07-29 | [0049-durable-content-publication-boundary.md](0049-durable-content-publication-boundary.md) |
 | 0050 | Durable Manual Cover Foundation | Accepted | 2026-08-02 | [0050-durable-manual-cover-foundation.md](0050-durable-manual-cover-foundation.md) |
 | 0051 | Administrator Catalog Removal and Safe Catalog Retirement | Accepted | 2026-08-04 | [0051-administrator-catalog-removal.md](0051-administrator-catalog-removal.md) |
+| 0052 | Automated Catalog Backup, Retention and Restore Verification | Accepted | 2026-08-04 | [0052-automated-catalog-backup-retention-and-restore-verification.md](0052-automated-catalog-backup-retention-and-restore-verification.md) |

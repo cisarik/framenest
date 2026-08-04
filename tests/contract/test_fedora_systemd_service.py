@@ -158,6 +158,10 @@ def test_non_secret_environment_template_is_loopback_first_and_path_explicit() -
         "FRAMENEST_COVER_STORAGE_ROOT": "/var/lib/framenest/covers",
         "FRAMENEST_COVER_THUMBNAIL_CACHE_PATH": "/var/cache/framenest/cover-thumbnails",
         "FRAMENEST_AI_CONFIG_PATH": "/var/lib/framenest/ai/config.json",
+        "FRAMENEST_CATALOG_BACKUP_ROOT": "/var/lib/framenest/catalog-backups",
+        "FRAMENEST_CATALOG_RESTORE_VERIFY_ROOT": "/var/lib/framenest/catalog-restore-verify",
+        "FRAMENEST_CATALOG_BACKUP_OPS_ROOT": "/var/lib/framenest/catalog-backup-ops",
+        "FRAMENEST_CATALOG_BACKUP_KEEP_AUTO": "30",
     }
 
 

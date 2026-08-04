@@ -329,7 +329,13 @@ def test_restore_verified_bundle_to_new_destination(tmp_path: Path) -> None:
     with sqlite3.connect(destination) as connection:
         revision = connection.execute("SELECT version_num FROM alembic_version").fetchone()
     assert revision == ("0024",)
-
+    siblings = [
+        path
+        for path in destination.parent.iterdir()
+        if path.name.startswith(f".{destination.name}.") and path.name.endswith(".tmp")
+    ]
+    assert siblings == []
+    assert list(destination.parent.iterdir()) == [destination]
 
 def test_restore_refuses_existing_or_symlink_destination_and_leaves_bundle_read_only(tmp_path: Path) -> None:
     from framenest.infrastructure.persistence.catalog_backup import BackupError, create_catalog_backup, restore_catalog_backup

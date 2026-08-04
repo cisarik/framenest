@@ -9,12 +9,95 @@ It is not a real NUC backup record, media backup plan, secret backup plan,
 service-replacement procedure, or deployment acceptance record.
 
 Authoritative decision: [ADR-0033](adr/0033-catalog-backup-and-recovery-foundation.md).
+Automated scheduling, retention, and restore-readiness:
+[ADR-0052](adr/0052-automated-catalog-backup-retention-and-restore-verification.md).
 
 The accepted sanitized NUC host baseline is recorded in
 [NUC_HOST_BASELINE.md](NUC_HOST_BASELINE.md). That baseline confirms the current
 media-storage preparation state but does not replace catalog backup, media
 second-copy planning, secret recovery, restore drills, or deployment
 acceptance.
+
+## Automated Daily Pipeline
+
+Threat: unverified or unscheduled catalog backups leave no proven recovery point
+after destructive administrator operations or failed migrations.
+
+Benefit: one systemd timer runs a full create → verify → disposable restore →
+semantic readback → retention pipeline every day.
+
+Limitation: this protects the catalog database only. It does not back up
+`/srv/media`, published originals, cover bytes, caches, secrets, or AI
+configuration. Successful catalog restore does not restore lost original media.
+Backups currently share the system SSD with the live catalog; off-host copies
+remain deferred.
+
+Default roots:
+
+```text
+/var/lib/framenest/catalog-backups
+/var/lib/framenest/catalog-restore-verify
+/var/lib/framenest/catalog-backup-ops
+```
+
+Schedule:
+
+```text
+framenest-catalog-backup.timer
+OnCalendar=*-*-* 03:17:00 UTC
+Persistent=yes
+RandomizedDelaySec=900
+```
+
+There is exactly one timer. Restore-readiness is proven by the daily pipeline.
+Status becomes stale when no complete scheduled success has occurred for more
+than 48 hours. Scheduled attempt ordering uses a durable monotonic
+`attempt_seq` in operator state so a later failure remains `failed` even when
+wall-clock timestamps collide in the same UTC second. Manual `verify-restore`
+never supersedes scheduled attempt order.
+
+Shared exclusive non-blocking `fcntl.flock` on
+`/var/lib/framenest/catalog-backup-ops/catalog-backup.lock` protects:
+
+- `create`
+- `verify`
+- `restore`
+- `run-scheduled`
+- `verify-restore`
+- `expire`
+
+Competing protected commands return sanitized `BACKUP_OPS_BUSY` with zero
+mutation. Read-only `status`, `list`, and `retain-plan` do not take the lock.
+Production manual pre-deployment `create` therefore shares the lock with the
+scheduled service when both use the configured operator-state root.
+
+Successful restore publication removes the private temporary sibling. A fully
+successful scheduled or manual restore-verification leaves the disposable
+restore-verification root without that operation's database or temporary
+sibling; unrelated files in the restore root are never removed.
+`pending_cleanup=false` only when every disposable artifact created by that
+operation was removed.
+
+Retention:
+
+- `FRAMENEST_CATALOG_BACKUP_KEEP_AUTO=30` by default;
+- minimum accepted value is `3`; invalid values fail closed;
+- only verified ledger-recorded `auto-` bundles expire;
+- all non-`auto-` bundles remain pinned;
+- failed pipelines perform no deletion;
+- `expire` defaults to dry-run; `--apply` is required to delete.
+
+Operator commands:
+
+```text
+framenest-backup run-scheduled
+framenest-backup status
+framenest-backup list
+framenest-backup retain-plan
+framenest-backup expire --dry-run
+framenest-backup expire --apply
+framenest-backup verify-restore --bundle <bundle>
+```
 
 ## State Classes
 
@@ -389,33 +472,39 @@ Verification evidence:
 Threat: too few backups, unverified backups, or automatic deletion can remove
 the only recoverable catalog.
 
-Benefit: explicit retention keeps recovery options available.
+Benefit: automated retention keeps the newest verified `auto-` recovery points
+while pinning all non-`auto-` historical bundles.
 
-Limitation: FrameNest does not implement retention deletion or scheduling.
+Limitation: automatic expiry never claims off-device durability and never deletes
+pinned pre-deployment or manual bundles.
 
 Preconditions:
 
-- Operator chooses retention count or age.
-- At least one recent verified bundle is copied off-device for important
-  catalog state.
+- Only completed verified ledger-recorded `auto-` bundles are eligible.
+- `FRAMENEST_CATALOG_BACKUP_KEEP_AUTO` is valid (`>= 3`, default `30`).
+- A newer verified automatic recovery point exists according to the policy.
 
-Mutation class: operator policy; deletion requires separate authority.
+Mutation class: deletes only whole eligible automatic bundle directories after
+dry-run or scheduled success.
 
 Stop conditions:
 
-- A newer bundle is not verified.
-- Off-device copy is not verified.
-- Deletion would leave only one important copy.
+- A current scheduled create/verify/restore pipeline failed.
+- Deletion would remove a non-`auto-` bundle.
+- Deletion would remove the newest verified automatic bundle.
+- Deletion would reduce verified automatic recovery points below three.
+- The path is a symlink or escapes the configured backup root.
 
 Rollback or cleanup:
 
 - Retain older verified bundles until replacement evidence exists.
+- Use `framenest-backup expire --dry-run` before `--apply`.
 
 Verification evidence:
 
 - List of retained bundle identifiers.
 - Verification evidence for retained current bundles.
-- Off-device copy evidence.
+- Operator status and events for applied expiry.
 
 ## Failure Handling
 

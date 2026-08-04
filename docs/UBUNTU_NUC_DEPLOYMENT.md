@@ -94,6 +94,55 @@ Release-local operator console entry points:
 /opt/framenest/current/.venv/bin/framenest-previews
 ```
 
+Automated catalog backup assets (ADR-0052):
+
+```text
+deploy/systemd/framenest-catalog-backup.service
+deploy/systemd/framenest-catalog-backup.timer
+```
+
+Install and enable only under an authorized deployment task after the feature
+release is active:
+
+```text
+# [NUC / bash]
+sudo install -m 0644 deploy/systemd/framenest-catalog-backup.service /etc/systemd/system/
+sudo install -m 0644 deploy/systemd/framenest-catalog-backup.timer /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now framenest-catalog-backup.timer
+systemctl list-timers framenest-catalog-backup.timer
+sudo -u framenest --chdir=/opt/framenest/current \
+  env FRAMENEST_ENV_FILE=/etc/framenest/framenest.env \
+  /opt/framenest/current/.venv/bin/framenest-backup status
+#------------------------------------------------------
+```
+
+Manual oneshot trigger:
+
+```text
+# [NUC / bash]
+sudo systemctl start framenest-catalog-backup.service
+sudo systemctl status framenest-catalog-backup.service --no-pager
+#------------------------------------------------------
+```
+
+Rollback to a release that lacks `run-scheduled` must disable and stop the timer
+before switching `current`, then remove or leave the units disabled:
+
+```text
+# [NUC / bash]
+sudo systemctl disable --now framenest-catalog-backup.timer
+sudo systemctl disable --now framenest-catalog-backup.service
+sudo systemctl daemon-reload
+#------------------------------------------------------
+```
+
+The daily pipeline creates an `auto-` catalog bundle, verifies it, restores it
+to a disposable destination, records restore-readiness, and expires only
+eligible automatic bundles. It does not back up original media bytes. Defaults
+and operator commands are documented in
+[BACKUP_AND_RECOVERY.md](BACKUP_AND_RECOVERY.md).
+
 The service must remain loopback-first, foreground under systemd, journal
 captured, explicit-migration only, and protected by the read-only database
 readiness gate.
@@ -721,9 +770,8 @@ Stop conditions:
 
 ## Not Implemented By This Runbook
 
-- Real deployment acceptance.
-- Real-host backup/restore acceptance, off-device copies, retention policy, and
-  production restore drills.
+- Real deployment acceptance of the automated catalog-backup timer on a host.
+- Off-device copies, media-byte backup, and in-place production catalog overwrite.
 - Live production provider-secret deployment or provider testing.
 - Tailscale Funnel or any ingress beyond the authenticated tailnet.
 - Multi-user administration UI, invitations, or per-user personal metadata.
