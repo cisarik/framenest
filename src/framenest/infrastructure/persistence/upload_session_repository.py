@@ -52,6 +52,7 @@ from framenest.domain.media_byte_identities import (
 )
 from framenest.infrastructure.persistence.catalog_schema import (
     media_byte_identities,
+    upload_publications,
     upload_sessions,
 )
 from framenest.infrastructure.persistence.engine import (
@@ -573,15 +574,28 @@ class SqliteUploadSessionRepository:
             )
             canonical_exists = connection.execute(
                 select(upload_sessions.c.id)
+                .select_from(
+                    upload_sessions.outerjoin(
+                        upload_publications,
+                        upload_publications.c.upload_id == upload_sessions.c.id,
+                    )
+                )
                 .where(
                     and_(
                         upload_sessions.c.id != session_id.to_string(),
                         upload_sessions.c.byte_identity_id == identity.id.to_string(),
-                        upload_sessions.c.state.in_(
-                            tuple(
-                                state.value
-                                for state in _QUALIFYING_DUPLICATE_CANONICAL_STATES
-                            )
+                        or_(
+                            upload_sessions.c.state.in_(
+                                (
+                                    UploadSessionState.PUBLISH_PENDING.value,
+                                    UploadSessionState.PUBLISHED.value,
+                                )
+                            ),
+                            and_(
+                                upload_sessions.c.state
+                                == UploadSessionState.CATALOGED.value,
+                                upload_publications.c.media_id.is_not(None),
+                            ),
                         ),
                     )
                 )

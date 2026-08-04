@@ -126,6 +126,8 @@ let adminCatalogState = {
   requestOwner: null,
   items: [],
   publishOwners: new Map(),
+  removalOwners: new Map(),
+  pendingCleanupReceiptId: null,
   actionStatusByMediaId: new Map(),
   loading: false,
   error: false,
@@ -485,6 +487,9 @@ const adminMediaReadinessFilter = document.querySelector("#admin-media-readiness
 const adminMediaAnalysisFilter = document.querySelector("#admin-media-analysis-filter");
 const adminMediaRefreshButton = document.querySelector("#admin-media-refresh-button");
 const adminMediaActionStatus = document.querySelector("#admin-media-action-status");
+const adminCatalogCleanupRetryButton = document.querySelector(
+  "#admin-catalog-cleanup-retry-button",
+);
 const adminMediaLoading = document.querySelector("#admin-media-loading");
 const adminMediaEmpty = document.querySelector("#admin-media-empty");
 const adminMediaError = document.querySelector("#admin-media-error");
@@ -7546,6 +7551,20 @@ function setAdminActionStatus(message) {
   if (adminMediaActionStatus) adminMediaActionStatus.textContent = message;
 }
 
+function setAdminPendingCleanupReceipt(receiptId) {
+  adminCatalogState.pendingCleanupReceiptId = receiptId || null;
+  if (!adminCatalogCleanupRetryButton) return;
+  const visible = Boolean(receiptId) && identityHasCapability("media.catalog.remove");
+  adminCatalogCleanupRetryButton.hidden = !visible;
+  adminCatalogCleanupRetryButton.disabled = false;
+  adminCatalogCleanupRetryButton.removeAttribute("aria-busy");
+  if (receiptId) {
+    adminCatalogCleanupRetryButton.dataset.receiptId = receiptId;
+  } else {
+    delete adminCatalogCleanupRetryButton.dataset.receiptId;
+  }
+}
+
 function adminMediaTitle(item) {
   const title = typeof item.display_title === "string" ? item.display_title.trim() : "";
   return title || "Untitled media";
@@ -7805,7 +7824,8 @@ function renderAdminMediaItem(item) {
     publishButton.disabled = !item.publication_ready
       || adminCatalogState.publishOwners.has(item.media_id)
       || Boolean(actionStatus)
-      || adminBatchDriverActive();
+      || adminBatchDriverActive()
+      || Boolean(adminCatalogState.removalOwners.has(item.media_id));
     if (!item.publication_ready) publishButton.title = adminMissingFieldsLabel(item);
     if (actionStatus) publishButton.title = actionStatus.message;
     if (adminCatalogState.publishOwners.has(item.media_id)) {
@@ -7814,6 +7834,24 @@ function renderAdminMediaItem(item) {
     }
     publishButton.addEventListener("click", () => publishAdminMediaItem(item, publishButton));
     actionsCell.appendChild(publishButton);
+  }
+
+  if (identityHasCapability("media.catalog.remove")) {
+    const removeButton = document.createElement("button");
+    removeButton.type = "button";
+    removeButton.className = "admin-media-action admin-media-action--remove";
+    removeButton.textContent = adminCatalogState.removalOwners.has(item.media_id)
+      ? "Removing…"
+      : "Remove from catalog";
+    removeButton.dataset.mediaId = item.media_id;
+    removeButton.dataset.adminAction = "catalog-remove";
+    removeButton.disabled = adminCatalogState.removalOwners.has(item.media_id)
+      || adminBatchDriverActive();
+    if (adminCatalogState.removalOwners.has(item.media_id)) {
+      removeButton.setAttribute("aria-busy", "true");
+    }
+    removeButton.addEventListener("click", () => removeAdminMediaFromCatalog(item, removeButton));
+    actionsCell.appendChild(removeButton);
   }
 
   if (actionStatus && actionStatus.retryable) {
@@ -7996,6 +8034,193 @@ async function publishAdminMediaItem(item, opener) {
       else if (publish && !publish.disabled) publish.focus();
       else if (adminMediaHeading) adminMediaHeading.focus();
     }
+  }
+}
+
+function buildCatalogRemovalConfirmationMessage(preview) {
+  const title = preview.display_title || "Untitled media";
+  const lines = [
+    `Remove “${title}” from the FrameNest catalog?`,
+    "The original media file remains on disk. This action does not purge originals.",
+    `Publication state: ${preview.publication_state}.`,
+    `Storage class: ${preview.storage_class}.`,
+    "Active Gallery, Details, streaming, download, cover, and preview access for this catalog identity will end.",
+  ];
+  if (preview.analysis_run_count > 0) {
+    lines.push(
+      `Analysis history rows removed: ${preview.analysis_run_count}`
+        + (
+          preview.provider_submission_count > 0
+            ? ` (provider submissions recorded: ${preview.provider_submission_count}).`
+            : "."
+        ),
+    );
+  }
+  if (Array.isArray(preview.provenance_effects) && preview.provenance_effects.length > 0) {
+    lines.push(`Provenance: ${preview.provenance_effects.join("; ")}.`);
+  }
+  if (
+    Array.isArray(preview.derived_artifact_cleanup_intent)
+    && preview.derived_artifact_cleanup_intent.length > 0
+  ) {
+    lines.push(
+      `Derived cleanup after catalog removal: ${preview.derived_artifact_cleanup_intent.join(", ")}.`,
+    );
+  }
+  return lines.join(" ");
+}
+
+async function removeAdminMediaFromCatalog(item, opener) {
+  if (!item || !item.media_id) return;
+  if (adminCatalogState.removalOwners.has(item.media_id) || adminBatchDriverActive()) return;
+  let preview;
+  try {
+    opener.disabled = true;
+    setAdminActionStatus(`Loading removal preview for ${adminMediaTitle(item)}…`);
+    const previewResponse = await fetch(
+      `${ADMIN_MEDIA_ENDPOINT}/${encodeURIComponent(item.media_id)}/catalog-removal`,
+      {
+        method: "GET",
+        headers: { Accept: "application/json" },
+        cache: "no-store",
+      },
+    );
+    preview = await previewResponse.json();
+    if (!previewResponse.ok) {
+      const code = preview && preview.error ? preview.error.code : "";
+      setAdminActionStatus(
+        code === "CAPABILITY_DENIED"
+          ? "Your current identity is not authorized to remove catalog media."
+          : "Catalog removal preview is unavailable.",
+      );
+      return;
+    }
+  } catch {
+    setAdminActionStatus("Catalog removal preview could not reach the local server.");
+    return;
+  } finally {
+    opener.disabled = false;
+    opener.removeAttribute("aria-busy");
+  }
+
+  const confirmed = await requestConfirmation({
+    title: "Remove from catalog?",
+    message: buildCatalogRemovalConfirmationMessage(preview),
+    confirmLabel: "Remove from catalog",
+    dismissLabel: "Cancel",
+    destructive: true,
+    focusReturn: opener,
+  });
+  if (!confirmed) {
+    setAdminActionStatus("");
+    opener.focus();
+    return;
+  }
+
+  adminCatalogState.removalOwners.set(item.media_id, opener);
+  opener.disabled = true;
+  opener.setAttribute("aria-busy", "true");
+  opener.textContent = "Removing…";
+  setAdminActionStatus(`Removing ${adminMediaTitle(item)} from catalog…`);
+  try {
+    const response = await fetch(
+      `${ADMIN_MEDIA_ENDPOINT}/${encodeURIComponent(item.media_id)}/catalog-removal`,
+      {
+        method: "POST",
+        headers: framenestMutationHeaders({
+          Accept: "application/json",
+          "Content-Type": "application/json",
+        }),
+        cache: "no-store",
+        body: JSON.stringify({
+          acknowledge_consequences: true,
+          consequence_fingerprint: preview.consequence_fingerprint,
+        }),
+      },
+    );
+    const payload = await response.json();
+    if (response.status === 409) {
+      setAdminActionStatus(
+        "Catalog state changed. Review the refreshed consequences and confirm again.",
+      );
+      adminCatalogState.removalOwners.delete(item.media_id);
+      await removeAdminMediaFromCatalog(item, opener);
+      return;
+    }
+    if (!response.ok) {
+      setAdminActionStatus(
+        response.status === 403
+          ? "Your current identity is not authorized to remove catalog media."
+          : "Catalog removal failed without changing the durable catalog state.",
+      );
+      return;
+    }
+    const receipt = payload.receipt || {};
+    adminBatchState.selectedMediaIds.delete(item.media_id);
+    if (receipt.cleanup_retry_available) {
+      setAdminPendingCleanupReceipt(receipt.receipt_id);
+      setAdminActionStatus(
+        `${adminMediaTitle(item)} removed from catalog. Derived cleanup is pending; retry is available.`,
+      );
+    } else {
+      setAdminPendingCleanupReceipt(null);
+      setAdminActionStatus(
+        `${adminMediaTitle(item)} removed from catalog. Original media files remain on disk.`,
+      );
+    }
+    await loadAdminCatalog({
+      focusMediaId: adminCatalogState.items.find((candidate) => (
+        candidate.media_id !== item.media_id
+      ))?.media_id,
+    });
+    if (typeof loadCatalog === "function") {
+      await loadCatalog();
+    }
+  } catch {
+    setAdminActionStatus("Catalog removal could not reach the local server.");
+  } finally {
+    adminCatalogState.removalOwners.delete(item.media_id);
+    if (opener.isConnected) {
+      opener.disabled = false;
+      opener.removeAttribute("aria-busy");
+      opener.textContent = "Remove from catalog";
+    }
+  }
+}
+
+async function retryAdminCatalogRemovalCleanup(receiptId, opener) {
+  if (!receiptId) return;
+  opener.disabled = true;
+  opener.setAttribute("aria-busy", "true");
+  setAdminActionStatus("Retrying derived-artifact cleanup…");
+  try {
+    const response = await fetch(
+      `/api/admin/catalog-removal-receipts/${encodeURIComponent(receiptId)}/cleanup-retry`,
+      {
+        method: "POST",
+        headers: framenestMutationHeaders({ Accept: "application/json" }),
+        cache: "no-store",
+      },
+    );
+    const payload = await response.json();
+    if (!response.ok) {
+      setAdminActionStatus("Derived-artifact cleanup retry failed.");
+      return;
+    }
+    const receipt = payload.receipt || {};
+    if (receipt.cleanup_retry_available) {
+      setAdminPendingCleanupReceipt(receipt.receipt_id || receiptId);
+      setAdminActionStatus("Derived-artifact cleanup is still pending.");
+    } else {
+      setAdminPendingCleanupReceipt(null);
+      setAdminActionStatus("Derived-artifact cleanup completed.");
+      await loadAdminCatalog();
+    }
+  } catch {
+    setAdminActionStatus("Derived-artifact cleanup retry could not reach the local server.");
+  } finally {
+    opener.disabled = false;
+    opener.removeAttribute("aria-busy");
   }
 }
 
@@ -10619,6 +10844,14 @@ if (adminMediaFilters) {
 if (adminMediaRetryButton) {
   adminMediaRetryButton.addEventListener("click", () => {
     loadAdminCatalog();
+  });
+}
+
+if (adminCatalogCleanupRetryButton) {
+  adminCatalogCleanupRetryButton.addEventListener("click", () => {
+    const receiptId = adminCatalogState.pendingCleanupReceiptId
+      || adminCatalogCleanupRetryButton.dataset.receiptId;
+    retryAdminCatalogRemovalCleanup(receiptId, adminCatalogCleanupRetryButton);
   });
 }
 

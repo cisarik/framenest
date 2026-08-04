@@ -528,6 +528,15 @@ sidecars, transcoding, or automatic AI analysis.
 Per-user Trash MUST be server-persisted visibility state and MUST NOT delete
 the server original.
 
+Administrator catalog removal MUST hard-delete one active logical-medium
+aggregate after an authoritative consequence preview and fingerprint
+confirmation, MUST retain all original media bytes, MUST persist a durable
+removal receipt, MUST transition linked YouTube claims to `catalog_removed`,
+MUST detach upload-publication catalog linkage without trapping identical
+re-uploads, and MUST NOT implement Trash, soft-delete tombstones, batch
+removal, or physical purge. See
+[ADR-0051](docs/adr/0051-administrator-catalog-removal.md).
+
 The synchronization protocol remains unresolved.
 
 ## 19. Network Boundary

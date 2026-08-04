@@ -241,6 +241,13 @@ failures, and choose server placement; clients must not select arbitrary server
 filesystem paths. Per-user Trash is server-persisted visibility state and must
 not delete the server original.
 
+Administrator catalog removal is hard removal of one catalog identity after an
+authoritative consequence preview. It is not Trash, Hide, soft delete, or
+physical purge. Original media files remain on disk. Derived exclusive artifact
+cleanup is receipt-backed and retryable. Linked YouTube provenance becomes
+`catalog_removed`, and historical upload provenance is detached so identical
+bytes can be cataloged again.
+
 Catalog membership and ordinary Gallery publication are separate. Later
 metadata regression must not silently revoke an accepted publication.
 `Processed`, AI-analysis state, upload storage publication, and content

@@ -1156,6 +1156,13 @@ def test_each_approved_canonical_state_gates_a_later_exact_upload(
     )
     try:
         repository.create(prior)
+        if qualifying_state is UploadSessionState.CATALOGED:
+            _seed_live_upload_publication_link(
+                engine,
+                upload_id=prior.id.to_string(),
+                byte_identity_id=identity_id.to_string(),
+                checksum_hex=digest,
+            )
         repository.create(current)
         completed = repository.complete_validation_success(
             current.id,
@@ -1170,6 +1177,118 @@ def test_each_approved_canonical_state_gates_a_later_exact_upload(
 
     assert completed.state is UploadSessionState.DUPLICATE_PENDING
     assert completed.byte_identity_id == identity_id
+
+
+def test_cataloged_without_live_publication_link_does_not_gate_exact_upload(
+    tmp_path: Path,
+) -> None:
+    repository, engine = _repository(tmp_path)
+    identity_id = MediaByteIdentityId.new()
+    digest = "3" * 64
+    prior = _session(
+        storage_key="upload-session-detached-0001",
+        state=UploadSessionState.CATALOGED,
+        received_size_bytes=100,
+        checksum_hex=digest,
+        validated_media_kind=UploadValidatedMediaKind.VIDEO,
+        validated_format=UploadValidatedFormat.MP4,
+        byte_identity_id=identity_id,
+    )
+    current = _session(
+        storage_key="upload-session-detached-0002",
+        state=UploadSessionState.VALIDATING,
+    )
+    try:
+        repository.create(prior)
+        repository.create(current)
+        completed = repository.complete_validation_success(
+            current.id,
+            expected_version=0,
+            checksum_hex=digest,
+            validated_media_kind=UploadValidatedMediaKind.VIDEO,
+            validated_format=UploadValidatedFormat.MP4,
+            updated_at_ms=20,
+        )
+    finally:
+        engine.dispose()
+
+    assert completed.state is UploadSessionState.PUBLISH_PENDING
+    assert completed.byte_identity_id == identity_id
+
+
+def _seed_live_upload_publication_link(
+    engine: sa.Engine,
+    *,
+    upload_id: str,
+    byte_identity_id: str,
+    checksum_hex: str,
+) -> None:
+    device_id = "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+    library_id = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+    media_id = "11111111-1111-4111-8111-111111111111"
+    location_id = "22222222-2222-4222-8222-222222222222"
+    publication_id = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
+    with engine.begin() as connection:
+        connection.execute(
+            sa.text(
+                "INSERT INTO devices (id, display_name) VALUES (:id, 'Synthetic')"
+            ),
+            {"id": device_id},
+        )
+        connection.execute(
+            sa.text(
+                "INSERT INTO libraries "
+                "(id, device_id, display_name, path_flavor, root_path) "
+                "VALUES (:id, :device_id, 'Synthetic', 'posix', '/synthetic')"
+            ),
+            {"id": library_id, "device_id": device_id},
+        )
+        connection.execute(
+            sa.text(
+                "INSERT INTO logical_media "
+                "(id, media_kind, created_at_ms, updated_at_ms) "
+                "VALUES (:id, 'video', 1, 1)"
+            ),
+            {"id": media_id},
+        )
+        connection.execute(
+            sa.text(
+                "INSERT INTO physical_media_locations "
+                "(id, media_id, library_id, relative_path, availability, "
+                "observed_size_bytes, observed_mtime_ns, created_at_ms, "
+                "updated_at_ms) VALUES "
+                "(:id, :media_id, :library_id, 'safe/item.mp4', 'available', "
+                "100, 1, 1, 1)"
+            ),
+            {
+                "id": location_id,
+                "media_id": media_id,
+                "library_id": library_id,
+            },
+        )
+        connection.execute(
+            sa.text(
+                "INSERT INTO upload_publications "
+                "(upload_id, publication_id, destination_id, relative_target, "
+                "byte_identity_id, expected_size_bytes, checksum_algorithm, "
+                "checksum_hex, validated_media_kind, validated_format, state, "
+                "cleanup_state, created_at_ms, updated_at_ms, verified_at_ms, "
+                "cleanup_completed_at_ms, version, media_id, media_location_id) "
+                "VALUES (:upload_id, :publication_id, :destination_id, :relative, "
+                ":byte_id, 100, 'sha256', :digest, 'video', 'mp4', 'verified', "
+                "'complete', 1, 1, 1, 1, 1, :media_id, :location_id)"
+            ),
+            {
+                "upload_id": upload_id,
+                "publication_id": publication_id,
+                "destination_id": library_id,
+                "relative": f"{publication_id.replace('-', '')}.mp4",
+                "byte_id": byte_identity_id,
+                "digest": checksum_hex,
+                "media_id": media_id,
+                "location_id": location_id,
+            },
+        )
 
 
 @pytest.mark.parametrize(

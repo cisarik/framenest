@@ -174,6 +174,40 @@ def test_failed_claim_requires_paired_sanitized_failure_evidence() -> None:
         )
 
 
+def test_cataloged_claim_can_become_catalog_removed() -> None:
+    media_id = MediaId.new()
+    location_id = MediaLocationId.new()
+    original = YouTubeAcquisitionClaim.new(
+        submitted_url=f"https://www.youtube.com/watch?v={VIDEO_ID}",
+        confirmation_method=YouTubeConfirmationMethod.INTERACTIVE,
+        now_ms=20,
+    )
+    cataloged = YouTubeAcquisitionClaim.new(
+        submitted_url=f"https://youtu.be/{VIDEO_ID}",
+        confirmation_method=YouTubeConfirmationMethod.YES_FLAG,
+        now_ms=30,
+    ).advance(
+        YouTubeAcquisitionState.DUPLICATE_RESOLVED,
+        updated_at_ms=31,
+        completed_at_ms=31,
+        resolved_claim_id=original.id,
+        media_id=media_id,
+        media_location_id=location_id,
+    )
+
+    removed = cataloged.mark_catalog_removed(now_ms=32)
+
+    assert removed.state is YouTubeAcquisitionState.CATALOG_REMOVED
+    assert removed.media_id is None
+    assert removed.media_location_id is None
+    assert removed.catalog_removed_at_ms == 32
+    assert removed.completed_at_ms == 31
+    with pytest.raises(FrameNestYouTubeTransitionError):
+        removed.mark_catalog_removed(now_ms=33)
+    with pytest.raises(FrameNestYouTubeClaimError):
+        cataloged.mark_catalog_removed(now_ms=30)
+
+
 def test_illegal_transition_is_rejected() -> None:
     claim = YouTubeAcquisitionClaim.new(
         submitted_url=f"https://youtu.be/{VIDEO_ID}",

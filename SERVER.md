@@ -290,10 +290,13 @@ privileged-action audit logging. Deferred security decisions now include:
 - transfer authorization;
 - stream URL lifetime;
 - backup access;
-- administrator operations beyond the initial capability set;
+- administrator operations beyond the catalog-removal and publication
+  capability set already accepted;
 - schema-backed identity migration if the configuration map outgrows its
   audit provenance or operational needs;
-- multi-user behavior, if any.
+- multi-user behavior, if any;
+- physical original-byte purge, batch catalog removal, Trash/Hide, and
+  soft-delete tombstone filtering.
 
 ## Current MacBook MVP Non-Goals
 

@@ -766,6 +766,7 @@ youtube_acquisition_claims = Table(
     Column("updated_at_ms", Integer(), nullable=False),
     Column("downloaded_at_ms", Integer(), nullable=True),
     Column("completed_at_ms", Integer(), nullable=True),
+    Column("catalog_removed_at_ms", Integer(), nullable=True),
     Column("failure_stage", Text(), nullable=True),
     Column("failure_code", Text(), nullable=True),
     Column("cleanup_state", Text(), nullable=False),
@@ -775,7 +776,7 @@ youtube_acquisition_claims = Table(
     CheckConstraint(
         "state IN ('claimed', 'inspecting', 'download_pending', 'downloading', "
         "'downloaded', 'handoff', 'handed_off', 'duplicate_resolved', "
-        "'cataloged', 'failed')",
+        "'cataloged', 'catalog_removed', 'failed')",
         name="ck_youtube_claims_state",
     ),
     CheckConstraint(
@@ -936,14 +937,24 @@ youtube_acquisition_claims = Table(
     ),
     CheckConstraint(
         "(state = 'cataloged' AND media_id IS NOT NULL "
-        "AND completed_at_ms IS NOT NULL AND failure_code IS NULL) "
+        "AND media_location_id IS NOT NULL "
+        "AND completed_at_ms IS NOT NULL AND failure_code IS NULL "
+        "AND catalog_removed_at_ms IS NULL) "
         "OR (state = 'duplicate_resolved' "
-        "AND media_id IS NOT NULL AND completed_at_ms IS NOT NULL "
+        "AND media_id IS NOT NULL AND media_location_id IS NOT NULL "
+        "AND completed_at_ms IS NOT NULL AND failure_code IS NULL "
+        "AND catalog_removed_at_ms IS NULL) "
+        "OR (state = 'catalog_removed' AND media_id IS NULL "
+        "AND media_location_id IS NULL AND completed_at_ms IS NOT NULL "
+        "AND catalog_removed_at_ms IS NOT NULL "
+        "AND catalog_removed_at_ms >= completed_at_ms "
         "AND failure_code IS NULL) "
         "OR (state = 'failed' AND failure_code IS NOT NULL "
-        "AND completed_at_ms IS NOT NULL) "
-        "OR (state NOT IN ('cataloged', 'duplicate_resolved', 'failed') "
-        "AND completed_at_ms IS NULL AND failure_code IS NULL)",
+        "AND completed_at_ms IS NOT NULL AND catalog_removed_at_ms IS NULL) "
+        "OR (state NOT IN ('cataloged', 'duplicate_resolved', 'catalog_removed', "
+        "'failed') "
+        "AND completed_at_ms IS NULL AND failure_code IS NULL "
+        "AND catalog_removed_at_ms IS NULL)",
         name="ck_youtube_claims_terminal_payload",
     ),
     UniqueConstraint("staging_key", name="uq_youtube_claims_staging_key"),
@@ -1191,4 +1202,138 @@ security_audit_events = Table(
     Index("ix_security_audit_events_occurred_at", "occurred_at_ms", "id"),
     Index("ix_security_audit_events_actor_key", "actor_key", "occurred_at_ms"),
     Index("ix_security_audit_events_capability", "capability", "occurred_at_ms"),
+)
+
+media_catalog_removal_receipts = Table(
+    "media_catalog_removal_receipts",
+    metadata,
+    Column("id", Text(), primary_key=True, nullable=False),
+    Column("occurred_at_ms", Integer(), nullable=False),
+    Column("request_id", Text(), nullable=False),
+    Column("actor_key", Text(), nullable=False),
+    Column("media_id", Text(), nullable=False),
+    Column("display_title_snapshot", Text(), nullable=True),
+    Column("acquisition_source", Text(), nullable=False),
+    Column("storage_class", Text(), nullable=False),
+    Column("was_published", Integer(), nullable=False),
+    Column("published_at_ms", Integer(), nullable=True),
+    Column("consequence_fingerprint", Text(), nullable=False),
+    Column("catalog_outcome", Text(), nullable=False),
+    Column("original_bytes_policy", Text(), nullable=False),
+    Column("original_bytes_outcome", Text(), nullable=False),
+    Column("youtube_claims_transitioned", Integer(), nullable=False),
+    Column("upload_publications_detached", Integer(), nullable=False),
+    Column("analysis_run_count", Integer(), nullable=False),
+    Column("provider_submission_count", Integer(), nullable=False),
+    Column("cover_artifact_digest", Text(), nullable=True),
+    Column("preview_location_ids_json", Text(), nullable=True),
+    Column("cover_cleanup_state", Text(), nullable=False),
+    Column("preview_cleanup_state", Text(), nullable=False),
+    Column("cleanup_updated_at_ms", Integer(), nullable=True),
+    CheckConstraint("length(id) = 36", name="ck_catalog_removal_receipts_id_length"),
+    CheckConstraint(
+        "occurred_at_ms >= 0",
+        name="ck_catalog_removal_receipts_occurred_non_negative",
+    ),
+    CheckConstraint(
+        "length(request_id) >= 1 AND length(request_id) <= 64",
+        name="ck_catalog_removal_receipts_request_id_length",
+    ),
+    CheckConstraint(
+        "length(actor_key) >= 1 AND length(actor_key) <= 254",
+        name="ck_catalog_removal_receipts_actor_key_length",
+    ),
+    CheckConstraint(
+        "length(media_id) = 36",
+        name="ck_catalog_removal_receipts_media_id_length",
+    ),
+    CheckConstraint(
+        "display_title_snapshot IS NULL OR ("
+        "length(display_title_snapshot) >= 1 "
+        "AND length(display_title_snapshot) <= 240)",
+        name="ck_catalog_removal_receipts_title_length",
+    ),
+    CheckConstraint(
+        "acquisition_source IN ("
+        "'unknown', 'manual_upload', 'library_scan', 'youtube_manual_claim')",
+        name="ck_catalog_removal_receipts_acquisition_source",
+    ),
+    CheckConstraint(
+        "storage_class IN ("
+        "'operator_managed', 'server_managed_upload', 'unknown')",
+        name="ck_catalog_removal_receipts_storage_class",
+    ),
+    CheckConstraint(
+        "was_published IN (0, 1)",
+        name="ck_catalog_removal_receipts_was_published",
+    ),
+    CheckConstraint(
+        "published_at_ms IS NULL OR published_at_ms >= 0",
+        name="ck_catalog_removal_receipts_published_at",
+    ),
+    CheckConstraint(
+        "length(consequence_fingerprint) = 64 "
+        "AND consequence_fingerprint = lower(consequence_fingerprint) "
+        "AND consequence_fingerprint NOT GLOB '*[^0-9a-f]*'",
+        name="ck_catalog_removal_receipts_fingerprint",
+    ),
+    CheckConstraint(
+        "catalog_outcome = 'removed'",
+        name="ck_catalog_removal_receipts_catalog_outcome",
+    ),
+    CheckConstraint(
+        "original_bytes_policy = 'retain_all'",
+        name="ck_catalog_removal_receipts_bytes_policy",
+    ),
+    CheckConstraint(
+        "original_bytes_outcome IN ("
+        "'retained_operator_managed', 'retained_server_managed', "
+        "'retained_already_missing', 'retained_unknown')",
+        name="ck_catalog_removal_receipts_bytes_outcome",
+    ),
+    CheckConstraint(
+        "youtube_claims_transitioned >= 0",
+        name="ck_catalog_removal_receipts_youtube_count",
+    ),
+    CheckConstraint(
+        "upload_publications_detached >= 0",
+        name="ck_catalog_removal_receipts_upload_count",
+    ),
+    CheckConstraint(
+        "analysis_run_count >= 0",
+        name="ck_catalog_removal_receipts_analysis_count",
+    ),
+    CheckConstraint(
+        "provider_submission_count >= 0",
+        name="ck_catalog_removal_receipts_provider_count",
+    ),
+    CheckConstraint(
+        "cover_artifact_digest IS NULL OR ("
+        "length(cover_artifact_digest) = 64 "
+        "AND cover_artifact_digest = lower(cover_artifact_digest) "
+        "AND cover_artifact_digest NOT GLOB '*[^0-9a-f]*')",
+        name="ck_catalog_removal_receipts_cover_digest",
+    ),
+    CheckConstraint(
+        "cover_cleanup_state IN ('none', 'pending', 'complete', 'failed')",
+        name="ck_catalog_removal_receipts_cover_cleanup",
+    ),
+    CheckConstraint(
+        "preview_cleanup_state IN ('none', 'pending', 'complete', 'failed')",
+        name="ck_catalog_removal_receipts_preview_cleanup",
+    ),
+    CheckConstraint(
+        "cleanup_updated_at_ms IS NULL OR cleanup_updated_at_ms >= occurred_at_ms",
+        name="ck_catalog_removal_receipts_cleanup_updated",
+    ),
+    Index(
+        "ix_catalog_removal_receipts_occurred",
+        "occurred_at_ms",
+        "id",
+    ),
+    Index(
+        "ix_catalog_removal_receipts_media_id",
+        "media_id",
+        "occurred_at_ms",
+    ),
 )

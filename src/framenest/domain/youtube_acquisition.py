@@ -71,6 +71,7 @@ class YouTubeAcquisitionState(StrEnum):
     HANDED_OFF = "handed_off"
     DUPLICATE_RESOLVED = "duplicate_resolved"
     CATALOGED = "cataloged"
+    CATALOG_REMOVED = "catalog_removed"
     FAILED = "failed"
 
 
@@ -90,7 +91,15 @@ TERMINAL_YOUTUBE_ACQUISITION_STATES = frozenset(
     {
         YouTubeAcquisitionState.DUPLICATE_RESOLVED,
         YouTubeAcquisitionState.CATALOGED,
+        YouTubeAcquisitionState.CATALOG_REMOVED,
         YouTubeAcquisitionState.FAILED,
+    }
+)
+
+LIVE_CATALOG_YOUTUBE_ACQUISITION_STATES = frozenset(
+    {
+        YouTubeAcquisitionState.DUPLICATE_RESOLVED,
+        YouTubeAcquisitionState.CATALOGED,
     }
 )
 
@@ -145,8 +154,17 @@ _ALLOWED_TRANSITIONS: dict[
             YouTubeAcquisitionState.FAILED,
         }
     ),
-    YouTubeAcquisitionState.DUPLICATE_RESOLVED: frozenset(),
-    YouTubeAcquisitionState.CATALOGED: frozenset(),
+    YouTubeAcquisitionState.DUPLICATE_RESOLVED: frozenset(
+        {
+            YouTubeAcquisitionState.CATALOG_REMOVED,
+        }
+    ),
+    YouTubeAcquisitionState.CATALOGED: frozenset(
+        {
+            YouTubeAcquisitionState.CATALOG_REMOVED,
+        }
+    ),
+    YouTubeAcquisitionState.CATALOG_REMOVED: frozenset(),
     YouTubeAcquisitionState.FAILED: frozenset(),
 }
 
@@ -302,6 +320,7 @@ class YouTubeAcquisitionClaim:
     downloaded_size_bytes: int | None = None
     downloaded_at_ms: int | None = None
     completed_at_ms: int | None = None
+    catalog_removed_at_ms: int | None = None
     failure_stage: YouTubeFailureStage | None = None
     failure_code: str | None = None
     cleanup_state: YouTubeStagingCleanupState = YouTubeStagingCleanupState.PENDING
@@ -380,6 +399,7 @@ class YouTubeAcquisitionClaim:
         _validate_optional_non_negative(self.downloaded_size_bytes, positive=True)
         _validate_optional_non_negative(self.downloaded_at_ms)
         _validate_optional_non_negative(self.completed_at_ms)
+        _validate_optional_non_negative(self.catalog_removed_at_ms)
         _validate_optional_non_negative(self.cleanup_completed_at_ms)
         if not isinstance(self.cleanup_state, YouTubeStagingCleanupState):
             raise FrameNestYouTubeClaimError(INVALID_YOUTUBE_CLAIM_MESSAGE)
@@ -449,6 +469,29 @@ class YouTubeAcquisitionClaim:
             **changes,
         )
 
+    def mark_catalog_removed(self, *, now_ms: int) -> YouTubeAcquisitionClaim:
+        """Detach active catalog linkage after administrator catalog removal."""
+        if self.state not in LIVE_CATALOG_YOUTUBE_ACQUISITION_STATES:
+            raise FrameNestYouTubeTransitionError(INVALID_YOUTUBE_TRANSITION_MESSAGE)
+        if self.media_id is None or self.media_location_id is None:
+            raise FrameNestYouTubeClaimError(INVALID_YOUTUBE_CLAIM_MESSAGE)
+        if (
+            isinstance(now_ms, bool)
+            or not isinstance(now_ms, int)
+            or now_ms < 0
+            or (
+                self.completed_at_ms is not None and now_ms < self.completed_at_ms
+            )
+        ):
+            raise FrameNestYouTubeClaimError(INVALID_YOUTUBE_CLAIM_MESSAGE)
+        return self.advance(
+            YouTubeAcquisitionState.CATALOG_REMOVED,
+            updated_at_ms=now_ms,
+            media_id=None,
+            media_location_id=None,
+            catalog_removed_at_ms=now_ms,
+        )
+
     def evolve(
         self,
         *,
@@ -510,20 +553,40 @@ def _validate_state_payload(claim: YouTubeAcquisitionClaim) -> None:
         claim.media_id is None
         or claim.completed_at_ms is None
         or claim.failure_code is not None
+        or claim.catalog_removed_at_ms is not None
     ):
         raise FrameNestYouTubeClaimError(INVALID_YOUTUBE_CLAIM_MESSAGE)
     if claim.state is YouTubeAcquisitionState.DUPLICATE_RESOLVED and (
         claim.media_id is None
         or claim.completed_at_ms is None
         or claim.failure_code is not None
+        or claim.catalog_removed_at_ms is not None
+    ):
+        raise FrameNestYouTubeClaimError(INVALID_YOUTUBE_CLAIM_MESSAGE)
+    if claim.state is YouTubeAcquisitionState.CATALOG_REMOVED and (
+        claim.media_id is not None
+        or claim.media_location_id is not None
+        or claim.completed_at_ms is None
+        or claim.catalog_removed_at_ms is None
+        or claim.catalog_removed_at_ms < claim.completed_at_ms
+        or claim.failure_code is not None
     ):
         raise FrameNestYouTubeClaimError(INVALID_YOUTUBE_CLAIM_MESSAGE)
     if claim.state is YouTubeAcquisitionState.FAILED and (
-        claim.failure_code is None or claim.completed_at_ms is None
+        claim.failure_code is None
+        or claim.completed_at_ms is None
+        or claim.catalog_removed_at_ms is not None
     ):
         raise FrameNestYouTubeClaimError(INVALID_YOUTUBE_CLAIM_MESSAGE)
     if claim.state not in TERMINAL_YOUTUBE_ACQUISITION_STATES and (
-        claim.completed_at_ms is not None or claim.failure_code is not None
+        claim.completed_at_ms is not None
+        or claim.failure_code is not None
+        or claim.catalog_removed_at_ms is not None
+    ):
+        raise FrameNestYouTubeClaimError(INVALID_YOUTUBE_CLAIM_MESSAGE)
+    if (
+        claim.state is not YouTubeAcquisitionState.CATALOG_REMOVED
+        and claim.catalog_removed_at_ms is not None
     ):
         raise FrameNestYouTubeClaimError(INVALID_YOUTUBE_CLAIM_MESSAGE)
 

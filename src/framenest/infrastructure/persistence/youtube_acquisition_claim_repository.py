@@ -458,6 +458,7 @@ def _values_from_claim(claim: YouTubeAcquisitionClaim) -> dict[str, object]:
         "updated_at_ms": claim.updated_at_ms,
         "downloaded_at_ms": claim.downloaded_at_ms,
         "completed_at_ms": claim.completed_at_ms,
+        "catalog_removed_at_ms": claim.catalog_removed_at_ms,
         "failure_stage": None
         if claim.failure_stage is None
         else claim.failure_stage.value,
@@ -508,6 +509,9 @@ def _claim_from_row(row: Mapping[str, object]) -> YouTubeAcquisitionClaim:
             updated_at_ms=int(row["updated_at_ms"]),
             downloaded_at_ms=_optional_int(row["downloaded_at_ms"]),
             completed_at_ms=_optional_int(row["completed_at_ms"]),
+            catalog_removed_at_ms=_optional_int(row["catalog_removed_at_ms"])
+            if "catalog_removed_at_ms" in row
+            else None,
             failure_stage=None
             if row["failure_stage"] is None
             else YouTubeFailureStage(str(row["failure_stage"])),

@@ -106,6 +106,7 @@ function renderAdminPublicationState(item) {
     adminCatalogState: {
       actionStatusByMediaId: new Map(),
       publishOwners: new Map(),
+      removalOwners: new Map(),
     },
     adminBatchState: {
       selectedMediaIds: new Set(),
@@ -117,6 +118,9 @@ function renderAdminPublicationState(item) {
     safeAdminDetailsItem: (candidate) => candidate,
     openDetailsDialog: (candidate, opener) => detailsCalls.push({ candidate, opener }),
     publishAdminMediaItem: () => {},
+    removeAdminMediaFromCatalog: () => {},
+    identityHasCapability: () => true,
+    adminBatchDriverActive: () => false,
     item,
   };
   context.globalThis = context;
@@ -195,6 +199,8 @@ test("admin surface owns independent filters, requests, items, and per-item publ
     "requestOwner",
     "items",
     "publishOwners",
+    "removalOwners",
+    "pendingCleanupReceiptId",
     "actionStatusByMediaId",
     "loading",
     "error",

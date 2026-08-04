@@ -110,8 +110,11 @@ The default URL serves the packaged pre-alpha FrameNest web shell. It can confir
 After verified identity resolution explicitly grants `media.workflow.read`, the
 header reveals `Manage media`. That sibling surface defaults to unpublished
 items, filters by readiness and analysis state, reuses Details through a
-path-redacted adapter, and publishes only one ready item at a time. The
-permissive loopback fallback never reveals this administrator navigation.
+path-redacted adapter, publishes only one ready item at a time, and offers a
+single-item `Remove from catalog` action for administrators with
+`media.catalog.remove`. Catalog removal is hard catalog retirement with retained
+original bytes; it is not Trash, soft delete, batch removal, or physical purge.
+The permissive loopback fallback never reveals this administrator navigation.
 
 Browser API paths currently include:
 
@@ -152,7 +155,10 @@ The public catalog query is now published-only and cannot request unpublished
 content. Capability-gated `GET /api/admin/media` provides the administrator
 read model; audited same-origin
 `PUT /api/admin/media/{media_id}/content-publication` performs idempotent
-single-item publication. Direct metadata, preview, content, range, download,
+single-item publication. Audited same-origin catalog-removal preview and
+mutation endpoints require `media.catalog.remove`, retain all original bytes,
+and leave a durable receipt for exclusive derived-artifact cleanup retry.
+Direct metadata, preview, content, range, download,
 and analysis routes enforce the same audience policy and conceal unpublished
 object existence from unauthorized callers.
 

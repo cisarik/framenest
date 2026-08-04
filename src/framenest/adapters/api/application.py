@@ -17,6 +17,10 @@ from framenest.adapters.api.media_analysis_api import (
     MediaAnalysisApiDependencies,
     create_media_analysis_api_router,
 )
+from framenest.adapters.api.catalog_removal_api import (
+    CatalogRemovalApiDependencies,
+    create_catalog_removal_api_router,
+)
 from framenest.adapters.api.content_publication_api import (
     ContentPublicationApiDependencies,
     create_content_publication_api_router,
@@ -71,6 +75,7 @@ from framenest.adapters.api.tailscale_ingress import (
     TailscaleIngressMiddleware,
 )
 from framenest.application.library_scan import PreviewLibraryScan
+from framenest.application.catalog_removal import CatalogMediaRemovalService
 from framenest.application.content_publication import (
     ContentAudiencePolicy,
     GetMediaWorkflowStatus,
@@ -91,8 +96,12 @@ from framenest.application.gallery_preview import GalleryPreviewService
 from framenest.application.media_cover import CoverService
 from framenest.application.media_suggestion import PreviewMediaSuggestion
 from framenest.application.media_suggestion import PreviewImportedMediaSuggestion
-from framenest.application.upload_transport import UploadTransportLimits, UploadTransportService
-from framenest.application.upload_transport import UploadSessionLockRegistry
+from framenest.application.upload_transport import (
+    UploadTransportLimits,
+    UploadTransportService,
+    UploadSessionLockRegistry,
+    default_now_ms,
+)
 from framenest.application.upload_catalog import CatalogPublishedUpload
 from framenest.application.upload_catalog_coordinator import UploadCatalogCoordinator
 from framenest.application.media_analysis_coordinator import MediaAnalysisCoordinator
@@ -140,6 +149,9 @@ from framenest.infrastructure.filesystem.quarantine_storage import FilesystemQua
 from framenest.infrastructure.filesystem.published_media_storage import (
     FilesystemPublishedMediaStorage,
 )
+from framenest.infrastructure.filesystem.derived_artifact_cleanup import (
+    FilesystemDerivedArtifactCleanup,
+)
 from framenest.infrastructure.filesystem.cover_storage import (
     FilesystemCoverThumbnailCache,
     FilesystemDurableCoverStorage,
@@ -153,6 +165,9 @@ from framenest.infrastructure.media_analysis.gallery_preview import (
     PillowGalleryPreviewEncoder,
 )
 from framenest.infrastructure.persistence.engine import create_sqlite_engine, dispose_engine
+from framenest.infrastructure.persistence.catalog_removal_repository import (
+    SqliteCatalogRemovalRepository,
+)
 from framenest.infrastructure.persistence.content_publication_repository import (
     SqliteContentPublicationRepository,
 )
@@ -232,6 +247,7 @@ def create_app(
     ) = None,
     content_publication_api_dependencies: ContentPublicationApiDependencies
     | None = None,
+    catalog_removal_api_dependencies: CatalogRemovalApiDependencies | None = None,
     cover_api_dependencies: CoverApiDependencies | None = None,
     upload_api_dependencies: UploadApiDependencies | None = None,
     youtube_operator_api_dependencies: YouTubeOperatorApiDependencies
@@ -261,6 +277,9 @@ def create_app(
     owned_content_audience_policy = None
     owned_cover_repository = None
     owned_cover_service = None
+    owned_cover_storage = None
+    owned_cover_thumbnail_cache = None
+    owned_gallery_preview_cache = None
     owned_media_analysis_coordinator = None
     owned_youtube_claim_repository = None
     owned_youtube_staging = None
@@ -307,6 +326,8 @@ def create_app(
             resolved_settings,
             owned_library_repository,
         )
+        owned_cover_storage = cover_storage
+        owned_cover_thumbnail_cache = cover_thumbnail_cache
         owned_cover_service = CoverService(
             owned_media_repository,
             owned_library_repository,
@@ -384,6 +405,9 @@ def create_app(
     if gallery_preview_api_dependencies is None:
         assert owned_media_repository is not None
         assert owned_library_repository is not None
+        owned_gallery_preview_cache = FilesystemGalleryPreviewCache(
+            resolved_settings.gallery_preview_cache_path
+        )
         gallery_preview_api_dependencies = GalleryPreviewApiDependencies(
             preview_service=GalleryPreviewService(
                 owned_media_repository,
@@ -391,7 +415,7 @@ def create_app(
                 LocalMediaContentReader(),
                 LocalMediaAnalysisAdapter(),
                 PillowGalleryPreviewEncoder(),
-                FilesystemGalleryPreviewCache(resolved_settings.gallery_preview_cache_path),
+                owned_gallery_preview_cache,
             ),
             catalog_available=resolved_settings.database_path.exists,
             audience_policy=owned_content_audience_policy,
@@ -526,6 +550,28 @@ def create_app(
                 owned_content_publication_repository
             ),
             catalog_available=resolved_settings.database_path.exists,
+        )
+    if catalog_removal_api_dependencies is None and owned_engine is not None:
+        if owned_gallery_preview_cache is None:
+            owned_gallery_preview_cache = FilesystemGalleryPreviewCache(
+                resolved_settings.gallery_preview_cache_path
+            )
+        if owned_cover_storage is None or owned_cover_thumbnail_cache is None:
+            assert owned_library_repository is not None
+            owned_cover_storage, owned_cover_thumbnail_cache = _resolve_cover_storage(
+                resolved_settings,
+                owned_library_repository,
+            )
+        catalog_removal_api_dependencies = CatalogRemovalApiDependencies(
+            service=CatalogMediaRemovalService(
+                repository=SqliteCatalogRemovalRepository(owned_engine),
+                cleanup=FilesystemDerivedArtifactCleanup(
+                    cover_storage=owned_cover_storage,
+                    thumbnail_cache=owned_cover_thumbnail_cache,
+                    preview_cache=owned_gallery_preview_cache,
+                ),
+                now_ms=default_now_ms,
+            )
         )
     if cover_api_dependencies is None:
         assert owned_cover_service is not None
@@ -815,6 +861,10 @@ def create_app(
             content_publication_api_dependencies
         )
     )
+    if catalog_removal_api_dependencies is not None:
+        app.include_router(
+            create_catalog_removal_api_router(catalog_removal_api_dependencies)
+        )
     app.include_router(create_cover_api_router(cover_api_dependencies))
     app.include_router(create_upload_api_router(upload_api_dependencies))
     app.include_router(

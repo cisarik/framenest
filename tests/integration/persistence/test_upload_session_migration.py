@@ -14,7 +14,7 @@ from framenest.infrastructure.persistence.catalog_schema import upload_sessions
 PRODUCTION_VERSIONS_PACKAGE = (
     "framenest.infrastructure.persistence.alembic_environment.versions"
 )
-CURRENT_HEAD_REVISION = "0023"
+CURRENT_HEAD_REVISION = "0024"
 TARGET_DUPLICATE_DISPOSITION_REVISION = "0012"
 TARGET_BYTE_IDENTITY_REVISION = "0011"
 TARGET_VALIDATION_REVISION = "0010"
@@ -376,6 +376,7 @@ def test_upgrade_from_0007_preserves_existing_catalog_rows_and_adds_empty_upload
         "security_audit_events",
         "media_content_publications",
         "media_covers",
+        "media_catalog_removal_receipts",
     } == _table_names(settings.database_path)
     connection = _connect(settings.database_path)
     try:

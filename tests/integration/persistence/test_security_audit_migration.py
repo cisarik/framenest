@@ -134,7 +134,7 @@ def test_downgrade_refuses_to_drop_existing_audit_history(
     finally:
         dispose_engine(engine)
 
-    with pytest.raises(RuntimeError, match="Cannot downgrade security audit storage"):
+    with pytest.raises(RuntimeError, match="Cannot downgrade catalog-removal"):
         _migrate(database_path, "0019", downgrade=True)
 
     connection = _connect(database_path)
@@ -144,7 +144,7 @@ def test_downgrade_refuses_to_drop_existing_audit_history(
         ).fetchone() == (1,)
         assert connection.execute(
             "SELECT version_num FROM alembic_version"
-        ).fetchone() == ("0023",)
+        ).fetchone() == ("0024",)
     finally:
         connection.close()
 
