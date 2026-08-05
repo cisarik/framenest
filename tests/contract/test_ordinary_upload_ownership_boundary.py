@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import uuid
 from pathlib import Path
 
@@ -230,6 +231,64 @@ def test_legacy_null_owner_is_administrator_only(upload_tailscale_client) -> Non
     assert admin.status_code == 200
 
 
+def _force_validate(
+    repository: SqliteUploadSessionRepository,
+    engine,
+    upload_id: str,
+    checksum_hex: str,
+):
+    with engine.begin() as connection:
+        connection.exec_driver_sql(
+            "UPDATE upload_sessions SET state = 'validating', "
+            "received_size_bytes = declared_size_bytes, version = version + 1, "
+            "updated_at_ms = updated_at_ms + 1 WHERE id = ?",
+            (upload_id,),
+        )
+    session = repository.get(UploadSessionId.from_string(upload_id))
+    assert session is not None
+    return repository.complete_validation_success(
+        session.id,
+        expected_version=session.version,
+        checksum_hex=checksum_hex,
+        validated_media_kind=UploadValidatedMediaKind.VIDEO,
+        validated_format=UploadValidatedFormat.MP4,
+        updated_at_ms=session.updated_at_ms + 1,
+    )
+
+
+def _resolve(client: TestClient, login: str, upload_id: str, resolution: str):
+    return client.post(
+        f"/api/uploads/{upload_id}/duplicate-resolution",
+        headers=_mutation_headers(login),
+        json={"resolution": resolution},
+    )
+
+
+def _assert_constant_privacy_conflict(response) -> dict:
+    assert response.status_code == 409
+    body = response.json()
+    assert body == {
+        "error": {
+            "code": "UPLOAD_SESSION_STATE_CONFLICT",
+            "message": "Upload session state conflict.",
+        }
+    }
+    lowered = response.text.lower()
+    for needle in (
+        "duplicate",
+        "matching",
+        "owner",
+        "media_id",
+        "publish",
+        "removal",
+        "keep_separate",
+        "discard",
+        "silent",
+    ):
+        assert needle not in lowered
+    return body
+
+
 def test_ordinary_duplicate_match_is_silent_and_indistinguishable(
     upload_tailscale_client,
 ) -> None:
@@ -244,32 +303,12 @@ def test_ordinary_duplicate_match_is_silent_and_indistinguishable(
             session = repository.get(session_id)
             assert session is not None
             assert session.created_by_login_key == owner
-            with engine.begin() as connection:
-                connection.exec_driver_sql(
-                    "UPDATE upload_sessions SET state = 'validating', "
-                    "received_size_bytes = declared_size_bytes, version = version + 1, "
-                    "updated_at_ms = updated_at_ms + 1 WHERE id = ?",
-                    (upload["id"],),
-                )
-        first_session = repository.get(UploadSessionId.from_string(first["id"]))
-        second_session = repository.get(UploadSessionId.from_string(second["id"]))
-        assert first_session is not None and second_session is not None
-        first_completed = repository.complete_validation_success(
-            first_session.id,
-            expected_version=first_session.version,
-            checksum_hex="a" * 64,
-            validated_media_kind=UploadValidatedMediaKind.VIDEO,
-            validated_format=UploadValidatedFormat.MP4,
-            updated_at_ms=first_session.updated_at_ms + 1,
-        )
-        second_completed = repository.complete_validation_success(
-            second_session.id,
-            expected_version=second_session.version,
-            checksum_hex="a" * 64,
-            validated_media_kind=UploadValidatedMediaKind.VIDEO,
-            validated_format=UploadValidatedFormat.MP4,
-            updated_at_ms=second_session.updated_at_ms + 1,
-        )
+            assert (
+                session.duplicate_resolution_mode
+                is UploadDuplicateResolutionMode.SILENT_KEEP_SEPARATE
+            )
+        first_completed = _force_validate(repository, engine, first["id"], "a" * 64)
+        second_completed = _force_validate(repository, engine, second["id"], "a" * 64)
         assert first_completed.state is UploadSessionState.PUBLISH_PENDING
         assert first_completed.duplicate_disposition is None
         assert second_completed.state is UploadSessionState.PUBLISH_PENDING
@@ -288,71 +327,147 @@ def test_ordinary_duplicate_match_is_silent_and_indistinguishable(
             assert "duplicate" not in status.text.lower()
             assert "matching" not in status.text.lower()
             assert payload.get("media_id") in (None, "")
-        conflict = client.post(
-            f"/api/uploads/{second['id']}/duplicate-resolution",
-            headers=_mutation_headers(USER_B_LOGIN),
-            json={"resolution": "keep_separate"},
-        )
-        # Idempotent keep_separate on an already silently kept session remains
-        # sanitized and never reintroduces duplicate_pending disclosure.
-        assert conflict.status_code in {200, 409}
-        if conflict.status_code == 200:
-            assert conflict.json()["state"] == "publish_pending"
-            assert "duplicate" not in conflict.text.lower()
-        else:
-            assert _error_code(conflict) == "UPLOAD_SESSION_STATE_CONFLICT"
+        unique_keep = _resolve(client, USER_A_LOGIN, first["id"], "keep_separate")
+        match_keep = _resolve(client, USER_B_LOGIN, second["id"], "keep_separate")
+        unique_body = _assert_constant_privacy_conflict(unique_keep)
+        match_body = _assert_constant_privacy_conflict(match_keep)
+        assert unique_body == match_body
     finally:
         dispose_engine(engine)
+
+
+def test_privacy_safe_duplicate_resolution_is_equivalent_and_side_effect_free(
+    upload_tailscale_client,
+) -> None:
+    client, settings = upload_tailscale_client
+    unique = _create(client, USER_A_LOGIN, size=5)
+    protected_owner = _create(client, ADMIN_LOGIN, size=5)
+    protected = _create(client, USER_A_LOGIN, size=5)
+    engine = create_sqlite_engine(settings.database_path)
+    repository = SqliteUploadSessionRepository(engine)
+    try:
+        unique_done = _force_validate(repository, engine, unique["id"], "c" * 64)
+        admin_done = _force_validate(
+            repository, engine, protected_owner["id"], "d" * 64
+        )
+        protected_done = _force_validate(repository, engine, protected["id"], "d" * 64)
+        assert unique_done.duplicate_disposition is None
+        assert admin_done.state is UploadSessionState.PUBLISH_PENDING
+        assert (
+            protected_done.duplicate_disposition
+            is UploadDuplicateDisposition.KEEP_SEPARATE
+        )
+        assert protected_done.state is UploadSessionState.PUBLISH_PENDING
+
+        # Persist-mode gate: reload before invoking the endpoint.
+        reloaded_unique = repository.get(UploadSessionId.from_string(unique["id"]))
+        reloaded_protected = repository.get(
+            UploadSessionId.from_string(protected["id"])
+        )
+        assert reloaded_unique is not None and reloaded_protected is not None
+        assert (
+            reloaded_unique.duplicate_resolution_mode
+            is UploadDuplicateResolutionMode.SILENT_KEEP_SEPARATE
+        )
+        assert (
+            reloaded_protected.duplicate_resolution_mode
+            is UploadDuplicateResolutionMode.SILENT_KEEP_SEPARATE
+        )
+
+        before_logical = _count(engine, "logical_media")
+        before_upload_pubs = _count(engine, "upload_publications")
+        before_content_pubs = _count(engine, "media_content_publications")
+        before_analysis = _count(engine, "media_analysis_runs")
+
+        keep_bodies = []
+        discard_bodies = []
+        for upload_id in (unique["id"], protected["id"]):
+            for _ in range(2):
+                keep = _resolve(client, USER_A_LOGIN, upload_id, "keep_separate")
+                keep_bodies.append(_assert_constant_privacy_conflict(keep))
+                discard = _resolve(client, USER_A_LOGIN, upload_id, "discard")
+                discard_bodies.append(_assert_constant_privacy_conflict(discard))
+
+        assert len({json.dumps(body, sort_keys=True) for body in keep_bodies}) == 1
+        assert len({json.dumps(body, sort_keys=True) for body in discard_bodies}) == 1
+        assert keep_bodies[0] == discard_bodies[0]
+
+        for upload_id, expected in (
+            (unique["id"], unique_done),
+            (protected["id"], protected_done),
+        ):
+            after = repository.get(UploadSessionId.from_string(upload_id))
+            assert after is not None
+            assert after.state is expected.state
+            assert after.duplicate_disposition is expected.duplicate_disposition
+            assert after.version == expected.version
+            assert (
+                after.duplicate_resolution_mode
+                is UploadDuplicateResolutionMode.SILENT_KEEP_SEPARATE
+            )
+
+        assert _count(engine, "logical_media") == before_logical
+        assert _count(engine, "upload_publications") == before_upload_pubs
+        assert _count(engine, "media_content_publications") == before_content_pubs
+        assert _count(engine, "media_analysis_runs") == before_analysis
+
+        foreign_keep = _resolve(client, USER_B_LOGIN, unique["id"], "keep_separate")
+        foreign_discard = _resolve(client, USER_B_LOGIN, unique["id"], "discard")
+        for response in (foreign_keep, foreign_discard):
+            assert response.status_code == 404
+            assert _error_code(response) == "UPLOAD_SESSION_NOT_FOUND"
+            assert response.json() == {
+                "error": {
+                    "code": "UPLOAD_SESSION_NOT_FOUND",
+                    "message": "Upload session not found.",
+                }
+            }
+    finally:
+        dispose_engine(engine)
+
+
+def _count(engine, table: str) -> int:
+    with engine.connect() as connection:
+        return int(
+            connection.exec_driver_sql(f"SELECT COUNT(*) FROM {table}").scalar_one()
+        )
 
 
 def test_administrator_duplicate_pending_regression(upload_tailscale_client) -> None:
     client, settings = upload_tailscale_client
     first = _create(client, ADMIN_LOGIN, size=5)
     second = _create(client, ADMIN_LOGIN, size=5)
+    third = _create(client, ADMIN_LOGIN, size=5)
+    fourth = _create(client, ADMIN_LOGIN, size=5)
     engine = create_sqlite_engine(settings.database_path)
     repository = SqliteUploadSessionRepository(engine)
     try:
-        for upload in (first, second):
-            with engine.begin() as connection:
-                connection.exec_driver_sql(
-                    "UPDATE upload_sessions SET state = 'validating', "
-                    "received_size_bytes = declared_size_bytes, version = version + 1, "
-                    "updated_at_ms = updated_at_ms + 1 WHERE id = ?",
-                    (upload["id"],),
-                )
-        first_session = repository.get(UploadSessionId.from_string(first["id"]))
-        second_session = repository.get(UploadSessionId.from_string(second["id"]))
-        assert first_session is not None and second_session is not None
         completed = [
-            repository.complete_validation_success(
-                first_session.id,
-                expected_version=first_session.version,
-                checksum_hex="b" * 64,
-                validated_media_kind=UploadValidatedMediaKind.VIDEO,
-                validated_format=UploadValidatedFormat.MP4,
-                updated_at_ms=first_session.updated_at_ms + 1,
-            ),
-            repository.complete_validation_success(
-                second_session.id,
-                expected_version=second_session.version,
-                checksum_hex="b" * 64,
-                validated_media_kind=UploadValidatedMediaKind.VIDEO,
-                validated_format=UploadValidatedFormat.MP4,
-                updated_at_ms=second_session.updated_at_ms + 1,
-            ),
+            _force_validate(repository, engine, first["id"], "b" * 64),
+            _force_validate(repository, engine, second["id"], "b" * 64),
+            _force_validate(repository, engine, third["id"], "e" * 64),
+            _force_validate(repository, engine, fourth["id"], "e" * 64),
         ]
     finally:
         dispose_engine(engine)
     assert completed[0].state is UploadSessionState.PUBLISH_PENDING
     assert completed[1].state is UploadSessionState.DUPLICATE_PENDING
+    assert completed[2].state is UploadSessionState.PUBLISH_PENDING
+    assert completed[3].state is UploadSessionState.DUPLICATE_PENDING
     status = client.get(
         f"/api/uploads/{second['id']}", headers=_serve_headers(ADMIN_LOGIN)
     )
     assert status.json()["state"] == "duplicate_pending"
-    kept = client.post(
-        f"/api/uploads/{second['id']}/duplicate-resolution",
-        headers=_mutation_headers(ADMIN_LOGIN),
-        json={"resolution": "keep_separate"},
-    )
+    kept = _resolve(client, ADMIN_LOGIN, second["id"], "keep_separate")
     assert kept.status_code == 200
     assert kept.json()["state"] == "publish_pending"
+    # Accepted idempotent keep for explicit sessions.
+    kept_again = _resolve(client, ADMIN_LOGIN, second["id"], "keep_separate")
+    assert kept_again.status_code == 200
+    assert kept_again.json()["state"] == "publish_pending"
+    discarded = _resolve(client, ADMIN_LOGIN, fourth["id"], "discard")
+    assert discarded.status_code == 200
+    assert discarded.json()["state"] == "cancelled"
+    discarded_again = _resolve(client, ADMIN_LOGIN, fourth["id"], "discard")
+    assert discarded_again.status_code == 200
+    assert discarded_again.json()["state"] == "cancelled"

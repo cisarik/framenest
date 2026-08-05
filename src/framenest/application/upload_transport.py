@@ -43,6 +43,7 @@ from framenest.domain.uploads import (
     UploadSessionId,
     UploadSessionState,
     UploadStorageKey,
+    uses_explicit_duplicate_resolution,
 )
 
 UPLOAD_FAILED_STORAGE_INCONSISTENT = "QUARANTINE_STATE_INCONSISTENT"
@@ -481,6 +482,12 @@ class UploadTransportService:
         storage = self._require_storage()
         async with self._locks.lease(session_id):
             session = self._load(session_id)
+            # Privacy-safe sessions never expose duplicate-resolution outcomes:
+            # reject before branching on disposition or explicit idempotency.
+            if not uses_explicit_duplicate_resolution(
+                session.duplicate_resolution_mode
+            ):
+                raise UploadSessionStateConflictError("upload session state conflict")
             if resolution is UploadDuplicateResolution.KEEP_SEPARATE:
                 if (
                     session.duplicate_disposition
