@@ -71,6 +71,13 @@ def define_upload_sessions_table(metadata: MetaData) -> Table:
             nullable=True,
         ),
         Column("duplicate_disposition", Text(), nullable=True),
+        Column("created_by_login_key", Text(), nullable=True),
+        Column(
+            "duplicate_resolution_mode",
+            Text(),
+            nullable=False,
+            server_default="explicit",
+        ),
         Column("created_at_ms", Integer(), nullable=False),
         Column("updated_at_ms", Integer(), nullable=False),
         Column("expires_at_ms", Integer(), nullable=False),
@@ -172,6 +179,21 @@ def define_upload_sessions_table(metadata: MetaData) -> Table:
             name="ck_upload_sessions_duplicate_disposition",
         ),
         CheckConstraint(
+            "created_by_login_key IS NULL OR ("
+            "length(created_by_login_key) >= 1 "
+            "AND length(created_by_login_key) <= 254 "
+            "AND created_by_login_key = lower(created_by_login_key) "
+            "AND instr(created_by_login_key, ' ') = 0 "
+            "AND instr(created_by_login_key, char(9)) = 0 "
+            "AND instr(created_by_login_key, char(10)) = 0 "
+            "AND instr(created_by_login_key, char(13)) = 0)",
+            name="ck_upload_sessions_created_by_login_key",
+        ),
+        CheckConstraint(
+            "duplicate_resolution_mode IN ('explicit', 'silent_keep_separate')",
+            name="ck_upload_sessions_duplicate_resolution_mode",
+        ),
+        CheckConstraint(
             "created_at_ms >= 0",
             name="ck_upload_sessions_created_at_ms_non_negative",
         ),
@@ -200,4 +222,5 @@ def define_upload_sessions_table(metadata: MetaData) -> Table:
         Index("ix_upload_sessions_expires_at_ms", "expires_at_ms"),
         Index("ix_upload_sessions_state_expires_at_ms", "state", "expires_at_ms"),
         Index("ix_upload_sessions_byte_identity_id", "byte_identity_id"),
+        Index("ix_upload_sessions_created_by_login_key", "created_by_login_key"),
     )

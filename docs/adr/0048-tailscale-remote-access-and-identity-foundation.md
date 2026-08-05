@@ -2,7 +2,11 @@
 
 ## Status
 
-`Accepted`
+`Accepted` — direct-upload capability assignment superseded by
+[ADR-0053](0053-ordinary-user-upload-submission-and-administrator-review-boundary.md)
+for ordinary-user `upload.submit` versus administrator-only `upload.manage`.
+Ingress architecture, mapping, mutation proof, and audit posture in this ADR
+remain authoritative.
 
 ## Decision Date
 

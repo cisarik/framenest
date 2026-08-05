@@ -80,16 +80,22 @@ that appears after an initial absence check. Restore writes only to a new
 absent destination and does not replace production, run migrations, start
 services, or prove readiness.
 
-The resumable upload transport is trusted-loopback MVP functionality, not a
-public upload service. Upload endpoints are disabled until
+The resumable upload transport is capability-gated trusted-path functionality,
+not a public upload service. Upload endpoints are disabled until
 `FRAMENEST_UPLOAD_QUARANTINE_ROOT` points to a pre-existing absolute
 non-symlink quarantine directory. That directory must not overlap registered
 media library roots or the Gallery preview cache. Upload requests use
 server-generated session and storage identities and stream bytes directly to
-quarantine. Bounded validation derives size and SHA-256 evidence on the server;
-the first qualifying identity reaches `publish_pending`, while a later exact
-copy remains quarantined in `duplicate_pending` until explicitly kept or
-discarded. Discard durably cancels that selected session before removing only
+quarantine. Direct-upload routes require `upload.submit`. Mapped ordinary
+Tailscale users may submit; `upload.manage` remains administrator-only for
+explicit duplicate resolution and ownership override. Durable upload-session
+ownership (`created_by_login_key`) and creation-time
+`duplicate_resolution_mode` are persisted by migration `0025`. Foreign ordinary
+callers receive sanitized `404 UPLOAD_SESSION_NOT_FOUND`. Bounded validation
+derives size and SHA-256 evidence on the server; administrator `explicit`
+sessions retain `duplicate_pending` until keep/discard, while ordinary
+`silent_keep_separate` sessions atomically keep-separate without disclosing a
+match. Discard durably cancels that selected session before removing only
 its quarantine object. Optional publication requires the server-controlled
 `FRAMENEST_UPLOAD_PUBLICATION_LIBRARY_ID` to resolve one existing writable
 registered POSIX library whose native non-symlink root is disjoint from
@@ -103,9 +109,10 @@ path, cleanup state, byte identity, or checksum; duplicate-resolution responses
 additionally expose no matching session or filename. An optional opaque
 `media_id` may appear only after successful `cataloged`. Merely `published`
 uploads remain uncataloged, unserved, absent from Gallery, and never sent to AI
-providers by this workflow. Catalog persistence failure leaves the durable
-published file untouched under the trusted-loopback single-tenant boundary;
-multi-user ownership remains deferred.
+providers by this workflow. Ordinary cataloged submissions remain
+content-unpublished until administrator publication. Catalog persistence failure
+leaves the durable published file untouched under the trusted-loopback
+single-tenant boundary; Tailscale multi-user ownership follows ADR-0053.
 Browser mutation requests with an `Origin` header must match the effective same
 origin; this is a bounded loopback protection and not authentication or
 authorization.

@@ -37,6 +37,7 @@ from framenest.domain import LibraryPathFlavor
 from framenest.domain.uploads import (
     FrameNestUploadSessionError,
     UploadDuplicateDisposition,
+    UploadDuplicateResolutionMode,
     UploadDisplayFilename,
     UploadSession,
     UploadSessionId,
@@ -222,6 +223,10 @@ class UploadTransportService:
         declared_size_bytes: object,
         session_id: UploadSessionId | None = None,
         storage_key: UploadStorageKey | None = None,
+        created_by_login_key: str | None = None,
+        duplicate_resolution_mode: UploadDuplicateResolutionMode = (
+            UploadDuplicateResolutionMode.EXPLICIT
+        ),
     ) -> UploadSessionSnapshot:
         storage = self._require_storage()
         try:
@@ -236,6 +241,10 @@ class UploadTransportService:
                 raise FrameNestUploadSessionError("invalid upload identity")
             if storage_key is not None and not isinstance(
                 storage_key, UploadStorageKey
+            ):
+                raise FrameNestUploadSessionError("invalid upload identity")
+            if not isinstance(
+                duplicate_resolution_mode, UploadDuplicateResolutionMode
             ):
                 raise FrameNestUploadSessionError("invalid upload identity")
         except FrameNestUploadSessionError as exc:
@@ -259,6 +268,8 @@ class UploadTransportService:
             expires_at_ms=now_ms + self._limits.session_ttl_seconds * 1000,
             failure_code=None,
             version=0,
+            created_by_login_key=created_by_login_key,
+            duplicate_resolution_mode=duplicate_resolution_mode,
         )
         try:
             self._repository.create(session)
@@ -281,6 +292,8 @@ class UploadTransportService:
                 or existing.storage_key != storage_key
                 or existing.display_filename != filename
                 or existing.declared_size_bytes != declared_size_bytes
+                or existing.created_by_login_key != created_by_login_key
+                or existing.duplicate_resolution_mode != duplicate_resolution_mode
             ):
                 raise UploadQuarantineUnavailableError(
                     "upload storage unavailable"
@@ -538,6 +551,10 @@ class UploadTransportService:
         if session is None:
             raise UploadSessionNotFoundTransportError("upload session not found")
         return session
+
+    def load_session(self, session_id: UploadSessionId) -> UploadSession:
+        """Return one durable upload session or raise the transport not-found error."""
+        return self._load(session_id)
 
     def _require_storage(self) -> QuarantineStorage:
         storage = self._storage

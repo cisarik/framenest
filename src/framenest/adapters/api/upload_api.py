@@ -29,10 +29,17 @@ from framenest.application.upload_transport import (
 )
 from framenest.adapters.api.tailscale_ingress import (
     CHANNEL_TAILSCALE,
+    SCOPE_IDENTITY,
     SCOPE_INGRESS_CHANNEL,
+)
+from framenest.domain.identity_access import (
+    CAPABILITY_UPLOAD_MANAGE,
+    IdentityContext,
 )
 from framenest.domain.uploads import (
     FrameNestUploadSessionError,
+    UploadDuplicateResolutionMode,
+    UploadSession,
     UploadSessionId,
     UploadSessionState,
 )
@@ -148,10 +155,15 @@ def create_upload_api_router(dependencies: UploadApiDependencies) -> APIRouter:
         origin_error = _reject_cross_origin_mutation(request)
         if origin_error is not None:
             return origin_error
+        created_by_login_key, duplicate_resolution_mode = _creation_ownership_fields(
+            request
+        )
         try:
             snapshot = dependencies.transport.create_session(
                 display_filename=payload.display_filename,
                 declared_size_bytes=payload.declared_size_bytes,
+                created_by_login_key=created_by_login_key,
+                duplicate_resolution_mode=duplicate_resolution_mode,
             )
         except Exception as exc:
             mapped = _map_error(exc)
@@ -190,7 +202,14 @@ def create_upload_api_router(dependencies: UploadApiDependencies) -> APIRouter:
         response_model=UploadSessionResponse,
         responses={404: {"model": ErrorResponse}, 503: {"model": ErrorResponse}},
     )
-    def upload_status(upload_id: UUID4) -> UploadSessionResponse | JSONResponse:
+    def upload_status(
+        upload_id: UUID4, request: Request
+    ) -> UploadSessionResponse | JSONResponse:
+        access_error = _enforce_upload_session_access(
+            dependencies.transport, request, upload_id
+        )
+        if access_error is not None:
+            return access_error
         try:
             snapshot = dependencies.transport.get_status(_session_id(upload_id))
         except Exception as exc:
@@ -224,6 +243,11 @@ def create_upload_api_router(dependencies: UploadApiDependencies) -> APIRouter:
         origin_error = _reject_cross_origin_mutation(request)
         if origin_error is not None:
             return origin_error
+        access_error = _enforce_upload_session_access(
+            dependencies.transport, request, upload_id
+        )
+        if access_error is not None:
+            return access_error
         content_type = _parse_upload_content_type(request)
         if isinstance(content_type, JSONResponse):
             return content_type
@@ -268,6 +292,11 @@ def create_upload_api_router(dependencies: UploadApiDependencies) -> APIRouter:
         origin_error = _reject_cross_origin_mutation(request)
         if origin_error is not None:
             return origin_error
+        access_error = _enforce_upload_session_access(
+            dependencies.transport, request, upload_id
+        )
+        if access_error is not None:
+            return access_error
         try:
             snapshot = await dependencies.transport.complete(_session_id(upload_id))
         except Exception as exc:
@@ -301,6 +330,11 @@ def create_upload_api_router(dependencies: UploadApiDependencies) -> APIRouter:
         origin_error = _reject_cross_origin_mutation(request)
         if origin_error is not None:
             return origin_error
+        access_error = _enforce_upload_session_access(
+            dependencies.transport, request, upload_id
+        )
+        if access_error is not None:
+            return access_error
         try:
             snapshot = await dependencies.transport.resolve_duplicate(
                 _session_id(upload_id),
@@ -336,6 +370,11 @@ def create_upload_api_router(dependencies: UploadApiDependencies) -> APIRouter:
         origin_error = _reject_cross_origin_mutation(request)
         if origin_error is not None:
             return origin_error
+        access_error = _enforce_upload_session_access(
+            dependencies.transport, request, upload_id
+        )
+        if access_error is not None:
+            return access_error
         try:
             snapshot = await dependencies.transport.cancel(_session_id(upload_id))
         except Exception as exc:
@@ -357,6 +396,66 @@ def _session_id(upload_id: UUID4) -> UploadSessionId:
         return UploadSessionId.from_string(str(upload_id))
     except FrameNestUploadSessionError:
         raise UploadSessionNotFoundTransportError("upload session not found") from None
+
+
+def _request_identity(request: Request) -> IdentityContext | None:
+    identity = request.scope.get(SCOPE_IDENTITY)
+    if isinstance(identity, IdentityContext):
+        return identity
+    return None
+
+
+def _creation_ownership_fields(
+    request: Request,
+) -> tuple[str | None, UploadDuplicateResolutionMode]:
+    identity = _request_identity(request)
+    if identity is None:
+        return None, UploadDuplicateResolutionMode.EXPLICIT
+    if identity.has_capability(CAPABILITY_UPLOAD_MANAGE):
+        return identity.login_key, UploadDuplicateResolutionMode.EXPLICIT
+    return identity.login_key, UploadDuplicateResolutionMode.SILENT_KEEP_SEPARATE
+
+
+def may_access_upload_session(
+    session: UploadSession,
+    identity: IdentityContext | None,
+) -> bool:
+    """Return whether the request identity may observe or mutate the session."""
+    if identity is None:
+        return True
+    if identity.has_capability(CAPABILITY_UPLOAD_MANAGE):
+        return True
+    if session.created_by_login_key is None:
+        return False
+    return session.created_by_login_key == identity.login_key
+
+
+def _enforce_upload_session_access(
+    transport: object,
+    request: Request,
+    upload_id: UUID4,
+) -> JSONResponse | None:
+    identity = _request_identity(request)
+    if identity is None:
+        return None
+    try:
+        session = transport.load_session(_session_id(upload_id))
+    except Exception as exc:
+        mapped = _map_error(exc)
+        if mapped is not None:
+            return mapped
+        return _error_response(
+            503,
+            QUARANTINE_STORAGE_UNAVAILABLE,
+            "Quarantine storage is unavailable.",
+        )
+    if may_access_upload_session(session, identity):
+        return None
+    return _error_response(
+        404,
+        UPLOAD_SESSION_NOT_FOUND,
+        "Upload session not found.",
+    )
 
 
 def _parse_content_length(request: Request) -> int | JSONResponse:

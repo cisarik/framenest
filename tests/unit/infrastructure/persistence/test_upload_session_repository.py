@@ -28,6 +28,7 @@ from framenest.configuration import FrameNestSettings
 from framenest.domain import MediaByteIdentity, MediaByteIdentityId
 from framenest.domain.uploads import (
     UploadDuplicateDisposition,
+    UploadDuplicateResolutionMode,
     UploadDisplayFilename,
     UploadSession,
     UploadSessionId,
@@ -83,6 +84,10 @@ def _session(
     validated_format: UploadValidatedFormat | None = None,
     byte_identity_id: MediaByteIdentityId | None = None,
     duplicate_disposition: UploadDuplicateDisposition | None = None,
+    created_by_login_key: str | None = None,
+    duplicate_resolution_mode: UploadDuplicateResolutionMode = (
+        UploadDuplicateResolutionMode.EXPLICIT
+    ),
 ) -> UploadSession:
     if state in {
         UploadSessionState.RECEIVED,
@@ -117,6 +122,8 @@ def _session(
         validated_format=validated_format,
         byte_identity_id=byte_identity_id,
         duplicate_disposition=duplicate_disposition,
+        created_by_login_key=created_by_login_key,
+        duplicate_resolution_mode=duplicate_resolution_mode,
     )
 
 
@@ -1091,6 +1098,87 @@ def test_two_successful_identical_uploads_link_to_one_byte_identity(tmp_path: Pa
     assert second_completed.duplicate_disposition is None
     assert first_completed.byte_identity_id == second_completed.byte_identity_id
     assert identity_count == 1
+
+
+def test_silent_keep_separate_mode_atomically_avoids_duplicate_pending(
+    tmp_path: Path,
+) -> None:
+    repository, engine = _repository(tmp_path)
+    first = _session(
+        state=UploadSessionState.VALIDATING,
+        storage_key="upload-session-silent-a001",
+        created_by_login_key="admin@example.com",
+        duplicate_resolution_mode=UploadDuplicateResolutionMode.EXPLICIT,
+    )
+    second = _session(
+        state=UploadSessionState.VALIDATING,
+        storage_key="upload-session-silent-b001",
+        created_by_login_key="user@example.com",
+        duplicate_resolution_mode=UploadDuplicateResolutionMode.SILENT_KEEP_SEPARATE,
+    )
+    digest = "f" * 64
+    try:
+        repository.create(first)
+        repository.create(second)
+        first_completed = repository.complete_validation_success(
+            first.id,
+            expected_version=0,
+            checksum_hex=digest,
+            validated_media_kind=UploadValidatedMediaKind.VIDEO,
+            validated_format=UploadValidatedFormat.MP4,
+            updated_at_ms=20,
+        )
+        second_completed = repository.complete_validation_success(
+            second.id,
+            expected_version=0,
+            checksum_hex=digest,
+            validated_media_kind=UploadValidatedMediaKind.VIDEO,
+            validated_format=UploadValidatedFormat.MP4,
+            updated_at_ms=21,
+        )
+        reloaded = repository.get(second.id)
+        repeated = repository.complete_validation_success(
+            second.id,
+            expected_version=second_completed.version,
+            checksum_hex=digest,
+            validated_media_kind=UploadValidatedMediaKind.VIDEO,
+            validated_format=UploadValidatedFormat.MP4,
+            updated_at_ms=22,
+        )
+    finally:
+        engine.dispose()
+
+    assert first_completed.state is UploadSessionState.PUBLISH_PENDING
+    assert second_completed.state is UploadSessionState.PUBLISH_PENDING
+    assert second_completed.duplicate_disposition is UploadDuplicateDisposition.KEEP_SEPARATE
+    assert second_completed.state is not UploadSessionState.DUPLICATE_PENDING
+    assert reloaded == second_completed
+    assert repeated == second_completed
+    assert repeated.created_by_login_key == "user@example.com"
+    assert (
+        repeated.duplicate_resolution_mode
+        is UploadDuplicateResolutionMode.SILENT_KEEP_SEPARATE
+    )
+
+
+def test_ownership_fields_round_trip_through_repository(tmp_path: Path) -> None:
+    repository, engine = _repository(tmp_path)
+    session = _session(
+        created_by_login_key="owner@example.com",
+        duplicate_resolution_mode=UploadDuplicateResolutionMode.SILENT_KEEP_SEPARATE,
+    )
+    try:
+        repository.create(session)
+        loaded = repository.get(session.id)
+    finally:
+        engine.dispose()
+
+    assert loaded is not None
+    assert loaded.created_by_login_key == "owner@example.com"
+    assert (
+        loaded.duplicate_resolution_mode
+        is UploadDuplicateResolutionMode.SILENT_KEEP_SEPARATE
+    )
 
 
 def test_validation_completion_never_uses_the_current_session_as_its_own_duplicate(

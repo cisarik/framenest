@@ -9,6 +9,7 @@ import re
 import uuid
 
 from framenest.domain.identities import MediaByteIdentityId
+from framenest.domain.identity_access import MAX_LOGIN_LENGTH
 
 INVALID_UPLOAD_SESSION_MESSAGE = "Invalid FrameNest upload session."
 INVALID_UPLOAD_TRANSITION_MESSAGE = "Invalid upload session transition."
@@ -20,6 +21,8 @@ INVALID_UPLOAD_VALIDATION_EVIDENCE_MESSAGE = "Invalid upload validation evidence
 _SHA256_HEX_PATTERN = re.compile(r"[0-9a-f]{64}")
 _STORAGE_KEY_PATTERN = re.compile(r"[a-z0-9][a-z0-9._-]{15,127}")
 _FAILURE_CODE_PATTERN = re.compile(r"[A-Z0-9_]{1,80}")
+_LOGIN_KEY_CONTROL_MAX = 0x1F
+_LOGIN_KEY_DEL = 0x7F
 
 
 class FrameNestUploadSessionError(ValueError):
@@ -68,6 +71,13 @@ class UploadDuplicateDisposition(StrEnum):
 
     KEEP_SEPARATE = "keep_separate"
     DISCARD = "discard"
+
+
+class UploadDuplicateResolutionMode(StrEnum):
+    """Creation-time durable duplicate privacy policy for one upload session."""
+
+    EXPLICIT = "explicit"
+    SILENT_KEEP_SEPARATE = "silent_keep_separate"
 
 
 class UploadValidatedMediaKind(StrEnum):
@@ -291,6 +301,10 @@ class UploadSession:
     validated_format: UploadValidatedFormat | None = None
     byte_identity_id: MediaByteIdentityId | None = None
     duplicate_disposition: UploadDuplicateDisposition | None = None
+    created_by_login_key: str | None = None
+    duplicate_resolution_mode: UploadDuplicateResolutionMode = (
+        UploadDuplicateResolutionMode.EXPLICIT
+    )
 
     def __post_init__(self) -> None:
         if not isinstance(self.id, UploadSessionId):
@@ -349,6 +363,18 @@ class UploadSession:
             validated_format=self.validated_format,
             byte_identity_id=self.byte_identity_id,
         )
+        _validate_created_by_login_key(self.created_by_login_key)
+        if not isinstance(self.duplicate_resolution_mode, UploadDuplicateResolutionMode):
+            raise FrameNestUploadSessionError(INVALID_UPLOAD_SESSION_MESSAGE)
+
+
+def uses_explicit_duplicate_resolution(
+    mode: UploadDuplicateResolutionMode | object | None,
+) -> bool:
+    """Return True only when the durable mode is positively proven explicit."""
+    return mode is UploadDuplicateResolutionMode.EXPLICIT or mode == (
+        UploadDuplicateResolutionMode.EXPLICIT.value
+    )
 
 
 def is_terminal_upload_session_state(state: UploadSessionState) -> bool:
@@ -531,6 +557,22 @@ def _validate_duplicate_disposition(
         validated_format=validated_format,
         byte_identity_id=byte_identity_id,
     )
+
+
+def _validate_created_by_login_key(value: object) -> None:
+    if value is None:
+        return
+    if not isinstance(value, str):
+        raise FrameNestUploadSessionError(INVALID_UPLOAD_SESSION_MESSAGE)
+    if not value or len(value) > MAX_LOGIN_LENGTH:
+        raise FrameNestUploadSessionError(INVALID_UPLOAD_SESSION_MESSAGE)
+    if any(
+        character.isspace()
+        or ord(character) <= _LOGIN_KEY_CONTROL_MAX
+        or ord(character) == _LOGIN_KEY_DEL
+        for character in value
+    ):
+        raise FrameNestUploadSessionError(INVALID_UPLOAD_SESSION_MESSAGE)
 
 
 def _validate_positive_int(

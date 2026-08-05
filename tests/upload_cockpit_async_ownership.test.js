@@ -3702,7 +3702,7 @@ test("Recovery not-found is cleared and persisted recovery stores no private byt
 
   assert.equal(stateOf(h).uploadId, null);
   assert.equal(h.context.localStorage.getItem(RECOVERY_KEY), null);
-  assert.match(stateOf(h).message, /not found/);
+  assert.match(stateOf(h).message, /expired or is unavailable/i);
 
   setActiveUpload(h, { id: UPLOAD_A, state: "receiving", received: 4 });
   const stored = JSON.parse(stateOf(h).recovery);
@@ -3776,4 +3776,75 @@ test("Recovered upload is ready after source reselection and waits for explicit 
   assert.equal(patchCalls[0].options.headers["Upload-Offset"], "4");
   assert.equal(patchCalls[0].options.body.start, 4);
   assert.equal(patchCalls[0].options.body.end, 8);
+});
+
+
+test("ordinary cataloged completion awaits review and does not track automatic analysis", async () => {
+  const h = await createHarness();
+  h.run(`
+    identityState.resolved = true;
+    identityState.available = true;
+    identityState.capabilities = new Set(["gallery.read", "upload.submit"]);
+    automaticAnalysisCapability.automatic_analysis_enabled = true;
+  `);
+  setActiveUpload(h, { id: UPLOAD_A, state: "published", received: 8 });
+  h.run('document.querySelector("#upload-dialog").setAttribute("open", "")');
+  h.run("scheduleUploadPolling(currentUploadContext({ uploadId: uploadState.uploadId }))");
+  enqueueStatus(h, UPLOAD_A, response({
+    ...snapshot(UPLOAD_A, "cataloged", 8),
+    media_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+  }));
+  h.runNextTimer();
+  await h.flush();
+  const state = stateOf(h);
+  assert.match(state.visibleMessage, /awaits administrator review/i);
+  assert.match(state.visibleMessage, /not public/i);
+  assert.equal(state.visibleMessage.includes("Available in Gallery"), false);
+  assert.equal(h.fetchController.matchingPrefix("GET", "/api/ai/").length, 0);
+  assert.equal(h.run("metadataWorkspace.openMediaId"), null);
+});
+
+test("ordinary identity never shows duplicate-found UI", async () => {
+  const h = await createHarness();
+  h.run(`
+    identityState.resolved = true;
+    identityState.available = true;
+    identityState.capabilities = new Set(["gallery.read", "upload.submit"]);
+  `);
+  setActiveUpload(h, { state: "duplicate_pending", received: 8 });
+  h.run("renderUploadCockpit()");
+  const state = stateOf(h);
+  assert.equal(state.stateLabel, "Validating");
+  assert.equal(state.visibleMessage.includes("Exact duplicate found"), false);
+  assert.equal(state.duplicateKeepHidden, true);
+  assert.equal(state.duplicateDiscardHidden, true);
+});
+
+test("active poll 404 clears stale recovery without server cancel and preserves transient network failure", async () => {
+  const h = await createHarness();
+  setActiveUpload(h, { id: UPLOAD_A, state: "publish_pending", received: 8 });
+  h.run('document.querySelector("#upload-dialog").setAttribute("open", "")');
+  h.run("scheduleUploadPolling(currentUploadContext({ uploadId: uploadState.uploadId }))");
+  enqueueStatus(h, UPLOAD_A, response({ error: { code: "UPLOAD_SESSION_NOT_FOUND" } }, 404));
+  h.runNextTimer();
+  await h.flush();
+  let state = stateOf(h);
+  assert.equal(state.uploadId, null);
+  assert.equal(state.snapshotState, null);
+  assert.equal(state.recovery, null);
+  assert.match(state.message, /expired or is unavailable/i);
+  assert.equal(h.fetchController.matching("DELETE", `/api/uploads/${UPLOAD_A}`).length, 0);
+
+  const network = await createHarness();
+  setActiveUpload(network, { id: UPLOAD_A, state: "publish_pending", received: 8 });
+  network.run('document.querySelector("#upload-dialog").setAttribute("open", "")');
+  network.run("scheduleUploadPolling(currentUploadContext({ uploadId: uploadState.uploadId }))");
+  enqueueStatus(network, UPLOAD_A, Promise.reject(new Error("temporary network failure")));
+  network.runNextTimer();
+  await network.flush();
+  state = stateOf(network);
+  assert.equal(state.uploadId, UPLOAD_A);
+  assert.notEqual(state.recovery, null);
+  assert.equal(state.hasPollOwner, true);
+  assert.match(state.message, /temporarily unavailable/i);
 });

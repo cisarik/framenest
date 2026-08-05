@@ -317,7 +317,7 @@ function applyIdentityCapabilities() {
   const youtubeClaimAllowed = typeof identityAllowsYouTubeClaim === "function"
     && identityAllowsYouTubeClaim();
   if (uploadOpenButton) {
-    uploadOpenButton.hidden = !identityHasCapability("upload.manage");
+    uploadOpenButton.hidden = !identityHasCapability("upload.submit");
   }
   if (detailsEditButton) {
     detailsEditButton.hidden = !identityHasCapability("metadata.canonical.write");
@@ -2529,7 +2529,9 @@ function uploadDisplayState(snapshot) {
   }
   if (snapshot.state === "received") return "Validating";
   if (snapshot.state === "validating") return "Validating";
-  if (snapshot.state === "duplicate_pending") return "Duplicate found";
+  if (snapshot.state === "duplicate_pending") {
+    return identityHasCapability("upload.manage") ? "Duplicate found" : "Validating";
+  }
   if (snapshot.state === "publish_pending") return "Publishing";
   if (snapshot.state === "published") return "Published";
   if (snapshot.state === "cataloged") return "Completed";
@@ -2581,10 +2583,13 @@ function uploadStatusMessage(snapshot) {
     return "Published. Awaiting cataloging. Not yet available in Gallery.";
   }
   if (snapshot.state === "cataloged") {
-    if (automaticAnalysisCapability.automatic_analysis_enabled) {
-      return "Cataloged. Available in Gallery. Automatic AI analysis may follow.";
+    if (identityHasCapability("upload.manage")) {
+      if (automaticAnalysisCapability.automatic_analysis_enabled) {
+        return "Cataloged. Available in Gallery. Automatic AI analysis may follow.";
+      }
+      return "Cataloged. Available in Gallery.";
     }
-    return "Cataloged. Available in Gallery.";
+    return "Submission succeeded. It awaits administrator review and is not public yet.";
   }
   if (snapshot.state === "received") {
     return "Bytes received. Waiting for server validation.";
@@ -2593,6 +2598,9 @@ function uploadStatusMessage(snapshot) {
     return "Server validation is running.";
   }
   if (snapshot.state === "duplicate_pending") {
+    if (!identityHasCapability("upload.manage")) {
+      return "Server validation is running.";
+    }
     if (uploadState.actionOwner && uploadState.message) return uploadState.message;
     return "Exact duplicate found.";
   }
@@ -2798,7 +2806,9 @@ function applyUploadSnapshot(snapshot, owner = null, options = {}) {
   renderUploadCockpit();
   if (snapshot.state === "cataloged") {
     refreshGalleryAfterCataloged(snapshot.id);
-    maybeTrackAutomaticAnalysisAfterCatalog(snapshot);
+    if (identityHasCapability("upload.manage")) {
+      maybeTrackAutomaticAnalysisAfterCatalog(snapshot);
+    }
   }
   return true;
 }
@@ -2897,7 +2907,11 @@ function updateUploadActions() {
   const cancelVisible = uploadCancelPermitted(snapshot)
     && !uploadState.completing
     && (!uploadState.actionOwner || uploadState.actionOwner.kind !== "cancel");
-  const duplicateVisible = Boolean(snapshot && snapshot.state === "duplicate_pending");
+  const duplicateVisible = Boolean(
+    snapshot
+    && snapshot.state === "duplicate_pending"
+    && identityHasCapability("upload.manage"),
+  );
   const duplicateDisabled = !duplicateVisible
     || Boolean(uploadState.actionOwner)
     || uploadState.completing;
@@ -3064,6 +3078,23 @@ function uploadStatusResultMessage(result) {
   return "Upload status could not be loaded.";
 }
 
+function clearStaleUploadRecoveryState(message) {
+  stopUploadPolling();
+  clearUploadRecovery();
+  uploadState.uploadId = null;
+  uploadState.snapshot = null;
+  uploadState.fileNameHint = "";
+  uploadState.expectedSizeBytes = 0;
+  uploadState.lastModifiedHint = null;
+  uploadState.needsReselection = false;
+  uploadState.publicationPollAttempts = 0;
+  uploadState.galleryCatalogRefreshUploadId = null;
+  uploadState.failureMessage = "";
+  uploadState.message = message
+    || "This submission expired or is unavailable. You can start a new upload.";
+  renderUploadCockpit();
+}
+
 async function refreshUploadStatus(
   uploadId = uploadState.uploadId,
   owner = currentUploadContext({ uploadId }),
@@ -3078,12 +3109,7 @@ async function refreshUploadStatus(
     return applyUploadSnapshot(result.snapshot, owner) ? result.snapshot : null;
   }
   if (options.clearNotFound && uploadStatusWasNotFound(result)) {
-    clearUploadRecovery();
-    uploadState.uploadId = null;
-    uploadState.snapshot = null;
-    uploadState.needsReselection = false;
-    uploadState.message = "Saved upload session was not found on this server.";
-    renderUploadCockpit();
+    clearStaleUploadRecoveryState();
     return null;
   }
   uploadState.message = uploadStatusResultMessage(result);
@@ -3113,18 +3139,11 @@ async function restoreUploadRecovery() {
   if (!uploadContextStillCurrent(owner)) return;
   if (!result.ok) {
     if (uploadStatusWasNotFound(result)) {
-      clearUploadRecovery();
-      uploadState.uploadId = null;
-      uploadState.snapshot = null;
-      uploadState.fileNameHint = "";
-      uploadState.expectedSizeBytes = 0;
-      uploadState.lastModifiedHint = null;
-      uploadState.needsReselection = false;
-      uploadState.message = "Saved upload session was not found on this server.";
+      clearStaleUploadRecoveryState();
     } else {
       uploadState.message = uploadStatusResultMessage(result);
+      renderUploadCockpit();
     }
-    renderUploadCockpit();
     return;
   }
   const snapshot = result.snapshot;
@@ -3168,10 +3187,7 @@ async function pollUploadStatus(owner = uploadState.pollOwner) {
     return;
   }
   if (uploadStatusWasNotFound(result)) {
-    stopUploadPolling();
-    clearUploadRecovery();
-    uploadState.message = "Upload session was not found on this server.";
-    renderUploadCockpit();
+    clearStaleUploadRecoveryState();
     return;
   }
   uploadState.message = "Upload status is temporarily unavailable; retrying.";
@@ -3530,12 +3546,7 @@ async function handleCancelUpload() {
       return;
     }
     if (uploadStatusWasNotFound({ status: response.status, payload })) {
-      clearUploadRecovery();
-      uploadState.uploadId = null;
-      uploadState.snapshot = null;
-      uploadState.needsReselection = false;
-      uploadState.message = "Upload session was not found on this server.";
-      renderUploadCockpit();
+      clearStaleUploadRecoveryState();
       return;
     }
     uploadState.message = uploadErrorMessage(payload);

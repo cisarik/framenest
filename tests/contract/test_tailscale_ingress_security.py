@@ -36,7 +36,12 @@ USER_LOGIN = "user@example.com"
 STRANGER_LOGIN = "stranger@example.com"
 
 ADMIN_CAPABILITY_SAMPLE = "metadata.canonical.write"
-USER_CAPABILITIES = {"gallery.read", "media.original.read", "media.download"}
+USER_CAPABILITIES = {
+    "gallery.read",
+    "media.original.read",
+    "media.download",
+    "upload.submit",
+}
 
 
 def _serve_headers(
@@ -351,8 +356,6 @@ def test_ordinary_user_reads_succeed(tailscale_client) -> None:
     [
         ("POST", "/api/canonical-tags", {"key": "alpha", "display_name": "Alpha"}),
         ("PUT", f"/api/media/{uuid.uuid4()}/metadata", {}),
-        ("POST", "/api/uploads", {}),
-        ("GET", "/api/uploads/capability", None),
         ("POST", f"/api/libraries/{uuid.uuid4()}/scan-preview", None),
         ("POST", f"/api/libraries/{uuid.uuid4()}/media-imports", {}),
         ("POST", f"/api/libraries/{uuid.uuid4()}/media-analysis-preview", {}),
@@ -385,6 +388,51 @@ def test_ordinary_user_direct_privileged_calls_fail(
         response = client.post(path, headers=headers, json=body)
     assert response.status_code == 403
     assert _error_code(response) == "CAPABILITY_DENIED"
+
+
+def test_ordinary_user_upload_submit_routes_are_capability_allowed(
+    tailscale_client,
+) -> None:
+    client, _ = tailscale_client
+    upload_id = str(uuid.uuid4())
+    capability = client.get(
+        "/api/uploads/capability", headers=_serve_headers(USER_LOGIN)
+    )
+    assert capability.status_code == 200
+    assert capability.json()["uploads_enabled"] is False
+    create = client.post(
+        "/api/uploads",
+        headers=_mutation_headers(USER_LOGIN),
+        json={"display_filename": "clip.mp4", "declared_size_bytes": 8},
+    )
+    assert create.status_code == 503
+    assert _error_code(create) != "CAPABILITY_DENIED"
+    status = client.get(
+        f"/api/uploads/{upload_id}", headers=_serve_headers(USER_LOGIN)
+    )
+    assert status.status_code in {404, 503}
+    assert _error_code(status) != "CAPABILITY_DENIED"
+
+
+def test_seven_upload_routes_require_upload_submit() -> None:
+    upload_id = str(uuid.uuid4())
+    cases = (
+        ("POST", "/api/uploads"),
+        ("GET", "/api/uploads/capability"),
+        ("GET", f"/api/uploads/{upload_id}"),
+        ("PATCH", f"/api/uploads/{upload_id}"),
+        ("POST", f"/api/uploads/{upload_id}/complete"),
+        ("POST", f"/api/uploads/{upload_id}/duplicate-resolution"),
+        ("DELETE", f"/api/uploads/{upload_id}"),
+    )
+    for method, path in cases:
+        policy, match = find_route_policy(method, path)
+        assert match is not None
+        assert policy.capability == "upload.submit"
+    admin_policy, admin_match = find_route_policy("GET", "/api/admin/media")
+    assert admin_match is not None
+    assert admin_policy.capability == "media.workflow.read"
+    assert admin_policy.capability != "upload.submit"
 
 
 def test_admin_privileged_operation_succeeds(tailscale_client) -> None:
@@ -819,11 +867,19 @@ def test_legitimate_upload_content_types_remain_functional(tailscale_client) -> 
         },
         content=b"chunk",
     )
-    assert response.status_code == 503
-    assert response.json()["error"]["code"] == "UPLOAD_CAPABILITY_NOT_CONFIGURED"
+    assert response.status_code in {404, 503}
+    assert response.json()["error"]["code"] in {
+        "UPLOAD_SESSION_NOT_FOUND",
+        "UPLOAD_CAPABILITY_NOT_CONFIGURED",
+    }
+    assert _error_code(response) != "CAPABILITY_DENIED"
     delete = client.delete(f"/api/uploads/{missing}", headers=_mutation_headers())
-    assert delete.status_code == 503
-    assert delete.json()["error"]["code"] == "UPLOAD_CAPABILITY_NOT_CONFIGURED"
+    assert delete.status_code in {404, 503}
+    assert delete.json()["error"]["code"] in {
+        "UPLOAD_SESSION_NOT_FOUND",
+        "UPLOAD_CAPABILITY_NOT_CONFIGURED",
+    }
+    assert _error_code(delete) != "CAPABILITY_DENIED"
 
 
 # --- Audit ---------------------------------------------------------------

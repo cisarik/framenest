@@ -350,9 +350,13 @@ test("identity control opens Tailscale status tab in source wiring", () => {
 });
 
 test("privileged controls are gated by capabilities in source", () => {
+  assert.ok(APP_SOURCE.includes('identityHasCapability("upload.submit")'));
   assert.ok(APP_SOURCE.includes('identityHasCapability("upload.manage")'));
   assert.ok(APP_SOURCE.includes('identityHasCapability("metadata.canonical.write")'));
   assert.ok(APP_SOURCE.includes('identityHasCapability("analysis.run")'));
+  assert.ok(APP_SOURCE.includes("awaits administrator review"));
+  assert.ok(APP_SOURCE.includes("clearStaleUploadRecoveryState"));
+  assert.ok(APP_SOURCE.includes("submission expired or is unavailable"));
   const cardBody = extractFunction(APP_SOURCE, "renderCatalogCard");
   assert.ok(cardBody.includes("cardAiQuickActionEligible(item)"));
   assert.equal(cardBody.includes("cardNeedsMetadata(item)"), false);
@@ -390,6 +394,7 @@ test("admin identity populates name-only badge and unlocks privileged controls",
         "metadata.canonical.write",
         "media.workflow.read",
         "upload.manage",
+        "upload.submit",
       ],
       provenance: "tailscale-serve",
     });
@@ -418,7 +423,7 @@ test("ordinary user identity hides privileged controls and keeps admin Tailscale
       login: "user@example.com",
       display_name: "Reader",
       role: "user",
-      capabilities: ["gallery.read", "media.download", "media.original.read"],
+      capabilities: ["gallery.read", "media.download", "media.original.read", "upload.submit"],
       provenance: "tailscale-serve",
     }),
   );
@@ -427,13 +432,29 @@ test("ordinary user identity hides privileged controls and keeps admin Tailscale
   assert.equal(context.identityStatusName.textContent, "Reader");
   assert.match(context.identityBadge.getAttribute("aria-label"), /Signed in as Reader/);
   assert.ok(!context.identityBadge.getAttribute("aria-label").includes("Admin"));
-  assert.equal(context.uploadOpenButton.hidden, true);
+  assert.equal(context.uploadOpenButton.hidden, false);
   assert.equal(context.detailsEditButton.hidden, true);
   assert.equal(context.adminMediaOpenButton.hidden, true);
   assert.equal(context.statusTailscaleAdminOnlyRows.every((row) => row.hidden === true), true);
+  assert.equal(vm.runInContext('identityHasCapability("upload.submit")', context), true);
   assert.equal(vm.runInContext('identityHasCapability("upload.manage")', context), false);
   assert.equal(vm.runInContext('identityHasCapability("metadata.canonical.write")', context), false);
   assert.equal(vm.runInContext('identityHasCapability("gallery.read")', context), true);
+});
+
+test("ordinary user without upload.submit hides upload control", async () => {
+  const context = createIdentityHarness(async () =>
+    response({
+      login: "user@example.com",
+      display_name: "Reader",
+      role: "user",
+      capabilities: ["gallery.read", "media.download", "media.original.read"],
+      provenance: "tailscale-serve",
+    }),
+  );
+  await vm.runInContext("loadIdentity()", context);
+  assert.equal(context.uploadOpenButton.hidden, true);
+  assert.equal(vm.runInContext('identityHasCapability("upload.submit")', context), false);
 });
 
 test("denied identity fails closed and hides the badge", async () => {

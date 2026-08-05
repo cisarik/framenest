@@ -30,6 +30,7 @@ from framenest.domain.uploads import (
     FrameNestUploadSessionTransitionError,
     FrameNestUploadValidationEvidenceError,
     UploadDuplicateDisposition,
+    UploadDuplicateResolutionMode,
     UploadDisplayFilename,
     UploadSession,
     UploadSessionId,
@@ -39,6 +40,7 @@ from framenest.domain.uploads import (
     UploadValidatedMediaKind,
     VALIDATED_UPLOAD_SESSION_STATES,
     ensure_upload_session_transition_allowed,
+    uses_explicit_duplicate_resolution,
     validate_sha256_checksum_hex,
     validate_upload_failure_code,
     validate_upload_offset_advance,
@@ -601,11 +603,16 @@ class SqliteUploadSessionRepository:
                 )
                 .limit(1)
             ).first() is not None
-            target_state = (
-                UploadSessionState.DUPLICATE_PENDING
-                if canonical_exists
-                else UploadSessionState.PUBLISH_PENDING
-            )
+            target_state = UploadSessionState.PUBLISH_PENDING
+            duplicate_disposition_value = None
+            if canonical_exists:
+                if uses_explicit_duplicate_resolution(row["duplicate_resolution_mode"]):
+                    target_state = UploadSessionState.DUPLICATE_PENDING
+                else:
+                    target_state = UploadSessionState.PUBLISH_PENDING
+                    duplicate_disposition_value = (
+                        UploadDuplicateDisposition.KEEP_SEPARATE.value
+                    )
             result = connection.execute(
                 update(upload_sessions)
                 .where(
@@ -629,6 +636,7 @@ class SqliteUploadSessionRepository:
                     validated_media_kind=media_kind.value,
                     validated_format=media_format.value,
                     byte_identity_id=identity.id.to_string(),
+                    duplicate_disposition=duplicate_disposition_value,
                     updated_at_ms=updated_at_ms,
                     version=upload_sessions.c.version + 1,
                 )
@@ -940,6 +948,8 @@ def _values_from_session(session: UploadSession) -> dict[str, object]:
         "duplicate_disposition": None
         if session.duplicate_disposition is None
         else session.duplicate_disposition.value,
+        "created_by_login_key": session.created_by_login_key,
+        "duplicate_resolution_mode": session.duplicate_resolution_mode.value,
         "created_at_ms": session.created_at_ms,
         "updated_at_ms": session.updated_at_ms,
         "expires_at_ms": session.expires_at_ms,
@@ -973,6 +983,12 @@ def _session_from_row(row: Mapping[str, object]) -> UploadSession:
             duplicate_disposition=None
             if row["duplicate_disposition"] is None
             else UploadDuplicateDisposition(str(row["duplicate_disposition"])),
+            created_by_login_key=None
+            if row["created_by_login_key"] is None
+            else str(row["created_by_login_key"]),
+            duplicate_resolution_mode=_duplicate_resolution_mode_from_row(
+                row["duplicate_resolution_mode"]
+            ),
             created_at_ms=int(row["created_at_ms"]),
             updated_at_ms=int(row["updated_at_ms"]),
             expires_at_ms=int(row["expires_at_ms"]),
@@ -981,6 +997,15 @@ def _session_from_row(row: Mapping[str, object]) -> UploadSession:
         )
     except (FrameNestIdentityError, FrameNestUploadSessionError, ValueError) as exc:
         raise FrameNestUploadSessionRepositoryError(_REPOSITORY_FAILURE_MESSAGE) from exc
+
+
+def _duplicate_resolution_mode_from_row(value: object) -> UploadDuplicateResolutionMode:
+    if value is None:
+        return UploadDuplicateResolutionMode.SILENT_KEEP_SEPARATE
+    try:
+        return UploadDuplicateResolutionMode(str(value))
+    except ValueError:
+        return UploadDuplicateResolutionMode.SILENT_KEEP_SEPARATE
 
 
 def _get_or_create_byte_identity(

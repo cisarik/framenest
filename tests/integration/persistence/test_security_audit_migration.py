@@ -144,7 +144,7 @@ def test_downgrade_refuses_to_drop_existing_audit_history(
         ).fetchone() == (1,)
         assert connection.execute(
             "SELECT version_num FROM alembic_version"
-        ).fetchone() == ("0024",)
+        ).fetchone() == ("0025",)
     finally:
         connection.close()
 

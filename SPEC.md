@@ -508,7 +508,15 @@ catalog or Gallery visibility. A specialized atomic `published -> cataloged`
 transaction MUST create logical media, a physical location, and
 upload-publication linkage together before content can be published. Ordinary
 Gallery eligibility additionally MUST require a durable content-publication row
-per [ADR-0049](docs/adr/0049-durable-content-publication-boundary.md). Catalog
+per [ADR-0049](docs/adr/0049-durable-content-publication-boundary.md). Mapped
+ordinary Tailscale users MAY complete direct uploads under capability
+`upload.submit` per
+[ADR-0053](docs/adr/0053-ordinary-user-upload-submission-and-administrator-review-boundary.md);
+resulting catalog rows MUST remain content-unpublished until administrator
+publication, and ordinary duplicate matches MUST NOT disclose matching
+evidence or enter an externally observable `duplicate_pending` state.
+Administrator `upload.manage` retains explicit duplicate keep/discard.
+Catalog
 persistence failure MUST leave
 	the upload truthfully `published` and MUST NOT delete the durable published
 	file.

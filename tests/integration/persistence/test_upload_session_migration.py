@@ -14,7 +14,7 @@ from framenest.infrastructure.persistence.catalog_schema import upload_sessions
 PRODUCTION_VERSIONS_PACKAGE = (
     "framenest.infrastructure.persistence.alembic_environment.versions"
 )
-CURRENT_HEAD_REVISION = "0024"
+CURRENT_HEAD_REVISION = "0025"
 TARGET_DUPLICATE_DISPOSITION_REVISION = "0012"
 TARGET_BYTE_IDENTITY_REVISION = "0011"
 TARGET_VALIDATION_REVISION = "0010"
@@ -201,6 +201,8 @@ def test_upload_sessions_table_has_required_columns_constraints_and_indexes(
         "validated_format",
         "byte_identity_id",
         "duplicate_disposition",
+        "created_by_login_key",
+        "duplicate_resolution_mode",
         "created_at_ms",
         "updated_at_ms",
         "expires_at_ms",
@@ -220,6 +222,8 @@ def test_upload_sessions_table_has_required_columns_constraints_and_indexes(
         "ck_upload_sessions_validation_evidence_pair",
         "ck_upload_sessions_validated_states_have_evidence",
         "ck_upload_sessions_duplicate_disposition",
+        "ck_upload_sessions_created_by_login_key",
+        "ck_upload_sessions_duplicate_resolution_mode",
         "ck_upload_sessions_expires_after_created",
         "ck_upload_sessions_failure_code_sanitized",
         "ck_upload_sessions_version_non_negative",
@@ -231,6 +235,7 @@ def test_upload_sessions_table_has_required_columns_constraints_and_indexes(
     assert "ix_upload_sessions_expires_at_ms" in indexes
     assert "ix_upload_sessions_state_expires_at_ms" in indexes
     assert "ix_upload_sessions_byte_identity_id" in indexes
+    assert "ix_upload_sessions_created_by_login_key" in indexes
     foreign_keys = _foreign_keys(settings.database_path, "upload_sessions")
     assert any(row[2] == "media_byte_identities" for row in foreign_keys)
     identity_columns = _columns(settings.database_path, "media_byte_identities")
@@ -1481,3 +1486,48 @@ def _insert_upload_session(connection: sqlite3.Connection, values: dict[str, obj
         """,
         values,
     )
+
+
+def test_migration_0025_ownership_and_duplicate_mode_upgrade_and_downgrade(
+    tmp_path: Path,
+) -> None:
+    from framenest.infrastructure.persistence.migrations import (
+        inspect_database_migration_status,
+    )
+
+    database_path = tmp_path / "ownership-0025.sqlite3"
+    _upgrade_to_revision(database_path, "0024")
+    assert inspect_database_migration_status(
+        _settings_for(database_path)
+    ).current_revision == "0024"
+    with sqlite3.connect(database_path) as connection:
+        connection.execute(
+            "INSERT INTO upload_sessions ("
+            "id, state, storage_key, display_filename, declared_size_bytes, "
+            "received_size_bytes, created_at_ms, updated_at_ms, expires_at_ms, version"
+            ") VALUES ("
+            "'11111111-1111-4111-8111-111111111111', 'created', "
+            "'upload-session-legacy01', 'legacy.mp4', 10, 0, 1, 1, 100, 0)"
+        )
+        connection.commit()
+    _upgrade_to_revision(database_path, "0025")
+    status = inspect_database_migration_status(_settings_for(database_path))
+    assert status.current_revision == "0025"
+    assert status.head_revision == "0025"
+    columns = _columns(database_path, "upload_sessions")
+    assert "created_by_login_key" in columns
+    assert "duplicate_resolution_mode" in columns
+    with sqlite3.connect(database_path) as connection:
+        row = connection.execute(
+            "SELECT created_by_login_key, duplicate_resolution_mode "
+            "FROM upload_sessions WHERE id = ?",
+            ("11111111-1111-4111-8111-111111111111",),
+        ).fetchone()
+    assert row == (None, "explicit")
+    _downgrade_to_revision(database_path, "0024")
+    assert inspect_database_migration_status(
+        _settings_for(database_path)
+    ).current_revision == "0024"
+    columns_after = _columns(database_path, "upload_sessions")
+    assert "created_by_login_key" not in columns_after
+    assert "duplicate_resolution_mode" not in columns_after
