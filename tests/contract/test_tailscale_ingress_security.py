@@ -47,6 +47,7 @@ USER_CAPABILITIES = {
     "media.download",
     "upload.submit",
     "youtube.request",
+    "x.request",
 }
 
 

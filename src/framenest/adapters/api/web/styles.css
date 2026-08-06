@@ -4775,3 +4775,61 @@ h2 {
     width: 100%;
   }
 }
+
+/* X requester-private acquisition */
+.x-asset-list,
+.x-admin-assets {
+  list-style: none;
+  margin: 0.25rem 0;
+  padding: 0;
+}
+.x-asset-item,
+.x-admin-assets li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.25rem 0;
+  border-bottom: 1px solid var(--border-color, #e2e2e2);
+}
+.x-asset-item[data-state="cataloged"],
+.x-admin-assets li[data-state="cataloged"] {
+  color: #1d7a3e;
+}
+.x-asset-item[data-state="failed"],
+.x-admin-assets li[data-state="failed"] {
+  color: #b42318;
+}
+.x-admin-review {
+  margin-top: 0.75rem;
+}
+.x-admin-heading {
+  margin: 0 0 0.5rem;
+  font-size: 1rem;
+}
+.x-admin-meta {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.25rem 0.75rem;
+  margin: 0 0 0.5rem;
+}
+.x-admin-meta dt {
+  font-weight: 600;
+}
+.x-admin-meta dd {
+  margin: 0;
+}
+.x-admin-creator {
+  font-size: 0.95rem;
+  margin-bottom: 0.5rem;
+  font-weight: 600;
+}
+.youtube-claim-errortext {
+  color: #b42318;
+  font-size: 0.85rem;
+}
+@media (max-width: 640px) {
+  .x-admin-meta {
+    grid-template-columns: 1fr;
+  }
+}

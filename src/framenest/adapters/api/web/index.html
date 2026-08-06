@@ -62,6 +62,24 @@
           My YouTube downloads
         </button>
         <button
+          id="x-request-open-button"
+          class="status-button youtube-request-nav-button"
+          type="button"
+          aria-label="My X downloads"
+          hidden
+        >
+          My X downloads
+        </button>
+        <button
+          id="x-admin-open-button"
+          class="status-button youtube-claim-nav-button"
+          type="button"
+          aria-label="Review X acquisition"
+          hidden
+        >
+          X review
+        </button>
+        <button
           id="upload-open-button"
           class="status-button status-button--icon upload-action-button"
           type="button"
@@ -238,6 +256,66 @@
         </form>
         <p id="youtube-request-status" class="youtube-claim-message" role="status" aria-live="polite" aria-atomic="true"></p>
         <ul id="youtube-request-list" class="youtube-request-list" aria-label="My YouTube download requests"></ul>
+      </div>
+    </dialog>
+
+    <dialog
+      id="x-request-dialog"
+      class="upload-dialog youtube-claim-dialog youtube-request-dialog"
+      aria-labelledby="x-request-dialog-title"
+      aria-describedby="x-request-guidance"
+    >
+      <div class="upload-dialog__header">
+        <h2 id="x-request-dialog-title" class="upload-dialog__title" tabindex="-1">My X downloads</h2>
+        <button id="x-request-close-button" class="upload-dialog__close" type="button" aria-label="Close My X downloads">✕</button>
+      </div>
+      <div class="upload-dialog__body youtube-claim-dialog__body">
+        <p id="x-request-guidance" class="youtube-claim-guidance">
+          Paste one public X post URL. Supported: x.com / twitter.com
+          <code>/handle/status/&lt;post-id&gt;</code>. Completed private downloads stay here until an administrator publishes or removes them.
+        </p>
+        <form id="x-request-form" class="youtube-claim-form">
+          <label class="youtube-claim-field" for="x-request-url">
+            <span>X post URL</span>
+            <input
+              id="x-request-url"
+              name="x-request-url"
+              type="url"
+              autocomplete="off"
+              spellcheck="false"
+              placeholder="x.com/handle/status/1234567890"
+              required
+              aria-describedby="x-request-url-note"
+            >
+          </label>
+          <p id="x-request-url-note" class="youtube-claim-note">Only the validated post is sent to the local FrameNest server.</p>
+          <p id="x-request-url-error" class="youtube-claim-field-error" role="alert" hidden></p>
+          <button id="x-request-submit-button" class="youtube-claim-submit" type="submit">Request download</button>
+        </form>
+        <p id="x-request-status" class="youtube-claim-message" role="status" aria-live="polite" aria-atomic="true"></p>
+        <ul id="x-request-list" class="youtube-request-list" aria-label="My X download requests"></ul>
+      </div>
+    </dialog>
+
+    <dialog
+      id="x-admin-dialog"
+      class="upload-dialog youtube-claim-dialog"
+      aria-labelledby="x-admin-dialog-title"
+    >
+      <div class="upload-dialog__header">
+        <h2 id="x-admin-dialog-title" class="upload-dialog__title" tabindex="-1">X acquisition review</h2>
+        <button id="x-admin-close-button" class="upload-dialog__close" type="button" aria-label="Close X acquisition review">✕</button>
+      </div>
+      <div class="upload-dialog__body youtube-claim-dialog__body">
+        <form id="x-admin-form" class="youtube-claim-form">
+          <label class="youtube-claim-field" for="x-admin-claim-id">
+            <span>X claim ID</span>
+            <input id="x-admin-claim-id" type="text" autocomplete="off" spellcheck="false" required>
+          </label>
+          <p id="x-admin-error" class="youtube-claim-field-error" role="alert" hidden></p>
+          <button id="x-admin-submit-button" class="youtube-claim-submit" type="submit">Review</button>
+        </form>
+        <div id="x-admin-review" class="x-admin-review"></div>
       </div>
     </dialog>
 

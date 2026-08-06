@@ -372,6 +372,14 @@ function applyIdentityCapabilities() {
   if (typeof youtubeRequestOpenButton !== "undefined" && youtubeRequestOpenButton) {
     youtubeRequestOpenButton.hidden = !youtubeRequestAllowed;
   }
+  const xReqBtn = document.querySelector("#x-request-open-button");
+  if (xReqBtn) {
+    xReqBtn.hidden = !(typeof identityAllowsXRequest === "function" && identityAllowsXRequest());
+  }
+  const xAdminBtn = document.querySelector("#x-admin-open-button");
+  if (xAdminBtn) {
+    xAdminBtn.hidden = !(typeof identityAllowsXAdmin === "function" && identityAllowsXAdmin());
+  }
   if (
     !youtubeClaimAllowed
     && typeof youtubeClaimDialog !== "undefined"
@@ -11559,3 +11567,336 @@ if (youtubeRequestDialog) {
   });
 }
 
+
+/* ------------------------------------------------------------------ X cockpit */
+const X_REQUESTS_ENDPOINT = "/api/x/requests";
+const X_ADMIN_ENDPOINT = "/api/admin/x/requests";
+
+function framenestJSONHeaders() {
+  return { Accept: "application/json", "Content-Type": "application/json" };
+}
+
+const xRequestOpenButton = document.querySelector("#x-request-open-button");
+const xRequestDialog = document.querySelector("#x-request-dialog");
+const xRequestCloseButton = document.querySelector("#x-request-close-button");
+const xRequestForm = document.querySelector("#x-request-form");
+const xRequestUrlInput = document.querySelector("#x-request-url");
+const xRequestUrlError = document.querySelector("#x-request-url-error");
+const xRequestStatus = document.querySelector("#x-request-status");
+const xRequestList = document.querySelector("#x-request-list");
+const xRequestSubmitButton = document.querySelector("#x-request-submit-button");
+
+const xAdminOpenButton = document.querySelector("#x-admin-open-button");
+const xAdminDialog = document.querySelector("#x-admin-dialog");
+const xAdminCloseButton = document.querySelector("#x-admin-close-button");
+const xAdminForm = document.querySelector("#x-admin-form");
+const xAdminClaimId = document.querySelector("#x-admin-claim-id");
+const xAdminError = document.querySelector("#x-admin-error");
+const xAdminReview = document.querySelector("#x-admin-review");
+
+const xRequestState = { items: [], statusMessage: "", submitting: false, pollTimer: null };
+
+function identityAllowsXRequest() {
+  return identityHasCapability("x.request");
+}
+function identityAllowsXAdmin() {
+  return identityHasCapability("x.acquire");
+}
+
+function xPhaseLabel(phase) {
+  switch (phase) {
+    case "queued": return "Queued";
+    case "processing": return "Processing";
+    case "failed": return "Failed";
+    case "completed": return "Completed";
+    case "completed_private": return "Completed (private)";
+    case "unavailable": return "Unavailable";
+    default: return phase || "Unknown";
+  }
+}
+
+function setXRequestStatus(message) {
+  if (xRequestStatus) xRequestStatus.textContent = message || "";
+}
+
+function renderXRequestCockpit() {
+  if (!xRequestList) return;
+  xRequestStatus && (xRequestStatus.textContent = xRequestState.statusMessage || "");
+  xRequestList.textContent = "";
+  if (!xRequestState.items.length) {
+    const empty = document.createElement("li");
+    empty.className = "youtube-request-empty";
+    empty.textContent = "No X requests yet.";
+    xRequestList.appendChild(empty);
+    return;
+  }
+  for (const item of xRequestState.items) {
+    const li = document.createElement("li");
+    li.className = "youtube-request-item";
+    li.dataset.state = item.state || "";
+    const header = document.createElement("div");
+    header.className = "youtube-request-row";
+    const phase = document.createElement("span");
+    phase.className = "youtube-request-phase";
+    phase.textContent = xPhaseLabel(item.phase);
+    phase.setAttribute("data-phase", item.phase || "");
+    const url = document.createElement("span");
+    url.className = "youtube-request-url";
+    url.textContent = item.canonical_url || item.submitted_url || "X post";
+    header.appendChild(phase);
+    header.appendChild(url);
+    li.appendChild(header);
+    if (item.title) {
+      const t = document.createElement("div");
+      t.className = "youtube-request-meta";
+      t.textContent = item.title;
+      li.appendChild(t);
+    }
+    if (Array.isArray(item.assets) && item.assets.length) {
+      const assets = document.createElement("ul");
+      assets.className = "x-asset-list";
+      for (const asset of item.assets) {
+        const a = document.createElement("li");
+        a.className = "x-asset-item";
+        a.dataset.state = asset.state || "";
+        const label = document.createElement("span");
+        label.textContent = `#${asset.ordinal + 1} ${asset.media_type} — ${asset.state}`;
+        a.appendChild(label);
+        if (asset.failure_code) {
+          const err = document.createElement("span");
+          err.className = "youtube-claim-errortext";
+          err.textContent = asset.failure_code;
+          a.appendChild(err);
+        }
+        if (asset.media_id) {
+          const open = document.createElement("button");
+          open.type = "button";
+          open.className = "youtube-request-action";
+          open.textContent = "Open result";
+          open.addEventListener("click", () => openPrivateDetails(asset.media_id));
+          a.appendChild(open);
+        }
+        assets.appendChild(a);
+      }
+      li.appendChild(assets);
+    }
+    const actions = document.createElement("div");
+    actions.className = "youtube-request-actions";
+    if (item.phase === "failed" || (item.state === "completed_partial" && item.failure_code)) {
+      const retry = document.createElement("button");
+      retry.type = "button";
+      retry.className = "youtube-request-action";
+      retry.textContent = "Retry";
+      retry.addEventListener("click", () => retryXRequest(item.request_id));
+      actions.appendChild(retry);
+    }
+    li.appendChild(actions);
+    xRequestList.appendChild(li);
+  }
+}
+
+function openPrivateDetails(mediaId) {
+  if (mediaId && typeof openDetails === "function") {
+    openDetails(mediaId);
+    if (xRequestDialog && typeof xRequestDialog.close === "function") xRequestDialog.close();
+  } else if (mediaId) {
+    window.location.hash = `#/details/${encodeURIComponent(mediaId)}`;
+  }
+}
+
+async function refreshXRequests({ focusSubmit } = {}) {
+  if (!identityAllowsXRequest() || !xRequestList) return;
+  try {
+    const response = await fetch(X_REQUESTS_ENDPOINT + "?limit=20", { headers: framenestJSONHeaders() });
+    if (!response.ok) {
+      setXRequestStatus("Could not load X requests.");
+      return;
+    }
+    const payload = await response.json();
+    xRequestState.items = Array.isArray(payload.items) ? payload.items : [];
+    renderXRequestCockpit();
+    if (focusSubmit && xRequestUrlInput) xRequestUrlInput.focus();
+  } catch (_err) {
+    setXRequestStatus("Could not load X requests.");
+  }
+}
+
+async function submitXRequest(event) {
+  event.preventDefault();
+  if (!identityAllowsXRequest() || xRequestState.submitting) return;
+  const url = xRequestUrlInput && xRequestUrlInput.value.trim();
+  if (!url) return;
+  xRequestState.submitting = true;
+  if (xRequestSubmitButton) xRequestSubmitButton.disabled = true;
+  if (xRequestUrlError) xRequestUrlError.hidden = true;
+  try {
+    const response = await fetch(X_REQUESTS_ENDPOINT, {
+      method: "POST",
+      headers: framenestMutationHeaders(framenestJSONHeaders()),
+      body: JSON.stringify({ url }),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      const code = (payload.error && payload.error.code) || "X_REQUEST_ERROR";
+      setXRequestStatus(typeof mapXRequestError === "function" ? mapXRequestError(code) : code || "Request failed.");
+      return;
+    }
+    xRequestState.statusMessage = "";
+    setXRequestStatus("Submitted. Processing locally.");
+    await refreshXRequests({ focusSubmit: false });
+  } catch (_err) {
+    setXRequestStatus("Could not submit X request.");
+  } finally {
+    xRequestState.submitting = false;
+    if (xRequestSubmitButton) xRequestSubmitButton.disabled = false;
+  }
+}
+
+async function retryXRequest(requestId) {
+  if (!requestId || !identityAllowsXRequest()) return;
+  try {
+    await fetch(`${X_REQUESTS_ENDPOINT}/${encodeURIComponent(requestId)}/retry`, {
+      method: "POST",
+      headers: framenestMutationHeaders(framenestJSONHeaders()),
+    });
+    setXRequestStatus("Retrying.");
+    await refreshXRequests({ focusSubmit: false });
+  } catch (_err) {
+    setXRequestStatus("Could not retry X request.");
+  }
+}
+
+function openXRequestDialog() {
+  if (!identityAllowsXRequest() || !xRequestDialog) return;
+  if (typeof xRequestDialog.showModal === "function") {
+    xRequestDialog.showModal();
+  } else {
+    xRequestDialog.setAttribute("open", "");
+  }
+  xRequestState.statusMessage = "";
+  renderXRequestCockpit();
+  refreshXRequests({ focusSubmit: true });
+  const title = xRequestDialog.querySelector(".upload-dialog__title");
+  if (title) title.focus();
+}
+function closeXRequestDialog() {
+  if (!xRequestDialog) return;
+  if (typeof xRequestDialog.close === "function") {
+    xRequestDialog.close();
+  } else {
+    xRequestDialog.removeAttribute("open");
+  }
+}
+
+function openXAdminDialog() {
+  if (!identityAllowsXAdmin() || !xAdminDialog) return;
+  if (typeof xAdminDialog.showModal === "function") {
+    xAdminDialog.showModal();
+  } else {
+    xAdminDialog.setAttribute("open", "");
+  }
+  if (xAdminError) xAdminError.hidden = true;
+  if (xAdminReview) xAdminReview.textContent = "";
+  if (xAdminClaimId) xAdminClaimId.focus();
+}
+function closeXAdminDialog() {
+  if (!xAdminDialog) return;
+  if (typeof xAdminDialog.close === "function") {
+    xAdminDialog.close();
+  } else {
+    xAdminDialog.removeAttribute("open");
+  }
+}
+
+async function reviewXClaim(event) {
+  event.preventDefault();
+  if (!identityAllowsXAdmin() || !xAdminClaimId) return;
+  const claimId = xAdminClaimId.value.trim();
+  if (!claimId) return;
+  if (xAdminError) xAdminError.hidden = true;
+  if (xAdminReview) xAdminReview.textContent = "Reviewing…";
+  try {
+    const response = await fetch(`${X_ADMIN_ENDPOINT}/${encodeURIComponent(claimId)}`, {
+      headers: framenestJSONHeaders(),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      if (xAdminError) {
+        xAdminError.textContent = (payload.error && payload.error.message) || "Claim not found.";
+        xAdminError.hidden = false;
+      }
+      if (xAdminReview) xAdminReview.textContent = "";
+      return;
+    }
+    renderXAdminReview(payload, claimId);
+  } catch (_err) {
+    if (xAdminError) {
+      xAdminError.textContent = "Could not review X claim.";
+      xAdminError.hidden = false;
+    }
+    if (xAdminReview) xAdminReview.textContent = "";
+  }
+}
+
+function renderXAdminReview(claim, claimId) {
+  if (!xAdminReview) return;
+  const parts = [];
+  const h = document.createElement("h3");
+  h.className = "x-admin-heading";
+  h.textContent = "X claim " + (claim.claim_id || claimId);
+  parts.push(h);
+  const meta = document.createElement("dl");
+  meta.className = "x-admin-meta";
+  const add = (k, v) => {
+    const dt = document.createElement("dt"); dt.textContent = k;
+    const dd = document.createElement("dd"); dd.textContent = v || "—";
+    meta.appendChild(dt); meta.appendChild(dd);
+  };
+  add("State", claim.state);
+  add("Post ID", claim.x_post_id);
+  add("Acquisition source", "x_manual_claim");
+  add("Canonical URL", claim.canonical_url);
+  add("Status", xPhaseLabel(claim.phase));
+  add("Assets", `${claim.success_count || 0} / ${claim.discovered_asset_count || 0}`);
+  add("Failure", claim.failure_code || "none");
+  parts.push(meta);
+  if (claim.source_author_handle || claim.source_author_display_name) {
+    const creator = document.createElement("div");
+    creator.className = "x-admin-creator";
+    const buffer = [claim.source_author_handle || ""];
+    if (claim.source_author_handle && claim.source_author_display_name) buffer.unshift("Creator");
+    creator.textContent = "Creator: " + (claim.source_author_display_name || claim.source_author_handle);
+    parts.push(creator);
+  }
+  if (Array.isArray(claim.assets) && claim.assets.length) {
+    const list = document.createElement("ul");
+    list.className = "x-admin-assets";
+    for (const asset of claim.assets) {
+      const li = document.createElement("li");
+      li.dataset.state = asset.state || "";
+      const text = `#${asset.ordinal + 1} ${asset.media_type} — ${asset.state}` + (asset.failure_code ? ` (${asset.failure_code})` : "");
+      const label = document.createElement("span");
+      label.textContent = text;
+      li.appendChild(label);
+      if (asset.media_id) {
+        const open = document.createElement("button");
+        open.type = "button";
+        open.className = "youtube-request-action";
+        open.textContent = "Open media";
+        open.addEventListener("click", () => openPrivateDetails(asset.media_id));
+        li.appendChild(open);
+      }
+      list.appendChild(li);
+    }
+    parts.push(list);
+  }
+  xAdminReview.textContent = "";
+  for (const p of parts) xAdminReview.appendChild(p);
+}
+
+if (xRequestOpenButton) xRequestOpenButton.addEventListener("click", openXRequestDialog);
+if (xRequestCloseButton) xRequestCloseButton.addEventListener("click", closeXRequestDialog);
+if (xRequestForm) xRequestForm.addEventListener("submit", submitXRequest);
+if (xAdminOpenButton) xAdminOpenButton.addEventListener("click", openXAdminDialog);
+if (xAdminCloseButton) xAdminCloseButton.addEventListener("click", closeXAdminDialog);
+if (xAdminForm) xAdminForm.addEventListener("submit", reviewXClaim);
