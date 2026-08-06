@@ -438,6 +438,16 @@ class YouTubeRequestService:
                     snapshot=self._request_snapshot(own_success),
                     created=False,
                 )
+            own_active = self._repository.find_active_by_source_identity(
+                extractor_key=claim.extractor_key,
+                youtube_video_id=claim.youtube_video_id,
+                created_by_login_key=created_by_login_key,
+            )
+            if own_active is not None:
+                return YouTubeRequestSubmission(
+                    snapshot=self._request_snapshot(own_active),
+                    created=False,
+                )
             published = self._repository.find_published_successful_by_source_identity(
                 extractor_key=claim.extractor_key,
                 youtube_video_id=claim.youtube_video_id,

@@ -11163,7 +11163,7 @@ async function submitYouTubeRequest(event) {
   if (!identityAllowsYouTubeRequest() || youtubeRequestState.submitting) return;
   const rawUrl = youtubeRequestUrlInput ? youtubeRequestUrlInput.value.trim() : "";
   const validation = validateYouTubeClaimUrl(rawUrl);
-  if (!validation.ok) {
+  if (!validation.supported) {
     youtubeRequestState.urlError = validation.message || "Enter a supported YouTube URL.";
     renderYouTubeRequestCockpit();
     if (youtubeRequestUrlInput) youtubeRequestUrlInput.focus();

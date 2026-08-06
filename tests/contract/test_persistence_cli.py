@@ -7,6 +7,7 @@ import os
 import signal
 import socket
 import subprocess
+import sys
 import time
 from pathlib import Path
 from typing import Any
@@ -14,9 +15,9 @@ from unittest.mock import patch
 
 import pytest
 
-REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
-DB_CONSOLE_SCRIPT = REPOSITORY_ROOT / ".venv" / "bin" / "framenest-db"
-SERVER_CONSOLE_SCRIPT = REPOSITORY_ROOT / ".venv" / "bin" / "framenest-server"
+INTERPRETER_BIN = Path(sys.executable).parent
+DB_CONSOLE_SCRIPT = INTERPRETER_BIN / "framenest-db"
+SERVER_CONSOLE_SCRIPT = INTERPRETER_BIN / "framenest-server"
 STARTUP_TIMEOUT_SECONDS = 8.0
 SHUTDOWN_TIMEOUT_SECONDS = 8.0
 
@@ -119,7 +120,7 @@ def test_framenest_db_status_reports_uninitialized_without_creating_database(
         "operation": "status",
         "state": "uninitialized",
         "current_revision": None,
-        "head_revision": "0025",
+        "head_revision": "0026",
     }
     assert str(database_path) not in result.stdout
     assert not database_path.exists()
@@ -139,8 +140,8 @@ def test_framenest_db_migrate_upgrades_to_head_with_deterministic_output(
     assert _parse_single_json_line(migrate.stdout) == {
         "operation": "migrate",
         "state": "at_head",
-        "current_revision": "0025",
-        "head_revision": "0025",
+        "current_revision": "0026",
+        "head_revision": "0026",
     }
     assert status.returncode == 0
     assert _parse_single_json_line(status.stdout)["state"] == "at_head"
@@ -200,7 +201,7 @@ def test_importing_cli_module_has_no_execution_side_effects(
 ) -> None:
     result = subprocess.run(
         [
-            str(REPOSITORY_ROOT / ".venv" / "bin" / "python"),
+            sys.executable,
             "-c",
             "import framenest.infrastructure.persistence.cli",
         ],
