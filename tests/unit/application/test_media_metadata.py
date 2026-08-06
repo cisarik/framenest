@@ -14,6 +14,7 @@ from framenest.application.media_metadata import (
     SaveMediaMetadata,
 )
 from framenest.application.ports.media_metadata_repository import (
+    AcquisitionSourceImmutableError,
     CanonicalTagCreateResult,
     CanonicalTagDefinitionConflictError,
     CanonicalTagNotFoundError,
@@ -98,6 +99,10 @@ class _FakeRepository:
         content_category=None,
         acquisition_source=None,
         genre_keys=(),
+        creator_attribution_kind=None,
+        creator_stable_id=None,
+        creator_handle=None,
+        creator_display_name=None,
     ) -> MediaMetadataSaveResult:
         from framenest.domain.media_classification import (
             DEFAULT_ACQUISITION_SOURCE,
@@ -106,7 +111,14 @@ class _FakeRepository:
 
         if content_category is None:
             content_category = DEFAULT_CONTENT_CATEGORY
-        if acquisition_source is None:
+        if self.snapshot.persisted:
+            if acquisition_source is None:
+                acquisition_source = self.snapshot.acquisition_source
+            elif acquisition_source != self.snapshot.acquisition_source:
+                raise AcquisitionSourceImmutableError(
+                    "Acquisition source is immutable provenance and cannot be changed."
+                )
+        elif acquisition_source is None:
             acquisition_source = DEFAULT_ACQUISITION_SOURCE
         if media_id != MEDIA_ID:
             raise MediaMetadataMediaNotFoundError()
@@ -123,6 +135,10 @@ class _FakeRepository:
             and self.snapshot.content_category == content_category
             and self.snapshot.acquisition_source == acquisition_source
             and self.snapshot.genre_keys == genre_keys
+            and self.snapshot.creator_attribution_kind == creator_attribution_kind
+            and self.snapshot.creator_stable_id == creator_stable_id
+            and self.snapshot.creator_handle == creator_handle
+            and self.snapshot.creator_display_name == creator_display_name
         ):
             status = "unchanged"
         created_at_ms = self.snapshot.created_at_ms if self.snapshot.created_at_ms is not None else now_ms
@@ -146,6 +162,10 @@ class _FakeRepository:
             content_category=content_category,
             acquisition_source=acquisition_source,
             genre_keys=genre_keys,
+            creator_attribution_kind=creator_attribution_kind,
+            creator_stable_id=creator_stable_id,
+            creator_handle=creator_handle,
+            creator_display_name=creator_display_name,
         )
         return MediaMetadataSaveResult(status=status, metadata=self.snapshot)
 

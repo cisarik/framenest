@@ -194,6 +194,10 @@ def test_media_metadata_tables_have_required_schema_constraints_and_indexes(
         "description",
         "content_category",
         "acquisition_source",
+        "creator_attribution_kind",
+        "creator_stable_id",
+        "creator_handle",
+        "creator_display_name",
         "collection_key",
         "processed_at_ms",
         "created_at_ms",
@@ -219,6 +223,8 @@ def test_media_metadata_tables_have_required_schema_constraints_and_indexes(
     assert "ck_media_metadata_title_length" in metadata_sql
     assert "ck_media_metadata_description_length" in metadata_sql
     assert "ck_media_metadata_updated_not_before_created" in metadata_sql
+    assert "ck_media_metadata_content_category" in metadata_sql
+    assert "ck_media_metadata_creator_attribution" in metadata_sql
     assert "ck_media_canonical_tags_position_range" in assignments_sql
 
     assert {
@@ -236,6 +242,8 @@ def test_media_metadata_tables_have_required_schema_constraints_and_indexes(
     assert any(row[2] == 1 and row[3] == "u" for row in indexes.values())
     metadata_indexes = _indexes(settings.database_path, "media_metadata")
     assert "ix_media_metadata_collection" in metadata_indexes
+    assert "ix_media_metadata_creator_stable" in metadata_indexes
+    assert "ix_media_metadata_creator_handle" in metadata_indexes
 
 
 def test_upgrade_from_populated_0004_preserves_rows_and_does_not_backfill_metadata(
