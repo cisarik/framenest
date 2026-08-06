@@ -457,7 +457,7 @@ def test_new_video_reuses_existing_pipeline_and_suppresses_automatic_analysis(
                     media_metadata.c.media_id == current.media_id.to_string()
                 )
             ).one()
-        assert metadata == ("general", "youtube_manual_claim", None)
+        assert metadata == ("general", "youtube_manual_claim", "Synthetic title")
         await fixture.close()
 
     asyncio.run(scenario())

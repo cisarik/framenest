@@ -30,6 +30,7 @@ from framenest.application.ports.youtube_staging import (
     YouTubeStagingError,
     YouTubeStagingStorage,
 )
+from framenest.application.upload_catalog import CatalogUploadClassification
 from framenest.application.upload_transport import (
     UploadDuplicateResolution,
     UploadTransportError,
@@ -41,6 +42,11 @@ from framenest.domain.identities import (
     YouTubeAcquisitionClaimId,
 )
 from framenest.domain.media_classification import AcquisitionSource, ContentCategory
+from framenest.domain.media_metadata import (
+    MAX_DISPLAY_TITLE_CODE_POINTS,
+    FrameNestMediaMetadataError,
+    MediaDisplayTitle,
+)
 from framenest.domain.uploads import (
     UploadDuplicateResolutionMode,
     UploadSession,
@@ -1352,12 +1358,38 @@ class YouTubeAcquisitionCoordinator:
 def youtube_classification_for_upload(
     repository: YouTubeAcquisitionClaimRepository,
     upload_id: UploadSessionId,
-) -> tuple[ContentCategory, AcquisitionSource] | None:
-    """Return sparse catalog defaults only for a linked YouTube claim."""
+) -> CatalogUploadClassification | None:
+    """Return sparse catalog defaults only for a linked YouTube claim.
+
+    When the claim carries a usable upstream_title and catalog display_title is
+    still absent at first catalog handoff, import that title as the initial
+    editable display_title. Administrator metadata Save remains canonical.
+    """
     claim = repository.find_by_upload_id(upload_id)
     if claim is None:
         return None
-    return ContentCategory.GENERAL, AcquisitionSource.YOUTUBE_MANUAL_CLAIM
+    return CatalogUploadClassification(
+        content_category=ContentCategory.GENERAL,
+        acquisition_source=AcquisitionSource.YOUTUBE_MANUAL_CLAIM,
+        display_title=_imported_display_title_from_upstream(claim.upstream_title),
+    )
+
+
+def _imported_display_title_from_upstream(
+    upstream_title: str | None,
+) -> MediaDisplayTitle | None:
+    """Map claim upstream_title onto catalog display_title bounds, or skip."""
+    if upstream_title is None:
+        return None
+    candidate = upstream_title
+    if len(candidate) > MAX_DISPLAY_TITLE_CODE_POINTS:
+        candidate = candidate[:MAX_DISPLAY_TITLE_CODE_POINTS].rstrip()
+    if not candidate:
+        return None
+    try:
+        return MediaDisplayTitle(candidate)
+    except FrameNestMediaMetadataError:
+        return None
 
 
 def automatic_analysis_allowed_for_upload(

@@ -28,12 +28,21 @@ from framenest.domain.upload_publications import (
     UploadPublicationCleanupState,
     UploadPublicationState,
 )
-from framenest.domain.media_metadata import MediaMetadata
+from framenest.domain.media_metadata import MediaDisplayTitle, MediaMetadata
 from framenest.domain.uploads import UploadSessionId, UploadSessionState
 
 
 class UploadCatalogError(RuntimeError):
     """Sanitized catalog-from-publication failure."""
+
+
+@dataclass(frozen=True, slots=True)
+class CatalogUploadClassification:
+    """Sparse catalog defaults applied when an upload is first cataloged."""
+
+    content_category: ContentCategory
+    acquisition_source: AcquisitionSource
+    display_title: MediaDisplayTitle | None = None
 
 
 class UploadCatalogNotFoundError(UploadCatalogError):
@@ -73,7 +82,7 @@ class CatalogPublishedUpload:
         location_id_factory: Callable[[], MediaLocationId] | None = None,
         classification_for_upload: Callable[
             [UploadSessionId],
-            tuple[ContentCategory, AcquisitionSource] | None,
+            CatalogUploadClassification | None,
         ]
         | None = None,
         now_ms: Callable[[], int] = default_now_ms,
@@ -144,16 +153,15 @@ class CatalogPublishedUpload:
             if self._classification_for_upload is not None:
                 classification = self._classification_for_upload(upload_id)
                 if classification is not None:
-                    content_category, acquisition_source = classification
                     metadata = MediaMetadata(
                         media_id=media.id,
-                        display_title=None,
+                        display_title=classification.display_title,
                         description=None,
                         tag_keys=(),
                         created_at_ms=now_ms,
                         updated_at_ms=now_ms,
-                        content_category=content_category,
-                        acquisition_source=acquisition_source,
+                        content_category=classification.content_category,
+                        acquisition_source=classification.acquisition_source,
                         genre_keys=(),
                     )
             try:

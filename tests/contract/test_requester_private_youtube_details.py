@@ -94,7 +94,9 @@ def _seed_private_owned_media(
     *,
     library_id: LibraryId,
     owner_login: str = OWNER_LOGIN,
-    title: str = "Owner Private Title",
+    title: str | None = "Owner Private Title",
+    upstream_title: str | None = "Upstream",
+    relative_path: str = "owner-private.mp4",
 ) -> None:
     engine = create_sqlite_engine(database_path)
     try:
@@ -119,7 +121,9 @@ def _seed_private_owned_media(
                 {
                     "media_id": MEDIA_ID,
                     "title": title,
-                    "description": "Private requester description",
+                    "description": (
+                        None if title is None else "Private requester description"
+                    ),
                 },
             )
             connection.execute(
@@ -135,7 +139,7 @@ def _seed_private_owned_media(
                     "id": LOCATION_ID,
                     "media_id": MEDIA_ID,
                     "library_id": library_id.to_string(),
-                    "relative": "owner-private.mp4",
+                    "relative": relative_path,
                     "size": len(MP4_BYTES),
                 },
             )
@@ -157,7 +161,7 @@ def _seed_private_owned_media(
                     "(:id, 'duplicate_resolved', 'youtube_manual_claim', "
                     ":submitted, :canonical, :video_id, 'Youtube', NULL, NULL, "
                     "NULL, :media_id, :location_id, 'interactive', 10, "
-                    "'Upstream', 'Channel', 'channel', '2026-01-02', 'yt-dlp', "
+                    ":upstream_title, 'Channel', 'channel', '2026-01-02', 'yt-dlp', "
                     "'2026.07.23', '2026.07.23', '18', NULL, 'remote.mp4', "
                     ":generated, :staging, :size, 10, 20, NULL, 20, NULL, NULL, NULL, "
                     "'complete', 20, 1, :owner)"
@@ -173,6 +177,7 @@ def _seed_private_owned_media(
                     "staging": "a" * 32,
                     "size": len(MP4_BYTES),
                     "owner": owner_login,
+                    "upstream_title": upstream_title,
                 },
             )
     finally:
@@ -441,3 +446,129 @@ def test_removed_requester_claim_clears_media_access(tmp_path: Path) -> None:
         unknown = owner.get(f"/api/media/{UNKNOWN_ID}")
         assert detail.status_code == unknown.status_code == 404
         assert detail.json() == unknown.json()
+
+
+def test_imported_upstream_title_is_canonical_until_admin_save(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "database" / "catalog.sqlite3"
+    database_path.parent.mkdir(parents=True)
+    library_root = tmp_path / "library"
+    library_root.mkdir()
+    hash_filename = "a1b2c3d4e5f6789012345678abcdef01.mp4"
+    (library_root / hash_filename).write_bytes(MP4_BYTES)
+    settings = FrameNestSettings(
+        database_path=database_path,
+        gallery_preview_cache_path=tmp_path / "previews",
+        _env_file=None,
+    )
+    upgrade_database_to_head(settings)
+    library_id = _register_library(database_path, library_root)
+    imported_title = "Realistic Upstream YouTube Title"
+    _seed_private_owned_media(
+        database_path,
+        library_id=library_id,
+        title=imported_title,
+        upstream_title=imported_title,
+        relative_path=hash_filename,
+    )
+
+    with _media_client(settings, OWNER_LOGIN, ROLE_USER) as owner:
+        gallery = owner.get("/api/media")
+        assert gallery.status_code == 200
+        assert gallery.json()["items"] == []
+
+        detail = owner.get(f"/api/media/{MEDIA_ID}")
+        assert detail.status_code == 200
+        payload = detail.json()
+        assert payload["display_title"] == imported_title
+        assert hash_filename not in payload["display_title"]
+        assert payload["locations"][0]["relative_path"] == hash_filename
+
+        content = owner.get(
+            f"/api/media/{MEDIA_ID}/locations/{LOCATION_ID}/content"
+        )
+        download = owner.get(
+            f"/api/media/{MEDIA_ID}/locations/{LOCATION_ID}/download"
+        )
+        assert content.status_code == 200
+        assert content.content == MP4_BYTES
+        assert download.status_code == 200
+        assert download.content == MP4_BYTES
+
+    with _media_client(settings, FOREIGN_LOGIN, ROLE_USER) as foreign:
+        denied = foreign.get(f"/api/media/{MEDIA_ID}")
+        unknown = foreign.get(f"/api/media/{UNKNOWN_ID}")
+        assert denied.status_code == unknown.status_code == 404
+        assert denied.json() == unknown.json()
+        assert imported_title not in denied.text
+        assert hash_filename not in denied.text
+        assert OWNER_LOGIN not in denied.text
+
+    with _media_client(settings, ADMIN_LOGIN, ROLE_ADMIN) as admin:
+        detail = admin.get(f"/api/media/{MEDIA_ID}")
+        assert detail.status_code == 200
+        assert detail.json()["display_title"] == imported_title
+        save = admin.put(
+            f"/api/media/{MEDIA_ID}/metadata",
+            json={
+                "display_title": "Admin Canonical Title",
+                "description": "Canonical description",
+                "tag_keys": [],
+            },
+        )
+        assert save.status_code == 200
+        assert save.json()["status"] in {"created", "updated", "unchanged"}
+        reloaded = admin.get(f"/api/media/{MEDIA_ID}")
+        assert reloaded.status_code == 200
+        assert reloaded.json()["display_title"] == "Admin Canonical Title"
+        metadata = admin.get(f"/api/media/{MEDIA_ID}/metadata")
+        assert metadata.status_code == 200
+        assert metadata.json()["display_title"] == "Admin Canonical Title"
+
+    with _media_client(settings, OWNER_LOGIN, ROLE_USER) as owner:
+        detail = owner.get(f"/api/media/{MEDIA_ID}")
+        assert detail.status_code == 200
+        assert detail.json()["display_title"] == "Admin Canonical Title"
+        assert detail.json()["display_title"] != imported_title
+
+
+def test_missing_upstream_and_display_title_do_not_invent_product_title(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "database" / "catalog.sqlite3"
+    database_path.parent.mkdir(parents=True)
+    library_root = tmp_path / "library"
+    library_root.mkdir()
+    hash_filename = "deadbeefcafebabe0123456789abcdef.mp4"
+    (library_root / hash_filename).write_bytes(MP4_BYTES)
+    settings = FrameNestSettings(
+        database_path=database_path,
+        gallery_preview_cache_path=tmp_path / "previews",
+        _env_file=None,
+    )
+    upgrade_database_to_head(settings)
+    library_id = _register_library(database_path, library_root)
+    _seed_private_owned_media(
+        database_path,
+        library_id=library_id,
+        title=None,
+        upstream_title=None,
+        relative_path=hash_filename,
+    )
+
+    with _media_client(settings, OWNER_LOGIN, ROLE_USER) as owner:
+        detail = owner.get(f"/api/media/{MEDIA_ID}")
+        assert detail.status_code == 200
+        payload = detail.json()
+        assert payload["display_title"] is None
+        assert "/" not in (payload["locations"][0]["relative_path"] or "")
+        assert payload["locations"][0]["relative_path"] == hash_filename
+
+    with _media_client(settings, FOREIGN_LOGIN, ROLE_USER) as foreign:
+        denied = foreign.get(f"/api/media/{MEDIA_ID}")
+        unknown = foreign.get(f"/api/media/{UNKNOWN_ID}")
+        assert denied.status_code == unknown.status_code == 404
+        assert denied.json() == unknown.json()
+        assert hash_filename not in denied.text
+        assert OWNER_LOGIN not in denied.text
