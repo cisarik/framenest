@@ -198,6 +198,11 @@ ROUTE_POLICIES: tuple[RoutePolicy, ...] = (
     ),
     RoutePolicy(
         method="GET",
+        template="/api/media/{media_id}",
+        capability=CAPABILITY_GALLERY_READ,
+    ),
+    RoutePolicy(
+        method="GET",
         template="/api/admin/media",
         capability=CAPABILITY_MEDIA_WORKFLOW_READ,
         audit_action="media.workflow.list",

@@ -9,12 +9,14 @@ audited, and the local channel stays narrowly operational.
 
 from __future__ import annotations
 
+import os
 import sqlite3
 import uuid
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import text
 
 from framenest.adapters.api.application import create_app
 from framenest.adapters.api.tailscale_ingress import (
@@ -23,10 +25,13 @@ from framenest.adapters.api.tailscale_ingress import (
     find_route_policy,
 )
 from framenest.configuration import FrameNestSettings
+from framenest.domain import Device, DeviceId, Library, LibraryId, LibraryPathFlavor, LibraryRoot
+from framenest.infrastructure.persistence.device_repository import SqliteDeviceRepository
 from framenest.infrastructure.persistence.engine import (
     create_sqlite_engine,
     dispose_engine,
 )
+from framenest.infrastructure.persistence.library_repository import SqliteLibraryRepository
 from framenest.infrastructure.persistence.migrations import upgrade_database_to_head
 
 EXTERNAL_ORIGIN = "https://nuc-1.example.ts.net"
@@ -41,6 +46,7 @@ USER_CAPABILITIES = {
     "media.original.read",
     "media.download",
     "upload.submit",
+    "youtube.request",
 }
 
 
@@ -1099,3 +1105,288 @@ def test_correlation_id_is_present_on_remote_responses(tailscale_client) -> None
     uuid.UUID(ok.headers["x-request-id"])
     denied = client.get("/api/media", headers=_serve_headers(STRANGER_LOGIN))
     uuid.UUID(denied.headers["x-request-id"])
+
+
+# --- Requester-private media detail ingress ------------------------------
+
+
+OWNER_LOGIN = "owner@example.com"
+FOREIGN_LOGIN = "foreign@example.com"
+PRIVATE_MEDIA_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+PRIVATE_LOCATION_ID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+PRIVATE_CLAIM_ID = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
+UNKNOWN_MEDIA_ID = "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+PRIVATE_TITLE = "Owner Private Ingress Title"
+PRIVATE_MP4 = b"\x00\x00\x00\x18ftypmp42" + b"\x01" * 100
+
+
+def _seed_requester_private_media(
+    database_path: Path,
+    *,
+    library_root: Path,
+    owner_login: str,
+) -> None:
+    library_root.mkdir(parents=True, exist_ok=True)
+    (library_root / "owner-private.mp4").write_bytes(PRIVATE_MP4)
+    engine = create_sqlite_engine(database_path)
+    try:
+        device = Device(id=DeviceId.new(), display_name="Ingress Private Device")
+        SqliteDeviceRepository(engine).add(device)
+        library_id = LibraryId.new()
+        flavor = (
+            LibraryPathFlavor.WINDOWS if os.name == "nt" else LibraryPathFlavor.POSIX
+        )
+        SqliteLibraryRepository(engine).add(
+            Library(
+                id=library_id,
+                device_id=device.id,
+                display_name="Ingress Private Library",
+                root=LibraryRoot(
+                    flavor=flavor,
+                    path=os.path.normpath(str(library_root)),
+                ),
+            )
+        )
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "INSERT INTO logical_media "
+                    "(id, media_kind, created_at_ms, updated_at_ms) "
+                    "VALUES (:id, 'video', 10, 10)"
+                ),
+                {"id": PRIVATE_MEDIA_ID},
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO media_metadata "
+                    "(media_id, display_title, description, collection_key, "
+                    "processed_at_ms, created_at_ms, updated_at_ms, "
+                    "content_category, acquisition_source) "
+                    "VALUES (:media_id, :title, :description, NULL, NULL, 10, 10, "
+                    "'general', 'youtube_manual_claim')"
+                ),
+                {
+                    "media_id": PRIVATE_MEDIA_ID,
+                    "title": PRIVATE_TITLE,
+                    "description": "Private requester description",
+                },
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO physical_media_locations "
+                    "(id, media_id, library_id, relative_path, availability, "
+                    "observed_size_bytes, observed_mtime_ns, created_at_ms, "
+                    "updated_at_ms) "
+                    "VALUES (:id, :media_id, :library_id, :relative, 'available', "
+                    ":size, 1, 10, 10)"
+                ),
+                {
+                    "id": PRIVATE_LOCATION_ID,
+                    "media_id": PRIVATE_MEDIA_ID,
+                    "library_id": library_id.to_string(),
+                    "relative": "owner-private.mp4",
+                    "size": len(PRIVATE_MP4),
+                },
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO youtube_acquisition_claims "
+                    "(id, state, acquisition_source, submitted_url, canonical_url, "
+                    "youtube_video_id, extractor_key, retry_of_claim_id, "
+                    "resolved_claim_id, upload_id, media_id, media_location_id, "
+                    "confirmation_method, confirmed_at_ms, upstream_title, "
+                    "upstream_channel, upstream_channel_id, upstream_source_date, "
+                    "downloader_name, downloader_version, extractor_version, "
+                    "selected_video_format_id, selected_audio_format_id, "
+                    "remote_filename, generated_filename, staging_key, "
+                    "downloaded_size_bytes, created_at_ms, updated_at_ms, "
+                    "downloaded_at_ms, completed_at_ms, catalog_removed_at_ms, "
+                    "failure_stage, failure_code, cleanup_state, "
+                    "cleanup_completed_at_ms, version, created_by_login_key) VALUES "
+                    "(:id, 'duplicate_resolved', 'youtube_manual_claim', "
+                    ":submitted, :canonical, :video_id, 'Youtube', NULL, NULL, "
+                    "NULL, :media_id, :location_id, 'interactive', 10, "
+                    "'Upstream', 'Channel', 'channel', '2026-01-02', 'yt-dlp', "
+                    "'2026.07.23', '2026.07.23', '18', NULL, 'remote.mp4', "
+                    ":generated, :staging, :size, 10, 20, NULL, 20, NULL, NULL, NULL, "
+                    "'complete', 20, 1, :owner)"
+                ),
+                {
+                    "id": PRIVATE_CLAIM_ID,
+                    "submitted": "https://youtu.be/AbCdEf123_-",
+                    "canonical": "https://www.youtube.com/watch?v=AbCdEf123_-",
+                    "video_id": "AbCdEf123_-",
+                    "media_id": PRIVATE_MEDIA_ID,
+                    "location_id": PRIVATE_LOCATION_ID,
+                    "generated": "youtube-AbCdEf123_-.mp4",
+                    "staging": "a" * 32,
+                    "size": len(PRIVATE_MP4),
+                    "owner": owner_login,
+                },
+            )
+    finally:
+        dispose_engine(engine)
+
+
+def test_media_detail_route_policy_uses_gallery_read_without_shadowing() -> None:
+    detail_policy, detail_match = find_route_policy(
+        "GET", f"/api/media/{PRIVATE_MEDIA_ID}"
+    )
+    list_policy, list_match = find_route_policy("GET", "/api/media")
+    metadata_policy, metadata_match = find_route_policy(
+        "GET", f"/api/media/{PRIVATE_MEDIA_ID}/metadata"
+    )
+    content_policy, content_match = find_route_policy(
+        "GET",
+        f"/api/media/{PRIVATE_MEDIA_ID}/locations/{PRIVATE_LOCATION_ID}/content",
+    )
+    download_policy, download_match = find_route_policy(
+        "GET",
+        f"/api/media/{PRIVATE_MEDIA_ID}/locations/{PRIVATE_LOCATION_ID}/download",
+    )
+
+    assert detail_match is not None
+    assert detail_policy.capability == "gallery.read"
+    assert list_match is not None
+    assert list_policy.capability == "gallery.read"
+    assert metadata_match is not None
+    assert metadata_policy.capability == "gallery.read"
+    assert content_match is not None
+    assert content_policy.capability == "media.original.read"
+    assert download_match is not None
+    assert download_policy.capability == "media.download"
+
+    detail_matches = [
+        policy
+        for policy in ROUTE_POLICIES
+        if policy.match("GET", f"/api/media/{PRIVATE_MEDIA_ID}") is not None
+    ]
+    list_matches = [
+        policy
+        for policy in ROUTE_POLICIES
+        if policy.match("GET", "/api/media") is not None
+    ]
+    assert len(detail_matches) == 1
+    assert len(list_matches) == 1
+    assert detail_matches[0] is not list_matches[0]
+    assert detail_policy.match("GET", "/api/media") is None
+    assert list_policy.match("GET", f"/api/media/{PRIVATE_MEDIA_ID}") is None
+    assert detail_policy.match(
+        "GET", f"/api/media/{PRIVATE_MEDIA_ID}/metadata"
+    ) is None
+
+
+def test_requester_private_media_detail_reaches_application_through_ingress(
+    tmp_path: Path,
+) -> None:
+    settings = FrameNestSettings(
+        database_path=tmp_path / "catalog.sqlite3",
+        gallery_preview_cache_path=tmp_path / "previews",
+        ingress_mode="tailscale_uds",
+        uds_path=tmp_path / "framenest.sock",
+        external_origin=EXTERNAL_ORIGIN,
+        identity_map={
+            ADMIN_LOGIN: "admin",
+            OWNER_LOGIN: "user",
+            FOREIGN_LOGIN: "user",
+        },
+        _env_file=None,
+    )
+    upgrade_database_to_head(settings)
+    _seed_requester_private_media(
+        settings.database_path,
+        library_root=tmp_path / "library",
+        owner_login=OWNER_LOGIN,
+    )
+
+    app = create_app(settings=settings)
+    with TestClient(app) as client:
+        owner_detail = client.get(
+            f"/api/media/{PRIVATE_MEDIA_ID}",
+            headers=_serve_headers(OWNER_LOGIN, "Owner"),
+        )
+        assert owner_detail.status_code == 200
+        assert owner_detail.json()["media_id"] == PRIVATE_MEDIA_ID
+        assert owner_detail.json()["display_title"] == PRIVATE_TITLE
+        assert "error" not in owner_detail.json()
+
+        foreign_detail = client.get(
+            f"/api/media/{PRIVATE_MEDIA_ID}",
+            headers=_serve_headers(FOREIGN_LOGIN, "Foreign"),
+        )
+        unknown_detail = client.get(
+            f"/api/media/{UNKNOWN_MEDIA_ID}",
+            headers=_serve_headers(FOREIGN_LOGIN, "Foreign"),
+        )
+        assert foreign_detail.status_code == unknown_detail.status_code == 404
+        assert foreign_detail.json() == unknown_detail.json()
+        assert _error_code(foreign_detail) == "MEDIA_NOT_FOUND"
+        assert PRIVATE_TITLE not in foreign_detail.text
+        assert OWNER_LOGIN not in foreign_detail.text
+        assert "owner-private.mp4" not in foreign_detail.text
+
+        admin_detail = client.get(
+            f"/api/media/{PRIVATE_MEDIA_ID}",
+            headers=_serve_headers(ADMIN_LOGIN),
+        )
+        assert admin_detail.status_code == 200
+        assert admin_detail.json()["display_title"] == PRIVATE_TITLE
+
+        missing_identity = client.get(f"/api/media/{PRIVATE_MEDIA_ID}")
+        assert missing_identity.status_code == 401
+        assert _error_code(missing_identity) == "IDENTITY_REQUIRED"
+
+        stranger = client.get(
+            f"/api/media/{PRIVATE_MEDIA_ID}",
+            headers=_serve_headers(STRANGER_LOGIN),
+        )
+        assert stranger.status_code == 403
+        assert _error_code(stranger) == "IDENTITY_NOT_AUTHORIZED"
+
+        owner_gallery = client.get(
+            "/api/media", headers=_serve_headers(OWNER_LOGIN, "Owner")
+        )
+        foreign_gallery = client.get(
+            "/api/media", headers=_serve_headers(FOREIGN_LOGIN, "Foreign")
+        )
+        assert owner_gallery.status_code == foreign_gallery.status_code == 200
+        assert owner_gallery.json()["items"] == []
+        assert foreign_gallery.json()["items"] == []
+
+        owner_metadata = client.get(
+            f"/api/media/{PRIVATE_MEDIA_ID}/metadata",
+            headers=_serve_headers(OWNER_LOGIN, "Owner"),
+        )
+        owner_content = client.get(
+            f"/api/media/{PRIVATE_MEDIA_ID}/locations/{PRIVATE_LOCATION_ID}/content",
+            headers=_serve_headers(OWNER_LOGIN, "Owner"),
+        )
+        owner_download = client.get(
+            f"/api/media/{PRIVATE_MEDIA_ID}/locations/{PRIVATE_LOCATION_ID}/download",
+            headers=_serve_headers(OWNER_LOGIN, "Owner"),
+        )
+        assert owner_metadata.status_code == 200
+        assert owner_metadata.json()["display_title"] == PRIVATE_TITLE
+        assert owner_content.status_code == 200
+        assert owner_content.content == PRIVATE_MP4
+        assert owner_download.status_code == 200
+        assert owner_download.content == PRIVATE_MP4
+
+        foreign_metadata = client.get(
+            f"/api/media/{PRIVATE_MEDIA_ID}/metadata",
+            headers=_serve_headers(FOREIGN_LOGIN, "Foreign"),
+        )
+        foreign_content = client.get(
+            f"/api/media/{PRIVATE_MEDIA_ID}/locations/{PRIVATE_LOCATION_ID}/content",
+            headers=_serve_headers(FOREIGN_LOGIN, "Foreign"),
+        )
+        foreign_download = client.get(
+            f"/api/media/{PRIVATE_MEDIA_ID}/locations/{PRIVATE_LOCATION_ID}/download",
+            headers=_serve_headers(FOREIGN_LOGIN, "Foreign"),
+        )
+        assert foreign_metadata.status_code == 404
+        assert foreign_content.status_code == 404
+        assert foreign_download.status_code == 404
+        assert _error_code(foreign_metadata) != "NOT_FOUND"
+        assert _error_code(foreign_content) != "NOT_FOUND"
+        assert _error_code(foreign_download) != "NOT_FOUND"
