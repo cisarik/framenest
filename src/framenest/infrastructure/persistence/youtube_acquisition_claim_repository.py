@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
-from sqlalchemy import and_, insert, or_, select, update
+from sqlalchemy import and_, func, insert, or_, select, update
 from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
@@ -34,6 +34,7 @@ from framenest.domain.youtube_acquisition import (
     ensure_youtube_transition_allowed,
 )
 from framenest.infrastructure.persistence.catalog_schema import (
+    media_content_publications,
     youtube_acquisition_claims,
 )
 from framenest.infrastructure.persistence.engine import (
@@ -71,6 +72,7 @@ class SqliteYouTubeAcquisitionClaimRepository:
                 connection,
                 extractor_key=claim.extractor_key,
                 youtube_video_id=claim.youtube_video_id,
+                created_by_login_key=claim.created_by_login_key,
             )
             if active is not None:
                 return _claim_from_row(active), False
@@ -84,6 +86,18 @@ class SqliteYouTubeAcquisitionClaimRepository:
         except YouTubeClaimAlreadyExistsError:
             raise
         except IntegrityError as exc:
+            try:
+                existing = self.find_active_by_source_identity(
+                    extractor_key=claim.extractor_key,
+                    youtube_video_id=claim.youtube_video_id,
+                    created_by_login_key=claim.created_by_login_key,
+                )
+            except FrameNestYouTubeClaimRepositoryError:
+                raise FrameNestYouTubeClaimRepositoryError(
+                    _REPOSITORY_FAILURE_MESSAGE
+                ) from exc
+            if existing is not None:
+                return existing, False
             raise FrameNestYouTubeClaimRepositoryError(
                 _REPOSITORY_FAILURE_MESSAGE
             ) from exc
@@ -100,6 +114,7 @@ class SqliteYouTubeAcquisitionClaimRepository:
                 connection,
                 extractor_key=claim.extractor_key,
                 youtube_video_id=claim.youtube_video_id,
+                created_by_login_key=claim.created_by_login_key,
             )
             if active is not None:
                 raise YouTubeClaimSourceIdentityConflictError(
@@ -145,12 +160,14 @@ class SqliteYouTubeAcquisitionClaimRepository:
         *,
         extractor_key: str,
         youtube_video_id: str,
+        created_by_login_key: str | None = None,
     ) -> YouTubeAcquisitionClaim | None:
         def operation(connection: Connection) -> YouTubeAcquisitionClaim | None:
             row = _active_row_by_source(
                 connection,
                 extractor_key=extractor_key,
                 youtube_video_id=youtube_video_id,
+                created_by_login_key=created_by_login_key,
             )
             return None if row is None else _claim_from_row(row)
 
@@ -205,6 +222,102 @@ class SqliteYouTubeAcquisitionClaimRepository:
                 _REPOSITORY_FAILURE_MESSAGE
             ) from exc
 
+    def find_owned_live_successful_by_source_identity(
+        self,
+        *,
+        extractor_key: str,
+        youtube_video_id: str,
+        created_by_login_key: str,
+    ) -> YouTubeAcquisitionClaim | None:
+        def operation(connection: Connection) -> YouTubeAcquisitionClaim | None:
+            row = (
+                connection.execute(
+                    select(youtube_acquisition_claims)
+                    .where(
+                        and_(
+                            youtube_acquisition_claims.c.extractor_key
+                            == extractor_key,
+                            youtube_acquisition_claims.c.youtube_video_id
+                            == youtube_video_id,
+                            youtube_acquisition_claims.c.created_by_login_key
+                            == created_by_login_key,
+                            youtube_acquisition_claims.c.state.in_(
+                                _SUCCESS_STATE_VALUES
+                            ),
+                            youtube_acquisition_claims.c.media_id.is_not(None),
+                            youtube_acquisition_claims.c.media_location_id.is_not(
+                                None
+                            ),
+                        )
+                    )
+                    .order_by(
+                        youtube_acquisition_claims.c.completed_at_ms.desc(),
+                        youtube_acquisition_claims.c.created_at_ms.desc(),
+                        youtube_acquisition_claims.c.id.desc(),
+                    )
+                    .limit(1)
+                )
+                .mappings()
+                .first()
+            )
+            return None if row is None else _claim_from_row(row)
+
+        try:
+            return run_in_transaction(self._engine, operation)
+        except SQLAlchemyError as exc:
+            raise FrameNestYouTubeClaimRepositoryError(
+                _REPOSITORY_FAILURE_MESSAGE
+            ) from exc
+
+    def find_published_successful_by_source_identity(
+        self,
+        *,
+        extractor_key: str,
+        youtube_video_id: str,
+    ) -> YouTubeAcquisitionClaim | None:
+        def operation(connection: Connection) -> YouTubeAcquisitionClaim | None:
+            row = (
+                connection.execute(
+                    select(youtube_acquisition_claims)
+                    .join(
+                        media_content_publications,
+                        media_content_publications.c.media_id
+                        == youtube_acquisition_claims.c.media_id,
+                    )
+                    .where(
+                        and_(
+                            youtube_acquisition_claims.c.extractor_key
+                            == extractor_key,
+                            youtube_acquisition_claims.c.youtube_video_id
+                            == youtube_video_id,
+                            youtube_acquisition_claims.c.state.in_(
+                                _SUCCESS_STATE_VALUES
+                            ),
+                            youtube_acquisition_claims.c.media_id.is_not(None),
+                            youtube_acquisition_claims.c.media_location_id.is_not(
+                                None
+                            ),
+                        )
+                    )
+                    .order_by(
+                        youtube_acquisition_claims.c.completed_at_ms.desc(),
+                        youtube_acquisition_claims.c.created_at_ms.desc(),
+                        youtube_acquisition_claims.c.id.desc(),
+                    )
+                    .limit(1)
+                )
+                .mappings()
+                .first()
+            )
+            return None if row is None else _claim_from_row(row)
+
+        try:
+            return run_in_transaction(self._engine, operation)
+        except SQLAlchemyError as exc:
+            raise FrameNestYouTubeClaimRepositoryError(
+                _REPOSITORY_FAILURE_MESSAGE
+            ) from exc
+
     def find_by_upload_id(
         self,
         upload_id: UploadSessionId,
@@ -221,6 +334,271 @@ class SqliteYouTubeAcquisitionClaimRepository:
                 .first()
             )
             return None if row is None else _claim_from_row(row)
+
+        try:
+            return run_in_transaction(self._engine, operation)
+        except SQLAlchemyError as exc:
+            raise FrameNestYouTubeClaimRepositoryError(
+                _REPOSITORY_FAILURE_MESSAGE
+            ) from exc
+
+    def get_owned(
+        self,
+        claim_id: YouTubeAcquisitionClaimId,
+        *,
+        created_by_login_key: str,
+    ) -> YouTubeAcquisitionClaim | None:
+        def operation(connection: Connection) -> YouTubeAcquisitionClaim | None:
+            row = _row_by_id(connection, claim_id)
+            if row is None:
+                return None
+            claim = _claim_from_row(row)
+            if claim.created_by_login_key != created_by_login_key:
+                return None
+            return claim
+
+        try:
+            return run_in_transaction(self._engine, operation)
+        except SQLAlchemyError as exc:
+            raise FrameNestYouTubeClaimRepositoryError(
+                _REPOSITORY_FAILURE_MESSAGE
+            ) from exc
+
+    def list_owned(
+        self,
+        *,
+        created_by_login_key: str,
+        limit: int,
+        after_created_at_ms: int | None = None,
+        after_id: str | None = None,
+    ) -> tuple[YouTubeAcquisitionClaim, ...]:
+        _validate_owned_cursor(limit, after_created_at_ms, after_id)
+
+        def operation(
+            connection: Connection,
+        ) -> tuple[YouTubeAcquisitionClaim, ...]:
+            filters = [
+                youtube_acquisition_claims.c.created_by_login_key
+                == created_by_login_key
+            ]
+            if after_created_at_ms is not None:
+                assert after_id is not None
+                filters.append(
+                    or_(
+                        youtube_acquisition_claims.c.created_at_ms
+                        < after_created_at_ms,
+                        and_(
+                            youtube_acquisition_claims.c.created_at_ms
+                            == after_created_at_ms,
+                            youtube_acquisition_claims.c.id < after_id,
+                        ),
+                    )
+                )
+            rows = (
+                connection.execute(
+                    select(youtube_acquisition_claims)
+                    .where(and_(*filters))
+                    .order_by(
+                        youtube_acquisition_claims.c.created_at_ms.desc(),
+                        youtube_acquisition_claims.c.id.desc(),
+                    )
+                    .limit(limit)
+                )
+                .mappings()
+                .all()
+            )
+            return tuple(_claim_from_row(row) for row in rows)
+
+        try:
+            return run_in_transaction(self._engine, operation)
+        except SQLAlchemyError as exc:
+            raise FrameNestYouTubeClaimRepositoryError(
+                _REPOSITORY_FAILURE_MESSAGE
+            ) from exc
+
+    def count_active_for_requester(self, *, created_by_login_key: str) -> int:
+        def operation(connection: Connection) -> int:
+            return int(
+                connection.execute(
+                    select(func.count())
+                    .select_from(youtube_acquisition_claims)
+                    .where(
+                        and_(
+                            youtube_acquisition_claims.c.created_by_login_key
+                            == created_by_login_key,
+                            youtube_acquisition_claims.c.state.in_(
+                                _ACTIVE_STATE_VALUES
+                            ),
+                        )
+                    )
+                ).scalar_one()
+            )
+
+        try:
+            return run_in_transaction(self._engine, operation)
+        except SQLAlchemyError as exc:
+            raise FrameNestYouTubeClaimRepositoryError(
+                _REPOSITORY_FAILURE_MESSAGE
+            ) from exc
+
+    def count_global_active_ordinary(self) -> int:
+        def operation(connection: Connection) -> int:
+            return int(
+                connection.execute(
+                    select(func.count())
+                    .select_from(youtube_acquisition_claims)
+                    .where(
+                        and_(
+                            youtube_acquisition_claims.c.created_by_login_key.is_not(
+                                None
+                            ),
+                            youtube_acquisition_claims.c.state.in_(
+                                _ACTIVE_STATE_VALUES
+                            ),
+                        )
+                    )
+                ).scalar_one()
+            )
+
+        try:
+            return run_in_transaction(self._engine, operation)
+        except SQLAlchemyError as exc:
+            raise FrameNestYouTubeClaimRepositoryError(
+                _REPOSITORY_FAILURE_MESSAGE
+            ) from exc
+
+    def count_submits_since(
+        self,
+        *,
+        created_by_login_key: str,
+        since_ms: int,
+    ) -> int:
+        def operation(connection: Connection) -> int:
+            return int(
+                connection.execute(
+                    select(func.count())
+                    .select_from(youtube_acquisition_claims)
+                    .where(
+                        and_(
+                            youtube_acquisition_claims.c.created_by_login_key
+                            == created_by_login_key,
+                            youtube_acquisition_claims.c.created_at_ms >= since_ms,
+                        )
+                    )
+                ).scalar_one()
+            )
+
+        try:
+            return run_in_transaction(self._engine, operation)
+        except SQLAlchemyError as exc:
+            raise FrameNestYouTubeClaimRepositoryError(
+                _REPOSITORY_FAILURE_MESSAGE
+            ) from exc
+
+    def count_failed_transitions_since(
+        self,
+        *,
+        created_by_login_key: str,
+        since_ms: int,
+    ) -> int:
+        def operation(connection: Connection) -> int:
+            return int(
+                connection.execute(
+                    select(func.count())
+                    .select_from(youtube_acquisition_claims)
+                    .where(
+                        and_(
+                            youtube_acquisition_claims.c.created_by_login_key
+                            == created_by_login_key,
+                            youtube_acquisition_claims.c.state
+                            == YouTubeAcquisitionState.FAILED.value,
+                            youtube_acquisition_claims.c.completed_at_ms >= since_ms,
+                        )
+                    )
+                ).scalar_one()
+            )
+
+        try:
+            return run_in_transaction(self._engine, operation)
+        except SQLAlchemyError as exc:
+            raise FrameNestYouTubeClaimRepositoryError(
+                _REPOSITORY_FAILURE_MESSAGE
+            ) from exc
+
+    def private_successful_quota(
+        self,
+        *,
+        created_by_login_key: str,
+    ) -> tuple[int, int]:
+        def operation(connection: Connection) -> tuple[int, int]:
+            rows = (
+                connection.execute(
+                    select(
+                        youtube_acquisition_claims.c.id,
+                        youtube_acquisition_claims.c.downloaded_size_bytes,
+                    )
+                    .select_from(
+                        youtube_acquisition_claims.outerjoin(
+                            media_content_publications,
+                            media_content_publications.c.media_id
+                            == youtube_acquisition_claims.c.media_id,
+                        )
+                    )
+                    .where(
+                        and_(
+                            youtube_acquisition_claims.c.created_by_login_key
+                            == created_by_login_key,
+                            youtube_acquisition_claims.c.state.in_(
+                                _SUCCESS_STATE_VALUES
+                            ),
+                            youtube_acquisition_claims.c.media_id.is_not(None),
+                            media_content_publications.c.media_id.is_(None),
+                        )
+                    )
+                )
+                .mappings()
+                .all()
+            )
+            aggregate = 0
+            for row in rows:
+                size = row["downloaded_size_bytes"]
+                if size is not None:
+                    aggregate += int(size)
+            return len(rows), aggregate
+
+        try:
+            return run_in_transaction(self._engine, operation)
+        except SQLAlchemyError as exc:
+            raise FrameNestYouTubeClaimRepositoryError(
+                _REPOSITORY_FAILURE_MESSAGE
+            ) from exc
+
+    def has_live_requester_media_access(
+        self,
+        *,
+        media_id: MediaId,
+        login_key: str,
+    ) -> bool:
+        def operation(connection: Connection) -> bool:
+            row = (
+                connection.execute(
+                    select(youtube_acquisition_claims.c.id)
+                    .where(
+                        and_(
+                            youtube_acquisition_claims.c.media_id
+                            == media_id.to_string(),
+                            youtube_acquisition_claims.c.created_by_login_key
+                            == login_key,
+                            youtube_acquisition_claims.c.state.in_(
+                                _SUCCESS_STATE_VALUES
+                            ),
+                        )
+                    )
+                    .limit(1)
+                )
+                .first()
+            )
+            return row is not None
 
         try:
             return run_in_transaction(self._engine, operation)
@@ -406,18 +784,24 @@ def _active_row_by_source(
     *,
     extractor_key: str,
     youtube_video_id: str,
+    created_by_login_key: str | None,
 ) -> Mapping[str, object] | None:
+    filters = [
+        youtube_acquisition_claims.c.extractor_key == extractor_key,
+        youtube_acquisition_claims.c.youtube_video_id == youtube_video_id,
+        youtube_acquisition_claims.c.state.in_(_ACTIVE_STATE_VALUES),
+    ]
+    if created_by_login_key is None:
+        filters.append(youtube_acquisition_claims.c.created_by_login_key.is_(None))
+    else:
+        filters.append(
+            youtube_acquisition_claims.c.created_by_login_key
+            == created_by_login_key
+        )
     return (
         connection.execute(
             select(youtube_acquisition_claims)
-            .where(
-                and_(
-                    youtube_acquisition_claims.c.extractor_key == extractor_key,
-                    youtube_acquisition_claims.c.youtube_video_id
-                    == youtube_video_id,
-                    youtube_acquisition_claims.c.state.in_(_ACTIVE_STATE_VALUES),
-                )
-            )
+            .where(and_(*filters))
             .limit(1)
         )
         .mappings()
@@ -466,11 +850,13 @@ def _values_from_claim(claim: YouTubeAcquisitionClaim) -> dict[str, object]:
         "cleanup_state": claim.cleanup_state.value,
         "cleanup_completed_at_ms": claim.cleanup_completed_at_ms,
         "version": claim.version,
+        "created_by_login_key": claim.created_by_login_key,
     }
 
 
 def _claim_from_row(row: Mapping[str, object]) -> YouTubeAcquisitionClaim:
     try:
+        owner = row["created_by_login_key"] if "created_by_login_key" in row.keys() else None
         return YouTubeAcquisitionClaim(
             id=YouTubeAcquisitionClaimId.from_string(str(row["id"])),
             state=YouTubeAcquisitionState(str(row["state"])),
@@ -521,6 +907,7 @@ def _claim_from_row(row: Mapping[str, object]) -> YouTubeAcquisitionClaim:
                 row["cleanup_completed_at_ms"]
             ),
             version=int(row["version"]),
+            created_by_login_key=_optional_text(owner),
         )
     except (
         FrameNestIdentityError,
@@ -588,6 +975,30 @@ def _validate_cursor(
         isinstance(after_updated_at_ms, bool)
         or not isinstance(after_updated_at_ms, int)
         or after_updated_at_ms < 0
+        or not isinstance(after_id, str)
+        or not after_id
+    ):
+        raise FrameNestYouTubeClaimRepositoryError(_REPOSITORY_FAILURE_MESSAGE)
+
+
+def _validate_owned_cursor(
+    limit: object,
+    after_created_at_ms: object,
+    after_id: object,
+) -> None:
+    if (
+        isinstance(limit, bool)
+        or not isinstance(limit, int)
+        or limit <= 0
+        or limit > 1_000
+    ):
+        raise FrameNestYouTubeClaimRepositoryError(_REPOSITORY_FAILURE_MESSAGE)
+    if after_created_at_ms is None and after_id is None:
+        return
+    if (
+        isinstance(after_created_at_ms, bool)
+        or not isinstance(after_created_at_ms, int)
+        or after_created_at_ms < 0
         or not isinstance(after_id, str)
         or not after_id
     ):

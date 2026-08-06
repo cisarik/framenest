@@ -70,6 +70,10 @@ from framenest.adapters.api.youtube_browser_api import (
     YouTubeBrowserApiDependencies,
     create_youtube_browser_api_router,
 )
+from framenest.adapters.api.youtube_request_api import (
+    YouTubeRequestApiDependencies,
+    create_youtube_request_api_router,
+)
 from framenest.adapters.api.tailscale_ingress import (
     SCOPE_IDENTITY,
     TailscaleIngressMiddleware,
@@ -123,6 +127,8 @@ from framenest.application.upload_validation_coordinator import UploadValidation
 from framenest.application.youtube_acquisition import (
     YouTubeAcquisitionCoordinator,
     YouTubeAcquisitionService,
+    YouTubeRequestLimits,
+    YouTubeRequestService,
     automatic_analysis_allowed_for_upload,
     youtube_classification_for_upload,
 )
@@ -253,6 +259,7 @@ def create_app(
     youtube_operator_api_dependencies: YouTubeOperatorApiDependencies
     | None = None,
     youtube_browser_api_dependencies: YouTubeBrowserApiDependencies | None = None,
+    youtube_request_api_dependencies: YouTubeRequestApiDependencies | None = None,
     youtube_downloader: object | None = None,
     security_audit_recorder: object | None = None,
 ) -> FastAPI:
@@ -285,6 +292,7 @@ def create_app(
     owned_youtube_staging = None
     owned_youtube_acquisition_coordinator = None
     owned_youtube_acquisition_service = None
+    owned_youtube_request_service = None
     if (
         library_api_dependencies is None
         or media_import_api_dependencies is None
@@ -311,12 +319,13 @@ def create_app(
         owned_content_publication_repository = (
             SqliteContentPublicationRepository(owned_engine)
         )
-        owned_content_audience_policy = ContentAudiencePolicy(
-            owned_content_publication_repository
-        )
         owned_cover_repository = SqliteMediaCoverRepository(owned_engine)
         owned_youtube_claim_repository = (
             SqliteYouTubeAcquisitionClaimRepository(owned_engine)
+        )
+        owned_content_audience_policy = ContentAudiencePolicy(
+            owned_content_publication_repository,
+            youtube_requester_private_access=owned_youtube_claim_repository,
         )
     if cover_api_dependencies is None:
         assert owned_media_repository is not None
@@ -717,6 +726,43 @@ def create_app(
                 owned_youtube_staging,
                 notifier=owned_youtube_acquisition_coordinator,
             )
+            assert owned_content_publication_repository is not None
+
+            def _youtube_request_free_space() -> int:
+                assert owned_youtube_staging is not None
+                return int(owned_youtube_staging.available_bytes())
+
+            owned_youtube_request_service = YouTubeRequestService(
+                owned_youtube_claim_repository,
+                owned_content_publication_repository,
+                owned_youtube_staging,
+                limits=YouTubeRequestLimits(
+                    max_active_per_user=(
+                        resolved_settings.youtube_request_max_active_per_user
+                    ),
+                    max_global_active=(
+                        resolved_settings.youtube_request_max_global_active
+                    ),
+                    max_submits_per_hour=(
+                        resolved_settings.youtube_request_max_submits_per_hour
+                    ),
+                    max_failed_per_24h=(
+                        resolved_settings.youtube_request_max_failed_per_24h
+                    ),
+                    max_private_items=(
+                        resolved_settings.youtube_request_max_private_items
+                    ),
+                    max_private_bytes=(
+                        resolved_settings.youtube_request_max_private_bytes
+                    ),
+                    min_free_space_reserve_bytes=(
+                        resolved_settings.upload_min_free_space_reserve_bytes
+                    ),
+                    max_final_media_bytes=resolved_settings.upload_max_total_bytes,
+                    free_space_bytes=_youtube_request_free_space,
+                ),
+                notifier=owned_youtube_acquisition_coordinator,
+            )
     if youtube_operator_api_dependencies is None:
         youtube_operator_api_dependencies = YouTubeOperatorApiDependencies(
             service=owned_youtube_acquisition_service,
@@ -808,6 +854,15 @@ def create_app(
                 and tailscale_ingress_enabled
             ),
         )
+    if youtube_request_api_dependencies is None:
+        youtube_request_api_dependencies = YouTubeRequestApiDependencies(
+            service=owned_youtube_request_service,
+            audit_recorder=resolved_audit_recorder,
+            enabled=(
+                owned_youtube_request_service is not None
+                and tailscale_ingress_enabled
+            ),
+        )
 
     if tailscale_ingress_enabled:
         app = FastAPI(
@@ -872,6 +927,9 @@ def create_app(
     )
     app.include_router(
         create_youtube_browser_api_router(youtube_browser_api_dependencies)
+    )
+    app.include_router(
+        create_youtube_request_api_router(youtube_request_api_dependencies)
     )
     if tailscale_ingress_enabled:
         assert identity_mapping is not None

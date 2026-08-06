@@ -772,7 +772,19 @@ youtube_acquisition_claims = Table(
     Column("cleanup_state", Text(), nullable=False),
     Column("cleanup_completed_at_ms", Integer(), nullable=True),
     Column("version", Integer(), nullable=False),
+    Column("created_by_login_key", Text(), nullable=True),
     CheckConstraint("length(id) = 36", name="ck_youtube_claims_id_length"),
+    CheckConstraint(
+        "created_by_login_key IS NULL OR ("
+        "length(created_by_login_key) >= 1 "
+        "AND length(created_by_login_key) <= 254 "
+        "AND created_by_login_key = lower(created_by_login_key) "
+        "AND instr(created_by_login_key, ' ') = 0 "
+        "AND instr(created_by_login_key, char(9)) = 0 "
+        "AND instr(created_by_login_key, char(10)) = 0 "
+        "AND instr(created_by_login_key, char(13)) = 0)",
+        name="ck_youtube_claims_created_by_login_key",
+    ),
     CheckConstraint(
         "state IN ('claimed', 'inspecting', 'download_pending', 'downloading', "
         "'downloaded', 'handoff', 'handed_off', 'duplicate_resolved', "
@@ -960,13 +972,26 @@ youtube_acquisition_claims = Table(
     UniqueConstraint("staging_key", name="uq_youtube_claims_staging_key"),
     UniqueConstraint("upload_id", name="uq_youtube_claims_upload_id"),
     Index(
-        "uq_youtube_claims_active_source_identity",
+        "uq_youtube_claims_active_source_admin",
         "extractor_key",
         "youtube_video_id",
         unique=True,
         sqlite_where=text(
             "state IN ('claimed', 'inspecting', 'download_pending', 'downloading', "
-            "'downloaded', 'handoff', 'handed_off')"
+            "'downloaded', 'handoff', 'handed_off') "
+            "AND created_by_login_key IS NULL"
+        ),
+    ),
+    Index(
+        "uq_youtube_claims_active_source_requester",
+        "extractor_key",
+        "youtube_video_id",
+        "created_by_login_key",
+        unique=True,
+        sqlite_where=text(
+            "state IN ('claimed', 'inspecting', 'download_pending', 'downloading', "
+            "'downloaded', 'handoff', 'handed_off') "
+            "AND created_by_login_key IS NOT NULL"
         ),
     ),
     Index(
@@ -979,6 +1004,18 @@ youtube_acquisition_claims = Table(
     Index("ix_youtube_claims_retry_of", "retry_of_claim_id"),
     Index("ix_youtube_claims_resolved_claim", "resolved_claim_id"),
     Index("ix_youtube_claims_media", "media_id", "media_location_id"),
+    Index("ix_youtube_claims_created_by_login_key", "created_by_login_key"),
+    Index(
+        "ix_youtube_claims_owner_updated",
+        "created_by_login_key",
+        "updated_at_ms",
+        "id",
+    ),
+    Index(
+        "ix_youtube_claims_media_requester_live",
+        "media_id",
+        "created_by_login_key",
+    ),
 )
 
 media_analysis_runs = Table(

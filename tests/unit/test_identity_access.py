@@ -9,6 +9,7 @@ from framenest.domain.identity_access import (
     CAPABILITY_UPLOAD_MANAGE,
     CAPABILITY_UPLOAD_SUBMIT,
     CAPABILITY_YOUTUBE_ACQUIRE,
+    CAPABILITY_YOUTUBE_REQUEST,
     IDENTITY_PROVENANCE_TAILSCALE_SERVE,
     MAPPING_PROVENANCE_CONFIG,
     MAX_IDENTITY_MAPPING_ENTRIES,
@@ -115,6 +116,7 @@ def test_resolve_identity_maps_admin_with_full_capabilities() -> None:
     assert identity.has_capability("upload.manage")
     assert identity.has_capability("upload.submit")
     assert identity.has_capability(CAPABILITY_YOUTUBE_ACQUIRE)
+    assert identity.has_capability(CAPABILITY_YOUTUBE_REQUEST)
 
 
 def test_resolve_identity_maps_ordinary_user_with_read_capabilities() -> None:
@@ -130,6 +132,7 @@ def test_resolve_identity_maps_ordinary_user_with_read_capabilities() -> None:
     assert identity.has_capability("media.original.read")
     assert identity.has_capability("media.download")
     assert identity.has_capability("upload.submit")
+    assert identity.has_capability(CAPABILITY_YOUTUBE_REQUEST)
     assert not identity.has_capability("metadata.canonical.write")
     assert not identity.has_capability("upload.manage")
     assert not identity.has_capability("analysis.run")
@@ -138,6 +141,9 @@ def test_resolve_identity_maps_ordinary_user_with_read_capabilities() -> None:
     assert not identity.has_capability(CAPABILITY_YOUTUBE_ACQUIRE)
     assert CAPABILITY_UPLOAD_SUBMIT in CAPABILITIES_BY_ROLE[ROLE_USER]
     assert CAPABILITY_UPLOAD_MANAGE not in CAPABILITIES_BY_ROLE[ROLE_USER]
+    assert CAPABILITY_YOUTUBE_REQUEST in CAPABILITIES_BY_ROLE[ROLE_USER]
+    assert CAPABILITY_YOUTUBE_REQUEST in CAPABILITIES_BY_ROLE[ROLE_ADMIN]
+    assert CAPABILITY_YOUTUBE_ACQUIRE not in CAPABILITIES_BY_ROLE[ROLE_USER]
     assert CAPABILITY_UPLOAD_SUBMIT in CAPABILITIES_BY_ROLE[ROLE_ADMIN]
     assert CAPABILITY_UPLOAD_MANAGE in CAPABILITIES_BY_ROLE[ROLE_ADMIN]
 

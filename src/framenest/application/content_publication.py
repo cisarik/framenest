@@ -38,6 +38,7 @@ class ContentAudiencePolicy:
     """Shared item-level audience decision used by every direct media surface."""
 
     repository: ContentPublicationRepository
+    youtube_requester_private_access: object | None = None
 
     def may_read(self, media_id: MediaId, identity: object) -> bool:
         if (
@@ -45,7 +46,20 @@ class ContentAudiencePolicy:
             and identity.has_capability(CAPABILITY_MEDIA_WORKFLOW_READ)
         ):
             return self.repository.media_exists(media_id)
-        return self.repository.is_published(media_id)
+        if self.repository.is_published(media_id):
+            return True
+        if (
+            isinstance(identity, IdentityContext)
+            and self.youtube_requester_private_access is not None
+        ):
+            return bool(
+                self.youtube_requester_private_access.has_live_requester_media_access(
+                    media_id=media_id,
+                    login_key=identity.login_key,
+                )
+            )
+        return False
+
 
 
 @dataclass(frozen=True, slots=True)

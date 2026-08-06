@@ -53,6 +53,15 @@
           YouTube
         </button>
         <button
+          id="youtube-request-open-button"
+          class="status-button youtube-request-nav-button"
+          type="button"
+          aria-label="My YouTube downloads"
+          hidden
+        >
+          My YouTube downloads
+        </button>
+        <button
           id="upload-open-button"
           class="status-button status-button--icon upload-action-button"
           type="button"
@@ -181,6 +190,7 @@
           </div>
           <p id="youtube-claim-message" class="youtube-claim-message" role="status" aria-live="polite" aria-atomic="true">Paste a YouTube URL to begin.</p>
           <div id="youtube-claim-details" class="youtube-claim-details" hidden>
+            <p id="youtube-claim-requester" class="youtube-claim-detail">Administrator claim</p>
             <p id="youtube-claim-metadata" class="youtube-claim-detail">Metadata: Not cataloged yet</p>
             <p id="youtube-claim-publication" class="youtube-claim-detail">Publication: Not cataloged yet</p>
           </div>
@@ -191,6 +201,43 @@
         <button id="youtube-claim-retry-button" class="youtube-claim-retry danger-button" type="button" hidden>Retry claim</button>
         <button id="youtube-claim-manage-media-button" class="youtube-claim-manage" type="button" hidden>Manage media</button>
         <button id="youtube-claim-reset-button" type="button" hidden>Claim another URL</button>
+      </div>
+    </dialog>
+
+    <dialog
+      id="youtube-request-dialog"
+      class="upload-dialog youtube-claim-dialog youtube-request-dialog"
+      aria-labelledby="youtube-request-dialog-title"
+      aria-describedby="youtube-request-guidance"
+    >
+      <div class="upload-dialog__header">
+        <h2 id="youtube-request-dialog-title" class="upload-dialog__title" tabindex="-1">My YouTube downloads</h2>
+        <button id="youtube-request-close-button" class="upload-dialog__close" type="button" aria-label="Close My YouTube downloads">✕</button>
+      </div>
+      <div class="upload-dialog__body youtube-claim-dialog__body">
+        <p id="youtube-request-guidance" class="youtube-claim-guidance">
+          Paste one supported YouTube URL. Completed private downloads stay in this list until an administrator publishes or removes them.
+        </p>
+        <form id="youtube-request-form" class="youtube-claim-form">
+          <label class="youtube-claim-field" for="youtube-request-url">
+            <span>YouTube URL</span>
+            <input
+              id="youtube-request-url"
+              name="youtube-request-url"
+              type="url"
+              autocomplete="off"
+              spellcheck="false"
+              placeholder="YouTube URL, for example youtube.com/watch?v=..."
+              required
+              aria-describedby="youtube-request-url-note"
+            >
+          </label>
+          <p id="youtube-request-url-note" class="youtube-claim-note">Only the confirmed request is sent to the local FrameNest server.</p>
+          <p id="youtube-request-url-error" class="youtube-claim-field-error" role="alert" hidden></p>
+          <button id="youtube-request-submit-button" class="youtube-claim-submit" type="submit">Request download</button>
+        </form>
+        <p id="youtube-request-status" class="youtube-claim-message" role="status" aria-live="polite" aria-atomic="true"></p>
+        <ul id="youtube-request-list" class="youtube-request-list" aria-label="My YouTube download requests"></ul>
       </div>
     </dialog>
 

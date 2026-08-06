@@ -90,6 +90,7 @@ class YouTubeBrowserClaimResponse(BaseModel):
     publication_state: Literal["unknown", "unpublished", "published"]
     failure: YouTubeBrowserFailureResponse | None
     retry_of_claim_id: str | None
+    requester_login_key: str | None = None
 
 
 class YouTubeBrowserErrorBody(BaseModel):
@@ -398,6 +399,7 @@ def _browser_response(
         publication_state=publication_state,
         failure=failure,
         retry_of_claim_id=snapshot.retry_of_claim_id,
+        requester_login_key=getattr(snapshot, "requester_login_key", None),
     )
 
 

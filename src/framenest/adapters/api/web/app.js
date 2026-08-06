@@ -13,6 +13,7 @@ const IDENTITY_ENDPOINT = "/api/identity/me";
 const UPLOADS_ENDPOINT = "/api/uploads";
 const UPLOAD_CAPABILITY_ENDPOINT = "/api/uploads/capability";
 const YOUTUBE_CLAIMS_ENDPOINT = "/api/admin/youtube/claims";
+const YOUTUBE_REQUESTS_ENDPOINT = "/api/youtube/requests";
 const YOUTUBE_CLAIM_RECOVERY_STORAGE_KEY = "framenest.youtube.currentClaim.v1";
 const MEDIA_IMPORTS_ENDPOINT = "media-imports";
 const CATALOG_PAGE_SIZE_OPTIONS = [10, 30, 60, 90];
@@ -263,6 +264,12 @@ function identityAllowsYouTubeClaim() {
     && identityState.capabilities.has("youtube.acquire");
 }
 
+function identityAllowsYouTubeRequest() {
+  return identityState.resolved
+    && identityState.available
+    && identityState.capabilities.has("youtube.request");
+}
+
 function identityAllowsCoverEditing() {
   return identityHasCapability("metadata.canonical.write");
 }
@@ -331,6 +338,11 @@ function applyIdentityCapabilities() {
   if (typeof youtubeClaimOpenButton !== "undefined" && youtubeClaimOpenButton) {
     youtubeClaimOpenButton.hidden = !youtubeClaimAllowed;
   }
+  const youtubeRequestAllowed = typeof identityAllowsYouTubeRequest === "function"
+    && identityAllowsYouTubeRequest();
+  if (typeof youtubeRequestOpenButton !== "undefined" && youtubeRequestOpenButton) {
+    youtubeRequestOpenButton.hidden = !youtubeRequestAllowed;
+  }
   if (
     !youtubeClaimAllowed
     && typeof youtubeClaimDialog !== "undefined"
@@ -338,6 +350,14 @@ function applyIdentityCapabilities() {
     && youtubeClaimDialog.hasAttribute("open")
   ) {
     closeYouTubeClaimDialog();
+  }
+  if (
+    !youtubeRequestAllowed
+    && typeof youtubeRequestDialog !== "undefined"
+    && youtubeRequestDialog
+    && youtubeRequestDialog.hasAttribute("open")
+  ) {
+    closeYouTubeRequestDialog();
   }
   if (!identityAllowsAdminWorkflow() && adminMediaBrowser && !adminMediaBrowser.hidden) {
     closeAdminMediaBrowser();
@@ -509,6 +529,17 @@ const adminBatchHint = document.querySelector("#admin-batch-hint");
 const adminBatchProgress = document.querySelector("#admin-batch-progress");
 const adminBatchOutcomes = document.querySelector("#admin-batch-outcomes");
 const youtubeClaimOpenButton = document.querySelector("#youtube-claim-open-button");
+const youtubeRequestOpenButton = document.querySelector("#youtube-request-open-button");
+const youtubeRequestDialog = document.querySelector("#youtube-request-dialog");
+const youtubeRequestDialogTitle = document.querySelector("#youtube-request-dialog-title");
+const youtubeRequestCloseButton = document.querySelector("#youtube-request-close-button");
+const youtubeRequestForm = document.querySelector("#youtube-request-form");
+const youtubeRequestUrlInput = document.querySelector("#youtube-request-url");
+const youtubeRequestUrlError = document.querySelector("#youtube-request-url-error");
+const youtubeRequestSubmitButton = document.querySelector("#youtube-request-submit-button");
+const youtubeRequestStatus = document.querySelector("#youtube-request-status");
+const youtubeRequestList = document.querySelector("#youtube-request-list");
+const youtubeClaimRequester = document.querySelector("#youtube-claim-requester");
 const youtubeClaimDialog = document.querySelector("#youtube-claim-dialog");
 const youtubeClaimDialogTitle = document.querySelector("#youtube-claim-dialog-title");
 const youtubeClaimCloseButton = document.querySelector("#youtube-claim-close-button");
@@ -1054,6 +1085,14 @@ function renderYouTubeClaimCockpit() {
     youtubeClaimUrlError.textContent = urlError;
   }
   if (youtubeClaimDetails) youtubeClaimDetails.hidden = !snapshot;
+  if (typeof youtubeClaimRequester !== "undefined" && youtubeClaimRequester) {
+    const key = snapshot && typeof snapshot.requester_login_key === "string"
+      ? snapshot.requester_login_key
+      : null;
+    youtubeClaimRequester.textContent = key
+      ? `Requested by ${key}`
+      : "Administrator claim";
+  }
   if (youtubeClaimMetadata) youtubeClaimMetadata.textContent = youtubeClaimMetadataLabel(snapshot);
   if (youtubeClaimPublication) youtubeClaimPublication.textContent = youtubeClaimPublicationLabel(snapshot);
   if (youtubeClaimFailure) {
@@ -10935,3 +10974,291 @@ window.addEventListener("pagehide", revokePreviewObjectUrls);
 window.addEventListener("pagehide", cleanupUploadRuntime);
 window.addEventListener("pagehide", invalidateAdminBatchOnTeardown);
 window.addEventListener("pagehide", invalidateYouTubeClaimOwnership);
+
+let youtubeRequestState = {
+  items: [],
+  submitting: false,
+  pollTimer: null,
+  urlError: "",
+  statusMessage: "",
+  focusedRequestId: "",
+};
+
+function youtubeRequestDialogIsOpen() {
+  return Boolean(
+    youtubeRequestDialog
+    && (
+      (typeof youtubeRequestDialog.hasAttribute === "function"
+        && youtubeRequestDialog.hasAttribute("open"))
+      || youtubeRequestDialog.open === true
+    ),
+  );
+}
+
+function youtubeRequestPhaseLabel(phase) {
+  switch (phase) {
+    case "queued": return "Queued";
+    case "processing": return "Processing";
+    case "downloading": return "Downloading";
+    case "completed_private": return "Completed (private)";
+    case "completed": return "Completed";
+    case "failed": return "Failed";
+    case "unavailable": return "Unavailable";
+    default: return "Unknown";
+  }
+}
+
+function clearYouTubeRequestPollTimer() {
+  if (youtubeRequestState.pollTimer != null) {
+    window.clearTimeout(youtubeRequestState.pollTimer);
+    youtubeRequestState.pollTimer = null;
+  }
+}
+
+function stopYouTubeRequestPolling() {
+  clearYouTubeRequestPollTimer();
+}
+
+function openYouTubeRequestDialog() {
+  if (!identityAllowsYouTubeRequest() || !youtubeRequestDialog) return;
+  if (typeof youtubeRequestDialog.showModal === "function") {
+    youtubeRequestDialog.showModal();
+  } else {
+    youtubeRequestDialog.setAttribute("open", "");
+  }
+  youtubeRequestState.statusMessage = "";
+  renderYouTubeRequestCockpit();
+  refreshYouTubeRequests({ focusSubmit: true });
+  if (youtubeRequestDialogTitle) youtubeRequestDialogTitle.focus();
+}
+
+function closeYouTubeRequestDialog() {
+  stopYouTubeRequestPolling();
+  if (!youtubeRequestDialog) return;
+  if (typeof youtubeRequestDialog.close === "function") {
+    youtubeRequestDialog.close();
+  } else {
+    youtubeRequestDialog.removeAttribute("open");
+  }
+}
+
+function renderYouTubeRequestCockpit() {
+  const busy = youtubeRequestState.submitting;
+  const urlError = youtubeRequestState.urlError || "";
+  if (youtubeRequestUrlInput) {
+    youtubeRequestUrlInput.disabled = busy;
+    youtubeRequestUrlInput.setAttribute("aria-invalid", String(Boolean(urlError)));
+    youtubeRequestUrlInput.setAttribute(
+      "aria-describedby",
+      urlError ? "youtube-request-url-note youtube-request-url-error" : "youtube-request-url-note",
+    );
+  }
+  if (youtubeRequestUrlError) {
+    youtubeRequestUrlError.hidden = !urlError;
+    youtubeRequestUrlError.textContent = urlError;
+  }
+  if (youtubeRequestSubmitButton) youtubeRequestSubmitButton.disabled = busy;
+  if (youtubeRequestStatus) {
+    youtubeRequestStatus.textContent = youtubeRequestState.statusMessage || "";
+  }
+  if (!youtubeRequestList) return;
+  youtubeRequestList.replaceChildren();
+  for (const item of youtubeRequestState.items) {
+    const li = document.createElement("li");
+    li.className = "youtube-request-item";
+    li.dataset.phase = item.phase || "unknown";
+    li.dataset.requestId = item.request_id || "";
+    li.tabIndex = -1;
+    const phase = document.createElement("p");
+    phase.className = "youtube-request-item__phase";
+    phase.textContent = youtubeRequestPhaseLabel(item.phase);
+    const url = document.createElement("p");
+    url.textContent = item.canonical_url || item.submitted_url || "";
+    li.append(phase, url);
+    if (item.phase === "completed_private") {
+      const privateLabel = document.createElement("p");
+      privateLabel.className = "youtube-request-item__private";
+      privateLabel.textContent = "Private until an administrator publishes it.";
+      li.append(privateLabel);
+    }
+    if (item.failure_code) {
+      const failure = document.createElement("p");
+      failure.setAttribute("role", "alert");
+      failure.textContent = `Failure: ${item.failure_code}`;
+      li.append(failure);
+    }
+    const actions = document.createElement("div");
+    actions.className = "youtube-request-item__actions";
+    if (item.phase === "failed") {
+      const retry = document.createElement("button");
+      retry.type = "button";
+      retry.textContent = "Retry";
+      retry.setAttribute("aria-label", `Retry YouTube request ${item.request_id}`);
+      retry.addEventListener("click", () => {
+        retryYouTubeRequest(item.request_id);
+      });
+      actions.append(retry);
+    }
+    if (
+      item.media_id
+      && (item.phase === "completed" || item.phase === "completed_private")
+    ) {
+      const openDetails = document.createElement("button");
+      openDetails.type = "button";
+      openDetails.textContent = "Open Details";
+      openDetails.setAttribute("aria-label", `Open details for ${item.request_id}`);
+      openDetails.addEventListener("click", () => {
+        closeYouTubeRequestDialog();
+        const mediaItem = { media_id: item.media_id, id: item.media_id };
+        if (typeof openDetailsDialog === "function") {
+          openDetailsDialog(mediaItem, openDetails);
+        }
+      });
+      actions.append(openDetails);
+    }
+    if (actions.childNodes.length) li.append(actions);
+    youtubeRequestList.append(li);
+  }
+}
+
+async function refreshYouTubeRequests({ focusSubmit = false } = {}) {
+  if (!identityAllowsYouTubeRequest()) return;
+  try {
+    const response = await fetch(YOUTUBE_REQUESTS_ENDPOINT, {
+      headers: { Accept: "application/json" },
+      cache: "no-store",
+    });
+    if (!response.ok) {
+      youtubeRequestState.statusMessage = "Unable to load YouTube requests.";
+      renderYouTubeRequestCockpit();
+      return;
+    }
+    const payload = await response.json();
+    youtubeRequestState.items = Array.isArray(payload.items) ? payload.items : [];
+    youtubeRequestState.statusMessage = "";
+    renderYouTubeRequestCockpit();
+    const active = youtubeRequestState.items.some((item) => (
+      item.phase === "queued"
+      || item.phase === "processing"
+      || item.phase === "downloading"
+    ));
+    if (active && youtubeRequestDialogIsOpen()) {
+      clearYouTubeRequestPollTimer();
+      youtubeRequestState.pollTimer = window.setTimeout(() => {
+        youtubeRequestState.pollTimer = null;
+        refreshYouTubeRequests();
+      }, 1000);
+    } else {
+      stopYouTubeRequestPolling();
+    }
+    if (focusSubmit && youtubeRequestSubmitButton) youtubeRequestSubmitButton.focus();
+  } catch {
+    youtubeRequestState.statusMessage = "Unable to load YouTube requests.";
+    renderYouTubeRequestCockpit();
+  }
+}
+
+async function submitYouTubeRequest(event) {
+  if (event) event.preventDefault();
+  if (!identityAllowsYouTubeRequest() || youtubeRequestState.submitting) return;
+  const rawUrl = youtubeRequestUrlInput ? youtubeRequestUrlInput.value.trim() : "";
+  const validation = validateYouTubeClaimUrl(rawUrl);
+  if (!validation.ok) {
+    youtubeRequestState.urlError = validation.message || "Enter a supported YouTube URL.";
+    renderYouTubeRequestCockpit();
+    if (youtubeRequestUrlInput) youtubeRequestUrlInput.focus();
+    return;
+  }
+  youtubeRequestState.urlError = "";
+  youtubeRequestState.submitting = true;
+  youtubeRequestState.statusMessage = "Submitting YouTube request...";
+  renderYouTubeRequestCockpit();
+  try {
+    const response = await fetch(YOUTUBE_REQUESTS_ENDPOINT, {
+      method: "POST",
+      headers: framenestMutationHeaders({
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      }),
+      body: JSON.stringify({
+        url: rawUrl,
+        confirmation_method: "interactive",
+      }),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      const code = payload && payload.error && payload.error.code;
+      youtubeRequestState.statusMessage = (payload && payload.error && payload.error.message)
+        || "YouTube request failed.";
+      if (code === "YOUTUBE_REQUEST_INVALID_URL") {
+        youtubeRequestState.urlError = "Enter a supported YouTube URL.";
+      }
+      return;
+    }
+    youtubeRequestState.focusedRequestId = payload.request_id || "";
+    youtubeRequestState.statusMessage = response.status === 201
+      ? "YouTube request accepted."
+      : "Existing YouTube request reused.";
+    if (youtubeRequestUrlInput) youtubeRequestUrlInput.value = "";
+    await refreshYouTubeRequests();
+  } catch {
+    youtubeRequestState.statusMessage = "YouTube request failed.";
+  } finally {
+    youtubeRequestState.submitting = false;
+    renderYouTubeRequestCockpit();
+    if (youtubeRequestSubmitButton) youtubeRequestSubmitButton.focus();
+  }
+}
+
+async function retryYouTubeRequest(requestId) {
+  if (!identityAllowsYouTubeRequest() || youtubeRequestState.submitting || !requestId) return;
+  youtubeRequestState.submitting = true;
+  youtubeRequestState.statusMessage = "Retrying YouTube request...";
+  renderYouTubeRequestCockpit();
+  try {
+    const response = await fetch(
+      `${YOUTUBE_REQUESTS_ENDPOINT}/${encodeURIComponent(requestId)}/retry`,
+      {
+        method: "POST",
+        headers: framenestMutationHeaders({
+          Accept: "application/json",
+          "Content-Type": "application/json",
+        }),
+        body: JSON.stringify({ confirmation_method: "interactive" }),
+      },
+    );
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      youtubeRequestState.statusMessage = (payload && payload.error && payload.error.message)
+        || "YouTube request retry failed.";
+      return;
+    }
+    youtubeRequestState.focusedRequestId = payload.request_id || requestId;
+    youtubeRequestState.statusMessage = "YouTube request retry accepted.";
+    await refreshYouTubeRequests();
+  } catch {
+    youtubeRequestState.statusMessage = "YouTube request retry failed.";
+  } finally {
+    youtubeRequestState.submitting = false;
+    renderYouTubeRequestCockpit();
+  }
+}
+
+if (youtubeRequestOpenButton) {
+  youtubeRequestOpenButton.addEventListener("click", () => openYouTubeRequestDialog());
+}
+if (youtubeRequestCloseButton) {
+  youtubeRequestCloseButton.addEventListener("click", () => closeYouTubeRequestDialog());
+}
+if (youtubeRequestForm) {
+  youtubeRequestForm.addEventListener("submit", (event) => {
+    submitYouTubeRequest(event);
+  });
+}
+if (youtubeRequestDialog) {
+  youtubeRequestDialog.addEventListener("cancel", (event) => {
+    event.preventDefault();
+    closeYouTubeRequestDialog();
+  });
+}
+

@@ -13,6 +13,7 @@ from framenest.domain.identities import (
     MediaLocationId,
     YouTubeAcquisitionClaimId,
 )
+from framenest.domain.identity_access import MAX_LOGIN_LENGTH, normalize_login
 from framenest.domain.media_classification import AcquisitionSource
 from framenest.domain.uploads import UploadSessionId
 
@@ -102,6 +103,24 @@ LIVE_CATALOG_YOUTUBE_ACQUISITION_STATES = frozenset(
         YouTubeAcquisitionState.CATALOGED,
     }
 )
+
+REQUESTER_PHASE_QUEUED = "queued"
+REQUESTER_PHASE_PROCESSING = "processing"
+REQUESTER_PHASE_DOWNLOADING = "downloading"
+REQUESTER_PHASE_FAILED = "failed"
+REQUESTER_PHASE_COMPLETED = "completed"
+REQUESTER_PHASE_COMPLETED_PRIVATE = "completed_private"
+REQUESTER_PHASE_UNAVAILABLE = "unavailable"
+
+_REQUESTER_PHASE_BY_ACTIVE_STATE: dict[YouTubeAcquisitionState, str] = {
+    YouTubeAcquisitionState.CLAIMED: REQUESTER_PHASE_QUEUED,
+    YouTubeAcquisitionState.INSPECTING: REQUESTER_PHASE_PROCESSING,
+    YouTubeAcquisitionState.DOWNLOAD_PENDING: REQUESTER_PHASE_DOWNLOADING,
+    YouTubeAcquisitionState.DOWNLOADING: REQUESTER_PHASE_DOWNLOADING,
+    YouTubeAcquisitionState.DOWNLOADED: REQUESTER_PHASE_PROCESSING,
+    YouTubeAcquisitionState.HANDOFF: REQUESTER_PHASE_PROCESSING,
+    YouTubeAcquisitionState.HANDED_OFF: REQUESTER_PHASE_PROCESSING,
+}
 
 _ALLOWED_TRANSITIONS: dict[
     YouTubeAcquisitionState, frozenset[YouTubeAcquisitionState]
@@ -326,6 +345,7 @@ class YouTubeAcquisitionClaim:
     cleanup_state: YouTubeStagingCleanupState = YouTubeStagingCleanupState.PENDING
     cleanup_completed_at_ms: int | None = None
     version: int = 0
+    created_by_login_key: str | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.id, YouTubeAcquisitionClaimId):
@@ -369,6 +389,7 @@ class YouTubeAcquisitionClaim:
             raise FrameNestYouTubeClaimError(INVALID_YOUTUBE_CLAIM_MESSAGE)
         if (self.media_id is None) != (self.media_location_id is None):
             raise FrameNestYouTubeClaimError(INVALID_YOUTUBE_CLAIM_MESSAGE)
+        _validate_created_by_login_key(self.created_by_login_key)
         _validate_advisory(
             self.upstream_title, MAX_UPSTREAM_TITLE_CODE_POINTS, allow_newline=False
         )
@@ -432,10 +453,19 @@ class YouTubeAcquisitionClaim:
         confirmation_method: YouTubeConfirmationMethod,
         now_ms: int,
         retry_of_claim_id: YouTubeAcquisitionClaimId | None = None,
+        created_by_login_key: str | None = None,
     ) -> YouTubeAcquisitionClaim:
         """Create a new owner-confirmed claim from authoritative URL parsing."""
         identity = canonicalize_youtube_url(submitted_url)
         claim_id = YouTubeAcquisitionClaimId.new()
+        owner = None
+        if created_by_login_key is not None:
+            try:
+                owner = normalize_login(created_by_login_key)
+            except Exception as exc:
+                raise FrameNestYouTubeClaimError(
+                    INVALID_YOUTUBE_CLAIM_MESSAGE
+                ) from exc
         return cls(
             id=claim_id,
             state=YouTubeAcquisitionState.CLAIMED,
@@ -450,6 +480,7 @@ class YouTubeAcquisitionClaim:
             created_at_ms=now_ms,
             updated_at_ms=now_ms,
             retry_of_claim_id=retry_of_claim_id,
+            created_by_login_key=owner,
         )
 
     def advance(
@@ -461,6 +492,7 @@ class YouTubeAcquisitionClaim:
     ) -> YouTubeAcquisitionClaim:
         """Return one validated optimistic state transition snapshot."""
         ensure_youtube_transition_allowed(self.state, target_state)
+        _reject_ownership_mutation(self, changes)
         return replace(
             self,
             state=target_state,
@@ -499,6 +531,7 @@ class YouTubeAcquisitionClaim:
         **changes: object,
     ) -> YouTubeAcquisitionClaim:
         """Return one same-state optimistic metadata or cleanup update."""
+        _reject_ownership_mutation(self, changes)
         return replace(
             self,
             updated_at_ms=updated_at_ms,
@@ -518,6 +551,27 @@ def ensure_youtube_transition_allowed(
         or target not in _ALLOWED_TRANSITIONS[source]
     ):
         raise FrameNestYouTubeTransitionError(INVALID_YOUTUBE_TRANSITION_MESSAGE)
+
+
+def derive_requester_phase(
+    claim: YouTubeAcquisitionClaim,
+    *,
+    media_is_published: bool | None,
+) -> str:
+    """Derive the sanitized ordinary-requester phase from durable claim truth."""
+    if claim.state is YouTubeAcquisitionState.FAILED:
+        return REQUESTER_PHASE_FAILED
+    if claim.state is YouTubeAcquisitionState.CATALOG_REMOVED:
+        return REQUESTER_PHASE_UNAVAILABLE
+    if claim.state in ACTIVE_YOUTUBE_ACQUISITION_STATES:
+        return _REQUESTER_PHASE_BY_ACTIVE_STATE[claim.state]
+    if claim.state in LIVE_CATALOG_YOUTUBE_ACQUISITION_STATES:
+        if claim.media_id is None or media_is_published is None:
+            return REQUESTER_PHASE_UNAVAILABLE
+        if media_is_published:
+            return REQUESTER_PHASE_COMPLETED
+        return REQUESTER_PHASE_COMPLETED_PRIVATE
+    raise FrameNestYouTubeClaimError(INVALID_YOUTUBE_CLAIM_MESSAGE)
 
 
 def normalize_advisory_text(value: object, *, maximum: int) -> str | None:
@@ -650,4 +704,27 @@ def _validate_optional_non_negative(
         return
     _require_non_negative(value)
     if positive and value == 0:
+        raise FrameNestYouTubeClaimError(INVALID_YOUTUBE_CLAIM_MESSAGE)
+
+
+def _validate_created_by_login_key(value: object) -> None:
+    if value is None:
+        return
+    if not isinstance(value, str) or not value or len(value) > MAX_LOGIN_LENGTH:
+        raise FrameNestYouTubeClaimError(INVALID_YOUTUBE_CLAIM_MESSAGE)
+    try:
+        normalized = normalize_login(value)
+    except Exception as exc:
+        raise FrameNestYouTubeClaimError(INVALID_YOUTUBE_CLAIM_MESSAGE) from exc
+    if value != normalized:
+        raise FrameNestYouTubeClaimError(INVALID_YOUTUBE_CLAIM_MESSAGE)
+
+
+def _reject_ownership_mutation(
+    claim: YouTubeAcquisitionClaim,
+    changes: dict[str, object],
+) -> None:
+    if "created_by_login_key" not in changes:
+        return
+    if changes["created_by_login_key"] != claim.created_by_login_key:
         raise FrameNestYouTubeClaimError(INVALID_YOUTUBE_CLAIM_MESSAGE)

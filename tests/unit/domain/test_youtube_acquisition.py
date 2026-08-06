@@ -220,3 +220,96 @@ def test_illegal_transition_is_rejected() -> None:
             YouTubeAcquisitionState.DOWNLOADING,
             updated_at_ms=51,
         )
+
+
+def test_requester_ownership_normalizes_and_is_immutable() -> None:
+    claim = YouTubeAcquisitionClaim.new(
+        submitted_url=f"https://youtu.be/{VIDEO_ID}",
+        confirmation_method=YouTubeConfirmationMethod.INTERACTIVE,
+        now_ms=10,
+        created_by_login_key="User@Example.COM",
+    )
+    assert claim.created_by_login_key == "user@example.com"
+    with pytest.raises(FrameNestYouTubeClaimError):
+        claim.evolve(updated_at_ms=11, created_by_login_key="other@example.com")
+    advanced = claim.advance(YouTubeAcquisitionState.INSPECTING, updated_at_ms=11)
+    assert advanced.created_by_login_key == "user@example.com"
+
+
+
+def test_legacy_null_ownership_and_retry_preserves_owner() -> None:
+    legacy = YouTubeAcquisitionClaim.new(
+        submitted_url=f"https://youtu.be/{VIDEO_ID}",
+        confirmation_method=YouTubeConfirmationMethod.YES_FLAG,
+        now_ms=10,
+    )
+    assert legacy.created_by_login_key is None
+    owned = YouTubeAcquisitionClaim.new(
+        submitted_url=f"https://youtu.be/{VIDEO_ID}",
+        confirmation_method=YouTubeConfirmationMethod.INTERACTIVE,
+        now_ms=20,
+        created_by_login_key="owner@example.com",
+    )
+    retry = YouTubeAcquisitionClaim.new(
+        submitted_url=owned.submitted_url,
+        confirmation_method=YouTubeConfirmationMethod.INTERACTIVE,
+        now_ms=30,
+        retry_of_claim_id=owned.id,
+        created_by_login_key=owned.created_by_login_key,
+    )
+    assert retry.created_by_login_key == "owner@example.com"
+    assert retry.retry_of_claim_id == owned.id
+
+
+def test_derive_requester_phase_mapping() -> None:
+    from framenest.domain.youtube_acquisition import derive_requester_phase
+
+    claim = YouTubeAcquisitionClaim.new(
+        submitted_url=f"https://youtu.be/{VIDEO_ID}",
+        confirmation_method=YouTubeConfirmationMethod.INTERACTIVE,
+        now_ms=10,
+        created_by_login_key="owner@example.com",
+    )
+    assert derive_requester_phase(claim, media_is_published=None) == "queued"
+    inspecting = claim.advance(YouTubeAcquisitionState.INSPECTING, updated_at_ms=11)
+    assert derive_requester_phase(inspecting, media_is_published=None) == "processing"
+    pending = inspecting.advance(
+        YouTubeAcquisitionState.DOWNLOAD_PENDING,
+        updated_at_ms=12,
+        upstream_title="Title",
+        upstream_channel="Channel",
+        upstream_channel_id="cid",
+        upstream_source_date="2026-01-02",
+        downloader_name="yt-dlp",
+        downloader_version="2026.07.23",
+        extractor_version="2026.07.23",
+        selected_video_format_id="137",
+        selected_audio_format_id="140",
+    )
+    assert derive_requester_phase(pending, media_is_published=None) == "downloading"
+    cataloged = (
+        pending.advance(YouTubeAcquisitionState.DOWNLOADING, updated_at_ms=13)
+        .advance(
+            YouTubeAcquisitionState.DOWNLOADED,
+            updated_at_ms=14,
+            downloaded_size_bytes=100,
+            downloaded_at_ms=14,
+        )
+        .advance(YouTubeAcquisitionState.HANDOFF, updated_at_ms=15)
+        .advance(
+            YouTubeAcquisitionState.HANDED_OFF,
+            updated_at_ms=16,
+            upload_id=UploadSessionId.new(),
+        )
+        .advance(
+            YouTubeAcquisitionState.CATALOGED,
+            updated_at_ms=17,
+            completed_at_ms=17,
+            media_id=MediaId.new(),
+            media_location_id=MediaLocationId.new(),
+        )
+    )
+    assert derive_requester_phase(cataloged, media_is_published=False) == "completed_private"
+    assert derive_requester_phase(cataloged, media_is_published=True) == "completed"
+    removed = cataloged.mark_catalog_removed(now_ms=18)
+    assert derive_requester_phase(removed, media_is_published=None) == "unavailable"

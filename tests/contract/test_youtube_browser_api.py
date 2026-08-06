@@ -206,6 +206,7 @@ def test_admin_can_create_read_and_retry_with_bounded_response_and_audit() -> No
         "publication_state": "unknown",
         "failure": None,
         "retry_of_claim_id": None,
+        "requester_login_key": None,
     }
     assert set(created.json()) == {
         "claim_id",
@@ -219,6 +220,7 @@ def test_admin_can_create_read_and_retry_with_bounded_response_and_audit() -> No
         "publication_state",
         "failure",
         "retry_of_claim_id",
+        "requester_login_key",
     }
     assert created.text.find(VIDEO_ID) == -1
     assert created.text.find("youtu.be") == -1

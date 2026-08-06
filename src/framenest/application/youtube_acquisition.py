@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
+import json
 import time
 
 from framenest.application.ports.upload_publications import (
@@ -40,6 +42,7 @@ from framenest.domain.identities import (
 )
 from framenest.domain.media_classification import AcquisitionSource, ContentCategory
 from framenest.domain.uploads import (
+    UploadDuplicateResolutionMode,
     UploadSession,
     UploadSessionId,
     UploadSessionState,
@@ -47,6 +50,9 @@ from framenest.domain.uploads import (
 )
 from framenest.domain.youtube_acquisition import (
     ACTIVE_YOUTUBE_ACQUISITION_STATES,
+    LIVE_CATALOG_YOUTUBE_ACQUISITION_STATES,
+    REQUESTER_PHASE_COMPLETED,
+    REQUESTER_PHASE_COMPLETED_PRIVATE,
     TERMINAL_YOUTUBE_ACQUISITION_STATES,
     FrameNestYouTubeAcquisitionError,
     YouTubeAcquisitionClaim,
@@ -55,7 +61,12 @@ from framenest.domain.youtube_acquisition import (
     YouTubeFailureStage,
     YouTubeStagingCleanupState,
     canonicalize_youtube_url,
+    derive_requester_phase,
 )
+
+DEFAULT_FINAL_MEDIA_BYTES = 1_073_741_824
+MS_PER_HOUR = 3_600_000
+MS_PER_DAY = 86_400_000
 
 DEFAULT_ACQUISITION_POLL_INTERVAL_SECONDS = 0.25
 DEFAULT_ACQUISITION_BATCH_SIZE = 32
@@ -81,6 +92,18 @@ class YouTubeAcquisitionInvalidRequestError(YouTubeAcquisitionError):
     """Submitted URL or confirmation data is outside the accepted policy."""
 
 
+class YouTubeRequestLimitError(YouTubeAcquisitionError):
+    """Ordinary requester admission limit was reached."""
+
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+
+
+class YouTubeRequestInsufficientStorageError(YouTubeAcquisitionError):
+    """Ordinary requester admission failed the free-space gate."""
+
+
 @dataclass(frozen=True, slots=True)
 class YouTubeClaimSnapshot:
     """Operator-safe durable claim projection."""
@@ -104,6 +127,25 @@ class YouTubeClaimSnapshot:
     updated_at_ms: int
     completed_at_ms: int | None
     version: int
+    requester_login_key: str | None = None
+    submitted_url: str | None = None
+    canonical_url: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class YouTubeRequestSnapshot:
+    """Ordinary requester-safe request projection."""
+
+    request_id: str
+    phase: str
+    submitted_url: str
+    canonical_url: str
+    media_id: str | None
+    failure_category: str | None
+    failure_code: str | None
+    retry_of_request_id: str | None
+    created_at_ms: int
+    updated_at_ms: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -112,6 +154,38 @@ class YouTubeClaimSubmission:
 
     snapshot: YouTubeClaimSnapshot
     created: bool
+
+
+@dataclass(frozen=True, slots=True)
+class YouTubeRequestSubmission:
+    """Ordinary request submission result."""
+
+    snapshot: YouTubeRequestSnapshot
+    created: bool
+
+
+@dataclass(frozen=True, slots=True)
+class YouTubeRequestPage:
+    """Owned request list page."""
+
+    items: tuple[YouTubeRequestSnapshot, ...]
+    next_cursor: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class YouTubeRequestLimits:
+    """Ordinary admission controls."""
+
+    max_active_per_user: int = 1
+    max_global_active: int = 8
+    max_submits_per_hour: int = 6
+    max_failed_per_24h: int = 10
+    max_private_items: int = 20
+    max_private_bytes: int = 10_737_418_240
+    min_free_space_reserve_bytes: int = 67_108_864
+    max_final_media_bytes: int = DEFAULT_FINAL_MEDIA_BYTES
+    free_space_bytes: Callable[[], int] | None = None
+
 
 
 def default_now_ms() -> int:
@@ -304,6 +378,363 @@ class YouTubeAcquisitionService:
             updated_at_ms=claim.updated_at_ms,
             completed_at_ms=claim.completed_at_ms,
             version=claim.version,
+            requester_login_key=claim.created_by_login_key,
+            submitted_url=claim.submitted_url,
+            canonical_url=claim.canonical_url,
+        )
+
+
+class YouTubeRequestService:
+    """Ordinary requester-owned YouTube request admission and inspection."""
+
+    def __init__(
+        self,
+        repository: YouTubeAcquisitionClaimRepository,
+        publication_repository: object,
+        staging: YouTubeStagingStorage,
+        *,
+        limits: YouTubeRequestLimits,
+        now_ms: Callable[[], int] = default_now_ms,
+        notifier: object | None = None,
+    ) -> None:
+        self._repository = repository
+        self._publication_repository = publication_repository
+        self._staging = staging
+        self._limits = limits
+        self._now_ms = now_ms
+        self._notifier = notifier
+
+    def submit(
+        self,
+        *,
+        submitted_url: str,
+        confirmation_method: YouTubeConfirmationMethod,
+        created_by_login_key: str,
+    ) -> YouTubeRequestSubmission:
+        if not created_by_login_key:
+            raise YouTubeAcquisitionInvalidRequestError(
+                "Invalid public YouTube video URL."
+            )
+        now_ms = self._now_ms()
+        try:
+            claim = YouTubeAcquisitionClaim.new(
+                submitted_url=submitted_url,
+                confirmation_method=confirmation_method,
+                now_ms=now_ms,
+                created_by_login_key=created_by_login_key,
+            )
+        except FrameNestYouTubeAcquisitionError as exc:
+            raise YouTubeAcquisitionInvalidRequestError(
+                "Invalid public YouTube video URL."
+            ) from exc
+        try:
+            own_success = self._repository.find_owned_live_successful_by_source_identity(
+                extractor_key=claim.extractor_key,
+                youtube_video_id=claim.youtube_video_id,
+                created_by_login_key=created_by_login_key,
+            )
+            if own_success is not None:
+                return YouTubeRequestSubmission(
+                    snapshot=self._request_snapshot(own_success),
+                    created=False,
+                )
+            published = self._repository.find_published_successful_by_source_identity(
+                extractor_key=claim.extractor_key,
+                youtube_video_id=claim.youtube_video_id,
+            )
+            if (
+                published is not None
+                and published.media_id is not None
+                and published.media_location_id is not None
+            ):
+                self._enforce_admission_limits(
+                    created_by_login_key=created_by_login_key,
+                    now_ms=now_ms,
+                    require_private_quota=False,
+                )
+                reused = claim.advance(
+                    YouTubeAcquisitionState.DUPLICATE_RESOLVED,
+                    updated_at_ms=now_ms,
+                    resolved_claim_id=published.id,
+                    media_id=published.media_id,
+                    media_location_id=published.media_location_id,
+                    completed_at_ms=now_ms,
+                    cleanup_state=YouTubeStagingCleanupState.COMPLETE,
+                    cleanup_completed_at_ms=now_ms,
+                )
+                self._repository.create(reused)
+                return YouTubeRequestSubmission(
+                    snapshot=self._request_snapshot(reused),
+                    created=True,
+                )
+            self._enforce_admission_limits(
+                created_by_login_key=created_by_login_key,
+                now_ms=now_ms,
+                require_private_quota=True,
+            )
+            selected, created = self._repository.create_or_get_active(claim)
+        except YouTubeRequestLimitError:
+            raise
+        except YouTubeRequestInsufficientStorageError:
+            raise
+        except FrameNestYouTubeClaimRepositoryError as exc:
+            raise YouTubeAcquisitionInfrastructureError(
+                "YouTube acquisition is unavailable."
+            ) from exc
+        if created:
+            _notify(self._notifier)
+        return YouTubeRequestSubmission(
+            snapshot=self._request_snapshot(selected),
+            created=created,
+        )
+
+    def list_owned(
+        self,
+        *,
+        created_by_login_key: str,
+        limit: int = 20,
+        cursor: str | None = None,
+    ) -> YouTubeRequestPage:
+        after_created_at_ms: int | None = None
+        after_id: str | None = None
+        if cursor is not None:
+            after_created_at_ms, after_id = _decode_owned_cursor(cursor)
+        try:
+            page = self._repository.list_owned(
+                created_by_login_key=created_by_login_key,
+                limit=limit + 1,
+                after_created_at_ms=after_created_at_ms,
+                after_id=after_id,
+            )
+        except FrameNestYouTubeClaimRepositoryError as exc:
+            raise YouTubeAcquisitionInfrastructureError(
+                "YouTube acquisition is unavailable."
+            ) from exc
+        items = page[:limit]
+        next_cursor = None
+        if len(page) > limit:
+            last = items[-1]
+            next_cursor = _encode_owned_cursor(last.created_at_ms, last.id.to_string())
+        return YouTubeRequestPage(
+            items=tuple(self._request_snapshot(item) for item in items),
+            next_cursor=next_cursor,
+        )
+
+    def get_owned(
+        self,
+        claim_id: YouTubeAcquisitionClaimId,
+        *,
+        created_by_login_key: str,
+    ) -> YouTubeRequestSnapshot:
+        try:
+            claim = self._repository.get_owned(
+                claim_id,
+                created_by_login_key=created_by_login_key,
+            )
+        except FrameNestYouTubeClaimRepositoryError as exc:
+            raise YouTubeAcquisitionInfrastructureError(
+                "YouTube acquisition is unavailable."
+            ) from exc
+        if claim is None:
+            raise YouTubeAcquisitionNotFoundError(
+                "YouTube acquisition request not found."
+            )
+        return self._request_snapshot(claim)
+
+    def retry(
+        self,
+        claim_id: YouTubeAcquisitionClaimId,
+        *,
+        confirmation_method: YouTubeConfirmationMethod,
+        created_by_login_key: str,
+    ) -> YouTubeRequestSubmission:
+        try:
+            original = self._repository.get_owned(
+                claim_id,
+                created_by_login_key=created_by_login_key,
+            )
+            if original is None:
+                raise YouTubeAcquisitionNotFoundError(
+                    "YouTube acquisition request not found."
+                )
+            if original.state is not YouTubeAcquisitionState.FAILED:
+                raise YouTubeAcquisitionStateConflictError(
+                    "YouTube acquisition request cannot be retried."
+                )
+            if original.cleanup_state is YouTubeStagingCleanupState.PENDING:
+                self._staging.cleanup(original.staging_key)
+                now_ms = self._now_ms()
+                cleaned = original.evolve(
+                    updated_at_ms=now_ms,
+                    cleanup_state=YouTubeStagingCleanupState.COMPLETE,
+                    cleanup_completed_at_ms=now_ms,
+                )
+                original = self._repository.save(
+                    cleaned,
+                    expected_state=original.state,
+                    expected_version=original.version,
+                )
+            now_ms = self._now_ms()
+            self._enforce_admission_limits(
+                created_by_login_key=created_by_login_key,
+                now_ms=now_ms,
+                require_private_quota=True,
+            )
+            retry = YouTubeAcquisitionClaim.new(
+                submitted_url=original.submitted_url,
+                confirmation_method=confirmation_method,
+                now_ms=now_ms,
+                retry_of_claim_id=original.id,
+                created_by_login_key=created_by_login_key,
+            )
+            selected, created = self._repository.create_or_get_active(retry)
+        except (
+            YouTubeAcquisitionNotFoundError,
+            YouTubeAcquisitionStateConflictError,
+            YouTubeRequestLimitError,
+            YouTubeRequestInsufficientStorageError,
+        ):
+            raise
+        except (
+            FrameNestYouTubeClaimRepositoryError,
+            YouTubeStagingError,
+            FrameNestYouTubeAcquisitionError,
+        ) as exc:
+            raise YouTubeAcquisitionInfrastructureError(
+                "YouTube acquisition is unavailable."
+            ) from exc
+        if created:
+            _notify(self._notifier)
+        return YouTubeRequestSubmission(
+            snapshot=self._request_snapshot(selected),
+            created=created,
+        )
+
+    def _enforce_admission_limits(
+        self,
+        *,
+        created_by_login_key: str,
+        now_ms: int,
+        require_private_quota: bool,
+    ) -> None:
+        if (
+            self._repository.count_active_for_requester(
+                created_by_login_key=created_by_login_key
+            )
+            >= self._limits.max_active_per_user
+        ):
+            raise YouTubeRequestLimitError(
+                "YOUTUBE_REQUEST_ACTIVE_LIMIT",
+                "Active YouTube request limit reached.",
+            )
+        if (
+            self._repository.count_global_active_ordinary()
+            >= self._limits.max_global_active
+        ):
+            raise YouTubeRequestLimitError(
+                "YOUTUBE_REQUEST_GLOBAL_QUEUE_FULL",
+                "The YouTube request queue is full.",
+            )
+        if (
+            self._repository.count_submits_since(
+                created_by_login_key=created_by_login_key,
+                since_ms=now_ms - MS_PER_HOUR,
+            )
+            >= self._limits.max_submits_per_hour
+        ):
+            raise YouTubeRequestLimitError(
+                "YOUTUBE_REQUEST_RATE_LIMIT",
+                "YouTube request rate limit reached.",
+            )
+        if (
+            self._repository.count_failed_transitions_since(
+                created_by_login_key=created_by_login_key,
+                since_ms=now_ms - MS_PER_DAY,
+            )
+            >= self._limits.max_failed_per_24h
+        ):
+            raise YouTubeRequestLimitError(
+                "YOUTUBE_REQUEST_FAILED_24H_LIMIT",
+                "YouTube failed-request limit reached for the previous 24 hours.",
+            )
+        if require_private_quota:
+            items, bytes_used = self._repository.private_successful_quota(
+                created_by_login_key=created_by_login_key
+            )
+            if (
+                items >= self._limits.max_private_items
+                or bytes_used >= self._limits.max_private_bytes
+            ):
+                raise YouTubeRequestLimitError(
+                    "YOUTUBE_REQUEST_PRIVATE_QUOTA",
+                    "Private YouTube download quota reached.",
+                )
+        if self._limits.free_space_bytes is not None:
+            required = (
+                self._limits.min_free_space_reserve_bytes
+                + self._limits.max_final_media_bytes
+            )
+            try:
+                available = self._limits.free_space_bytes()
+            except Exception as exc:
+                raise YouTubeRequestInsufficientStorageError(
+                    "Insufficient storage for YouTube request."
+                ) from exc
+            if available < required:
+                raise YouTubeRequestInsufficientStorageError(
+                    "Insufficient storage for YouTube request."
+                )
+
+    def _request_snapshot(
+        self,
+        claim: YouTubeAcquisitionClaim,
+    ) -> YouTubeRequestSnapshot:
+        media_is_published: bool | None = None
+        media_id_text: str | None = None
+        if (
+            claim.state in LIVE_CATALOG_YOUTUBE_ACQUISITION_STATES
+            and claim.media_id is not None
+        ):
+            try:
+                media_is_published = bool(
+                    self._publication_repository.is_published(claim.media_id)
+                )
+            except Exception as exc:
+                raise YouTubeAcquisitionInfrastructureError(
+                    "YouTube acquisition is unavailable."
+                ) from exc
+            phase = derive_requester_phase(
+                claim,
+                media_is_published=media_is_published,
+            )
+            if phase in {
+                REQUESTER_PHASE_COMPLETED,
+                REQUESTER_PHASE_COMPLETED_PRIVATE,
+            }:
+                media_id_text = claim.media_id.to_string()
+        else:
+            phase = derive_requester_phase(claim, media_is_published=None)
+        retry_of = None
+        if claim.retry_of_claim_id is not None:
+            parent = self._repository.get_owned(
+                claim.retry_of_claim_id,
+                created_by_login_key=claim.created_by_login_key or "",
+            )
+            if parent is not None:
+                retry_of = claim.retry_of_claim_id.to_string()
+        return YouTubeRequestSnapshot(
+            request_id=claim.id.to_string(),
+            phase=phase,
+            submitted_url=claim.submitted_url,
+            canonical_url=claim.canonical_url,
+            media_id=media_id_text,
+            failure_category=None
+            if claim.failure_stage is None
+            else claim.failure_stage.value,
+            failure_code=claim.failure_code,
+            retry_of_request_id=retry_of,
+            created_at_ms=claim.created_at_ms,
+            updated_at_ms=claim.updated_at_ms,
         )
 
 
@@ -656,11 +1087,21 @@ class YouTubeAcquisitionCoordinator:
             raise UploadTransportError("upload handoff failed")
         upload_id = UploadSessionId.from_string(claim.id.to_string())
         upload_storage_key = UploadStorageKey(claim.staging_key)
+        if claim.created_by_login_key is None:
+            created_by_login_key = None
+            duplicate_resolution_mode = UploadDuplicateResolutionMode.EXPLICIT
+        else:
+            created_by_login_key = claim.created_by_login_key
+            duplicate_resolution_mode = (
+                UploadDuplicateResolutionMode.SILENT_KEEP_SEPARATE
+            )
         snapshot = self._transport.create_session(
             display_filename=claim.generated_filename,
             declared_size_bytes=claim.downloaded_size_bytes,
             session_id=upload_id,
             storage_key=upload_storage_key,
+            created_by_login_key=created_by_login_key,
+            duplicate_resolution_mode=duplicate_resolution_mode,
         )
         current = claim
         if current.upload_id is None:
@@ -788,10 +1229,19 @@ class YouTubeAcquisitionCoordinator:
         ):
             return False
         if upload.state is UploadSessionState.DUPLICATE_PENDING:
+            if claim.created_by_login_key is not None:
+                await self._transport.resolve_duplicate(
+                    upload.id,
+                    UploadDuplicateResolution.KEEP_SEPARATE,
+                )
+                _notify(self._publication_coordinator)
+                return True
             await self._transport.resolve_duplicate(
                 upload.id,
                 UploadDuplicateResolution.DISCARD,
             )
+        if claim.created_by_login_key is not None:
+            return False
         resolved_claim = self._repository.find_by_upload_id(
             canonical.upload.id
         )
@@ -921,6 +1371,35 @@ def _identity_text(value: object) -> str | None:
             "YouTube acquisition is unavailable."
         )
     return str(to_string())
+
+
+def _encode_owned_cursor(created_at_ms: int, claim_id: str) -> str:
+    payload = json.dumps(
+        {"created_at_ms": created_at_ms, "id": claim_id},
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return base64.urlsafe_b64encode(payload).decode("ascii").rstrip("=")
+
+
+def _decode_owned_cursor(cursor: str) -> tuple[int, str]:
+    try:
+        padded = cursor + ("=" * (-len(cursor) % 4))
+        payload = json.loads(base64.urlsafe_b64decode(padded.encode("ascii")))
+        created_at_ms = payload["created_at_ms"]
+        claim_id = payload["id"]
+        if (
+            isinstance(created_at_ms, bool)
+            or not isinstance(created_at_ms, int)
+            or created_at_ms < 0
+            or not isinstance(claim_id, str)
+            or not claim_id
+        ):
+            raise ValueError("invalid cursor")
+        return created_at_ms, claim_id
+    except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise YouTubeAcquisitionInvalidRequestError(
+            "Invalid YouTube request cursor."
+        ) from exc
 
 
 def _notify(coordinator: object | None) -> None:

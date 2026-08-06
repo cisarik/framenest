@@ -36,6 +36,13 @@ DEFAULT_UPLOAD_MAX_PATCH_BYTES = 8_388_608
 DEFAULT_UPLOAD_SESSION_TTL_SECONDS = 86_400
 DEFAULT_UPLOAD_MIN_FREE_SPACE_RESERVE_BYTES = 67_108_864
 DEFAULT_YOUTUBE_ACQUISITION_MAX_STAGING_BYTES = 2_214_592_512
+DEFAULT_YOUTUBE_REQUEST_MAX_ACTIVE_PER_USER = 1
+DEFAULT_YOUTUBE_REQUEST_MAX_GLOBAL_ACTIVE = 8
+DEFAULT_YOUTUBE_REQUEST_MAX_SUBMITS_PER_HOUR = 6
+DEFAULT_YOUTUBE_REQUEST_MAX_FAILED_PER_24H = 10
+DEFAULT_YOUTUBE_REQUEST_MAX_PRIVATE_ITEMS = 20
+DEFAULT_YOUTUBE_REQUEST_MAX_PRIVATE_BYTES = 10_737_418_240
+DEFAULT_YOUTUBE_FINAL_MEDIA_BYTES = 1_073_741_824
 SUPPORTED_AI_PROVIDER_IDS = frozenset({"nvidia-nim", "vercel-ai-gateway"})
 INGRESS_MODE_TCP = "tcp"
 INGRESS_MODE_TAILSCALE_UDS = "tailscale_uds"
@@ -140,6 +147,30 @@ class FrameNestSettings(BaseSettings):
     youtube_acquisition_root: Path | None = Field(default=None, repr=False)
     youtube_acquisition_max_staging_bytes: int = Field(
         default=DEFAULT_YOUTUBE_ACQUISITION_MAX_STAGING_BYTES,
+        gt=0,
+    )
+    youtube_request_max_active_per_user: int = Field(
+        default=DEFAULT_YOUTUBE_REQUEST_MAX_ACTIVE_PER_USER,
+        gt=0,
+    )
+    youtube_request_max_global_active: int = Field(
+        default=DEFAULT_YOUTUBE_REQUEST_MAX_GLOBAL_ACTIVE,
+        gt=0,
+    )
+    youtube_request_max_submits_per_hour: int = Field(
+        default=DEFAULT_YOUTUBE_REQUEST_MAX_SUBMITS_PER_HOUR,
+        gt=0,
+    )
+    youtube_request_max_failed_per_24h: int = Field(
+        default=DEFAULT_YOUTUBE_REQUEST_MAX_FAILED_PER_24H,
+        gt=0,
+    )
+    youtube_request_max_private_items: int = Field(
+        default=DEFAULT_YOUTUBE_REQUEST_MAX_PRIVATE_ITEMS,
+        gt=0,
+    )
+    youtube_request_max_private_bytes: int = Field(
+        default=DEFAULT_YOUTUBE_REQUEST_MAX_PRIVATE_BYTES,
         gt=0,
     )
     ai_provider_id: str | None = Field(default=None)

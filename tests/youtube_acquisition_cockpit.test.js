@@ -153,6 +153,7 @@ function createYouTubeAccessibilityHarness({ confirmationAccepted = true } = {})
     youtubeClaimMessage: createClaimElement("p"),
     youtubeClaimDetails: createClaimElement("div"),
     youtubeClaimMetadata: createClaimElement("p"),
+    youtubeClaimRequester: createClaimElement("p"),
     youtubeClaimPublication: createClaimElement("p"),
     youtubeClaimFailure: createClaimElement("p"),
     youtubeClaimSubmitButton: createClaimElement("button"),
