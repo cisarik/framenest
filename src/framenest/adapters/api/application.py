@@ -86,7 +86,7 @@ from framenest.application.content_publication import (
     ListAdminMedia,
     PublishContent,
 )
-from framenest.application.media_catalog import ListMediaCatalog
+from framenest.application.media_catalog import GetMediaCatalogItem, ListMediaCatalog
 from framenest.application.media_import import ImportMediaFromScanCandidate
 from framenest.application.media_metadata import (
     CreateCanonicalTag,
@@ -369,16 +369,22 @@ def create_app(
         )
     if media_catalog_api_dependencies is None:
         assert owned_media_catalog_repository is not None
+        _catalog_cover_states = (
+            owned_cover_service.cover_ready_map
+            if owned_cover_service is not None
+            else None
+        )
         media_catalog_api_dependencies = MediaCatalogApiDependencies(
             list_media=ListMediaCatalog(
                 owned_media_catalog_repository,
-                cover_states=(
-                    owned_cover_service.cover_ready_map
-                    if owned_cover_service is not None
-                    else None
-                ),
+                cover_states=_catalog_cover_states,
+            ),
+            get_media=GetMediaCatalogItem(
+                owned_media_catalog_repository,
+                cover_states=_catalog_cover_states,
             ),
             catalog_available=resolved_settings.database_path.exists,
+            audience_policy=owned_content_audience_policy,
         )
     if media_metadata_api_dependencies is None:
         assert owned_media_metadata_repository is not None

@@ -126,6 +126,72 @@ class SqliteMediaCatalogRepository:
         except SQLAlchemyError as exc:
             raise FrameNestMediaCatalogRepositoryError(_REPOSITORY_FAILURE_MESSAGE) from exc
 
+    def get_media_item(self, media_id: str) -> CatalogMediaItem | None:
+        def operation(connection: Connection) -> CatalogMediaItem | None:
+            row = connection.execute(
+                select(
+                    logical_media.c.id,
+                    logical_media.c.media_kind,
+                    logical_media.c.created_at_ms,
+                    logical_media.c.updated_at_ms,
+                    media_metadata.c.display_title,
+                    media_metadata.c.description,
+                    media_metadata.c.collection_key,
+                    media_metadata.c.processed_at_ms,
+                    media_metadata.c.content_category,
+                    media_metadata.c.acquisition_source,
+                )
+                .select_from(
+                    logical_media.outerjoin(
+                        media_metadata,
+                        media_metadata.c.media_id == logical_media.c.id,
+                    )
+                )
+                .where(logical_media.c.id == media_id)
+            ).mappings().first()
+            if row is None:
+                return None
+            media_ids = (str(row["id"]),)
+            tags_by_media = _load_tags(connection, media_ids)
+            locations_by_media = _load_locations(connection, media_ids)
+            return CatalogMediaItem(
+                media_id=str(row["id"]),
+                media_kind=str(row["media_kind"]),
+                created_at_ms=int(row["created_at_ms"]),
+                updated_at_ms=int(row["updated_at_ms"]),
+                display_title=None
+                if row["display_title"] is None
+                else str(row["display_title"]),
+                collection_key=None
+                if row["collection_key"] is None
+                else str(row["collection_key"]),
+                processed_at_ms=None
+                if row["processed_at_ms"] is None
+                else int(row["processed_at_ms"]),
+                tags=tuple(tags_by_media[str(row["id"])]),
+                locations=tuple(locations_by_media[str(row["id"])]),
+                content_category=(
+                    "general"
+                    if row["content_category"] is None
+                    else str(row["content_category"])
+                ),
+                acquisition_source=(
+                    "unknown"
+                    if row["acquisition_source"] is None
+                    else str(row["acquisition_source"])
+                ),
+                description=None
+                if row["description"] is None
+                else str(row["description"]),
+            )
+
+        try:
+            return run_in_transaction(self._engine, operation)
+        except FrameNestMediaCatalogRepositoryError:
+            raise
+        except SQLAlchemyError as exc:
+            raise FrameNestMediaCatalogRepositoryError(_REPOSITORY_FAILURE_MESSAGE) from exc
+
 
 def _filtered_media_select(query: MediaCatalogQuery, tag_values: tuple[str, ...]):
     joined = logical_media.outerjoin(

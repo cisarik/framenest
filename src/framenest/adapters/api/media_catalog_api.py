@@ -5,18 +5,26 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, UUID4
 
+from framenest.adapters.api.content_audience_api import (
+    ContentAudienceUnavailableError,
+    content_audience_allows,
+)
+from framenest.application.content_publication import ContentAudiencePolicy
 from framenest.application.media_catalog import MediaCatalogValidationError
-from framenest.domain.media_metadata import MediaCollectionKey
 from framenest.application.ports.media_catalog_repository import (
     FrameNestMediaCatalogRepositoryError,
 )
+from framenest.domain.identities import MediaId
+from framenest.domain.media_metadata import MediaCollectionKey
 
 CATALOG_UNAVAILABLE_CODE = "CATALOG_UNAVAILABLE"
 CATALOG_UNAVAILABLE_MESSAGE = "The local catalog is not available."
+MEDIA_NOT_FOUND_CODE = "MEDIA_NOT_FOUND"
+MEDIA_NOT_FOUND_MESSAGE = "Media not found."
 MEDIA_CATALOG_INVALID_QUERY_CODE = "INVALID_MEDIA_CATALOG_QUERY"
 MEDIA_CATALOG_INVALID_QUERY_MESSAGE = "Invalid media catalog query."
 MEDIA_CATALOG_QUERY_FAILED_CODE = "MEDIA_CATALOG_QUERY_FAILED"
@@ -80,6 +88,8 @@ class MediaCatalogApiDependencies:
 
     list_media: object
     catalog_available: Callable[[], bool]
+    get_media: object | None = None
+    audience_policy: ContentAudiencePolicy | None = None
 
 
 def create_media_catalog_api_router(dependencies: MediaCatalogApiDependencies) -> APIRouter:
@@ -145,6 +155,67 @@ def create_media_catalog_api_router(dependencies: MediaCatalogApiDependencies) -
                 MEDIA_CATALOG_QUERY_FAILED_MESSAGE,
             )
         return _catalog_response(result)
+
+    @router.get(
+        "/api/media/{media_id}",
+        response_model=CatalogMediaResponse,
+        responses={
+            404: {"model": ErrorResponse},
+            500: {"model": ErrorResponse},
+            503: {"model": ErrorResponse},
+        },
+    )
+    def get_media(
+        media_id: UUID4,
+        request: Request,
+    ) -> CatalogMediaResponse | JSONResponse:
+        if not dependencies.catalog_available() or dependencies.get_media is None:
+            return _catalog_unavailable_response()
+        parsed_id = MediaId.from_string(str(media_id))
+        try:
+            if not content_audience_allows(
+                request=request,
+                media_id=parsed_id,
+                policy=dependencies.audience_policy,
+            ):
+                return _error_response(
+                    404,
+                    MEDIA_NOT_FOUND_CODE,
+                    MEDIA_NOT_FOUND_MESSAGE,
+                )
+        except ContentAudienceUnavailableError:
+            return _error_response(
+                500,
+                MEDIA_CATALOG_QUERY_FAILED_CODE,
+                MEDIA_CATALOG_QUERY_FAILED_MESSAGE,
+            )
+        try:
+            item = dependencies.get_media.execute(str(media_id))
+        except MediaCatalogValidationError:
+            return _error_response(
+                404,
+                MEDIA_NOT_FOUND_CODE,
+                MEDIA_NOT_FOUND_MESSAGE,
+            )
+        except FrameNestMediaCatalogRepositoryError:
+            return _error_response(
+                500,
+                MEDIA_CATALOG_QUERY_FAILED_CODE,
+                MEDIA_CATALOG_QUERY_FAILED_MESSAGE,
+            )
+        except Exception:
+            return _error_response(
+                500,
+                MEDIA_CATALOG_QUERY_FAILED_CODE,
+                MEDIA_CATALOG_QUERY_FAILED_MESSAGE,
+            )
+        if item is None:
+            return _error_response(
+                404,
+                MEDIA_NOT_FOUND_CODE,
+                MEDIA_NOT_FOUND_MESSAGE,
+            )
+        return _media_response(item)
 
     return router
 

@@ -7,10 +7,13 @@ from dataclasses import dataclass, replace
 import unicodedata
 
 from framenest.application.ports.media_catalog_repository import (
+    CatalogMediaItem,
     MediaCatalogPage,
     MediaCatalogQuery,
     MediaCatalogRepository,
 )
+from framenest.domain import FrameNestIdentityError
+from framenest.domain.identities import MediaId
 from framenest.domain.media_classification import AcquisitionSource, ContentCategory
 from framenest.domain.media_metadata import (
     CanonicalTagKey,
@@ -66,6 +69,27 @@ class ListMediaCatalog:
             for item in page.items
         )
         return replace(page, items=items)
+
+
+@dataclass(frozen=True, slots=True)
+class GetMediaCatalogItem:
+    """Load one catalog-shaped media item for audience-gated Details hydration."""
+
+    repository: MediaCatalogRepository
+    cover_states: Callable[[tuple[str, ...]], dict[str, bool]] | None = None
+
+    def execute(self, media_id: str) -> CatalogMediaItem | None:
+        try:
+            MediaId.from_string(media_id)
+        except FrameNestIdentityError as exc:
+            raise MediaCatalogValidationError(MEDIA_CATALOG_QUERY_INVALID_MESSAGE) from exc
+        item = self.repository.get_media_item(media_id)
+        if item is None:
+            return None
+        if self.cover_states is None:
+            return item
+        states = self.cover_states((item.media_id,))
+        return replace(item, cover_ready=states.get(item.media_id, False))
 
 
 def _normalize_title_query(value: str | None) -> str | None:

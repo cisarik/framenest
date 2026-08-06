@@ -85,3 +85,6 @@ class MediaCatalogRepository(Protocol):
 
     def list_media(self, query: MediaCatalogQuery) -> MediaCatalogPage:
         """Return one deterministic page of catalog media."""
+
+    def get_media_item(self, media_id: str) -> CatalogMediaItem | None:
+        """Return one catalog item by media id, or None when absent."""

@@ -232,3 +232,28 @@ test("ordinary request submit blocks empty input with the required message", asy
   assert.equal(harness.state.urlError, REQUIRED_MESSAGE);
   assert.equal(harness.youtubeRequestUrlInput.focusCount, 1);
 });
+
+test("completed_private Open Details hydrates through audience-safe media detail", () => {
+  assert.match(APP_SOURCE, /function resolveDetailsMediaItem\(/);
+  assert.match(APP_SOURCE, /function detailsMediaItemLooksComplete\(/);
+  assert.match(APP_SOURCE, /mediaDetailEndpoint\(/);
+  assert.match(APP_SOURCE, /await resolveDetailsMediaItem\(item\)/);
+  assert.match(
+    APP_SOURCE,
+    /media_id:\s*item\.media_id,\s*id:\s*item\.media_id/,
+  );
+  assert.match(APP_SOURCE, /phase === "completed_private"/);
+  assert.match(APP_SOURCE, /Private until an administrator publishes it/);
+  assert.doesNotMatch(
+    APP_SOURCE,
+    /openDetailsDialog\(\{\s*media_id:\s*item\.media_id[\s\S]{0,80}media_kind/,
+  );
+});
+
+test("Details population tolerates incomplete items after media detail hydration", () => {
+  const populate = extractFunction(APP_SOURCE, "populateDetailsDialog");
+  assert.match(populate, /payload\.display_title/);
+  assert.match(populate, /Array\.isArray\(item\.locations\)/);
+  assert.match(populate, /const locations = Array\.isArray\(item\.locations\)/);
+  assert.doesNotMatch(populate, /item\.locations\.forEach\(/);
+});

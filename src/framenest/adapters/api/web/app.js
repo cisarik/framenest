@@ -6985,21 +6985,52 @@ function applyMetadataPayloadToWorkspace(payload) {
   syncClassificationControlsFromWorkspace();
 }
 
+function detailsMediaItemLooksComplete(item) {
+  return Boolean(
+    item
+    && item.media_id
+    && item.media_kind
+    && Array.isArray(item.locations)
+    && item.locations.length > 0
+  );
+}
+
+function mediaDetailEndpoint(mediaId) {
+  return `${MEDIA_CATALOG_ENDPOINT}/${encodeURIComponent(mediaId)}`;
+}
+
+async function resolveDetailsMediaItem(item) {
+  if (detailsMediaItemLooksComplete(item)) {
+    return item;
+  }
+  const mediaId = item && (item.media_id || item.id);
+  if (!mediaId) return null;
+  const response = await fetch(mediaDetailEndpoint(mediaId), {
+    headers: { Accept: "application/json" },
+    cache: "no-store",
+  });
+  if (!response.ok) return null;
+  const payload = await response.json();
+  if (!payload || !payload.media_id) return null;
+  return payload;
+}
+
 async function openDetailsDialog(item, openerElement, { playWhenReady = false } = {}) {
   if (!detailsDialog) return;
+  const requestedMediaId = item && (item.media_id || item.id);
   if (metadataWorkspace.openMediaId !== null) {
-    const targetMediaId = item.media_id;
+    const targetMediaId = requestedMediaId;
     const discardContext = await confirmDiscardDirtyMetadata({ action: "open-details", targetMediaId });
-    if (!discardContext || item.media_id !== targetMediaId) return;
+    if (!discardContext || requestedMediaId !== targetMediaId) return;
     if (!closeMetadataWorkspaceWithContext(discardContext)) return;
   }
   if (
     item.media_kind === "video"
     && activeCardMediaRestore
     && activeCardMediaRestore.item
-    && activeCardMediaRestore.item.media_id === item.media_id
+    && activeCardMediaRestore.item.media_id === requestedMediaId
   ) {
-    captureVideoPlaybackPosition(item.media_id, cardSurfaceVideoElement(activeCardMediaRestore.surface));
+    captureVideoPlaybackPosition(requestedMediaId, cardSurfaceVideoElement(activeCardMediaRestore.surface));
   } else {
     captureActiveCardVideoPlaybackPosition();
   }
@@ -7017,7 +7048,20 @@ async function openDetailsDialog(item, openerElement, { playWhenReady = false } 
     detailsDialog.setAttribute("open", "");
   }
   detailsCloseButton.focus();
-  populateDetailsDialog(item);
+  let resolved = item;
+  try {
+    resolved = await resolveDetailsMediaItem(item);
+  } catch {
+    resolved = null;
+  }
+  if (!resolved) {
+    detailsLoading.hidden = true;
+    detailsError.hidden = false;
+    detailsContent.hidden = true;
+    return;
+  }
+  detailsCurrentItem = resolved;
+  populateDetailsDialog(resolved);
 }
 
 async function populateDetailsDialog(item) {
@@ -7038,14 +7082,35 @@ async function populateDetailsDialog(item) {
     detailsLoading.hidden = true;
     detailsContent.hidden = false;
 
-    renderDetailsMedia(item, { playWhenReady: detailsPlayRequested });
+    const displayTitle = item.display_title
+      || payload.display_title
+      || deriveCatalogFallbackTitle(item);
+    const tags = (item.tags && item.tags.length)
+      ? item.tags
+      : (payload.tags || []);
+    const description = payload.description || item.description || "";
+    const locations = Array.isArray(item.locations) ? item.locations : [];
+    const hydratedItem = {
+      ...item,
+      display_title: displayTitle,
+      tags,
+      description,
+      locations,
+      collection_key: item.collection_key ?? payload.collection_key ?? null,
+      processed_at_ms: item.processed_at_ms ?? payload.processed_at_ms ?? null,
+      content_category: item.content_category || payload.content_category || "general",
+      acquisition_source: item.acquisition_source || payload.acquisition_source || "unknown",
+    };
+    detailsCurrentItem = hydratedItem;
+
+    renderDetailsMedia(hydratedItem, { playWhenReady: detailsPlayRequested });
 
     if (detailsDialogTitle) {
-      detailsDialogTitle.textContent = item.display_title || deriveCatalogFallbackTitle(item);
+      detailsDialogTitle.textContent = displayTitle;
     }
 
     detailsTagsContainer.replaceChildren();
-    (item.tags || []).forEach((tag) => {
+    tags.forEach((tag) => {
       const pill = document.createElement("button");
       pill.type = "button";
       pill.className = "media-details-dialog__tag";
@@ -7055,22 +7120,24 @@ async function populateDetailsDialog(item) {
       detailsTagsContainer.appendChild(pill);
     });
 
-    detailsDescription.textContent = payload.description || "";
-    detailsDescription.hidden = !payload.description;
+    detailsDescription.textContent = description;
+    detailsDescription.hidden = !description;
 
     detailsTechnicalList.replaceChildren();
     if (detailsTechnical) {
       detailsTechnical.removeAttribute("open");
     }
-    addMetadataValue(detailsTechnicalList, "Media ID", item.media_id);
-    addMetadataValue(detailsTechnicalList, "Kind", formatCatalogKind(item.media_kind));
-    addMetadataValue(detailsTechnicalList, "Created", new Date(item.created_at_ms).toISOString());
-    addMetadataValue(detailsTechnicalList, "Collection", item.collection_key || "none");
-    const processedAtMs = item.processed_at_ms ?? payload.processed_at_ms;
+    addMetadataValue(detailsTechnicalList, "Media ID", hydratedItem.media_id);
+    addMetadataValue(detailsTechnicalList, "Kind", formatCatalogKind(hydratedItem.media_kind));
+    if (hydratedItem.created_at_ms !== null && hydratedItem.created_at_ms !== undefined) {
+      addMetadataValue(detailsTechnicalList, "Created", new Date(hydratedItem.created_at_ms).toISOString());
+    }
+    addMetadataValue(detailsTechnicalList, "Collection", hydratedItem.collection_key || "none");
+    const processedAtMs = hydratedItem.processed_at_ms;
     if (processedAtMs !== null && processedAtMs !== undefined) {
       addMetadataValue(detailsTechnicalList, "Processed at", new Date(processedAtMs).toISOString());
     }
-    item.locations.forEach((location, index) => {
+    locations.forEach((location, index) => {
       addMetadataValue(detailsTechnicalList, `Location ${index + 1}`, location.relative_path);
       addMetadataValue(detailsTechnicalList, `Availability ${index + 1}`, location.availability);
     });

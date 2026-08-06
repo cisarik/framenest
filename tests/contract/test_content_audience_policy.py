@@ -131,10 +131,14 @@ def test_public_list_hides_unpublished_while_admin_list_can_inspect_it(
         listing = ordinary.get("/api/media")
         denied = ordinary.get(f"/api/media/{UNPUBLISHED_ID}/metadata")
         unknown = ordinary.get(f"/api/media/{UNKNOWN_ID}/metadata")
+        denied_detail = ordinary.get(f"/api/media/{UNPUBLISHED_ID}")
+        unknown_detail = ordinary.get(f"/api/media/{UNKNOWN_ID}")
+        published_detail = ordinary.get(f"/api/media/{PUBLISHED_ID}")
 
     with _client(settings, admin=True) as admin:
         workflow = admin.get("/api/admin/media")
         metadata = admin.get(f"/api/media/{UNPUBLISHED_ID}/metadata")
+        admin_detail = admin.get(f"/api/media/{UNPUBLISHED_ID}")
 
     assert listing.status_code == 200
     assert [item["media_id"] for item in listing.json()["items"]] == [
@@ -142,12 +146,19 @@ def test_public_list_hides_unpublished_while_admin_list_can_inspect_it(
     ]
     assert denied.status_code == unknown.status_code == 404
     assert denied.json() == unknown.json()
+    assert denied_detail.status_code == unknown_detail.status_code == 404
+    assert denied_detail.json() == unknown_detail.json()
+    assert published_detail.status_code == 200
+    assert published_detail.json()["display_title"] == "Published"
+    assert published_detail.json()["media_kind"] == "video"
     assert workflow.status_code == 200
     assert [item["media_id"] for item in workflow.json()["items"]] == [
         UNPUBLISHED_ID
     ]
     assert metadata.status_code == 200
     assert metadata.json()["display_title"] == "Unpublished"
+    assert admin_detail.status_code == 200
+    assert admin_detail.json()["display_title"] == "Unpublished"
 
 
 def test_every_direct_surface_denies_unpublished_like_unknown(
@@ -156,6 +167,11 @@ def test_every_direct_surface_denies_unpublished_like_unknown(
     settings = _settings(tmp_path)
     _seed(settings)
     direct_reads = [
+        (
+            "GET",
+            f"/api/media/{{media_id}}",
+            None,
+        ),
         (
             "GET",
             f"/api/media/{{media_id}}/metadata",
