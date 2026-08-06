@@ -393,19 +393,51 @@ media_metadata = Table(
     Column("description", Text(), nullable=True),
     Column("content_category", Text(), nullable=False, server_default="general"),
     Column("acquisition_source", Text(), nullable=False, server_default="unknown"),
+    Column("creator_attribution_kind", Text(), nullable=True),
+    Column("creator_stable_id", Text(), nullable=True),
+    Column("creator_handle", Text(), nullable=True),
+    Column("creator_display_name", Text(), nullable=True),
     Column("collection_key", Text(), nullable=True),
     Column("processed_at_ms", Integer(), nullable=True),
     Column("created_at_ms", Integer(), nullable=False),
     Column("updated_at_ms", Integer(), nullable=False),
     CheckConstraint("length(media_id) = 36", name="ck_media_metadata_media_id_length"),
     CheckConstraint(
-        "content_category IN ('general', 'meme', 'movie')",
+        "content_category IN ('general', 'meme', 'movie', 'youtube')",
         name="ck_media_metadata_content_category",
     ),
     CheckConstraint(
         "acquisition_source IN ("
         "'unknown', 'manual_upload', 'library_scan', 'youtube_manual_claim')",
         name="ck_media_metadata_acquisition_source",
+    ),
+    CheckConstraint(
+        "("
+        "creator_attribution_kind IS NULL "
+        "AND creator_stable_id IS NULL "
+        "AND creator_handle IS NULL "
+        "AND creator_display_name IS NULL"
+        ") OR ("
+        "creator_attribution_kind IS NOT NULL "
+        "AND creator_attribution_kind IN ('youtube_channel', 'x_author') "
+        "AND ("
+        "creator_stable_id IS NOT NULL "
+        "OR creator_handle IS NOT NULL "
+        "OR creator_display_name IS NOT NULL"
+        ") "
+        "AND (creator_stable_id IS NULL OR ("
+        "length(creator_stable_id) >= 1 AND length(creator_stable_id) <= 128"
+        ")) "
+        "AND (creator_handle IS NULL OR ("
+        "length(creator_handle) >= 1 AND length(creator_handle) <= 64 "
+        "AND creator_handle = lower(creator_handle) "
+        "AND substr(creator_handle, 1, 1) != '@'"
+        ")) "
+        "AND (creator_display_name IS NULL OR ("
+        "length(creator_display_name) >= 1 AND length(creator_display_name) <= 200"
+        "))"
+        ")",
+        name="ck_media_metadata_creator_attribution",
     ),
     CheckConstraint(
         "collection_key IS NULL OR collection_key = 'processed'",
@@ -448,6 +480,18 @@ media_metadata = Table(
     ),
     Index("ix_media_metadata_content_category", "content_category", "media_id"),
     Index("ix_media_metadata_acquisition_source", "acquisition_source", "media_id"),
+    Index(
+        "ix_media_metadata_creator_stable",
+        "creator_attribution_kind",
+        "creator_stable_id",
+        "media_id",
+    ),
+    Index(
+        "ix_media_metadata_creator_handle",
+        "creator_attribution_kind",
+        "creator_handle",
+        "media_id",
+    ),
 )
 
 media_genres = Table(

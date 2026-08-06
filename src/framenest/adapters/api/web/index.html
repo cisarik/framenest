@@ -480,12 +480,13 @@
                   <option value="general">General</option>
                   <option value="meme">Meme</option>
                   <option value="movie">Movie</option>
+                  <option value="youtube">YouTube</option>
                 </select>
               </label>
 
               <label class="metadata-field" for="metadata-acquisition-source">
-                <span>Acquisition source</span>
-                <select id="metadata-acquisition-source">
+                <span>Acquisition source (provenance)</span>
+                <select id="metadata-acquisition-source" disabled>
                   <option value="unknown">Unknown</option>
                   <option value="manual_upload">Manual upload</option>
                   <option value="library_scan">Library scan</option>
@@ -578,7 +579,7 @@
         <div class="catalog-class-filters" role="group" aria-label="Content and source filters">
           <button id="catalog-filter-memes" type="button" data-content-category="meme" aria-pressed="false">Memes</button>
           <button id="catalog-filter-movies" type="button" data-content-category="movie" aria-pressed="false">Movies</button>
-          <button id="catalog-filter-youtube" type="button" data-acquisition-source="youtube_manual_claim" aria-pressed="false">YouTube</button>
+          <button id="catalog-filter-youtube" type="button" data-content-category="youtube" aria-pressed="false">YouTube</button>
         </div>
         <p id="catalog-tags-state" class="catalog-tags-state" role="status" hidden></p>
         <div

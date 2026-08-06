@@ -66,6 +66,10 @@ class SqliteMediaCatalogRepository:
                         filtered.c.processed_at_ms,
                         filtered.c.content_category,
                         filtered.c.acquisition_source,
+                        filtered.c.creator_attribution_kind,
+                        filtered.c.creator_stable_id,
+                        filtered.c.creator_handle,
+                        filtered.c.creator_display_name,
                     )
                     .order_by(*order_columns)
                     .limit(query.limit)
@@ -105,6 +109,18 @@ class SqliteMediaCatalogRepository:
                     description=None
                     if row["description"] is None
                     else str(row["description"]),
+                    creator_attribution_kind=None
+                    if row["creator_attribution_kind"] is None
+                    else str(row["creator_attribution_kind"]),
+                    creator_stable_id=None
+                    if row["creator_stable_id"] is None
+                    else str(row["creator_stable_id"]),
+                    creator_handle=None
+                    if row["creator_handle"] is None
+                    else str(row["creator_handle"]),
+                    creator_display_name=None
+                    if row["creator_display_name"] is None
+                    else str(row["creator_display_name"]),
                 )
                 for row in page_rows
             )
@@ -117,6 +133,9 @@ class SqliteMediaCatalogRepository:
                 tag_keys=query.tag_keys,
                 content_category=query.content_category,
                 acquisition_source=query.acquisition_source,
+                creator_attribution_kind=query.creator_attribution_kind,
+                creator_stable_id=query.creator_stable_id,
+                creator_handle=query.creator_handle,
             )
 
         try:
@@ -140,6 +159,10 @@ class SqliteMediaCatalogRepository:
                     media_metadata.c.processed_at_ms,
                     media_metadata.c.content_category,
                     media_metadata.c.acquisition_source,
+                    media_metadata.c.creator_attribution_kind,
+                    media_metadata.c.creator_stable_id,
+                    media_metadata.c.creator_handle,
+                    media_metadata.c.creator_display_name,
                 )
                 .select_from(
                     logical_media.outerjoin(
@@ -183,6 +206,18 @@ class SqliteMediaCatalogRepository:
                 description=None
                 if row["description"] is None
                 else str(row["description"]),
+                creator_attribution_kind=None
+                if row["creator_attribution_kind"] is None
+                else str(row["creator_attribution_kind"]),
+                creator_stable_id=None
+                if row["creator_stable_id"] is None
+                else str(row["creator_stable_id"]),
+                creator_handle=None
+                if row["creator_handle"] is None
+                else str(row["creator_handle"]),
+                creator_display_name=None
+                if row["creator_display_name"] is None
+                else str(row["creator_display_name"]),
             )
 
         try:
@@ -219,6 +254,10 @@ def _filtered_media_select(query: MediaCatalogQuery, tag_values: tuple[str, ...]
         media_metadata.c.processed_at_ms,
         media_metadata.c.content_category,
         media_metadata.c.acquisition_source,
+        media_metadata.c.creator_attribution_kind,
+        media_metadata.c.creator_stable_id,
+        media_metadata.c.creator_handle,
+        media_metadata.c.creator_display_name,
     ).select_from(joined)
     if query.q is not None:
         statement = statement.where(
@@ -239,6 +278,24 @@ def _filtered_media_select(query: MediaCatalogQuery, tag_values: tuple[str, ...]
         statement = statement.where(
             media_metadata.c.acquisition_source == query.acquisition_source
         )
+    if (
+        query.creator_attribution_kind is not None
+        and query.creator_stable_id is not None
+    ):
+        statement = statement.where(
+            media_metadata.c.creator_attribution_kind
+            == query.creator_attribution_kind,
+            media_metadata.c.creator_stable_id == query.creator_stable_id,
+        )
+    elif (
+        query.creator_attribution_kind is not None
+        and query.creator_handle is not None
+    ):
+        statement = statement.where(
+            media_metadata.c.creator_attribution_kind
+            == query.creator_attribution_kind,
+            media_metadata.c.creator_handle == query.creator_handle,
+        )
     if tag_values:
         statement = (
             statement.where(media_canonical_tags.c.tag_key.in_(tag_values))
@@ -253,6 +310,10 @@ def _filtered_media_select(query: MediaCatalogQuery, tag_values: tuple[str, ...]
                 media_metadata.c.processed_at_ms,
                 media_metadata.c.content_category,
                 media_metadata.c.acquisition_source,
+                media_metadata.c.creator_attribution_kind,
+                media_metadata.c.creator_stable_id,
+                media_metadata.c.creator_handle,
+                media_metadata.c.creator_display_name,
             )
             .having(func.count(distinct(media_canonical_tags.c.tag_key)) == len(tag_values))
         )

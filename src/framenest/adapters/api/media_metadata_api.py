@@ -10,6 +10,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, UUID4, field_validator
 
 from framenest.application.ports.media_metadata_repository import (
+    AcquisitionSourceImmutableError,
     CanonicalTagDefinitionConflictError,
     CanonicalTagNotFoundError,
     FrameNestMediaMetadataRepositoryError,
@@ -22,12 +23,16 @@ from framenest.adapters.api.content_audience_api import (
 from framenest.application.content_publication import ContentAudiencePolicy
 from framenest.domain import FrameNestIdentityError
 from framenest.domain.identities import MediaId
+from framenest.domain.media_classification import CreatorAttributionKind
 from framenest.domain.media_metadata import (
     CanonicalTagDisplayName,
     CanonicalTagKey,
     FrameNestMediaMetadataError,
     MediaDescription,
     MediaDisplayTitle,
+    normalize_creator_display_name,
+    normalize_creator_handle,
+    normalize_creator_stable_id,
 )
 
 CATALOG_UNAVAILABLE_CODE = "CATALOG_UNAVAILABLE"
@@ -42,6 +47,10 @@ CANONICAL_TAG_OPERATION_FAILED_CODE = "CANONICAL_TAG_OPERATION_FAILED"
 CANONICAL_TAG_OPERATION_FAILED_MESSAGE = "Canonical tag operation failed."
 MEDIA_METADATA_OPERATION_FAILED_CODE = "MEDIA_METADATA_OPERATION_FAILED"
 MEDIA_METADATA_OPERATION_FAILED_MESSAGE = "Media metadata operation failed."
+ACQUISITION_SOURCE_IMMUTABLE_CODE = "ACQUISITION_SOURCE_IMMUTABLE"
+ACQUISITION_SOURCE_IMMUTABLE_MESSAGE = (
+    "Acquisition source is immutable provenance and cannot be changed."
+)
 
 
 class ErrorBody(BaseModel):
@@ -95,6 +104,10 @@ class MediaMetadataResponse(BaseModel):
     content_category: str = "general"
     acquisition_source: str = "unknown"
     genres: list[str] = []
+    creator_attribution_kind: str | None = None
+    creator_stable_id: str | None = None
+    creator_handle: str | None = None
+    creator_display_name: str | None = None
 
 
 class MediaMetadataSaveRequest(BaseModel):
@@ -102,8 +115,12 @@ class MediaMetadataSaveRequest(BaseModel):
     description: str | None
     tag_keys: list[str]
     content_category: str = "general"
-    acquisition_source: str = "unknown"
+    acquisition_source: str | None = None
     genres: list[str] = []
+    creator_attribution_kind: str | None = None
+    creator_stable_id: str | None = None
+    creator_handle: str | None = None
+    creator_display_name: str | None = None
 
     @field_validator("display_title")
     @classmethod
@@ -141,7 +158,9 @@ class MediaMetadataSaveRequest(BaseModel):
 
     @field_validator("acquisition_source")
     @classmethod
-    def validate_acquisition_source(cls, value: str) -> str:
+    def validate_acquisition_source(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
         from framenest.domain.media_classification import AcquisitionSource
 
         return AcquisitionSource(value).value
@@ -152,6 +171,28 @@ class MediaMetadataSaveRequest(BaseModel):
         if len(value) > 8 or len(set(item.casefold() for item in value)) != len(value):
             raise ValueError(MEDIA_METADATA_OPERATION_FAILED_MESSAGE)
         return value
+
+    @field_validator("creator_attribution_kind")
+    @classmethod
+    def validate_creator_attribution_kind(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return CreatorAttributionKind(value).value
+
+    @field_validator("creator_stable_id")
+    @classmethod
+    def validate_creator_stable_id(cls, value: str | None) -> str | None:
+        return normalize_creator_stable_id(value)
+
+    @field_validator("creator_handle")
+    @classmethod
+    def validate_creator_handle(cls, value: str | None) -> str | None:
+        return normalize_creator_handle(value)
+
+    @field_validator("creator_display_name")
+    @classmethod
+    def validate_creator_display_name(cls, value: str | None) -> str | None:
+        return normalize_creator_display_name(value)
 
 
 class MediaMetadataSaveResponse(BaseModel):
@@ -320,9 +361,19 @@ def create_media_metadata_api_router(dependencies: MediaMetadataApiDependencies)
                 content_category=request.content_category,
                 acquisition_source=request.acquisition_source,
                 genres=request.genres,
+                creator_attribution_kind=request.creator_attribution_kind,
+                creator_stable_id=request.creator_stable_id,
+                creator_handle=request.creator_handle,
+                creator_display_name=request.creator_display_name,
             )
         except MediaMetadataMediaNotFoundError:
             return _error_response(404, MEDIA_NOT_FOUND_CODE, MEDIA_NOT_FOUND_MESSAGE)
+        except AcquisitionSourceImmutableError:
+            return _error_response(
+                409,
+                ACQUISITION_SOURCE_IMMUTABLE_CODE,
+                ACQUISITION_SOURCE_IMMUTABLE_MESSAGE,
+            )
         except CanonicalTagNotFoundError:
             return _error_response(
                 409,
@@ -389,4 +440,8 @@ def _metadata_response(metadata: object) -> MediaMetadataResponse:
         content_category=getattr(metadata, "content_category", "general"),
         acquisition_source=getattr(metadata, "acquisition_source", "unknown"),
         genres=list(getattr(metadata, "genres", ())),
+        creator_attribution_kind=getattr(metadata, "creator_attribution_kind", None),
+        creator_stable_id=getattr(metadata, "creator_stable_id", None),
+        creator_handle=getattr(metadata, "creator_handle", None),
+        creator_display_name=getattr(metadata, "creator_display_name", None),
     )

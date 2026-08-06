@@ -13,6 +13,7 @@ from framenest.domain.media_classification import (
     MAX_MEDIA_GENRES,
     AcquisitionSource,
     ContentCategory,
+    CreatorAttributionKind,
     MovieGenre,
 )
 
@@ -23,6 +24,9 @@ MAX_TAG_KEY_CODE_POINTS = 64
 MAX_TAG_DISPLAY_NAME_CODE_POINTS = 80
 MAX_MEDIA_TAGS = 32
 MAX_DESCRIPTION_CODE_POINTS = 10_000
+MAX_CREATOR_STABLE_ID_CODE_POINTS = 128
+MAX_CREATOR_HANDLE_CODE_POINTS = 64
+MAX_CREATOR_DISPLAY_NAME_CODE_POINTS = 200
 
 _TAG_KEY_PATTERN = re.compile(r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$")
 
@@ -211,6 +215,86 @@ class CanonicalTag:
             raise FrameNestMediaMetadataError(INVALID_MEDIA_METADATA_MESSAGE)
 
 
+def normalize_creator_display_name(value: object | None) -> str | None:
+    """Trim, NFC-normalize, and blank-to-NULL a human-facing creator name."""
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise FrameNestMediaMetadataError(INVALID_MEDIA_METADATA_MESSAGE)
+    if _has_control_character(value):
+        raise FrameNestMediaMetadataError(INVALID_MEDIA_METADATA_MESSAGE)
+    normalized = unicodedata.normalize("NFC", value.strip())
+    if not normalized:
+        return None
+    if len(normalized) > MAX_CREATOR_DISPLAY_NAME_CODE_POINTS:
+        raise FrameNestMediaMetadataError(INVALID_MEDIA_METADATA_MESSAGE)
+    return normalized
+
+
+def normalize_creator_stable_id(value: object | None) -> str | None:
+    """Trim and blank-to-NULL a platform stable ID without rewriting case."""
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise FrameNestMediaMetadataError(INVALID_MEDIA_METADATA_MESSAGE)
+    if _has_control_character(value):
+        raise FrameNestMediaMetadataError(INVALID_MEDIA_METADATA_MESSAGE)
+    trimmed = value.strip()
+    if not trimmed:
+        return None
+    if len(trimmed) > MAX_CREATOR_STABLE_ID_CODE_POINTS:
+        raise FrameNestMediaMetadataError(INVALID_MEDIA_METADATA_MESSAGE)
+    return trimmed
+
+
+def normalize_creator_handle(value: object | None) -> str | None:
+    """Trim, strip leading ``@``, lowercase, and blank-to-NULL a creator handle."""
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise FrameNestMediaMetadataError(INVALID_MEDIA_METADATA_MESSAGE)
+    if _has_control_character(value):
+        raise FrameNestMediaMetadataError(INVALID_MEDIA_METADATA_MESSAGE)
+    trimmed = value.strip()
+    while trimmed.startswith("@"):
+        trimmed = trimmed[1:].lstrip()
+    normalized = trimmed.lower()
+    if not normalized:
+        return None
+    if len(normalized) > MAX_CREATOR_HANDLE_CODE_POINTS:
+        raise FrameNestMediaMetadataError(INVALID_MEDIA_METADATA_MESSAGE)
+    return normalized
+
+
+def validate_creator_attribution_fields(
+    kind: CreatorAttributionKind | None,
+    stable_id: str | None,
+    handle: str | None,
+    display_name: str | None,
+) -> tuple[CreatorAttributionKind | None, str | None, str | None, str | None]:
+    """Normalize and validate creator attribution field combinations."""
+    if kind is not None and not isinstance(kind, CreatorAttributionKind):
+        raise FrameNestMediaMetadataError(INVALID_MEDIA_METADATA_MESSAGE)
+    normalized_stable = normalize_creator_stable_id(stable_id)
+    normalized_handle = normalize_creator_handle(handle)
+    normalized_display = normalize_creator_display_name(display_name)
+    if kind is None:
+        if (
+            normalized_stable is not None
+            or normalized_handle is not None
+            or normalized_display is not None
+        ):
+            raise FrameNestMediaMetadataError(INVALID_MEDIA_METADATA_MESSAGE)
+        return None, None, None, None
+    if (
+        normalized_stable is None
+        and normalized_handle is None
+        and normalized_display is None
+    ):
+        raise FrameNestMediaMetadataError(INVALID_MEDIA_METADATA_MESSAGE)
+    return kind, normalized_stable, normalized_handle, normalized_display
+
+
 @dataclass(frozen=True, slots=True)
 class MediaMetadata:
     """Persisted user metadata for one logical media item."""
@@ -224,6 +308,10 @@ class MediaMetadata:
     content_category: ContentCategory = DEFAULT_CONTENT_CATEGORY
     acquisition_source: AcquisitionSource = DEFAULT_ACQUISITION_SOURCE
     genre_keys: tuple[MovieGenre, ...] = ()
+    creator_attribution_kind: CreatorAttributionKind | None = None
+    creator_stable_id: str | None = None
+    creator_handle: str | None = None
+    creator_display_name: str | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.media_id, MediaId):
@@ -258,6 +346,16 @@ class MediaMetadata:
             raise FrameNestMediaMetadataError(INVALID_MEDIA_METADATA_MESSAGE)
         if self.genre_keys and self.content_category is not ContentCategory.MOVIE:
             raise FrameNestMediaMetadataError(INVALID_MEDIA_METADATA_MESSAGE)
+        kind, stable_id, handle, display_name = validate_creator_attribution_fields(
+            self.creator_attribution_kind,
+            self.creator_stable_id,
+            self.creator_handle,
+            self.creator_display_name,
+        )
+        object.__setattr__(self, "creator_attribution_kind", kind)
+        object.__setattr__(self, "creator_stable_id", stable_id)
+        object.__setattr__(self, "creator_handle", handle)
+        object.__setattr__(self, "creator_display_name", display_name)
         _validate_non_negative_int(self.created_at_ms)
         _validate_non_negative_int(self.updated_at_ms)
         if self.updated_at_ms < self.created_at_ms:

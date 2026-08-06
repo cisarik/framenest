@@ -172,9 +172,12 @@ This scope describes product direction. It does not claim that all sources, form
 
 Future first-class categories include `memes`, `youtube`, and `movies`.
 Categories are a dedicated catalog facet rather than only tags or directory
-names. Movie language metadata should prefer container or audio metadata and
-user editing before expensive AI analysis, and FrameNest must not automatically
-upload audio to a cloud provider.
+names. The stored `youtube` content category and structured creator attribution
+are accepted through
+[ADR-0055](docs/adr/0055-youtube-creator-taxonomy-and-immutable-provenance.md);
+X acquisition remains unimplemented. Movie language metadata should prefer
+container or audio metadata and user editing before expensive AI analysis,
+and FrameNest must not automatically upload audio to a cloud provider.
 
 ## 8. Local-First Invariants
 

@@ -385,7 +385,7 @@ function createFlowHarness({ confirmAccepted = true, reducedMotion = true } = {}
     canonicalTagDefinitions: [],
     canonicalTagsLoaded: true,
     catalogResults,
-    catalogState: { tagKeys: [], collection: "" },
+    catalogState: { tagKeys: [], collection: "", contentCategory: "", acquisitionSource: "", creatorAttributionKind: "", creatorStableId: "", creatorHandle: "" },
     PROCESSED_COLLECTION: "processed",
     detailsCurrentItem: null,
     detailsDialogTitle: new FakeElement("h2"),
@@ -397,6 +397,9 @@ function createFlowHarness({ confirmAccepted = true, reducedMotion = true } = {}
     MAX_METADATA_TAGS: 32,
     openStatusDialogCalls: [],
     confirmationCalls: 0,
+    loadCatalog() {},
+    syncCatalogFilterControls() {},
+    advanceMetadataWorkspaceRevision() {},
     layoutSnapshots: [],
     openStatusDialog(tab) {
       context.openStatusDialogCalls.push(tab);
@@ -564,6 +567,13 @@ function createFlowHarness({ confirmAccepted = true, reducedMotion = true } = {}
     extractFunction(APP_SOURCE, "setCardAnalyzeButtonState"),
     extractFunction(APP_SOURCE, "reconcileCatalogCardAiQuickActions"),
     extractFunction(APP_SOURCE, "suggestionIsUsableForCanonicalSave"),
+    extractFunction(APP_SOURCE, "mediaCreatorAttributionFields"),
+    extractFunction(APP_SOURCE, "mediaHasCreatorAttribution"),
+    extractFunction(APP_SOURCE, "mediaCreatorChipLabel"),
+    extractFunction(APP_SOURCE, "catalogCreatorFilterIsActive"),
+    extractFunction(APP_SOURCE, "setCatalogCreatorFilter"),
+    extractFunction(APP_SOURCE, "appendCatalogCreatorChip"),
+    extractFunction(APP_SOURCE, "appendDetailsCreatorChip"),
     extractFunction(APP_SOURCE, "renderCatalogCardTags"),
     extractFunction(APP_SOURCE, "applySavedAiMetadataToCatalogSurfaces"),
     extractFunction(APP_SOURCE, "handleAnalyzeCatalogCard"),
@@ -947,7 +957,8 @@ test("source wiring gates brain on metadata need and positively resolved identit
   assert.ok(handleBody.includes("cardAiPreviewResponseMatchesRequest(payload, mediaId, location.location_id)"));
   assert.ok(handleBody.includes("cardAiQuickActionIsLocked(mediaId)"));
   assert.ok(handleBody.includes("content_category: metadataPayload.content_category"));
-  assert.ok(handleBody.includes("acquisition_source: metadataPayload.acquisition_source"));
+  assert.equal(handleBody.includes("acquisition_source: metadataPayload.acquisition_source"), false);
+  assert.ok(handleBody.includes("creator_attribution_kind: metadataPayload.creator_attribution_kind"));
   assert.ok(handleBody.includes("genres: Array.isArray(metadataPayload.genres)"));
   assert.equal(handleBody.includes('openStatusDialog("ai"'), false);
   assert.ok(handleBody.includes('state: "idle"'));
@@ -1687,7 +1698,7 @@ test("one acceptance creates one preview and locks through metadata save", async
   assert.equal(putCalls[0].headers["X-FrameNest-Request"], "1");
   const putBody = JSON.parse(putCalls[0].body);
   assert.equal(putBody.content_category, "meme");
-  assert.equal(putBody.acquisition_source, "library_scan");
+  assert.equal("acquisition_source" in putBody, false);
   assert.deepEqual(putBody.genres, ["Documentary"]);
   assert.equal(button.isConnected, false);
   assert.equal(status.textContent, "AI metadata saved");
@@ -2014,7 +2025,11 @@ test("Edit Analyze primary button uses near-white surface without black-green sl
 test("native metadata selects are styled and classification row stacks responsively", () => {
   assert.ok(INDEX_SOURCE.includes('class="metadata-classification-row"'));
   assert.ok(INDEX_SOURCE.includes('id="metadata-content-category"'));
+  assert.ok(INDEX_SOURCE.includes('option value="youtube"'));
   assert.ok(INDEX_SOURCE.includes('id="metadata-acquisition-source"'));
+  assert.ok(INDEX_SOURCE.includes('id="metadata-acquisition-source" disabled'));
+  assert.ok(INDEX_SOURCE.includes('data-content-category="youtube"'));
+  assert.equal(INDEX_SOURCE.includes('data-acquisition-source="youtube_manual_claim"'), false);
   assert.ok(STYLES_SOURCE.includes(".metadata-field select"));
   assert.ok(STYLES_SOURCE.includes("width: 100%"));
   assert.ok(STYLES_SOURCE.includes(".metadata-classification-row"));

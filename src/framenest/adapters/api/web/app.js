@@ -110,6 +110,9 @@ let catalogState = {
   collection: "",
   contentCategory: "",
   acquisitionSource: "",
+  creatorAttributionKind: "",
+  creatorStableId: "",
+  creatorHandle: "",
   limit: CATALOG_PAGE_SIZE,
   offset: 0,
   total: 0,
@@ -174,8 +177,34 @@ let metadataWorkspace = {
   analyzing: false,
   aiSuggestionApplied: false,
   suggestedFilename: "",
-  baseline: { displayTitle: null, description: null, tagKeys: [], collectionKey: null, processedAtMs: null, contentCategory: "general", acquisitionSource: "unknown", genres: [] },
-  current: { displayTitle: "", description: "", tagKeys: [], collectionKey: null, processedAtMs: null, contentCategory: "general", acquisitionSource: "unknown", genres: [] },
+  baseline: {
+    displayTitle: null,
+    description: null,
+    tagKeys: [],
+    collectionKey: null,
+    processedAtMs: null,
+    contentCategory: "general",
+    acquisitionSource: "unknown",
+    genres: [],
+    creatorAttributionKind: null,
+    creatorStableId: null,
+    creatorHandle: null,
+    creatorDisplayName: null,
+  },
+  current: {
+    displayTitle: "",
+    description: "",
+    tagKeys: [],
+    collectionKey: null,
+    processedAtMs: null,
+    contentCategory: "general",
+    acquisitionSource: "unknown",
+    genres: [],
+    creatorAttributionKind: null,
+    creatorStableId: null,
+    creatorHandle: null,
+    creatorDisplayName: null,
+  },
 };
 let metadataTagSuggestionState = {
   items: [],
@@ -2256,6 +2285,10 @@ function normalizedMetadataFormState() {
       contentCategory: metadataWorkspace.current.contentCategory || "general",
       acquisitionSource: metadataWorkspace.current.acquisitionSource || "unknown",
       genres: [...(metadataWorkspace.current.genres || [])],
+      creatorAttributionKind: metadataWorkspace.current.creatorAttributionKind || null,
+      creatorStableId: metadataWorkspace.current.creatorStableId || null,
+      creatorHandle: metadataWorkspace.current.creatorHandle || null,
+      creatorDisplayName: metadataWorkspace.current.creatorDisplayName || null,
     };
   }
   if (rawTitle.trim() !== rawTitle) {
@@ -2265,7 +2298,18 @@ function normalizedMetadataFormState() {
   if (desc.error) {
     return desc;
   }
-  return { displayTitle: rawTitle, description: desc.description, tagKeys: [...metadataWorkspace.current.tagKeys], contentCategory: metadataWorkspace.current.contentCategory || "general", acquisitionSource: metadataWorkspace.current.acquisitionSource || "unknown", genres: [...(metadataWorkspace.current.genres || [])] };
+  return {
+    displayTitle: rawTitle,
+    description: desc.description,
+    tagKeys: [...metadataWorkspace.current.tagKeys],
+    contentCategory: metadataWorkspace.current.contentCategory || "general",
+    acquisitionSource: metadataWorkspace.current.acquisitionSource || "unknown",
+    genres: [...(metadataWorkspace.current.genres || [])],
+    creatorAttributionKind: metadataWorkspace.current.creatorAttributionKind || null,
+    creatorStableId: metadataWorkspace.current.creatorStableId || null,
+    creatorHandle: metadataWorkspace.current.creatorHandle || null,
+    creatorDisplayName: metadataWorkspace.current.creatorDisplayName || null,
+  };
 }
 
 function metadataIsDirty() {
@@ -2274,13 +2318,11 @@ function metadataIsDirty() {
     return true;
   }
   const baselineCategory = metadataWorkspace.baseline.contentCategory || "general";
-  const baselineSource = metadataWorkspace.baseline.acquisitionSource || "unknown";
   const baselineGenres = metadataWorkspace.baseline.genres || [];
   return normalized.displayTitle !== metadataWorkspace.baseline.displayTitle
     || normalized.description !== metadataWorkspace.baseline.description
     || !semanticArraysEqual(normalized.tagKeys, metadataWorkspace.baseline.tagKeys)
     || normalized.contentCategory !== baselineCategory
-    || normalized.acquisitionSource !== baselineSource
     || !semanticArraysEqual(normalized.genres, baselineGenres);
 }
 
@@ -4607,6 +4649,9 @@ function snapshotCatalogQueryState() {
     collection: catalogState.collection,
     contentCategory: catalogState.contentCategory || "",
     acquisitionSource: catalogState.acquisitionSource || "",
+    creatorAttributionKind: catalogState.creatorAttributionKind || "",
+    creatorStableId: catalogState.creatorStableId || "",
+    creatorHandle: catalogState.creatorHandle || "",
     limit: CATALOG_PAGE_SIZE_OPTIONS.includes(catalogState.limit) ? catalogState.limit : CATALOG_PAGE_SIZE,
     offset: catalogState.offset,
   });
@@ -4629,6 +4674,15 @@ function buildCatalogQueryParams(snapshot = snapshotCatalogQueryState()) {
   }
   if (snapshot.acquisitionSource) {
     params.set("acquisition_source", snapshot.acquisitionSource);
+  }
+  if (snapshot.creatorAttributionKind) {
+    params.set("creator_attribution_kind", snapshot.creatorAttributionKind);
+  }
+  if (snapshot.creatorStableId) {
+    params.set("creator_stable_id", snapshot.creatorStableId);
+  }
+  if (snapshot.creatorHandle) {
+    params.set("creator_handle", snapshot.creatorHandle);
   }
   params.set("limit", String(snapshot.limit));
   params.set("offset", String(snapshot.offset));
@@ -4653,8 +4707,11 @@ function catalogRequestOwnerIsCurrent(owner) {
     && (typeof catalogState.q === "string" ? catalogState.q.trim() : "") === owner.q
     && semanticArraysEqual(catalogState.tagKeys, owner.tagKeys)
     && catalogState.collection === owner.collection
-    && catalogState.contentCategory === owner.contentCategory
-    && catalogState.acquisitionSource === owner.acquisitionSource
+    && (catalogState.contentCategory || "") === (owner.contentCategory || "")
+    && (catalogState.acquisitionSource || "") === (owner.acquisitionSource || "")
+    && (catalogState.creatorAttributionKind || "") === (owner.creatorAttributionKind || "")
+    && (catalogState.creatorStableId || "") === (owner.creatorStableId || "")
+    && (catalogState.creatorHandle || "") === (owner.creatorHandle || "")
     && catalogState.limit === owner.limit
     && catalogState.offset === owner.offset;
 }
@@ -5377,6 +5434,18 @@ function applySavedAiMetadataToCatalogSurfaces(item, metadata) {
   item.tags = tags;
   if (metadata.content_category) item.content_category = metadata.content_category;
   if (metadata.acquisition_source) item.acquisition_source = metadata.acquisition_source;
+  if (Object.prototype.hasOwnProperty.call(metadata, "creator_attribution_kind")) {
+    item.creator_attribution_kind = metadata.creator_attribution_kind;
+  }
+  if (Object.prototype.hasOwnProperty.call(metadata, "creator_stable_id")) {
+    item.creator_stable_id = metadata.creator_stable_id;
+  }
+  if (Object.prototype.hasOwnProperty.call(metadata, "creator_handle")) {
+    item.creator_handle = metadata.creator_handle;
+  }
+  if (Object.prototype.hasOwnProperty.call(metadata, "creator_display_name")) {
+    item.creator_display_name = metadata.creator_display_name;
+  }
   if (Object.prototype.hasOwnProperty.call(metadata, "collection_key")) {
     item.collection_key = metadata.collection_key;
   }
@@ -5423,6 +5492,10 @@ function applySavedAiMetadataToCatalogSurfaces(item, metadata) {
     detailsCurrentItem.tags = tags.map((tag) => ({ ...tag }));
     detailsCurrentItem.content_category = item.content_category;
     detailsCurrentItem.acquisition_source = item.acquisition_source;
+    detailsCurrentItem.creator_attribution_kind = item.creator_attribution_kind;
+    detailsCurrentItem.creator_stable_id = item.creator_stable_id;
+    detailsCurrentItem.creator_handle = item.creator_handle;
+    detailsCurrentItem.creator_display_name = item.creator_display_name;
     detailsCurrentItem.collection_key = item.collection_key;
     detailsCurrentItem.processed_at_ms = item.processed_at_ms;
     if (detailsDialogTitle) {
@@ -5430,6 +5503,7 @@ function applySavedAiMetadataToCatalogSurfaces(item, metadata) {
     }
     if (detailsTagsContainer) {
       detailsTagsContainer.replaceChildren();
+      appendDetailsCreatorChip(detailsTagsContainer, detailsCurrentItem);
       tags.forEach((tag) => {
         const pill = document.createElement("button");
         pill.type = "button";
@@ -5458,7 +5532,7 @@ async function handleAnalyzeCatalogCard(item, button) {
   setCardAnalyzeButtonState(button, "confirming");
   const accepted = await requestConfirmation({
     title: "Analyze and save with AI?",
-    message: "FrameNest will send up to 3 optimized preview frames and bounded metadata to the configured server-side AI provider. The original file, local path, and API key are not uploaded. The returned AI title, description, and tags will replace the current canonical values for this media item. Content category, acquisition source, and genres are preserved. This uses last-write-wins and does not detect concurrent edits in another tab.",
+    message: "FrameNest will send up to 3 optimized preview frames and bounded metadata to the configured server-side AI provider. The original file, local path, and API key are not uploaded. The returned AI title, description, and tags will replace the current canonical values for this media item. Content category, acquisition source, creator attribution, and genres are preserved. This uses last-write-wins and does not detect concurrent edits in another tab.",
     dismissLabel: "Not now",
     confirmLabel: "Analyze and save",
     destructive: false,
@@ -5541,8 +5615,11 @@ async function handleAnalyzeCatalogCard(item, button) {
       description: suggestion.description || null,
       tag_keys: tagKeys,
       content_category: metadataPayload.content_category || "general",
-      acquisition_source: metadataPayload.acquisition_source || "unknown",
       genres: Array.isArray(metadataPayload.genres) ? [...metadataPayload.genres] : [],
+      creator_attribution_kind: metadataPayload.creator_attribution_kind || null,
+      creator_stable_id: metadataPayload.creator_stable_id || null,
+      creator_handle: metadataPayload.creator_handle || null,
+      creator_display_name: metadataPayload.creator_display_name || null,
     };
     const saveResponse = await fetch(metadataEndpoint(mediaId), {
       method: "PUT",
@@ -5593,11 +5670,102 @@ function setCatalogPagination(page, renderedCount = page.items.length) {
   catalogNextButton.disabled = page.offset + page.limit >= page.total;
 }
 
+function mediaCreatorAttributionFields(source) {
+  if (!source) {
+    return { kind: null, stableId: null, handle: null, displayName: null };
+  }
+  return {
+    kind: source.creator_attribution_kind || source.creatorAttributionKind || null,
+    stableId: source.creator_stable_id || source.creatorStableId || null,
+    handle: source.creator_handle || source.creatorHandle || null,
+    displayName: source.creator_display_name || source.creatorDisplayName || null,
+  };
+}
+
+function mediaHasCreatorAttribution(source) {
+  const attribution = mediaCreatorAttributionFields(source);
+  return Boolean(
+    attribution.kind
+    && (attribution.displayName || attribution.handle || attribution.stableId),
+  );
+}
+
+function mediaCreatorChipLabel(source) {
+  const attribution = mediaCreatorAttributionFields(source);
+  if (attribution.displayName) return attribution.displayName;
+  if (attribution.handle) return `@${attribution.handle}`;
+  return attribution.stableId || "";
+}
+
+function catalogCreatorFilterIsActive(kind, stableId, handle) {
+  if (!kind) return false;
+  if (catalogState.creatorAttributionKind !== kind) return false;
+  if (stableId) {
+    return catalogState.creatorStableId === stableId && !catalogState.creatorHandle;
+  }
+  if (handle) {
+    return catalogState.creatorHandle === handle && !catalogState.creatorStableId;
+  }
+  return false;
+}
+
+function appendCatalogCreatorChip(container, item) {
+  if (!mediaHasCreatorAttribution(item)) return;
+  const attribution = mediaCreatorAttributionFields(item);
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "catalog-card__tag catalog-card__tag--creator";
+  button.textContent = mediaCreatorChipLabel(item);
+  button.dataset.creatorAttributionKind = attribution.kind || "";
+  button.dataset.creatorStableId = attribution.stableId || "";
+  button.dataset.creatorHandle = attribution.handle || "";
+  button.setAttribute("aria-label", `Filter Gallery by creator ${button.textContent}`);
+  button.setAttribute(
+    "aria-pressed",
+    String(catalogCreatorFilterIsActive(attribution.kind, attribution.stableId, attribution.handle)),
+  );
+  button.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" || event.key === " ") event.stopPropagation();
+  });
+  button.addEventListener("click", (event) => {
+    event.stopPropagation();
+    setCatalogCreatorFilter({
+      kind: attribution.kind,
+      stableId: attribution.stableId,
+      handle: attribution.handle,
+    });
+  });
+  container.appendChild(button);
+}
+
+function appendDetailsCreatorChip(container, item) {
+  if (!mediaHasCreatorAttribution(item)) return;
+  const attribution = mediaCreatorAttributionFields(item);
+  const pill = document.createElement("button");
+  pill.type = "button";
+  pill.className = "media-details-dialog__tag media-details-dialog__tag--creator";
+  pill.textContent = mediaCreatorChipLabel(item);
+  pill.dataset.creatorAttributionKind = attribution.kind || "";
+  pill.dataset.creatorStableId = attribution.stableId || "";
+  pill.dataset.creatorHandle = attribution.handle || "";
+  pill.setAttribute("aria-label", `Filter Gallery by creator ${pill.textContent}`);
+  pill.addEventListener("click", () => {
+    closeDetailsDialog({ restoreFocus: false });
+    setCatalogCreatorFilter({
+      kind: attribution.kind,
+      stableId: attribution.stableId,
+      handle: attribution.handle,
+    });
+  });
+  container.appendChild(pill);
+}
+
 function renderCatalogCardTags(item) {
   const tags = document.createElement("div");
   tags.className = "catalog-card__tags";
   tags.setAttribute("role", "group");
   tags.setAttribute("aria-label", "Media tags");
+  appendCatalogCreatorChip(tags, item);
   (item.tags || []).forEach((tag) => {
     const button = document.createElement("button");
     button.type = "button";
@@ -5745,7 +5913,11 @@ function renderCatalogCard(item) {
 function renderCatalogEmptyState() {
   const hasSearch = Boolean(catalogState.q.trim());
   const hasTags = catalogState.tagKeys.length > 0;
-  const hasClassFilters = Boolean(catalogState.contentCategory) || Boolean(catalogState.acquisitionSource);
+  const hasClassFilters = Boolean(catalogState.contentCategory)
+    || Boolean(catalogState.acquisitionSource)
+    || Boolean(catalogState.creatorAttributionKind)
+    || Boolean(catalogState.creatorStableId)
+    || Boolean(catalogState.creatorHandle);
   const hasCollection = Boolean(catalogState.collection);
   const hasAnyFilter = hasSearch || hasTags || hasClassFilters || hasCollection;
   const messageTarget = catalogStateEmptyMessage || catalogStateEmpty;
@@ -6024,8 +6196,11 @@ function claimMetadataSaveOwner(normalized, { closeAfterSave = true } = {}) {
     description: normalized.description,
     tag_keys: normalized.tagKeys,
     content_category: normalized.contentCategory || "general",
-    acquisition_source: normalized.acquisitionSource || "unknown",
     genres: normalized.genres || [],
+    creator_attribution_kind: normalized.creatorAttributionKind || null,
+    creator_stable_id: normalized.creatorStableId || null,
+    creator_handle: normalized.creatorHandle || null,
+    creator_display_name: normalized.creatorDisplayName || null,
   };
   Object.freeze(requestPayload.tag_keys);
   Object.freeze(requestPayload.genres);
@@ -6182,6 +6357,14 @@ function renderMetadataAiAnalyzeButtonContent(isAnalyzing) {
 
 function renderSelectedMetadataTags() {
   metadataSelectedTags.replaceChildren();
+  if (mediaHasCreatorAttribution(metadataWorkspace.current)) {
+    const chip = document.createElement("span");
+    chip.className = "metadata-tag-chip metadata-tag-chip--creator";
+    const label = document.createElement("span");
+    label.textContent = mediaCreatorChipLabel(metadataWorkspace.current);
+    chip.appendChild(label);
+    metadataSelectedTags.appendChild(chip);
+  }
   metadataWorkspace.current.tagKeys.forEach((key) => {
     const definition = selectedTagDefinition(key);
     const chip = document.createElement("span");
@@ -6961,6 +7144,10 @@ function applyMetadataPayloadToWorkspace(payload) {
   const contentCategory = payload.content_category || "general";
   const acquisitionSource = payload.acquisition_source || "unknown";
   const genres = Array.isArray(payload.genres) ? [...payload.genres] : [];
+  const creatorAttributionKind = payload.creator_attribution_kind || null;
+  const creatorStableId = payload.creator_stable_id || null;
+  const creatorHandle = payload.creator_handle || null;
+  const creatorDisplayName = payload.creator_display_name || null;
   metadataWorkspace.baseline = {
     displayTitle: payload.display_title === null ? null : payload.display_title,
     description: payload.description === null ? null : payload.description,
@@ -6970,6 +7157,10 @@ function applyMetadataPayloadToWorkspace(payload) {
     contentCategory,
     acquisitionSource,
     genres: [...genres],
+    creatorAttributionKind,
+    creatorStableId,
+    creatorHandle,
+    creatorDisplayName,
   };
   metadataWorkspace.current = {
     displayTitle: payload.display_title === null ? "" : payload.display_title,
@@ -6980,6 +7171,10 @@ function applyMetadataPayloadToWorkspace(payload) {
     contentCategory,
     acquisitionSource,
     genres: [...genres],
+    creatorAttributionKind,
+    creatorStableId,
+    creatorHandle,
+    creatorDisplayName,
   };
   advanceMetadataWorkspaceRevision();
   syncClassificationControlsFromWorkspace();
@@ -7100,6 +7295,10 @@ async function populateDetailsDialog(item) {
       processed_at_ms: item.processed_at_ms ?? payload.processed_at_ms ?? null,
       content_category: item.content_category || payload.content_category || "general",
       acquisition_source: item.acquisition_source || payload.acquisition_source || "unknown",
+      creator_attribution_kind: item.creator_attribution_kind || payload.creator_attribution_kind || null,
+      creator_stable_id: item.creator_stable_id || payload.creator_stable_id || null,
+      creator_handle: item.creator_handle || payload.creator_handle || null,
+      creator_display_name: item.creator_display_name || payload.creator_display_name || null,
     };
     detailsCurrentItem = hydratedItem;
 
@@ -7110,6 +7309,7 @@ async function populateDetailsDialog(item) {
     }
 
     detailsTagsContainer.replaceChildren();
+    appendDetailsCreatorChip(detailsTagsContainer, hydratedItem);
     tags.forEach((tag) => {
       const pill = document.createElement("button");
       pill.type = "button";
@@ -9497,6 +9697,7 @@ function syncClassificationControlsFromWorkspace() {
   }
   if (sourceSelect) {
     sourceSelect.value = metadataWorkspace.current.acquisitionSource || "unknown";
+    sourceSelect.disabled = true;
   }
   const isMovie = (metadataWorkspace.current.contentCategory || "general") === "movie";
   if (genresFieldset) {
@@ -9534,7 +9735,10 @@ function catalogHasNarrowingFilters() {
   return Boolean(typeof catalogState.q === "string" ? catalogState.q.trim() : "")
     || catalogState.tagKeys.length > 0
     || Boolean(catalogState.contentCategory)
-    || Boolean(catalogState.acquisitionSource);
+    || Boolean(catalogState.acquisitionSource)
+    || Boolean(catalogState.creatorAttributionKind)
+    || Boolean(catalogState.creatorStableId)
+    || Boolean(catalogState.creatorHandle);
 }
 
 function catalogIsUnfilteredAllMedia() {
@@ -9555,7 +9759,7 @@ function syncCatalogFilterControls() {
   const youtube = document.querySelector("#catalog-filter-youtube");
   if (memes) memes.setAttribute("aria-pressed", String(catalogState.contentCategory === "meme"));
   if (movies) movies.setAttribute("aria-pressed", String(catalogState.contentCategory === "movie"));
-  if (youtube) youtube.setAttribute("aria-pressed", String(catalogState.acquisitionSource === "youtube_manual_claim"));
+  if (youtube) youtube.setAttribute("aria-pressed", String(catalogState.contentCategory === "youtube"));
 }
 
 function setCatalogClassificationFilter({ contentCategory = null, acquisitionSource = null } = {}) {
@@ -9564,6 +9768,30 @@ function setCatalogClassificationFilter({ contentCategory = null, acquisitionSou
   }
   if (acquisitionSource !== null) {
     catalogState.acquisitionSource = catalogState.acquisitionSource === acquisitionSource ? "" : acquisitionSource;
+  }
+  catalogState.offset = 0;
+  syncCatalogFilterControls();
+  loadCatalog();
+}
+
+function setCatalogCreatorFilter(options) {
+  const opts = options || {};
+  const nextKind = opts.kind || "";
+  const nextStableId = opts.stableId || "";
+  const nextHandle = nextStableId ? "" : (opts.handle || "");
+  const alreadyActive = Boolean(nextKind)
+    && Boolean(nextStableId || nextHandle)
+    && catalogState.creatorAttributionKind === nextKind
+    && catalogState.creatorStableId === nextStableId
+    && catalogState.creatorHandle === nextHandle;
+  if (alreadyActive) {
+    catalogState.creatorAttributionKind = "";
+    catalogState.creatorStableId = "";
+    catalogState.creatorHandle = "";
+  } else {
+    catalogState.creatorAttributionKind = nextKind;
+    catalogState.creatorStableId = nextStableId;
+    catalogState.creatorHandle = nextHandle;
   }
   catalogState.offset = 0;
   syncCatalogFilterControls();
@@ -9591,6 +9819,9 @@ function resetCatalogToAllMedia() {
   catalogState.tagKeys = [];
   catalogState.contentCategory = "";
   catalogState.acquisitionSource = "";
+  catalogState.creatorAttributionKind = "";
+  catalogState.creatorStableId = "";
+  catalogState.creatorHandle = "";
   catalogState.offset = 0;
   renderActiveCatalogTagFilters();
   renderCatalogTagFilterStates();
@@ -9629,7 +9860,7 @@ document.querySelector("#catalog-filter-movies")?.addEventListener("click", () =
   setCatalogClassificationFilter({ contentCategory: "movie" });
 });
 document.querySelector("#catalog-filter-youtube")?.addEventListener("click", () => {
-  setCatalogClassificationFilter({ acquisitionSource: "youtube_manual_claim" });
+  setCatalogClassificationFilter({ contentCategory: "youtube" });
 });
 
 document.querySelector("#metadata-content-category")?.addEventListener("change", (event) => {
@@ -9640,9 +9871,8 @@ document.querySelector("#metadata-content-category")?.addEventListener("change",
   syncClassificationControlsFromWorkspace();
   updateMetadataControls();
 });
-document.querySelector("#metadata-acquisition-source")?.addEventListener("change", (event) => {
-  metadataWorkspace.current.acquisitionSource = event.target.value;
-  updateMetadataControls();
+document.querySelector("#metadata-acquisition-source")?.addEventListener("change", () => {
+  // Acquisition source is read-only provenance; the control stays disabled.
 });
 
 document.querySelector("#metadata-movie-identify-button")?.addEventListener("click", async () => {

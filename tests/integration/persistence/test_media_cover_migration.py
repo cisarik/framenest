@@ -303,7 +303,7 @@ def test_packaged_head_is_0023(tmp_path: Path) -> None:
 
     settings = FrameNestSettings(database_path=tmp_path / "head.sqlite3", _env_file=None)
     status = upgrade_database_to_head(settings)
-    assert status.current_revision == status.head_revision == "0026"
+    assert status.current_revision == status.head_revision == "0027"
     assert inspect_database_migration_status(settings) == status
 
 

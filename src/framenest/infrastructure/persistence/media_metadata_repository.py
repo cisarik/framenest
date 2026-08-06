@@ -7,6 +7,7 @@ from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from framenest.application.ports.media_metadata_repository import (
+    AcquisitionSourceImmutableError,
     CanonicalTagCreateResult,
     CanonicalTagDefinitionConflictError,
     CanonicalTagNotFoundError,
@@ -22,6 +23,7 @@ from framenest.domain.media_classification import (
     MAX_MEDIA_GENRES,
     AcquisitionSource,
     ContentCategory,
+    CreatorAttributionKind,
     MovieGenre,
 )
 from framenest.domain.media_metadata import (
@@ -35,6 +37,7 @@ from framenest.domain.media_metadata import (
     MediaDescription,
     MediaDisplayTitle,
     normalize_genres_for_category,
+    validate_creator_attribution_fields,
 )
 from framenest.infrastructure.persistence.catalog_schema import (
     canonical_tags,
@@ -145,15 +148,33 @@ class SqliteMediaMetadataRepository:
         now_ms: int,
         *,
         content_category: ContentCategory = DEFAULT_CONTENT_CATEGORY,
-        acquisition_source: AcquisitionSource = DEFAULT_ACQUISITION_SOURCE,
+        acquisition_source: AcquisitionSource | None = None,
         genre_keys: tuple[MovieGenre, ...] = (),
+        creator_attribution_kind: CreatorAttributionKind | None = None,
+        creator_stable_id: str | None = None,
+        creator_handle: str | None = None,
+        creator_display_name: str | None = None,
     ) -> MediaMetadataSaveResult:
         if len(tag_keys) > 32 or len(set(tag_keys)) != len(tag_keys):
             raise ValueError(_REPOSITORY_FAILURE_MESSAGE)
         if not isinstance(content_category, ContentCategory):
             raise ValueError(_REPOSITORY_FAILURE_MESSAGE)
-        if not isinstance(acquisition_source, AcquisitionSource):
+        if acquisition_source is not None and not isinstance(
+            acquisition_source,
+            AcquisitionSource,
+        ):
             raise ValueError(_REPOSITORY_FAILURE_MESSAGE)
+        (
+            creator_attribution_kind,
+            creator_stable_id,
+            creator_handle,
+            creator_display_name,
+        ) = validate_creator_attribution_fields(
+            creator_attribution_kind,
+            creator_stable_id,
+            creator_handle,
+            creator_display_name,
+        )
         normalized_genres = normalize_genres_for_category(content_category, genre_keys)
         if len(normalized_genres) > MAX_MEDIA_GENRES or len(set(normalized_genres)) != len(
             normalized_genres
@@ -167,6 +188,21 @@ class SqliteMediaMetadataRepository:
                 if _get_tag(connection, key) is None:
                     raise CanonicalTagNotFoundError()
             current = _load_metadata_snapshot(connection, media_id)
+            if current.persisted:
+                if acquisition_source is None:
+                    resolved_source = current.acquisition_source
+                elif acquisition_source == current.acquisition_source:
+                    resolved_source = current.acquisition_source
+                else:
+                    raise AcquisitionSourceImmutableError(
+                        "Acquisition source is immutable provenance and cannot be changed."
+                    )
+            else:
+                resolved_source = (
+                    DEFAULT_ACQUISITION_SOURCE
+                    if acquisition_source is None
+                    else acquisition_source
+                )
             derived = derive_collection_state(
                 current.collection_key,
                 current.processed_at_ms,
@@ -181,8 +217,12 @@ class SqliteMediaMetadataRepository:
                 and current.collection_key == derived.collection_key
                 and current.processed_at_ms == derived.processed_at_ms
                 and current.content_category == content_category
-                and current.acquisition_source == acquisition_source
+                and current.acquisition_source == resolved_source
                 and current.genre_keys == normalized_genres
+                and current.creator_attribution_kind == creator_attribution_kind
+                and current.creator_stable_id == creator_stable_id
+                and current.creator_handle == creator_handle
+                and current.creator_display_name == creator_display_name
             ):
                 return MediaMetadataSaveResult(status="unchanged", metadata=current)
 
@@ -196,7 +236,15 @@ class SqliteMediaMetadataRepository:
                         display_title=None if display_title is None else display_title.value,
                         description=None if description is None else description.value,
                         content_category=content_category.value,
-                        acquisition_source=acquisition_source.value,
+                        acquisition_source=resolved_source.value,
+                        creator_attribution_kind=(
+                            None
+                            if creator_attribution_kind is None
+                            else creator_attribution_kind.value
+                        ),
+                        creator_stable_id=creator_stable_id,
+                        creator_handle=creator_handle,
+                        creator_display_name=creator_display_name,
                         collection_key=None
                         if derived.collection_key is None
                         else derived.collection_key.value,
@@ -213,7 +261,15 @@ class SqliteMediaMetadataRepository:
                         display_title=None if display_title is None else display_title.value,
                         description=None if description is None else description.value,
                         content_category=content_category.value,
-                        acquisition_source=acquisition_source.value,
+                        acquisition_source=resolved_source.value,
+                        creator_attribution_kind=(
+                            None
+                            if creator_attribution_kind is None
+                            else creator_attribution_kind.value
+                        ),
+                        creator_stable_id=creator_stable_id,
+                        creator_handle=creator_handle,
+                        creator_display_name=creator_display_name,
                         collection_key=None
                         if derived.collection_key is None
                         else derived.collection_key.value,
@@ -244,14 +300,19 @@ class SqliteMediaMetadataRepository:
                 created_at_ms=created_at_ms,
                 updated_at_ms=now_ms,
                 content_category=content_category,
-                acquisition_source=acquisition_source,
+                acquisition_source=resolved_source,
                 genre_keys=normalized_genres,
+                creator_attribution_kind=creator_attribution_kind,
+                creator_stable_id=creator_stable_id,
+                creator_handle=creator_handle,
+                creator_display_name=creator_display_name,
             )
             return MediaMetadataSaveResult(status=status, metadata=snapshot)
 
         try:
             return run_in_transaction(self._engine, operation)
         except (
+            AcquisitionSourceImmutableError,
             CanonicalTagNotFoundError,
             MediaMetadataMediaNotFoundError,
             FrameNestMediaMetadataRepositoryError,
@@ -299,6 +360,10 @@ def _load_metadata_snapshot(connection: Connection, media_id: MediaId) -> MediaM
                 media_metadata.c.description,
                 media_metadata.c.content_category,
                 media_metadata.c.acquisition_source,
+                media_metadata.c.creator_attribution_kind,
+                media_metadata.c.creator_stable_id,
+                media_metadata.c.creator_handle,
+                media_metadata.c.creator_display_name,
                 media_metadata.c.collection_key,
                 media_metadata.c.processed_at_ms,
                 media_metadata.c.created_at_ms,
@@ -343,6 +408,19 @@ def _load_metadata_snapshot(connection: Connection, media_id: MediaId) -> MediaM
             raise FrameNestMediaMetadataRepositoryError(_REPOSITORY_FAILURE_MESSAGE)
         raw_collection_key = mapping["collection_key"]
         raw_processed_at_ms = mapping["processed_at_ms"]
+        raw_kind = mapping["creator_attribution_kind"]
+        creator_kind = None if raw_kind is None else CreatorAttributionKind(raw_kind)
+        (
+            creator_kind,
+            creator_stable_id,
+            creator_handle,
+            creator_display_name,
+        ) = validate_creator_attribution_fields(
+            creator_kind,
+            mapping["creator_stable_id"],
+            mapping["creator_handle"],
+            mapping["creator_display_name"],
+        )
         return MediaMetadataSnapshot(
             media_id=MediaId.from_string(mapping["media_id"]),
             persisted=True,
@@ -358,6 +436,10 @@ def _load_metadata_snapshot(connection: Connection, media_id: MediaId) -> MediaM
             content_category=ContentCategory(mapping["content_category"]),
             acquisition_source=AcquisitionSource(mapping["acquisition_source"]),
             genre_keys=tuple(MovieGenre(dict(row)["genre_key"]) for row in genre_rows),
+            creator_attribution_kind=creator_kind,
+            creator_stable_id=creator_stable_id,
+            creator_handle=creator_handle,
+            creator_display_name=creator_display_name,
         )
     except (
         FrameNestIdentityError,

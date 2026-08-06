@@ -17,20 +17,41 @@ class ContentCategory(StrEnum):
     GENERAL = "general"
     MEME = "meme"
     MOVIE = "movie"
+    YOUTUBE = "youtube"
 
 
 class AcquisitionSource(StrEnum):
     """How the media entered the catalog, orthogonal to content category.
 
-    ``youtube_manual_claim`` is a coarse editable catalog classification.
-    Immutable source evidence for controlled ingestion lives in the durable
-    acquisition claim defined by ADR-0046.
+    ``youtube_manual_claim`` is durable catalog provenance set at acquisition
+    or upload creation. Ordinary metadata Save must not change it
+    (ADR-0055). Immutable source evidence for controlled ingestion also lives
+    in the durable acquisition claim defined by ADR-0046.
     """
 
     UNKNOWN = "unknown"
     MANUAL_UPLOAD = "manual_upload"
     LIBRARY_SCAN = "library_scan"
     YOUTUBE_MANUAL_CLAIM = "youtube_manual_claim"
+
+
+class CreatorAttributionKind(StrEnum):
+    """Platform-scoped creator attribution kind.
+
+    Absence of attribution is represented by NULL, never a stored ``none``.
+    ``x_author`` is schema-forward-compatible; X acquisition is not implemented.
+    """
+
+    YOUTUBE_CHANNEL = "youtube_channel"
+    X_AUTHOR = "x_author"
+
+
+CONTENT_CATEGORY_DISPLAY_NAMES: dict[ContentCategory, str] = {
+    ContentCategory.GENERAL: "General",
+    ContentCategory.MEME: "Meme",
+    ContentCategory.MOVIE: "Movie",
+    ContentCategory.YOUTUBE: "YouTube",
+}
 
 
 class MovieGenre(StrEnum):

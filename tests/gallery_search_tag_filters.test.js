@@ -356,6 +356,12 @@ function createInteractionHarness() {
     "snapshotCatalogQueryState",
     "buildCatalogQueryParams",
     "setCatalogSearchText",
+    "mediaCreatorAttributionFields",
+    "mediaHasCreatorAttribution",
+    "mediaCreatorChipLabel",
+    "catalogCreatorFilterIsActive",
+    "setCatalogCreatorFilter",
+    "appendCatalogCreatorChip",
     "renderCatalogCardTags",
     "reconcileCatalogSelectedCard",
     "renderCatalogEmptyState",
@@ -374,7 +380,7 @@ function createInteractionHarness() {
   vm.runInContext(`
     const CATALOG_PAGE_SIZE_OPTIONS = [10, 30, 60, 90];
     const CATALOG_PAGE_SIZE = 30;
-    let catalogState = { q: "", tagKeys: [], collection: "", contentCategory: "", acquisitionSource: "", limit: 30, offset: 0, total: 0 };
+    let catalogState = { q: "", tagKeys: [], collection: "", contentCategory: "", acquisitionSource: "", creatorAttributionKind: "", creatorStableId: "", creatorHandle: "", limit: 30, offset: 0, total: 0 };
     let canonicalTagDefinitions = [];
     let metadataWorkspace = { openMediaId: null };
     let catalogLoadCalls = 0;
@@ -456,7 +462,7 @@ function createRequestHarness(fetch) {
     let commandSearchRequestToken = 0;
     let commandSearchActiveIndex = -1;
     let commandSearchCurrentSuggestions = [];
-    let catalogState = { q: "", tagKeys: [], collection: "", contentCategory: "", acquisitionSource: "", limit: 30, offset: 0, total: 0 };
+    let catalogState = { q: "", tagKeys: [], collection: "", contentCategory: "", acquisitionSource: "", creatorAttributionKind: "", creatorStableId: "", creatorHandle: "", limit: 30, offset: 0, total: 0 };
     const catalogPrevButton = { disabled: false };
     const catalogNextButton = { disabled: false };
     const catalogPageSummary = { textContent: "" };
@@ -761,9 +767,9 @@ test("Catalog request owners reject stale success, error, and finally work under
   });
 
   const oldRequest = h.run("loadCatalog()");
-  h.run("setCatalogSearchText('new title'); catalogState.tagKeys = ['alpha', 'beta']; catalogState.collection = 'processed'; catalogState.contentCategory = 'movie'; catalogState.acquisitionSource = 'youtube_manual_claim'; catalogState.offset = 30");
+  h.run("setCatalogSearchText('new title'); catalogState.tagKeys = ['alpha', 'beta']; catalogState.collection = 'processed'; catalogState.contentCategory = 'movie'; catalogState.acquisitionSource = ''; catalogState.offset = 30");
   const newRequest = h.run("loadCatalog()");
-  assert.equal(requests[1].url, "/api/media?q=new+title&tag=alpha&tag=beta&collection=processed&content_category=movie&acquisition_source=youtube_manual_claim&limit=30&offset=30");
+  assert.equal(requests[1].url, "/api/media?q=new+title&tag=alpha&tag=beta&collection=processed&content_category=movie&limit=30&offset=30");
 
   requests[0].pending.resolve(response({ marker: "old", items: [], total: 1, limit: 30, offset: 0, q: "" }));
   await oldRequest;
@@ -822,7 +828,7 @@ test("All media reset invalidates pending search work and rejects a pre-reset ca
     return pending.promise;
   });
 
-  const staleRequest = h.run("setCatalogSearchText('stale'); catalogState.tagKeys = ['alpha']; catalogState.collection = 'processed'; catalogState.contentCategory = 'movie'; catalogState.acquisitionSource = 'youtube_manual_claim'; catalogState.offset = 30; loadCatalog()");
+  const staleRequest = h.run("setCatalogSearchText('stale'); catalogState.tagKeys = ['alpha']; catalogState.collection = 'processed'; catalogState.contentCategory = 'movie'; catalogState.acquisitionSource = ''; catalogState.offset = 30; loadCatalog()");
   h.commandSearchInput.value = "stale";
   h.commandSearchInput.dispatchEvent(new TestEvent("input"));
   const staleDebounce = [...h.pendingTimers.values()][0];
@@ -865,8 +871,8 @@ test("A stale catalog response cannot cross Gallery category or source changes",
   });
 
   const staleRequest = h.run("loadCatalog()");
-  h.run("catalogState.contentCategory = 'movie'; catalogState.acquisitionSource = 'youtube_manual_claim'; loadCatalog()");
-  assert.equal(requests[1].url, "/api/media?content_category=movie&acquisition_source=youtube_manual_claim&limit=30&offset=0");
+  h.run("catalogState.contentCategory = 'youtube'; catalogState.acquisitionSource = ''; loadCatalog()");
+  assert.equal(requests[1].url, "/api/media?content_category=youtube&limit=30&offset=0");
 
   requests[0].pending.resolve(response({ marker: "stale", items: [], total: 1, limit: 30, offset: 0 }));
   await staleRequest;

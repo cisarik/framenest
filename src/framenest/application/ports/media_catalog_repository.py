@@ -23,6 +23,9 @@ class MediaCatalogQuery:
     collection_key: MediaCollectionKey | None
     content_category: str | None = None
     acquisition_source: str | None = None
+    creator_attribution_kind: str | None = None
+    creator_stable_id: str | None = None
+    creator_handle: str | None = None
     published_only: bool = False
 
 
@@ -64,6 +67,10 @@ class CatalogMediaItem:
     acquisition_source: str = "unknown"
     description: str | None = None
     cover_ready: bool = False
+    creator_attribution_kind: str | None = None
+    creator_stable_id: str | None = None
+    creator_handle: str | None = None
+    creator_display_name: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -78,6 +85,9 @@ class MediaCatalogPage:
     tag_keys: tuple[CanonicalTagKey, ...]
     content_category: str | None = None
     acquisition_source: str | None = None
+    creator_attribution_kind: str | None = None
+    creator_stable_id: str | None = None
+    creator_handle: str | None = None
 
 
 class MediaCatalogRepository(Protocol):

@@ -14,11 +14,17 @@ from framenest.application.ports.media_catalog_repository import (
 )
 from framenest.domain import FrameNestIdentityError
 from framenest.domain.identities import MediaId
-from framenest.domain.media_classification import AcquisitionSource, ContentCategory
+from framenest.domain.media_classification import (
+    AcquisitionSource,
+    ContentCategory,
+    CreatorAttributionKind,
+)
 from framenest.domain.media_metadata import (
     CanonicalTagKey,
     FrameNestMediaMetadataError,
     MediaCollectionKey,
+    normalize_creator_handle,
+    normalize_creator_stable_id,
 )
 
 MEDIA_CATALOG_QUERY_INVALID_MESSAGE = "Invalid media catalog query."
@@ -48,7 +54,15 @@ class ListMediaCatalog:
         collection_key: MediaCollectionKey | None = None,
         content_category: str | None = None,
         acquisition_source: str | None = None,
+        creator_attribution_kind: str | None = None,
+        creator_stable_id: str | None = None,
+        creator_handle: str | None = None,
     ) -> MediaCatalogPage:
+        creator_kind, creator_sid, creator_h = _normalize_creator_filter(
+            creator_attribution_kind,
+            creator_stable_id,
+            creator_handle,
+        )
         query = MediaCatalogQuery(
             q=_normalize_title_query(q),
             tag_keys=_normalize_tag_keys(tag_keys or []),
@@ -57,6 +71,9 @@ class ListMediaCatalog:
             collection_key=collection_key,
             content_category=_normalize_content_category(content_category),
             acquisition_source=_normalize_acquisition_source(acquisition_source),
+            creator_attribution_kind=creator_kind,
+            creator_stable_id=creator_sid,
+            creator_handle=creator_h,
             published_only=True,
         )
         page = self.repository.list_media(query)
@@ -135,6 +152,32 @@ def _normalize_acquisition_source(value: str | None) -> str | None:
         return AcquisitionSource(value).value
     except ValueError as exc:
         raise MediaCatalogValidationError(MEDIA_CATALOG_QUERY_INVALID_MESSAGE) from exc
+
+
+def _normalize_creator_filter(
+    kind: str | None,
+    stable_id: str | None,
+    handle: str | None,
+) -> tuple[str | None, str | None, str | None]:
+    """Prefer kind+stable_id; otherwise kind+handle. Reject display-name-only."""
+    if kind is None and stable_id is None and handle is None:
+        return None, None, None
+    if kind is None:
+        raise MediaCatalogValidationError(MEDIA_CATALOG_QUERY_INVALID_MESSAGE)
+    try:
+        parsed_kind = CreatorAttributionKind(kind).value
+    except ValueError as exc:
+        raise MediaCatalogValidationError(MEDIA_CATALOG_QUERY_INVALID_MESSAGE) from exc
+    try:
+        normalized_stable = normalize_creator_stable_id(stable_id)
+        normalized_handle = normalize_creator_handle(handle)
+    except FrameNestMediaMetadataError as exc:
+        raise MediaCatalogValidationError(MEDIA_CATALOG_QUERY_INVALID_MESSAGE) from exc
+    if normalized_stable is not None:
+        return parsed_kind, normalized_stable, None
+    if normalized_handle is not None:
+        return parsed_kind, None, normalized_handle
+    raise MediaCatalogValidationError(MEDIA_CATALOG_QUERY_INVALID_MESSAGE)
 
 
 def _validate_limit(value: int) -> int:

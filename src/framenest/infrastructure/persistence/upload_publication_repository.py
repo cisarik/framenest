@@ -613,6 +613,14 @@ class SqliteUploadPublicationRepository:
                             else metadata.description.value,
                             content_category=metadata.content_category.value,
                             acquisition_source=metadata.acquisition_source.value,
+                            creator_attribution_kind=(
+                                None
+                                if metadata.creator_attribution_kind is None
+                                else metadata.creator_attribution_kind.value
+                            ),
+                            creator_stable_id=metadata.creator_stable_id,
+                            creator_handle=metadata.creator_handle,
+                            creator_display_name=metadata.creator_display_name,
                             collection_key=None,
                             processed_at_ms=None,
                             created_at_ms=metadata.created_at_ms,

@@ -41,7 +41,11 @@ from framenest.domain.identities import (
     MediaLocationId,
     YouTubeAcquisitionClaimId,
 )
-from framenest.domain.media_classification import AcquisitionSource, ContentCategory
+from framenest.domain.media_classification import (
+    AcquisitionSource,
+    ContentCategory,
+    CreatorAttributionKind,
+)
 from framenest.domain.media_metadata import (
     MAX_DISPLAY_TITLE_CODE_POINTS,
     FrameNestMediaMetadataError,
@@ -1364,14 +1368,29 @@ def youtube_classification_for_upload(
     When the claim carries a usable upstream_title and catalog display_title is
     still absent at first catalog handoff, import that title as the initial
     editable display_title. Administrator metadata Save remains canonical.
+
+    New YouTube catalog handoffs seed content_category=youtube and structured
+    creator attribution from retained channel identity when present. Duplicate
+    and reuse paths never reach this first-catalog insert.
     """
     claim = repository.find_by_upload_id(upload_id)
     if claim is None:
         return None
+    creator_kind = None
+    creator_stable_id = None
+    creator_display_name = None
+    if claim.upstream_channel_id is not None or claim.upstream_channel is not None:
+        creator_kind = CreatorAttributionKind.YOUTUBE_CHANNEL
+        creator_stable_id = claim.upstream_channel_id
+        creator_display_name = claim.upstream_channel
     return CatalogUploadClassification(
-        content_category=ContentCategory.GENERAL,
+        content_category=ContentCategory.YOUTUBE,
         acquisition_source=AcquisitionSource.YOUTUBE_MANUAL_CLAIM,
         display_title=_imported_display_title_from_upstream(claim.upstream_title),
+        creator_attribution_kind=creator_kind,
+        creator_stable_id=creator_stable_id,
+        creator_handle=None,
+        creator_display_name=creator_display_name,
     )
 
 

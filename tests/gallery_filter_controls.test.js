@@ -392,8 +392,7 @@ test("All media reset clears Gallery search UI, pending state, filters, and perf
   h.run(`catalogState.q = "needle";
     catalogState.tagKeys = ["alpha"];
     catalogState.collection = "processed";
-    catalogState.contentCategory = "movie";
-    catalogState.acquisitionSource = "youtube_manual_claim";
+    catalogState.contentCategory = "youtube";
     catalogState.offset = 60;
     commandSearchInput.value = "needle";
     commandSearchClear.hidden = false;
@@ -419,7 +418,7 @@ test("All media reset clears Gallery search UI, pending state, filters, and perf
 
 test("Details open and close preserve both active Gallery filters and a completed All media reset", async () => {
   const h = createDetailsFilterHarness();
-  h.run('catalogState = { q: "needle", tagKeys: ["alpha"], collection: "processed", contentCategory: "movie", acquisitionSource: "youtube_manual_claim" }');
+  h.run('catalogState = { q: "needle", tagKeys: ["alpha"], collection: "processed", contentCategory: "movie", acquisitionSource: "", creatorAttributionKind: "", creatorStableId: "", creatorHandle: "" }');
   const activeBefore = h.run("JSON.stringify(catalogState)");
 
   await h.run("openDetailsDialog({ media_id: 'media-1', media_kind: 'image' }, opener)");
@@ -427,21 +426,21 @@ test("Details open and close preserve both active Gallery filters and a complete
   assert.equal(h.run("JSON.stringify(catalogState)"), activeBefore);
   assert.equal(h.context.opener.focusCalls, 1);
 
-  h.run('catalogState = { q: "", tagKeys: [], collection: "", contentCategory: "", acquisitionSource: "" }');
+  h.run('catalogState = { q: "", tagKeys: [], collection: "", contentCategory: "", acquisitionSource: "", creatorAttributionKind: "", creatorStableId: "", creatorHandle: "" }');
   await h.run("openDetailsDialog({ media_id: 'media-1', media_kind: 'image' }, opener)");
   h.run("closeDetailsDialog()");
-  assert.equal(h.run("JSON.stringify(catalogState)"), '{"q":"","tagKeys":[],"collection":"","contentCategory":"","acquisitionSource":""}');
+  assert.equal(h.run("JSON.stringify(catalogState)"), '{"q":"","tagKeys":[],"collection":"","contentCategory":"","acquisitionSource":"","creatorAttributionKind":"","creatorStableId":"","creatorHandle":""}');
 });
 
 test("All media clears quick collections and selected tags without changing AND query composition", () => {
   const h = createFilterHarness();
   h.run("activateCatalogTagFilter('alpha'); activateCatalogTagFilter('beta')");
-  h.run("setCatalogClassificationFilter({ acquisitionSource: 'youtube_manual_claim' })");
+  h.run("setCatalogClassificationFilter({ contentCategory: 'youtube' })");
   h.run("setCatalogScope(PROCESSED_COLLECTION)");
 
   assert.equal(h.catalogScopeProcessed.classList.contains("scope-active"), true);
   assert.equal(h.catalogFilterYoutube.getAttribute("aria-pressed"), "true");
-  assert.equal(h.run("buildCatalogQueryParams().toString()"), "tag=alpha&tag=beta&collection=processed&acquisition_source=youtube_manual_claim&limit=30&offset=0");
+  assert.equal(h.run("buildCatalogQueryParams().toString()"), "tag=alpha&tag=beta&collection=processed&content_category=youtube&limit=30&offset=0");
 
   h.run("resetCatalogToAllMedia()");
   assert.equal(h.run("buildCatalogQueryParams().toString()"), "limit=30&offset=0");

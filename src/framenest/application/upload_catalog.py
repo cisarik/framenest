@@ -16,7 +16,11 @@ from framenest.application.ports.upload_publications import (
 )
 from framenest.application.upload_transport import default_now_ms
 from framenest.domain.identities import MediaId, MediaLocationId
-from framenest.domain.media_classification import AcquisitionSource, ContentCategory
+from framenest.domain.media_classification import (
+    AcquisitionSource,
+    ContentCategory,
+    CreatorAttributionKind,
+)
 from framenest.domain.media import (
     LogicalMedia,
     MediaKind,
@@ -43,6 +47,10 @@ class CatalogUploadClassification:
     content_category: ContentCategory
     acquisition_source: AcquisitionSource
     display_title: MediaDisplayTitle | None = None
+    creator_attribution_kind: CreatorAttributionKind | None = None
+    creator_stable_id: str | None = None
+    creator_handle: str | None = None
+    creator_display_name: str | None = None
 
 
 class UploadCatalogNotFoundError(UploadCatalogError):
@@ -163,6 +171,10 @@ class CatalogPublishedUpload:
                         content_category=classification.content_category,
                         acquisition_source=classification.acquisition_source,
                         genre_keys=(),
+                        creator_attribution_kind=classification.creator_attribution_kind,
+                        creator_stable_id=classification.creator_stable_id,
+                        creator_handle=classification.creator_handle,
+                        creator_display_name=classification.creator_display_name,
                     )
             try:
                 commit_arguments = {

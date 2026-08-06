@@ -7,6 +7,7 @@ import time
 from typing import Literal, Protocol
 
 from framenest.application.ports.media_metadata_repository import (
+    AcquisitionSourceImmutableError,
     CanonicalTagCreateResult,
     CanonicalTagNotFoundError,
     MediaMetadataRepository,
@@ -20,6 +21,7 @@ from framenest.domain.media_classification import (
     MOVIE_GENRE_DISPLAY_NAMES,
     AcquisitionSource,
     ContentCategory,
+    CreatorAttributionKind,
     MovieGenre,
 )
 from framenest.domain.media_metadata import (
@@ -29,9 +31,13 @@ from framenest.domain.media_metadata import (
     MediaDescription,
     MediaDisplayTitle,
     normalize_genres_for_category,
+    validate_creator_attribution_fields,
 )
 
 MEDIA_METADATA_OPERATION_FAILED_MESSAGE = "Media metadata operation failed."
+ACQUISITION_SOURCE_IMMUTABLE_MESSAGE = (
+    "Acquisition source is immutable provenance and cannot be changed."
+)
 
 
 class ClockMs(Protocol):
@@ -63,6 +69,10 @@ class MediaMetadataView:
     content_category: str = DEFAULT_CONTENT_CATEGORY.value
     acquisition_source: str = DEFAULT_ACQUISITION_SOURCE.value
     genres: tuple[str, ...] = ()
+    creator_attribution_kind: str | None = None
+    creator_stable_id: str | None = None
+    creator_handle: str | None = None
+    creator_display_name: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -134,8 +144,12 @@ class SaveMediaMetadata:
         tag_keys: list[str],
         *,
         content_category: str = DEFAULT_CONTENT_CATEGORY.value,
-        acquisition_source: str = DEFAULT_ACQUISITION_SOURCE.value,
+        acquisition_source: str | None = None,
         genres: list[str] | None = None,
+        creator_attribution_kind: str | None = None,
+        creator_stable_id: str | None = None,
+        creator_handle: str | None = None,
+        creator_display_name: str | None = None,
     ) -> SaveMediaMetadataResult:
         parsed_keys = tuple(CanonicalTagKey(key) for key in tag_keys)
         if len(parsed_keys) != len(set(parsed_keys)):
@@ -143,9 +157,25 @@ class SaveMediaMetadata:
         parsed_title = None if display_title is None else MediaDisplayTitle(display_title)
         parsed_description = _normalize_description(description)
         parsed_category = ContentCategory(content_category)
-        parsed_source = AcquisitionSource(acquisition_source)
+        parsed_source = None
+        if acquisition_source is not None:
+            parsed_source = AcquisitionSource(acquisition_source)
         parsed_genres = _parse_genres(genres or [])
         parsed_genres = normalize_genres_for_category(parsed_category, parsed_genres)
+        parsed_creator_kind = None
+        if creator_attribution_kind is not None:
+            parsed_creator_kind = CreatorAttributionKind(creator_attribution_kind)
+        (
+            parsed_creator_kind,
+            parsed_stable_id,
+            parsed_handle,
+            parsed_display_name,
+        ) = validate_creator_attribution_fields(
+            parsed_creator_kind,
+            creator_stable_id,
+            creator_handle,
+            creator_display_name,
+        )
         result = self._repository.save_media_metadata(
             MediaId.from_string(media_id),
             parsed_title,
@@ -155,6 +185,10 @@ class SaveMediaMetadata:
             content_category=parsed_category,
             acquisition_source=parsed_source,
             genre_keys=parsed_genres,
+            creator_attribution_kind=parsed_creator_kind,
+            creator_stable_id=parsed_stable_id,
+            creator_handle=parsed_handle,
+            creator_display_name=parsed_display_name,
         )
         return SaveMediaMetadataResult(
             status=result.status,
@@ -216,6 +250,14 @@ def _view_from_snapshot(
         content_category=snapshot.content_category.value,
         acquisition_source=snapshot.acquisition_source.value,
         genres=tuple(MOVIE_GENRE_DISPLAY_NAMES[genre] for genre in snapshot.genre_keys),
+        creator_attribution_kind=(
+            None
+            if snapshot.creator_attribution_kind is None
+            else snapshot.creator_attribution_kind.value
+        ),
+        creator_stable_id=snapshot.creator_stable_id,
+        creator_handle=snapshot.creator_handle,
+        creator_display_name=snapshot.creator_display_name,
     )
 
 
@@ -228,3 +270,16 @@ def _call_clock_ms(clock_ms: ClockMs) -> int:
     if isinstance(value, bool) or not isinstance(value, int) or value < 0:
         raise ValueError(MEDIA_METADATA_OPERATION_FAILED_MESSAGE)
     return value
+
+
+__all__ = [
+    "ACQUISITION_SOURCE_IMMUTABLE_MESSAGE",
+    "AcquisitionSourceImmutableError",
+    "CreateCanonicalTag",
+    "GetMediaMetadata",
+    "ListCanonicalTags",
+    "MEDIA_METADATA_OPERATION_FAILED_MESSAGE",
+    "MediaMetadataView",
+    "SaveMediaMetadata",
+    "SaveMediaMetadataResult",
+]

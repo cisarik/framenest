@@ -43,6 +43,9 @@ class _FakeListMediaCatalog:
         collection_key: MediaCollectionKey | None = None,
         content_category: str | None = None,
         acquisition_source: str | None = None,
+        creator_attribution_kind: str | None = None,
+        creator_stable_id: str | None = None,
+        creator_handle: str | None = None,
     ) -> MediaCatalogPage:
         if self.queries is None:
             self.queries = []
@@ -55,6 +58,9 @@ class _FakeListMediaCatalog:
                 "collection_key": collection_key,
                 "content_category": content_category,
                 "acquisition_source": acquisition_source,
+                "creator_attribution_kind": creator_attribution_kind,
+                "creator_stable_id": creator_stable_id,
+                "creator_handle": creator_handle,
             }
         )
         if self.error is not None:
@@ -67,6 +73,9 @@ class _FakeListMediaCatalog:
             collection_key=collection_key,
             content_category=content_category,
             acquisition_source=acquisition_source,
+            creator_attribution_kind=creator_attribution_kind,
+            creator_stable_id=creator_stable_id,
+            creator_handle=creator_handle,
         )
 
 
@@ -154,6 +163,10 @@ def test_successful_default_listing_exposes_complete_catalog_safe_fields() -> No
                 "content_category": "general",
                 "acquisition_source": "unknown",
                 "cover_ready": False,
+                "creator_attribution_kind": None,
+                "creator_stable_id": None,
+                "creator_handle": None,
+                "creator_display_name": None,
             }
         ],
         "total": 1,
@@ -163,6 +176,9 @@ def test_successful_default_listing_exposes_complete_catalog_safe_fields() -> No
         "tag_keys": [],
         "content_category": None,
         "acquisition_source": None,
+        "creator_attribution_kind": None,
+        "creator_stable_id": None,
+        "creator_handle": None,
     }
     assert PRIVATE_ROOT_MARKER not in response.text
 
@@ -193,6 +209,9 @@ def test_repeated_tags_title_query_combined_filters_and_pagination_metadata() ->
             "collection_key": None,
             "content_category": None,
             "acquisition_source": None,
+            "creator_attribution_kind": None,
+            "creator_stable_id": None,
+            "creator_handle": None,
         }
     ]
 

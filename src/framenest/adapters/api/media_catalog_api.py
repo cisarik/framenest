@@ -69,6 +69,10 @@ class CatalogMediaResponse(BaseModel):
     acquisition_source: str = "unknown"
     description: str | None = None
     cover_ready: bool = False
+    creator_attribution_kind: str | None = None
+    creator_stable_id: str | None = None
+    creator_handle: str | None = None
+    creator_display_name: str | None = None
 
 
 class MediaCatalogResponse(BaseModel):
@@ -80,6 +84,9 @@ class MediaCatalogResponse(BaseModel):
     tag_keys: list[str]
     content_category: str | None = None
     acquisition_source: str | None = None
+    creator_attribution_kind: str | None = None
+    creator_stable_id: str | None = None
+    creator_handle: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -113,6 +120,9 @@ def create_media_catalog_api_router(dependencies: MediaCatalogApiDependencies) -
         collection: str | None = None,
         content_category: str | None = None,
         acquisition_source: str | None = None,
+        creator_attribution_kind: str | None = None,
+        creator_stable_id: str | None = None,
+        creator_handle: str | None = None,
     ) -> MediaCatalogResponse | JSONResponse:
         if not dependencies.catalog_available():
             return _catalog_unavailable_response()
@@ -135,6 +145,9 @@ def create_media_catalog_api_router(dependencies: MediaCatalogApiDependencies) -
                 collection_key=parsed_collection,
                 content_category=content_category,
                 acquisition_source=acquisition_source,
+                creator_attribution_kind=creator_attribution_kind,
+                creator_stable_id=creator_stable_id,
+                creator_handle=creator_handle,
             )
         except MediaCatalogValidationError:
             return _error_response(
@@ -238,6 +251,9 @@ def _catalog_response(result: object) -> MediaCatalogResponse:
         tag_keys=[key.value for key in result.tag_keys],
         content_category=getattr(result, "content_category", None),
         acquisition_source=getattr(result, "acquisition_source", None),
+        creator_attribution_kind=getattr(result, "creator_attribution_kind", None),
+        creator_stable_id=getattr(result, "creator_stable_id", None),
+        creator_handle=getattr(result, "creator_handle", None),
     )
 
 
@@ -254,6 +270,10 @@ def _media_response(item: object) -> CatalogMediaResponse:
         acquisition_source=getattr(item, "acquisition_source", "unknown"),
         description=getattr(item, "description", None),
         cover_ready=getattr(item, "cover_ready", False),
+        creator_attribution_kind=getattr(item, "creator_attribution_kind", None),
+        creator_stable_id=getattr(item, "creator_stable_id", None),
+        creator_handle=getattr(item, "creator_handle", None),
+        creator_display_name=getattr(item, "creator_display_name", None),
         tags=[
             CatalogTagResponse(
                 key=tag.key,

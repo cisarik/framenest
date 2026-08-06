@@ -96,8 +96,12 @@ class _FakeSaveMetadata:
         tag_keys: list[str],
         *,
         content_category: str = "general",
-        acquisition_source: str = "unknown",
+        acquisition_source: str | None = None,
         genres: list[str] | None = None,
+        creator_attribution_kind: str | None = None,
+        creator_stable_id: str | None = None,
+        creator_handle: str | None = None,
+        creator_display_name: str | None = None,
     ) -> object:
         self.last_display_title = display_title
         self.last_description = description
@@ -115,8 +119,12 @@ class _FakeSaveMetadata:
             created_at_ms=10,
             updated_at_ms=10,
             content_category=content_category,
-            acquisition_source=acquisition_source,
+            acquisition_source=acquisition_source or "unknown",
             genres=tuple(genres or ()),
+            creator_attribution_kind=creator_attribution_kind,
+            creator_stable_id=creator_stable_id,
+            creator_handle=creator_handle,
+            creator_display_name=creator_display_name,
         )
         return SaveMediaMetadataResult(status=self.status, metadata=metadata)
 
@@ -204,6 +212,10 @@ def test_metadata_get_unsaved_saved_and_save_statuses() -> None:
         "content_category": "general",
         "acquisition_source": "unknown",
         "genres": [],
+        "creator_attribution_kind": None,
+        "creator_stable_id": None,
+        "creator_handle": None,
+        "creator_display_name": None,
     }
     assert saved.json()["tags"] == [{"key": "mathematics", "display_name": "Math"}]
     assert saved.json()["description"] == "A plain text description."

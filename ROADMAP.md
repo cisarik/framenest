@@ -218,8 +218,8 @@ Implemented within this phase:
 - explicit idempotent import from selected scan candidates through [ADR-0026](docs/adr/0026-explicit-idempotent-scan-candidate-import.md).
 - persistent display-title and canonical content tags through [ADR-0027](docs/adr/0027-persistent-display-title-and-canonical-tags.md).
 - read-only catalog retrieval, display-title search, canonical-tag AND filters, deterministic ordering, and bounded offset pagination through [ADR-0028](docs/adr/0028-catalog-read-model-and-search-semantics.md).
-- browser manual `Current` metadata workspace for one selected imported medium, including persistent display-title edit/clear, optional plain-text description edit/clear, content category, acquisition source, movie genres when categorized as movie, canonical-tag search, selected-tag removal and reordering, explicit canonical-tag creation, dirty/discard protection covering title, description, classification, and tag changes, and catalog refresh after successful save.
-- Gallery high-level filters for Memes (content category), Movies (content category), and YouTube (acquisition source) as independent query dimensions per [ADR-0045](docs/adr/0045-content-classification-and-movie-identification.md).
+- browser manual `Current` metadata workspace for one selected imported medium, including persistent display-title edit/clear, optional plain-text description edit/clear, content category, read-only acquisition provenance, structured creator attribution chips, movie genres when categorized as movie, canonical-tag search, selected-tag removal and reordering, explicit canonical-tag creation, dirty/discard protection covering title, description, classification, and tag changes, and catalog refresh after successful save.
+- Gallery high-level filters for Memes, Movies, and YouTube as content-category query dimensions, plus creator-chip filtering by structured attribution identity, per [ADR-0045](docs/adr/0045-content-classification-and-movie-identification.md) and [ADR-0055](docs/adr/0055-youtube-creator-taxonomy-and-immutable-provenance.md).
 - bounded movie-identification analysis profile with reasoning ON, contact-sheet derivative transport, and durable run separation from generic analysis.
 - automatic built-in `Processed` workflow collection entered by the first durable tag save, cleared when all tags are removed, with a virtual `All media` Catalog scope and an optional `Processed` Catalog scope in the packaged browser.
 
@@ -227,7 +227,7 @@ Still unimplemented within this phase:
 
 - arbitrary user-created collections and a general collection manager;
 - suggested filename editing and physical rename;
-- browser metadata fields beyond display title, plain-text description, content category, acquisition source, movie genres, and ordered canonical tags;
+- browser metadata fields beyond display title, plain-text description, content category, read-only acquisition provenance, structured creator attribution, movie genres, and ordered canonical tags;
 - availability tracking;
 - storage capacity reporting;
 - rebuildable local index persistence;

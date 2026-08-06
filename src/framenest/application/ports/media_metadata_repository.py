@@ -11,6 +11,7 @@ from framenest.domain.media_classification import (
     DEFAULT_CONTENT_CATEGORY,
     AcquisitionSource,
     ContentCategory,
+    CreatorAttributionKind,
     MovieGenre,
 )
 from framenest.domain.media_metadata import (
@@ -34,6 +35,10 @@ class CanonicalTagNotFoundError(RuntimeError):
 
 class MediaMetadataMediaNotFoundError(RuntimeError):
     """Raised when a logical media item is absent."""
+
+
+class AcquisitionSourceImmutableError(RuntimeError):
+    """Raised when metadata Save attempts to change acquisition provenance."""
 
 
 class FrameNestMediaMetadataRepositoryError(RuntimeError):
@@ -64,6 +69,10 @@ class MediaMetadataSnapshot:
     content_category: ContentCategory = DEFAULT_CONTENT_CATEGORY
     acquisition_source: AcquisitionSource = DEFAULT_ACQUISITION_SOURCE
     genre_keys: tuple[MovieGenre, ...] = ()
+    creator_attribution_kind: CreatorAttributionKind | None = None
+    creator_stable_id: str | None = None
+    creator_handle: str | None = None
+    creator_display_name: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -103,7 +112,16 @@ class MediaMetadataRepository(Protocol):
         now_ms: int,
         *,
         content_category: ContentCategory = DEFAULT_CONTENT_CATEGORY,
-        acquisition_source: AcquisitionSource = DEFAULT_ACQUISITION_SOURCE,
+        acquisition_source: AcquisitionSource | None = None,
         genre_keys: tuple[MovieGenre, ...] = (),
+        creator_attribution_kind: CreatorAttributionKind | None = None,
+        creator_stable_id: str | None = None,
+        creator_handle: str | None = None,
+        creator_display_name: str | None = None,
     ) -> MediaMetadataSaveResult:
-        """Persist a complete metadata replacement atomically, deriving collection state from tag list."""
+        """Persist a complete metadata replacement atomically, deriving collection state from tag list.
+
+        When ``acquisition_source`` is ``None``, the existing stored provenance is
+        preserved. A provided value equal to the stored value is accepted. A
+        different provided value raises ``AcquisitionSourceImmutableError``.
+        """
