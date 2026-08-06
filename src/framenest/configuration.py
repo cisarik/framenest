@@ -43,6 +43,11 @@ DEFAULT_YOUTUBE_REQUEST_MAX_FAILED_PER_24H = 10
 DEFAULT_YOUTUBE_REQUEST_MAX_PRIVATE_ITEMS = 20
 DEFAULT_YOUTUBE_REQUEST_MAX_PRIVATE_BYTES = 10_737_418_240
 DEFAULT_YOUTUBE_FINAL_MEDIA_BYTES = 1_073_741_824
+DEFAULT_X_ACQUISITION_MAX_STAGING_BYTES = 2_147_483_648
+DEFAULT_X_REQUEST_MAX_ACTIVE_PER_USER = 1
+DEFAULT_X_REQUEST_MAX_GLOBAL_ACTIVE = 8
+DEFAULT_X_REQUEST_MAX_SUBMITS_PER_HOUR = 6
+DEFAULT_X_REQUEST_MAX_FAILED_PER_24H = 10
 SUPPORTED_AI_PROVIDER_IDS = frozenset({"nvidia-nim", "vercel-ai-gateway"})
 INGRESS_MODE_TCP = "tcp"
 INGRESS_MODE_TAILSCALE_UDS = "tailscale_uds"
@@ -173,6 +178,27 @@ class FrameNestSettings(BaseSettings):
         default=DEFAULT_YOUTUBE_REQUEST_MAX_PRIVATE_BYTES,
         gt=0,
     )
+    x_acquisition_root: Path | None = Field(default=None, repr=False)
+    x_acquisition_max_staging_bytes: int = Field(
+        default=DEFAULT_X_ACQUISITION_MAX_STAGING_BYTES,
+        gt=0,
+    )
+    x_request_max_active_per_user: int = Field(
+        default=DEFAULT_X_REQUEST_MAX_ACTIVE_PER_USER,
+        gt=0,
+    )
+    x_request_max_global_active: int = Field(
+        default=DEFAULT_X_REQUEST_MAX_GLOBAL_ACTIVE,
+        gt=0,
+    )
+    x_request_max_submits_per_hour: int = Field(
+        default=DEFAULT_X_REQUEST_MAX_SUBMITS_PER_HOUR,
+        gt=0,
+    )
+    x_request_max_failed_per_24h: int = Field(
+        default=DEFAULT_X_REQUEST_MAX_FAILED_PER_24H,
+        gt=0,
+    )
     ai_provider_id: str | None = Field(default=None)
     ai_model_id: str | None = Field(default=None)
     ingress_mode: str = Field(default=INGRESS_MODE_TCP)
@@ -253,6 +279,23 @@ class FrameNestSettings(BaseSettings):
             )
         return Path(os.path.abspath(path))
 
+    @field_validator("x_acquisition_root", mode="before")
+    @classmethod
+    def validate_x_acquisition_root(cls, value: Any) -> Path | None:
+        if value is None or value == "":
+            return None
+        try:
+            path = Path(value).expanduser()
+        except (RuntimeError, TypeError, ValueError) as exc:
+            raise ValueError(
+                "X acquisition root must be an absolute path"
+            ) from exc
+        if not path.is_absolute():
+            raise ValueError(
+                "X acquisition root must be an absolute path"
+            )
+        return Path(os.path.abspath(path))
+
     @model_validator(mode="after")
     def validate_private_storage_roots(self) -> "FrameNestSettings":
         storage_paths = (
@@ -262,6 +305,7 @@ class FrameNestSettings(BaseSettings):
             self.cover_thumbnail_cache_path,
             self.upload_quarantine_root,
             self.youtube_acquisition_root,
+            self.x_acquisition_root,
         )
         for first, second in _disjoint_pairs(storage_paths):
             if _paths_overlap(first, second):

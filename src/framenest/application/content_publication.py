@@ -39,6 +39,7 @@ class ContentAudiencePolicy:
 
     repository: ContentPublicationRepository
     youtube_requester_private_access: object | None = None
+    x_requester_private_access: object | None = None
 
     def may_read(self, media_id: MediaId, identity: object) -> bool:
         if (
@@ -48,17 +49,23 @@ class ContentAudiencePolicy:
             return self.repository.media_exists(media_id)
         if self.repository.is_published(media_id):
             return True
-        if (
-            isinstance(identity, IdentityContext)
-            and self.youtube_requester_private_access is not None
-        ):
-            return bool(
-                self.youtube_requester_private_access.has_live_requester_media_access(
-                    media_id=media_id,
-                    login_key=identity.login_key,
-                )
-            )
+        if isinstance(identity, IdentityContext) and identity.login_key is not None:
+            for access in self._requester_accesses():
+                if access is None:
+                    continue
+                if bool(
+                    access.has_live_requester_media_access(
+                        media_id=media_id, login_key=identity.login_key
+                    )
+                ):
+                    return True
         return False
+
+    def _requester_accesses(self) -> tuple[object, ...]:
+        return (
+            self.youtube_requester_private_access,
+            self.x_requester_private_access,
+        )
 
 
 
