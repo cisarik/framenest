@@ -147,4 +147,3 @@ def test_missing_channel_leaves_creator_attribution_null() -> None:
     assert result.creator_handle is None
     assert result.display_title is not None
     assert result.display_title.value == "Title Only"
-
