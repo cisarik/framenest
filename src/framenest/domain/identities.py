@@ -88,6 +88,18 @@ class YouTubeAcquisitionClaimId(_UuidIdentity):
     __slots__ = ()
 
 
+class XPostClaimId(_UuidIdentity):
+    """Stable identity for one durable requester-private X post claim."""
+
+    __slots__ = ()
+
+
+class XAssetId(_UuidIdentity):
+    """Stable identity for one durable source X media asset."""
+
+    __slots__ = ()
+
+
 class DeviceId(_UuidIdentity):
     """Stable identity for one FrameNest device."""
 

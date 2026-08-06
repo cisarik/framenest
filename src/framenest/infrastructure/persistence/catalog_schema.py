@@ -408,7 +408,8 @@ media_metadata = Table(
     ),
     CheckConstraint(
         "acquisition_source IN ("
-        "'unknown', 'manual_upload', 'library_scan', 'youtube_manual_claim')",
+        "'unknown', 'manual_upload', 'library_scan', 'youtube_manual_claim', "
+        "'x_manual_claim')",
         name="ck_media_metadata_acquisition_source",
     ),
     CheckConstraint(
@@ -1062,6 +1063,290 @@ youtube_acquisition_claims = Table(
     ),
 )
 
+x_post_claims = Table(
+    "x_post_claims",
+    metadata,
+    Column("id", Text(), primary_key=True, nullable=False),
+    Column("state", Text(), nullable=False),
+    Column("acquisition_source", Text(), nullable=False),
+    Column("submitted_url", Text(), nullable=False),
+    Column("canonical_url", Text(), nullable=False),
+    Column("x_post_id", Text(), nullable=False),
+    Column("extractor_key", Text(), nullable=False),
+    Column("created_by_login_key", Text(), nullable=True),
+    Column(
+        "retry_of_claim_id",
+        Text(),
+        ForeignKey("x_post_claims.id", ondelete="RESTRICT",
+                   name="fk_x_post_claims_retry_of_claim_id"),
+        nullable=True,
+    ),
+    Column(
+        "resolved_claim_id",
+        Text(),
+        ForeignKey("x_post_claims.id", ondelete="RESTRICT",
+                   name="fk_x_post_claims_resolved_claim_id"),
+        nullable=True,
+    ),
+    Column("source_author_stable_id", Text(), nullable=True),
+    Column("source_author_handle", Text(), nullable=True),
+    Column("source_author_display_name", Text(), nullable=True),
+    Column("source_post_text", Text(), nullable=True),
+    Column("source_posted_at_ms", Integer(), nullable=True),
+    Column("title", Text(), nullable=True),
+    Column("extractor_version", Text(), nullable=True),
+    Column("discovered_asset_count", Integer(), nullable=False),
+    Column("success_count", Integer(), nullable=False),
+    Column("failure_count", Integer(), nullable=False),
+    Column("created_at_ms", Integer(), nullable=False),
+    Column("updated_at_ms", Integer(), nullable=False),
+    Column("completed_at_ms", Integer(), nullable=True),
+    Column("catalog_removed_at_ms", Integer(), nullable=True),
+    Column("failure_stage", Text(), nullable=True),
+    Column("failure_code", Text(), nullable=True),
+    Column("cleanup_state", Text(), nullable=False),
+    Column("cleanup_completed_at_ms", Integer(), nullable=True),
+    Column("version", Integer(), nullable=False),
+    CheckConstraint("length(id) = 36", name="ck_x_post_claims_id_length"),
+    CheckConstraint(
+        "created_by_login_key IS NULL OR ("
+        "length(created_by_login_key) >= 1 "
+        "AND length(created_by_login_key) <= 254 "
+        "AND created_by_login_key = lower(created_by_login_key) "
+        "AND instr(created_by_login_key, ' ') = 0 "
+        "AND instr(created_by_login_key, char(9)) = 0 "
+        "AND instr(created_by_login_key, char(10)) = 0 "
+        "AND instr(created_by_login_key, char(13)) = 0)",
+        name="ck_x_post_claims_created_by_login_key",
+    ),
+    CheckConstraint(
+        "state IN ('submitted', 'queued', 'extracting', 'acquiring', "
+        "'handing_off', 'completed', 'completed_partial', 'failed', "
+        "'duplicate_resolved', 'catalog_removed')",
+        name="ck_x_post_claims_state",
+    ),
+    CheckConstraint(
+        "acquisition_source = 'x_manual_claim'",
+        name="ck_x_post_claims_acquisition_source",
+    ),
+    CheckConstraint(
+        "length(submitted_url) >= 1 AND length(submitted_url) <= 2048",
+        name="ck_x_post_claims_submitted_url_length",
+    ),
+    CheckConstraint(
+        "length(canonical_url) >= 1 AND length(canonical_url) <= 2048",
+        name="ck_x_post_claims_canonical_url_length",
+    ),
+    CheckConstraint(
+        "length(x_post_id) >= 1 AND length(x_post_id) <= 19 "
+        "AND x_post_id NOT GLOB '*[^0-9]*'",
+        name="ck_x_post_claims_post_id",
+    ),
+    CheckConstraint(
+        "extractor_key = 'X'",
+        name="ck_x_post_claims_extractor_key",
+    ),
+    CheckConstraint(
+        "source_author_handle IS NULL OR ("
+        "length(source_author_handle) >= 1 "
+        "AND length(source_author_handle) <= 64 "
+        "AND source_author_handle = lower(source_author_handle) "
+        "AND substr(source_author_handle, 1, 1) != '@')",
+        name="ck_x_post_claims_author_handle",
+    ),
+    CheckConstraint(
+        "source_posted_at_ms IS NULL OR source_posted_at_ms >= 0",
+        name="ck_x_post_claims_source_posted_at",
+    ),
+    CheckConstraint(
+        "discovered_asset_count >= 0 AND discovered_asset_count <= 4",
+        name="ck_x_post_claims_discovered_count",
+    ),
+    CheckConstraint(
+        "success_count >= 0 AND success_count <= 4 "
+        "AND failure_count >= 0 AND failure_count <= 4",
+        name="ck_x_post_claims_outcome_counts",
+    ),
+    CheckConstraint(
+        "success_count + failure_count <= discovered_asset_count",
+        name="ck_x_post_claims_outcome_bounded",
+    ),
+    CheckConstraint(
+        "completed_at_ms IS NULL OR completed_at_ms >= created_at_ms",
+        name="ck_x_post_claims_completed_at",
+    ),
+    CheckConstraint(
+        "catalog_removed_at_ms IS NULL OR completed_at_ms IS NULL "
+        "OR catalog_removed_at_ms >= completed_at_ms",
+        name="ck_x_post_claims_removed_at",
+    ),
+    CheckConstraint(
+        "(failure_stage IS NULL AND failure_code IS NULL) "
+        "OR (failure_stage IS NOT NULL AND failure_code IS NOT NULL)",
+        name="ck_x_post_claims_failure_pair",
+    ),
+    CheckConstraint(
+        "failure_stage IS NULL OR failure_stage IN ("
+        "'configuration', 'extraction', 'acquisition', 'staging', "
+        "'handoff', 'downstream', 'cleanup', 'internal')",
+        name="ck_x_post_claims_failure_stage",
+    ),
+    CheckConstraint(
+        "cleanup_state IN ('pending', 'complete')",
+        name="ck_x_post_claims_cleanup_state",
+    ),
+    CheckConstraint(
+        "(cleanup_state = 'pending' AND cleanup_completed_at_ms IS NULL) "
+        "OR (cleanup_state = 'complete' AND cleanup_completed_at_ms IS NOT NULL)",
+        name="ck_x_post_claims_cleanup_pair",
+    ),
+    UniqueConstraint("id", name="uq_x_post_claims_id"),
+    Index(
+        "uq_x_post_claims_active_requester",
+        "x_post_id",
+        "created_by_login_key",
+        unique=True,
+        sqlite_where=text(
+            "state IN ('submitted', 'queued', 'extracting', 'acquiring', "
+            "'handing_off') AND created_by_login_key IS NOT NULL"
+        ),
+    ),
+    Index(
+        "ix_x_post_claims_state",
+        "state",
+        "updated_at_ms",
+        "id",
+    ),
+    Index("ix_x_post_claims_post_id", "x_post_id", "created_at_ms"),
+    Index("ix_x_post_claims_retry_of", "retry_of_claim_id"),
+    Index("ix_x_post_claims_resolved_claim", "resolved_claim_id"),
+    Index("ix_x_post_claims_created_by_login_key", "created_by_login_key"),
+    Index(
+        "ix_x_post_claims_owner_updated",
+        "created_by_login_key",
+        "updated_at_ms",
+        "id",
+    ),
+)
+
+x_assets = Table(
+    "x_assets",
+    metadata,
+    Column("id", Text(), primary_key=True, nullable=False),
+    Column(
+        "claim_id",
+        Text(),
+        ForeignKey("x_post_claims.id", ondelete="RESTRICT",
+                   name="fk_x_assets_claim_id"),
+        nullable=False,
+    ),
+    Column("ordinal", Integer(), nullable=False),
+    Column("media_type", Text(), nullable=False),
+    Column("expected_mime", Text(), nullable=False),
+    Column("source_media_key", Text(), nullable=True),
+    Column("width", Integer(), nullable=True),
+    Column("height", Integer(), nullable=True),
+    Column("duration_seconds", Integer(), nullable=True),
+    Column("selected_variant", Text(), nullable=True),
+    Column("state", Text(), nullable=False),
+    Column("stage_key", Text(), nullable=False),
+    Column("acquired_bytes", Integer(), nullable=True),
+    Column("acquired_sha256", Text(), nullable=True),
+    Column(
+        "media_id",
+        Text(),
+        ForeignKey("logical_media.id", ondelete="RESTRICT",
+                   name="fk_x_assets_media_id"),
+        nullable=True,
+    ),
+    Column(
+        "media_location_id",
+        Text(),
+        ForeignKey("physical_media_locations.id", ondelete="RESTRICT",
+                   name="fk_x_assets_media_location_id"),
+        nullable=True,
+    ),
+    Column("upload_asset_key", Text(), nullable=True),
+    Column("created_at_ms", Integer(), nullable=False),
+    Column("updated_at_ms", Integer(), nullable=False),
+    Column("completed_at_ms", Integer(), nullable=True),
+    Column("failure_stage", Text(), nullable=True),
+    Column("failure_code", Text(), nullable=True),
+    Column("cleanup_state", Text(), nullable=False),
+    Column("cleanup_completed_at_ms", Integer(), nullable=True),
+    Column("version", Integer(), nullable=False),
+    CheckConstraint("length(id) = 36", name="ck_x_assets_id_length"),
+    CheckConstraint("length(claim_id) = 36", name="ck_x_assets_claim_id_length"),
+    CheckConstraint(
+        "ordinal >= 0 AND ordinal <= 3",
+        name="ck_x_assets_ordinal",
+    ),
+    CheckConstraint(
+        "media_type IN ('video', 'animated_gif', 'image')",
+        name="ck_x_assets_media_type",
+    ),
+    CheckConstraint(
+        "length(expected_mime) >= 1 AND length(expected_mime) <= 120",
+        name="ck_x_assets_mime_length",
+    ),
+    CheckConstraint(
+        "width IS NULL OR width >= 0",
+        name="ck_x_assets_width",
+    ),
+    CheckConstraint(
+        "height IS NULL OR height >= 0",
+        name="ck_x_assets_height",
+    ),
+    CheckConstraint(
+        "duration_seconds IS NULL OR duration_seconds <= 300",
+        name="ck_x_assets_duration",
+    ),
+    CheckConstraint(
+        "state IN ('pending', 'extracted', 'acquiring', 'staged', "
+        "'handing_off', 'cataloged', 'failed')",
+        name="ck_x_assets_state",
+    ),
+    CheckConstraint(
+        "length(stage_key) = 32 "
+        "AND stage_key NOT GLOB '*[^0-9a-f]*'",
+        name="ck_x_assets_stage_key",
+    ),
+    CheckConstraint(
+        "acquired_bytes IS NULL OR acquired_bytes > 0",
+        name="ck_x_assets_acquired_bytes",
+    ),
+    CheckConstraint(
+        "acquired_sha256 IS NULL OR ("
+        "length(acquired_sha256) = 64 "
+        "AND acquired_sha256 = lower(acquired_sha256) "
+        "AND acquired_sha256 NOT GLOB '*[^0-9a-f]*')",
+        name="ck_x_assets_sha256",
+    ),
+    CheckConstraint(
+        "completed_at_ms IS NULL OR completed_at_ms >= created_at_ms",
+        name="ck_x_assets_completed_at",
+    ),
+    CheckConstraint(
+        "(failure_stage IS NULL AND failure_code IS NULL) "
+        "OR (failure_stage IS NOT NULL AND failure_code IS NOT NULL)",
+        name="ck_x_assets_failure_pair",
+    ),
+    CheckConstraint(
+        "cleanup_state IN ('pending', 'complete')",
+        name="ck_x_assets_cleanup_state",
+    ),
+    CheckConstraint(
+        "(cleanup_state = 'pending' AND cleanup_completed_at_ms IS NULL) "
+        "OR (cleanup_state = 'complete' AND cleanup_completed_at_ms IS NOT NULL)",
+        name="ck_x_assets_cleanup_pair",
+    ),
+    UniqueConstraint("stage_key", name="uq_x_assets_stage_key"),
+    UniqueConstraint("claim_id", "ordinal", name="uq_x_assets_claim_ordinal"),
+    Index("ix_x_assets_claim_id", "claim_id", "ordinal"),
+    Index("ix_x_assets_state", "state", "updated_at_ms", "id"),
+    Index("ix_x_assets_media", "media_id", "media_location_id"),
+)
+
 media_analysis_runs = Table(
     "media_analysis_runs",
     metadata,
@@ -1336,7 +1621,8 @@ media_catalog_removal_receipts = Table(
     ),
     CheckConstraint(
         "acquisition_source IN ("
-        "'unknown', 'manual_upload', 'library_scan', 'youtube_manual_claim')",
+        "'unknown', 'manual_upload', 'library_scan', 'youtube_manual_claim', "
+        "'x_manual_claim')",
         name="ck_catalog_removal_receipts_acquisition_source",
     ),
     CheckConstraint(

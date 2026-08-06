@@ -33,6 +33,7 @@ class AcquisitionSource(StrEnum):
     MANUAL_UPLOAD = "manual_upload"
     LIBRARY_SCAN = "library_scan"
     YOUTUBE_MANUAL_CLAIM = "youtube_manual_claim"
+    X_MANUAL_CLAIM = "x_manual_claim"
 
 
 class CreatorAttributionKind(StrEnum):
