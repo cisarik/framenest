@@ -21,9 +21,16 @@ Verified upstream TwitterIE contract:
   never passes ``--no-playlist`` (which would discard valid attached assets);
 * photo media is filtered by the extractor (``m['type'] != 'photo'``), so the
   pinned extractor does not emit static still-image entries; photo-only posts
-  surface the typed terminal failure ``X_NO_SUPPORTED_MEDIA``.
+  surface the typed terminal failure ``X_NO_SUPPORTED_MEDIA``;
 * an animated-GIF-like post is delivered as a short MP4 video entry and is
   treated as video unless a GIF marker is present.
+
+First-release production capability: X native video and animated-GIF-as-video
+only. Static X photo acquisition is deferred and NOT part of this adapter's
+real contract, because the pinned extractor does not expose ordinary photo
+entries through the selected contract. The normalized domain model retains the
+``XMediaType.IMAGE`` type for internal/fake-fixture use, but a production
+adapter result never normalizes to it.
 
 The configured command never uses cookies, ``.netrc``, browser-cookie
 extraction, arbitrary plugin/config discovery, or requester-supplied shell
@@ -256,9 +263,6 @@ def _assets_from_single(raw: dict) -> list[XNormalizedAssetDescriptor]:
     width = raw.get("width")
     height = raw.get("height")
     source_media_key = _clean_text(raw.get("id"))
-    if media_type is XMediaType.IMAGE and (width is None or height is None):
-        width = raw.get("thumbnail_width") or raw.get("width") or 0
-        height = raw.get("thumbnail_height") or raw.get("height") or 0
     return [
         XNormalizedAssetDescriptor(
             ordinal=0,
@@ -305,9 +309,12 @@ def _assets_from_entries(entries: list[object]) -> list[XNormalizedAssetDescript
 def _media_type_from_raw(raw: dict) -> XMediaType | None:
     """Classify an entry emitted by the pinned yt-dlp Twitter extractor.
 
-    Real TwitterIE output carries images filtered out; entries are videos with
-    a ``formats`` list and/or ``duration``. A direct still-image entry is a
-    synthetic/plugin contract only and is detected via image extension markers.
+    The production adapter's real capability is video / animated-GIF-as-video
+    only. The pinned TwitterIE filters ``type == 'photo'`` and never emits
+    ordinary static photo entries through this contract. A remaining still-image
+    marker (e.g. ``ext == 'png'``) is therefore not a supported production
+    asset: it returns ``None`` so a photo-only post yields no supported assets
+    and terminates through ``X_NO_SUPPORTED_MEDIA``.
     """
     ext = str(raw.get("ext") or "").lower()
     extname = str(raw.get("_filename") or "").lower()
@@ -320,12 +327,9 @@ def _media_type_from_raw(raw: dict) -> XMediaType | None:
     url = str(raw.get("url") or "")
     if ext == "gif" or extname.endswith(".gif"):
         return XMediaType.ANIMATED_GIF
-    if ext in {"jpg", "jpeg", "png"} or extname.endswith((".jpg", ".jpeg", ".png")):
-        return XMediaType.IMAGE
     if has_formats or has_duration or re.search(r"\.(mp4|m4v|mov|webm|m3u8)(\?|$)", url):
         return XMediaType.VIDEO
-    if raw.get("vcodec") is None and raw.get("width") is not None and not has_formats:
-        return XMediaType.IMAGE
+    # Static photo markers are not a first-release production X capability.
     return None
 
 

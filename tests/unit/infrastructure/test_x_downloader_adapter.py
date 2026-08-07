@@ -211,7 +211,11 @@ def test_inspect_single_animated_gif_marker(tmp_path: Path) -> None:
     assert inspection.assets[0].media_type is XMediaType.ANIMATED_GIF
 
 
-def test_inspect_single_image_marker(tmp_path: Path) -> None:
+def test_photo_only_post_terminates_as_no_supported_media(tmp_path: Path) -> None:
+    # The pinned yt-dlp TwitterIE filters photo media and does not emit ordinary
+    # static-photo entries, so the production adapter must refuse photo-only
+    # posts through the existing sanitized unsupported/no-media path rather than
+    # advertising static-image acquisition.
     payload = {
         "id": "9999999999999999999",
         "description": "A photo",
@@ -226,11 +230,47 @@ def test_inspect_single_image_marker(tmp_path: Path) -> None:
     }
     exe = _write_fake_executable(tmp_path / "fake_x", stdout_json=json.dumps(payload))
     extractor = YtDlpXExtractor(executable=str(exe))
+    with pytest.raises(XExtractionError) as ctx:
+        extractor.inspect(
+            post_id="123456789", submitted_url="https://x.com/a/status/123456789"
+        )
+    assert ctx.value.code == "X_NO_SUPPORTED_MEDIA"
+
+
+def test_adapter_asset_classification_is_video_animated_video_only(tmp_path: Path) -> None:
+    # Adapter source-contract proof: the production adapter normalizes only
+    # video and animated-GIF-as-video entries; it never declares a supported
+    # static-photo asset (deferred until a conforming extractor strategy).
+    payload = json.loads(_video_json())
+    payload["entries"] = [
+        {
+            "id": "2222222",
+            "ext": "mp4",
+            "formats": [{"url": "https://video.twimg.com/x/720.mp4"}],
+            "duration": 2,
+        },
+        {
+            "id": "3333333",
+            "ext": "gif",
+            "display_id": "123456789",
+        },
+        {
+            "id": "4444444",
+            "ext": "png",
+            "width": 100,
+            "height": 100,
+        },
+    ]
+    exe = _write_fake_executable(tmp_path / "fake_x", stdout_json=json.dumps(payload))
+    extractor = YtDlpXExtractor(executable=str(exe))
     inspection = extractor.inspect(
         post_id="123456789", submitted_url="https://x.com/a/status/123456789"
     )
-    assert inspection.assets[0].media_type is XMediaType.IMAGE
-    assert inspection.assets[0].expected_mime == "image/jpeg"
+    assert [a.media_type for a in inspection.assets] == [
+        XMediaType.VIDEO,
+        XMediaType.ANIMATED_GIF,
+    ]
+    assert all(a.media_type is not XMediaType.IMAGE for a in inspection.assets)
 
 
 def test_inspect_absent_optional_fields_are_nullable(tmp_path: Path) -> None:

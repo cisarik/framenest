@@ -6,6 +6,11 @@ can progress to cataloged media. Identity is injected from an optional
 ``X-Test-Identity`` header (default ``alice`` = ordinary requester) so the
 requester cockpit, privacy and admin scenarios can be driven from one browser.
 
+The included still-image asset is a SYNTHETIC normalized-image application-path
+fixture (exercising FrameNest's generic image lifecycle/category/handoff), NOT
+evidence that the real pinned ``yt-dlp`` TwitterIE adapter acquires X still
+photos — that capability is intentionally deferred.
+
 Usage:
     python x_browser_server.py <db> <fixtures> <staging> <quarantine> <publish> <port>
 
