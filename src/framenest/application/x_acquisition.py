@@ -156,6 +156,7 @@ class XClaimSnapshot:
     created_at_ms: int
     updated_at_ms: int
     completed_at_ms: int | None
+    can_retry: bool = False
     assets: tuple[XAssetSnapshot, ...] = ()
 
 
@@ -1039,8 +1040,30 @@ def _administration_snapshot(
         created_at_ms=claim.created_at_ms,
         updated_at_ms=claim.updated_at_ms,
         completed_at_ms=claim.completed_at_ms,
+        can_retry=_retry_eligible(claim, assets),
         assets=tuple(_asset_snapshot(a) for a in assets),
     )
+
+
+def _retry_eligible(
+    claim: XPostClaim, assets: tuple[XAsset, ...]
+) -> bool:
+    """Requester retry truth derived from durable claim/asset state.
+
+    Mirrors XAcquisitionRequestService.retry eligibility: a claim is retryable
+    only when its terminal state is retryable and a failed/incomplete asset (or,
+    for a FAILED claim, an absent discovery) remains to be re-acquired.
+    Successful cataloged assets are never the basis for retry.
+    """
+    if claim.state is XAcquisitionState.COMPLETED_PARTIAL:
+        if claim.failure_count <= 0:
+            return False
+        return any(_asset_retryable(a) for a in assets)
+    if claim.state is XAcquisitionState.FAILED:
+        if not assets:
+            return True
+        return any(_asset_retryable(a) for a in assets)
+    return False
 
 
 def _requester_snapshot(

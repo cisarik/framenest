@@ -66,8 +66,15 @@ test("phase and asset status projection present", () => {
 
 test("retry is gated and partial-success is presentable", () => {
   assert.match(APP_SOURCE, /retryXRequest\(/);
-  assert.match(APP_SOURCE, /completed_partial/);
+  assert.match(APP_SOURCE, /x-asset-list/);
   assert.match(APP_SOURCE, /encodeURIComponent\(requestId\)\}\/retry/);
+  assert.match(APP_SOURCE, /if \(item\.can_retry\)/);
+});
+
+test("requester retry is gated on explicit backend can_retry projection", () => {
+  assert.match(APP_SOURCE, /if \(item\.can_retry\)/);
+  assert.match(APP_SOURCE, /retryXRequest\(item\.request_id\)/);
+  assert.doesNotMatch(APP_SOURCE, /completed_partial && item\.failure_code/);
 });
 
 test("styles cover requester and admin X surfaces", () => {

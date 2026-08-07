@@ -11682,7 +11682,7 @@ function renderXRequestCockpit() {
     }
     const actions = document.createElement("div");
     actions.className = "youtube-request-actions";
-    if (item.phase === "failed" || (item.state === "completed_partial" && item.failure_code)) {
+    if (item.can_retry) {
       const retry = document.createElement("button");
       retry.type = "button";
       retry.className = "youtube-request-action";

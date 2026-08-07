@@ -8,10 +8,13 @@ import types
 import pytest
 from sqlalchemy import create_engine, text
 
+from framenest.application.ports.x_extractor import XExtractionError
 from framenest.application.x_acquisition import (
     XAcquisitionAdministrationService,
     XAcquisitionCoordinator,
+    XAcquisitionNotFoundError,
     XAcquisitionRequestService,
+    XAcquisitionStateConflictError,
     XRequestLimitError,
     XRequestLimits,
 )
@@ -19,6 +22,7 @@ from framenest.domain.identities import MediaId, MediaLocationId
 from framenest.domain.uploads import UploadSessionState
 from framenest.domain.x_acquisition import (
     XAcquisitionState,
+    XAssetState,
     XMediaType,
     XNormalizedAssetDescriptor,
     XPostClaimId,
@@ -271,3 +275,99 @@ def test_admin_review_exposes_result(lifecycle) -> None:
     assert snapshot.success_count == 2
     assert snapshot.source_author_handle == "author"
     assert snapshot.state == "completed"
+
+
+def _partial_fixture(extractor):
+    """Deterministically fail asset ordinal 0 while asset 1 succeeds."""
+    from framenest.application.ports.x_extractor import XExtractionError as _E
+
+    original_download = extractor.download
+
+    def failing_download(*, ordinal, **kwargs):
+        if ordinal == 0:
+            raise _E("X_DOWNLOAD_TIMEOUT", "simulated asset failure")
+        return original_download(ordinal=ordinal, **kwargs)
+
+    extractor.assets = [
+        XNormalizedAssetDescriptor(
+            ordinal=0, media_type=XMediaType.VIDEO, expected_mime="video/mp4",
+            source_media_key="asset-0", width=320, height=180, duration_seconds=12,
+        ),
+        XNormalizedAssetDescriptor(
+            ordinal=1, media_type=XMediaType.IMAGE, expected_mime="image/jpeg",
+            source_media_key="asset-1", width=800, height=600,
+        ),
+    ]
+    extractor.download = failing_download
+
+
+def test_completed_partial_retry_is_visible_and_touches_only_failed_asset(lifecycle) -> None:
+    repo, service, admin, coordinator, extractor, media_id = lifecycle
+    _partial_fixture(extractor)
+    result = service.submit(URL, login_key="alice")
+    claim = _run(_drain_until_terminal(coordinator, repo, result.request_id))
+    assert claim.state is XAcquisitionState.COMPLETED_PARTIAL
+
+    snapshot = service.get_owned(claim.id, login_key="alice")
+    assert snapshot.can_retry is True
+
+    before = {a.ordinal: a for a in repo.list_assets_for_post(claim.id)}
+    assert before[0].state is XAssetState.FAILED
+    assert before[1].state is XAssetState.CATALOGED
+    successful_media_id = before[1].media_id
+
+    service.retry(claim.id, login_key="alice")
+
+    after = {a.ordinal: a for a in repo.list_assets_for_post(claim.id)}
+    # Only the failed/incomplete asset is reset for re-acquisition.
+    assert after[0].state is XAssetState.PENDING
+    # The successful cataloged asset is preserved, bytes and linkage intact.
+    assert after[1].state is XAssetState.CATALOGED
+    assert after[1].media_id == successful_media_id
+
+
+def test_completed_successful_claim_has_no_retry(lifecycle) -> None:
+    repo, service, admin, coordinator, extractor, media_id = lifecycle
+    result = service.submit(URL, login_key="alice")
+    claim = _run(_drain_until_terminal(coordinator, repo, result.request_id))
+    assert claim.state is XAcquisitionState.COMPLETED
+    snapshot = service.get_owned(claim.id, login_key="alice")
+    assert snapshot.can_retry is False
+
+
+def test_failed_claim_retry_is_visible(lifecycle) -> None:
+    repo, service, admin, coordinator, extractor, media_id = lifecycle
+    extractor.assets = [
+        XNormalizedAssetDescriptor(
+            ordinal=0, media_type=XMediaType.VIDEO, expected_mime="video/mp4",
+            source_media_key="asset-0", width=320, height=180, duration_seconds=12,
+        ),
+    ]
+    def failing_download(*, ordinal, **kwargs):
+        raise XExtractionError("X_DOWNLOAD_TIMEOUT", "simulated asset failure")
+
+    extractor.download = failing_download
+    result = service.submit(URL, login_key="alice")
+    claim = _run(_drain_until_terminal(coordinator, repo, result.request_id))
+    assert claim.state is XAcquisitionState.FAILED
+    snapshot = service.get_owned(claim.id, login_key="alice")
+    assert snapshot.can_retry is True
+
+
+def test_foreign_requester_cannot_retry_owning_claim(lifecycle) -> None:
+    repo, service, admin, coordinator, extractor, media_id = lifecycle
+    _partial_fixture(extractor)
+    result = service.submit(URL, login_key="alice")
+    claim = _run(_drain_until_terminal(coordinator, repo, result.request_id))
+    assert claim.state is XAcquisitionState.COMPLETED_PARTIAL
+    with pytest.raises(XAcquisitionNotFoundError):
+        service.retry(claim.id, login_key="bob")
+
+
+def test_non_retryable_terminal_claim_cannot_retry(lifecycle) -> None:
+    repo, service, admin, coordinator, extractor, media_id = lifecycle
+    result = service.submit(URL, login_key="alice")
+    claim = _run(_drain_until_terminal(coordinator, repo, result.request_id))
+    assert claim.state is XAcquisitionState.COMPLETED
+    with pytest.raises(XAcquisitionStateConflictError):
+        service.retry(claim.id, login_key="alice")

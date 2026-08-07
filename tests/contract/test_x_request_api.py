@@ -100,3 +100,48 @@ def test_missing_identity_fails_closed() -> None:
         "/api/x/requests", json={"url": "https://x.com/a/status/123"}
     )
     assert response.status_code == 401
+
+
+def test_invalid_url_maps_to_sanitized_422() -> None:
+    from framenest.domain.x_acquisition import FrameNestXUrlError
+
+    class _InvalidService:
+        def submit(self, url: str, login_key: str):
+            raise FrameNestXUrlError("Invalid public X post URL.")
+
+    client = TestClient(_app(_InvalidService()))
+    for hostile in [
+        "http://x.com/a/status/1",
+        "https://x.com.attacker.example/a/status/1",
+        "https://evil.com/a/status/1",
+        "https://x.com/a/status/abc",
+        "https://x.com/a/status/1/photo/2",
+        "https://x.com/a/status/1?a=1",
+        "https://x.com/a/status/1#frag",
+        "https://x.com:8443/a/status/1",
+        "https://user:pass@x.com/a/status/1",
+        "not a url",
+    ]:
+        response = client.post(
+            "/api/x/requests", json={"url": hostile}
+        )
+        assert response.status_code == 422, hostile
+        body = response.json()
+        assert body["error"]["code"] == "X_REQUEST_INVALID_URL", hostile
+        assert "Invalid" in body["error"]["message"]
+
+
+def test_unexpected_internal_exception_is_not_mislabeled_422() -> None:
+    class _BoomService:
+        def submit(self, url: str, login_key: str):
+            raise RuntimeError("unexpected internal failure")
+
+    # raise_server_exceptions=False lets a genuine internal failure surface as
+    # an HTTP 500 response (instead of re-raising in the test client).
+    client = TestClient(_app(_BoomService()), raise_server_exceptions=False)
+    response = client.post(
+        "/api/x/requests", json={"url": "https://x.com/a/status/1"}
+    )
+    # An unexpected internal exception must remain an internal failure, not be
+    # folded into the requester-invalid 422 contract.
+    assert response.status_code == 500

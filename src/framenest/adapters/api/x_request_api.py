@@ -28,7 +28,7 @@ from framenest.domain.security_audit import (
     AUDIT_OUTCOME_ALLOWED,
     SecurityAuditEvent,
 )
-from framenest.domain.x_acquisition import XPostClaimId
+from framenest.domain.x_acquisition import FrameNestXUrlError, XPostClaimId
 from framenest.structured_logging import get_logger
 
 X_REQUEST_NOT_CONFIGURED = "X_REQUEST_NOT_CONFIGURED"
@@ -121,8 +121,8 @@ def create_x_request_api_router(
             return _error(X_REQUEST_NOT_CONFIGURED, "X acquisition is unavailable.", 503)
         try:
             result = dependencies.service.submit(body.url, login_key=identity.login_key)
-        except XAcquisitionInvalidRequestError as exc:
-            return _map_error(exc, X_REQUEST_INVALID_URL, "Invalid X post URL.", 422)
+        except (XAcquisitionInvalidRequestError, FrameNestXUrlError):
+            return _error(X_REQUEST_INVALID_URL, "Invalid X post URL.", 422)
         except XRequestLimitError as exc:
             return _error(_code_for_limit(exc.code), str(exc), 429)
         except XRequestInsufficientStorageError as exc:
@@ -292,6 +292,7 @@ def _item_dict(claim: object) -> dict:
         "title": claim.title,
         "failure_code": claim.failure_code,
         "retry_of_request_id": claim.retry_of_claim_id,
+        "can_retry": bool(getattr(claim, "can_retry", False)),
         "created_at_ms": claim.created_at_ms,
         "updated_at_ms": claim.updated_at_ms,
         "assets": [
