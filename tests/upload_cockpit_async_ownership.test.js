@@ -1734,8 +1734,11 @@ test("Metadata current save owns its request, response, baseline, and one post-s
     description: "Unsaved description",
     tag_keys: ["persisted", "unsaved"],
     content_category: "general",
-    acquisition_source: "unknown",
     genres: [],
+    creator_attribution_kind: null,
+    creator_stable_id: null,
+    creator_handle: null,
+    creator_display_name: null,
   });
   assert.equal(metadataStateOf(h).saving, true);
 
@@ -3028,8 +3031,11 @@ test("Loaded durable suggestion remains editable and Save uses metadata PUT only
     description: "Durable AI description",
     tag_keys: [],
     content_category: "general",
-    acquisition_source: "unknown",
     genres: [],
+    creator_attribution_kind: null,
+    creator_stable_id: null,
+    creator_handle: null,
+    creator_display_name: null,
   });
   assert.equal(h.fetchController.matching("POST", metadataAiEndpoint()).length, 0);
   assert.equal(JSON.parse(puts[0].options.body).suggested_filename, undefined);
@@ -3267,8 +3273,11 @@ test("Suggested filename is display-only and excluded from metadata Save", async
   assert.equal(body.suggested_filename, undefined);
   assert.equal(body.collection, undefined);
   assert.deepEqual(Object.keys(body).sort(), [
-    "acquisition_source",
     "content_category",
+    "creator_attribution_kind",
+    "creator_display_name",
+    "creator_handle",
+    "creator_stable_id",
     "description",
     "display_title",
     "genres",

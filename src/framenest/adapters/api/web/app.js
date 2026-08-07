@@ -372,13 +372,13 @@ function applyIdentityCapabilities() {
   if (typeof youtubeRequestOpenButton !== "undefined" && youtubeRequestOpenButton) {
     youtubeRequestOpenButton.hidden = !youtubeRequestAllowed;
   }
-  const xReqBtn = document.querySelector("#x-request-open-button");
-  if (xReqBtn) {
-    xReqBtn.hidden = !(typeof identityAllowsXRequest === "function" && identityAllowsXRequest());
+  const xReqAllowed = typeof identityAllowsXRequest === "function" && identityAllowsXRequest();
+  if (typeof xRequestOpenButton !== "undefined" && xRequestOpenButton) {
+    xRequestOpenButton.hidden = !xReqAllowed;
   }
-  const xAdminBtn = document.querySelector("#x-admin-open-button");
-  if (xAdminBtn) {
-    xAdminBtn.hidden = !(typeof identityAllowsXAdmin === "function" && identityAllowsXAdmin());
+  const xAdminAllowed = typeof identityAllowsXAdmin === "function" && identityAllowsXAdmin();
+  if (typeof xAdminOpenButton !== "undefined" && xAdminOpenButton) {
+    xAdminOpenButton.hidden = !xAdminAllowed;
   }
   if (
     !youtubeClaimAllowed
@@ -11695,11 +11695,15 @@ function renderXRequestCockpit() {
   }
 }
 
-function openPrivateDetails(mediaId) {
-  if (mediaId && typeof openDetails === "function") {
-    openDetails(mediaId);
-    if (xRequestDialog && typeof xRequestDialog.close === "function") xRequestDialog.close();
-  } else if (mediaId) {
+function openPrivateDetails(mediaId, openerElement) {
+  if (!mediaId) return;
+  if (xRequestDialog && typeof xRequestDialog.close === "function") {
+    xRequestDialog.close();
+  }
+  if (typeof openDetailsDialog === "function") {
+    const element = openerElement || document.activeElement;
+    openDetailsDialog({ media_id: mediaId }, element, { playWhenReady: false });
+  } else {
     window.location.hash = `#/details/${encodeURIComponent(mediaId)}`;
   }
 }
