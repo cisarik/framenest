@@ -503,7 +503,7 @@ class SqliteXAcquisitionClaimRepository:
                 )
                 .values(_post_values(claim))
             )
-            return self.get_post(claim.id)
+            return claim
 
         try:
             return run_in_transaction(self._engine, operation)
@@ -587,7 +587,7 @@ class SqliteXAcquisitionClaimRepository:
                 )
                 .values(_asset_values(asset))
             )
-            return self.get_asset(asset.id)
+            return asset
 
         try:
             return run_in_transaction(self._engine, operation)

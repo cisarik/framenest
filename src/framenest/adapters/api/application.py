@@ -830,8 +830,7 @@ def create_app(
 
     # ------------------------------------------------------------------ X
     if (
-        x_extractor is None
-        and resolved_settings.x_acquisition_root is not None
+        resolved_settings.x_acquisition_root is not None
         and owned_upload_validation_coordinator is not None
         and owned_upload_publication_coordinator is not None
         and owned_x_claim_repository is not None

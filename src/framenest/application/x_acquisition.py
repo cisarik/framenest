@@ -336,25 +336,33 @@ class XAcquisitionRequestService:
             )
         assets = self._repository.list_assets_for_post(claim.id)
         retryable = [a for a in assets if _asset_retryable(a)]
+        # No discovered assets means extraction itself failed: re-extract.
+        if not assets and claim.state is XAcquisitionState.FAILED:
+            queued = claim.advance(
+                XAcquisitionState.QUEUED, updated_at_ms=self._now_ms(),
+                completed_at_ms=None, failure_stage=None, failure_code=None,
+            )
+            self._save_claim(claim, queued)
+            return _requester_snapshot(queued, self._repository)
         if not retryable:
-            if claim.state is XAcquisitionState.FAILED:
-                queued = claim.advance(
-                    XAcquisitionState.QUEUED, updated_at_ms=self._now_ms()
-                )
-                self._save_claim(claim, queued)
-                return _requester_snapshot(queued, self._repository)
             raise XAcquisitionStateConflictError(
                 "X claim has no retryable assets."
             )
-        # Reset retryable assets to pending for re-acquisition.
+        # Reset retryable assets to pending for re-acquisition. Successful
+        # cataloged assets are preserved and never re-downloaded.
         for asset in retryable:
             reset = asset.advance(
                 XAssetState.PENDING, updated_at_ms=self._now_ms(),
                 failure_stage=None, failure_code=None,
             )
             self._save_asset(asset, reset)
-        queued = claim.advance(XAcquisitionState.QUEUED, updated_at_ms=self._now_ms())
-        updated = self._save_claim(claim, queued)
+        # Resume acquisition directly so existing assets are not re-extracted
+        # and successful cataloged assets are not duplicated.
+        resumed = claim.advance(
+            XAcquisitionState.ACQUIRING, updated_at_ms=self._now_ms(),
+            completed_at_ms=None, failure_stage=None, failure_code=None,
+        )
+        updated = self._save_claim(claim, resumed)
         return _requester_snapshot(updated, self._repository)
 
     def _enforce_admission_limits(self, requester: str) -> None:

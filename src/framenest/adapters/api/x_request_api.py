@@ -132,9 +132,13 @@ def create_x_request_api_router(
         _record_result_classification(
             dependencies, request, "x.request.submit", "allowed", result.submission_result
         )
+        claim = dependencies.service.get_owned(
+            XPostClaimId.from_string(result.request_id),
+            login_key=identity.login_key,
+        )
         return JSONResponse(
             status_code=200,
-            content=_item_dict(result),
+            content=_item_dict(claim),
             headers=_NO_STORE_HEADERS,
         )
 
@@ -278,7 +282,8 @@ def _error(code: str, message: str, status: int) -> JSONResponse:
 
 def _item_dict(claim: object) -> dict:
     return {
-        "request_id": claim.request_id,
+        "request_id": claim.claim_id,
+        "claim_id": claim.claim_id,
         "phase": claim.phase,
         "state": claim.state,
         "x_post_id": claim.x_post_id,

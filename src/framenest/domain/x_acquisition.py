@@ -183,12 +183,15 @@ _ALLOWED_POST_TRANSITIONS: dict[
     ),
     XAcquisitionState.COMPLETED: frozenset({XAcquisitionState.CATALOG_REMOVED}),
     XAcquisitionState.COMPLETED_PARTIAL: frozenset(
-        {XAcquisitionState.CATALOG_REMOVED}
+        {XAcquisitionState.CATALOG_REMOVED, XAcquisitionState.QUEUED,
+         XAcquisitionState.ACQUIRING}
     ),
     XAcquisitionState.DUPLICATE_RESOLVED: frozenset(
         {XAcquisitionState.CATALOG_REMOVED}
     ),
-    XAcquisitionState.FAILED: frozenset(),
+    XAcquisitionState.FAILED: frozenset(
+        {XAcquisitionState.QUEUED, XAcquisitionState.ACQUIRING}
+    ),
     XAcquisitionState.CATALOG_REMOVED: frozenset(),
 }
 
@@ -201,7 +204,8 @@ _ALLOWED_ASSET_TRANSITIONS: dict[XAssetState, frozenset[XAssetState]] = {
         {XAssetState.CATALOGED, XAssetState.FAILED}
     ),
     XAssetState.CATALOGED: frozenset(),
-    XAssetState.FAILED: frozenset(),
+    # Retry: an eligible failed asset is deliberately reset to pending.
+    XAssetState.FAILED: frozenset({XAssetState.PENDING}),
 }
 
 ACTIVE_X_ASSET_STATES = frozenset(
