@@ -17,6 +17,7 @@ from framenest.application.ports.media_metadata_repository import (
     CanonicalTagNotFoundError,
     FrameNestMediaMetadataRepositoryError,
     MediaMetadataMediaNotFoundError,
+    SourceDerivedMetadataImmutableError,
 )
 from framenest.configuration import FrameNestSettings
 from framenest.domain.media_metadata import (
@@ -95,20 +96,28 @@ class _FakeSaveMetadata:
         description: str | None,
         tag_keys: list[str],
         *,
-        content_category: str = "general",
+        content_category: str | None | object = "general",
         acquisition_source: str | None = None,
         genres: list[str] | None = None,
-        creator_attribution_kind: str | None = None,
-        creator_stable_id: str | None = None,
-        creator_handle: str | None = None,
-        creator_display_name: str | None = None,
+        creator_attribution_kind: str | None | object = None,
+        creator_stable_id: str | None | object = None,
+        creator_handle: str | None | object = None,
+        creator_display_name: str | None | object = None,
     ) -> object:
+        from framenest.application.ports.media_metadata_repository import OMITTED
+
         self.last_display_title = display_title
         self.last_description = description
         self.last_tag_keys = tag_keys
         if self.error is not None:
             raise self.error
         has_tags = len(tag_keys) > 0
+        if content_category is OMITTED:
+            content_category = "general"
+        creator_attribution_kind = None if creator_attribution_kind is OMITTED else creator_attribution_kind
+        creator_stable_id = None if creator_stable_id is OMITTED else creator_stable_id
+        creator_handle = None if creator_handle is OMITTED else creator_handle
+        creator_display_name = None if creator_display_name is OMITTED else creator_display_name
         metadata = MediaMetadataView(
             persisted=True,
             display_title=display_title,
@@ -278,6 +287,16 @@ def test_malformed_requests_return_422(body: dict[str, object]) -> None:
     else:
         response = client.put(f"/api/media/{MEDIA_ID}/metadata", json=body)
     assert response.status_code == 422
+
+
+def test_source_derived_immutability_is_sanitized_409() -> None:
+    immutable = _client(
+        save_metadata=_FakeSaveMetadata(error=SourceDerivedMetadataImmutableError(UNDERLYING_EXCEPTION_TEXT))
+    ).put(f"/api/media/{MEDIA_ID}/metadata", json={"display_title": None, "description": None, "tag_keys": []})
+
+    assert immutable.status_code == 409
+    assert immutable.json()["error"]["code"] == "SOURCE_DERIVED_IMMUTABLE"
+    assert UNDERLYING_EXCEPTION_TEXT not in immutable.text
 
 
 def test_unexpected_failures_are_sanitized() -> None:

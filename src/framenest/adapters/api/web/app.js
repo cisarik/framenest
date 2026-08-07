@@ -9702,6 +9702,8 @@ function syncClassificationControlsFromWorkspace() {
   const identifyButton = document.querySelector("#metadata-movie-identify-button");
   if (categorySelect) {
     categorySelect.value = metadataWorkspace.current.contentCategory || "general";
+    const xAcquired = metadataWorkspace.current.acquisitionSource === "x_manual_claim";
+    categorySelect.disabled = xAcquired;
   }
   if (sourceSelect) {
     sourceSelect.value = metadataWorkspace.current.acquisitionSource || "unknown";

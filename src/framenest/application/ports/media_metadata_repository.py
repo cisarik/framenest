@@ -41,6 +41,22 @@ class AcquisitionSourceImmutableError(RuntimeError):
     """Raised when metadata Save attempts to change acquisition provenance."""
 
 
+class SourceDerivedMetadataImmutableError(RuntimeError):
+    """Raised when metadata Save attempts to change X source-derived values."""
+
+
+class _Omitted:
+    """Marker distinguishing an omitted protected field from an explicit clear."""
+
+    __slots__ = ()
+
+    def __repr__(self) -> str:
+        return "OMITTED"
+
+
+OMITTED = _Omitted()
+
+
 class FrameNestMediaMetadataRepositoryError(RuntimeError):
     """Sanitized error raised when media metadata persistence fails."""
 
@@ -111,17 +127,22 @@ class MediaMetadataRepository(Protocol):
         tag_keys: tuple[CanonicalTagKey, ...],
         now_ms: int,
         *,
-        content_category: ContentCategory = DEFAULT_CONTENT_CATEGORY,
+        content_category: ContentCategory | None | object = OMITTED,
         acquisition_source: AcquisitionSource | None = None,
         genre_keys: tuple[MovieGenre, ...] = (),
-        creator_attribution_kind: CreatorAttributionKind | None = None,
-        creator_stable_id: str | None = None,
-        creator_handle: str | None = None,
-        creator_display_name: str | None = None,
+        creator_attribution_kind: CreatorAttributionKind | None | object = OMITTED,
+        creator_stable_id: str | None | object = OMITTED,
+        creator_handle: str | None | object = OMITTED,
+        creator_display_name: str | None | object = OMITTED,
     ) -> MediaMetadataSaveResult:
         """Persist a complete metadata replacement atomically, deriving collection state from tag list.
 
         When ``acquisition_source`` is ``None``, the existing stored provenance is
         preserved. A provided value equal to the stored value is accepted. A
         different provided value raises ``AcquisitionSourceImmutableError``.
+
+        For X source-derived values (``x_manual_claim``), ``OMITTED`` preserves
+        the existing value, an identical value is a compatible no-op, a
+        different value raises ``SourceDerivedMetadataImmutableError``, and an
+        explicit clear (``None`` over a present value) is rejected.
         """

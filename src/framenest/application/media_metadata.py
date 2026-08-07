@@ -7,12 +7,14 @@ import time
 from typing import Literal, Protocol
 
 from framenest.application.ports.media_metadata_repository import (
+    OMITTED,
     AcquisitionSourceImmutableError,
     CanonicalTagCreateResult,
     CanonicalTagNotFoundError,
     MediaMetadataRepository,
     MediaMetadataSaveResult,
     MediaMetadataSnapshot,
+    SourceDerivedMetadataImmutableError,
 )
 from framenest.domain import MediaId
 from framenest.domain.media_classification import (
@@ -37,6 +39,9 @@ from framenest.domain.media_metadata import (
 MEDIA_METADATA_OPERATION_FAILED_MESSAGE = "Media metadata operation failed."
 ACQUISITION_SOURCE_IMMUTABLE_MESSAGE = (
     "Acquisition source is immutable provenance and cannot be changed."
+)
+SOURCE_DERIVED_IMMUTABLE_MESSAGE = (
+    "X source-derived values are immutable provenance and cannot be changed."
 )
 
 
@@ -143,39 +148,59 @@ class SaveMediaMetadata:
         description: str | None,
         tag_keys: list[str],
         *,
-        content_category: str = DEFAULT_CONTENT_CATEGORY.value,
+        content_category: str | None | object = OMITTED,
         acquisition_source: str | None = None,
         genres: list[str] | None = None,
-        creator_attribution_kind: str | None = None,
-        creator_stable_id: str | None = None,
-        creator_handle: str | None = None,
-        creator_display_name: str | None = None,
+        creator_attribution_kind: str | None | object = OMITTED,
+        creator_stable_id: str | None | object = OMITTED,
+        creator_handle: str | None | object = OMITTED,
+        creator_display_name: str | None | object = OMITTED,
     ) -> SaveMediaMetadataResult:
         parsed_keys = tuple(CanonicalTagKey(key) for key in tag_keys)
         if len(parsed_keys) != len(set(parsed_keys)):
             raise ValueError(MEDIA_METADATA_OPERATION_FAILED_MESSAGE)
         parsed_title = None if display_title is None else MediaDisplayTitle(display_title)
         parsed_description = _normalize_description(description)
-        parsed_category = ContentCategory(content_category)
+        if content_category is OMITTED:
+            parsed_category = OMITTED
+        elif content_category is None:
+            parsed_category = None
+        else:
+            parsed_category = ContentCategory(content_category)
         parsed_source = None
         if acquisition_source is not None:
             parsed_source = AcquisitionSource(acquisition_source)
         parsed_genres = _parse_genres(genres or [])
-        parsed_genres = normalize_genres_for_category(parsed_category, parsed_genres)
-        parsed_creator_kind = None
-        if creator_attribution_kind is not None:
-            parsed_creator_kind = CreatorAttributionKind(creator_attribution_kind)
-        (
-            parsed_creator_kind,
-            parsed_stable_id,
-            parsed_handle,
-            parsed_display_name,
-        ) = validate_creator_attribution_fields(
-            parsed_creator_kind,
+        if parsed_category not in (None, OMITTED):
+            parsed_genres = normalize_genres_for_category(parsed_category, parsed_genres)
+        creator_fields = (
+            creator_attribution_kind,
             creator_stable_id,
             creator_handle,
             creator_display_name,
         )
+        if all(field is OMITTED for field in creator_fields):
+            parsed_creator_kind = OMITTED
+            parsed_stable_id = OMITTED
+            parsed_handle = OMITTED
+            parsed_display_name = OMITTED
+        else:
+            parsed_kind = (
+                None
+                if creator_attribution_kind is OMITTED or creator_attribution_kind is None
+                else CreatorAttributionKind(creator_attribution_kind)
+            )
+            (
+                parsed_creator_kind,
+                parsed_stable_id,
+                parsed_handle,
+                parsed_display_name,
+            ) = validate_creator_attribution_fields(
+                parsed_kind,
+                None if creator_stable_id is OMITTED else creator_stable_id,
+                None if creator_handle is OMITTED else creator_handle,
+                None if creator_display_name is OMITTED else creator_display_name,
+            )
         result = self._repository.save_media_metadata(
             MediaId.from_string(media_id),
             parsed_title,
@@ -280,6 +305,9 @@ __all__ = [
     "ListCanonicalTags",
     "MEDIA_METADATA_OPERATION_FAILED_MESSAGE",
     "MediaMetadataView",
+    "OMITTED",
     "SaveMediaMetadata",
     "SaveMediaMetadataResult",
+    "SOURCE_DERIVED_IMMUTABLE_MESSAGE",
+    "SourceDerivedMetadataImmutableError",
 ]

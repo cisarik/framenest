@@ -10,11 +10,13 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, UUID4, field_validator
 
 from framenest.application.ports.media_metadata_repository import (
+    OMITTED,
     AcquisitionSourceImmutableError,
     CanonicalTagDefinitionConflictError,
     CanonicalTagNotFoundError,
     FrameNestMediaMetadataRepositoryError,
     MediaMetadataMediaNotFoundError,
+    SourceDerivedMetadataImmutableError,
 )
 from framenest.adapters.api.content_audience_api import (
     ContentAudienceUnavailableError,
@@ -50,6 +52,10 @@ MEDIA_METADATA_OPERATION_FAILED_MESSAGE = "Media metadata operation failed."
 ACQUISITION_SOURCE_IMMUTABLE_CODE = "ACQUISITION_SOURCE_IMMUTABLE"
 ACQUISITION_SOURCE_IMMUTABLE_MESSAGE = (
     "Acquisition source is immutable provenance and cannot be changed."
+)
+SOURCE_DERIVED_IMMUTABLE_CODE = "SOURCE_DERIVED_IMMUTABLE"
+SOURCE_DERIVED_IMMUTABLE_MESSAGE = (
+    "X source-derived values are immutable provenance and cannot be changed."
 )
 
 
@@ -114,13 +120,13 @@ class MediaMetadataSaveRequest(BaseModel):
     display_title: str | None
     description: str | None
     tag_keys: list[str]
-    content_category: str = "general"
+    content_category: str | None | object = OMITTED
     acquisition_source: str | None = None
     genres: list[str] = []
-    creator_attribution_kind: str | None = None
-    creator_stable_id: str | None = None
-    creator_handle: str | None = None
-    creator_display_name: str | None = None
+    creator_attribution_kind: str | None | object = OMITTED
+    creator_stable_id: str | None | object = OMITTED
+    creator_handle: str | None | object = OMITTED
+    creator_display_name: str | None | object = OMITTED
 
     @field_validator("display_title")
     @classmethod
@@ -151,7 +157,9 @@ class MediaMetadataSaveRequest(BaseModel):
 
     @field_validator("content_category")
     @classmethod
-    def validate_content_category(cls, value: str) -> str:
+    def validate_content_category(cls, value: str | None | object) -> str | None | object:
+        if value is OMITTED or value is None:
+            return value
         from framenest.domain.media_classification import ContentCategory
 
         return ContentCategory(value).value
@@ -174,24 +182,30 @@ class MediaMetadataSaveRequest(BaseModel):
 
     @field_validator("creator_attribution_kind")
     @classmethod
-    def validate_creator_attribution_kind(cls, value: str | None) -> str | None:
-        if value is None:
-            return None
+    def validate_creator_attribution_kind(cls, value: str | None | object) -> str | None | object:
+        if value is OMITTED or value is None:
+            return value
         return CreatorAttributionKind(value).value
 
     @field_validator("creator_stable_id")
     @classmethod
-    def validate_creator_stable_id(cls, value: str | None) -> str | None:
+    def validate_creator_stable_id(cls, value: str | None | object) -> str | None | object:
+        if value is OMITTED:
+            return value
         return normalize_creator_stable_id(value)
 
     @field_validator("creator_handle")
     @classmethod
-    def validate_creator_handle(cls, value: str | None) -> str | None:
+    def validate_creator_handle(cls, value: str | None | object) -> str | None | object:
+        if value is OMITTED:
+            return value
         return normalize_creator_handle(value)
 
     @field_validator("creator_display_name")
     @classmethod
-    def validate_creator_display_name(cls, value: str | None) -> str | None:
+    def validate_creator_display_name(cls, value: str | None | object) -> str | None | object:
+        if value is OMITTED:
+            return value
         return normalize_creator_display_name(value)
 
 
@@ -373,6 +387,12 @@ def create_media_metadata_api_router(dependencies: MediaMetadataApiDependencies)
                 409,
                 ACQUISITION_SOURCE_IMMUTABLE_CODE,
                 ACQUISITION_SOURCE_IMMUTABLE_MESSAGE,
+            )
+        except SourceDerivedMetadataImmutableError:
+            return _error_response(
+                409,
+                SOURCE_DERIVED_IMMUTABLE_CODE,
+                SOURCE_DERIVED_IMMUTABLE_MESSAGE,
             )
         except CanonicalTagNotFoundError:
             return _error_response(

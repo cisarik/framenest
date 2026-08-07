@@ -14,6 +14,7 @@ from framenest.application.media_metadata import (
     SaveMediaMetadata,
 )
 from framenest.application.ports.media_metadata_repository import (
+    OMITTED,
     AcquisitionSourceImmutableError,
     CanonicalTagCreateResult,
     CanonicalTagDefinitionConflictError,
@@ -109,8 +110,16 @@ class _FakeRepository:
             DEFAULT_CONTENT_CATEGORY,
         )
 
-        if content_category is None:
+        if content_category is None or content_category is OMITTED:
             content_category = DEFAULT_CONTENT_CATEGORY
+        if creator_attribution_kind is OMITTED:
+            creator_attribution_kind = None
+        if creator_stable_id is OMITTED:
+            creator_stable_id = None
+        if creator_handle is OMITTED:
+            creator_handle = None
+        if creator_display_name is OMITTED:
+            creator_display_name = None
         if self.snapshot.persisted:
             if acquisition_source is None:
                 acquisition_source = self.snapshot.acquisition_source
