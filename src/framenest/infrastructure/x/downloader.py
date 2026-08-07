@@ -157,10 +157,14 @@ class YtDlpXExtractor:
         expected_mime: str,
         source_media_key: str | None,
         stage_key: str,
+        submitted_url: str,
         staging: XStagingStorage,
     ) -> XAssetAcquisition:
         if self._staging is not None:
             staging = self._staging
+        identity = accept_x_post_url(submitted_url)
+        if identity.post_id != post_id:
+            raise XExtractionError("X_URL_INVALID_POST_ID", "Invalid X post identity.")
         directory = staging.prepare(stage_key)
         argv = [
             self._executable,
@@ -170,11 +174,12 @@ class YtDlpXExtractor:
             "--no-overwrites",
             "--output",
             "artifact.mp4",
+            "--playlist-items",
+            str(int(ordinal) + 1),
             "--socket-timeout",
             str(int(self._socket_timeout_seconds)),
         ]
-        if source_media_key:
-            argv += ["--", source_media_key]
+        argv += ["--", identity.canonical_url]
         completed = _run_bounded(
             argv,
             timeout=self._download_timeout_seconds,
@@ -207,6 +212,17 @@ def _normalize_inspection(
 ) -> XNormalizedInspection:
     if not isinstance(raw, dict):
         raise XExtractionError("X_EXTRACTOR_MALFORMED", "X extractor is malformed.")
+    if raw.get("_type") == "url":
+        raise XExtractionError(
+            "X_EXTERNAL_LINK_DENIED",
+            "X embedded external link is not a supported acquisition target.",
+        )
+    extractor = _clean_text(raw.get("extractor"))
+    if extractor is not None and extractor.lower() != "twitter":
+        raise XExtractionError(
+            "X_EXTERNAL_LINK_DENIED",
+            "X embedded external link is not a supported acquisition target.",
+        )
     if raw.get("availability") in {"needs_auth", "private", "members_only"} or raw.get(
         "is_live"
     ):

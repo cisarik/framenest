@@ -667,6 +667,7 @@ class XAcquisitionCoordinator:
             expected_mime=asset.expected_mime,
             source_media_key=asset.source_media_key,
             stage_key=asset.stage_key,
+            submitted_url=claim.submitted_url,
             staging=self._staging,
         )
         if (

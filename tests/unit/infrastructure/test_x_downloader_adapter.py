@@ -358,10 +358,115 @@ def test_download_produces_artifact(tmp_path: Path) -> None:
         expected_mime="video/mp4",
         source_media_key="asset-0",
         stage_key="f" * 32,
+        submitted_url="https://x.com/author/status/123456789",
         staging=staging,
     )
     assert result.size_bytes > 0
     assert len(result.sha256) == 64
+
+
+def test_download_targets_validated_post_url_not_raw_media_key(tmp_path: Path) -> None:
+    # The real download must target the validated X post URL with a specific
+    # playlist item, never the raw media id or an unvalidated embedded URL.
+    import json
+
+    argv_log = tmp_path / "argv.json"
+
+    def _fake_argv_logging_exe(log: Path) -> Path:
+        script = (
+            "#!/usr/bin/env python3\n"
+            "import sys, json\n"
+            "def log(p):\n"
+            "    with open(r'" + str(log) + "', 'w') as fh:\n"
+            "        json.dump(sys.argv[1:], fh)\n"
+            "log(None)\n"
+            "open('artifact.mp4', 'wb').write(b'fakebytes')\n"
+        )
+        exe = tmp_path / "fake_x_argv"
+        exe.write_text(script)
+        exe.chmod(0o755)
+        return exe
+
+    from framenest.infrastructure.x.staging import FilesystemXStaging
+
+    staging_root = tmp_path / "xroot2"
+    staging_root.mkdir(parents=True, exist_ok=True)
+    staging_root.chmod(0o700)
+    staging = FilesystemXStaging(staging_root)
+    exe = _fake_argv_logging_exe(argv_log)
+    extractor = YtDlpXExtractor(executable=str(exe))
+    extractor.download(
+        post_id="123456789",
+        ordinal=1,
+        media_type="video",
+        expected_mime="video/mp4",
+        source_media_key="9999999999999999999",
+        stage_key="a" * 32,
+        submitted_url="https://x.com/author/status/123456789",
+        staging=staging,
+    )
+    argv = json.loads(argv_log.read_text())
+    assert "--playlist-items" in argv
+    assert argv[argv.index("--playlist-items") + 1] == "2"
+    assert argv[-1] == "https://x.com/author/status/123456789"
+    # The raw media id must never become the download target.
+    assert "9999999999999999999" not in argv
+
+
+def test_download_rejects_submitted_url_mismatched_post_id(tmp_path: Path) -> None:
+    from framenest.infrastructure.x.staging import FilesystemXStaging
+
+    staging_root = tmp_path / "xroot3"
+    staging_root.mkdir(parents=True, exist_ok=True)
+    staging_root.chmod(0o700)
+    staging = FilesystemXStaging(staging_root)
+    exe = _write_fake_executable(tmp_path / "fake_x", artifact_name="artifact.mp4")
+    extractor = YtDlpXExtractor(executable=str(exe))
+    with pytest.raises(XExtractionError) as ctx:
+        extractor.download(
+            post_id="111111111",
+            ordinal=0,
+            media_type="video",
+            expected_mime="video/mp4",
+            source_media_key="asset-0",
+            stage_key="c" * 32,
+            submitted_url="https://x.com/author/status/999999999",
+            staging=staging,
+        )
+    assert ctx.value.code == "X_URL_INVALID_POST_ID"
+
+
+def test_inspect_denies_external_embedded_link_fallback(tmp_path: Path) -> None:
+    # A TwitterIE external-link fallback (_type == 'url' or a non-twitter
+    # extractor) must never normalize into a supported media acquisition.
+    payload = json.loads(_video_json())
+    payload["_type"] = "url"
+    payload["url"] = "https://vimeo.com/123456789"
+    payload["webpage_url"] = "https://vimeo.com/123456789"
+    payload["extractor"] = "generic"
+    exe = _write_fake_executable(tmp_path / "fake_x", stdout_json=json.dumps(payload))
+    extractor = YtDlpXExtractor(executable=str(exe))
+    with pytest.raises(XExtractionError) as ctx:
+        extractor.inspect(
+            post_id="123456789", submitted_url="https://x.com/a/status/123456789"
+        )
+    assert ctx.value.code == "X_EXTERNAL_LINK_DENIED"
+
+
+def test_inspect_denies_non_twitter_extractor_outcome(tmp_path: Path) -> None:
+    # Even when the shape looks like media, an extraction that concluded on a
+    # foreign origin (e.g. a Vimeo/YouTube redirect) must be rejected.
+    payload = json.loads(_video_json())
+    payload["extractor"] = "vimeo"
+    payload["webpage_url"] = "https://vimeo.com/123456789"
+    payload["url"] = "https://vimeo.com/e/123456789?quality=720p"
+    exe = _write_fake_executable(tmp_path / "fake_x", stdout_json=json.dumps(payload))
+    extractor = YtDlpXExtractor(executable=str(exe))
+    with pytest.raises(XExtractionError) as ctx:
+        extractor.inspect(
+            post_id="123456789", submitted_url="https://x.com/a/status/123456789"
+        )
+    assert ctx.value.code == "X_EXTERNAL_LINK_DENIED"
 
 
 def test_attest_version_with_fake_executable(tmp_path: Path) -> None:

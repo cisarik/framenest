@@ -146,6 +146,7 @@ class BrowserFakeExtractor:
         expected_mime: str,
         source_media_key: str | None,
         stage_key: str,
+        submitted_url: str,
         staging: object,
     ) -> None:
         from framenest.application.ports.x_extractor import XAssetAcquisition

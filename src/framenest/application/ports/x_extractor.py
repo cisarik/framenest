@@ -55,6 +55,7 @@ class XExtractor(Protocol):
         expected_mime: str,
         source_media_key: str | None,
         stage_key: str,
+        submitted_url: str,
         staging: XStagingStorage,
     ) -> XAssetAcquisition:
         """Download one source asset into claim-owned staging deterministically."""
