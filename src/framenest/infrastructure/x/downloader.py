@@ -5,10 +5,30 @@ post and downloads supported assets into claim-owned staging using only an
 argument-vector subprocess with `--ignore-config`, a controlled environment, a
 bounded working directory and strict timeout and process-group termination.
 
-Everything here is testable with a fake executable emitting local synthetic
-JSON without any contact with X. Mapping of a real X source JSON onto the
-normalized fields is a documented local-candidate approximation that requires
-real-source validation before any production use.
+Mapping is aligned to the exact pinned extractor: ``yt-dlp==2026.7.4``
+(``.venv/lib/python3.13/site-packages/yt_dlp/extractor/twitter.py``).
+
+Verified upstream TwitterIE contract:
+
+* ``id`` is the media id; ``display_id``/top-level ``id`` are the tweet id;
+* ``channel_id`` is the stable numeric user id (``user_id_str``);
+* ``uploader_id`` is the ``screen_name`` (handle);
+* ``uploader`` is the display name;
+* ``description`` is the tweet text; ``timestamp`` is the posted time;
+* a single video returns one merged info dict with ``formats``/``duration``;
+* multiple videos return a ``playlist_result`` with ``_type == 'playlist'``
+  and an ordered ``entries`` list — the adapter preserves entry order and
+  never passes ``--no-playlist`` (which would discard valid attached assets);
+* photo media is filtered by the extractor (``m['type'] != 'photo'``), so the
+  pinned extractor does not emit static still-image entries; photo-only posts
+  surface the typed terminal failure ``X_NO_SUPPORTED_MEDIA``.
+* an animated-GIF-like post is delivered as a short MP4 video entry and is
+  treated as video unless a GIF marker is present.
+
+The configured command never uses cookies, ``.netrc``, browser-cookie
+extraction, arbitrary plugin/config discovery, or requester-supplied shell
+interpolation. It is testable with a fake executable emitting local synthetic
+JSON without any contact with X.
 """
 
 from __future__ import annotations
@@ -197,11 +217,13 @@ def _normalize_inspection(
         raise XExtractionError("X_NO_SUPPORTED_MEDIA", "X post has no media.")
     canonical_url = raw.get("webpage_url")
     canonical_url = _validated_canonical(canonical_url, identity)
-    author_stable_id = _clean_text(raw.get("uploader_id")) or _clean_text(
-        raw.get("channel_id")
+    # Real TwitterIE contract: `channel_id` is the stable numeric user id,
+    # `uploader_id` is the screen_name (handle), `uploader` is the display name.
+    author_stable_id = _clean_text(raw.get("channel_id")) or _clean_text(
+        raw.get("user_id")
     )
-    author_handle = _clean_text(raw.get("uploader"))
-    author_display_name = _clean_text(raw.get("channel")) or author_handle
+    author_handle = _clean_text(raw.get("uploader_id"))
+    author_display_name = _clean_text(raw.get("uploader"))
     posted_at = raw.get("timestamp")
     posted_at_ms = None
     if isinstance(posted_at, (int, float)) and not isinstance(posted_at, bool):
@@ -281,22 +303,28 @@ def _assets_from_entries(entries: list[object]) -> list[XNormalizedAssetDescript
 
 
 def _media_type_from_raw(raw: dict) -> XMediaType | None:
+    """Classify an entry emitted by the pinned yt-dlp Twitter extractor.
+
+    Real TwitterIE output carries images filtered out; entries are videos with
+    a ``formats`` list and/or ``duration``. A direct still-image entry is a
+    synthetic/plugin contract only and is detected via image extension markers.
+    """
     ext = str(raw.get("ext") or "").lower()
     extname = str(raw.get("_filename") or "").lower()
     formats = raw.get("formats")
-    has_visual = bool(
-        formats
-        and any(
-            _is_visual(format) for format in formats if isinstance(format, dict)
-        )
+    has_formats = isinstance(formats, list) and len(formats) > 0
+    duration = raw.get("duration")
+    has_duration = isinstance(duration, (int, float)) and not isinstance(
+        duration, bool
     )
+    url = str(raw.get("url") or "")
     if ext == "gif" or extname.endswith(".gif"):
         return XMediaType.ANIMATED_GIF
     if ext in {"jpg", "jpeg", "png"} or extname.endswith((".jpg", ".jpeg", ".png")):
         return XMediaType.IMAGE
-    if ext in {"mp4", "m4v", "mov", "webm", "m4a"} or has_visual:
+    if has_formats or has_duration or re.search(r"\.(mp4|m4v|mov|webm|m3u8)(\?|$)", url):
         return XMediaType.VIDEO
-    if raw.get("vcodec") is None and raw.get("width") is not None and not has_visual:
+    if raw.get("vcodec") is None and raw.get("width") is not None and not has_formats:
         return XMediaType.IMAGE
     return None
 
