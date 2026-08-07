@@ -231,3 +231,42 @@ def test_failure_retryability() -> None:
     assert is_retryable_x_failure("X_DOWNLOAD_TIMEOUT")
     assert not is_retryable_x_failure("X_AUTHENTICATION_REQUIRED")
     assert not is_retryable_x_failure("X_NO_SUPPORTED_MEDIA")
+
+
+def test_retry_reset_transitions_allowed() -> None:
+    claim = _claim()
+    asset = XAsset.new(
+        claim_id=claim.id, ordinal=0, media_type=XMediaType.VIDEO,
+        expected_mime="video/mp4", now_ms=1000,
+    )
+    failed = asset.advance(
+        XAssetState.FAILED, updated_at_ms=2000,
+        failure_stage=XFailureStage.ACQUISITION, failure_code="X_DOWNLOAD_TIMEOUT",
+    )
+    reset = failed.advance(
+        XAssetState.PENDING, updated_at_ms=3000, failure_stage=None, failure_code=None,
+    )
+    assert reset.state is XAssetState.PENDING
+    # Post retry transitions are legal on terminal partial/failed states.
+    partial = claim.advance(XAcquisitionState.QUEUED, updated_at_ms=2000)
+    partial = partial.advance(XAcquisitionState.EXTRACTING, updated_at_ms=3000)
+    partial = partial.advance(XAcquisitionState.ACQUIRING, updated_at_ms=4000)
+    partial = partial.advance(XAcquisitionState.HANDING_OFF, updated_at_ms=5000)
+    partial = partial.advance(
+        XAcquisitionState.COMPLETED_PARTIAL, updated_at_ms=6000, completed_at_ms=6000,
+    )
+    resumed = partial.advance(
+        XAcquisitionState.ACQUIRING, updated_at_ms=7000,
+        completed_at_ms=None, failure_stage=None, failure_code=None,
+    )
+    assert resumed.state is XAcquisitionState.ACQUIRING
+    failed_post = _claim().advance(
+        XAcquisitionState.FAILED, updated_at_ms=8000,
+        failure_stage=XFailureStage.EXTRACTION, failure_code="X_NO_SUPPORTED_MEDIA",
+        completed_at_ms=8000,
+    )
+    requeued = failed_post.advance(
+        XAcquisitionState.QUEUED, updated_at_ms=9000,
+        completed_at_ms=None, failure_stage=None, failure_code=None,
+    )
+    assert requeued.state is XAcquisitionState.QUEUED

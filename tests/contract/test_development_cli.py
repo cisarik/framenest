@@ -706,12 +706,23 @@ def test_project_console_entries_match_packaged_metadata() -> None:
     script_names = sorted(metadata["project"]["scripts"])
 
     assert script_names, "packaged console scripts must exist"
-    expected_shebang = f"#!{CANONICAL_VENV_BIN}/python"
+    # Installed console entry points must invoke the canonical project venv
+    # Python runtime. The venv exposes that interpreter under both "python" and
+    # "python3" (python3 is a symlink to python); either name is equivalent.
+    python_link = CANONICAL_VENV_BIN / "python"
+    python3_link = CANONICAL_VENV_BIN / "python3"
+    if python_link.is_symlink() and python3_link.is_symlink() and python_link.resolve() == python3_link.resolve():
+        allowed_shebangs = {
+            f"#!{CANONICAL_VENV_BIN}/python",
+            f"#!{CANONICAL_VENV_BIN}/python3",
+        }
+    else:
+        allowed_shebangs = {f"#!{CANONICAL_VENV_BIN}/python"}
     for name in script_names:
         script = CANONICAL_VENV_BIN / name
         assert script.is_file(), f"missing console script: {name}"
         content = script.read_text(encoding="utf-8")
-        assert content.splitlines()[0] == expected_shebang
+        assert content.splitlines()[0] in allowed_shebangs
         assert content != FAKE_CONTROLLER_STUB
 
 

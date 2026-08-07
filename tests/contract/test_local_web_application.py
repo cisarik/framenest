@@ -376,7 +376,14 @@ def test_javascript_metadata_workspace_uses_existing_same_origin_endpoints(
     assert 'method: "PUT"' in script
     assert 'body: JSON.stringify(saveOwner.requestPayload)' in script
     assert "content_category: normalized.contentCategory" in script
-    assert "acquisition_source: normalized.acquisitionSource" in script
+    # Acquisition source is immutable catalog provenance (ADR-0055): it is part
+    # of the normalized workspace form state (shown read-only) but must not be
+    # sent as a mutable field on ordinary metadata Save.
+    form_body = _javascript_function(script, "normalizedMetadataFormState")
+    assert "acquisitionSource: metadataWorkspace.current.acquisitionSource || \"unknown\"" in form_body
+    save_body = _javascript_function(script, "claimMetadataSaveOwner")
+    assert "requestPayload" in save_body
+    assert "acquisition_source" not in save_body
     assert "genres: normalized.genres" in script
     assert 'fetch(CANONICAL_TAGS_ENDPOINT, {' in script
     assert 'method: "POST"' in script
@@ -2172,8 +2179,8 @@ def test_javascript_details_description_replaces_prominent_processed_panel(clien
 
     assert "Processed" not in principal_body
     assert " since " not in principal_body
-    assert "detailsDescription.textContent = payload.description" in populate_body
-    assert "detailsDescription.hidden = !payload.description" in populate_body
+    assert "detailsDescription.textContent = description" in populate_body
+    assert "detailsDescription.hidden = !description" in populate_body
     assert "detailsProcessedContainer" not in populate_body
     assert 'addMetadataValue(detailsTechnicalList, "Processed at"' in populate_body
     assert ".media-details-dialog__description" in details_css

@@ -45,54 +45,39 @@ def _app(service) -> FastAPI:
     return app
 
 
+def _snapshot(claim_id: object, state: str = "submitted") -> types.SimpleNamespace:
+    claim_id = str(claim_id)
+    return types.SimpleNamespace(
+        claim_id=claim_id,
+        request_id=claim_id,
+        phase="queued" if state == "submitted" else "completed",
+        state=state,
+        x_post_id="123",
+        submitted_url="https://x.com/a/status/123",
+        canonical_url="https://x.com/a/status/123",
+        title=None,
+        failure_code=None,
+        retry_of_claim_id=None,
+        created_at_ms=1,
+        updated_at_ms=1,
+        completed_at_ms=None,
+        assets=[],
+    )
+
+
+_VALID_ID = "00000000-0000-4000-8000-000000000001"
+
+
 def _service_fake():
     return types.SimpleNamespace(
         submit=lambda url, login_key: types.SimpleNamespace(
-            request_id="claim-1",
-            phase="queued",
-            state="submitted",
-            x_post_id="123",
-            submitted_url=url,
-            canonical_url="https://x.com/a/status/123",
-            title=None,
-            failure_code=None,
-            retry_of_claim_id=None,
-            created_at_ms=1,
-            updated_at_ms=1,
-            assets=[],
-            submission_result="new",
+            request_id=_VALID_ID, submission_result="new"
         ),
         list_owned=lambda login_key, limit, cursor: types.SimpleNamespace(
-            items=[], next_cursor=None
+            items=[_snapshot(_VALID_ID)], next_cursor=None
         ),
-        get_owned=lambda cid, login_key: types.SimpleNamespace(
-            request_id=cid,
-            phase="queued",
-            state="submitted",
-            x_post_id="123",
-            submitted_url="https://x.com/a/status/123",
-            canonical_url="https://x.com/a/status/123",
-            title=None,
-            failure_code=None,
-            retry_of_claim_id=None,
-            created_at_ms=1,
-            updated_at_ms=1,
-            assets=[],
-        ),
-        retry=lambda cid, login_key: types.SimpleNamespace(
-            request_id=cid,
-            phase="queued",
-            state="queued",
-            x_post_id="123",
-            submitted_url="https://x.com/a/status/123",
-            canonical_url="https://x.com/a/status/123",
-            title=None,
-            failure_code=None,
-            retry_of_claim_id=None,
-            created_at_ms=1,
-            updated_at_ms=1,
-            assets=[],
-        ),
+        get_owned=lambda cid, login_key: _snapshot(cid),
+        retry=lambda cid, login_key: _snapshot(cid, state="queued"),
     )
 
 
@@ -101,7 +86,7 @@ def test_submit_x_request_returns_item() -> None:
     response = client.post("/api/x/requests", json={"url": "https://x.com/a/status/123"})
     assert response.status_code == 200
     payload = response.json()
-    assert payload["request_id"] == "claim-1"
+    assert payload["request_id"] == _VALID_ID
     assert payload["phase"] == "queued"
 
 
