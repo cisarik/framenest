@@ -25,9 +25,11 @@ from framenest.infrastructure.persistence.catalog_backup_ops import (
     load_catalog_backup_ops_config,
     operation_lock,
     read_operator_status,
+    run_offdevice_catalog_copy,
     run_scheduled_catalog_backup,
     verify_restore_bundle,
 )
+from framenest.infrastructure.persistence.catalog_backup_offdevice import OffdeviceError
 
 INVALID_INPUT_CODE = "FRAMENEST_BACKUP_INVALID_INPUT"
 COMMAND_FAILED_CODE = "FRAMENEST_BACKUP_COMMAND_FAILED"
@@ -38,6 +40,7 @@ PROTECTED_OPERATIONS = frozenset(
         "verify",
         "restore",
         "run-scheduled",
+        "run-offdevice",
         "verify-restore",
         "expire",
     }
@@ -105,6 +108,20 @@ def main(argv: Sequence[str] | None = None) -> int:
             message="Backup command failed.",
         )
         return 1
+    except OffdeviceError as exc:
+        message = "Off-device catalog copy failed."
+        if exc.error_code == "OFFDEVICE_DISABLED":
+            message = "Off-device catalog copy is disabled."
+        elif exc.error_code == "OFFDEVICE_COPY_CONFLICT":
+            message = "Off-device destination bundle conflicts."
+        elif exc.error_code == "OFFDEVICE_ATOMIC_PUBLISH_UNSUPPORTED":
+            message = "Atomic off-device publication is unsupported."
+        _write_error(
+            operation=operation,
+            error_code=exc.error_code,
+            message=message,
+        )
+        return 1
     except (BackupError, Exception):
         _write_error(
             operation=operation,
@@ -147,6 +164,24 @@ def _dispatch_protected(operation: str, args: argparse.Namespace, config: Catalo
                     "expired": list(scheduled.expired),
                 },
                 "pending_cleanup": scheduled.pending_cleanup,
+            }
+        )
+        return 0
+    if operation == "run-offdevice":
+        result = run_offdevice_catalog_copy(config)
+        _write_payload(
+            {
+                "operation": operation,
+                "state": "succeeded",
+                "bundle_id": result.bundle_id,
+                "catalog": {
+                    "size_bytes": result.catalog_size_bytes,
+                    "sha256": result.catalog_sha256,
+                    "alembic_revision": result.alembic_revision,
+                },
+                "reused_existing": result.reused_existing,
+                "pending_cleanup": result.pending_cleanup,
+                "semantic": dict(result.semantic),
             }
         )
         return 0
@@ -224,6 +259,13 @@ def _build_parser() -> argparse.ArgumentParser:
     subcommands.add_parser(
         "run-scheduled",
         help="Run the daily create, verify, restore, and retention pipeline.",
+    )
+    subcommands.add_parser(
+        "run-offdevice",
+        help=(
+            "Copy the latest verified scheduled catalog recovery point to the "
+            "configured off-device mount and restore-verify it."
+        ),
     )
 
     verify_restore = subcommands.add_parser(

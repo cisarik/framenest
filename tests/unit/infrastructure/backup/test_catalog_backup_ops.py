@@ -126,7 +126,10 @@ def test_restore_readiness_boundaries() -> None:
 
 def test_run_scheduled_pipeline_success_and_source_unchanged(tmp_path: Path) -> None:
     from framenest.infrastructure.persistence.catalog_backup import sha256_file
-    from framenest.infrastructure.persistence.catalog_backup_ops import run_scheduled_catalog_backup
+    from framenest.infrastructure.persistence.catalog_backup_ops import (
+        read_operator_status,
+        run_scheduled_catalog_backup,
+    )
 
     config = _ops_config(tmp_path)
     before = sha256_file(config.database_path)
@@ -145,6 +148,7 @@ def test_run_scheduled_pipeline_success_and_source_unchanged(tmp_path: Path) -> 
     assert status["last_successful_scheduled_backup_and_restore"]["bundle_id"] == result.bundle_id
     assert status["last_successful_scheduled_backup_and_restore"]["attempt_seq"] == 1
     assert status["last_manual_verify_restore"] is None
+    assert status.get("last_successful_offdevice_copy_and_restore") is None
     assert unrelated.read_text(encoding="utf-8") == "unrelated"
     leftovers = [
         path
@@ -152,6 +156,9 @@ def test_run_scheduled_pipeline_success_and_source_unchanged(tmp_path: Path) -> 
         if path.name != "keep-me.txt"
     ]
     assert leftovers == []
+    operator = read_operator_status(config, offdevice_environ={})
+    assert operator["off_device"]["configured"] is False
+    assert operator["off_device"]["readiness"] == "disabled"
 
 
 def test_same_timestamp_failure_uses_attempt_seq(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

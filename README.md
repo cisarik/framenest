@@ -230,12 +230,16 @@ Override bind address with `FRAMENEST_HOST` and `FRAMENEST_PORT` for the raw ser
 
 Reload, AppArmor/UFW hardening completion, and broader multi-device
 synchronization remain open work. A catalog backup create/verify/restore
-foundation exists through `framenest-backup`, and automated catalog
+foundation exists through `framenest-backup`, automated catalog
 backup/retention/restore-verification is accepted through
-[ADR-0052](docs/adr/0052-automated-catalog-backup-retention-and-restore-verification.md)
+[ADR-0052](docs/adr/0052-automated-catalog-backup-retention-and-restore-verification.md),
+and mounted-filesystem off-device catalog copy/restore-verification is accepted
+through
+[ADR-0056](docs/adr/0056-off-device-catalog-backup-copy-and-restore-verification.md)
 and documented in [docs/BACKUP_AND_RECOVERY.md](docs/BACKUP_AND_RECOVERY.md); it
 does not copy original media, include secrets, replace production databases as
-an automated recovery, or claim media second-copy durability. A
+an automated recovery, or claim that a destination survives host loss until
+separately authorized host acceptance proves the failure domain. A
 repository-native generic systemd service bundle exists under `deploy/systemd/`,
 the superseded Fedora guide remains in [docs/FEDORA_SERVICE.md](docs/FEDORA_SERVICE.md),
 and the current Ubuntu NUC deployment workflow is documented in
@@ -582,6 +586,7 @@ Current foundation files:
 - [`docs/adr/0031-fedora-systemd-service-foundation.md`](docs/adr/0031-fedora-systemd-service-foundation.md) records the historical Fedora systemd service foundation superseded by ADR-0032 for the active deployment target.
 - [`docs/adr/0032-ubuntu-nuc-deployment-foundation.md`](docs/adr/0032-ubuntu-nuc-deployment-foundation.md) records the accepted Ubuntu NUC deployment foundation.
 - [`docs/adr/0033-catalog-backup-and-recovery-foundation.md`](docs/adr/0033-catalog-backup-and-recovery-foundation.md) records the accepted catalog backup and recovery foundation.
+- [`docs/adr/0056-off-device-catalog-backup-copy-and-restore-verification.md`](docs/adr/0056-off-device-catalog-backup-copy-and-restore-verification.md) records mounted-filesystem off-device catalog copy and restore verification.
 - [`docs/adr/0050-durable-manual-cover-foundation.md`](docs/adr/0050-durable-manual-cover-foundation.md) records the accepted durable manual cover foundation.
 - [`docs/adr/0034-canonical-analytic-programming-integration.md`](docs/adr/0034-canonical-analytic-programming-integration.md) records the accepted pinned canonical AP submodule integration.
 - [`docs/adr/0035-authoritative-server-and-client-state-model.md`](docs/adr/0035-authoritative-server-and-client-state-model.md) records the accepted authoritative server/client state model.

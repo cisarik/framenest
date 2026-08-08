@@ -77,14 +77,17 @@ The catalog backup foundation uses `framenest-backup` for the SQLite catalog
 only. Backup manifests and command output must not contain source paths,
 destination paths, usernames, hostnames, IP addresses, environment values, SQL,
 media paths, media filenames, raw exception text, credentials, tokens, cookies,
-authorization headers, private keys, or secret prefixes. The initial bundle
+authorization headers, private keys, or secret prefixes. Ordinary off-device
+status output must also omit destination root, marker destination ID, filesystem
+device numbers, and mount identity. The initial bundle
 excludes Gallery preview cache, scan-imported originals, published upload
 originals, non-secret AI configuration, and secrets. A valid catalog backup bundle contains only the declared manifest
 and catalog artifact; unexpected files, directories, symlinks, and temporary
 state are rejected. Backup and restore publication must not overwrite a path
 that appears after an initial absence check. Restore writes only to a new
 absent destination and does not replace production, run migrations, start
-services, or prove readiness.
+services, or prove readiness. Off-device publication uses no-replace semantics
+and must not overwrite a conflicting final destination bundle.
 
 The resumable upload transport is capability-gated trusted-path functionality,
 not a public upload service. Upload endpoints are disabled until

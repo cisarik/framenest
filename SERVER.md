@@ -79,10 +79,14 @@ Tailscale remote-access and identity foundation (root-owned HTTPS Serve to a
 permission-restricted Unix socket, verified-identity mapping, capability
 authorization, and privileged-action audit) is recorded in
 [ADR-0048](docs/adr/0048-tailscale-remote-access-and-identity-foundation.md)
-and the current runbook. Catalog backup create/verify/restore and automated
-retention/restore-verification foundations are documented in
-[docs/BACKUP_AND_RECOVERY.md](docs/BACKUP_AND_RECOVERY.md) and
-[ADR-0052](docs/adr/0052-automated-catalog-backup-retention-and-restore-verification.md).
+and the current runbook. Catalog backup create/verify/restore, automated
+retention/restore-verification, and mounted-filesystem off-device
+copy/restore-verification foundations are documented in
+[docs/BACKUP_AND_RECOVERY.md](docs/BACKUP_AND_RECOVERY.md),
+[ADR-0052](docs/adr/0052-automated-catalog-backup-retention-and-restore-verification.md),
+and
+[ADR-0056](docs/adr/0056-off-device-catalog-backup-copy-and-restore-verification.md).
+Repository off-device copy does not by itself prove physical host-loss survival.
 Sanitized command-observed NUC hardening and media-storage baseline facts are
 preserved in [docs/NUC_HOST_BASELINE.md](docs/NUC_HOST_BASELINE.md); that
 baseline is historical host evidence, not a substitute for current acceptance.

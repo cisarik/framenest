@@ -11,6 +11,8 @@ service-replacement procedure, or deployment acceptance record.
 Authoritative decision: [ADR-0033](adr/0033-catalog-backup-and-recovery-foundation.md).
 Automated scheduling, retention, and restore-readiness:
 [ADR-0052](adr/0052-automated-catalog-backup-retention-and-restore-verification.md).
+Mounted-filesystem off-device copy and restore verification:
+[ADR-0056](adr/0056-off-device-catalog-backup-copy-and-restore-verification.md).
 
 The accepted sanitized NUC host baseline is recorded in
 [NUC_HOST_BASELINE.md](NUC_HOST_BASELINE.md). That baseline confirms the current
@@ -29,8 +31,9 @@ semantic readback → retention pipeline every day.
 Limitation: this protects the catalog database only. It does not back up
 `/srv/media`, published originals, cover bytes, caches, secrets, or AI
 configuration. Successful catalog restore does not restore lost original media.
-Backups currently share the system SSD with the live catalog; off-host copies
-remain deferred.
+Same-host verified recovery points remain on the live catalog host filesystem;
+mounted-filesystem off-device copy is a separate ADR-0056 capability and does
+not by itself prove a distinct physical/off-host failure domain.
 
 Default roots:
 
@@ -49,12 +52,12 @@ Persistent=yes
 RandomizedDelaySec=900
 ```
 
-There is exactly one timer. Restore-readiness is proven by the daily pipeline.
-Status becomes stale when no complete scheduled success has occurred for more
-than 48 hours. Scheduled attempt ordering uses a durable monotonic
-`attempt_seq` in operator state so a later failure remains `failed` even when
-wall-clock timestamps collide in the same UTC second. Manual `verify-restore`
-never supersedes scheduled attempt order.
+There is exactly one local backup timer. Restore-readiness is proven by the
+daily pipeline. Status becomes stale when no complete scheduled success has
+occurred for more than 48 hours. Scheduled attempt ordering uses a durable
+monotonic `attempt_seq` in operator state so a later failure remains `failed`
+even when wall-clock timestamps collide in the same UTC second. Manual
+`verify-restore` never supersedes scheduled attempt order.
 
 Shared exclusive non-blocking `fcntl.flock` on
 `/var/lib/framenest/catalog-backup-ops/catalog-backup.lock` protects:
@@ -63,6 +66,7 @@ Shared exclusive non-blocking `fcntl.flock` on
 - `verify`
 - `restore`
 - `run-scheduled`
+- `run-offdevice`
 - `verify-restore`
 - `expire`
 
@@ -85,18 +89,68 @@ Retention:
 - only verified ledger-recorded `auto-` bundles expire;
 - all non-`auto-` bundles remain pinned;
 - failed pipelines perform no deletion;
-- `expire` defaults to dry-run; `--apply` is required to delete.
+- `expire` defaults to dry-run; `--apply` is required to delete;
+- local retention never scans or deletes off-device destination bundles.
 
 Operator commands:
 
 ```text
 framenest-backup run-scheduled
+framenest-backup run-offdevice
 framenest-backup status
 framenest-backup list
 framenest-backup retain-plan
 framenest-backup expire --dry-run
 framenest-backup expire --apply
 framenest-backup verify-restore --bundle <bundle>
+```
+
+## Off-Device Mounted Copy
+
+Threat: a catalog recovery point stored only on the NUC can be lost with that
+host filesystem.
+
+Benefit: `framenest-backup run-offdevice` copies the latest verified scheduled
+catalog recovery point onto a distinct mounted destination, verifies exact
+bytes, publishes without replace, and restore-verifies from the published
+destination bundle into the disposable local restore root.
+
+Limitation: this repository capability proves the mounted-filesystem copy and
+verification contract only. It does not back up media, covers, secrets, AI
+configuration, or host state. It does not by itself prove that a chosen
+destination survives complete NUC loss until separately authorized host
+acceptance establishes the physical/network failure domain. V1 has no off-device
+retention or final-bundle deletion command.
+
+Fixed scheduled destination:
+
+```text
+/mnt/framenest-catalog-offdevice
+```
+
+Required destination marker:
+
+```text
+.framenest-catalog-offdevice.json
+```
+
+Optional non-secret pin:
+
+```text
+FRAMENEST_CATALOG_OFFDEVICE_DESTINATION_ID=<32 lowercase hex>
+```
+
+When unset, off-device copy remains disabled. Ordinary `status` output exposes a
+sanitized `off_device` block and must not print the destination root, marker ID,
+device numbers, or mount identity.
+
+Optional timer:
+
+```text
+framenest-catalog-offdevice.timer
+OnCalendar=*-*-* 04:17:00 UTC
+Persistent=yes
+RandomizedDelaySec=900
 ```
 
 ## State Classes
@@ -329,39 +383,52 @@ Verification evidence:
 Threat: a backup stored only on the NUC can be lost with the NUC, disk, power
 event, theft, or operator error.
 
-Benefit: an off-device copy protects the catalog bundle against local loss.
+Benefit: a verified mounted-filesystem off-device copy protects the catalog
+bundle against local filesystem loss after ADR-0056 repository implementation.
 
-Limitation: FrameNest does not implement upload, sync, cloud storage, media
-copy, or retention automation in this slice.
+Limitation: FrameNest does not implement cloud upload, media copy, secret
+backup, or off-device retention automation in this slice. Repository evidence
+proves the copy/verify contract only; physical/off-host failure-domain proof
+remains separate host acceptance.
 
 Preconditions:
 
-- Local bundle verification passed.
-- Destination is chosen by the operator.
-- Destination copy method is outside this repository task.
+- Local scheduled backup-and-restore evidence exists.
+- Destination mount `/mnt/framenest-catalog-offdevice` is provisioned with the
+  trusted marker and `bundles/` layout.
+- `FRAMENEST_CATALOG_OFFDEVICE_DESTINATION_ID` is set to the marker identity.
 
-Mutation class: operator-controlled file copy outside FrameNest tooling.
+Mutation class: FrameNest-owned staging copy and no-replace publication under
+`bundles/`, plus disposable local restore verification.
+
+Command:
+
+```text
+framenest-backup run-offdevice
+```
 
 Stop conditions:
 
-- Destination cannot be verified.
-- Copy process would expose private paths, media filenames, or secrets in shared
-  logs.
-- The operator intends to delete the only verified local bundle before proving
-  the off-device copy.
+- Destination gate fails (missing mount, same device, unsafe marker/layout).
+- Source recovery point is absent, unverified, or not ledgered.
+- Final destination bundle conflicts and is not an exact identity match.
+- Atomic no-replace publication is unsupported.
+- Destination restore verification fails.
 
 Rollback or cleanup:
 
-- Keep the verified local bundle until the off-device copy is verified.
-- Remove incomplete destination copies according to the destination's own safe
-  cleanup procedure.
+- Keep the verified local bundle.
+- Incomplete staging directories may be removed only when they pass exact
+  FrameNest-owned stage validation.
+- Conflicting final destination bundles are never overwritten or deleted by
+  this command.
 
 Verification evidence:
 
-- Off-device copy identity.
-- Bundle `manifest.json` and `catalog.sqlite3` present at destination.
-- Verification run against the copied bundle when practical.
-- Matching SHA-256 digest for the catalog artifact.
+- Exit code `0` with sanitized success JSON.
+- `status.off_device.readiness` becomes `ready` only after destination restore
+  verification succeeds.
+- No destination root, marker ID, or device identity appears in ordinary status.
 
 ## Restore Drill
 

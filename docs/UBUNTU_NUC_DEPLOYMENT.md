@@ -106,8 +106,20 @@ deploy/systemd/framenest-catalog-backup.service
 deploy/systemd/framenest-catalog-backup.timer
 ```
 
-Install and enable only under an authorized deployment task after the feature
-release is active:
+Optional off-device catalog copy assets (ADR-0056):
+
+```text
+deploy/systemd/framenest-catalog-offdevice.service
+deploy/systemd/framenest-catalog-offdevice.timer
+```
+
+These off-device units remain repository source material until a separately
+authorized host task provisions `/mnt/framenest-catalog-offdevice`, sets the
+non-secret destination ID, and accepts the physical failure domain. Installing
+or enabling them is not part of ordinary repository implementation.
+
+Install and enable the local backup timer only under an authorized deployment
+task after the feature release is active:
 
 ```text
 # [NUC / bash]
@@ -142,11 +154,14 @@ sudo systemctl daemon-reload
 #------------------------------------------------------
 ```
 
-The daily pipeline creates an `auto-` catalog bundle, verifies it, restores it
-to a disposable destination, records restore-readiness, and expires only
-eligible automatic bundles. It does not back up original media bytes. Defaults
-and operator commands are documented in
-[BACKUP_AND_RECOVERY.md](BACKUP_AND_RECOVERY.md).
+The daily local pipeline creates an `auto-` catalog bundle, verifies it,
+restores it to a disposable destination, records restore-readiness, and expires
+only eligible automatic bundles. It does not back up original media bytes.
+Defaults and operator commands are documented in
+[BACKUP_AND_RECOVERY.md](BACKUP_AND_RECOVERY.md). The optional ADR-0056
+off-device timer copies that verified recovery point to a distinct mount and
+restore-verifies it; repository presence alone is not proof of host-loss
+survival.
 
 The service must remain loopback-first, foreground under systemd, journal
 captured, explicit-migration only, and protected by the read-only database

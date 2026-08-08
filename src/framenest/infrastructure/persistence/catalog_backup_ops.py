@@ -27,6 +27,19 @@ from framenest.infrastructure.persistence.catalog_backup import (
     sha256_file,
     verify_catalog_backup,
 )
+from framenest.infrastructure.persistence.catalog_backup_offdevice import (
+    DEFAULT_OFFDEVICE_ROOT,
+    OffdeviceCopyResult,
+    OffdeviceError,
+    OffdeviceOsHooks,
+    build_sanitized_offdevice_status,
+    capture_bundle_identity,
+    derive_offdevice_readiness,
+    inspect_destination_health,
+    parse_configured_destination_id,
+    publish_or_reuse_offdevice_bundle,
+    validate_offdevice_destination,
+)
 
 DEFAULT_BACKUP_ROOT = Path("/var/lib/framenest/catalog-backups")
 DEFAULT_RESTORE_VERIFY_ROOT = Path("/var/lib/framenest/catalog-restore-verify")
@@ -115,6 +128,112 @@ class ScheduledPipelineResult:
     retention: RetentionPlan
     expired: tuple[str, ...]
     pending_cleanup: bool
+
+
+def run_offdevice_catalog_copy(
+    config: CatalogBackupOpsConfig,
+    *,
+    now: datetime | None = None,
+    hooks: OffdeviceOsHooks | None = None,
+    destination_root: Path | None = None,
+    environ: Mapping[str, str] | None = None,
+) -> OffdeviceCopyResult:
+    """Copy the latest verified scheduled recovery point to the off-device mount.
+
+    ``destination_root`` defaults to the fixed scheduled mount. Tests may inject
+    a disposable root with matching OS hooks. Operator CLI never accepts an
+    arbitrary destination argument.
+    """
+    clock = now or datetime.now(UTC)
+    configured_id = parse_configured_destination_id(environ)
+    if configured_id is None:
+        raise OffdeviceError(
+            "Off-device catalog copy is disabled.",
+            error_code="OFFDEVICE_DISABLED",
+        )
+    root = destination_root if destination_root is not None else DEFAULT_OFFDEVICE_ROOT
+    with operation_lock(config) as held:
+        if not held:
+            raise CatalogBackupOpsError(
+                "Another catalog backup operation is in progress.",
+                error_code="BACKUP_OPS_BUSY",
+            )
+        _ensure_ops_layout(config)
+        status = _load_status(config)
+        attempt_seq = _allocate_offdevice_attempt_seq(status)
+        status["current_operation"] = "run-offdevice"
+        status["last_offdevice_attempt"] = {
+            "started_at_utc": _format_utc(clock),
+            "state": "running",
+            "operation": "run-offdevice",
+            "attempt_seq": attempt_seq,
+        }
+        _write_status(config, status)
+        _append_event(
+            config,
+            {
+                "event": "offdevice_attempt_started",
+                "at_utc": _format_utc(clock),
+                "attempt_seq": attempt_seq,
+            },
+        )
+        try:
+            result = _run_offdevice_body(
+                config,
+                clock=clock,
+                attempt_seq=attempt_seq,
+                configured_destination_id=configured_id,
+                destination_root=root,
+                hooks=hooks,
+            )
+            if result.pending_cleanup:
+                raise CatalogBackupOpsError(
+                    "Disposable restore cleanup is pending.",
+                    error_code="PENDING_CLEANUP",
+                )
+            return result
+        except OffdeviceError as exc:
+            _record_offdevice_failure(
+                config,
+                error_code=exc.error_code,
+                clock=clock,
+                attempt_seq=attempt_seq,
+            )
+            raise
+        except CatalogBackupOpsError as exc:
+            if exc.error_code == "PENDING_CLEANUP":
+                raise
+            _record_offdevice_failure(
+                config,
+                error_code=exc.error_code,
+                clock=clock,
+                attempt_seq=attempt_seq,
+            )
+            raise
+        except BackupError as exc:
+            _record_offdevice_failure(
+                config,
+                error_code=getattr(exc, "error_code", "BACKUP_FAILED"),
+                clock=clock,
+                attempt_seq=attempt_seq,
+            )
+            raise
+        except Exception:
+            _record_offdevice_failure(
+                config,
+                error_code="OFFDEVICE_FAILED",
+                clock=clock,
+                attempt_seq=attempt_seq,
+            )
+            raise OffdeviceError(
+                "Off-device catalog copy failed.",
+                error_code="OFFDEVICE_FAILED",
+            )
+        finally:
+            status = _load_status(config)
+            if status.get("current_operation") == "run-offdevice":
+                status["current_operation"] = None
+                _write_status(config, status)
 
 
 def load_catalog_backup_ops_config(
@@ -579,6 +698,9 @@ def read_operator_status(
     config: CatalogBackupOpsConfig,
     *,
     now: datetime | None = None,
+    offdevice_hooks: OffdeviceOsHooks | None = None,
+    offdevice_destination_root: Path | None = None,
+    offdevice_environ: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
     """Return sanitized operator status including derived readiness."""
     _ensure_ops_layout(config)
@@ -609,6 +731,46 @@ def read_operator_status(
             destination_health = "missing"
     except CatalogBackupOpsError:
         destination_health = "unsafe"
+
+    configured = False
+    configured_destination_id: str | None = None
+    offdevice_destination_health = "unconfigured"
+    destination_root = (
+        offdevice_destination_root
+        if offdevice_destination_root is not None
+        else DEFAULT_OFFDEVICE_ROOT
+    )
+    try:
+        configured_destination_id = parse_configured_destination_id(offdevice_environ)
+        configured = configured_destination_id is not None
+        offdevice_destination_health = inspect_destination_health(
+            configured=configured,
+            configured_destination_id=configured_destination_id,
+            local_backup_root=config.backup_root,
+            hooks=offdevice_hooks,
+            destination_root=destination_root,
+        )
+    except OffdeviceError:
+        configured = True
+        offdevice_destination_health = "unsafe"
+
+    local_recovery = status.get("last_successful_scheduled_backup_and_restore")
+    if not isinstance(local_recovery, dict):
+        local_recovery = None
+    off_device_readiness = derive_offdevice_readiness(
+        configured=configured,
+        status=status,
+        destination_health=offdevice_destination_health if configured else "unconfigured",
+        now=now,
+        lock_held_elsewhere=lock_busy and not status.get("current_operation"),
+    )
+    off_device = build_sanitized_offdevice_status(
+        configured=configured,
+        readiness=off_device_readiness,
+        destination_health=offdevice_destination_health,
+        status=status,
+        local_recovery_point=local_recovery,
+    )
     return {
         "operation": "status",
         "restore_readiness": readiness,
@@ -634,6 +796,7 @@ def read_operator_status(
         "pending_cleanup": status.get("pending_cleanup"),
         "recent_failure": status.get("recent_failure"),
         "next_scheduled_execution": None,
+        "off_device": off_device,
     }
 
 
@@ -727,6 +890,209 @@ def capture_semantic_snapshot(database: Path) -> SemanticSnapshot:
             error_code="SEMANTIC_READBACK_FAILED",
         ) from exc
     return SemanticSnapshot(alembic_revision=row[0], counts=counts)
+
+
+def _run_offdevice_body(
+    config: CatalogBackupOpsConfig,
+    *,
+    clock: datetime,
+    attempt_seq: int,
+    configured_destination_id: str,
+    destination_root: Path,
+    hooks: OffdeviceOsHooks | None,
+) -> OffdeviceCopyResult:
+    status = _load_status(config)
+    success = status.get("last_successful_scheduled_backup_and_restore")
+    if not isinstance(success, dict):
+        raise OffdeviceError(
+            "No verified scheduled catalog recovery point is available.",
+            error_code="OFFDEVICE_SOURCE_UNAVAILABLE",
+        )
+    bundle_id = success.get("bundle_id")
+    if not isinstance(bundle_id, str) or not is_automatic_bundle_name(bundle_id):
+        raise OffdeviceError(
+            "Scheduled recovery point identity is invalid.",
+            error_code="OFFDEVICE_SOURCE_INVALID",
+        )
+    ledger_ids = {
+        entry["bundle_id"]
+        for entry in _ledger_entries(status)
+        if isinstance(entry.get("bundle_id"), str)
+    }
+    if bundle_id not in ledger_ids:
+        raise OffdeviceError(
+            "Scheduled recovery point is not ledgered.",
+            error_code="OFFDEVICE_SOURCE_NOT_LEDGERED",
+        )
+    source_bundle = config.backup_root / bundle_id
+    if source_bundle.is_symlink() or not source_bundle.is_dir():
+        raise OffdeviceError(
+            "Scheduled recovery point is missing.",
+            error_code="OFFDEVICE_SOURCE_MISSING",
+        )
+    verified = verify_catalog_backup(source_bundle)
+    expected_sha = success.get("catalog_sha256")
+    expected_revision = success.get("alembic_revision")
+    expected_size = success.get("catalog_size_bytes")
+    if (
+        verified.catalog_sha256 != expected_sha
+        or verified.alembic_revision != expected_revision
+        or verified.catalog_size_bytes != expected_size
+    ):
+        raise OffdeviceError(
+            "Scheduled recovery point no longer matches recorded evidence.",
+            error_code="OFFDEVICE_SOURCE_EVIDENCE_MISMATCH",
+        )
+    source_identity = capture_bundle_identity(source_bundle)
+    destination = validate_offdevice_destination(
+        destination_root=destination_root,
+        configured_destination_id=configured_destination_id,
+        local_backup_root=config.backup_root,
+        hooks=hooks,
+    )
+    # Re-validate destination immediately before publication boundary.
+    destination = validate_offdevice_destination(
+        destination_root=destination_root,
+        configured_destination_id=configured_destination_id,
+        local_backup_root=config.backup_root,
+        hooks=hooks,
+    )
+    published, reused = publish_or_reuse_offdevice_bundle(
+        source_bundle=source_bundle,
+        source_identity=source_identity,
+        destination=destination,
+        hooks=hooks,
+    )
+    # Destination identity must still hold after publication.
+    validate_offdevice_destination(
+        destination_root=destination_root,
+        configured_destination_id=configured_destination_id,
+        local_backup_root=config.backup_root,
+        hooks=hooks,
+    )
+    final_verified = verify_catalog_backup(published)
+    if (
+        final_verified.catalog_sha256 != source_identity.catalog_sha256
+        or final_verified.catalog_size_bytes != source_identity.catalog_size_bytes
+        or final_verified.alembic_revision != source_identity.alembic_revision
+    ):
+        raise OffdeviceError(
+            "Published off-device bundle identity mismatch.",
+            error_code="OFFDEVICE_FINAL_IDENTITY_MISMATCH",
+        )
+    semantic, _disposable, pending_cleanup = _restore_and_semantic(
+        config,
+        published,
+        final_verified,
+        clock=clock,
+    )
+    completed_at = _format_utc(clock)
+    success_payload = {
+        "bundle_id": bundle_id,
+        "completed_at_utc": completed_at,
+        "catalog_sha256": final_verified.catalog_sha256,
+        "alembic_revision": final_verified.alembic_revision,
+        "catalog_size_bytes": final_verified.catalog_size_bytes,
+        "reused_existing": reused,
+        "semantic": _semantic_payload(semantic),
+        "attempt_seq": attempt_seq,
+    }
+    status = _load_status(config)
+    status["last_offdevice_attempt"] = {
+        "started_at_utc": status.get("last_offdevice_attempt", {}).get("started_at_utc")
+        if isinstance(status.get("last_offdevice_attempt"), dict)
+        else None,
+        "completed_at_utc": completed_at,
+        "state": "succeeded",
+        "operation": "run-offdevice",
+        "bundle_id": bundle_id,
+        "attempt_seq": attempt_seq,
+    }
+    status["last_successful_offdevice_copy_and_restore"] = success_payload
+    status["offdevice_attempt_seq"] = attempt_seq
+    if pending_cleanup:
+        status["offdevice_pending_cleanup"] = {
+            "path_kind": "disposable_restore",
+            "bundle_id": bundle_id,
+            "at_utc": completed_at,
+        }
+    else:
+        status["offdevice_pending_cleanup"] = None
+    status["current_operation"] = None
+    _write_status(config, status)
+    _append_event(
+        config,
+        {
+            "event": "offdevice_copy_and_restore_succeeded",
+            "at_utc": completed_at,
+            "bundle_id": bundle_id,
+            "attempt_seq": attempt_seq,
+            "reused_existing": reused,
+        },
+    )
+    return OffdeviceCopyResult(
+        bundle_id=bundle_id,
+        catalog_sha256=final_verified.catalog_sha256,
+        alembic_revision=final_verified.alembic_revision,
+        catalog_size_bytes=final_verified.catalog_size_bytes,
+        reused_existing=reused,
+        pending_cleanup=pending_cleanup,
+        semantic=_semantic_payload(semantic),
+    )
+
+
+def _record_offdevice_failure(
+    config: CatalogBackupOpsConfig,
+    *,
+    error_code: str,
+    clock: datetime,
+    attempt_seq: int | None = None,
+) -> None:
+    status = _load_status(config)
+    previous = status.get("last_offdevice_attempt")
+    previous_seq = None
+    if isinstance(previous, dict):
+        previous_seq = previous.get("attempt_seq")
+    seq = attempt_seq if isinstance(attempt_seq, int) else previous_seq
+    status["last_offdevice_attempt"] = {
+        "started_at_utc": previous.get("started_at_utc") if isinstance(previous, dict) else None,
+        "completed_at_utc": _format_utc(clock),
+        "state": "failed",
+        "operation": "run-offdevice",
+        "error_code": error_code,
+        "attempt_seq": seq,
+    }
+    if isinstance(seq, int) and seq > 0:
+        status["offdevice_attempt_seq"] = max(
+            _coerce_attempt_seq(status.get("offdevice_attempt_seq")) or 0,
+            seq,
+        )
+    status["current_operation"] = None
+    _write_status(config, status)
+    _append_event(
+        config,
+        {
+            "event": "offdevice_attempt_failed",
+            "at_utc": _format_utc(clock),
+            "error_code": error_code,
+            "attempt_seq": seq,
+        },
+    )
+
+
+def _allocate_offdevice_attempt_seq(status: Mapping[str, Any]) -> int:
+    current = _coerce_attempt_seq(status.get("offdevice_attempt_seq")) or 0
+    last = status.get("last_offdevice_attempt")
+    if isinstance(last, dict):
+        last_seq = _coerce_attempt_seq(last.get("attempt_seq"))
+        if last_seq is not None:
+            current = max(current, last_seq)
+    success = status.get("last_successful_offdevice_copy_and_restore")
+    if isinstance(success, dict):
+        success_seq = _coerce_attempt_seq(success.get("attempt_seq"))
+        if success_seq is not None:
+            current = max(current, success_seq)
+    return current + 1
 
 
 def _run_scheduled_body(
@@ -1081,6 +1447,10 @@ def _empty_status() -> dict[str, Any]:
         "pending_cleanup": None,
         "recent_failure": None,
         "auto_ledger": [],
+        "offdevice_attempt_seq": 0,
+        "last_offdevice_attempt": None,
+        "last_successful_offdevice_copy_and_restore": None,
+        "offdevice_pending_cleanup": None,
     }
 
 
