@@ -3,9 +3,9 @@
 ## Status
 
 This is a living permanent product architecture reference. It records accepted
-future server/client direction; it does not claim that NUC deployment,
-streaming, synchronization, upload, per-user visibility state, authentication,
-or transfer is currently implemented.
+server/client direction and current shipped foundations. It does not claim that
+streaming, multi-device synchronization, complete Cover Studio, or full NUC
+security hardening are finished.
 
 Classification: living permanent product architecture/UX reference.
 
@@ -51,36 +51,41 @@ membership, cookies, or same-machine execution.
 
 ## NUC Role
 
-The Intel NUC is the current concrete personal production server preparation
-target for a future authoritative FrameNest server and archive-node role. It is
-not required for local ownership and must not make FrameNest a public-cloud or
-SaaS dependency.
+The Intel NUC is the current concrete personal production server and
+archive-node role for FrameNest. It is not required for local ownership and must
+not make FrameNest a public-cloud or SaaS dependency.
 
-The NUC may later provide:
+The NUC currently provides authoritative catalog serving for the
+owner-authoritative production release. Later or incomplete NUC capabilities
+include:
 
-- authoritative catalog serving;
-- archive or preferred storage for selected media bytes;
-- remote streaming and download;
+- archive or preferred storage for selected media bytes beyond current roots;
+- remote streaming and download beyond current Tailscale Serve access;
 - transfer coordination;
 - explicit archive/copy/move destinations;
-- centralized provider access for AI workflows;
-- future backup participation.
+- centralized provider access for AI workflows beyond current credential
+  foundations;
+- media second-copy backup participation.
 
 Ubuntu Server 24.04 on the Intel NUC6i5SYH supersedes Fedora as the active
 deployment target. A repository-native systemd service foundation and Ubuntu
-NUC deployment-readiness runbook now exist, but real host installation,
-activation, NUC acceptance, AppArmor/UFW policy, production database
-replacement, media backup, and secret recovery remain unimplemented. A
+NUC deployment runbook exist. Owner-authoritative current production serves
+commit `aec2f0091c10aed2fc2033dac154a0d9651b2b6d` from
+`/opt/framenest/releases/aec2f0091c10aed2fc2033dac154a0d9651b2b6d` with schema
+`0028`, healthy service, and Tailscale Serve only (Funnel not publicly
+exposed). Further NUC security hardening, AppArmor/UFW completion, production
+database replacement automation, and media second-copy backup remain open. A
 Tailscale remote-access and identity foundation (root-owned HTTPS Serve to a
 permission-restricted Unix socket, verified-identity mapping, capability
 authorization, and privileged-action audit) is recorded in
 [ADR-0048](docs/adr/0048-tailscale-remote-access-and-identity-foundation.md)
-and the current runbook. The minimum catalog backup and
-restore-to-new-destination foundation is documented in
-[docs/BACKUP_AND_RECOVERY.md](docs/BACKUP_AND_RECOVERY.md).
+and the current runbook. Catalog backup create/verify/restore and automated
+retention/restore-verification foundations are documented in
+[docs/BACKUP_AND_RECOVERY.md](docs/BACKUP_AND_RECOVERY.md) and
+[ADR-0052](docs/adr/0052-automated-catalog-backup-retention-and-restore-verification.md).
 Sanitized command-observed NUC hardening and media-storage baseline facts are
 preserved in [docs/NUC_HOST_BASELINE.md](docs/NUC_HOST_BASELINE.md); that
-baseline is not host mutation authority or FrameNest deployment acceptance.
+baseline is historical host evidence, not a substitute for current acceptance.
 
 ## Same Core, Different Deployment Capabilities
 
@@ -237,8 +242,8 @@ The historical Fedora service foundation is recorded in
 superseded for the active deployment target by
 [ADR-0032](docs/adr/0032-ubuntu-nuc-deployment-foundation.md) and the current
 [Ubuntu NUC deployment runbook](docs/UBUNTU_NUC_DEPLOYMENT.md). Do not describe
-a real NUC deployment as completed until a later host-acceptance task verifies
-it.
+NUC security hardening or VPS migration as completed until a later bounded task
+verifies them.
 
 ## Server-Side AI Provider Boundary
 
@@ -273,10 +278,11 @@ reports the exact external tailnet origin instead.
 
 In development, provider credentials remain in the server process environment:
 `NVIDIA_API_KEY` for NVIDIA NIM and `AI_GATEWAY_API_KEY` for Vercel AI Gateway.
-Production provider-secret integration is not implemented by the Ubuntu service
-foundation. Persistent secret storage, OS keychain integration, systemd
-credential files, browser provider Settings, service-secret adapters, and
-application-level remote administrator authorization remain future bounded work.
+Production AI credential support via systemd credential files is repository
+source material and may be deployed under explicit operator authority per
+[ADR-0036](docs/adr/0036-production-ai-credentials-via-systemd.md). OS keychain
+integration, browser provider Settings, and broader multi-user authorization
+remain future bounded work.
 
 ## Security And Authorization Deferred Decisions
 
@@ -302,19 +308,16 @@ privileged-action audit logging. Deferred security decisions now include:
 
 The current MacBook MVP does not include:
 
-- NUC deployment;
-- real systemd service installation or activation;
-- authoritative server deployment;
-- remote streaming;
+- complete NUC security hardening;
+- remote streaming beyond Tailscale Serve access to the packaged web shell;
 - transfer protocol;
 - automatic synchronization;
-- authenticated server-managed media ingest or upload;
 - per-user visibility state such as Trash;
-- backup orchestration;
-- centralized provider Settings;
+- media second-copy backup orchestration;
+- centralized browser provider Settings;
 - multi-device conflict resolution;
-- server-side media import.
+- server-side media import beyond the shipped upload and acquisition paths.
 
 The local Gallery and Details phase is frozen for MVP absent a concrete defect.
-Further NUC work should stay bounded to deployment readiness, acceptance, or
+Further NUC work should stay bounded to security hardening, acceptance, or
 server-authority tasks rather than reopening Gallery or Details UX.

@@ -3,12 +3,16 @@
 ## Status
 
 This is the current repository-native operator runbook for preparing and
-performing a future FrameNest deployment to the Intel NUC6i5SYH running Ubuntu
-Server 24.04 LTS as a personal production server.
+operating FrameNest on the Intel NUC6i5SYH running Ubuntu Server 24.04 LTS as a
+personal production server.
 
-It is not a transcript, installer, host acceptance record, or claim that the
-real NUC has been deployed. It must be executed only by an authorized operator
-on the real host in a later bounded session.
+It is not a transcript of every historical host command and does not by itself
+grant mutation authority. Owner-authoritative current production baseline is
+public/canonical commit `aec2f0091c10aed2fc2033dac154a0d9651b2b6d` (schema
+`0028`) served from
+`/opt/framenest/releases/aec2f0091c10aed2fc2033dac154a0d9651b2b6d` with
+Tailscale Serve only. Execute host mutations only under an authorized operator
+task.
 
 Classification: deployment operator runbook.
 
@@ -55,9 +59,10 @@ docs/BACKUP_AND_RECOVERY.md
 The service artifacts are source material. Committing them does not install,
 enable, start, stop, reload, or inspect a real service.
 
-[NUC_HOST_BASELINE.md](NUC_HOST_BASELINE.md) records the accepted sanitized
-host hardening and media-storage baseline. It does not grant mutation authority
-and does not prove that FrameNest has been deployed.
+[NUC_HOST_BASELINE.md](NUC_HOST_BASELINE.md) records accepted sanitized
+host hardening and media-storage baseline facts. It does not grant mutation
+authority and is historical host evidence, not a substitute for current release
+acceptance.
 
 ## Stable Service Contract
 

@@ -20,41 +20,37 @@ direction.
 
 FrameNest is currently in foundation-stage, pre-alpha development.
 
-A minimal Poetry package, runnable loopback FastAPI server, packaged local web shell, explicit SQLite migration foundation, local device and library registries, read-only library scan preview, explicit idempotent scan-candidate import into the minimum persistent media catalog, persistent display-title and canonical-tag core, local media-analysis preview, provider-neutral NVIDIA suggestion prototype, bounded JPEG VLM transport, explicit editable browser AI suggestion review, and owner-operated cookie-free YouTube manual ingestion now exist. YouTube ingestion is CLI-only, durable, loopback-only, and reuses the existing quarantine, validation, byte-identity, publication, and catalog lifecycle.
+A Poetry package, runnable loopback FastAPI server, packaged local web shell,
+explicit SQLite migration foundation through schema head `0028`, local device
+and library registries, read-only library scan preview, explicit idempotent
+scan-candidate import into the minimum persistent media catalog, persistent
+display-title and canonical-tag core, local media-analysis preview,
+provider-neutral NVIDIA suggestion prototype, bounded JPEG VLM transport,
+explicit editable browser AI suggestion review, ordinary-user private upload
+submission with administrator review, requester-private YouTube acquisition with
+administrator promotion, requester-private X meme acquisition (native X video
+and animated-GIF-like media delivered as video; static X photos deferred), and
+YouTube/X creator taxonomy with immutable source-derived provenance through
+normal Save now exist.
 
-Durable content-publication truth and a responsive capability-gated
-administrator workflow now also exist. Existing catalog rows are backfilled as
-published; newly cataloged media remains outside the ordinary Gallery until
-persisted title, description, and canonical-tag metadata is ready and an
-authorized administrator publishes that one item.
+Durable content-publication truth, a responsive capability-gated administrator
+workflow with bounded batch actions, safe administrator catalog removal, a
+durable manual cover foundation, and automated catalog
+backup/retention/restore-verification foundations also exist. Existing catalog
+rows are backfilled as published; newly cataloged media remains outside the
+ordinary Gallery until persisted title, description, and canonical-tag metadata
+is ready and an authorized administrator publishes.
 
-There is still no completed media application, premium gallery, generalized downloader UI,
-desktop shell, GUI Settings, broad automatic AI workflow beyond optional
-server-enabled post-catalog analysis, media mutation workflow,
-deployed server, installer, or supported release. The persistent media catalog
-remains minimal: it can store logical media and physical locations from
-explicit scan-candidate import plus a user-editable display title and ordered
-canonical content tags. Canonical tag keys are stable English identifiers, and
-display titles remain separate from physical filenames. Display-title search
-and canonical-tag AND filtering exist in the catalog browser. A manual browser
-metadata workspace exists for display title, optional plain-text description,
-and ordered canonical tags. An automatic built-in `Processed` workflow
-collection is derived from durable metadata saves containing at least one
-canonical tag: the first such save records a `processed_at_ms` tagging
-timestamp, non-empty tag edits and title/description edits preserve it, and
-removing all tags clears Processed membership and the timestamp. The catalog
-does not yet include arbitrary user-created collections, a general collection
-manager, suggested filenames, complete Cover Studio, imported/AI/series covers,
-cover candidates, premium gallery data, or filesystem
-rename workflows. A durable manual cover foundation is implemented (migration
-`0022`): one accepted manually selected cover per logical medium with durable
-artifacts and regenerable cover thumbnails
-([ADR-0050](docs/adr/0050-durable-manual-cover-foundation.md)). Tauri v2 is accepted as the future desktop shell, but no
-Tauri scaffold exists yet. Development remains MacBook-first; Ubuntu Server
-24.04 on the Intel NUC6i5SYH is now the current personal production server
-preparation target for a future authoritative FrameNest server. This document
-defines approved product direction; it does not claim full product
-implementation.
+There is still no completed desktop shell, GUI Settings, complete Cover Studio,
+arbitrary user-created collections, persistent AI Drafts, multi-model draft
+comparison/promotion, media second-copy backup, or installer. Owner-authoritative
+current production baseline is public/canonical commit
+`aec2f0091c10aed2fc2033dac154a0d9651b2b6d` on the Ubuntu NUC release path
+`/opt/framenest/releases/aec2f0091c10aed2fc2033dac154a0d9651b2b6d` with schema
+`0028`. Tauri v2 is accepted as the future desktop shell, but no Tauri scaffold
+exists yet. Development remains MacBook-first; Ubuntu Server 24.04 on the Intel
+NUC6i5SYH is the current personal production server. This document defines
+approved product direction; it does not claim full product implementation.
 
 ## 3. Product Vision
 
@@ -174,10 +170,12 @@ Future first-class categories include `memes`, `youtube`, and `movies`.
 Categories are a dedicated catalog facet rather than only tags or directory
 names. The stored `youtube` content category and structured creator attribution
 are accepted through
-[ADR-0055](docs/adr/0055-youtube-creator-taxonomy-and-immutable-provenance.md);
-X acquisition remains unimplemented. Movie language metadata should prefer
-container or audio metadata and user editing before expensive AI analysis,
-and FrameNest must not automatically upload audio to a cloud provider.
+[ADR-0055](docs/adr/0055-youtube-creator-taxonomy-and-immutable-provenance.md).
+Requester-private X meme acquisition is implemented for native X video and
+animated-GIF-like media delivered as video; there is no separate X content
+category, and static X photos remain deferred. Movie language metadata should
+prefer container or audio metadata and user editing before expensive AI
+analysis, and FrameNest must not automatically upload audio to a cloud provider.
 
 ## 8. Local-First Invariants
 

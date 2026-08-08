@@ -48,6 +48,9 @@ Current product, system, and operational truth is distributed across:
 - [docs/NUC_HOST_BASELINE.md](docs/NUC_HOST_BASELINE.md) for sanitized,
   command-observed NUC host baseline facts.
 - [docs/adr/README.md](docs/adr/README.md) for accepted architecture decisions.
+- [docs/WORKER_EXECUTION_CONTRACT.md](docs/WORKER_EXECUTION_CONTRACT.md) for
+  Worker runtime, `.venv`, exact-source evidence, and test invocation rules.
+- [DEVELOPMENT.md](DEVELOPMENT.md) for the local browser-development launcher.
 
 When sources conflict, identify the exact conflict, determine whether a source
 is stale, incomplete, misunderstood, or intentionally superseded, and escalate
@@ -124,11 +127,24 @@ Rendered UX acceptance belongs to Michal. The accepted Gallery and Details MVP
 visual behavior remains frozen unless a concrete defect is identified.
 
 Do not hide new product scope inside infrastructure, deployment, backup,
-protocol, or migration work. Do not claim desktop app, real host deployment,
-Tailscale, authentication, production provider-secret integration, arbitrary
-collection management, persistent AI Drafts, covers, thumbnails, upload,
-synchronization, or complete backup coverage until repository evidence proves
-it.
+protocol, or migration work. Do not claim desktop app, complete Cover Studio,
+arbitrary collection management, persistent AI Drafts, multi-model draft
+comparison, synchronization, media second-copy backup, or full production
+hardening until repository evidence and owner acceptance prove it. Living status
+for already-shipped foundations belongs in README, ROADMAP, PRODUCT, SPEC, and
+SERVER; do not reopen closed logical wholes merely because prose elsewhere is
+stale.
+
+## Worker Execution
+
+Workers must follow
+[docs/WORKER_EXECUTION_CONTRACT.md](docs/WORKER_EXECUTION_CONTRACT.md) for
+CPython 3.13 / Poetry authority, canonical `.venv` preservation, isolated
+worktree exact-source provenance, Python and JavaScript test invocation,
+repository browser-evidence gates, failure classification, and no-GUI shell
+rules. Implementation authority does not implicitly grant push, publication,
+deployment, production mutation, provider contact, or external X/YouTube
+acquisition.
 
 ## Git And Lifecycle
 

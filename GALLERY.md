@@ -28,10 +28,13 @@ task. Git history remains the archive.
 
 The gallery is a flagship FrameNest capability. It should be premium, dark,
 cover-first, fast, and useful for large personal collections. The current
-repository implements a minimum persistent media catalog and a read-only
-imported-media catalog browser with display-title search and canonical-tag AND
-filters. It does not yet implement the cover pipeline, derived thumbnails, or
-real premium gallery.
+repository implements a persistent media catalog and packaged Gallery/Details
+browser with display-title search, canonical-tag AND filters, content-category
+filters, creator-chip filtering, publication-gated ordinary visibility, durable
+manual cover priority with regenerable cover thumbnails, and identity-only
+playback/download handoff for available locations. Complete Cover Studio,
+imported/AI/series covers, cover candidates, and full premium-gallery polish
+remain later work.
 
 The gallery should feel like a media product, not a generic administrative
 dashboard.

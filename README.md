@@ -4,20 +4,61 @@ FrameNest is a local-first, privacy-conscious, cross-platform library for video 
 
 ## Status
 
-FrameNest is in an early foundation, pre-alpha stage.
+FrameNest is in an early foundation, pre-alpha stage with a substantial shipped
+server, catalog, Gallery/Details, upload, acquisition, and operator foundation.
 
-A minimal Poetry package scaffold exists at the repository root with centralized settings, a FastAPI application factory, a typed `GET /health` endpoint, in-process contract tests, a loopback-first Uvicorn development server, a packaged pre-alpha local web shell at `GET /`, pure-domain identity primitives, and a repository-native systemd service foundation now targeted at Ubuntu Server 24.04 on the Intel NUC6i5SYH personal production server. A bounded operator-only YouTube manual-ingestion path exists, but there is no completed media application, generalized downloader UI, desktop shell, installer, real host deployment, or supported release yet.
+A Poetry package scaffold exists at the repository root with centralized
+settings, a FastAPI application factory, a typed `GET /health` endpoint,
+in-process contract tests, a loopback-first Uvicorn development server, a
+packaged pre-alpha local web shell at `GET /`, pure-domain identity primitives,
+and a repository-native systemd service foundation targeted at Ubuntu Server
+24.04 on the Intel NUC6i5SYH personal production server. Owner-authoritative
+current production baseline for living status is public/canonical commit
+`aec2f0091c10aed2fc2033dac154a0d9651b2b6d` (schema head `0028`), served from
+`/opt/framenest/releases/aec2f0091c10aed2fc2033dac154a0d9651b2b6d` with
+Tailscale Serve only (Funnel not publicly exposed). There is still no completed
+desktop shell, installer, or generalized multi-source downloader UI.
 
-The repository also contains the first persistence, registry, media catalog, local media-analysis, AI suggestion-review, and quarantine upload-transport foundations: a centralized SQLite database path setting, synchronous SQLAlchemy Core engine helpers, packaged Alembic resources, explicit database commands, local device and library registry tables, durable upload-session, canonical byte-identity, duplicate-disposition, and publication-provenance and upload-to-catalog linkage tables through migration `0014`, persistent logical-media and physical-location tables, persistent display-title, plain-text description, and canonical-tag tables through migration `0006`, and an automatic built-in `Processed` workflow collection derived from durable tag saves added in migration `0007`, read-only library scan and media-analysis preview commands, explicit idempotent scan-candidate import, an imported-media catalog browser with display-title search, canonical-tag AND filters, a virtual `All media` Catalog scope, and an optional `Processed` Catalog scope, a manual browser `Edit media` dialog for persistent title, optional plain-text description, ordered tag assignment, and explicit server-provider AI assistance through NVIDIA NIM or Vercel AI Gateway. The media catalog foundation is now exposed for explicit scan-candidate import, same-origin title/description/tag API operations, same-origin catalog retrieval, browser editing of the currently persisted title, description, and tag state, and identity-only imported-media AI suggestion preview. The upload path receives untrusted bytes only into configured server quarantine, performs bounded server-side validation, and derives canonical identity from validated byte size and SHA-256 digest. The first qualifying exact identity reaches `publish_pending`; later exact copies wait in `duplicate_pending` for an explicit keep-or-discard decision. When an operator explicitly selects a safe registered publication library, lifecycle-owned recovery publishes each eligible upload to its own verified server-owned target without replacement and then cleans up quarantine. `published` remains absent from Gallery until specialized cataloging reaches `cataloged`. The current foundation now also includes a durable manual cover foundation (migration `0022`): at most one accepted manually selected cover per logical medium from an available GIF or MP4 source, with durable server-owned artifacts and regenerable cover thumbnails ([ADR-0050](docs/adr/0050-durable-manual-cover-foundation.md)). It does not provide arbitrary user-created collections, a general collection manager, persisted suggested filenames, complete Cover Studio, imported/AI/series covers, cover candidates, AI Draft persistence, or premium gallery data yet.
+The repository also contains the first persistence, registry, media catalog,
+local media-analysis, AI suggestion-review, and quarantine upload-transport
+foundations: a centralized SQLite database path setting, synchronous SQLAlchemy
+Core engine helpers, packaged Alembic resources through schema head `0028`,
+explicit database commands, local device and library registry tables, durable
+upload-session, canonical byte-identity, duplicate-disposition, and
+publication-provenance and upload-to-catalog linkage tables, persistent
+logical-media and physical-location tables, persistent display-title, plain-text
+description, and canonical-tag tables, an automatic built-in `Processed`
+workflow collection derived from durable tag saves, read-only library scan and
+media-analysis preview commands, explicit idempotent scan-candidate import, an
+imported-media catalog browser with display-title search, canonical-tag AND
+filters, a virtual `All media` Catalog scope, and an optional `Processed`
+Catalog scope, a manual browser `Edit media` dialog for persistent title,
+optional plain-text description, ordered tag assignment, and explicit
+server-provider AI assistance through NVIDIA NIM or Vercel AI Gateway. Ordinary
+users may submit private uploads for administrator review; administrators have
+bounded batch actions, safe catalog removal, and content publication.
+Requester-private YouTube and X meme acquisition with explicit administrator
+promotion are implemented (X is video/animated-GIF-like media only; static X
+photos remain deferred). The upload path receives untrusted bytes only into
+configured server quarantine, performs bounded server-side validation, and
+derives canonical identity from validated byte size and SHA-256 digest. The
+current foundation also includes a durable manual cover foundation: at most one
+accepted manually selected cover per logical medium from an available GIF, MP4,
+or still-image source, with durable server-owned artifacts and regenerable cover
+thumbnails ([ADR-0050](docs/adr/0050-durable-manual-cover-foundation.md)). It
+does not provide arbitrary user-created collections, a general collection
+manager, persisted suggested filenames, complete Cover Studio,
+imported/AI/series covers, cover candidates, or AI Draft persistence.
 
 Migration `0021` adds a separate durable content-publication relation. Existing
 logical media is backfilled as published; newly cataloged media remains outside
 the ordinary Gallery until persisted title, description, and canonical-tag
 metadata is complete and an authorized administrator publishes that one item.
 `GET /api/media` is published-only for every identity, while a separate
-capability-gated `Manage media` surface supports responsive inspection and
-single-item publication. Upload storage publication, cataloging, `Processed`,
-AI analysis, and ordinary-audience content publication remain distinct facts.
+capability-gated `Manage media` surface supports responsive inspection,
+bounded batch actions, and publication. Upload storage publication, cataloging,
+`Processed`, AI analysis, and ordinary-audience content publication remain
+distinct facts.
 
 Migration `0022` adds the durable manual cover foundation: a sparse accepted
 `media_covers` relation, admin-only source-frame authoring from an available
@@ -25,9 +66,20 @@ GIF or MP4 source, durable immutable cover artifacts, and regenerable
 `cover-thumbnail-jpeg-v1` derivatives served through an identity-only,
 publication-visibility-gated endpoint. Gallery cards prefer a validated cover
 thumbnail and fall back to the existing `gallery-preview`/fallback path
-([ADR-0050](docs/adr/0050-durable-manual-cover-foundation.md)).
+([ADR-0050](docs/adr/0050-durable-manual-cover-foundation.md)). Later revisions
+through `0028` add catalog-removal receipts, ordinary-user upload ownership,
+requester-private YouTube and X acquisition, and YouTube/X creator taxonomy
+contracts.
 
-Supported runtime: CPython `>=3.13,<3.14`. Local development uses a uv-managed CPython 3.13.14 interpreter with Poetry as the dependency, environment, and lockfile manager. The initial `poetry.lock` was generated with Poetry 2.1.4. The local virtual environment lives in `.venv/` and is not committed.
+Supported runtime: CPython `>=3.13,<3.14`. Poetry is the dependency,
+environment, and lockfile manager (`pyproject.toml` + committed `poetry.lock`).
+Local development may use `uv` only to locate or install a CPython 3.13
+interpreter for Poetry ([ADR-0006](docs/adr/0006-macos-python-interpreter-provider.md));
+`uv` is not the project dependency manager and an untracked `uv.lock` is not
+project authority. The initial `poetry.lock` was generated with Poetry 2.1.4.
+The local virtual environment lives in `.venv/` and is not committed. Worker
+runtime and exact-source rules:
+[docs/WORKER_EXECUTION_CONTRACT.md](docs/WORKER_EXECUTION_CONTRACT.md).
 
 ## Development Setup
 
@@ -54,6 +106,10 @@ poetry run pytest
 `./framenest setup` idempotently uses `uv` to locate or install CPython
 `3.13.14`, configures Poetry for the in-project `.venv/`, and installs the
 committed dependencies. Re-run it after dependency or lockfile changes.
+JavaScript `node:test` suites and opt-in browser evidence commands are
+documented in
+[docs/WORKER_EXECUTION_CONTRACT.md](docs/WORKER_EXECUTION_CONTRACT.md) and
+[DEVELOPMENT.md](DEVELOPMENT.md).
 
 ## Local Server
 
@@ -172,7 +228,22 @@ FrameNest-owned runtime logs are compact JSON lines written to `stderr` by the d
 
 Override bind address with `FRAMENEST_HOST` and `FRAMENEST_PORT` for the raw server command. Default binding is loopback-only (`127.0.0.1`). Setting `FRAMENEST_HOST=0.0.0.0` is an explicit exposure override and is not the recommended default. The browser-development launcher enforces loopback and accepts only `FRAMENEST_PORT` for port selection.
 
-Reload, real host deployment, Tailscale behavior, authentication, and AppArmor/UFW policy are not provided yet. A minimum catalog backup and restore-to-new-destination foundation exists through `framenest-backup` and is documented in [docs/BACKUP_AND_RECOVERY.md](docs/BACKUP_AND_RECOVERY.md); it does not copy original media, include secrets, automate retention, replace production databases, or prove a real NUC restore. A repository-native generic systemd service bundle exists under `deploy/systemd/`, the superseded Fedora guide remains in [docs/FEDORA_SERVICE.md](docs/FEDORA_SERVICE.md), and the current Ubuntu NUC deployment-readiness workflow is documented in [docs/UBUNTU_NUC_DEPLOYMENT.md](docs/UBUNTU_NUC_DEPLOYMENT.md).
+Reload, AppArmor/UFW hardening completion, and broader multi-device
+synchronization remain open work. A catalog backup create/verify/restore
+foundation exists through `framenest-backup`, and automated catalog
+backup/retention/restore-verification is accepted through
+[ADR-0052](docs/adr/0052-automated-catalog-backup-retention-and-restore-verification.md)
+and documented in [docs/BACKUP_AND_RECOVERY.md](docs/BACKUP_AND_RECOVERY.md); it
+does not copy original media, include secrets, replace production databases as
+an automated recovery, or claim media second-copy durability. A
+repository-native generic systemd service bundle exists under `deploy/systemd/`,
+the superseded Fedora guide remains in [docs/FEDORA_SERVICE.md](docs/FEDORA_SERVICE.md),
+and the current Ubuntu NUC deployment workflow is documented in
+[docs/UBUNTU_NUC_DEPLOYMENT.md](docs/UBUNTU_NUC_DEPLOYMENT.md). Owner-authoritative
+current production serves commit
+`aec2f0091c10aed2fc2033dac154a0d9651b2b6d` from
+`/opt/framenest/releases/aec2f0091c10aed2fc2033dac154a0d9651b2b6d` over
+Tailscale Serve only.
 
 ## Local Database Foundation
 
@@ -371,7 +442,11 @@ The current conceptual direction is:
 - External VLC first for playback, with embedded libVLC considered later.
 - Remote access through Tailscale-only networking rather than public internet exposure.
 
-The accepted desktop and distributed-media direction is documentation only at this stage. No Tauri scaffold, installer, real NUC deployment, persistent gallery, transfer implementation, or deployed authoritative server exists yet.
+The accepted desktop and distributed-media direction remains documentation-led
+for Tauri packaging. No Tauri scaffold or installer exists yet. Authoritative
+server deployment on the Ubuntu NUC is present for the owner-authoritative
+current release noted above; multi-device synchronization and transfer remain
+later scope.
 
 Accepted implementation foundations so far:
 
@@ -411,14 +486,16 @@ Security decisions should favor least privilege, explicit confirmation for destr
 ## Development Methodology
 
 FrameNest development follows Analytic Programming through the pinned `.ap/`
-Git submodule. The initial AP pin is:
+Git submodule. The current AP gitlink is:
 
 ```text
-c4c69f52b9995c609248cee5d04223dbddd6da5f
+5c2f0e197d6aecdc6aca918b22e080bb58abc7a1
 ```
 
 Universal AP protocol files live under `.ap/`. FrameNest-specific operating
-rules live in [AGENTS.md](AGENTS.md) outside the managed AP block. Verify AP
+rules live in [AGENTS.md](AGENTS.md) outside the managed AP block. Worker
+runtime and exact-source rules live in
+[docs/WORKER_EXECUTION_CONTRACT.md](docs/WORKER_EXECUTION_CONTRACT.md). Verify AP
 integration with:
 
 ```text
@@ -449,8 +526,6 @@ Current server deployment preparation targets Ubuntu Server 24.04 on the Intel N
 
 ## Documentation Map
 
-The full documentation set will be added in later bounded cycles. Expected future documents include architecture decision records, development workflow guidance, security notes, local runtime layout, testing strategy, and deployment notes.
-
 Current foundation files:
 
 - [`.gitignore`](.gitignore) defines the first repository safety perimeter.
@@ -462,6 +537,7 @@ Current foundation files:
 - [`ROADMAP.md`](ROADMAP.md) defines the staged evidence-based development roadmap.
 - [`DESKTOP.md`](DESKTOP.md) records accepted desktop shell architecture and UX direction.
 - [`DEVELOPMENT.md`](DEVELOPMENT.md) describes the local browser-development launcher workflow.
+- [`docs/WORKER_EXECUTION_CONTRACT.md`](docs/WORKER_EXECUTION_CONTRACT.md) defines Worker runtime, `.venv`, exact-source evidence, and test invocation rules.
 - [`SERVER.md`](SERVER.md) records accepted optional server and NUC aggregation direction.
 - [`GALLERY.md`](GALLERY.md) records accepted gallery product and UX direction.
 - [`AI_WORKSPACE.md`](AI_WORKSPACE.md) records accepted manual-first metadata and multi-model AI workspace direction.
@@ -470,7 +546,7 @@ Current foundation files:
 - [`.ap/README.md`](.ap/README.md), [`.ap/INTEGRATION.md`](.ap/INTEGRATION.md), and [`.ap/AP.md`](.ap/AP.md) define the pinned canonical Analytic Programming protocol integration.
 - [`.ap/AP_ORCHESTRATOR.md`](.ap/AP_ORCHESTRATOR.md) defines the universal Orchestrator handbook.
 - [`.ap/AP_WORKER.md`](.ap/AP_WORKER.md) defines the universal Worker handbook.
-- [`docs/NUC_HOST_BASELINE.md`](docs/NUC_HOST_BASELINE.md) preserves sanitized command-observed NUC host baseline facts accepted before real FrameNest deployment.
+- [`docs/NUC_HOST_BASELINE.md`](docs/NUC_HOST_BASELINE.md) preserves sanitized command-observed NUC host baseline facts.
 - [`docs/ARCHITECTURE_FOUNDATION_EVIDENCE.md`](docs/ARCHITECTURE_FOUNDATION_EVIDENCE.md) collects primary-source evidence for the first architecture decisions. It is not an ADR and does not approve any option.
 - [`docs/adr/README.md`](docs/adr/README.md) indexes accepted architecture decision records.
 - [`docs/adr/0001-supported-python-version.md`](docs/adr/0001-supported-python-version.md) records the accepted CPython 3.13 runtime decision.

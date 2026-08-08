@@ -104,7 +104,7 @@ Accepted so far:
 - Persistent display-title and canonical-tag core through [ADR-0027](docs/adr/0027-persistent-display-title-and-canonical-tags.md); implementation complete for API-level title/tag persistence.
 - Catalog read model and search semantics through [ADR-0028](docs/adr/0028-catalog-read-model-and-search-semantics.md); implementation complete for read-only imported-media listing, display-title search, canonical-tag AND filters, deterministic ordering, and bounded offset pagination.
 - Automatic built-in `Processed` workflow collection from durable tag saves through [ADR-0030](docs/adr/0030-automatic-processed-collection.md); accepted and implemented through migration `0007`, with one zero-or-one collection membership per medium, and no arbitrary collection CRUD or general collection manager.
-- Fedora systemd service foundation through [ADR-0031](docs/adr/0031-fedora-systemd-service-foundation.md), superseded for the active deployment target by the Ubuntu NUC deployment foundation through [ADR-0032](docs/adr/0032-ubuntu-nuc-deployment-foundation.md); accepted and implemented as repository-local service source material, a non-secret environment template, a read-only database-readiness gate, and an Ubuntu operator runbook. The catalog backup and restore-to-new-destination foundation is accepted through [ADR-0033](docs/adr/0033-catalog-backup-and-recovery-foundation.md). Real host installation, activation, NUC acceptance, AppArmor/UFW policy, Tailscale Serve, authentication, production database replacement, media backup, and secret recovery remain unimplemented.
+- Fedora systemd service foundation through [ADR-0031](docs/adr/0031-fedora-systemd-service-foundation.md), superseded for the active deployment target by the Ubuntu NUC deployment foundation through [ADR-0032](docs/adr/0032-ubuntu-nuc-deployment-foundation.md); accepted and implemented as repository-local service source material, a non-secret environment template, a read-only database-readiness gate, and an Ubuntu operator runbook. The catalog backup and restore-to-new-destination foundation is accepted through [ADR-0033](docs/adr/0033-catalog-backup-and-recovery-foundation.md). Automated catalog backup/retention/restore-verification is accepted through [ADR-0052](docs/adr/0052-automated-catalog-backup-retention-and-restore-verification.md). Owner-authoritative current production serves commit `aec2f0091c10aed2fc2033dac154a0d9651b2b6d`. Further NUC security hardening, AppArmor/UFW completion, production database replacement automation, media second-copy backup, and secret-recovery drills remain open.
 - Canonical Analytic Programming integration through a pinned `.ap/` Git submodule and managed `AGENTS.md` block through [ADR-0034](docs/adr/0034-canonical-analytic-programming-integration.md); accepted and implemented. Universal AP protocol files live under `.ap/`, FrameNest-specific rules live in `AGENTS.md`, and permanent BOOT/NEXT files are no longer live repository artifacts.
 - Authoritative server and client state model through [ADR-0035](docs/adr/0035-authoritative-server-and-client-state-model.md); accepted as product architecture direction. The server process is authoritative for catalog and server-owned state and may run locally or later on the NUC; browser, desktop, and remote interfaces are clients. Broader authenticated upload, synchronization, client cache/download, per-user Trash, categories, language metadata, and playback extensions remain unimplemented beyond the current trusted-loopback upload foundation.
 - Durable upload sessions, bounded validation, lifecycle-owned validation, canonical byte identity, exact-duplicate disposition, atomic single-process storage-publication recovery, specialized `published -> cataloged` catalog creation, optional durable automatic post-catalog AI analysis, first-class still-image (`jpg`/`png`) media kinds, first-class content classification plus bounded movie identification, owner-operated YouTube manual ingestion, and a separate durable content-publication boundary with a responsive single-item administrator workflow through [ADR-0037](docs/adr/0037-durable-upload-session-and-safe-ingest-foundation.md), [ADR-0038](docs/adr/0038-bounded-upload-media-validation.md), [ADR-0039](docs/adr/0039-lifecycle-owned-upload-validation-orchestration.md), [ADR-0040](docs/adr/0040-canonical-upload-byte-identity-foundation.md), [ADR-0041](docs/adr/0041-exact-byte-upload-duplicate-disposition.md), [ADR-0042](docs/adr/0042-atomic-upload-publication.md), [ADR-0043](docs/adr/0043-upload-to-catalog-transaction.md), [ADR-0044](docs/adr/0044-durable-automatic-post-catalog-analysis.md), [ADR-0045](docs/adr/0045-content-classification-and-movie-identification.md), [ADR-0046](docs/adr/0046-youtube-manual-ingestion-and-provenance.md), and [ADR-0049](docs/adr/0049-durable-content-publication-boundary.md); implemented through migration `0021`.
@@ -113,7 +113,7 @@ The initial scaffold decision gate is complete. A Poetry package scaffold, centr
 
 Broader architecture decisions still open include sidecar manifest format and versioning, category and language metadata schema, metadata/tag/search schema, cover and thumbnail cache implementation details, desktop sidecar IPC, initial authentication boundary, offline client cache semantics, multiprocess publication or catalog leases or fencing, media-tool distribution strategy, and Ubuntu NUC host-acceptance details beyond the initial systemd service foundation.
 
-Persistence strategy is accepted through [ADR-0010](docs/adr/0010-initial-persistence-foundation.md). The minimal SQLAlchemy/Alembic migration foundation is implemented. The current schema head is revision `0023`: catalog tables and the automatic built-in `Processed` collection are established through `0007`; `0008` through `0018` add durable upload, validation, byte identity, duplicate disposition, storage publication, catalog, automatic-analysis, still-image, classification, movie-identification, and analysis-history foundations; `0019` adds durable YouTube manual-acquisition provenance; `0020` adds durable security audit events; `0021` adds durable content publication with legacy backfill; and `0022` adds the durable manual cover foundation per [ADR-0050](docs/adr/0050-durable-manual-cover-foundation.md). Revision `0023` extends the accepted cover source contract to timeless still-image (JPEG/PNG) sources selected through the existing browser upload cockpit.
+Persistence strategy is accepted through [ADR-0010](docs/adr/0010-initial-persistence-foundation.md). The minimal SQLAlchemy/Alembic migration foundation is implemented. The current schema head is revision `0028`: catalog tables and the automatic built-in `Processed` collection are established through `0007`; `0008` through `0018` add durable upload, validation, byte identity, duplicate disposition, storage publication, catalog, automatic-analysis, still-image, classification, movie-identification, and analysis-history foundations; `0019` adds durable YouTube manual-acquisition provenance; `0020` adds durable security audit events; `0021` adds durable content publication with legacy backfill; `0022` adds the durable manual cover foundation per [ADR-0050](docs/adr/0050-durable-manual-cover-foundation.md); `0023` extends the accepted cover source contract to timeless still-image (JPEG/PNG) sources; `0024` adds catalog-removal receipts; `0025` adds upload-session ownership and duplicate mode for ordinary-user submission; `0026` adds YouTube requester ownership; `0027` adds YouTube creator taxonomy fields; and `0028` adds requester-private X acquisition.
 
 Stable identity strategy is accepted through [ADR-0011](docs/adr/0011-stable-domain-identities.md). Pure domain identity primitives exist, and minimal logical media, physical location, device, and library entities exist. Storage volume and series entities remain future work beyond identity values.
 
@@ -127,7 +127,7 @@ Boundaries: Phase 2 remains `in progress` until the broader architecture package
 
 ## Phase 3 — Domain and Metadata Core
 
-Status: planned.
+Status: partially implemented.
 
 Goal: define and test the core domain model and durable metadata behavior.
 
@@ -155,7 +155,7 @@ Boundaries: no gallery, downloader, playback, or multi-device server behavior be
 
 ## Phase 4 — Server-First Development Skeleton on macOS
 
-Status: partially started.
+Status: shipped/closed for the skeleton boundary; later product surfaces continue in later phases.
 
 Goal: create the first local development server skeleton on macOS.
 
@@ -203,7 +203,7 @@ Boundaries: server-first implementation priority MUST NOT make the desktop produ
 
 ## Phase 5 — Local Catalog and Library Scanning
 
-Status: in progress.
+Status: partially implemented.
 
 Goal: register and scan local libraries safely.
 
@@ -243,7 +243,7 @@ Boundaries: no destructive organization by default; no file mutation is required
 
 ## Phase 6 — Naming, Tagging, and Portable Metadata
 
-Status: planned.
+Status: partially implemented.
 
 Goal: implement canonical organization rules and durable metadata.
 
@@ -257,11 +257,22 @@ Boundaries: no silent rename or migration execution.
 
 ## Phase 7 — Media Acquisition
 
-Status: planned.
+Status: partially implemented.
 
 Goal: implement the first adapter-based acquisition workflow.
 
 Key deliverables: yt-dlp adapter, source inspection, metadata preview, progress, cancellation, temporary state, finalization, archive identity, structured errors, and tests.
+
+Implemented within this phase:
+
+- ordinary-user private upload submission and administrator review boundary;
+- requester-private YouTube acquisition and administrator promotion;
+- YouTube/X creator taxonomy and immutable source-derived provenance;
+- requester-private X meme acquisition for native X video and animated-GIF-like
+  media delivered as video (static X photos deferred).
+
+Still required for phase exit: broader adapter coverage, generalized downloader
+UI, and additional source adapters beyond the shipped YouTube/X foundations.
 
 Entry conditions: media acquisition boundaries and packaging/update strategy are decided.
 
@@ -303,7 +314,7 @@ Boundaries: AI-generated covers remain later scope.
 
 ## Phase 9 — Premium Local Gallery
 
-Status: planned.
+Status: partially implemented.
 
 Goal: build the first real scalable local gallery.
 
@@ -317,7 +328,7 @@ Boundaries: do not select a frontend framework outside approved ADRs.
 
 ## Phase 10 — Playback
 
-Status: planned.
+Status: partially implemented.
 
 Goal: open local and later remote media through a playback abstraction.
 
@@ -331,7 +342,7 @@ Boundaries: embedded libVLC remains deferred.
 
 ## Phase 11 — Intel NUC Ubuntu Deployment
 
-Status: deployment-readiness documentation in progress; real host deployment not accepted.
+Status: partially implemented; owner-authoritative production release is active, while NUC security hardening remains open.
 
 Goal: deploy and harden the server foundation on Ubuntu Server 24.04 on the Intel NUC6i5SYH personal production server.
 
@@ -345,7 +356,7 @@ Boundaries: no destructive disk commands in roadmap tasks; no public listener, r
 
 ## Phase 12 — Tailscale-Only Remote Access
 
-Status: planned.
+Status: partially implemented.
 
 Goal: enable private remote access without public exposure.
 
@@ -401,7 +412,7 @@ must not select arbitrary server filesystem paths.
 
 ## Phase 15 — AI-Assisted Workflows
 
-Status: long-term planned.
+Status: partially implemented; multi-model draft comparison remains frozen.
 
 Goal: add optional user-controlled AI assistance.
 
@@ -429,8 +440,12 @@ Boundaries: no generated cover candidate replaces an approved cover without expl
 
 ## Phase 17 — Backup and Encrypted Cloud Restore
 
-Status: long-term scope only; minimum catalog backup and restore-to-new-destination
-foundation exists through [ADR-0033](docs/adr/0033-catalog-backup-and-recovery-foundation.md).
+Status: partially implemented; catalog backup create/verify/restore and automated
+retention/restore-verification foundations exist through
+[ADR-0033](docs/adr/0033-catalog-backup-and-recovery-foundation.md) and
+[ADR-0052](docs/adr/0052-automated-catalog-backup-retention-and-restore-verification.md).
+Media second-copy, encrypted cloud restore, and production-replacement automation
+remain open.
 
 Goal: provide future backup and restore without losing local-first ownership.
 
@@ -444,36 +459,60 @@ Boundaries: not part of early implementation beyond the current catalog-only fou
 
 ## Current Active Logical Whole
 
-Active logical whole: `Admin Media Selection and Bounded Batch Actions`.
+No product implementation logical whole is declared active in living roadmap
+state after the closed `Requester-Private X Meme Acquisition` baseline at
+`aec2f0091c10aed2fc2033dac154a0d9651b2b6d`.
 
-This whole adds page-scoped administrator selection, bounded sequential
-publish-selected behavior, bounded sequential first-analysis-selected behavior,
-truthful per-item and aggregate progress, and honest stop and partial-failure
-behavior on top of the closed `Processed Publish Workflow and Responsive Admin
-List View + production deployment` whole.
+Expected near-term strategic work, when separately authorized, includes
+`NUC Security Hardening` before any VPS deployment. That whole is **not**
+automatically active here and must not be started without a fresh Orchestrator
+grant.
 
-Implementation is in progress under bounded Worker authority. This logical
-whole is **not accepted and not closed**. Closure still requires:
+Do not reopen the closed wholes listed below merely because older roadmap prose
+was stale.
 
-- independent acceptance of the exact implementation candidate;
-- immutable NUC deployment;
-- no-provider owner visual acceptance;
-- exact provider-count and durable-state explanation;
-- ORCHESTRATOR closure.
+## Closed Product Logical Wholes
 
-Do not treat repository documentation as closure authority for this whole.
+The following named wholes are closed ancestors. Do not treat them as current
+active unfinished work:
+
+| Logical whole | Status note |
+| --- | --- |
+| Processed Publish Workflow and Responsive Admin List View | `CLOSED` |
+| Admin Media Selection and Bounded Batch Actions | `CLOSED` (feat commit `3f89b8b`) |
+| Administrator Media Removal / safe catalog retirement | `CLOSED` (feat commit `deb8b7c`) |
+| Automated Catalog Backup/Retention/Restore Verification | `CLOSED` (feat commit `455a174`; [ADR-0052](docs/adr/0052-automated-catalog-backup-retention-and-restore-verification.md)) |
+| Ordinary-User Upload Submission / Administrator Review Boundary | `CLOSED` (feat commit `68eb98f`; [ADR-0053](docs/adr/0053-ordinary-user-upload-submission-and-administrator-review-boundary.md)) |
+| Requester-Private YouTube Acquisition / Administrator Promotion | `CLOSED` (feat commit `3948a0e`; [ADR-0054](docs/adr/0054-requester-private-youtube-acquisition-and-promotion-boundary.md)) |
+| YouTube and X Taxonomy / Creator Attribution / AI Tagging Contract | `CLOSED` (feat commit `4350a04`; [ADR-0055](docs/adr/0055-youtube-creator-taxonomy-and-immutable-provenance.md)) |
+| Requester-Private X Meme Acquisition | `CLOSED` at public/canonical `aec2f0091c10aed2fc2033dac154a0d9651b2b6d` |
 
 ## Frozen and Parked Product Logical Wholes
 
 The following product logical wholes are preserved for future fresh
-Orchestrator and Worker authorization. They are outside the current active
-MVP path unless explicitly reopened. Do not mix them into the current Admin AI
-Quick Action and Edit Surface Polish work.
+Orchestrator and Worker authorization. They are outside the current MVP path
+unless explicitly reopened. Do not mix them into ordinary documentation or
+hardening work.
 
 FrameNest product work remains prioritized before stable AP upgrade work,
 `cisarik/ap_experimental`, kiosk, general NUC desktop work, native mobile
 applications, VPS showcase, and observability/Grafana. That ordering is
 priority context only; it does not authorize those later tracks here.
+
+### Bounded Multi-Model Metadata Draft Comparison and Promotion
+
+Status: `FROZEN — separate future logical whole, outside the current MVP path`
+
+Preservation notes:
+
+- persistent multi-model AI drafts, inline model picker, draft comparison, and
+  draft promotion remain unimplemented and must not be treated as immediately
+  actionable;
+- related accepted direction remains in
+  [ADR-0023](docs/adr/0023-manual-first-metadata-and-multi-model-ai-drafts.md)
+  and [AI_WORKSPACE.md](AI_WORKSPACE.md);
+- do not reopen this whole inside ordinary metadata, Gallery, or acquisition
+  tasks.
 
 ### Movie Identification, Reasoning Lifecycle and Movies Taxonomy
 
@@ -526,9 +565,9 @@ This frozen whole does not amend that ADR.
 Status: `CLOSED — delivered as Processed Publish Workflow and Responsive Admin
 List View + production deployment`
 
-Page-scoped administrator selection and bounded batch actions continue as the
-current active logical whole `Admin Media Selection and Bounded Batch Actions`
-and are not part of this closed whole.
+Page-scoped administrator selection and bounded batch actions were delivered as
+the successor whole `Admin Media Selection and Bounded Batch Actions` and are
+also closed. Do not reopen either whole from stale roadmap text.
 
 Owner goals recorded for this whole:
 
@@ -550,7 +589,7 @@ Owner goals recorded for this whole:
 - publishing remains an explicit admin action.
 
 Likely concerns recorded for this whole and its successor, without
-pre-designing beyond the active logical whole:
+pre-designing beyond authorized work:
 
 - durable publish state;
 - authorization and audit actions;
@@ -573,7 +612,7 @@ Explicit boundaries recorded for this whole:
 
 Existing automatic `Processed` workflow-collection membership from durable tag
 saves ([ADR-0030](docs/adr/0030-automatic-processed-collection.md)) is not
-publication and must not be treated as this frozen publish workflow.
+publication and must not be treated as this closed publish workflow.
 
 ### Responsive Mobile-Web Polish
 
@@ -587,8 +626,7 @@ Preservation notes:
   direct owner-visible evidence;
 - responsive correctness is still required locally for every touched UI
   surface;
-- the current Edit modal corrections remain part of the active individual AI
-  workflow;
+- screenshot-led UI/UX production polish remains deferred;
 - the future Processed admin list view must be designed responsively within its
   own logical whole;
 - test narrow phone, ordinary phone, tablet/intermediate, and desktop widths
@@ -602,6 +640,10 @@ Native Android/iOS architecture remains separate and later.
 
 ## Deferred Early Non-Goals
 
-Deferred early non-goals include mobile-native completeness, public hosting, transcoding cluster, embedded libVLC, automatic global synchronization, every source adapter, multi-user SaaS, automatic self-updates, and VeraCrypt UI.
+Deferred early non-goals include mobile-native completeness, public hosting,
+transcoding cluster, embedded libVLC, automatic global synchronization, every
+source adapter, multi-user SaaS, automatic self-updates, VeraCrypt UI, Kiosk,
+static X photo support, and screenshot-led UI/UX production polish.
 
-These items MUST NOT be pulled into early implementation without explicit Orchestrator and Cooperator approval.
+These items MUST NOT be pulled into early implementation without explicit
+Orchestrator and Cooperator approval.

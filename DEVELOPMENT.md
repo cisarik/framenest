@@ -11,10 +11,17 @@ Consumers: Cooperator, Orchestrator, Worker, and local FrameNest developers.
 
 Retention: remains while the browser-development launcher exists.
 
-Inbound links: [README.md](README.md).
+Inbound links: [README.md](README.md),
+[docs/WORKER_EXECUTION_CONTRACT.md](docs/WORKER_EXECUTION_CONTRACT.md),
+[AGENTS.md](AGENTS.md).
 
 Cleanup/update owner: future explicitly authorized Worker under an Orchestrator
 task. Git history remains the archive.
+
+Worker runtime, Poetry/`.venv` authority, exact-source worktree testing, and
+test invocation rules live in
+[docs/WORKER_EXECUTION_CONTRACT.md](docs/WORKER_EXECUTION_CONTRACT.md). This
+launcher guide does not replace that contract.
 
 ## First Run
 
@@ -33,7 +40,11 @@ the managed block in [AGENTS.md](AGENTS.md). It does not replace product tests.
 `setup` locates the uv-managed CPython `3.13.14`, installs it with `uv` if it is
 missing, configures Poetry to use that interpreter with `.venv/`, and runs
 `poetry install --no-interaction`. Re-run `./framenest setup` after committed
-dependency or lockfile changes.
+dependency or lockfile changes. `uv` here is only the interpreter provider;
+Poetry remains the dependency and lockfile authority. Do not adopt an untracked
+`uv.lock`. Ordinary Workers must not casually recreate, move, symlink, or
+replace the canonical project `.venv` — see
+[docs/WORKER_EXECUTION_CONTRACT.md](docs/WORKER_EXECUTION_CONTRACT.md).
 
 `start` automatically performs the same setup flow only when the expected
 project environment or installed controller is missing.
@@ -168,6 +179,30 @@ If status is `conflict`, inspect the message and stop the unrelated process
 through the tool that started it, or choose a different `FRAMENEST_PORT`. The
 launcher does not use broad process search, `pkill`, `killall`, port-based
 killing, or automatic force-kill recovery.
+
+## Tests
+
+Python:
+
+```text
+poetry run pytest
+```
+
+Isolated worktree exact-source Python evidence uses the canonical interpreter
+plus `PYTHONPATH=<exact-worktree>/src` as documented in
+[docs/WORKER_EXECUTION_CONTRACT.md](docs/WORKER_EXECUTION_CONTRACT.md).
+
+JavaScript (`node:test` suites under `tests/*.test.js`; no npm test script):
+
+```text
+node --test tests/<name>.test.js
+```
+
+Opt-in repository browser evidence (system Chrome/CDP, not Playwright authority):
+
+```text
+FRAMENEST_RUN_BROWSER_EVIDENCE=1 node --test tests/browser_<name>_evidence.test.js
+```
 
 ## Manual No-Browser Run
 
