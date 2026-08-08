@@ -59,7 +59,7 @@ The long-term goal is to provide a personal media library that can acquire media
 FrameNest should allow users to keep useful media under their own control,
 understand where each copy exists, and access the collection through clients of
 an authoritative FrameNest server process. That server process may run locally
-on the same device as the desktop client or later on the Ubuntu NUC. This is
+on the same device as the desktop client or on the Ubuntu NUC. This is
 not a public cloud or SaaS requirement.
 
 The normal user experience should be a native desktop application rather than a manually opened external browser. Browser mode remains useful for development and diagnostics.
@@ -205,8 +205,11 @@ Browser, desktop, and remote interfaces are clients. They must not infer
 administrator authority from loopback, source IP, hostname, Tailscale
 membership, cookies, or same-machine execution.
 
-The Intel NUC may later host the authoritative server, but it is not required
-for local ownership and is not yet deployed.
+The Intel NUC currently hosts the owner-authoritative production server, but it
+is not required for local ownership. Current production remains
+tailnet-oriented. NUC security hardening remains open and is required before
+future VPS deployment; present NUC operation does not imply VPS deployment or
+public Internet exposure.
 
 The server may later support:
 

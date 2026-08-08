@@ -423,11 +423,11 @@ The current approved product direction includes:
 - A visually premium gallery as a flagship experience.
 - Media acquisition through replaceable source adapters.
 - Local-first ownership through an authoritative FrameNest server process that
-  may run locally or later on the Ubuntu NUC.
+  may run locally or on the Ubuntu NUC.
 - Privacy-aware AI assistance later, after core library behavior and safety boundaries are established.
 - Multiple libraries, multiple devices, and one logical media item that may exist in multiple physical locations.
-- An Intel NUC personal production server direction for future authoritative
-  server hosting, remote access, transfer, and archive workflows.
+- An Intel NUC personal production server for authoritative hosting, with
+  further remote-access, transfer, and archive workflows remaining future work.
 
 ## Architectural Direction
 
@@ -602,7 +602,7 @@ The current stage does not provide:
 - AI-generated covers.
 - Public internet exposure.
 - A complete premium gallery, arbitrary user-created collections, suggested filenames, complete Cover Studio, imported/AI/series covers, cover candidates, persistent AI Drafts, persistent media scanner, or generalized downloader UI.
-- Production deployment.
+- VPS or public-Internet production hosting beyond the current owner-operated Ubuntu NUC Tailscale Serve deployment.
 
 ## License
 

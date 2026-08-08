@@ -4,7 +4,13 @@
 
 FrameNest is in foundation-stage, pre-alpha development.
 
-There is no stable release, supported release, production deployment, or security response service level yet. Security-sensitive decisions are still being documented as the repository foundation and architecture are established.
+There is no stable or supported public release and no security response service
+level yet. Owner-authoritative current production on the Ubuntu NUC serves
+commit `aec2f0091c10aed2fc2033dac154a0d9651b2b6d` (schema `0028`) over
+Tailscale Serve only; Funnel is not publicly exposed. NUC security hardening
+remains open before future VPS deployment. Security-sensitive decisions are
+still being documented as the repository foundation and architecture are
+established.
 
 ## Reporting Security Issues
 
