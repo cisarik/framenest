@@ -79,15 +79,22 @@ destination paths, usernames, hostnames, IP addresses, environment values, SQL,
 media paths, media filenames, raw exception text, credentials, tokens, cookies,
 authorization headers, private keys, or secret prefixes. Ordinary off-device
 status output must also omit destination root, marker destination ID, filesystem
-device numbers, and mount identity. The initial bundle
+device numbers, and mount identity. Workstation snapshot envelopes and recovery
+CLI output must omit SSH host/user/IP/alias, local source/destination paths,
+store/marker IDs, device numbers, filesystem UUIDs, credentials, and production
+release paths. The initial bundle
 excludes Gallery preview cache, scan-imported originals, published upload
 originals, non-secret AI configuration, and secrets. A valid catalog backup bundle contains only the declared manifest
 and catalog artifact; unexpected files, directories, symlinks, and temporary
 state are rejected. Backup and restore publication must not overwrite a path
 that appears after an initial absence check. Restore writes only to a new
 absent destination and does not replace production, run migrations, start
-services, or prove readiness. Off-device publication uses no-replace semantics
-and must not overwrite a conflicting final destination bundle.
+services, or prove readiness. Off-device and workstation snapshot publication
+use no-replace semantics and must not overwrite a conflicting final destination
+bundle. Workstation pull uses system OpenSSH with a fixed remote export
+launcher and a narrow `framenest` sudo bridge; it must not grant arbitrary
+sudo, caller-controlled launcher arguments, or NUC write access to workstation
+storage.
 
 The resumable upload transport is capability-gated trusted-path functionality,
 not a public upload service. Upload endpoints are disabled until

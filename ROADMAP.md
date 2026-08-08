@@ -441,12 +441,14 @@ Boundaries: no generated cover candidate replaces an approved cover without expl
 ## Phase 17 — Backup and Encrypted Cloud Restore
 
 Status: partially implemented; catalog backup create/verify/restore, automated
-retention/restore-verification, and mounted-filesystem off-device
-copy/restore-verification foundations exist through
+retention/restore-verification, mounted-filesystem off-device
+copy/restore-verification, and operator-workstation pull-based snapshot
+foundations exist through
 [ADR-0033](docs/adr/0033-catalog-backup-and-recovery-foundation.md),
 [ADR-0052](docs/adr/0052-automated-catalog-backup-retention-and-restore-verification.md),
+[ADR-0056](docs/adr/0056-off-device-catalog-backup-copy-and-restore-verification.md),
 and
-[ADR-0056](docs/adr/0056-off-device-catalog-backup-copy-and-restore-verification.md).
+[ADR-0057](docs/adr/0057-operator-workstation-pull-based-catalog-snapshot.md).
 Media second-copy, encrypted cloud restore, proven physical host-loss survival,
 and production-replacement automation remain open.
 

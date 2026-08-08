@@ -5,6 +5,7 @@ set -g repo_root (realpath "$script_dir")
 set -g controller "$repo_root/.venv/bin/framenest-dev"
 set -g ai_controller "$repo_root/.venv/bin/framenest-ai"
 set -g backup_controller "$repo_root/.venv/bin/framenest-backup"
+set -g recovery_controller "$repo_root/.venv/bin/framenest-recovery"
 set -g library_python "$repo_root/.venv/bin/python"
 set -g youtube_controller "$repo_root/.venv/bin/framenest-youtube"
 set -g local_ai_env "$repo_root/.secrets/ai.env.fish"
@@ -34,6 +35,11 @@ function _framenest_help
     echo "  ./framenest backup retain-plan"
     echo "  ./framenest backup expire"
     echo "  ./framenest backup verify-restore"
+    echo "  ./framenest backup export-latest"
+    echo "  ./framenest recovery init-store"
+    echo "  ./framenest recovery pull"
+    echo "  ./framenest recovery list"
+    echo "  ./framenest recovery verify"
     echo "  ./framenest library status"
     echo "  ./framenest library add"
     echo "  ./framenest library refresh"
@@ -196,6 +202,15 @@ switch "$argv[1]"
         _framenest_use_repo_env_file
         or exit $status
         "$backup_controller" $argv[2..-1]
+        exit $status
+    case recovery
+        if not test -x "$recovery_controller"
+            _framenest_setup
+            or exit $status
+        end
+        _framenest_use_repo_env_file
+        or exit $status
+        "$recovery_controller" $argv[2..-1]
         exit $status
     case library
         if not test -x "$library_python"

@@ -21,6 +21,7 @@ from framenest.infrastructure.persistence.catalog_backup_ops import (
     CatalogBackupOpsError,
     build_retention_plan,
     expire_automatic_backups,
+    export_latest_scheduled_recovery_point,
     list_bundle_summaries,
     load_catalog_backup_ops_config,
     operation_lock,
@@ -30,6 +31,7 @@ from framenest.infrastructure.persistence.catalog_backup_ops import (
     verify_restore_bundle,
 )
 from framenest.infrastructure.persistence.catalog_backup_offdevice import OffdeviceError
+from framenest.infrastructure.persistence.catalog_backup_transfer import TransferError
 
 INVALID_INPUT_CODE = "FRAMENEST_BACKUP_INVALID_INPUT"
 COMMAND_FAILED_CODE = "FRAMENEST_BACKUP_COMMAND_FAILED"
@@ -43,6 +45,7 @@ PROTECTED_OPERATIONS = frozenset(
         "run-offdevice",
         "verify-restore",
         "expire",
+        "export-latest",
     }
 )
 
@@ -122,6 +125,13 @@ def main(argv: Sequence[str] | None = None) -> int:
             message=message,
         )
         return 1
+    except TransferError as exc:
+        _write_error(
+            operation=operation,
+            error_code=exc.error_code,
+            message="Catalog export transfer failed.",
+        )
+        return 1
     except (BackupError, Exception):
         _write_error(
             operation=operation,
@@ -196,6 +206,10 @@ def _dispatch_protected(operation: str, args: argparse.Namespace, config: Catalo
         payload = expire_automatic_backups(config, apply=apply)
         _write_payload(payload)
         return 0
+    if operation == "export-latest":
+        # Protocol bytes occupy stdout exclusively; do not emit JSON success.
+        export_latest_scheduled_recovery_point(config, sys.stdout.buffer)
+        return 0
     raise _UsageError("Invalid backup command.")
 
 
@@ -265,6 +279,13 @@ def _build_parser() -> argparse.ArgumentParser:
         help=(
             "Copy the latest verified scheduled catalog recovery point to the "
             "configured off-device mount and restore-verify it."
+        ),
+    )
+    subcommands.add_parser(
+        "export-latest",
+        help=(
+            "Stream the latest verified scheduled catalog recovery point as "
+            "protocol-v1 bytes on stdout (no arguments)."
         ),
     )
 

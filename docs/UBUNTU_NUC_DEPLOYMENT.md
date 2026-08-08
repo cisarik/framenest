@@ -118,6 +118,24 @@ authorized host task provisions `/mnt/framenest-catalog-offdevice`, sets the
 non-secret destination ID, and accepts the physical failure domain. Installing
 or enabling them is not part of ordinary repository implementation.
 
+Operator-workstation pull assets (ADR-0057):
+
+```text
+deploy/ubuntu/framenest-catalog-export-v1
+```
+
+Console surfaces after the feature release is deployed:
+
+```text
+/opt/framenest/current/.venv/bin/framenest-backup export-latest
+/opt/framenest/current/.venv/bin/framenest-recovery
+```
+
+The export launcher and exact no-argument sudoers bridge are later host
+provisioning only. Current production may remain on an older SHA until an
+authorized immutable deployment publishes this capability. Repository presence
+alone does not enable real workstation pulls.
+
 Install and enable the local backup timer only under an authorized deployment
 task after the feature release is active:
 
@@ -161,7 +179,9 @@ Defaults and operator commands are documented in
 [BACKUP_AND_RECOVERY.md](BACKUP_AND_RECOVERY.md). The optional ADR-0056
 off-device timer copies that verified recovery point to a distinct mount and
 restore-verifies it; repository presence alone is not proof of host-loss
-survival.
+survival. The preferred current off-host layer is ADR-0057 operator-workstation
+pull, which remains repository capability until later E3 launcher/sudoers/store
+provisioning and the first accepted real pull/verify.
 
 The service must remain loopback-first, foreground under systemd, journal
 captured, explicit-migration only, and protected by the read-only database

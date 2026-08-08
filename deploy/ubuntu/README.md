@@ -10,6 +10,20 @@ architecture decision is
 catalog backup and recovery prerequisite is documented in
 [docs/BACKUP_AND_RECOVERY.md](../../docs/BACKUP_AND_RECOVERY.md) and
 [ADR-0033](../../docs/adr/0033-catalog-backup-and-recovery-foundation.md).
+Mounted off-device copy is
+[ADR-0056](../../docs/adr/0056-off-device-catalog-backup-copy-and-restore-verification.md).
+Operator-workstation pull is
+[ADR-0057](../../docs/adr/0057-operator-workstation-pull-based-catalog-snapshot.md).
+
+Repository source for the later root-owned export launcher:
+
+```text
+deploy/ubuntu/framenest-catalog-export-v1
+```
+
+That launcher is source material only until a later bounded host-provisioning
+task installs it under `/usr/local/libexec/` with root ownership and activates
+the exact no-argument sudoers rule documented in the backup runbook.
 
 ## Phase Map
 

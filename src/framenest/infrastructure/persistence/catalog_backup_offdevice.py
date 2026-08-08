@@ -15,7 +15,6 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-import ctypes
 import errno
 import json
 import os
@@ -31,7 +30,14 @@ from framenest.infrastructure.persistence.catalog_backup import (
     MANIFEST_NAME,
     BackupError,
     sha256_file,
-    verify_catalog_backup,
+)
+from framenest.infrastructure.persistence.catalog_backup_transfer import (
+    BundleIdentity,
+    TransferError,
+    capture_bundle_identity,
+    fsync_directory,
+    identities_match,
+    rename_noreplace as transfer_rename_noreplace,
 )
 
 DEFAULT_OFFDEVICE_ROOT = Path("/mnt/framenest-catalog-offdevice")
@@ -52,24 +58,8 @@ OffdeviceReadiness = Literal[
     "ready",
 ]
 
-AT_FDCWD = -100
-RENAME_NOREPLACE = 1
-
-
 class OffdeviceError(BackupError):
     """Sanitized off-device catalog copy failure."""
-
-
-@dataclass(frozen=True, slots=True)
-class BundleIdentity:
-    """Exact byte identity of a catalog backup bundle."""
-
-    bundle_id: str
-    catalog_sha256: str
-    catalog_size_bytes: int
-    alembic_revision: str
-    manifest_sha256: str
-    manifest_size_bytes: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -121,38 +111,6 @@ def parse_configured_destination_id(
             error_code="OFFDEVICE_DESTINATION_ID_INVALID",
         )
     return value
-
-
-def capture_bundle_identity(
-    bundle: Path | str,
-    *,
-    bundle_id: str | None = None,
-) -> BundleIdentity:
-    """Capture exact identity of a verified catalog backup bundle."""
-    bundle_path = Path(bundle)
-    verified = verify_catalog_backup(bundle_path)
-    manifest_path = _require_regular_file(bundle_path / MANIFEST_NAME, description="manifest")
-    catalog_path = _require_regular_file(bundle_path / CATALOG_NAME, description="catalog artifact")
-    return BundleIdentity(
-        bundle_id=bundle_id if bundle_id is not None else bundle_path.name,
-        catalog_sha256=verified.catalog_sha256,
-        catalog_size_bytes=verified.catalog_size_bytes,
-        alembic_revision=verified.alembic_revision,
-        manifest_sha256=sha256_file(manifest_path),
-        manifest_size_bytes=manifest_path.stat().st_size,
-    )
-
-
-def identities_match(left: BundleIdentity, right: BundleIdentity) -> bool:
-    """Return True when two bundle identities are exactly equal."""
-    return (
-        left.bundle_id == right.bundle_id
-        and left.catalog_sha256 == right.catalog_sha256
-        and left.catalog_size_bytes == right.catalog_size_bytes
-        and left.alembic_revision == right.alembic_revision
-        and left.manifest_sha256 == right.manifest_sha256
-        and left.manifest_size_bytes == right.manifest_size_bytes
-    )
 
 
 def validate_offdevice_destination(
@@ -353,12 +311,17 @@ def publish_or_reuse_offdevice_bundle(
                 "Staged off-device bundle identity mismatch.",
                 error_code="OFFDEVICE_STAGE_IDENTITY_MISMATCH",
             )
-        _fsync_directory(stage, hooks=probe)
-        _fsync_directory(destination.bundles_dir, hooks=probe)
+        fsync_directory(stage, fsync=probe.fsync)
+        fsync_directory(destination.bundles_dir, fsync=probe.fsync)
         try:
             rename(stage, final_path)
         except OffdeviceError:
             raise
+        except TransferError as exc:
+            raise OffdeviceError(
+                "Atomic off-device publication is unsupported.",
+                error_code="OFFDEVICE_ATOMIC_PUBLISH_UNSUPPORTED",
+            ) from exc
         except FileExistsError as exc:
             raise OffdeviceError(
                 "Off-device destination bundle conflicts.",
@@ -385,7 +348,7 @@ def publish_or_reuse_offdevice_bundle(
                 error_code="OFFDEVICE_PUBLISH_FAILED",
             ) from exc
         stage = Path()  # published; do not remove final
-        _fsync_directory(destination.bundles_dir, hooks=probe)
+        fsync_directory(destination.bundles_dir, fsync=probe.fsync)
         final_identity = capture_bundle_identity(
             final_path,
             bundle_id=source_identity.bundle_id,
@@ -404,45 +367,12 @@ def publish_or_reuse_offdevice_bundle(
 def rename_noreplace(source: Path, destination: Path) -> None:
     """Atomically rename with Linux RENAME_NOREPLACE semantics."""
     try:
-        libc = ctypes.CDLL("libc.so.6", use_errno=True)
-    except OSError as exc:
+        transfer_rename_noreplace(source, destination)
+    except TransferError as exc:
         raise OffdeviceError(
             "Atomic off-device publication is unsupported.",
             error_code="OFFDEVICE_ATOMIC_PUBLISH_UNSUPPORTED",
         ) from exc
-    if not hasattr(libc, "renameat2"):
-        raise OffdeviceError(
-            "Atomic off-device publication is unsupported.",
-            error_code="OFFDEVICE_ATOMIC_PUBLISH_UNSUPPORTED",
-        )
-    renameat2 = libc.renameat2
-    renameat2.argtypes = [
-        ctypes.c_int,
-        ctypes.c_char_p,
-        ctypes.c_int,
-        ctypes.c_char_p,
-        ctypes.c_uint,
-    ]
-    renameat2.restype = ctypes.c_int
-    ctypes.set_errno(0)
-    result = renameat2(
-        AT_FDCWD,
-        os.fsencode(source),
-        AT_FDCWD,
-        os.fsencode(destination),
-        RENAME_NOREPLACE,
-    )
-    if result == 0:
-        return
-    err = ctypes.get_errno()
-    if err == errno.EEXIST:
-        raise FileExistsError(err, os.strerror(err), str(destination))
-    if err in {errno.ENOSYS, errno.EINVAL}:
-        raise OffdeviceError(
-            "Atomic off-device publication is unsupported.",
-            error_code="OFFDEVICE_ATOMIC_PUBLISH_UNSUPPORTED",
-        )
-    raise OSError(err, os.strerror(err))
 
 
 def derive_offdevice_readiness(
@@ -643,14 +573,6 @@ def _cleanup_owned_stage(stage: Path, bundles_dir: Path) -> None:
     for child in children:
         child.unlink()
     stage.rmdir()
-
-
-def _fsync_directory(path: Path, *, hooks: OffdeviceOsHooks) -> None:
-    fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY)
-    try:
-        hooks.fsync(fd)
-    finally:
-        os.close(fd)
 
 
 def _require_regular_file(path: Path, *, description: str) -> Path:

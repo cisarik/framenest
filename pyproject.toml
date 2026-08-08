@@ -18,6 +18,7 @@ framenest-backup = "framenest.adapters.cli.backup:main"
 framenest-youtube = "framenest.adapters.cli.youtube:main"
 framenest-previews = "framenest.adapters.cli.previews:main"
 framenest-covers = "framenest.adapters.cli.covers:main"
+framenest-recovery = "framenest.adapters.cli.recovery:main"
 
 [tool.poetry]
 package-mode = true

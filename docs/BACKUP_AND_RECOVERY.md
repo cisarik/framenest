@@ -13,6 +13,8 @@ Automated scheduling, retention, and restore-readiness:
 [ADR-0052](adr/0052-automated-catalog-backup-retention-and-restore-verification.md).
 Mounted-filesystem off-device copy and restore verification:
 [ADR-0056](adr/0056-off-device-catalog-backup-copy-and-restore-verification.md).
+Operator-workstation pull-based catalog snapshot and recovery:
+[ADR-0057](adr/0057-operator-workstation-pull-based-catalog-snapshot.md).
 
 The accepted sanitized NUC host baseline is recorded in
 [NUC_HOST_BASELINE.md](NUC_HOST_BASELINE.md). That baseline confirms the current
@@ -67,6 +69,7 @@ Shared exclusive non-blocking `fcntl.flock` on
 - `restore`
 - `run-scheduled`
 - `run-offdevice`
+- `export-latest`
 - `verify-restore`
 - `expire`
 
@@ -97,6 +100,7 @@ Operator commands:
 ```text
 framenest-backup run-scheduled
 framenest-backup run-offdevice
+framenest-backup export-latest
 framenest-backup status
 framenest-backup list
 framenest-backup retain-plan
@@ -152,6 +156,119 @@ OnCalendar=*-*-* 04:17:00 UTC
 Persistent=yes
 RandomizedDelaySec=900
 ```
+
+## Operator-Workstation Pull (Preferred Current Off-Host Layer)
+
+Threat: a catalog recovery point that exists only on the NUC, or only on a
+mounted destination the NUC can write, can still be lost with that host or
+mount failure domain.
+
+Benefit: the operator workstation initiates an OpenSSH pull of exactly the
+ledgered successful scheduled recovery point, verifies framed bytes locally,
+restore-verifies into a disposable local database, and publishes a private
+snapshot with no-replace atomicity. The NUC never learns the workstation
+destination root and gains no workstation credential or snapshot write/delete
+authority. No NUC outbound backup connection is introduced.
+
+Limitation: this is a repository capability after implementation. It is not
+real-host proven until later E3 workstation/NUC provisioning and the first
+accepted pull/verify. It remains catalog-only. It does not back up media,
+cover bytes beyond existing bundle scope, secrets, AI configuration, or full
+host state. V1 has no workstation retention, no automatic scheduling, and no
+Level-4 production replacement.
+
+Recovery layers remain distinct:
+
+1. same-host scheduled verified backup;
+2. optional mounted off-device copy (ADR-0056);
+3. preferred current operator-workstation pull (ADR-0057).
+
+Do not redefine `off_device` status to include workstation snapshots.
+
+### Export and sudo contract
+
+Remote export command:
+
+```text
+framenest-backup export-latest
+```
+
+Repository launcher source:
+
+```text
+deploy/ubuntu/framenest-catalog-export-v1
+```
+
+Intended later host install path:
+
+```text
+/usr/local/libexec/framenest-catalog-export-v1
+```
+
+Intended later sudoers semantic contract (operator username is host-specific;
+use the placeholder, never hardcode a real username into product code):
+
+```text
+<FRAME_NEST_OPERATOR> ALL=(framenest) NOPASSWD:NOSETENV: /usr/local/libexec/framenest-catalog-export-v1 ""
+```
+
+The explicit final `""` is required so zero arguments are matched. Run-as
+target is `framenest`, not `root`. No wildcard `framenest-backup *` rule. No
+caller environment override. Host provisioning must validate with `visudo`
+before activation. This repository task does not install the launcher or
+sudoers on a real NUC.
+
+### Workstation recovery CLI
+
+```text
+framenest-recovery init-store --store-root <abs> --mount-root <abs>
+framenest-recovery pull --store-root <abs> --mount-root <abs> --expected-store-id <32hex> --ssh-target <alias-or-user@host>
+framenest-recovery list --store-root <abs> --mount-root <abs> --expected-store-id <32hex>
+framenest-recovery verify --store-root <abs> --mount-root <abs> --expected-store-id <32hex> --bundle-id <id>
+```
+
+Generic code accepts store/mount/SSH parameters. Concrete workstation values
+remain local operator configuration for a later Fish wrapper outside the
+repository (`~/.local/bin/framenest-nuc-backup.fish` is intentionally not
+installed by this repository task).
+
+### Recovery levels
+
+- Level 1 (implemented): offline workstation `list` and `verify`.
+- Level 2 (documented): reverify local snapshot, transfer the nested original
+  bundle into bounded operator-owned NUC staging, no-replace move/install into
+  private service-owned recovery staging, correct owner/mode, reverify
+  identity. No new automatic remote-import protocol.
+- Level 3 (documented): staged bundle → strict verify → restore into a NEW
+  ABSENT disposable database → SQLite integrity/FK/Alembic/semantic checks.
+  No migration. No production replacement. Equal revision may proceed through
+  disposable verification; older revision may be verified historically but must
+  not be silently migrated; newer-than-runtime revision fails compatibility for
+  that runtime.
+- Level 4 (out of scope): service stop, production catalog replacement,
+  migration-as-recovery, restart/cutover.
+
+### Future real-host sequencing
+
+Current public repository and current production SHA may intentionally differ
+until an authorized immutable deployment. Repository implementation alone does
+not make `export-latest` available on the current NUC. Future sequencing:
+
+1. implementation;
+2. independent repository acceptance;
+3. publication;
+4. pre-deployment verified production backup/readiness;
+5. immutable deployment of exact published SHA;
+6. health/schema acceptance;
+7. launcher provisioning;
+8. exact sudo rule provisioning;
+9. workstation store provisioning;
+10. first real pull;
+11. offline workstation verification;
+12. optional Level-2/3 non-production recovery drill;
+13. logical-whole closure.
+
+Do not claim real off-host recovery before stages 10–11 pass.
 
 ## State Classes
 

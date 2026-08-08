@@ -33,12 +33,17 @@ from framenest.infrastructure.persistence.catalog_backup_offdevice import (
     OffdeviceError,
     OffdeviceOsHooks,
     build_sanitized_offdevice_status,
-    capture_bundle_identity,
     derive_offdevice_readiness,
     inspect_destination_health,
     parse_configured_destination_id,
     publish_or_reuse_offdevice_bundle,
     validate_offdevice_destination,
+)
+from framenest.infrastructure.persistence.catalog_backup_transfer import (
+    BundleIdentity,
+    capture_bundle_identity,
+    identities_match,
+    write_protocol_v1_stream,
 )
 
 DEFAULT_BACKUP_ROOT = Path("/var/lib/framenest/catalog-backups")
@@ -281,6 +286,137 @@ def parse_keep_auto(raw: object) -> int:
 def is_automatic_bundle_name(name: str) -> bool:
     """Return True when the name matches the accepted auto- bundle form."""
     return AUTO_NAME_PATTERN.fullmatch(name) is not None
+
+
+@dataclass(frozen=True, slots=True)
+class SelectedScheduledRecoveryPoint:
+    """Authoritative latest successful scheduled recovery point."""
+
+    bundle_path: Path
+    identity: BundleIdentity
+    semantic: Mapping[str, Any]
+    recorded_success: Mapping[str, Any]
+
+
+def select_latest_successful_scheduled_recovery_point(
+    config: CatalogBackupOpsConfig,
+) -> SelectedScheduledRecoveryPoint:
+    """Select and strictly verify the ledgered successful scheduled recovery point.
+
+    This is the single shared definition of "latest successful scheduled backup"
+    used by mounted off-device copy and workstation export.
+    """
+    status = _load_status(config)
+    success = status.get("last_successful_scheduled_backup_and_restore")
+    if not isinstance(success, dict):
+        raise CatalogBackupOpsError(
+            "No verified scheduled catalog recovery point is available.",
+            error_code="SCHEDULED_SOURCE_UNAVAILABLE",
+        )
+    bundle_id = success.get("bundle_id")
+    if not isinstance(bundle_id, str) or not is_automatic_bundle_name(bundle_id):
+        raise CatalogBackupOpsError(
+            "Scheduled recovery point identity is invalid.",
+            error_code="SCHEDULED_SOURCE_INVALID",
+        )
+    ledger_ids = {
+        entry["bundle_id"]
+        for entry in _ledger_entries(status)
+        if isinstance(entry.get("bundle_id"), str)
+    }
+    if bundle_id not in ledger_ids:
+        raise CatalogBackupOpsError(
+            "Scheduled recovery point is not ledgered.",
+            error_code="SCHEDULED_SOURCE_NOT_LEDGERED",
+        )
+    source_bundle = config.backup_root / bundle_id
+    if source_bundle.is_symlink() or not source_bundle.is_dir():
+        raise CatalogBackupOpsError(
+            "Scheduled recovery point is missing.",
+            error_code="SCHEDULED_SOURCE_MISSING",
+        )
+    verified = verify_catalog_backup(source_bundle)
+    expected_sha = success.get("catalog_sha256")
+    expected_revision = success.get("alembic_revision")
+    expected_size = success.get("catalog_size_bytes")
+    if (
+        verified.catalog_sha256 != expected_sha
+        or verified.alembic_revision != expected_revision
+        or verified.catalog_size_bytes != expected_size
+    ):
+        raise CatalogBackupOpsError(
+            "Scheduled recovery point no longer matches recorded evidence.",
+            error_code="SCHEDULED_SOURCE_EVIDENCE_MISMATCH",
+        )
+    identity = capture_bundle_identity(source_bundle, bundle_id=bundle_id)
+    catalog_path = source_bundle / CATALOG_NAME
+    live_semantic = capture_semantic_snapshot(catalog_path)
+    semantic_payload = _semantic_payload(live_semantic)
+    recorded_semantic = success.get("semantic")
+    if isinstance(recorded_semantic, dict):
+        recorded_counts = recorded_semantic.get("counts")
+        if isinstance(recorded_counts, dict) and dict(recorded_counts) != dict(
+            semantic_payload["counts"]
+        ):
+            raise CatalogBackupOpsError(
+                "Scheduled recovery point no longer matches recorded evidence.",
+                error_code="SCHEDULED_SOURCE_EVIDENCE_MISMATCH",
+            )
+        recorded_revision = recorded_semantic.get("alembic_revision")
+        if (
+            isinstance(recorded_revision, str)
+            and recorded_revision != semantic_payload["alembic_revision"]
+        ):
+            raise CatalogBackupOpsError(
+                "Scheduled recovery point no longer matches recorded evidence.",
+                error_code="SCHEDULED_SOURCE_EVIDENCE_MISMATCH",
+            )
+    return SelectedScheduledRecoveryPoint(
+        bundle_path=source_bundle,
+        identity=identity,
+        semantic=semantic_payload,
+        recorded_success=success,
+    )
+
+
+def export_latest_scheduled_recovery_point(
+    config: CatalogBackupOpsConfig,
+    stdout: Any,
+) -> BundleIdentity:
+    """Stream protocol-v1 bytes for the authoritative scheduled recovery point.
+
+    Acquires the shared backup operation lock for selection, verification,
+    streaming, and terminal source re-verification. Does not mutate scheduled
+    success status, retention, or backup roots. Writes protocol bytes only to
+    ``stdout``.
+    """
+    with operation_lock(config) as held:
+        if not held:
+            raise CatalogBackupOpsError(
+                "Another catalog backup operation is in progress.",
+                error_code="BACKUP_OPS_BUSY",
+            )
+        _ensure_ops_layout(config)
+        selected = select_latest_successful_scheduled_recovery_point(config)
+        write_protocol_v1_stream(
+            stdout,
+            identity=selected.identity,
+            semantic=selected.semantic,
+            manifest_path=selected.bundle_path / MANIFEST_NAME,
+            catalog_path=selected.bundle_path / CATALOG_NAME,
+        )
+        revalidated = select_latest_successful_scheduled_recovery_point(config)
+        if not identities_match(selected.identity, revalidated.identity):
+            raise CatalogBackupOpsError(
+                "Scheduled recovery point changed during export.",
+                error_code="SCHEDULED_SOURCE_CHANGED",
+            )
+        if dict(selected.semantic) != dict(revalidated.semantic):
+            raise CatalogBackupOpsError(
+                "Scheduled recovery point changed during export.",
+                error_code="SCHEDULED_SOURCE_CHANGED",
+            )
+        return selected.identity
 
 
 def derive_restore_readiness(
@@ -901,49 +1037,13 @@ def _run_offdevice_body(
     destination_root: Path,
     hooks: OffdeviceOsHooks | None,
 ) -> OffdeviceCopyResult:
-    status = _load_status(config)
-    success = status.get("last_successful_scheduled_backup_and_restore")
-    if not isinstance(success, dict):
-        raise OffdeviceError(
-            "No verified scheduled catalog recovery point is available.",
-            error_code="OFFDEVICE_SOURCE_UNAVAILABLE",
-        )
-    bundle_id = success.get("bundle_id")
-    if not isinstance(bundle_id, str) or not is_automatic_bundle_name(bundle_id):
-        raise OffdeviceError(
-            "Scheduled recovery point identity is invalid.",
-            error_code="OFFDEVICE_SOURCE_INVALID",
-        )
-    ledger_ids = {
-        entry["bundle_id"]
-        for entry in _ledger_entries(status)
-        if isinstance(entry.get("bundle_id"), str)
-    }
-    if bundle_id not in ledger_ids:
-        raise OffdeviceError(
-            "Scheduled recovery point is not ledgered.",
-            error_code="OFFDEVICE_SOURCE_NOT_LEDGERED",
-        )
-    source_bundle = config.backup_root / bundle_id
-    if source_bundle.is_symlink() or not source_bundle.is_dir():
-        raise OffdeviceError(
-            "Scheduled recovery point is missing.",
-            error_code="OFFDEVICE_SOURCE_MISSING",
-        )
-    verified = verify_catalog_backup(source_bundle)
-    expected_sha = success.get("catalog_sha256")
-    expected_revision = success.get("alembic_revision")
-    expected_size = success.get("catalog_size_bytes")
-    if (
-        verified.catalog_sha256 != expected_sha
-        or verified.alembic_revision != expected_revision
-        or verified.catalog_size_bytes != expected_size
-    ):
-        raise OffdeviceError(
-            "Scheduled recovery point no longer matches recorded evidence.",
-            error_code="OFFDEVICE_SOURCE_EVIDENCE_MISMATCH",
-        )
-    source_identity = capture_bundle_identity(source_bundle)
+    try:
+        selected = select_latest_successful_scheduled_recovery_point(config)
+    except CatalogBackupOpsError as exc:
+        raise _map_scheduled_source_to_offdevice(exc) from exc
+    bundle_id = selected.identity.bundle_id
+    source_bundle = selected.bundle_path
+    source_identity = selected.identity
     destination = validate_offdevice_destination(
         destination_root=destination_root,
         configured_destination_id=configured_destination_id,
@@ -1038,6 +1138,20 @@ def _run_offdevice_body(
         reused_existing=reused,
         pending_cleanup=pending_cleanup,
         semantic=_semantic_payload(semantic),
+    )
+
+
+def _map_scheduled_source_to_offdevice(exc: CatalogBackupOpsError) -> OffdeviceError:
+    mapping = {
+        "SCHEDULED_SOURCE_UNAVAILABLE": "OFFDEVICE_SOURCE_UNAVAILABLE",
+        "SCHEDULED_SOURCE_INVALID": "OFFDEVICE_SOURCE_INVALID",
+        "SCHEDULED_SOURCE_NOT_LEDGERED": "OFFDEVICE_SOURCE_NOT_LEDGERED",
+        "SCHEDULED_SOURCE_MISSING": "OFFDEVICE_SOURCE_MISSING",
+        "SCHEDULED_SOURCE_EVIDENCE_MISMATCH": "OFFDEVICE_SOURCE_EVIDENCE_MISMATCH",
+    }
+    return OffdeviceError(
+        str(exc),
+        error_code=mapping.get(exc.error_code, "OFFDEVICE_SOURCE_UNAVAILABLE"),
     )
 
 

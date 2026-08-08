@@ -26,6 +26,7 @@ CLI_MODULES = (
     "framenest.adapters.cli.catalog",
     "framenest.adapters.cli.library",
     "framenest.adapters.cli.previews",
+    "framenest.adapters.cli.recovery",
     "framenest.adapters.cli.youtube",
 )
 
