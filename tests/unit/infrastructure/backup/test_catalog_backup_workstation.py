@@ -585,3 +585,149 @@ def test_offline_verify_rejects_corrupt_envelope(tmp_path: Path) -> None:
             hooks=hooks,
         )
     assert exc.value.error_code == "WORKSTATION_SNAPSHOT_ENVELOPE_MALFORMED"
+
+
+def test_real_pipe_body_stall_times_out_and_reaps_child(tmp_path: Path) -> None:
+    """A3-F01: valid preamble + stalled body must fire transfer timeout on a real pipe."""
+    import subprocess
+    import sys
+    import time
+
+    from framenest.infrastructure.persistence.catalog_backup_workstation import (
+        WorkstationError,
+        init_workstation_store,
+        pull_workstation_snapshot,
+    )
+
+    mount, store = _prepare_mount(tmp_path)
+    hooks = _hooks(mount)
+    init = init_workstation_store(store_root=store, mount_root=mount, hooks=hooks)
+
+    helper = tmp_path / "stall_after_preamble_helper.py"
+    helper.write_text(
+        "\n".join(
+            [
+                "import json, sys, time",
+                "header = {",
+                '  "protocol_version": 1,',
+                '  "bundle_id": "auto-20260808T031700Z-abcd1234",',
+                '  "manifest_filename": "manifest.json",',
+                '  "catalog_filename": "catalog.sqlite3",',
+                '  "manifest_size_bytes": 1024,',
+                '  "manifest_sha256": "a" * 64,',
+                '  "catalog_size_bytes": 4096,',
+                '  "catalog_sha256": "b" * 64,',
+                '  "alembic_revision": "0028",',
+                '  "semantic": {"alembic_revision": "0028", "counts": {}},',
+                "}",
+                'encoded = json.dumps(header, sort_keys=True, separators=(",", ":")).encode()',
+                'sys.stdout.buffer.write(b"FNCBE01\\0")',
+                "sys.stdout.buffer.write(len(encoded).to_bytes(4, 'big'))",
+                "sys.stdout.buffer.write(encoded)",
+                "sys.stdout.buffer.flush()",
+                "while True:",
+                "    time.sleep(3600)",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    child_holder: dict[str, subprocess.Popen[bytes] | None] = {"proc": None}
+
+    def _popen(argv, **kwargs):  # noqa: ANN001
+        proc = subprocess.Popen(
+            [sys.executable, str(helper)],
+            stdin=kwargs.get("stdin"),
+            stdout=kwargs.get("stdout"),
+            stderr=kwargs.get("stderr"),
+            shell=False,
+            bufsize=0,
+        )
+        child_holder["proc"] = proc
+        return proc
+
+    transfer_timeout = 2
+    outer_watchdog = 12.0
+    t0 = time.monotonic()
+    with pytest.raises(WorkstationError) as exc:
+        pull_workstation_snapshot(
+            store_root=store,
+            mount_root=mount,
+            expected_store_id=init.store_id,
+            ssh_target="nuc-alias",
+            transfer_timeout_seconds=transfer_timeout,
+            hooks=hooks,
+            popen=_popen,
+        )
+    elapsed = time.monotonic() - t0
+    assert exc.value.error_code == "WORKSTATION_TRANSFER_TIMEOUT"
+    assert elapsed < outer_watchdog
+    assert elapsed >= transfer_timeout * 0.5
+
+    child = child_holder["proc"]
+    assert child is not None
+    assert child.poll() is not None
+    snapshots = store / "snapshots"
+    finals = [
+        path
+        for path in snapshots.iterdir()
+        if path.is_dir() and not path.name.startswith(".")
+    ]
+    assert finals == []
+    stages = [path for path in snapshots.iterdir() if path.name.startswith(".framenest-pull-stage-")]
+    assert stages == []
+
+
+def test_exporter_stalled_stdout_releases_operation_lock(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A3-F01: non-draining stdout must fail export and release the shared lock."""
+    import os
+    import threading
+    import time
+
+    from framenest.infrastructure.persistence import catalog_backup_transfer as transfer_mod
+    from framenest.infrastructure.persistence.catalog_backup_ops import (
+        export_latest_scheduled_recovery_point,
+        operation_lock,
+        run_scheduled_catalog_backup,
+    )
+    from framenest.infrastructure.persistence.catalog_backup_transfer import TransferError
+
+    monkeypatch.setattr(transfer_mod, "EXPORT_STDOUT_NO_PROGRESS_SECONDS", 2)
+
+    config = _ops_config(tmp_path)
+    run_scheduled_catalog_backup(config, now=datetime(2026, 8, 8, 3, 17, 0, tzinfo=UTC))
+
+    r_fd, w_fd = os.pipe()
+    errors: list[BaseException] = []
+    done = threading.Event()
+
+    def _run_export() -> None:
+        try:
+            with os.fdopen(w_fd, "wb", buffering=0) as stdout:
+                export_latest_scheduled_recovery_point(config, stdout)
+        except BaseException as exc:  # noqa: BLE001 - capture for assertion
+            errors.append(exc)
+        finally:
+            done.set()
+
+    thread = threading.Thread(target=_run_export, name="export-stall", daemon=True)
+    t0 = time.monotonic()
+    thread.start()
+
+    assert done.wait(timeout=12.0) is True
+    elapsed = time.monotonic() - t0
+    assert elapsed < 10.0
+    assert len(errors) == 1
+    assert isinstance(errors[0], TransferError)
+    assert errors[0].error_code == "TRANSFER_WRITE_NO_PROGRESS"
+    assert thread.is_alive() is False
+
+    with operation_lock(config) as held:
+        assert held is True
+
+    os.close(r_fd)
+    # No scheduled success mutation / deletion side effects from stalled export.
+    status = (config.ops_root / "status.json").read_text(encoding="utf-8")
+    assert "last_successful_scheduled_backup_and_restore" in status
+    assert list(config.backup_root.iterdir())

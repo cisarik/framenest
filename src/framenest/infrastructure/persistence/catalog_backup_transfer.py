@@ -11,10 +11,14 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 import ctypes
 import errno
+import fcntl
 import hashlib
+import io
 import json
 import os
 from pathlib import Path
+import select
+import time
 from typing import Any, BinaryIO
 
 from framenest.infrastructure.persistence.catalog_backup import (
@@ -46,6 +50,10 @@ HEADER_REQUIRED_KEYS = frozenset(
 SHA256_PATTERN = frozenset("0123456789abcdef")
 AT_FDCWD = -100
 RENAME_NOREPLACE = 1
+# Fail export when a real stdout pipe makes no forward byte progress for this long.
+# Not caller-configurable; tests may monkeypatch the module constant.
+EXPORT_STDOUT_NO_PROGRESS_SECONDS = 120
+_STREAM_IO_CHUNK_BYTES = 64 * 1024
 
 
 class TransferError(BackupError):
@@ -217,11 +225,15 @@ def write_protocol_v1_stream(
     manifest_path: Path,
     catalog_path: Path,
 ) -> None:
-    """Write a complete protocol-v1 stream to stdout and flush."""
+    """Write a complete protocol-v1 stream to stdout and flush.
+
+    Real file-descriptor stdout pipes use a monotonic no-progress write bound so
+    a non-draining consumer cannot hold the caller’s operation lock indefinitely.
+    """
     header = build_protocol_v1_header(identity, semantic=semantic)
-    stdout.write(PROTOCOL_MAGIC)
-    stdout.write(len(header).to_bytes(4, "big"))
-    stdout.write(header)
+    _write_bytes_with_no_progress(stdout, PROTOCOL_MAGIC)
+    _write_bytes_with_no_progress(stdout, len(header).to_bytes(4, "big"))
+    _write_bytes_with_no_progress(stdout, header)
     _stream_exact_file(
         manifest_path,
         stdout,
@@ -234,46 +246,55 @@ def write_protocol_v1_stream(
         expected_size=identity.catalog_size_bytes,
         expected_sha256=identity.catalog_sha256,
     )
-    stdout.flush()
+    try:
+        stdout.flush()
+    except BrokenPipeError as exc:
+        raise TransferError(
+            "Transfer stdout pipe broke during export.",
+            error_code="TRANSFER_BROKEN_PIPE",
+        ) from exc
 
 
-def read_exact(stream: BinaryIO, size: int, *, what: str) -> bytes:
-    """Read exactly ``size`` bytes or fail on premature EOF."""
+def read_exact(
+    stream: BinaryIO,
+    size: int,
+    *,
+    what: str,
+    deadline: float | None = None,
+) -> bytes:
+    """Read exactly ``size`` bytes or fail on premature EOF / deadline."""
     if size < 0:
         raise TransferError(
             "Invalid transfer size.",
             error_code="TRANSFER_SIZE_INVALID",
         )
-    chunks: list[bytes] = []
-    remaining = size
-    while remaining > 0:
-        chunk = stream.read(min(remaining, 1024 * 1024))
-        if not chunk:
-            raise TransferError(
-                f"Premature EOF while reading {what}.",
-                error_code="TRANSFER_PREMATURE_EOF",
-            )
-        chunks.append(chunk)
-        remaining -= len(chunk)
-    return b"".join(chunks)
+    if size == 0:
+        return b""
+    if deadline is None:
+        return _read_exact_unbounded(stream, size, what=what)
+    return _read_exact_with_deadline(stream, size, what=what, deadline=deadline)
 
 
-def read_protocol_v1_preamble(stream: BinaryIO) -> dict[str, Any]:
+def read_protocol_v1_preamble(
+    stream: BinaryIO,
+    *,
+    deadline: float | None = None,
+) -> dict[str, Any]:
     """Read magic + length-prefixed header and return validated header payload."""
-    magic = read_exact(stream, len(PROTOCOL_MAGIC), what="protocol magic")
+    magic = read_exact(stream, len(PROTOCOL_MAGIC), what="protocol magic", deadline=deadline)
     if magic != PROTOCOL_MAGIC:
         raise TransferError(
             "Protocol magic mismatch.",
             error_code="TRANSFER_MAGIC_MISMATCH",
         )
-    length_bytes = read_exact(stream, 4, what="header length")
+    length_bytes = read_exact(stream, 4, what="header length", deadline=deadline)
     header_len = int.from_bytes(length_bytes, "big")
     if header_len > MAX_HEADER_BYTES:
         raise TransferError(
             "Protocol header exceeds maximum size.",
             error_code="TRANSFER_HEADER_TOO_LARGE",
         )
-    header_bytes = read_exact(stream, header_len, what="protocol header")
+    header_bytes = read_exact(stream, header_len, what="protocol header", deadline=deadline)
     return parse_protocol_v1_header(header_bytes)
 
 
@@ -284,6 +305,7 @@ def receive_file_bytes(
     expected_size: int,
     expected_sha256: str,
     fsync: Any = os.fsync,
+    deadline: float | None = None,
 ) -> None:
     """Receive exact file bytes into a new private destination with digest checks."""
     if destination.exists() or destination.is_symlink():
@@ -297,12 +319,12 @@ def receive_file_bytes(
         with open(destination, "xb", buffering=0) as handle:
             remaining = expected_size
             while remaining > 0:
-                chunk = stream.read(min(remaining, 1024 * 1024))
-                if not chunk:
-                    raise TransferError(
-                        "Premature EOF while reading transfer payload.",
-                        error_code="TRANSFER_PREMATURE_EOF",
-                    )
+                chunk = read_exact(
+                    stream,
+                    min(remaining, _STREAM_IO_CHUNK_BYTES),
+                    what="transfer payload",
+                    deadline=deadline,
+                )
                 handle.write(chunk)
                 digest.update(chunk)
                 received += len(chunk)
@@ -310,6 +332,8 @@ def receive_file_bytes(
             handle.flush()
             fsync(handle.fileno())
         os.chmod(destination, 0o600)
+    except TransferError:
+        raise
     except FileExistsError as exc:
         raise TransferError(
             "Transfer staging path already exists.",
@@ -337,9 +361,12 @@ def receive_file_bytes(
         )
 
 
-def assert_stream_eof(stream: BinaryIO) -> None:
+def assert_stream_eof(stream: BinaryIO, *, deadline: float | None = None) -> None:
     """Fail when trailing bytes remain after the framed payload."""
-    trailing = stream.read(1)
+    if deadline is None:
+        trailing = stream.read(1)
+    else:
+        trailing = _read_at_most_with_deadline(stream, 1, what="trailing byte proof", deadline=deadline)
     if trailing:
         raise TransferError(
             "Unexpected trailing bytes after transfer payload.",
@@ -411,10 +438,10 @@ def _stream_exact_file(
     written = 0
     with path.open("rb") as handle:
         while True:
-            chunk = handle.read(1024 * 1024)
+            chunk = handle.read(_STREAM_IO_CHUNK_BYTES)
             if not chunk:
                 break
-            stdout.write(chunk)
+            _write_bytes_with_no_progress(stdout, chunk)
             digest.update(chunk)
             written += len(chunk)
     if written != expected_size:
@@ -427,6 +454,218 @@ def _stream_exact_file(
             "Source file digest changed during export.",
             error_code="TRANSFER_SOURCE_DIGEST_CHANGED",
         )
+
+
+def _stream_fileno(stream: BinaryIO) -> int | None:
+    try:
+        fileno = stream.fileno()
+    except (AttributeError, io.UnsupportedOperation, OSError):
+        return None
+    if not isinstance(fileno, int) or fileno < 0:
+        return None
+    return fileno
+
+
+def _raise_timeout(what: str) -> None:
+    raise TransferError(
+        f"Transfer timed out while reading {what}.",
+        error_code="TRANSFER_TIMEOUT",
+    )
+
+
+def _read_exact_unbounded(stream: BinaryIO, size: int, *, what: str) -> bytes:
+    chunks: list[bytes] = []
+    remaining = size
+    while remaining > 0:
+        chunk = stream.read(min(remaining, _STREAM_IO_CHUNK_BYTES))
+        if not chunk:
+            raise TransferError(
+                f"Premature EOF while reading {what}.",
+                error_code="TRANSFER_PREMATURE_EOF",
+            )
+        chunks.append(chunk)
+        remaining -= len(chunk)
+    return b"".join(chunks)
+
+
+def _read_exact_with_deadline(
+    stream: BinaryIO,
+    size: int,
+    *,
+    what: str,
+    deadline: float,
+) -> bytes:
+    fileno = _stream_fileno(stream)
+    if fileno is not None:
+        return _read_exact_from_fd(fileno, size, what=what, deadline=deadline)
+    # Non-fd streams (e.g. BytesIO tests): reads must return promptly. A missing
+    # fileno never authorizes treating a real production pipe as unbounded.
+    return _read_exact_non_fd_deadline(stream, size, what=what, deadline=deadline)
+
+
+def _read_exact_from_fd(fileno: int, size: int, *, what: str, deadline: float) -> bytes:
+    chunks: list[bytes] = []
+    remaining = size
+    while remaining > 0:
+        wait = deadline - time.monotonic()
+        if wait <= 0:
+            _raise_timeout(what)
+        ready, _, _ = select.select([fileno], [], [], wait)
+        if not ready:
+            _raise_timeout(what)
+        try:
+            chunk = os.read(fileno, min(remaining, _STREAM_IO_CHUNK_BYTES))
+        except InterruptedError:
+            continue
+        except OSError as exc:
+            if exc.errno == errno.EAGAIN:
+                continue
+            raise TransferError(
+                f"Transfer read failed while reading {what}.",
+                error_code="TRANSFER_READ_FAILED",
+            ) from exc
+        if not chunk:
+            raise TransferError(
+                f"Premature EOF while reading {what}.",
+                error_code="TRANSFER_PREMATURE_EOF",
+            )
+        chunks.append(chunk)
+        remaining -= len(chunk)
+    return b"".join(chunks)
+
+
+def _read_exact_non_fd_deadline(
+    stream: BinaryIO,
+    size: int,
+    *,
+    what: str,
+    deadline: float,
+) -> bytes:
+    chunks: list[bytes] = []
+    remaining = size
+    while remaining > 0:
+        if time.monotonic() >= deadline:
+            _raise_timeout(what)
+        chunk = stream.read(min(remaining, _STREAM_IO_CHUNK_BYTES))
+        if not chunk:
+            raise TransferError(
+                f"Premature EOF while reading {what}.",
+                error_code="TRANSFER_PREMATURE_EOF",
+            )
+        chunks.append(chunk)
+        remaining -= len(chunk)
+    return b"".join(chunks)
+
+
+def _read_at_most_with_deadline(
+    stream: BinaryIO,
+    size: int,
+    *,
+    what: str,
+    deadline: float,
+) -> bytes:
+    """Read up to ``size`` bytes; empty result means EOF before any data."""
+    if size <= 0:
+        return b""
+    fileno = _stream_fileno(stream)
+    if fileno is None:
+        if time.monotonic() >= deadline:
+            _raise_timeout(what)
+        return stream.read(size) or b""
+    wait = deadline - time.monotonic()
+    if wait <= 0:
+        _raise_timeout(what)
+    ready, _, _ = select.select([fileno], [], [], wait)
+    if not ready:
+        _raise_timeout(what)
+    try:
+        chunk = os.read(fileno, size)
+    except InterruptedError:
+        return b""
+    except OSError as exc:
+        if exc.errno == errno.EAGAIN:
+            return b""
+        raise TransferError(
+            f"Transfer read failed while reading {what}.",
+            error_code="TRANSFER_READ_FAILED",
+        ) from exc
+    return chunk
+
+
+def _write_bytes_with_no_progress(stdout: BinaryIO, data: bytes) -> None:
+    if not data:
+        return
+    fileno = _stream_fileno(stdout)
+    if fileno is None:
+        try:
+            stdout.write(data)
+        except BrokenPipeError as exc:
+            raise TransferError(
+                "Transfer stdout pipe broke during export.",
+                error_code="TRANSFER_BROKEN_PIPE",
+            ) from exc
+        return
+    _write_bytes_to_fd_with_no_progress(fileno, data)
+
+
+def _write_bytes_to_fd_with_no_progress(fileno: int, data: bytes) -> None:
+    no_progress = max(1, int(EXPORT_STDOUT_NO_PROGRESS_SECONDS))
+    progress_deadline = time.monotonic() + no_progress
+    flags = fcntl.fcntl(fileno, fcntl.F_GETFL)
+    nonblocking = bool(flags & os.O_NONBLOCK)
+    if not nonblocking:
+        fcntl.fcntl(fileno, fcntl.F_SETFL, flags | os.O_NONBLOCK)
+    offset = 0
+    try:
+        while offset < len(data):
+            remaining = progress_deadline - time.monotonic()
+            if remaining <= 0:
+                raise TransferError(
+                    "Export stdout made no forward progress before the bound.",
+                    error_code="TRANSFER_WRITE_NO_PROGRESS",
+                )
+            _, ready, _ = select.select([], [fileno], [], remaining)
+            if not ready:
+                raise TransferError(
+                    "Export stdout made no forward progress before the bound.",
+                    error_code="TRANSFER_WRITE_NO_PROGRESS",
+                )
+            try:
+                written = os.write(fileno, data[offset : offset + _STREAM_IO_CHUNK_BYTES])
+            except BlockingIOError:
+                continue
+            except InterruptedError:
+                continue
+            except BrokenPipeError as exc:
+                raise TransferError(
+                    "Transfer stdout pipe broke during export.",
+                    error_code="TRANSFER_BROKEN_PIPE",
+                ) from exc
+            except OSError as exc:
+                if exc.errno in {errno.EPIPE, errno.ECONNRESET}:
+                    raise TransferError(
+                        "Transfer stdout pipe broke during export.",
+                        error_code="TRANSFER_BROKEN_PIPE",
+                    ) from exc
+                if exc.errno in {errno.EAGAIN, errno.EWOULDBLOCK}:
+                    continue
+                raise TransferError(
+                    "Transfer stdout write failed during export.",
+                    error_code="TRANSFER_WRITE_FAILED",
+                ) from exc
+            if written <= 0:
+                raise TransferError(
+                    "Transfer stdout write failed during export.",
+                    error_code="TRANSFER_WRITE_FAILED",
+                )
+            offset += written
+            progress_deadline = time.monotonic() + no_progress
+    finally:
+        if not nonblocking:
+            try:
+                fcntl.fcntl(fileno, fcntl.F_SETFL, flags)
+            except OSError:
+                pass
 
 
 def _normalize_semantic(semantic: Mapping[str, Any]) -> dict[str, Any]:

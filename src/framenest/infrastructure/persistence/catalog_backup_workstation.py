@@ -12,13 +12,11 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 import errno
-import io
 import json
 import os
 from pathlib import Path
 import re
 import secrets
-import select
 import signal
 import sqlite3
 import subprocess
@@ -408,21 +406,31 @@ def pull_workstation_snapshot(
         bundle_stage.mkdir(mode=PRIVATE_DIR_MODE)
         os.chmod(bundle_stage, PRIVATE_DIR_MODE)
 
-        receive_file_bytes(
-            process.stdout,
-            bundle_stage / MANIFEST_NAME,
-            expected_size=int(header["manifest_size_bytes"]),
-            expected_sha256=str(header["manifest_sha256"]),
-            fsync=probe.fsync,
-        )
-        receive_file_bytes(
-            process.stdout,
-            bundle_stage / CATALOG_NAME,
-            expected_size=int(header["catalog_size_bytes"]),
-            expected_sha256=str(header["catalog_sha256"]),
-            fsync=probe.fsync,
-        )
-        assert_stream_eof(process.stdout)
+        try:
+            receive_file_bytes(
+                process.stdout,
+                bundle_stage / MANIFEST_NAME,
+                expected_size=int(header["manifest_size_bytes"]),
+                expected_sha256=str(header["manifest_sha256"]),
+                fsync=probe.fsync,
+                deadline=deadline,
+            )
+            receive_file_bytes(
+                process.stdout,
+                bundle_stage / CATALOG_NAME,
+                expected_size=int(header["catalog_size_bytes"]),
+                expected_sha256=str(header["catalog_sha256"]),
+                fsync=probe.fsync,
+                deadline=deadline,
+            )
+            assert_stream_eof(process.stdout, deadline=deadline)
+        except TransferError as exc:
+            if exc.error_code == "TRANSFER_TIMEOUT":
+                raise WorkstationError(
+                    "Workstation pull timed out.",
+                    error_code="WORKSTATION_TRANSFER_TIMEOUT",
+                ) from exc
+            raise
         _wait_process(process, deadline=deadline)
         if process.returncode != 0:
             raise _classify_remote_exit(process.returncode)
@@ -531,6 +539,11 @@ def pull_workstation_snapshot(
                     "SSH transport or authentication failed.",
                     error_code="WORKSTATION_SSH_TRANSPORT",
                 ) from exc
+        if exc.error_code == "TRANSFER_TIMEOUT":
+            raise WorkstationError(
+                "Workstation pull timed out.",
+                error_code="WORKSTATION_TRANSFER_TIMEOUT",
+            ) from exc
         raise WorkstationError(str(exc), error_code=exc.error_code) from exc
     finally:
         if process is not None and process.poll() is None:
@@ -1128,19 +1141,13 @@ def _read_preamble_with_timeout(
         )
     stdout = process.stdout
     try:
-        fileno = stdout.fileno()
-    except (AttributeError, io.UnsupportedOperation, OSError):
-        fileno = None
-    if fileno is not None:
-        ready, _, _ = select.select([stdout], [], [], remaining)
-        if not ready:
+        return read_protocol_v1_preamble(stdout, deadline=deadline)
+    except TransferError as exc:
+        if exc.error_code == "TRANSFER_TIMEOUT":
             raise WorkstationError(
                 "Workstation pull timed out.",
                 error_code="WORKSTATION_TRANSFER_TIMEOUT",
-            )
-    try:
-        return read_protocol_v1_preamble(stdout)
-    except TransferError:
+            ) from exc
         raise
     except BrokenPipeError as exc:
         raise WorkstationError(
