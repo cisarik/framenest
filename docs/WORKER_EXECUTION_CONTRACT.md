@@ -228,6 +228,65 @@ FrameNest uses the pinned AP submodule at `.ap/`. Read:
 Treat `.ap/` as read-only during ordinary work. Do not upgrade AP or change the
 `.ap` gitlink without an explicit AP update task.
 
+## Baseline-Bound AP Execution
+
+FrameNest declares a root `ap.project.conf` (schema v1) that binds AP execution
+to the canonical Poetry-owned interpreter and declares exactly three
+operations:
+
+| Operation | argv | Trailing argv |
+| --- | --- | --- |
+| `runtime-info` | `-c <provenance probe>` | forbidden |
+| `test` | `-m pytest` | forbidden |
+| `test-focus` | `-m pytest` | allowed only after `--` |
+
+The declared runtime is **CPython 3.13** at `.venv/bin/python`, with
+`sourceRoot = src` and `provenanceModule = framenest`. **Poetry remains the
+owner** of dependency resolution, `poetry.lock`, and the `.venv` execution
+environment; `ap.project.conf` binds to that environment, it does not replace
+or manage it. Automatic repair through `uv`, `pip`, `poetry env use`, or
+`.venv` reconstruction is prohibited; an unsuitable interpreter is an
+environment defect to report, not a defect to repair.
+
+Validation and execution:
+
+```text
+./.ap/ap project check --root /home/agile/Projects/framenest --candidate
+./.ap/ap project check --root /home/agile/Projects/framenest --baseline <commit>
+./.ap/ap exec --root /home/agile/Projects/framenest \
+  --baseline <commit> --operation <id> [-- <trailing argv>]
+```
+
+`--baseline` must be an **exact Orchestrator-authorized or otherwise canonical
+commit identity**. A Worker must not derive mutation authority merely from the
+current `HEAD`. Candidate-mode validation is **readiness evidence only** and
+authorizes nothing. A locally created commit is **not canonical** merely
+because `ap project check` or `ap exec` accepts it. Technical readiness does
+not grant mutation, publication, deployment, or production authority; Worker
+authority remains separate from technical executability and comes only from
+the current authoritative Orchestrator prompt.
+
+The Cursor/AppImage host session is an **untrusted ambient execution
+boundary**. `ap project` and `ap exec` re-exec themselves through a sanitized
+bootstrap and then run the operation with `env -i`: the child environment is
+exactly `PATH=/usr/bin:/bin`, `LC_ALL=C`, `LANG=C`, `PYTHONNOUSERSITE=1`,
+`PYTHONDONTWRITEBYTECODE=1`, `PYTHONPATH=<root>/src`, and the
+`AP_PROJECT_ROOT` / `AP_BASELINE` / `AP_OPERATION` markers. Inherited
+`APPIMAGE`, `APPDIR`, `LD_*`, `PYTHONHOME`, `VIRTUAL_ENV*`, `GIT_*`, and
+`SSH_AUTH_SOCK` values do not reach the executed process; the tool reports
+contaminated variable names/classes only, never values. `ap exec` is a direct
+**execution envelope, not a sandbox**: it constrains the environment and argv
+of declared operations, it does not isolate the process from the host.
+
+Known limitations:
+
+- Project identity is currently rooted in the **mutable
+  `remote.origin.url`**; it is the present trust root for `projectId`
+  verification, not a strong identity anchor.
+- The dynamic loader acts on the initial shell interpreter **before** the
+  tool's sanitized re-exec can run, so loader-level contamination classes
+  cannot be filtered for that first stage (pre-re-exec loader limitation).
+
 ## Authority Boundaries
 
 Implementation authority does **not** implicitly grant:
