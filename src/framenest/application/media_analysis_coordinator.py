@@ -6,6 +6,12 @@ import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from enum import Enum, auto
 
+from framenest.application.in_process_lifecycle import (
+    IterationFailureLimiter,
+    ShutdownDeadline,
+    attach_unexpected_runner_observer,
+    shutdown_executor_backed_coordinator,
+)
 from framenest.application.media_analysis_lifecycle import (
     CatalogedAnalysisTarget,
     ExecuteAutomaticMediaAnalysisRun,
@@ -60,6 +66,7 @@ class MediaAnalysisCoordinator:
             DEFAULT_ANALYSIS_RETRY_INITIAL_DELAY_SECONDS
         ),
         retry_max_delay_seconds: float = DEFAULT_ANALYSIS_RETRY_MAX_DELAY_SECONDS,
+        process_runner: object | None = None,
     ) -> None:
         if isinstance(batch_size, bool) or batch_size <= 0:
             raise ValueError("media analysis batch size must be positive")
@@ -82,9 +89,11 @@ class MediaAnalysisCoordinator:
         self._batch_size = batch_size
         self._executor = executor
         self._owns_executor = executor is None
+        self._process_runner = process_runner
         self._retry_initial_delay_seconds = retry_initial_delay_seconds
         self._retry_max_delay_seconds = retry_max_delay_seconds
         self._current_retry_delay_seconds = retry_initial_delay_seconds
+        self._iteration_failures = IterationFailureLimiter()
         self._runner: asyncio.Task[None] | None = None
         self._wake: asyncio.Event | None = None
         self._stopping = False
@@ -103,6 +112,11 @@ class MediaAnalysisCoordinator:
         self._runner = asyncio.create_task(
             self._run(),
             name="framenest-media-analysis-coordinator",
+        )
+        attach_unexpected_runner_observer(
+            self._runner,
+            is_expected=lambda: self._stopping,
+            log_unexpected=_log_unexpected_runner_death,
         )
         self.notify()
 
@@ -166,7 +180,10 @@ class MediaAnalysisCoordinator:
         self._ensure_executor()
         await self._drain_once()
 
-    async def shutdown(self) -> None:
+    async def shutdown(
+        self,
+        deadline: ShutdownDeadline | None = None,
+    ) -> None:
         """Stop claiming work and wait for owned blocking work to settle."""
         self._stopping = True
         if self._wake is not None:
@@ -174,32 +191,46 @@ class MediaAnalysisCoordinator:
         runner = self._runner
         cancellation: asyncio.CancelledError | None = None
         try:
-            if runner is not None:
-                try:
-                    await runner
-                except asyncio.CancelledError as exc:
-                    cancellation = exc
-                except Exception:
-                    _safe_log(
-                        level="WARNING",
-                        event="media_analysis_runner_shutdown_fault",
-                        operation="media_analysis_shutdown",
-                        error_code="MEDIA_ANALYSIS_RUNNER_SHUTDOWN_FAULT",
-                        retryable=False,
-                    )
+            cancellation = await shutdown_executor_backed_coordinator(
+                runner=runner,
+                executor=self._executor,
+                owns_executor=self._owns_executor,
+                deadline=deadline,
+                interrupt_owned_work=lambda: self._interrupt_owned_work(deadline),
+                log_runner_fault=lambda: _safe_log(
+                    level="WARNING",
+                    event="media_analysis_runner_shutdown_fault",
+                    operation="media_analysis_shutdown",
+                    error_code="MEDIA_ANALYSIS_RUNNER_SHUTDOWN_FAULT",
+                    retryable=False,
+                ),
+                log_unresolved=lambda: _safe_log(
+                    level="WARNING",
+                    event="media_analysis_executor_unresolved",
+                    operation="media_analysis_shutdown",
+                    error_code="MEDIA_ANALYSIS_EXECUTOR_UNRESOLVED",
+                    retryable=False,
+                ),
+            )
         finally:
             self._runner = None
             self._wake = None
             self._active_run_ids.clear()
             self._current_retry_delay_seconds = self._retry_initial_delay_seconds
-            try:
-                if self._executor is not None and self._owns_executor:
-                    self._executor.shutdown(wait=True, cancel_futures=False)
-            finally:
-                if self._owns_executor:
-                    self._executor = None
+            if self._owns_executor:
+                self._executor = None
         if cancellation is not None:
             raise cancellation
+
+    def _interrupt_owned_work(self, deadline: ShutdownDeadline | None) -> None:
+        remaining = None if deadline is None else deadline.remaining_seconds()
+        runner = self._process_runner
+        interrupt = getattr(runner, "interrupt", None) if runner is not None else None
+        if callable(interrupt):
+            try:
+                interrupt(remaining_seconds=remaining)
+            except TypeError:
+                interrupt()
 
     @property
     def runner_done(self) -> bool:
@@ -218,16 +249,15 @@ class MediaAnalysisCoordinator:
                 return
             try:
                 await self._reconcile_until_idle()
-            except asyncio.CancelledError:
-                raise
             except Exception:
-                _safe_log(
-                    level="ERROR",
-                    event="media_analysis_runner_iteration_failed",
-                    operation="media_analysis_run",
-                    error_code="MEDIA_ANALYSIS_RUNNER_ITERATION_FAILED",
-                    retryable=True,
-                )
+                if self._iteration_failures.allow():
+                    _safe_log(
+                        level="ERROR",
+                        event="media_analysis_runner_iteration_failed",
+                        operation="media_analysis_run",
+                        error_code="MEDIA_ANALYSIS_RUNNER_ITERATION_FAILED",
+                        retryable=True,
+                    )
 
     async def _reconcile_until_idle(self) -> None:
         while not self._stopping:
@@ -390,3 +420,32 @@ def _safe_log(**fields: object) -> None:
         LOGGER.emit(**fields)
     except Exception:
         return
+
+
+def _log_unexpected_runner_death() -> None:
+    _safe_log(
+        level="ERROR",
+        event="media_analysis_runner_unexpected_death",
+        operation="media_analysis_run",
+        error_code="MEDIA_ANALYSIS_RUNNER_UNEXPECTED_DEATH",
+        retryable=False,
+    )
+
+
+class InterruptAwareMediaAnalysisRunExecutor(ExecuteAutomaticMediaAnalysisRun):
+    """Leave ANALYZING durable when lifecycle interruption stops local preparation."""
+
+    def __init__(
+        self,
+        *args: object,
+        process_runner: object | None = None,
+        **kwargs: object,
+    ) -> None:
+        super().__init__(*args, **kwargs)
+        self._process_runner = process_runner
+
+    def _persist_failure(self, claimed, exc):
+        runner = self._process_runner
+        if runner is not None and getattr(runner, "interrupt_requested", False):
+            return claimed
+        return super()._persist_failure(claimed, exc)

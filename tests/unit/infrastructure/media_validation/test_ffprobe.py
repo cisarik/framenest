@@ -28,6 +28,7 @@ from framenest.infrastructure.media_analysis.process import (
     PROCESS_OUTPUT_LIMIT_MESSAGE,
     PROCESS_TIMEOUT_MESSAGE,
     ProcessExecutionError,
+    ProcessInterruptedError,
     ProcessRunResult,
 )
 from framenest.infrastructure.media_validation.ffprobe import BoundedUploadMediaValidator
@@ -495,3 +496,16 @@ def test_excessive_still_image_dimensions_are_rejected(monkeypatch: pytest.Monke
         validator.validate(_Reader(_png_bytes(size=(8, 8))))
 
     assert exc.value.failure_code == UPLOAD_VALIDATION_MEDIA_POLICY_LIMIT
+
+
+def test_ffprobe_interruption_is_recoverable_and_not_a_content_failure() -> None:
+    class _InterruptRunner:
+        def run(self, **_kwargs: object) -> ProcessRunResult:
+            raise ProcessInterruptedError("External tool was interrupted.")
+
+    validator = BoundedUploadMediaValidator(
+        _InterruptRunner(),
+        ffprobe_executable="/usr/bin/ffprobe",
+    )
+    with pytest.raises(ProcessInterruptedError):
+        validator.validate(_Reader(_mp4_bytes()))

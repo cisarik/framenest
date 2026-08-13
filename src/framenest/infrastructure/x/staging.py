@@ -26,3 +26,7 @@ class FilesystemXStaging(FilesystemYouTubeStaging):
         forbidden_roots: tuple[Path, ...] = (),
     ) -> None:
         super().__init__(root, forbidden_roots=forbidden_roots)
+
+    def clear(self, staging_key: str) -> None:
+        """Idempotently remove one owned staging directory."""
+        self.cleanup(staging_key)

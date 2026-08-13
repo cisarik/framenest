@@ -147,9 +147,9 @@ def test_application_lifespan_shuts_down_owned_coordinator_before_database_dispo
     coordinator = app.state.upload_validation_coordinator
     original_shutdown = coordinator.shutdown
 
-    async def tracked_shutdown() -> None:
+    async def tracked_shutdown(deadline=None) -> None:
         events.append("coordinator_shutdown_start")
-        await original_shutdown()
+        await original_shutdown(deadline)
         events.append("coordinator_shutdown_end")
 
     coordinator.shutdown = tracked_shutdown

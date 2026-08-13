@@ -24,6 +24,10 @@ class XRequiresAuthenticationError(XExtractionError):
     """Typed terminal failure when the post requires X authentication."""
 
 
+class XExtractionInterrupted(Exception):
+    """Lifecycle interruption of owned X extractor work; durable retry remains."""
+
+
 @dataclass(frozen=True, slots=True)
 class XAssetAcquisition:
     """Public-safe result of one bounded asset download into staging."""

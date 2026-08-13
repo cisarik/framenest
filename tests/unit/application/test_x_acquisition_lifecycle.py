@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import time
 import types
 
 import pytest
 from sqlalchemy import create_engine, text
 
-from framenest.application.ports.x_extractor import XExtractionError
+from framenest.application.ports.x_extractor import XExtractionError, XExtractionInterrupted
 from framenest.application.x_acquisition import (
     XAcquisitionAdministrationService,
     XAcquisitionCoordinator,
@@ -371,3 +372,127 @@ def test_non_retryable_terminal_claim_cannot_retry(lifecycle) -> None:
     assert claim.state is XAcquisitionState.COMPLETED
     with pytest.raises(XAcquisitionStateConflictError):
         service.retry(claim.id, login_key="alice")
+
+
+def test_inspect_and_download_do_not_block_the_event_loop(lifecycle) -> None:
+    repo, service, admin, original, extractor, _media_id = lifecycle
+
+    class _SlowExtractor:
+        def __init__(self, inner: object) -> None:
+            self._inner = inner
+
+        def attest_version(self) -> str | None:
+            return self._inner.attest_version()
+
+        def inspect(self, **kwargs: object):
+            time.sleep(0.2)
+            return self._inner.inspect(**kwargs)
+
+        def download(self, **kwargs: object):
+            return self._inner.download(**kwargs)
+
+    coordinator = XAcquisitionCoordinator(
+        repo,
+        _SlowExtractor(extractor),
+        original._staging,
+        original._transport,
+        original._upload_repository,
+        original._publication_repository,
+        original._validation_coordinator,
+        original._publication_coordinator,
+    )
+    ticks: list[float] = []
+
+    async def ticker() -> None:
+        deadline = time.monotonic() + 0.15
+        while time.monotonic() < deadline:
+            ticks.append(time.monotonic())
+            await asyncio.sleep(0.02)
+
+    async def scenario() -> None:
+        service.submit(URL, login_key="alice")
+        await asyncio.gather(coordinator.drain(), ticker())
+
+    _run(scenario())
+    assert len(ticks) >= 4
+
+
+def test_interrupted_acquiring_retries_same_asset_after_staging_clear(lifecycle) -> None:
+    repo, service, admin, original, extractor, _media_id = lifecycle
+    extractor.assets = [
+        XNormalizedAssetDescriptor(
+            ordinal=0,
+            media_type=XMediaType.VIDEO,
+            expected_mime="video/mp4",
+            source_media_key="asset-0",
+            width=640,
+            height=360,
+            duration_seconds=12,
+        )
+    ]
+    extractor.download_bytes = {0: b"\x00\x00\x00\x18ftypmp42retry-bytes"}
+
+    class _InterruptOnceExtractor:
+        def __init__(self, inner: object) -> None:
+            self._inner = inner
+            self.downloads = 0
+            self.first_asset_id = None
+            self.partial_present = False
+
+        def attest_version(self) -> str | None:
+            return self._inner.attest_version()
+
+        def inspect(self, **kwargs: object):
+            return self._inner.inspect(**kwargs)
+
+        def download(self, **kwargs: object):
+            self.downloads += 1
+            staging = kwargs["staging"]
+            stage_key = kwargs["stage_key"]
+            directory = staging.prepare(stage_key)
+            artifact = directory / "artifact.mp4"
+            if self.downloads == 1:
+                artifact.write_bytes(b"partial-overwrites-bait")
+                self.partial_present = artifact.exists()
+                raise XExtractionInterrupted()
+            assert not artifact.exists()
+            return self._inner.download(**kwargs)
+
+    wrapper = _InterruptOnceExtractor(extractor)
+    coordinator = XAcquisitionCoordinator(
+        repo,
+        wrapper,
+        original._staging,
+        original._transport,
+        original._upload_repository,
+        original._publication_repository,
+        original._validation_coordinator,
+        original._publication_coordinator,
+    )
+    result = service.submit(URL, login_key="alice")
+    parsed = XPostClaimId.from_string(result.request_id)
+
+    async def drain_until_interrupted() -> None:
+        for _ in range(8):
+            await coordinator.drain()
+            assets = repo.list_assets_for_post(parsed)
+            if wrapper.downloads >= 1 and any(
+                asset.state is XAssetState.ACQUIRING for asset in assets
+            ):
+                return
+        raise AssertionError("interrupted ACQUIRING asset was not observed")
+
+    _run(drain_until_interrupted())
+    assets = repo.list_assets_for_post(parsed)
+    acquiring = [asset for asset in assets if asset.state is XAssetState.ACQUIRING]
+    assert len(acquiring) == 1
+    original_id = acquiring[0].id.to_string()
+    original_stage_key = acquiring[0].stage_key
+    assert wrapper.partial_present
+    claim = _run(_drain_until_terminal(coordinator, repo, result.request_id))
+    recovered = repo.list_assets_for_post(parsed)
+    assert claim.state is XAcquisitionState.COMPLETED
+    assert len(recovered) == 1
+    assert recovered[0].id.to_string() == original_id
+    assert recovered[0].stage_key == original_stage_key
+    assert wrapper.downloads == 2

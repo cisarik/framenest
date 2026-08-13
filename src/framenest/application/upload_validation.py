@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -18,6 +19,7 @@ from framenest.application.ports.upload_media_validation import (
     UploadMediaValidationRejectedError,
     UploadMediaValidator,
 )
+from framenest.infrastructure.media_analysis.process import ProcessInterruptedError
 from framenest.application.ports.upload_sessions import (
     FrameNestUploadSessionRepositoryError,
     IncompleteUploadSessionError,
@@ -74,6 +76,10 @@ class UploadValidationConcurrencyError(UploadValidationError):
     """Raised when optimistic persistence guards reject validation."""
 
 
+class UploadValidationInterruptedError(UploadValidationError):
+    """Raised when lifecycle shutdown interrupts retryable validation work."""
+
+
 @dataclass(frozen=True, slots=True)
 class UploadValidationResult:
     """Internal validation result for deterministic application tests."""
@@ -109,6 +115,11 @@ class ValidateReceivedUpload:
         self._validator = validator
         self._now_ms = now_ms
         self._locks = locks or UploadSessionLockRegistry()
+        self._stop = threading.Event()
+
+    def request_stop(self) -> None:
+        """Request cooperative interruption at safe hash chunk boundaries."""
+        self._stop.set()
 
     async def validate(self, session_id: UploadSessionId) -> UploadValidationResult:
         """Validate a received upload and return its internal durable state."""
@@ -211,11 +222,17 @@ class ValidateReceivedUpload:
             raise UploadValidationQuarantineInconsistentError("quarantine state inconsistent")
         reader = self._open_reader(session)
         try:
-            checksum_hex = _sha256(reader)
+            checksum_hex = _sha256(reader, stop_event=self._stop)
             reader.verify_still_consistent()
             reader.seek_start()
             try:
                 evidence = self._validator.validate(reader)
+            except ProcessInterruptedError as exc:
+                raise UploadValidationInterruptedError(
+                    "upload validation interrupted"
+                ) from exc
+            except UploadValidationInterruptedError:
+                raise
             except UploadMediaValidationRejectedError as exc:
                 rejected = self._reject(session, exc.failure_code)
                 return _result(rejected)
@@ -227,7 +244,7 @@ class ValidateReceivedUpload:
                 raise UploadValidationUnavailableError("upload validation unavailable") from None
             reader.verify_still_consistent()
             reader.seek_start()
-            second_checksum_hex = _sha256(reader)
+            second_checksum_hex = _sha256(reader, stop_event=self._stop)
             if second_checksum_hex != checksum_hex:
                 self._fail_if_possible(session, UPLOAD_VALIDATION_QUARANTINE_INCONSISTENT)
                 raise UploadValidationQuarantineInconsistentError(
@@ -348,10 +365,16 @@ class ValidateReceivedUpload:
             )
 
 
-def _sha256(reader: QuarantineReader) -> str:
+def _sha256(
+    reader: QuarantineReader,
+    *,
+    stop_event: threading.Event | None = None,
+) -> str:
     reader.seek_start()
     digest = hashlib.sha256()
     while True:
+        if stop_event is not None and stop_event.is_set():
+            raise UploadValidationInterruptedError("upload validation interrupted")
         chunk = reader.read(_HASH_CHUNK_SIZE)
         if not chunk:
             break

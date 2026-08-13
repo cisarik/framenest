@@ -16,6 +16,7 @@ from framenest.application.upload_validation import (
     UPLOAD_VALIDATION_INTERNAL_ERROR,
     UPLOAD_VALIDATION_QUARANTINE_INCONSISTENT,
     UPLOAD_VALIDATION_UNSUPPORTED_MEDIA_TYPE,
+    UploadValidationInterruptedError,
     UploadValidationQuarantineInconsistentError,
     UploadValidationUnavailableError,
     ValidateReceivedUpload,
@@ -446,3 +447,30 @@ def test_unexpected_validator_failure_recording_failure_stays_sanitized_and_retr
     assert stored is not None
     assert stored.state is UploadSessionState.VALIDATING
     assert stored.failure_code is None
+
+
+def test_cooperative_interruption_leaves_validating_recoverable(
+    tmp_path: Path,
+) -> None:
+    service, repository, engine, session, _path = _setup(tmp_path)
+    try:
+        service.request_stop()
+        with pytest.raises(UploadValidationInterruptedError):
+            service.validate_owned_blocking(session.id)
+        stored = repository.get(session.id)
+        assert stored is not None
+        assert stored.state is UploadSessionState.VALIDATING
+        assert stored.failure_code is None
+        recovered = ValidateReceivedUpload(
+            repository,
+            FilesystemQuarantineStorage(tmp_path / "quarantine"),
+            _Validator(),
+            now_ms=lambda: 30,
+        )
+        result = recovered.recover_abandoned_validating_owned_blocking(session.id)
+        restored = repository.get(session.id)
+    finally:
+        dispose_engine(engine)
+    assert result.state == UploadSessionState.PUBLISH_PENDING.value
+    assert restored is not None
+    assert restored.state is UploadSessionState.PUBLISH_PENDING

@@ -8,7 +8,6 @@ import re
 import signal
 import socket
 import subprocess
-import sys
 import time
 import urllib.error
 import urllib.request
@@ -18,8 +17,7 @@ from typing import Any
 import pytest
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
-CONSOLE_SCRIPT = REPOSITORY_ROOT / ".venv" / "bin" / "framenest-server"
-VENV_PYTHON = REPOSITORY_ROOT / ".venv" / "bin" / "python"
+CANONICAL_PYTHON = Path("/home/agile/Projects/framenest/.venv/bin/python")
 REPRESENTATIVE_SECRET = "process-output-contract-api-key-secret"
 STARTUP_TIMEOUT_SECONDS = 8.0
 SHUTDOWN_TIMEOUT_SECONDS = 8.0
@@ -45,9 +43,21 @@ FORBIDDEN_OUTPUT_FRAGMENTS = (
 
 
 def _require_console_script() -> Path:
-    if not CONSOLE_SCRIPT.is_file():
-        pytest.fail(f"Expected installed console script at {CONSOLE_SCRIPT}")
-    return CONSOLE_SCRIPT
+    if not CANONICAL_PYTHON.is_file():
+        pytest.fail(f"Expected canonical interpreter at {CANONICAL_PYTHON}")
+    return CANONICAL_PYTHON
+
+
+def _server_command() -> list[str]:
+    return [str(_require_console_script()), "-m", "framenest.server"]
+
+
+def _server_env(base: dict[str, str] | None = None) -> dict[str, str]:
+    env = os.environ.copy() if base is None else dict(base)
+    env["PYTHONPATH"] = str(REPOSITORY_ROOT / "src")
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
+    env.pop("LD_LIBRARY_PATH", None)
+    return env
 
 
 def _find_free_loopback_port() -> int:
@@ -123,9 +133,8 @@ def _parse_stderr_json_lines(stderr: str) -> list[dict[str, Any]]:
 def _run_direct_process_shutdown(
     termination_signal: signal.Signals,
 ) -> dict[str, Any]:
-    console_script = _require_console_script()
     port = _find_free_loopback_port()
-    env = os.environ.copy()
+    env = _server_env()
     env["FRAMENEST_HOST"] = "127.0.0.1"
     env["FRAMENEST_PORT"] = str(port)
     env["FRAMENEST_API_KEY"] = REPRESENTATIVE_SECRET
@@ -142,7 +151,7 @@ def _run_direct_process_shutdown(
     if os.name == "posix":
         popen_kwargs["start_new_session"] = True
 
-    proc = subprocess.Popen([str(console_script)], **popen_kwargs)
+    proc = subprocess.Popen(_server_command(), **popen_kwargs)
     result: dict[str, Any] = {
         "termination_signal": termination_signal.name,
         "parent_pid": proc.pid,
@@ -256,9 +265,8 @@ def test_direct_process_sigterm_shutdown_has_no_traceback() -> None:
 
 
 def test_direct_process_emergency_cleanup_prevents_listener_leak() -> None:
-    console_script = _require_console_script()
     port = _find_free_loopback_port()
-    env = os.environ.copy()
+    env = _server_env()
     env["FRAMENEST_HOST"] = "127.0.0.1"
     env["FRAMENEST_PORT"] = str(port)
     env["FRAMENEST_API_KEY"] = REPRESENTATIVE_SECRET
@@ -271,7 +279,7 @@ def test_direct_process_emergency_cleanup_prevents_listener_leak() -> None:
         "text": True,
         "start_new_session": True,
     }
-    proc = subprocess.Popen([str(console_script)], **popen_kwargs)
+    proc = subprocess.Popen(_server_command(), **popen_kwargs)
     try:
         _wait_until_port_listening("127.0.0.1", port, STARTUP_TIMEOUT_SECONDS)
         os.killpg(os.getpgid(proc.pid), signal.SIGKILL)

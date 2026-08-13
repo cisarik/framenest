@@ -196,6 +196,7 @@ def test_reload_disabled_and_single_worker(
     server = create_server(settings=settings_with_secret)
     assert server.config.reload is False
     assert server.config.workers == 1
+    assert server.config.timeout_graceful_shutdown == 5
 
 
 def test_api_secret_not_disclosed_in_server_representations(

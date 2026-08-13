@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -11,6 +12,7 @@ import pytest
 from framenest.application.upload_transport import UploadSessionLockRegistry
 from framenest.application.upload_validation import UploadValidationResult
 from framenest.application.upload_validation_coordinator import UploadValidationCoordinator
+from framenest.application.in_process_lifecycle import ShutdownDeadline
 from framenest.domain.uploads import (
     UploadDisplayFilename,
     UploadSession,
@@ -702,6 +704,7 @@ def test_caller_cancellation_during_shutdown_still_cleans_owned_resources() -> N
             if coordinator._executor is not None:
                 coordinator._executor.shutdown(wait=True, cancel_futures=False)
                 coordinator._executor = None
+        await _wait_until(lambda: not _live_validation_threads())
 
         assert coordinator._runner is None
         assert coordinator._wake is None
@@ -746,3 +749,92 @@ def test_shutdown_after_ordinary_runner_fault_cleans_owned_resources_and_is_idem
         assert not _live_validation_threads()
 
     asyncio.run(scenario())
+
+
+def test_expired_deadline_does_not_block_on_executor_wait() -> None:
+    async def scenario() -> None:
+        session = _session()
+        validator = _BlockingValidator()
+        coordinator = UploadValidationCoordinator(
+            _Repository([(session,), ()]),
+            validator,
+            UploadSessionLockRegistry(),
+        )
+        await coordinator.start()
+        await _wait_until(lambda: validator.started.is_set())
+        began = time.monotonic()
+        await coordinator.shutdown(ShutdownDeadline(0.0))
+        elapsed = time.monotonic() - began
+        validator.release.set()
+        await asyncio.sleep(0.05)
+        assert elapsed < 0.2
+        assert coordinator.runner_done
+        assert not coordinator.executor_running
+
+    asyncio.run(scenario())
+
+
+def test_unexpected_runner_death_is_observable_once_without_private_data(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    recorded: list[dict[str, object]] = []
+
+    def capture(**fields: object) -> None:
+        recorded.append(fields)
+
+    monkeypatch.setattr(
+        "framenest.application.upload_validation_coordinator._safe_log",
+        capture,
+    )
+
+    async def scenario() -> None:
+        coordinator = UploadValidationCoordinator(
+            _Repository([()]),
+            _ScriptedValidator(),
+            UploadSessionLockRegistry(),
+        )
+        await coordinator.start()
+        runner = coordinator._runner
+        assert runner is not None
+        runner.cancel()
+        try:
+            await runner
+        except asyncio.CancelledError:
+            pass
+        await coordinator.shutdown()
+
+    asyncio.run(scenario())
+    unexpected = [
+        item
+        for item in recorded
+        if item.get("event") == "upload_validation_runner_unexpected_death"
+    ]
+    assert len(unexpected) == 1
+    serialized = repr(unexpected)
+    assert "example.mp4" not in serialized
+    assert "validation-candidate" not in serialized
+
+
+def test_expected_shutdown_does_not_log_runner_death_as_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    recorded: list[dict[str, object]] = []
+    monkeypatch.setattr(
+        "framenest.application.upload_validation_coordinator._safe_log",
+        lambda **fields: recorded.append(fields),
+    )
+
+    async def scenario() -> None:
+        coordinator = UploadValidationCoordinator(
+            _Repository([()]),
+            _ScriptedValidator(),
+            UploadSessionLockRegistry(),
+        )
+        await coordinator.start()
+        await coordinator.shutdown()
+
+    asyncio.run(scenario())
+    assert all(
+        item.get("event") != "upload_validation_runner_unexpected_death"
+        for item in recorded
+    )

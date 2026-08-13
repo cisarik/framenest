@@ -16,6 +16,10 @@ import sys
 import time
 from typing import Any
 
+from framenest.application.in_process_lifecycle import (
+    ShutdownDeadline,
+    split_termination_budget,
+)
 from framenest.application.ports.youtube_downloader import (
     YouTubeDownloadError,
     YouTubeDownloaderConfigurationError,
@@ -112,6 +116,11 @@ class YtDlpYouTubeDownloader:
         self._process_factory = process_factory or asyncio.create_subprocess_exec
         self._clock = clock
         self._attested_version: str | None = None
+        self._shutdown_deadline: ShutdownDeadline | None = None
+
+    def bind_shutdown_deadline(self, deadline: ShutdownDeadline | None) -> None:
+        """Use the shared application remaining budget for TERM/KILL."""
+        self._shutdown_deadline = deadline
 
     async def attest_version(self) -> str:
         """Compare package metadata with the isolated module entry point."""
@@ -447,7 +456,10 @@ class YtDlpYouTubeDownloader:
                         failure_code = exc.code
                         break
         except BaseException:
-            await self._terminate_process_group(process)
+            try:
+                await self._terminate_process_group(process)
+            except Exception:
+                pass
             await _finish_capture_tasks(stdout_task, stderr_task)
             raise
         if failure_code is not None:
@@ -486,11 +498,17 @@ class YtDlpYouTubeDownloader:
                 timeout=timeout_seconds,
             )
         except TimeoutError as exc:
-            await self._terminate_process_group(process)
+            try:
+                await self._terminate_process_group(process)
+            except Exception:
+                pass
             await _finish_capture_tasks(stdout_task, stderr_task)
             raise YouTubeDownloadError("SUBPROCESS_TIMEOUT") from exc
         except BaseException:
-            await self._terminate_process_group(process)
+            try:
+                await self._terminate_process_group(process)
+            except Exception:
+                pass
             await _finish_capture_tasks(stdout_task, stderr_task)
             raise
         stdout, stdout_overflow = await stdout_task
@@ -525,28 +543,44 @@ class YtDlpYouTubeDownloader:
             ) from exc
 
     async def _terminate_process_group(self, process: Any) -> None:
+        term_timeout = TERMINATE_GRACE_SECONDS
+        kill_timeout = KILL_GRACE_SECONDS
+        deadline = self._shutdown_deadline
+        if deadline is not None:
+            term_timeout, kill_timeout = split_termination_budget(
+                deadline.remaining_seconds()
+            )
         try:
             os.killpg(process.pid, signal.SIGTERM)
         except ProcessLookupError:
+            try:
+                await asyncio.wait_for(process.wait(), timeout=max(kill_timeout, 0.0))
+            except TimeoutError:
+                return
             return
         except OSError as exc:
             raise YouTubeDownloadError("SUBPROCESS_TERMINATION_FAILED") from exc
-        try:
-            await asyncio.wait_for(
-                process.wait(),
-                timeout=TERMINATE_GRACE_SECONDS,
-            )
-            return
-        except TimeoutError:
-            pass
+        if term_timeout > 0:
+            try:
+                await asyncio.wait_for(
+                    process.wait(),
+                    timeout=term_timeout,
+                )
+                return
+            except TimeoutError:
+                pass
         try:
             os.killpg(process.pid, signal.SIGKILL)
         except ProcessLookupError:
+            try:
+                await asyncio.wait_for(process.wait(), timeout=max(kill_timeout, 0.0))
+            except TimeoutError:
+                return
             return
         except OSError as exc:
             raise YouTubeDownloadError("SUBPROCESS_TERMINATION_FAILED") from exc
         try:
-            await asyncio.wait_for(process.wait(), timeout=KILL_GRACE_SECONDS)
+            await asyncio.wait_for(process.wait(), timeout=max(kill_timeout, 0.0))
         except TimeoutError as exc:
             raise YouTubeDownloadError("SUBPROCESS_TERMINATION_FAILED") from exc
 

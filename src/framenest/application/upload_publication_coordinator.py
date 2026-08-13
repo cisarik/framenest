@@ -7,6 +7,12 @@ from concurrent.futures import ThreadPoolExecutor
 from enum import Enum, auto
 from typing import Protocol
 
+from framenest.application.in_process_lifecycle import (
+    IterationFailureLimiter,
+    ShutdownDeadline,
+    attach_unexpected_runner_observer,
+    shutdown_executor_backed_coordinator,
+)
 from framenest.application.ports.upload_publications import (
     FrameNestUploadPublicationRepositoryError,
     UploadPublicationCandidate,
@@ -96,6 +102,7 @@ class UploadPublicationCoordinator:
         self._stopping = False
         self._active_upload_ids: set[str] = set()
         self._catalog_coordinator = catalog_coordinator
+        self._iteration_failures = IterationFailureLimiter()
 
     async def start(self) -> None:
         """Start one runner and wake startup reconciliation."""
@@ -110,6 +117,11 @@ class UploadPublicationCoordinator:
         self._runner = asyncio.create_task(
             self._run(),
             name="framenest-upload-publication-coordinator",
+        )
+        attach_unexpected_runner_observer(
+            self._runner,
+            is_expected=lambda: self._stopping,
+            log_unexpected=_log_unexpected_runner_death,
         )
         self.notify()
 
@@ -126,7 +138,10 @@ class UploadPublicationCoordinator:
         self._ensure_executor()
         await self._drain_once()
 
-    async def shutdown(self) -> None:
+    async def shutdown(
+        self,
+        deadline: ShutdownDeadline | None = None,
+    ) -> None:
         """Stop claiming work and wait for owned blocking work to settle."""
         self._stopping = True
         if self._wake is not None:
@@ -134,32 +149,41 @@ class UploadPublicationCoordinator:
         runner = self._runner
         cancellation: asyncio.CancelledError | None = None
         try:
-            if runner is not None:
-                try:
-                    await runner
-                except asyncio.CancelledError as exc:
-                    cancellation = exc
-                except Exception:
-                    _safe_log(
-                        level="WARNING",
-                        event="upload_publication_runner_shutdown_fault",
-                        operation="upload_publication_shutdown",
-                        error_code="UPLOAD_PUBLICATION_RUNNER_SHUTDOWN_FAULT",
-                        retryable=False,
-                    )
+            cancellation = await shutdown_executor_backed_coordinator(
+                runner=runner,
+                executor=self._executor,
+                owns_executor=self._owns_executor,
+                deadline=deadline,
+                interrupt_owned_work=self._interrupt_owned_work,
+                log_runner_fault=lambda: _safe_log(
+                    level="WARNING",
+                    event="upload_publication_runner_shutdown_fault",
+                    operation="upload_publication_shutdown",
+                    error_code="UPLOAD_PUBLICATION_RUNNER_SHUTDOWN_FAULT",
+                    retryable=False,
+                ),
+                log_unresolved=lambda: _safe_log(
+                    level="WARNING",
+                    event="upload_publication_executor_unresolved",
+                    operation="upload_publication_shutdown",
+                    error_code="UPLOAD_PUBLICATION_EXECUTOR_UNRESOLVED",
+                    retryable=False,
+                ),
+            )
         finally:
             self._runner = None
             self._wake = None
             self._active_upload_ids.clear()
             self._current_retry_delay_seconds = self._retry_initial_delay_seconds
-            try:
-                if self._executor is not None and self._owns_executor:
-                    self._executor.shutdown(wait=True, cancel_futures=False)
-            finally:
-                if self._owns_executor:
-                    self._executor = None
+            if self._owns_executor:
+                self._executor = None
         if cancellation is not None:
             raise cancellation
+
+    def _interrupt_owned_work(self) -> None:
+        request_stop = getattr(self._publisher, "request_stop", None)
+        if callable(request_stop):
+            request_stop()
 
     @property
     def runner_done(self) -> bool:
@@ -182,16 +206,15 @@ class UploadPublicationCoordinator:
                 return
             try:
                 await self._reconcile_until_idle()
-            except asyncio.CancelledError:
-                raise
             except Exception:
-                _safe_log(
-                    level="ERROR",
-                    event="upload_publication_runner_iteration_failed",
-                    operation="upload_publication_run",
-                    error_code="UPLOAD_PUBLICATION_RUNNER_ITERATION_FAILED",
-                    retryable=True,
-                )
+                if self._iteration_failures.allow():
+                    _safe_log(
+                        level="ERROR",
+                        event="upload_publication_runner_iteration_failed",
+                        operation="upload_publication_run",
+                        error_code="UPLOAD_PUBLICATION_RUNNER_ITERATION_FAILED",
+                        retryable=True,
+                    )
 
     async def _reconcile_until_idle(self) -> None:
         while not self._stopping:
@@ -383,3 +406,13 @@ def _safe_log(**fields: object) -> None:
         LOGGER.emit(**fields)
     except Exception:
         return
+
+
+def _log_unexpected_runner_death() -> None:
+    _safe_log(
+        level="ERROR",
+        event="upload_publication_runner_unexpected_death",
+        operation="upload_publication_run",
+        error_code="UPLOAD_PUBLICATION_RUNNER_UNEXPECTED_DEATH",
+        retryable=False,
+    )

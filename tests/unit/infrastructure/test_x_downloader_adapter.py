@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import threading
+import time
 
 import pytest
 
-from framenest.application.ports.x_extractor import XExtractionError
+from framenest.application.ports.x_extractor import XExtractionError, XExtractionInterrupted
 from framenest.domain.x_acquisition import (
     XMediaType,
     XNormalizedInspection,
@@ -473,3 +475,39 @@ def test_attest_version_with_fake_executable(tmp_path: Path) -> None:
     exe = _write_fake_executable(tmp_path / "fake_x", stdout_json=_video_json())
     extractor = YtDlpXExtractor(executable=str(exe))
     assert extractor.attest_version() == "2025.01.01"
+
+
+def test_request_interrupt_stops_owned_process_group(tmp_path: Path) -> None:
+    exe = _write_fake_executable(
+        tmp_path / "fake_x",
+        stdout_json=_video_json(),
+        delay=5.0,
+    )
+    extractor = YtDlpXExtractor(executable=str(exe))
+    raised: list[BaseException] = []
+
+    def run_inspect() -> None:
+        try:
+            extractor.inspect(
+                post_id="123456789",
+                submitted_url="https://x.com/author/status/123456789",
+            )
+        except BaseException as exc:
+            raised.append(exc)
+
+    worker = threading.Thread(target=run_inspect)
+    worker.start()
+    deadline = time.monotonic() + 2.0
+    while time.monotonic() < deadline:
+        with extractor._guard:
+            if extractor._active_process is not None:
+                break
+        time.sleep(0.01)
+    extractor.request_interrupt()
+    extractor.request_interrupt()
+    worker.join(timeout=2.0)
+    assert not worker.is_alive()
+    assert raised
+    assert isinstance(raised[0], XExtractionInterrupted)
+    with extractor._guard:
+        assert extractor._active_process is None

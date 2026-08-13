@@ -7,6 +7,7 @@ from collections.abc import AsyncIterator
 from importlib import resources
 from ipaddress import ip_address
 from pathlib import Path
+import time
 from typing import Literal
 
 from fastapi import FastAPI, HTTPException, Request
@@ -78,6 +79,12 @@ from framenest.adapters.api.tailscale_ingress import (
     SCOPE_IDENTITY,
     TailscaleIngressMiddleware,
 )
+from framenest.application.in_process_lifecycle import (
+    APPLICATION_LIFESPAN_SHUTDOWN_BUDGET_SECONDS,
+    StartedResource,
+    create_application_shutdown_deadline,
+    shutdown_started_resources,
+)
 from framenest.application.library_scan import PreviewLibraryScan
 from framenest.application.catalog_removal import CatalogMediaRemovalService
 from framenest.application.content_publication import (
@@ -111,11 +118,13 @@ from framenest.application.upload_catalog import (
     CatalogUploadClassification,
 )
 from framenest.application.upload_catalog_coordinator import UploadCatalogCoordinator
-from framenest.application.media_analysis_coordinator import MediaAnalysisCoordinator
+from framenest.application.media_analysis_coordinator import (
+    InterruptAwareMediaAnalysisRunExecutor,
+    MediaAnalysisCoordinator,
+)
 from framenest.application.media_analysis_lifecycle import (
     AutomaticImportedMediaSuggestionExecutor,
     CatalogedAnalysisTarget,
-    ExecuteAutomaticMediaAnalysisRun,
     ReadAutomaticMediaAnalysis,
     RequestManualMediaAnalysis,
     ScheduleAutomaticMediaAnalysis,
@@ -184,6 +193,7 @@ from framenest.infrastructure.filesystem.cover_storage import (
     PillowCoverEncoder,
 )
 from framenest.infrastructure.media_analysis import LocalMediaAnalysisAdapter
+from framenest.infrastructure.media_analysis.process import SubprocessRunner
 from framenest.infrastructure.media_analysis.cover_frame import LocalCoverSourceAdapter
 from framenest.infrastructure.media_validation import BoundedUploadMediaValidator
 from framenest.infrastructure.media_analysis.gallery_preview import (
@@ -227,9 +237,12 @@ from framenest.infrastructure.persistence.x_acquisition_claim_repository import 
     SqliteXAcquisitionClaimRepository,
 )
 from framenest.infrastructure.youtube.downloader import YtDlpYouTubeDownloader
+from framenest.infrastructure.youtube.staging import FilesystemYouTubeStaging
 from framenest.infrastructure.x.downloader import YtDlpXExtractor
 from framenest.infrastructure.x.staging import FilesystemXStaging
-from framenest.infrastructure.youtube.staging import FilesystemYouTubeStaging
+from framenest.structured_logging import get_logger
+
+LOGGER = get_logger("api_application")
 
 
 class HealthResponse(BaseModel):
@@ -290,6 +303,8 @@ def create_app(
     x_request_api_dependencies: XRequestApiDependencies | None = None,
     x_admin_api_dependencies: XAdminApiDependencies | None = None,
     security_audit_recorder: object | None = None,
+    lifespan_shutdown_budget_seconds: float | None = None,
+    shutdown_clock: object | None = None,
 ) -> FastAPI:
     resolved_settings = settings if settings is not None else load_settings()
     tailscale_ingress_enabled = (
@@ -519,21 +534,24 @@ def create_app(
         analysis_manual_requester = RequestManualMediaAnalysis(
             owned_media_analysis_run_repository,
         )
-        analysis_executor = ExecuteAutomaticMediaAnalysisRun(
+        analysis_process_runner = SubprocessRunner()
+        analysis_executor = InterruptAwareMediaAnalysisRunExecutor(
             owned_media_analysis_run_repository,
             AutomaticImportedMediaSuggestionExecutor(
                 owned_media_repository,
                 owned_library_repository,
-                LocalMediaAnalysisAdapter(),
+                LocalMediaAnalysisAdapter(analysis_process_runner),
                 analysis_provider,
             ),
             max_attempts=resolved_settings.automatic_media_analysis_max_attempts,
+            process_runner=analysis_process_runner,
         )
         owned_media_analysis_coordinator = MediaAnalysisCoordinator(
             owned_media_analysis_run_repository,
             analysis_scheduler,
             analysis_executor,
             manual_requester=analysis_manual_requester,
+            process_runner=analysis_process_runner,
         )
         movie_identification_executor = None
         movie_identification_requester = None
@@ -725,11 +743,12 @@ def create_app(
             ),
             publication_repository=owned_upload_publication_repository,
         )
+        validation_process_runner = SubprocessRunner()
         if storage is not None:
             owned_upload_validation = ValidateReceivedUpload(
                 owned_upload_session_repository,
                 storage,
-                BoundedUploadMediaValidator(),
+                BoundedUploadMediaValidator(validation_process_runner),
                 locks=upload_locks,
             )
             owned_upload_validation_coordinator = UploadValidationCoordinator(
@@ -737,6 +756,7 @@ def create_app(
                 owned_upload_validation,
                 upload_locks,
                 publication_coordinator=owned_upload_publication_coordinator,
+                process_runner=validation_process_runner,
             )
             upload_api_dependencies = UploadApiDependencies(
                 transport=upload_api_dependencies.transport,
@@ -908,62 +928,68 @@ def create_app(
         analysis_coordinator = owned_media_analysis_coordinator
         youtube_coordinator = owned_youtube_acquisition_coordinator
         x_coordinator = owned_x_acquisition_coordinator
-        publication_started = False
-        validation_started = False
-        catalog_started = False
-        analysis_started = False
-        youtube_started = False
-        x_started = False
+        started: list[StartedResource] = []
+        budget = (
+            APPLICATION_LIFESPAN_SHUTDOWN_BUDGET_SECONDS
+            if lifespan_shutdown_budget_seconds is None
+            else float(lifespan_shutdown_budget_seconds)
+        )
+        clock = time.monotonic if shutdown_clock is None else shutdown_clock
         try:
             if analysis_coordinator is not None:
                 await analysis_coordinator.start()
-                analysis_started = True
+                started.append(
+                    StartedResource("media_analysis", analysis_coordinator.shutdown)
+                )
             if catalog_coordinator is not None:
                 await catalog_coordinator.start()
-                catalog_started = True
+                started.append(
+                    StartedResource("upload_catalog", catalog_coordinator.shutdown)
+                )
             if publication_coordinator is not None:
                 await publication_coordinator.start()
-                publication_started = True
+                started.append(
+                    StartedResource(
+                        "upload_publication", publication_coordinator.shutdown
+                    )
+                )
             if validation_coordinator is not None:
                 await validation_coordinator.start()
-                validation_started = True
+                started.append(
+                    StartedResource(
+                        "upload_validation", validation_coordinator.shutdown
+                    )
+                )
             if youtube_coordinator is not None:
                 await youtube_coordinator.start()
-                youtube_started = True
+                started.append(
+                    StartedResource(
+                        "youtube_acquisition", youtube_coordinator.shutdown
+                    )
+                )
             if x_coordinator is not None:
                 await x_coordinator.start()
-                x_started = True
+                started.append(
+                    StartedResource("x_acquisition", x_coordinator.shutdown)
+                )
             yield
         finally:
+            deadline = create_application_shutdown_deadline(
+                budget_seconds=budget,
+                clock=clock,
+            )
+            cancelled = await shutdown_started_resources(
+                started,
+                deadline,
+                log_fault=_log_lifecycle_shutdown_fault,
+            )
             try:
-                if x_started and x_coordinator is not None:
-                    await x_coordinator.shutdown()
-            finally:
-                try:
-                    if youtube_started and youtube_coordinator is not None:
-                        await youtube_coordinator.shutdown()
-                finally:
-                    try:
-                        if validation_started and validation_coordinator is not None:
-                            await validation_coordinator.shutdown()
-                    finally:
-                        try:
-                            if publication_started and publication_coordinator is not None:
-                                await publication_coordinator.shutdown()
-                        finally:
-                            try:
-                                if catalog_started and catalog_coordinator is not None:
-                                    await catalog_coordinator.shutdown()
-                            finally:
-                                try:
-                                    if (
-                                        analysis_started
-                                        and analysis_coordinator is not None
-                                    ):
-                                        await analysis_coordinator.shutdown()
-                                finally:
-                                    if owned_engine is not None:
-                                        dispose_engine(owned_engine)
+                if owned_engine is not None:
+                    dispose_engine(owned_engine)
+            except Exception:
+                _log_lifecycle_shutdown_fault(resource_name="engine")
+            if cancelled is not None:
+                raise cancelled
 
     identity_mapping: dict[str, IdentityMappingEntry] | None = None
     resolved_audit_recorder = security_audit_recorder
@@ -1130,6 +1156,20 @@ def create_app(
             )
 
     return app
+
+
+def _log_lifecycle_shutdown_fault(*, resource_name: str) -> None:
+    del resource_name
+    try:
+        LOGGER.emit(
+            level="WARNING",
+            event="lifecycle_resource_shutdown_fault",
+            operation="lifecycle_shutdown",
+            error_code="LIFECYCLE_RESOURCE_SHUTDOWN_FAULT",
+            retryable=False,
+        )
+    except Exception:
+        return
 
 
 def _upload_validation_coordinator(dependencies: UploadApiDependencies) -> object | None:

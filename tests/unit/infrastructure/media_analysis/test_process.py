@@ -16,9 +16,11 @@ import framenest.infrastructure.media_analysis.process as process_module
 from framenest.infrastructure.media_analysis.process import (
     EXECUTABLE_NOT_FOUND_MESSAGE,
     PROCESS_FAILED_MESSAGE,
+    PROCESS_INTERRUPTED_MESSAGE,
     PROCESS_OUTPUT_LIMIT_MESSAGE,
     PROCESS_TIMEOUT_MESSAGE,
     ProcessExecutionError,
+    ProcessInterruptedError,
     ProcessRunResult,
     SubprocessRunner,
     _STDERR_READER_THREAD_NAME,
@@ -892,3 +894,40 @@ def test_process_errors_do_not_leak_sensitive_argv_paths() -> None:
         )
     message = str(exc_info.value)
     assert SENSITIVE_MEDIA_PATH not in message
+
+
+def test_interrupt_is_idempotent_and_reaps_owned_child() -> None:
+    runner = SubprocessRunner()
+    pid_holder: dict[str, int] = {}
+
+    def run_sleep() -> None:
+        try:
+            runner.run(
+                executable=sys.executable,
+                argv=["-c", "import time; time.sleep(30)"],
+                timeout_seconds=30.0,
+                stdout_max_bytes=64,
+                stderr_max_bytes=64,
+            )
+        except ProcessInterruptedError:
+            pid_holder["interrupted"] = 1
+
+    thread = threading.Thread(target=run_sleep)
+    thread.start()
+    deadline = time.monotonic() + 2.0
+    while time.monotonic() < deadline:
+        with runner._guard:
+            if runner._active_processes:
+                process = next(iter(runner._active_processes))
+                pid_holder["pid"] = process.pid
+                break
+        time.sleep(0.01)
+    assert "pid" in pid_holder
+    runner.interrupt(remaining_seconds=0.2)
+    runner.interrupt(remaining_seconds=0.2)
+    thread.join(timeout=2.0)
+    assert not thread.is_alive()
+    assert pid_holder.get("interrupted") == 1
+    assert _wait_for_missing_process(pid_holder["pid"])
+    assert str(ProcessInterruptedError(PROCESS_INTERRUPTED_MESSAGE))
+    assert SENSITIVE_MEDIA_PATH not in PROCESS_INTERRUPTED_MESSAGE

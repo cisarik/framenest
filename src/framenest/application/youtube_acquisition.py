@@ -9,6 +9,12 @@ from dataclasses import dataclass
 import json
 import time
 
+from framenest.application.in_process_lifecycle import (
+    IterationFailureLimiter,
+    ShutdownDeadline,
+    attach_unexpected_runner_observer,
+    wait_for_deadline,
+)
 from framenest.application.ports.upload_publications import (
     UploadPublicationCandidate,
     UploadPublicationRepository,
@@ -73,6 +79,7 @@ from framenest.domain.youtube_acquisition import (
     canonicalize_youtube_url,
     derive_requester_phase,
 )
+from framenest.structured_logging import get_logger
 
 DEFAULT_FINAL_MEDIA_BYTES = 1_073_741_824
 MS_PER_HOUR = 3_600_000
@@ -80,6 +87,7 @@ MS_PER_DAY = 86_400_000
 
 DEFAULT_ACQUISITION_POLL_INTERVAL_SECONDS = 0.25
 DEFAULT_ACQUISITION_BATCH_SIZE = 32
+LOGGER = get_logger("youtube_acquisition")
 
 
 class YouTubeAcquisitionError(RuntimeError):
@@ -806,6 +814,7 @@ class YouTubeAcquisitionCoordinator:
         self._wake: asyncio.Event | None = None
         self._stopping = False
         self._startup_reconciled = False
+        self._iteration_failures = IterationFailureLimiter()
 
     async def start(self) -> None:
         if self._runner is not None:
@@ -818,6 +827,11 @@ class YouTubeAcquisitionCoordinator:
         self._runner = asyncio.create_task(
             self._run(),
             name="framenest-youtube-acquisition-coordinator",
+        )
+        attach_unexpected_runner_observer(
+            self._runner,
+            is_expected=lambda: self._stopping,
+            log_unexpected=_log_unexpected_runner_death,
         )
         self.notify()
 
@@ -832,8 +846,17 @@ class YouTubeAcquisitionCoordinator:
             await self._reconcile_startup()
         await self._drain_once()
 
-    async def shutdown(self) -> None:
+    async def shutdown(
+        self,
+        deadline: ShutdownDeadline | None = None,
+    ) -> None:
         self._stopping = True
+        binder = getattr(self._downloader, "bind_shutdown_deadline", None)
+        if callable(binder):
+            binder(deadline)
+        interrupt = getattr(self._downloader, "request_interrupt", None)
+        if callable(interrupt):
+            interrupt()
         if self._wake is not None:
             self._wake.set()
         runner = self._runner
@@ -841,9 +864,26 @@ class YouTubeAcquisitionCoordinator:
             runner.cancel()
         try:
             if runner is not None:
-                await runner
-        except asyncio.CancelledError:
-            pass
+                try:
+                    await wait_for_deadline(runner, deadline)
+                except TimeoutError:
+                    _safe_log(
+                        level="WARNING",
+                        event="youtube_acquisition_shutdown_unresolved",
+                        operation="youtube_acquisition_shutdown",
+                        error_code="YOUTUBE_ACQUISITION_SHUTDOWN_UNRESOLVED",
+                        retryable=False,
+                    )
+                except asyncio.CancelledError:
+                    pass
+                except Exception:
+                    _safe_log(
+                        level="WARNING",
+                        event="youtube_acquisition_runner_shutdown_fault",
+                        operation="youtube_acquisition_shutdown",
+                        error_code="YOUTUBE_ACQUISITION_RUNNER_SHUTDOWN_FAULT",
+                        retryable=False,
+                    )
         finally:
             self._runner = None
             self._wake = None
@@ -858,9 +898,19 @@ class YouTubeAcquisitionCoordinator:
             try:
                 progressed = await self._drain_once()
             except asyncio.CancelledError:
+                if self._stopping:
+                    return
                 raise
             except Exception:
                 progressed = False
+                if self._iteration_failures.allow():
+                    _safe_log(
+                        level="ERROR",
+                        event="youtube_acquisition_runner_iteration_failed",
+                        operation="youtube_acquisition_run",
+                        error_code="YOUTUBE_ACQUISITION_RUNNER_ITERATION_FAILED",
+                        retryable=True,
+                    )
             if self._stopping:
                 return
             if progressed:
@@ -1471,3 +1521,20 @@ def _notify(coordinator: object | None) -> None:
         notify()
     except Exception:
         return
+
+
+def _safe_log(**fields: object) -> None:
+    try:
+        LOGGER.emit(**fields)
+    except Exception:
+        return
+
+
+def _log_unexpected_runner_death() -> None:
+    _safe_log(
+        level="ERROR",
+        event="youtube_acquisition_runner_unexpected_death",
+        operation="youtube_acquisition_run",
+        error_code="YOUTUBE_ACQUISITION_RUNNER_UNEXPECTED_DEATH",
+        retryable=False,
+    )

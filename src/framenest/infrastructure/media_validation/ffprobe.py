@@ -34,7 +34,9 @@ from framenest.infrastructure.media_analysis.process import (
     PROCESS_OUTPUT_LIMIT_MESSAGE,
     PROCESS_TIMEOUT_MESSAGE,
     PROCESS_FAILED_MESSAGE,
+    PROCESS_INTERRUPTED_MESSAGE,
     ProcessExecutionError,
+    ProcessInterruptedError,
     ProcessRunner,
     SubprocessRunner,
 )
@@ -161,6 +163,8 @@ class BoundedUploadMediaValidator:
                 stderr_max_bytes=UPLOAD_VALIDATION_PROBE_STDERR_MAX_BYTES,
                 pass_fds=(reader.file_descriptor,),
             )
+        except ProcessInterruptedError:
+            raise
         except ProcessExecutionError as exc:
             _raise_process_error(exc)
         if result.returncode != 0:
@@ -514,6 +518,8 @@ def _validate_duration(duration_ms: int | None) -> None:
 
 def _raise_process_error(exc: ProcessExecutionError) -> None:
     message = str(exc)
+    if message == PROCESS_INTERRUPTED_MESSAGE:
+        raise ProcessInterruptedError(PROCESS_INTERRUPTED_MESSAGE) from None
     if message in {EXECUTABLE_NOT_FOUND_MESSAGE, TOOL_NOT_AVAILABLE_MESSAGE}:
         raise UploadMediaValidationInfrastructureError(
             UPLOAD_VALIDATION_TOOL_UNAVAILABLE

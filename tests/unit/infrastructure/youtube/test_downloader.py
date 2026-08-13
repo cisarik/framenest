@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 import signal
 import sys
+import time
 from typing import Any
 
 import pytest
@@ -21,6 +22,7 @@ from framenest.application.ports.youtube_downloader import (
 from framenest.domain.youtube_acquisition import canonicalize_youtube_url
 from framenest.infrastructure.youtube.downloader import YtDlpYouTubeDownloader
 from framenest.infrastructure.youtube.staging import FilesystemYouTubeStaging
+from framenest.application.in_process_lifecycle import ShutdownDeadline
 
 VIDEO_ID = "AbCdEf123_-"
 STAGING_KEY = "2" * 32
@@ -395,3 +397,38 @@ def test_intermediate_staging_limit_is_enforced_before_subprocess(
         )
     assert exc_info.value.code == "STAGING_SIZE_LIMIT"
     assert factory.calls == []
+
+
+def test_shutdown_term_kill_respects_remaining_budget_and_reaps_child(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    process = _HangingProcess()
+    factory = _RecordingFactory([process])
+    signals: list[signal.Signals] = []
+
+    def fake_killpg(pid: int, sent_signal: signal.Signals) -> None:
+        assert pid == process.pid
+        signals.append(sent_signal)
+        if sent_signal == signal.SIGKILL:
+            process.finished.set()
+
+    monkeypatch.setattr(
+        "framenest.infrastructure.youtube.downloader.os.killpg",
+        fake_killpg,
+    )
+    downloader = YtDlpYouTubeDownloader(
+        _private_staging(tmp_path),
+        process_factory=factory,
+        inspection_timeout_seconds=0.05,
+    )
+    downloader.bind_shutdown_deadline(ShutdownDeadline(0.2))
+
+    started = time.monotonic()
+    with pytest.raises(YouTubeDownloaderConfigurationError) as exc_info:
+        asyncio.run(downloader.attest_version())
+    elapsed = time.monotonic() - started
+    assert exc_info.value.code == "DOWNLOADER_ATTESTATION_TIMEOUT"
+    assert elapsed < 0.5
+    assert signals == [signal.SIGTERM, signal.SIGKILL]
+    assert process.finished.is_set()

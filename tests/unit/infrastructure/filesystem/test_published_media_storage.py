@@ -698,3 +698,30 @@ def test_keep_separate_duplicate_still_requires_full_destination_allocation(
     finally:
         reader.close()
     assert quarantine.file_size(key) == len(data)
+
+
+def test_request_stop_leaves_no_final_media_and_allows_retry(tmp_path: Path) -> None:
+    data = b"synthetic-cooperative-stop-bytes"
+    publication = _publication(data)
+    quarantine, key, _ = _quarantine(tmp_path, data)
+    published, root = _published_storage(tmp_path, publication)
+    reader = quarantine.open_reader(key, expected_size_bytes=len(data))
+    try:
+        published.request_stop()
+        with pytest.raises(PublishedMediaWriteError):
+            published.publish_from_reader(publication, reader)
+        final = root / publication.relative_path.value
+        assert not final.exists()
+    finally:
+        reader.close()
+    retried = FilesystemPublishedMediaStorage(
+        publication.destination_id,
+        root,
+        forbidden_roots=(),
+    )
+    reader = quarantine.open_reader(key, expected_size_bytes=len(data))
+    try:
+        retried.publish_from_reader(publication, reader)
+    finally:
+        reader.close()
+    assert (root / publication.relative_path.value).read_bytes() == data

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Callable
 import threading
+import time
 import uuid
 
 from framenest.application.ports.upload_publications import UploadPublicationCandidate
@@ -13,6 +14,7 @@ from framenest.application.upload_catalog import (
     UploadCatalogResult,
 )
 from framenest.application.upload_catalog_coordinator import UploadCatalogCoordinator
+from framenest.application.in_process_lifecycle import ShutdownDeadline
 from framenest.application.upload_transport import UploadSessionLockRegistry
 from framenest.domain.identities import LibraryId, MediaByteIdentityId, MediaId, MediaLocationId
 from framenest.domain.upload_publications import (
@@ -262,5 +264,30 @@ def test_in_process_lock_prevents_concurrent_duplicate_cataloging() -> None:
         await _wait_until(lambda: repository.get_candidate(candidate.upload.id) is None)
         await coordinator.shutdown()
         assert cataloger.calls.count(candidate.upload.id.to_string()) == 1
+
+    asyncio.run(scenario())
+
+
+def test_expired_deadline_does_not_block_on_executor_wait() -> None:
+    async def scenario() -> None:
+        candidate = _candidate(1)
+        repository = _Repository((candidate,))
+        block = threading.Event()
+        cataloger = _Cataloger(repository, block=block)
+        coordinator = UploadCatalogCoordinator(
+            repository,
+            cataloger,
+            UploadSessionLockRegistry(),
+        )
+        await coordinator.start()
+        await _wait_until(lambda: cataloger.started.is_set())
+        began = time.monotonic()
+        await coordinator.shutdown(ShutdownDeadline(0.0))
+        elapsed = time.monotonic() - began
+        block.set()
+        await asyncio.sleep(0.05)
+        assert elapsed < 0.2
+        assert coordinator.runner_done
+        assert not coordinator.executor_running
 
     asyncio.run(scenario())

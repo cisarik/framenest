@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Callable
 import threading
+import time
 import uuid
 
 from framenest.application.ports.upload_publications import UploadPublicationCandidate
@@ -15,6 +16,7 @@ from framenest.application.upload_publication import (
 from framenest.application.upload_publication_coordinator import (
     UploadPublicationCoordinator,
 )
+from framenest.application.in_process_lifecycle import ShutdownDeadline
 from framenest.application.upload_transport import UploadSessionLockRegistry
 from framenest.domain.identities import MediaByteIdentityId
 from framenest.domain.uploads import (
@@ -247,5 +249,30 @@ def test_drain_batches_candidates_and_shared_lock_prevents_same_upload_overlap()
 
         assert 1 <= publisher.calls.count(candidate.upload.id.to_string()) <= 2
         assert repository.get_candidate(candidate.upload.id) is None
+
+    asyncio.run(scenario())
+
+
+def test_expired_deadline_does_not_block_on_executor_wait() -> None:
+    async def scenario() -> None:
+        candidate = _candidate(1)
+        repository = _Repository((candidate,))
+        release = threading.Event()
+        publisher = _Publisher(repository, block=release)
+        coordinator = UploadPublicationCoordinator(
+            repository,
+            publisher,
+            UploadSessionLockRegistry(),
+        )
+        await coordinator.start()
+        await asyncio.to_thread(publisher.started.wait, 1)
+        began = time.monotonic()
+        await coordinator.shutdown(ShutdownDeadline(0.0))
+        elapsed = time.monotonic() - began
+        release.set()
+        await asyncio.sleep(0.05)
+        assert elapsed < 0.2
+        assert coordinator.runner_done
+        assert not coordinator.executor_running
 
     asyncio.run(scenario())

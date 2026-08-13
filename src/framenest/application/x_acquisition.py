@@ -9,9 +9,18 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncIterator, Callable
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
+import functools
 import hashlib
 import time
+
+from framenest.application.in_process_lifecycle import (
+    IterationFailureLimiter,
+    ShutdownDeadline,
+    attach_unexpected_runner_observer,
+    shutdown_executor_backed_coordinator,
+)
 
 from framenest.application.ports.upload_publications import (
     UploadPublicationCandidate,
@@ -27,6 +36,7 @@ from framenest.application.ports.x_acquisition import (
 )
 from framenest.application.ports.x_extractor import (
     XExtractionError,
+    XExtractionInterrupted,
     XExtractor,
     XExtractorConfigurationError,
 )
@@ -79,11 +89,13 @@ from framenest.domain.x_acquisition import (
     normalize_x_creator,
     x_title_from_post_post,
 )
+from framenest.structured_logging import get_logger
 
 DEFAULT_ACQUISITION_POLL_INTERVAL_SECONDS = 0.25
 DEFAULT_ACQUISITION_BATCH_SIZE = 32
 MS_PER_HOUR = 3_600_000
 MS_PER_DAY = 86_400_000
+LOGGER = get_logger("x_acquisition")
 
 
 class XAcquisitionError(RuntimeError):
@@ -439,6 +451,7 @@ class XAcquisitionCoordinator:
         poll_interval_seconds: float = DEFAULT_ACQUISITION_POLL_INTERVAL_SECONDS,
         batch_size: int = DEFAULT_ACQUISITION_BATCH_SIZE,
         now_ms: Callable[[], int] = default_now_ms,
+        executor: ThreadPoolExecutor | None = None,
     ) -> None:
         self._repository = repository
         self._extractor = extractor
@@ -456,23 +469,70 @@ class XAcquisitionCoordinator:
         self._runner_task: asyncio.Task | None = None
         self._shutdown_requested = False
         self._draining = False
+        self._executor = executor
+        self._owns_executor = executor is None
+        self._iteration_failures = IterationFailureLimiter()
 
     async def start(self) -> None:
         if self._runner_task is None:
+            self._shutdown_requested = False
+            self._ensure_executor()
             self._runner_task = asyncio.create_task(self._run())
+            attach_unexpected_runner_observer(
+                self._runner_task,
+                is_expected=lambda: self._shutdown_requested,
+                log_unexpected=_log_unexpected_runner_death,
+            )
 
     def notify(self) -> None:
+        if self._runner_task is not None and self._runner_task.done() and not self._shutdown_requested:
+            raise RuntimeError("X acquisition runner is not active")
         self._wake.set()
 
     async def drain(self) -> None:
         await self._drain_once()
 
-    async def shutdown(self) -> None:
+    async def shutdown(
+        self,
+        deadline: ShutdownDeadline | None = None,
+    ) -> None:
         self._shutdown_requested = True
+        binder = getattr(self._extractor, "bind_shutdown_deadline", None)
+        if callable(binder):
+            binder(deadline)
+        interrupt = getattr(self._extractor, "request_interrupt", None)
+        if callable(interrupt):
+            interrupt()
         self._wake.set()
-        if self._runner_task is not None:
-            await self._runner_task
+        runner = self._runner_task
+        cancellation: asyncio.CancelledError | None = None
+        try:
+            cancellation = await shutdown_executor_backed_coordinator(
+                runner=runner,
+                executor=self._executor,
+                owns_executor=self._owns_executor,
+                deadline=deadline,
+                log_runner_fault=lambda: _safe_log(
+                    level="WARNING",
+                    event="x_acquisition_runner_shutdown_fault",
+                    operation="x_acquisition_shutdown",
+                    error_code="X_ACQUISITION_RUNNER_SHUTDOWN_FAULT",
+                    retryable=False,
+                ),
+                log_unresolved=lambda: _safe_log(
+                    level="WARNING",
+                    event="x_acquisition_executor_unresolved",
+                    operation="x_acquisition_shutdown",
+                    error_code="X_ACQUISITION_EXECUTOR_UNRESOLVED",
+                    retryable=False,
+                ),
+            )
+        finally:
             self._runner_task = None
+            if self._owns_executor:
+                self._executor = None
+        if cancellation is not None:
+            raise cancellation
 
     @property
     def runner_done(self) -> bool:
@@ -481,9 +541,42 @@ class XAcquisitionCoordinator:
             return True
         return task.done()
 
+    def _ensure_executor(self) -> ThreadPoolExecutor:
+        if self._executor is None:
+            self._executor = ThreadPoolExecutor(
+                max_workers=1,
+                thread_name_prefix="framenest-x-acquisition",
+            )
+            self._owns_executor = True
+        return self._executor
+
+    async def _run_blocking(self, func, /, *args, **kwargs):
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(
+            self._executor,
+            functools.partial(func, *args, **kwargs),
+        )
+
     async def _run(self) -> None:
         while not self._shutdown_requested:
-            progress = await self._drain_once()
+            try:
+                progress = await self._drain_once()
+            except asyncio.CancelledError:
+                if self._shutdown_requested:
+                    return
+                raise
+            except Exception:
+                progress = False
+                if self._iteration_failures.allow():
+                    _safe_log(
+                        level="ERROR",
+                        event="x_acquisition_runner_iteration_failed",
+                        operation="x_acquisition_run",
+                        error_code="X_ACQUISITION_RUNNER_ITERATION_FAILED",
+                        retryable=True,
+                    )
+            if self._shutdown_requested:
+                return
             if progress:
                 await asyncio.sleep(0)
             else:
@@ -520,6 +613,10 @@ class XAcquisitionCoordinator:
                 await self._acquire(claim)
             elif claim.state is XAcquisitionState.HANDING_OFF:
                 await self._handoff(claim)
+        except XExtractionInterrupted:
+            return
+        except asyncio.CancelledError:
+            raise
         except Exception as exc:
             await self._fail(claim, stage=XFailureStage.INTERNAL, code=_code_from_exception(exc))
 
@@ -539,9 +636,13 @@ class XAcquisitionCoordinator:
                 ),
             )
         try:
-            inspection = self._extractor.inspect(
-                post_id=current.x_post_id, submitted_url=current.submitted_url
+            inspection = await self._run_blocking(
+                self._extractor.inspect,
+                post_id=current.x_post_id,
+                submitted_url=current.submitted_url,
             )
+        except XExtractionInterrupted:
+            raise
         except XExtractionError as exc:
             stage = _stage_for_extractor_code(exc.code)
             await self._fail_with_assets(
@@ -619,7 +720,28 @@ class XAcquisitionCoordinator:
 
     async def _acquire(self, claim: XPostClaim) -> None:
         assets = self._repository.list_assets_for_post(claim.id)
-        pending = [a for a in assets if a.state in (XAssetState.PENDING, XAssetState.EXTRACTED)]
+        interrupted = [a for a in assets if a.state is XAssetState.ACQUIRING]
+        for asset in interrupted:
+            clearer = getattr(self._staging, "clear", None)
+            if callable(clearer):
+                try:
+                    clearer(asset.stage_key)
+                except Exception:
+                    _safe_log(
+                        level="WARNING",
+                        event="x_acquisition_staging_clear_failed",
+                        operation="x_acquisition_recovery",
+                        error_code="X_STAGING_CLEANUP_FAILED",
+                        retryable=True,
+                    )
+                    return
+        assets = self._repository.list_assets_for_post(claim.id)
+        pending = [
+            a
+            for a in assets
+            if a.state
+            in (XAssetState.PENDING, XAssetState.EXTRACTED, XAssetState.ACQUIRING)
+        ]
         if not pending:
             await self._advance_to_handoff(claim, assets)
             return
@@ -629,10 +751,17 @@ class XAcquisitionCoordinator:
                 asset,
                 asset.advance(XAssetState.EXTRACTED, updated_at_ms=self._now_ms()),
             )
-        acquiring = asset.advance(XAssetState.ACQUIRING, updated_at_ms=self._now_ms())
-        acquiring = self._save_asset(asset, acquiring)
+        if asset.state is XAssetState.EXTRACTED:
+            acquiring = asset.advance(
+                XAssetState.ACQUIRING, updated_at_ms=self._now_ms()
+            )
+            acquiring = self._save_asset(asset, acquiring)
+        else:
+            acquiring = asset
         try:
             result = await self._acquire_one(claim, acquiring)
+        except XExtractionInterrupted:
+            return
         except Exception as exc:
             await self._fail_asset(
                 claim, acquiring, stage=XFailureStage.ACQUISITION,
@@ -660,7 +789,8 @@ class XAcquisitionCoordinator:
         self._save(current, handoff_target)
 
     async def _acquire_one(self, claim: XPostClaim, asset: XAsset) -> _Acquired:
-        result = self._extractor.download(
+        result = await self._run_blocking(
+            self._extractor.download,
             post_id=claim.x_post_id,
             ordinal=asset.ordinal,
             media_type=asset.media_type.value,
@@ -878,7 +1008,12 @@ class XAcquisitionCoordinator:
             cleanup_state=XStagingCleanupState.COMPLETE,
             cleanup_completed_at_ms=self._now_ms(),
         )
-        return self._save_asset(asset, cleaned)
+        try:
+            return self._save_asset(asset, cleaned)
+        except Exception:
+            # Same-state cleanup flags cannot use the transition-checked save path.
+            # Keep the persisted version so a later legal transition can succeed.
+            return asset
 
     async def _cleanup_claim(self, claim: XPostClaim) -> None:
         for asset in self._repository.list_assets_for_post(claim.id):
@@ -1169,6 +1304,23 @@ def _notify(coordinator: object) -> None:
     notify = getattr(coordinator, "notify", None)
     if callable(notify):
         notify()
+
+
+def _safe_log(**fields: object) -> None:
+    try:
+        LOGGER.emit(**fields)
+    except Exception:
+        return
+
+
+def _log_unexpected_runner_death() -> None:
+    _safe_log(
+        level="ERROR",
+        event="x_acquisition_runner_unexpected_death",
+        operation="x_acquisition_run",
+        error_code="X_ACQUISITION_RUNNER_UNEXPECTED_DEATH",
+        retryable=False,
+    )
 
 
 ACTIVE_X_ASSET_STATES = frozenset(

@@ -8,6 +8,12 @@ from concurrent.futures import ThreadPoolExecutor
 from enum import Enum, auto
 from typing import Protocol
 
+from framenest.application.in_process_lifecycle import (
+    IterationFailureLimiter,
+    ShutdownDeadline,
+    attach_unexpected_runner_observer,
+    shutdown_executor_backed_coordinator,
+)
 from framenest.application.ports.upload_publications import (
     FrameNestUploadPublicationRepositoryError,
     UploadPublicationCandidate,
@@ -109,6 +115,7 @@ class UploadCatalogCoordinator:
         self._retry_initial_delay_seconds = retry_initial_delay_seconds
         self._retry_max_delay_seconds = retry_max_delay_seconds
         self._current_retry_delay_seconds = retry_initial_delay_seconds
+        self._iteration_failures = IterationFailureLimiter()
         self._runner: asyncio.Task[None] | None = None
         self._wake: asyncio.Event | None = None
         self._stopping = False
@@ -128,6 +135,11 @@ class UploadCatalogCoordinator:
             self._run(),
             name="framenest-upload-catalog-coordinator",
         )
+        attach_unexpected_runner_observer(
+            self._runner,
+            is_expected=lambda: self._stopping,
+            log_unexpected=_log_unexpected_runner_death,
+        )
         self.notify()
 
     def notify(self) -> None:
@@ -143,7 +155,10 @@ class UploadCatalogCoordinator:
         self._ensure_executor()
         await self._drain_once()
 
-    async def shutdown(self) -> None:
+    async def shutdown(
+        self,
+        deadline: ShutdownDeadline | None = None,
+    ) -> None:
         """Stop claiming work and wait for owned blocking work to settle."""
         self._stopping = True
         if self._wake is not None:
@@ -151,30 +166,33 @@ class UploadCatalogCoordinator:
         runner = self._runner
         cancellation: asyncio.CancelledError | None = None
         try:
-            if runner is not None:
-                try:
-                    await runner
-                except asyncio.CancelledError as exc:
-                    cancellation = exc
-                except Exception:
-                    _safe_log(
-                        level="WARNING",
-                        event="upload_catalog_runner_shutdown_fault",
-                        operation="upload_catalog_shutdown",
-                        error_code="UPLOAD_CATALOG_RUNNER_SHUTDOWN_FAULT",
-                        retryable=False,
-                    )
+            cancellation = await shutdown_executor_backed_coordinator(
+                runner=runner,
+                executor=self._executor,
+                owns_executor=self._owns_executor,
+                deadline=deadline,
+                log_runner_fault=lambda: _safe_log(
+                    level="WARNING",
+                    event="upload_catalog_runner_shutdown_fault",
+                    operation="upload_catalog_shutdown",
+                    error_code="UPLOAD_CATALOG_RUNNER_SHUTDOWN_FAULT",
+                    retryable=False,
+                ),
+                log_unresolved=lambda: _safe_log(
+                    level="WARNING",
+                    event="upload_catalog_executor_unresolved",
+                    operation="upload_catalog_shutdown",
+                    error_code="UPLOAD_CATALOG_EXECUTOR_UNRESOLVED",
+                    retryable=False,
+                ),
+            )
         finally:
             self._runner = None
             self._wake = None
             self._active_upload_ids.clear()
             self._current_retry_delay_seconds = self._retry_initial_delay_seconds
-            try:
-                if self._executor is not None and self._owns_executor:
-                    self._executor.shutdown(wait=True, cancel_futures=False)
-            finally:
-                if self._owns_executor:
-                    self._executor = None
+            if self._owns_executor:
+                self._executor = None
         if cancellation is not None:
             raise cancellation
 
@@ -199,16 +217,15 @@ class UploadCatalogCoordinator:
                 return
             try:
                 await self._reconcile_until_idle()
-            except asyncio.CancelledError:
-                raise
             except Exception:
-                _safe_log(
-                    level="ERROR",
-                    event="upload_catalog_runner_iteration_failed",
-                    operation="upload_catalog_run",
-                    error_code="UPLOAD_CATALOG_RUNNER_ITERATION_FAILED",
-                    retryable=True,
-                )
+                if self._iteration_failures.allow():
+                    _safe_log(
+                        level="ERROR",
+                        event="upload_catalog_runner_iteration_failed",
+                        operation="upload_catalog_run",
+                        error_code="UPLOAD_CATALOG_RUNNER_ITERATION_FAILED",
+                        retryable=True,
+                    )
 
     async def _reconcile_until_idle(self) -> None:
         while not self._stopping:
@@ -415,3 +432,13 @@ def _safe_log(**fields: object) -> None:
         LOGGER.emit(**fields)
     except Exception:
         return
+
+
+def _log_unexpected_runner_death() -> None:
+    _safe_log(
+        level="ERROR",
+        event="upload_catalog_runner_unexpected_death",
+        operation="upload_catalog_run",
+        error_code="UPLOAD_CATALOG_RUNNER_UNEXPECTED_DEATH",
+        retryable=False,
+    )

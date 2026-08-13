@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+import threading
 import time
 
 from framenest.application.ports.published_media_storage import (
@@ -92,12 +93,24 @@ class PublishPendingUpload:
         self._storage = storage
         self._quarantine = quarantine
         self._now_ms = now_ms
+        self._stop = threading.Event()
+
+    def request_stop(self) -> None:
+        """Request cooperative interruption of lifecycle-owned publication work."""
+        self._stop.set()
+        stopper = getattr(self._storage, "request_stop", None)
+        if callable(stopper):
+            stopper()
 
     def publish_owned_blocking(
         self,
         upload_id: UploadSessionId,
     ) -> UploadPublicationResult:
         """Reconstruct one publication from durable database and filesystem truth."""
+        if self._stop.is_set():
+            raise UploadPublicationInfrastructureError(
+                "upload publication operation failed"
+            )
         try:
             candidate = self._repository.get_candidate(upload_id)
             if candidate is None:

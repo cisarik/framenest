@@ -15,6 +15,7 @@ EXECUTABLE_NOT_FOUND_MESSAGE = "External tool is not available."
 PROCESS_TIMEOUT_MESSAGE = "External tool timed out."
 PROCESS_OUTPUT_LIMIT_MESSAGE = "External tool output exceeded the allowed limit."
 PROCESS_FAILED_MESSAGE = "External tool execution failed."
+PROCESS_INTERRUPTED_MESSAGE = "External tool was interrupted."
 
 _READ_CHUNK_SIZE = 8192
 _JOIN_TIMEOUT_SECONDS = 5.0
@@ -26,6 +27,14 @@ _STDERR_READER_THREAD_NAME = "framenest-media-analysis-stderr-reader"
 
 class ProcessExecutionError(RuntimeError):
     """Sanitized error raised when subprocess execution fails."""
+
+
+class ProcessInterruptedError(RuntimeError):
+    """Raised when lifecycle interruption stops a still-running owned process.
+
+    This is intentionally not a ProcessExecutionError so request-time and
+    per-frame helpers that swallow tool failures do not hide interruption.
+    """
 
 
 @dataclass(frozen=True, slots=True)
@@ -137,7 +146,12 @@ def _poll_direct_child_without_reaping(process: subprocess.Popen[bytes]) -> int 
     return process.poll()
 
 
-def _cleanup_owned_process_group(process: subprocess.Popen[bytes]) -> None:
+def _cleanup_owned_process_group(
+    process: subprocess.Popen[bytes],
+    *,
+    terminate_grace_seconds: float = _TERMINATE_GRACE_SECONDS,
+    join_timeout_seconds: float = _JOIN_TIMEOUT_SECONDS,
+) -> None:
     pgid = process.pid
     if pgid <= 0:
         raise ProcessExecutionError(PROCESS_FAILED_MESSAGE)
@@ -145,19 +159,19 @@ def _cleanup_owned_process_group(process: subprocess.Popen[bytes]) -> None:
     group_exists = _process_group_exists(pgid)
     if group_exists:
         _signal_process_group(pgid, signal.SIGTERM)
-        _wait_for_direct_child(process, timeout_seconds=_TERMINATE_GRACE_SECONDS)
+        _wait_for_direct_child(process, timeout_seconds=terminate_grace_seconds)
         group_exists = not _wait_for_process_group_absence(
             pgid,
-            timeout_seconds=_TERMINATE_GRACE_SECONDS,
+            timeout_seconds=terminate_grace_seconds,
         )
 
     if group_exists:
         _signal_process_group(pgid, signal.SIGKILL)
-        _wait_for_direct_child(process, timeout_seconds=_JOIN_TIMEOUT_SECONDS)
-        if not _wait_for_process_group_absence(pgid, timeout_seconds=_JOIN_TIMEOUT_SECONDS):
+        _wait_for_direct_child(process, timeout_seconds=join_timeout_seconds)
+        if not _wait_for_process_group_absence(pgid, timeout_seconds=join_timeout_seconds):
             raise ProcessExecutionError(PROCESS_FAILED_MESSAGE)
 
-    if not _wait_for_direct_child(process, timeout_seconds=_JOIN_TIMEOUT_SECONDS):
+    if not _wait_for_direct_child(process, timeout_seconds=join_timeout_seconds):
         raise ProcessExecutionError(PROCESS_FAILED_MESSAGE)
 
 
@@ -315,6 +329,52 @@ def _handle_output_overflow(
 class SubprocessRunner:
     """Standard-library subprocess runner with bounded output retention."""
 
+    def __init__(self) -> None:
+        self._guard = threading.Lock()
+        self._interrupt = threading.Event()
+        self._active_processes: set[subprocess.Popen[bytes]] = set()
+        self._interrupt_remaining_seconds: float | None = None
+
+    @property
+    def interrupt_requested(self) -> bool:
+        return self._interrupt.is_set()
+
+    def interrupt(self, remaining_seconds: float | None = None) -> None:
+        """Idempotently request interruption of the currently owned process group.
+
+        The worker that called run() remains responsible for reaping the direct
+        child and joining bounded stdout/stderr readers.
+        """
+        self._interrupt.set()
+        if remaining_seconds is not None:
+            self._interrupt_remaining_seconds = max(0.0, float(remaining_seconds))
+        with self._guard:
+            processes = tuple(self._active_processes)
+        for process in processes:
+            pgid = process.pid
+            if pgid <= 0:
+                continue
+            try:
+                _signal_process_group(pgid, signal.SIGTERM)
+            except ProcessExecutionError:
+                continue
+
+    def _register(self, process: subprocess.Popen[bytes]) -> None:
+        with self._guard:
+            self._active_processes.add(process)
+
+    def _unregister(self, process: subprocess.Popen[bytes]) -> None:
+        with self._guard:
+            self._active_processes.discard(process)
+
+    def _interrupt_timeouts(self) -> tuple[float, float]:
+        remaining = self._interrupt_remaining_seconds
+        if remaining is None:
+            return _TERMINATE_GRACE_SECONDS, _JOIN_TIMEOUT_SECONDS
+        if remaining <= 0:
+            return 0.0, 0.0
+        return remaining * 0.6, remaining * 0.4
+
     def run(
         self,
         *,
@@ -327,6 +387,8 @@ class SubprocessRunner:
     ) -> ProcessRunResult:
         if not executable or not argv:
             raise ProcessExecutionError(PROCESS_FAILED_MESSAGE)
+        if self._interrupt.is_set():
+            raise ProcessInterruptedError(PROCESS_INTERRUPTED_MESSAGE)
         command = (executable, *argv)
         try:
             process = subprocess.Popen(
@@ -342,6 +404,25 @@ class SubprocessRunner:
         except OSError:
             raise ProcessExecutionError(PROCESS_FAILED_MESSAGE) from None
 
+        self._register(process)
+        try:
+            return self._run_registered(
+                process,
+                timeout_seconds=timeout_seconds,
+                stdout_max_bytes=stdout_max_bytes,
+                stderr_max_bytes=stderr_max_bytes,
+            )
+        finally:
+            self._unregister(process)
+
+    def _run_registered(
+        self,
+        process: subprocess.Popen[bytes],
+        *,
+        timeout_seconds: float,
+        stdout_max_bytes: int,
+        stderr_max_bytes: int,
+    ) -> ProcessRunResult:
         if process.stdout is None or process.stderr is None:
             _cleanup_owned_process_group(process)
             raise ProcessExecutionError(PROCESS_FAILED_MESSAGE)
@@ -378,6 +459,28 @@ class SubprocessRunner:
         deadline = time.monotonic() + timeout_seconds
         try:
             while True:
+                if self._interrupt.is_set():
+                    term_seconds, join_seconds = self._interrupt_timeouts()
+                    try:
+                        _cleanup_owned_process_group(
+                            process,
+                            terminate_grace_seconds=term_seconds,
+                            join_timeout_seconds=join_seconds,
+                        )
+                    except ProcessExecutionError:
+                        _close_pipe(process.stdout)
+                        _close_pipe(process.stderr)
+                    try:
+                        _finalize_readers(
+                            stdout_thread=stdout_thread,
+                            stderr_thread=stderr_thread,
+                            stdout_state=stdout_state,
+                            stderr_state=stderr_state,
+                        )
+                    except ProcessExecutionError:
+                        pass
+                    raise ProcessInterruptedError(PROCESS_INTERRUPTED_MESSAGE)
+
                 if stdout_state.overflow or stderr_state.overflow or output_wake.is_set():
                     _handle_output_overflow(
                         process,
@@ -413,6 +516,8 @@ class SubprocessRunner:
                     raise ProcessExecutionError(PROCESS_TIMEOUT_MESSAGE)
 
                 output_wake.wait(timeout=_POLL_INTERVAL_SECONDS)
+        except ProcessInterruptedError:
+            raise
         except ProcessExecutionError:
             raise
         except Exception:

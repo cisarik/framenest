@@ -35,6 +35,7 @@ def create_server(
         forwarded_allow_ips="",
         access_log=False,
         log_config=build_uvicorn_log_config(),
+        timeout_graceful_shutdown=5,
         **config_kwargs,
     )
     return uvicorn.Server(config)

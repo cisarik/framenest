@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import shutil
 import stat as stat_module
+import threading
 
 from framenest.application.ports.published_media_storage import (
     PublishedMediaInsufficientSpaceError,
@@ -46,6 +47,11 @@ class FilesystemPublishedMediaStorage:
         self._root = root
         self._forbidden_roots = forbidden_roots
         self._min_free_space_reserve_bytes = min_free_space_reserve_bytes
+        self._stop = threading.Event()
+
+    def request_stop(self) -> None:
+        """Request cooperative interruption at copy chunk boundaries."""
+        self._stop.set()
 
     @property
     def destination_id(self) -> LibraryId:
@@ -106,7 +112,12 @@ class FilesystemPublishedMediaStorage:
             try:
                 temp_fd = _open_owned_temporary(root_fd, temp_name)
                 try:
-                    _copy_and_verify_source(temp_fd, source, publication)
+                    _copy_and_verify_source(
+                        temp_fd,
+                        source,
+                        publication,
+                        stop_event=self._stop,
+                    )
                     _fsync_file(temp_fd)
                 finally:
                     _close_descriptor(temp_fd)
@@ -275,12 +286,16 @@ def _copy_and_verify_source(
     target_fd: int,
     source: QuarantineReader,
     publication: UploadPublication,
+    *,
+    stop_event: threading.Event | None = None,
 ) -> None:
     digest = hashlib.sha256()
     copied = 0
     try:
         source.seek_start()
         while True:
+            if stop_event is not None and stop_event.is_set():
+                raise PublishedMediaWriteError("published media write failed")
             chunk = source.read(_COPY_CHUNK_SIZE)
             if not chunk:
                 break

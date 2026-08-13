@@ -46,11 +46,19 @@ import math
 import os
 from pathlib import Path
 import re
+import signal
 import subprocess
+import threading
+import time
 
+from framenest.application.in_process_lifecycle import (
+    ShutdownDeadline,
+    split_termination_budget,
+)
 from framenest.application.ports.x_extractor import (
     XAssetAcquisition,
     XExtractionError,
+    XExtractionInterrupted,
     XRequiresAuthenticationError,
     XStagingStorage,
 )
@@ -68,6 +76,7 @@ DEFAULT_DOWNLOAD_TIMEOUT_SECONDS = 600
 DEFAULT_SOCKET_TIMEOUT_SECONDS = 30
 MAX_STDOUT_BYTES = 4_194_304
 TERMINATE_GRACE_SECONDS = 5
+KILL_GRACE_SECONDS = 2
 
 _SUPPORTED_MIME_BY_TYPE = {
     XMediaType.VIDEO: "video/mp4",
@@ -97,6 +106,26 @@ class YtDlpXExtractor:
         self._socket_timeout_seconds = socket_timeout_seconds
         self._working_directory = working_directory
         self._max_assets = max_assets
+        self._guard = threading.Lock()
+        self._interrupt = threading.Event()
+        self._active_process: subprocess.Popen[bytes] | None = None
+        self._shutdown_deadline: ShutdownDeadline | None = None
+
+    def bind_shutdown_deadline(self, deadline: ShutdownDeadline | None) -> None:
+        self._shutdown_deadline = deadline
+
+    def request_interrupt(self) -> None:
+        """Idempotently interrupt the currently owned process group."""
+        self._interrupt.set()
+        with self._guard:
+            process = self._active_process
+        if process is None:
+            return
+        _terminate_process_group(
+            process,
+            remaining_seconds=_remaining_or_default(self._shutdown_deadline),
+            reap=False,
+        )
 
     def attest_version(self) -> str | None:
         try:
@@ -135,7 +164,7 @@ class YtDlpXExtractor:
             "--",
             submitted_url,
         ]
-        completed = _run_bounded(argv, timeout=self._inspect_timeout_seconds)
+        completed = self._run_bounded(argv, timeout=self._inspect_timeout_seconds)
         if completed.timed_out:
             raise XExtractionError("X_DOWNLOAD_TIMEOUT", "X extraction timed out.")
         if completed.returncode != 0:
@@ -180,7 +209,7 @@ class YtDlpXExtractor:
             str(int(self._socket_timeout_seconds)),
         ]
         argv += ["--", identity.canonical_url]
-        completed = _run_bounded(
+        completed = self._run_bounded(
             argv,
             timeout=self._download_timeout_seconds,
             cwd=_to_path(directory),
@@ -203,6 +232,96 @@ class YtDlpXExtractor:
                     break
                 digest.update(block)
         return XAssetAcquisition(size_bytes=size_bytes, sha256=digest.hexdigest())
+
+    def _run_bounded(
+        self,
+        argv: list[str],
+        *,
+        timeout: float,
+        cwd: Path | None = None,
+    ) -> _BoundedCompleted:
+        if self._interrupt.is_set():
+            raise XExtractionInterrupted()
+        try:
+            process = subprocess.Popen(
+                argv,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                cwd=str(cwd) if cwd is not None else None,
+                env=_subprocess_environment(),
+                start_new_session=True,
+            )
+        except OSError as exc:
+            raise XExtractionError("X_EXTRACTOR_UNAVAILABLE", "X extractor is unavailable.") from exc
+        with self._guard:
+            self._active_process = process
+        timed_out = False
+        stdout = b""
+        stderr = b""
+        try:
+            if self._interrupt.is_set():
+                self._reap_interrupted(process)
+                raise XExtractionInterrupted()
+            remaining = timeout
+            deadline = time.monotonic() + timeout
+            while True:
+                slice_timeout = min(0.05, max(0.0, remaining))
+                try:
+                    stdout, stderr = process.communicate(timeout=slice_timeout)
+                    break
+                except subprocess.TimeoutExpired:
+                    if self._interrupt.is_set():
+                        self._reap_interrupted(process)
+                        raise XExtractionInterrupted() from None
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        timed_out = True
+                        _terminate_process_group(
+                            process,
+                            remaining_seconds=TERMINATE_GRACE_SECONDS + KILL_GRACE_SECONDS,
+                            reap=False,
+                        )
+                        try:
+                            stdout, stderr = process.communicate(
+                                timeout=TERMINATE_GRACE_SECONDS
+                            )
+                        except subprocess.TimeoutExpired:
+                            process.kill()
+                            stdout, stderr = process.communicate()
+                        break
+            if self._interrupt.is_set():
+                raise XExtractionInterrupted()
+        finally:
+            with self._guard:
+                if self._active_process is process:
+                    self._active_process = None
+            if process.poll() is None:
+                try:
+                    process.wait(timeout=0.05)
+                except subprocess.TimeoutExpired:
+                    pass
+        if _out_overflow(stdout):
+            raise XExtractionError("X_EXTRACTOR_FAILED", "X extractor output overflowed.")
+        return _BoundedCompleted(
+            stdout=stdout or b"",
+            stderr=stderr or b"",
+            returncode=process.returncode,
+            timed_out=timed_out,
+        )
+
+    def _reap_interrupted(self, process: subprocess.Popen[bytes]) -> None:
+        _terminate_process_group(
+            process,
+            remaining_seconds=_remaining_or_default(self._shutdown_deadline),
+            reap=False,
+        )
+        try:
+            process.communicate(
+                timeout=max(_remaining_or_default(self._shutdown_deadline), 0.05)
+            )
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.communicate()
 
 
 def _normalize_inspection(
@@ -412,51 +531,49 @@ class _BoundedCompleted:
         self.timed_out = timed_out
 
 
-def _run_bounded(
-    argv: list[str],
+def _remaining_or_default(deadline: ShutdownDeadline | None) -> float:
+    if deadline is None:
+        return TERMINATE_GRACE_SECONDS + KILL_GRACE_SECONDS
+    return deadline.remaining_seconds()
+
+
+def _out_overflow(stdout: bytes | None) -> bool:
+    return stdout is not None and len(stdout) > MAX_STDOUT_BYTES
+
+
+def _terminate_process_group(
+    process: subprocess.Popen[bytes],
     *,
-    timeout: float,
-    cwd: Path | None = None,
-) -> _BoundedCompleted:
+    remaining_seconds: float,
+    reap: bool,
+) -> None:
+    term_seconds, kill_seconds = split_termination_budget(remaining_seconds)
+    if remaining_seconds <= 0:
+        term_seconds, kill_seconds = 0.0, 0.0
     try:
-        process = subprocess.Popen(
-            argv,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            cwd=str(cwd) if cwd is not None else None,
-            env=_subprocess_environment(),
-            start_new_session=True,
-        )
-    except OSError as exc:
-        raise XExtractionError("X_EXTRACTOR_UNAVAILABLE", "X extractor is unavailable.") from exc
-    timed_out = False
-    try:
-        _out, _err = process.communicate(timeout=timeout)
-    except subprocess.TimeoutExpired:
-        timed_out = True
-        _terminate_process_group(process)
-        try:
-            _out, _err = process.communicate(timeout=TERMINATE_GRACE_SECONDS)
-        except subprocess.TimeoutExpired:
-            process.kill()
-            _out, _err = process.communicate()
-    if _out is not None and len(_out) > MAX_STDOUT_BYTES:
-        raise XExtractionError("X_EXTRACTOR_FAILED", "X extractor output overflowed.")
-    return _BoundedCompleted(
-        stdout=_out or b"",
-        stderr=_err or b"",
-        returncode=process.returncode,
-        timed_out=timed_out,
-    )
-
-
-def _terminate_process_group(process: subprocess.Popen) -> None:
-    try:
-        os.killpg(os.getpgid(process.pid), 15)
+        os.killpg(process.pid, signal.SIGTERM)
     except (ProcessLookupError, OSError):
         try:
             process.terminate()
         except OSError:
+            pass
+    if reap and term_seconds > 0:
+        try:
+            process.wait(timeout=term_seconds)
+            return
+        except subprocess.TimeoutExpired:
+            pass
+    try:
+        os.killpg(process.pid, signal.SIGKILL)
+    except (ProcessLookupError, OSError):
+        try:
+            process.kill()
+        except OSError:
+            pass
+    if reap:
+        try:
+            process.wait(timeout=max(kill_seconds, 0.05))
+        except subprocess.TimeoutExpired:
             pass
 
 

@@ -4,7 +4,11 @@ from __future__ import annotations
 
 import asyncio
 
-from framenest.application.media_analysis_coordinator import MediaAnalysisCoordinator
+from framenest.application.media_analysis_coordinator import (
+    InterruptAwareMediaAnalysisRunExecutor,
+    MediaAnalysisCoordinator,
+)
+from framenest.application.in_process_lifecycle import ShutdownDeadline
 from framenest.application.media_analysis_lifecycle import (
     CatalogedAnalysisTarget,
     ExecuteAutomaticMediaAnalysisRun,
@@ -20,6 +24,8 @@ from framenest.domain.media_analysis_runs import (
 )
 from dataclasses import replace
 import threading
+import time
+import types
 
 
 MEDIA_ID = MediaId.from_string("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
@@ -465,3 +471,51 @@ def test_crash_window_provider_success_without_persist_does_not_replay() -> None
     assert repository.run.state is MediaAnalysisRunState.FAILED
     assert repository.run.error_code == "ANALYSIS_OUTCOME_UNKNOWN"
     assert repository.run.result_json is None
+
+
+def test_expired_deadline_does_not_block_on_executor_wait() -> None:
+    repository = _FakeRepository()
+    scheduler = ScheduleAutomaticMediaAnalysis(repository, enabled=True, now_ms=lambda: 1)
+    executor = _Executor()
+    service = ExecuteAutomaticMediaAnalysisRun(repository, executor, now_ms=lambda: 2)
+    coordinator = MediaAnalysisCoordinator(repository, scheduler, service)
+
+    async def scenario() -> None:
+        await coordinator.start()
+        coordinator.notify_cataloged(MEDIA_ID, LOCATION_ID)
+        await asyncio.sleep(0.05)
+        began = time.monotonic()
+        await coordinator.shutdown(ShutdownDeadline(0.0))
+        elapsed = time.monotonic() - began
+        executor.block.set()
+        await asyncio.sleep(0.05)
+        assert elapsed < 0.3
+        assert coordinator.runner_done
+
+    asyncio.run(scenario())
+
+
+def test_interrupt_aware_executor_leaves_analyzing_for_restart_recovery() -> None:
+    repository = _FakeRepository()
+    pending = repository.create_pending(
+        media_id=MEDIA_ID,
+        media_location_id=LOCATION_ID,
+        analysis_definition=AUTOMATIC_POST_CATALOG_ANALYSIS_DEFINITION,
+        created_at_ms=1,
+    )
+    claimed = repository.claim_pending(
+        run_id=pending.id.to_string(),
+        expected_version=pending.version,
+        started_at_ms=2,
+        max_attempts=3,
+    )
+    service = InterruptAwareMediaAnalysisRunExecutor(
+        repository,
+        _Executor(),
+        process_runner=types.SimpleNamespace(interrupt_requested=True),
+    )
+    returned = service._persist_failure(claimed, RuntimeError("interrupted"))
+    assert returned.state is MediaAnalysisRunState.ANALYZING
+    assert repository.run is not None
+    assert repository.run.state is MediaAnalysisRunState.ANALYZING
+    assert repository.run.error_code is None

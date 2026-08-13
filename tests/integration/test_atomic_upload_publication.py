@@ -532,3 +532,44 @@ def test_full_application_lifecycle_automatically_publishes_valid_synthetic_gif(
     assert list(quarantine_root.iterdir()) == []
     assert logical_count == (1,)
     assert location_count == (1,)
+
+
+def test_cooperative_publication_interrupt_leaves_retryable_state_without_final_media(
+    tmp_path: Path,
+) -> None:
+    fixture = _fixture(tmp_path)
+    data = b"\x00\x00\x00\x18ftypmp42interrupt-publication"
+    upload = _pending_upload(data)
+    _stage(fixture, upload, data)
+    try:
+        fixture.publisher.request_stop()
+        with pytest.raises(UploadPublicationInfrastructureError):
+            fixture.publisher.publish_owned_blocking(upload.id)
+        candidate = fixture.publications.get_candidate(upload.id)
+        assert candidate is not None
+        assert candidate.upload.state is UploadSessionState.PUBLISH_PENDING
+        final_names = [
+            path.name
+            for path in fixture.published_root.iterdir()
+            if not path.name.endswith(".publish.tmp") and not path.name.startswith(".")
+        ]
+        assert final_names == []
+        fresh_storage = FilesystemPublishedMediaStorage(
+            DESTINATION_ID,
+            fixture.published_root,
+            forbidden_roots=(fixture.quarantine_root,),
+        )
+        retried = PublishPendingUpload(
+            fixture.publications,
+            fresh_storage,
+            fixture.quarantine,
+            now_ms=iter(range(200, 1000)).__next__,
+        )
+        result = retried.publish_owned_blocking(upload.id)
+        restored = fixture.publications.get_candidate(upload.id)
+        assert result.state == "published"
+        assert restored is not None
+        assert restored.upload.state is UploadSessionState.PUBLISHED
+        assert list(fixture.published_root.glob("*.mp4"))
+    finally:
+        dispose_engine(fixture.engine)
