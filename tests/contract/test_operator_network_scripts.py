@@ -636,6 +636,65 @@ def test_unreadable_tailscale_get_prefs_fall_back_to_status_json(tmp_path: Path)
     assert "{" not in result.stdout
 
 
+def test_readable_opaque_get_reconciles_selected_mullvad_from_status_json(
+    tmp_path: Path,
+) -> None:
+    opaque_pref = "fnOpaqueSelectedPref"
+    paths = _install_fakes(
+        tmp_path,
+        get_exit_node=opaque_pref,
+        get_lan="false",
+        status_json=_healthy_status_json(selected_mullvad=True),
+        mullvad_mode="disconnected",
+    )
+    result = _run_bash(paths, ["status"])
+    combined = _combined(result)
+    assert result.returncode == 0, result.stderr
+    assert "backend: Running" in result.stdout
+    assert "client-get: supported" in result.stdout
+    assert f"exit-node: mullvad:{MULLVAD_NODE}" in result.stdout
+    assert "exit-node: non-mullvad" not in result.stdout
+    assert "lan-access: false" in result.stdout
+    assert "mullvad-nodes: available" in result.stdout
+    assert "self-advertises-exit-node: no" in result.stdout
+    assert "standalone-mullvad-tunnel: disconnected" in result.stdout
+    assert opaque_pref not in combined
+    argv_text = paths["argv_log"].read_text(encoding="utf-8")
+    for line in argv_text.splitlines():
+        first = line.split()[0] if line.split() else ""
+        assert first not in {"set", "up", "down", "login", "logout"}
+    assert paths["set_log"].read_text(encoding="utf-8") == ""
+    _assert_no_secrets(combined)
+    assert "{" not in result.stdout
+
+
+def test_readable_opaque_get_keeps_selected_non_mullvad_from_status_json(
+    tmp_path: Path,
+) -> None:
+    opaque_pref = "fnOpaqueSelectedPref"
+    paths = _install_fakes(
+        tmp_path,
+        get_exit_node=opaque_pref,
+        get_lan="false",
+        status_json=_healthy_status_json(selected_other=True),
+        mullvad_mode="disconnected",
+    )
+    result = _run_bash(paths, ["status"])
+    combined = _combined(result)
+    assert result.returncode == 0, result.stderr
+    assert "client-get: supported" in result.stdout
+    assert "exit-node: non-mullvad" in result.stdout
+    assert "exit-node: mullvad:" not in result.stdout
+    assert opaque_pref not in combined
+    argv_text = paths["argv_log"].read_text(encoding="utf-8")
+    for line in argv_text.splitlines():
+        first = line.split()[0] if line.split() else ""
+        assert first not in {"set", "up", "down", "login", "logout"}
+    assert paths["set_log"].read_text(encoding="utf-8") == ""
+    _assert_no_secrets(combined)
+    assert "{" not in result.stdout
+
+
 def test_diagnostic_transport_failure_is_unknown_not_non_mullvad(tmp_path: Path) -> None:
     paths = _install_fakes(tmp_path, curl_mode="transport")
     result = _run_bash(paths, ["verify"])

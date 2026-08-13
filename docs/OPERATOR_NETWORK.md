@@ -57,12 +57,16 @@ Clients do not expose identical CLI surfaces. A newer client may provide
 `tailscale get`; an older client may not. Scripts treat that preference
 surface as usable only when a read-only `tailscale get` probe for the required
 preference actually exits zero. Command presence alone is not enough.
-Unavailable or unreadable preference access falls back to sanitized
-`tailscale status --json` for selected-exit-node classification. LAN-access is
-reported as unavailable without a usable `tailscale get`; it is not treated as
-proof that LAN-access state is `false`. Mutation still uses `tailscale set`,
-which both observed client generations support. Scripts never assume the two
-machines share one CLI.
+Readable `get` remains the preference and LAN-access surface. A non-DNS or
+opaque selected preference is not itself enough to classify provider type;
+sanitized `tailscale status --json` identifies the selected peer as Mullvad or
+non-Mullvad, and raw opaque preference values are not emitted. Unavailable or
+unreadable preference access falls back to that same sanitized JSON for
+selected-exit-node classification. LAN-access is reported as unavailable
+without a usable `tailscale get`; it is not treated as proof that LAN-access
+state is `false`. Mutation still uses `tailscale set`, which both observed
+client generations support. Scripts never assume the two machines share one
+CLI.
 
 ## Subcommands
 

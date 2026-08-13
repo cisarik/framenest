@@ -430,6 +430,8 @@ print_status() {
         selected="unsafe-non-explicit"
       elif [[ "${from_get}" == *"${MULLVAD_SUFFIX}" ]]; then
         selected="mullvad:${from_get}"
+      elif [[ "${SELECTED_KIND:-none}" == "mullvad" && -n "${SELECTED_MULLVAD_DNS}" ]]; then
+        selected="mullvad:${SELECTED_MULLVAD_DNS}"
       else
         selected="non-mullvad"
       fi
