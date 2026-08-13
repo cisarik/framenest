@@ -591,6 +591,8 @@ Current foundation files:
 - [`docs/adr/0033-catalog-backup-and-recovery-foundation.md`](docs/adr/0033-catalog-backup-and-recovery-foundation.md) records the accepted catalog backup and recovery foundation.
 - [`docs/adr/0056-off-device-catalog-backup-copy-and-restore-verification.md`](docs/adr/0056-off-device-catalog-backup-copy-and-restore-verification.md) records mounted-filesystem off-device catalog copy and restore verification.
 - [`docs/adr/0057-operator-workstation-pull-based-catalog-snapshot.md`](docs/adr/0057-operator-workstation-pull-based-catalog-snapshot.md) records operator-workstation pull-based catalog snapshot recovery.
+- [`docs/adr/0058-independent-mullvad-egress-and-operator-network-recovery.md`](docs/adr/0058-independent-mullvad-egress-and-operator-network-recovery.md) records independent Mullvad egress and operator network recovery.
+- [`docs/OPERATOR_NETWORK.md`](docs/OPERATOR_NETWORK.md) is the durable operator contract for Mullvad egress controls.
 - [`docs/adr/0050-durable-manual-cover-foundation.md`](docs/adr/0050-durable-manual-cover-foundation.md) records the accepted durable manual cover foundation.
 - [`docs/adr/0034-canonical-analytic-programming-integration.md`](docs/adr/0034-canonical-analytic-programming-integration.md) records the accepted pinned canonical AP submodule integration.
 - [`docs/adr/0035-authoritative-server-and-client-state-model.md`](docs/adr/0035-authoritative-server-and-client-state-model.md) records the accepted authoritative server/client state model.

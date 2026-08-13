@@ -14,6 +14,9 @@ Mounted off-device copy is
 [ADR-0056](../../docs/adr/0056-off-device-catalog-backup-copy-and-restore-verification.md).
 Operator-workstation pull is
 [ADR-0057](../../docs/adr/0057-operator-workstation-pull-based-catalog-snapshot.md).
+Independent Mullvad egress and operator network recovery are
+[docs/OPERATOR_NETWORK.md](../../docs/OPERATOR_NETWORK.md) and
+[ADR-0058](../../docs/adr/0058-independent-mullvad-egress-and-operator-network-recovery.md).
 
 Repository source for the later root-owned export launcher:
 

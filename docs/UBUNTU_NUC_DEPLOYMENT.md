@@ -23,7 +23,8 @@ Retention: remains while Ubuntu NUC deployment is the current server workflow.
 
 Inbound links: [ADR-0032](adr/0032-ubuntu-nuc-deployment-foundation.md),
 [NUC_HOST_BASELINE.md](NUC_HOST_BASELINE.md), [SERVER.md](../SERVER.md),
-[SECURITY.md](../SECURITY.md), and [ROADMAP.md](../ROADMAP.md).
+[SECURITY.md](../SECURITY.md), [ROADMAP.md](../ROADMAP.md), and
+[OPERATOR_NETWORK.md](OPERATOR_NETWORK.md).
 
 Cleanup/update owner: future explicitly authorized Worker under an Orchestrator
 task. Git history remains the archive.
@@ -814,6 +815,8 @@ Stop conditions:
 - Off-device copies, media-byte backup, and in-place production catalog overwrite.
 - Live production provider-secret deployment or provider testing.
 - Tailscale Funnel or any ingress beyond the authenticated tailnet.
+- Live Mullvad exit-node assignment; see [OPERATOR_NETWORK.md](OPERATOR_NETWORK.md)
+  and [ADR-0058](adr/0058-independent-mullvad-egress-and-operator-network-recovery.md).
 - Multi-user administration UI, invitations, or per-user personal metadata.
 - AppArmor profile.
 - UFW policy changes.

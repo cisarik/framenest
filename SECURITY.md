@@ -168,6 +168,7 @@ FrameNest security work should follow these principles:
 - Keep local backend services bound to localhost where applicable.
 - Use Tailscale as the remote network boundary for cross-device features.
 - Treat Tailscale networking as necessary but not sufficient; application-level authorization is still required.
+- Keep public-internet egress distinct from Tailscale Serve ingress; operator Mullvad controls are documented in [docs/OPERATOR_NETWORK.md](docs/OPERATOR_NETWORK.md) and [ADR-0058](docs/adr/0058-independent-mullvad-egress-and-operator-network-recovery.md) and must not create inbound exposure.
 - Require explicit confirmation for destructive actions.
 - Do not distribute provider secrets to ordinary client installations.
 

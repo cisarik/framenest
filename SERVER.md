@@ -244,6 +244,12 @@ root-owned Tailscale HTTPS Serve proxies to a permission-restricted Unix
 socket, and the application maps the exact verified Serve login to explicit
 roles and capabilities with durable privileged-action audit.
 
+Public-internet egress is a separate operator concern from Serve ingress.
+Independent Mullvad exit-node selection and recovery are recorded in
+[ADR-0058](docs/adr/0058-independent-mullvad-egress-and-operator-network-recovery.md)
+and [docs/OPERATOR_NETWORK.md](docs/OPERATOR_NETWORK.md). Those controls do
+not add a public listener and do not change Tailscale Serve.
+
 The historical Fedora service foundation is recorded in
 [ADR-0031](docs/adr/0031-fedora-systemd-service-foundation.md). It is
 superseded for the active deployment target by
