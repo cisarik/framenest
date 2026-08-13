@@ -16,10 +16,10 @@ from framenest.application.ports.quarantine_storage import (
 )
 from framenest.application.ports.upload_media_validation import (
     UploadMediaValidationInfrastructureError,
+    UploadMediaValidationInterruptedError,
     UploadMediaValidationRejectedError,
     UploadMediaValidator,
 )
-from framenest.infrastructure.media_analysis.process import ProcessInterruptedError
 from framenest.application.ports.upload_sessions import (
     FrameNestUploadSessionRepositoryError,
     IncompleteUploadSessionError,
@@ -227,7 +227,7 @@ class ValidateReceivedUpload:
             reader.seek_start()
             try:
                 evidence = self._validator.validate(reader)
-            except ProcessInterruptedError as exc:
+            except UploadMediaValidationInterruptedError as exc:
                 raise UploadValidationInterruptedError(
                     "upload validation interrupted"
                 ) from exc

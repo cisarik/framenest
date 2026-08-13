@@ -33,6 +33,13 @@ class UploadMediaValidationInfrastructureError(RuntimeError):
         self.failure_code = failure_code
 
 
+class UploadMediaValidationInterruptedError(RuntimeError):
+    """Raised when media validation is interrupted before a durable outcome."""
+
+    def __init__(self) -> None:
+        super().__init__("upload media validation interrupted")
+
+
 class UploadMediaValidator(Protocol):
     """Validate content from one stable quarantine object."""
 

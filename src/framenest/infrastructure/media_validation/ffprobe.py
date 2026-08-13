@@ -16,6 +16,7 @@ from framenest.application.ports.quarantine_storage import QuarantineReader
 from framenest.application.ports.upload_media_validation import (
     UploadMediaValidationEvidence,
     UploadMediaValidationInfrastructureError,
+    UploadMediaValidationInterruptedError,
     UploadMediaValidationRejectedError,
 )
 from framenest.application.upload_validation import (
@@ -163,8 +164,8 @@ class BoundedUploadMediaValidator:
                 stderr_max_bytes=UPLOAD_VALIDATION_PROBE_STDERR_MAX_BYTES,
                 pass_fds=(reader.file_descriptor,),
             )
-        except ProcessInterruptedError:
-            raise
+        except ProcessInterruptedError as exc:
+            raise UploadMediaValidationInterruptedError() from exc
         except ProcessExecutionError as exc:
             _raise_process_error(exc)
         if result.returncode != 0:
@@ -519,7 +520,7 @@ def _validate_duration(duration_ms: int | None) -> None:
 def _raise_process_error(exc: ProcessExecutionError) -> None:
     message = str(exc)
     if message == PROCESS_INTERRUPTED_MESSAGE:
-        raise ProcessInterruptedError(PROCESS_INTERRUPTED_MESSAGE) from None
+        raise UploadMediaValidationInterruptedError() from None
     if message in {EXECUTABLE_NOT_FOUND_MESSAGE, TOOL_NOT_AVAILABLE_MESSAGE}:
         raise UploadMediaValidationInfrastructureError(
             UPLOAD_VALIDATION_TOOL_UNAVAILABLE

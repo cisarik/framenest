@@ -11,6 +11,7 @@ import framenest.infrastructure.media_validation.ffprobe as ffprobe_module
 from framenest.application.ports.quarantine_storage import QuarantineStateInconsistentError
 from framenest.application.ports.upload_media_validation import (
     UploadMediaValidationInfrastructureError,
+    UploadMediaValidationInterruptedError,
     UploadMediaValidationRejectedError,
 )
 from framenest.application.upload_validation import (
@@ -507,5 +508,22 @@ def test_ffprobe_interruption_is_recoverable_and_not_a_content_failure() -> None
         _InterruptRunner(),
         ffprobe_executable="/usr/bin/ffprobe",
     )
-    with pytest.raises(ProcessInterruptedError):
+    with pytest.raises(UploadMediaValidationInterruptedError) as error:
         validator.validate(_Reader(_mp4_bytes()))
+
+    raised = error.value
+    assert type(raised) is UploadMediaValidationInterruptedError
+    assert not isinstance(raised, ProcessInterruptedError)
+    assert not isinstance(raised, UploadMediaValidationRejectedError)
+    assert not isinstance(raised, UploadMediaValidationInfrastructureError)
+    assert not hasattr(raised, "failure_code")
+    assert str(raised) == "upload media validation interrupted"
+    assert type(raised.__cause__) is ProcessInterruptedError
+    assert not issubclass(
+        UploadMediaValidationInterruptedError,
+        ProcessInterruptedError,
+    )
+    assert not issubclass(
+        ProcessInterruptedError,
+        UploadMediaValidationInterruptedError,
+    )
