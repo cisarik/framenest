@@ -496,7 +496,7 @@ FrameNest development follows Analytic Programming through the pinned `.ap/`
 Git submodule. The current AP gitlink is:
 
 ```text
-5c2f0e197d6aecdc6aca918b22e080bb58abc7a1
+041de310ea33ed1b47dd8f5fbfcc2829d1a32514
 ```
 
 Universal AP protocol files live under `.ap/`. FrameNest-specific operating
