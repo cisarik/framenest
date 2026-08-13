@@ -776,3 +776,9 @@ def test_documentation_contains_no_private_values() -> None:
     assert "auto:any" in adr
     assert "ahw" in adr
     assert "framenest-nuc" in adr
+
+
+def test_operator_network_doc_requires_ten_minute_nuc_rollback() -> None:
+    text = OPERATOR_DOC.read_text(encoding="utf-8")
+    rollback = text.split("## Transient NUC rollback design", 1)[1]
+    assert "10 minutes" in rollback

@@ -177,16 +177,20 @@ authorized host grant is required.
 
 ## Transient NUC rollback design
 
-The headless NUC requires an automatic transient rollback *before* exit-node
-mutation. Required properties:
+The headless NUC requires an automatic transient rollback *before* changing
+the NUC exit-node preference. The delay is exactly 10 minutes, and the
+rollback remains capable of firing if SSH disconnects or the Worker
+terminates. Required properties:
 
 - armed under a separately authorized host task, not by these scripts;
 - clears only the selected exit node;
 - is transient (not a persistent boot unit);
-- is cancelled after a successful `verify`;
+- is cancelled only after the required SSH, Mullvad-egress, FrameNest-health,
+  and Serve/Funnel verification gates pass;
 - does not change Serve, DNS, firewall, or routes.
 
-This repository slice does not install or start that timer.
+This repository slice does not install or start that timer. Repository
+presence alone grants no timer, sudo, host, Tailscale, or account authority.
 
 ## One-device-at-a-time reboot acceptance
 
