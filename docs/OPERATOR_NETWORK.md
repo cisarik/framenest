@@ -54,13 +54,15 @@ tailnet identity, account data, node keys, or raw `tailscale status --json`.
 ## Installed-command feature detection
 
 Clients do not expose identical CLI surfaces. A newer client may provide
-`tailscale get`; an older client may not. Scripts detect that feature and, for
-read-only exit-node inspection, use `tailscale status --json` parsed into
-sanitized labels. Absence of `tailscale get` is not treated as proof that
-LAN-access state is `false`; that preference is reported as unavailable
-without `tailscale get`. Mutation still uses `tailscale set`, which both
-observed client generations support. Scripts never assume the two machines
-share one CLI.
+`tailscale get`; an older client may not. Scripts treat that preference
+surface as usable only when a read-only `tailscale get` probe for the required
+preference actually exits zero. Command presence alone is not enough.
+Unavailable or unreadable preference access falls back to sanitized
+`tailscale status --json` for selected-exit-node classification. LAN-access is
+reported as unavailable without a usable `tailscale get`; it is not treated as
+proof that LAN-access state is `false`. Mutation still uses `tailscale set`,
+which both observed client generations support. Scripts never assume the two
+machines share one CLI.
 
 ## Subcommands
 

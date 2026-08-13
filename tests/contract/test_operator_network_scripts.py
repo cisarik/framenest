@@ -112,6 +112,7 @@ def _install_fakes(
     tmp_path: Path,
     *,
     get_supported: bool = True,
+    get_pref_readable: bool = True,
     get_exit_node: str = "",
     get_lan: str = "false",
     status_json: str | None = None,
@@ -155,6 +156,10 @@ fi
 if [[ "${{1:-}}" == get ]]; then
   if [[ {int(not get_supported)} -eq 1 ]]; then
     echo "unknown command: get" >&2
+    exit 1
+  fi
+  if [[ {int(not get_pref_readable)} -eq 1 ]]; then
+    echo "fn-unreadable-pref-token" >&2
     exit 1
   fi
   if [[ "${{2:-}}" == exit-node ]]; then
@@ -601,6 +606,34 @@ def test_absence_of_tailscale_get_uses_readonly_fallback(tmp_path: Path) -> None
     enable = _run_bash(paths, ["enable", "--node", MULLVAD_NODE])
     assert enable.returncode == 0, enable.stderr
     assert "--exit-node=" in paths["set_log"].read_text(encoding="utf-8")
+
+
+def test_unreadable_tailscale_get_prefs_fall_back_to_status_json(tmp_path: Path) -> None:
+    paths = _install_fakes(
+        tmp_path,
+        get_pref_readable=False,
+        status_json=_healthy_status_json(),
+        mullvad_mode="disconnected",
+    )
+    result = _run_bash(paths, ["status"])
+    combined = _combined(result)
+    assert result.returncode == 0, result.stderr
+    assert "backend: Running" in result.stdout
+    assert "client-get: unsupported" in result.stdout
+    assert "exit-node: none" in result.stdout
+    assert "lan-access: unavailable-without-tailscale-get" in result.stdout
+    assert "mullvad-nodes: available" in result.stdout
+    assert "self-advertises-exit-node: no" in result.stdout
+    assert "standalone-mullvad-tunnel: disconnected" in result.stdout
+    argv_text = paths["argv_log"].read_text(encoding="utf-8")
+    for line in argv_text.splitlines():
+        first = line.split()[0] if line.split() else ""
+        assert first not in {"set", "up", "down", "login", "logout"}
+    assert paths["set_log"].read_text(encoding="utf-8") == ""
+    assert "fn-unreadable-pref-token" not in combined
+    assert "tailscale get is present but could not read" not in combined
+    _assert_no_secrets(combined)
+    assert "{" not in result.stdout
 
 
 def test_diagnostic_transport_failure_is_unknown_not_non_mullvad(tmp_path: Path) -> None:

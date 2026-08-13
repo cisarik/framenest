@@ -220,15 +220,9 @@ detect_tailscale_get() {
   set -e
   if [[ "${rc}" -eq 0 ]]; then
     HAVE_TAILSCALE_GET="yes"
-    scrub_temp_dir "${tmpdir}"
-    return 0
-  fi
-  if PATH="${TRUSTED_PATH}" command grep -qiE 'unknown command|unrecognized|invalid command|help wanted' "${err}"; then
+  else
     HAVE_TAILSCALE_GET="no"
-    scrub_temp_dir "${tmpdir}"
-    return 0
   fi
-  HAVE_TAILSCALE_GET="yes"
   scrub_temp_dir "${tmpdir}"
   return 0
 }
