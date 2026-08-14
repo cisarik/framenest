@@ -27,6 +27,13 @@ Treat `.ap/` as read-only during ordinary project work. Protocol updates require
 a separate explicit AP update task.
 <!-- END MANAGED AP INTEGRATION -->
 
+## AP Upgrade Ledger
+
+AP upgrade ledger declaration:
+Upgrade ledger: upgrade https://github.com/cisarik/ap.git
+Ledger storage version: 1
+Ledger path: docs/AP_UPGRADE_OBSERVATIONS.md
+
 ## Project Truth
 
 Repository files, tests, Git history, public commits, ADRs, and current product
