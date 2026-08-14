@@ -48,7 +48,11 @@ or still-image source, with durable server-owned artifacts and regenerable cover
 thumbnails ([ADR-0050](docs/adr/0050-durable-manual-cover-foundation.md)). It
 does not provide arbitrary user-created collections, a general collection
 manager, persisted suggested filenames, complete Cover Studio,
-imported/AI/series covers, cover candidates, or AI Draft persistence.
+imported/AI/series covers, cover candidates, or AI Draft persistence. Selected
+catalog metadata can travel beside one chosen media copy through the portable
+sidecar v1 projection and `framenest-sidecar` operator commands; the artifact is
+deterministic and versioned, and it remains an explicit projection rather than
+bidirectional synchronization.
 
 Migration `0021` adds a separate durable content-publication relation. Existing
 logical media is backfilled as published; newly cataloged media remains outside
@@ -148,6 +152,7 @@ poetry run framenest-server
 poetry run framenest-db status
 poetry run framenest-db migrate
 poetry run framenest-catalog --help
+poetry run framenest-sidecar --help
 poetry run framenest-backup --help
 ./framenest ai status
 ./framenest ai configure
@@ -411,6 +416,41 @@ poetry run framenest-catalog library suggest-preview \
   --provider nvidia-nim \
   --model nvidia/nemotron-3-nano-omni-30b-a3b-reasoning \
   --confirm-cloud-upload
+```
+
+## Portable Media Sidecar CLI
+
+The `framenest-sidecar` command is a thin operator adapter over the accepted
+portable media sidecar v1 projection. During normal operation the SQLite
+catalog remains authoritative. A sidecar is an explicit, deterministic,
+versioned projection beside one chosen media copy; it is not live catalog write
+authority, not a second catalog, and not bidirectional synchronization.
+
+Export and compare require explicit `--media-id` and `--location-id` and a
+database at migration head. `FRAMENEST_DATABASE_PATH` follows the existing
+settings boundary. Validate requires only `--path` and does not load or require
+the catalog. There is no implicit location selection, multi-copy fan-out,
+sidecar-to-catalog import, rebuild, drift repair, or metadata Save coupling.
+Ordinary metadata Save does not write sidecars. Missing sidecars do not
+invalidate catalog state. This command is not a production deployment surface.
+
+The adjacent filename is `{media_filename}.framenest.json`, for example
+`clip.mp4.framenest.json` beside `clip.mp4`.
+
+Successful commands print exactly one JSON object plus a trailing newline to
+stdout and exit `0`. Compare `missing` is a completed observation, not an
+error. Failures print exactly one JSON object to stderr, leave stdout empty,
+and exit `1`. Output does not include absolute paths, catalog paths, library
+roots, or sidecar contents.
+
+```text
+poetry run framenest-sidecar export \
+  --media-id "<media-id>" \
+  --location-id "<location-id>"
+poetry run framenest-sidecar validate --path "movies/clip.mp4.framenest.json"
+poetry run framenest-sidecar compare \
+  --media-id "<media-id>" \
+  --location-id "<location-id>"
 ```
 
 ## Structured Logging

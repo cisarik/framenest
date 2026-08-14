@@ -212,6 +212,31 @@ adds identity-only authoring and delivery endpoints:
   the database, registered media roots, Gallery preview cache, upload
   quarantine, and YouTube acquisition storage.
 
+## Portable Media Sidecar
+
+The portable media sidecar v1 projection ([ADR-0059](docs/adr/0059-portable-media-sidecar-roundtrip-foundation.md))
+is a closed JSON document beside one explicit media copy:
+
+- The schema is closed. Unknown fields are rejected. Secrets, absolute library
+  roots, host paths, device identities, requester-private acquisition state,
+  credentials, tokens, cookies, and catalog/database paths are not projected.
+- Reads are bounded to 256 KiB before parse.
+- Sidecar targets are classified before open. Symlinks and other non-regular
+  files are refused without following or replacing them. Source-media symlinks
+  and symlink parents are refused. The store does not reuse content-reader
+  behavior that permits an in-root media symlink.
+- Create and replace use a same-directory uniquely owned temp, fsync, codec
+  validation, installed mode `0644`, `os.replace`, and directory fsync. Exact
+  intended bytes are a no-op. Foreign `media_id` or `location_id` is refused.
+  Malformed and unsupported documents are refused. The previous valid target is
+  preserved when temp creation, write, validation, or replacement preparation
+  fails. The catalog is not mutated.
+- Known Windows `os.replace` and case-folding evidence remains incomplete;
+  non-native library roots are rejected on the current host.
+- The `framenest-sidecar` command emits sanitized JSON only. It does not print
+  sidecar contents, absolute paths, or tracebacks. Validate does not require
+  the catalog. Export and compare do not write catalog rows.
+
 ## Dependencies and Updates
 
 Dependencies, update mechanisms, packaging flows, and production deployment procedures must be pinned where appropriate, reviewed, tested, and documented before production use.

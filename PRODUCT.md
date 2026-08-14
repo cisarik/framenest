@@ -36,7 +36,9 @@ normal Save now exist.
 Durable content-publication truth, a responsive capability-gated administrator
 workflow with bounded batch actions, safe administrator catalog removal, a
 durable manual cover foundation, and automated catalog
-backup/retention/restore-verification foundations also exist. Existing catalog
+backup/retention/restore-verification foundations also exist. Selected catalog
+metadata can travel beside one chosen media copy as a deterministic versioned
+portable sidecar projection; it is not bidirectional synchronization. Existing catalog
 rows are backfilled as published; newly cataloged media remains outside the
 ordinary Gallery until persisted title, description, and canonical-tag metadata
 is ready and an authorized administrator publishes.
@@ -189,7 +191,9 @@ a local FrameNest server process rather than a remote NUC.
 
 Local clients must not become unusable public-cloud thin clients.
 
-Durable metadata should remain portable where feasible.
+Durable metadata should remain portable where feasible. The v1 sidecar
+projection now lets selected catalog metadata travel beside one explicit media
+location; the catalog remains authoritative in normal operation.
 
 The normal desktop experience must not require Chrome, Brave, Firefox, Safari, or another external browser.
 

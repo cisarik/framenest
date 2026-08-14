@@ -111,7 +111,7 @@ Accepted so far:
 
 The initial scaffold decision gate is complete. A Poetry package scaffold, centralized configuration boundary, FastAPI application factory, typed health endpoint, contract tests, Uvicorn runtime dependency, startup wiring, and a runnable loopback-only server command now exist.
 
-Broader architecture decisions still open include sidecar manifest format and versioning, category and language metadata schema, metadata/tag/search schema, cover and thumbnail cache implementation details, desktop sidecar IPC, initial authentication boundary, offline client cache semantics, multiprocess publication or catalog leases or fencing, media-tool distribution strategy, and Ubuntu NUC host-acceptance details beyond the initial systemd service foundation.
+Broader architecture decisions still open include category and language metadata schema, metadata/tag/search schema, cover and thumbnail cache implementation details, desktop sidecar IPC, initial authentication boundary, offline client cache semantics, multiprocess publication or catalog leases or fencing, media-tool distribution strategy, and Ubuntu NUC host-acceptance details beyond the initial systemd service foundation. Portable media sidecar v1 format, projection, validation, and compare exist through [ADR-0059](docs/adr/0059-portable-media-sidecar-roundtrip-foundation.md); import, rebuild, and synchronization remain open.
 
 Persistence strategy is accepted through [ADR-0010](docs/adr/0010-initial-persistence-foundation.md). The minimal SQLAlchemy/Alembic migration foundation is implemented. The current schema head is revision `0028`: catalog tables and the automatic built-in `Processed` collection are established through `0007`; `0008` through `0018` add durable upload, validation, byte identity, duplicate disposition, storage publication, catalog, automatic-analysis, still-image, classification, movie-identification, and analysis-history foundations; `0019` adds durable YouTube manual-acquisition provenance; `0020` adds durable security audit events; `0021` adds durable content publication with legacy backfill; `0022` adds the durable manual cover foundation per [ADR-0050](docs/adr/0050-durable-manual-cover-foundation.md); `0023` extends the accepted cover source contract to timeless still-image (JPEG/PNG) sources; `0024` adds catalog-removal receipts; `0025` adds upload-session ownership and duplicate mode for ordinary-user submission; `0026` adds YouTube requester ownership; `0027` adds YouTube creator taxonomy fields; and `0028` adds requester-private X acquisition.
 
@@ -231,7 +231,9 @@ Still unimplemented within this phase:
 - availability tracking;
 - storage capacity reporting;
 - rebuildable local index persistence;
-- sidecars and rebuild behavior.
+- sidecar-to-catalog import and rebuild behavior.
+
+The portable sidecar v1 contract, one-location projection, adjacent filesystem store, and `framenest-sidecar` export/validate/compare commands exist through [ADR-0059](docs/adr/0059-portable-media-sidecar-roundtrip-foundation.md).
 
 Key deliverables: library registration, safe scanning, persistent metadata collection, logical media and physical locations, canonical tags, title/tag search, availability tracking, storage capacity reporting, rebuildable local index, and tests.
 
@@ -246,6 +248,13 @@ Boundaries: no destructive organization by default; no file mutation is required
 Status: partially implemented.
 
 Goal: implement canonical organization rules and durable metadata.
+
+The bounded portable sidecar v1 contract and one-location projection foundation
+is implemented: closed schema and codec, catalog projection, secure adjacent
+filesystem store, and operator export/validate/compare. Later work in this
+phase remains unimplemented: sidecar-to-catalog import/rebuild, drift repair,
+automatic Save projection, multi-location fan-out, directory naming, native OS
+tags, dry-run organization, and cross-device synchronization.
 
 Key deliverables: canonical tags, directory naming, sidecars, native tag adapters, dry runs, migrations, drift detection, and repair workflows.
 
