@@ -35,9 +35,9 @@ records are not yet projectable into a closed, deterministic near-file
 document. Without that contract, later filesystem export, validation, compare,
 and rebuild slices would invent incompatible encodings.
 
-This decision records the durable v1 sidecar schema and codec. It does not
-implement filesystem I/O, application projection, CLI operations, catalog
-import, or synchronization.
+This decision records the durable v1 sidecar schema and codec. The original
+acceptance did not itself ship filesystem I/O, application projection, or CLI
+operations. Catalog import and synchronization remain excluded.
 
 ## Decision
 
@@ -163,14 +163,13 @@ The domain API is `SIDECAR_FORMAT`, `SIDECAR_SCHEMA_VERSION`,
 `encode_media_sidecar`, and `decode_media_sidecar`. No new dependency and no
 Alembic revision are introduced.
 
-### Future operator contract, not this slice
+### Operator filename and outcomes
 
 The intended sidecar filename is `{media_filename}.framenest.json` beside the
 selected media file. A logical medium may have multiple locations; export
 selects exactly one explicit location.
 
-Later slices of this still-open logical whole may add operator operations
-`export`, `validate`, and `compare`.
+Accepted operator operations are `export`, `validate`, and `compare`.
 
 Export outcomes:
 
@@ -186,17 +185,23 @@ Compare results are completed observations with exit zero:
 - `missing`
 
 Malformed, unsupported, unsafe, or foreign-identity targets are errors, not
-compare results. Future same-directory writes use validated atomic replacement.
+compare results. Same-directory writes use validated atomic replacement.
 Byte-equal output is a no-op (`unchanged`). Malformed, unsupported,
 special-file, symlink, and foreign-identity targets are never destroyed.
 
-Filesystem store, application projection, CLI, round-trip integration, and
-compare/export execution remain later slices. Catalog import/rebuild, metadata
-Save coupling, multi-copy fan-out, synchronization, conflict resolution, UI,
-HTTP, migration, deployment, and production behavior are excluded here.
+### Current implementation status
 
-The current implementation boundary is only this ADR, the domain codec, and
-unit tests.
+The current candidate stack includes this ADR, the deterministic domain codec,
+application catalog projection and compare orchestration, an
+infrastructure-independent storage port, a secure local filesystem store, a
+thin `framenest-sidecar` CLI, and focused domain, application, filesystem,
+contract, and integration tests.
+
+Sidecar-to-catalog import, catalog rebuild, metadata Save coupling, automatic
+drift repair, multi-location fan-out, cross-device synchronization, HTTP or
+browser surface, deployment, and complete Windows replace/case-folding evidence
+remain excluded and unimplemented. Conflict resolution, UI, migration, and
+production behavior stay outside this decision.
 
 ## Rationale
 
@@ -218,13 +223,13 @@ one logical medium has several physical locations.
 
 - Sidecar v1 can be encoded and decoded without filesystem or application
   services.
-- Later filesystem and CLI slices must use this codec rather than inventing a
+- Filesystem and CLI slices must use this codec rather than inventing a
   parallel schema.
 - Rebuild, import, Save hooks, and multi-device synchronization remain
   separately authorized.
-- Known Windows replace and case-folding evidence remains incomplete; later
-  filesystem slices must not assume POSIX `os.replace` semantics on Windows
-  without new evidence.
+- Known Windows replace and case-folding evidence remains incomplete; filesystem
+  slices must not assume POSIX `os.replace` semantics on Windows without new
+  evidence.
 
 ## Related
 

@@ -321,7 +321,7 @@ first durable tag save and cleared when all tags are removed, and browser
 editing of the current title, description, and tag metadata. There is still no
 arbitrary user-created collection schema, general collection manager,
 suggested filenames, complete Cover Studio, imported/AI/series covers, cover
-candidates, premium gallery data, sidecar, user, or authentication schema. A
+candidates, premium gallery data, user, or authentication schema. A
 durable manual cover foundation (migration `0022`) is implemented for one
 accepted cover per logical medium
 ([ADR-0050](docs/adr/0050-durable-manual-cover-foundation.md)).
