@@ -375,23 +375,20 @@ def cmd_remote_extract(archive_path: str, destination: str, engine_path: str) ->
     )
 
 
-def cmd_remote_write_markers(
-    release_path: str, manifest_json: str, release_sha: str
-) -> str:
+def cmd_remote_cat_stdin(path: str) -> str:
+    """Write runner stdin to ``path``; payload bytes must not enter the command string."""
+    return f"sudo -n sh -c 'umask 077; cat > {shlex.quote(path)}'"
+
+
+def cmd_remote_write_markers(release_path: str) -> tuple[str, str]:
     return (
-        "set -e\n"
-        f"sudo -n sh -c 'printf %s {shlex.quote(manifest_json)} | "
-        f"cat > {shlex.quote(release_path)}/.framenest-release-manifest.json'\n"
-        f"sudo -n sh -c 'printf %s {shlex.quote(release_sha + chr(10))} | "
-        f"cat > {shlex.quote(release_path)}/.framenest-release-sha'"
+        cmd_remote_cat_stdin(f"{release_path}/.framenest-release-manifest.json"),
+        cmd_remote_cat_stdin(f"{release_path}/.framenest-release-sha"),
     )
 
 
 def cmd_remote_write_poetry_toml(release_path: str) -> str:
-    return (
-        f"sudo -n sh -c 'printf %s {shlex.quote(POETRY_TOML)} | "
-        f"cat > {shlex.quote(release_path)}/poetry.toml'"
-    )
+    return cmd_remote_cat_stdin(f"{release_path}/poetry.toml")
 
 
 def cmd_remote_poetry_check_lock(release_path: str) -> str:
@@ -880,6 +877,7 @@ def _cmd_deploy(args: argparse.Namespace, runner: Runner) -> int:
             runner,
             **transport,
             remote_command=cmd_remote_write_poetry_toml(staging),
+            input_bytes=POETRY_TOML.encode("utf-8"),
         )
 
         # Poetry preparation against the committed lock; never update the lock.
@@ -913,10 +911,18 @@ def _cmd_deploy(args: argparse.Namespace, runner: Runner) -> int:
             sort_keys=True,
             separators=(",", ":"),
         )
+        manifest_cmd, sha_cmd = cmd_remote_write_markers(staging)
         ssh(
             runner,
             **transport,
-            remote_command=cmd_remote_write_markers(staging, manifest_json, release_sha),
+            remote_command=manifest_cmd,
+            input_bytes=manifest_json.encode("utf-8"),
+        )
+        ssh(
+            runner,
+            **transport,
+            remote_command=sha_cmd,
+            input_bytes=(release_sha + "\n").encode("utf-8"),
         )
         ssh(
             runner,

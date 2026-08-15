@@ -12,6 +12,7 @@ import io
 import json
 from pathlib import Path
 import shlex
+import subprocess
 import sys
 import tarfile
 
@@ -121,6 +122,16 @@ class FakeRunner:
             return ""
         if "cat > /opt/framenest/releases/" in combined and "poetry.toml" in combined:
             return ""
+        if (
+            "cat > /opt/framenest/releases/" in combined
+            and ".framenest-release-manifest.json" in combined
+        ):
+            return ""
+        if (
+            "cat > /opt/framenest/releases/" in combined
+            and ".framenest-release-sha" in combined
+        ):
+            return ""
         if "sha256sum /opt/framenest/releases/" in combined and "poetry.lock" in combined:
             return "deadbeef  /opt/framenest/releases/placeholder/poetry.lock"
         if "check --lock" in combined:
@@ -140,8 +151,6 @@ class FakeRunner:
                 release_sha=RELEASE, ap_pin=AP_PIN,
                 superproject_sha256="e" * 64, ap_archive_sha256="f" * 64,
             ))
-        if "printf" in combined and ".framenest-release-manifest.json" in combined:
-            return ""
         if "mv /opt/framenest/releases/" in combined and ".staging" in combined:
             return ""
         if "framenest-db status" in combined:
@@ -293,6 +302,59 @@ def test_cmd_remote_extract_emits_nested_private_argv_and_extracts(
             ["_remote-extract", "--archive", str(archive), "--destination", str(destination)]
         )
     assert exc.value.code == 2
+
+
+def _sudo_sh_c_script(command: str) -> str:
+    parts = shlex.split(command)
+    assert parts[:4] == ["sudo", "-n", "sh", "-c"], command
+    assert len(parts) == 5, command
+    return parts[4]
+
+
+def test_cmd_remote_write_poetry_toml_uses_stdin_not_nested_quotes(
+    tmp_path: Path,
+) -> None:
+    """Payload must travel as stdin; nested shlex quotes made in-project a command."""
+    command = engine.cmd_remote_write_poetry_toml(str(tmp_path))
+    assert "in-project" not in command
+    assert engine.POETRY_TOML not in command
+    script = _sudo_sh_c_script(command)
+    dest = tmp_path / "poetry.toml"
+    assert script == f"umask 077; cat > {shlex.quote(str(dest))}"
+    subprocess.run(["sh", "-c", script], input=engine.POETRY_TOML.encode("utf-8"), check=True)
+    assert dest.read_bytes() == engine.POETRY_TOML.encode("utf-8")
+
+
+def test_cmd_remote_write_markers_uses_stdin_not_nested_quotes(tmp_path: Path) -> None:
+    """Manifest JSON and SHA must not be nested inside single-quoted sh -c strings."""
+    manifest_json = json.dumps(
+        engine.make_manifest(
+            release_sha=RELEASE,
+            ap_pin=AP_PIN,
+            superproject_sha256="e" * 64,
+            ap_archive_sha256="f" * 64,
+        ),
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    sha_payload = RELEASE + "\n"
+    manifest_cmd, sha_cmd = engine.cmd_remote_write_markers(str(tmp_path))
+    for command in (manifest_cmd, sha_cmd):
+        assert manifest_json not in command
+        assert RELEASE not in command
+        assert "printf %s" not in command
+    manifest_script = _sudo_sh_c_script(manifest_cmd)
+    sha_script = _sudo_sh_c_script(sha_cmd)
+    manifest_dest = tmp_path / ".framenest-release-manifest.json"
+    sha_dest = tmp_path / ".framenest-release-sha"
+    assert manifest_script == f"umask 077; cat > {shlex.quote(str(manifest_dest))}"
+    assert sha_script == f"umask 077; cat > {shlex.quote(str(sha_dest))}"
+    subprocess.run(
+        ["sh", "-c", manifest_script], input=manifest_json.encode("utf-8"), check=True
+    )
+    subprocess.run(["sh", "-c", sha_script], input=sha_payload.encode("utf-8"), check=True)
+    assert manifest_dest.read_bytes() == manifest_json.encode("utf-8")
+    assert sha_dest.read_bytes() == sha_payload.encode("utf-8")
 
 
 # --- status flow ---
@@ -467,8 +529,20 @@ def test_deploy_transfers_engine_and_both_archives_as_stdin() -> None:
     assert any("framenest_release.py" in c for c in transferred)
     assert any("superproject.tar" in c for c in transferred)
     assert any("ap.tar" in c for c in transferred)
-    # Exactly three stdin payloads: engine, superproject archive, AP archive.
-    assert len(payloads) == 3
+    poetry = next(data for argv, data in payloads if any("poetry.toml" in part for part in argv))
+    manifest = next(
+        data
+        for argv, data in payloads
+        if any(".framenest-release-manifest.json" in part for part in argv)
+    )
+    sha = next(
+        data for argv, data in payloads if any(".framenest-release-sha" in part for part in argv)
+    )
+    assert poetry == engine.POETRY_TOML.encode("utf-8")
+    assert json.loads(manifest.decode("utf-8"))["framenest_release_sha"] == RELEASE
+    assert sha == (RELEASE + "\n").encode("utf-8")
+    # Engine, two archives, poetry.toml, manifest JSON, and SHA marker.
+    assert len(payloads) == 6
 
 
 def test_deploy_verifies_archive_hashes_remotely() -> None:
