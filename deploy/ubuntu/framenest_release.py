@@ -353,7 +353,7 @@ def cmd_remote_prepare_dir(release_path: str) -> str:
 
 def cmd_remote_extract(archive_path: str, destination: str, engine_path: str) -> str:
     return (
-        f"sudo -n python3 {shlex.quote(engine_path)} _remote-extract "
+        f"sudo -n python3 {shlex.quote(engine_path)} _remote _remote-extract "
         f"--archive {shlex.quote(archive_path)} "
         f"--destination {shlex.quote(destination)}"
     )

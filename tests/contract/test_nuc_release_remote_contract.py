@@ -11,6 +11,7 @@ import importlib.util
 import io
 import json
 from pathlib import Path
+import shlex
 import sys
 import tarfile
 
@@ -248,6 +249,44 @@ def test_service_account_commands_establish_release_cwd_and_env() -> None:
         assert f"--chdir={TARGET}" in command
         assert f"env FRAMENEST_ENV_FILE={engine.ENV_FILE}" in command
         assert "-u framenest" in command
+
+
+def test_cmd_remote_extract_emits_nested_private_argv_and_extracts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Transferred-engine extract must be nested ``_remote _remote-extract``.
+
+    Top-level ``_remote-extract`` is invalid parser input and must stay so.
+    """
+    monkeypatch.setattr(engine, "REMOTE_DEPLOY_DIR", str(tmp_path))
+    monkeypatch.setattr(engine, "RELEASE_ROOT", str(tmp_path))
+    archive = tmp_path / "safe.tar"
+    destination = tmp_path / "out"
+    destination.mkdir()
+    _write_tar(str(archive))
+    remote_engine = str(tmp_path / "framenest_release.py")
+
+    command = engine.cmd_remote_extract(str(archive), str(destination), remote_engine)
+    argv = shlex.split(command)
+    assert argv[:3] == ["sudo", "-n", "python3"]
+    remaining = argv[4:]
+
+    parsed = engine._build_parser().parse_args(remaining)
+    assert parsed.command == "_remote"
+    assert parsed.remote_command == "_remote-extract"
+    assert parsed.archive == str(archive)
+    assert parsed.destination == str(destination)
+
+    result = engine.main(remaining)
+    assert result == engine.EXIT_OK
+    assert (destination / "pyproject.toml").read_bytes() == b"[tool.poetry]\n"
+    assert (destination / "poetry.lock").read_bytes() == b"lock"
+
+    with pytest.raises(SystemExit) as exc:
+        engine._build_parser().parse_args(
+            ["_remote-extract", "--archive", str(archive), "--destination", str(destination)]
+        )
+    assert exc.value.code == 2
 
 
 # --- status flow ---
