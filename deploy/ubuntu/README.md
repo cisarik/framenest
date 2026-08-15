@@ -1,7 +1,9 @@
 # FrameNest Ubuntu Deployment Support
 
-This directory makes the Ubuntu deployment workflow discoverable without adding
-untested host-mutating automation.
+This directory holds the discoverable, tested, repository-native Ubuntu
+deployment support, including the routine immutable release-update contract
+(`framenest-release` / `framenest_release.py`). Nothing here grants host
+mutation authority; real deployment requires a separately authorized task.
 
 The current authoritative runbook is
 [docs/UBUNTU_NUC_DEPLOYMENT.md](../../docs/UBUNTU_NUC_DEPLOYMENT.md). The
@@ -14,6 +16,8 @@ Mounted off-device copy is
 [ADR-0056](../../docs/adr/0056-off-device-catalog-backup-copy-and-restore-verification.md).
 Operator-workstation pull is
 [ADR-0057](../../docs/adr/0057-operator-workstation-pull-based-catalog-snapshot.md).
+Routine immutable release updates are
+[ADR-0060](../../docs/adr/0060-repeatable-immutable-nuc-release-update-contract.md).
 Independent Mullvad egress and operator network recovery are
 [docs/OPERATOR_NETWORK.md](../../docs/OPERATOR_NETWORK.md) and
 [ADR-0058](../../docs/adr/0058-independent-mullvad-egress-and-operator-network-recovery.md).
@@ -27,6 +31,25 @@ deploy/ubuntu/framenest-catalog-export-v1
 That launcher is source material only until a later bounded host-provisioning
 task installs it under `/usr/local/libexec/` with root ownership and activates
 the exact no-argument sudoers rule documented in the backup runbook.
+
+## Routine Immutable Release Update
+
+```text
+deploy/ubuntu/framenest-release status
+deploy/ubuntu/framenest-release check --release <40-hex-SHA>
+deploy/ubuntu/framenest-release deploy --release <40-hex-SHA> --yes
+deploy/ubuntu/framenest-release rollback --release <40-hex-SHA> --yes
+```
+
+`framenest-release` is the single Fish-compatible operator entry point; it
+resolves the repository root and runs `deploy/ubuntu/framenest_release.py`
+through the repository `.venv/bin/python`. The engine is standard-library only
+and remains Ubuntu system Python 3.12 compatible for its private transferred
+remote mode. It never invokes `uv`, never runs migrations, and never accepts a
+user-supplied remote command. Full operating rules and the same-schema,
+checkpoint, cutover, rollback, and privilege-release boundaries are documented
+in [docs/UBUNTU_NUC_DEPLOYMENT.md](../../docs/UBUNTU_NUC_DEPLOYMENT.md) and
+[ADR-0060](../../docs/adr/0060-repeatable-immutable-nuc-release-update-contract.md).
 
 ## Phase Map
 

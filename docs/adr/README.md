@@ -84,3 +84,4 @@ An accepted ADR may only be changed by a later ADR that supersedes it. Editing a
 | 0057 | Operator-Workstation Pull-Based Catalog Snapshot and Recovery | Accepted | 2026-08-08 | [0057-operator-workstation-pull-based-catalog-snapshot.md](0057-operator-workstation-pull-based-catalog-snapshot.md) |
 | 0058 | Independent Mullvad Egress and Operator Network Recovery | Accepted | 2026-08-13 | [0058-independent-mullvad-egress-and-operator-network-recovery.md](0058-independent-mullvad-egress-and-operator-network-recovery.md) |
 | 0059 | Portable Media Sidecar Round-Trip Foundation | Accepted | 2026-08-14 | [0059-portable-media-sidecar-roundtrip-foundation.md](0059-portable-media-sidecar-roundtrip-foundation.md) |
+| 0060 | Repeatable Immutable NUC Release-Update Contract | Accepted | 2026-08-15 | [0060-repeatable-immutable-nuc-release-update-contract.md](0060-repeatable-immutable-nuc-release-update-contract.md) |

@@ -250,7 +250,9 @@ testing.
 
 Future NUC work should remain incremental and evidence-driven:
 
-- exact-release deployment workflow;
+- exact-release deployment workflow; the routine immutable release-update
+  contract is now [ADR-0060](adr/0060-repeatable-immutable-nuc-release-update-contract.md)
+  and [deploy/ubuntu/framenest-release](../../deploy/ubuntu/framenest-release);
 - secure isolated CPython 3.13 provisioning;
 - service user and release directory preparation;
 - explicit migration and readiness;

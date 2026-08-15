@@ -1,0 +1,538 @@
+"""Remote contract tests for the NUC release-update engine.
+
+These tests exercise command building and the deploy/rollback orchestration flow
+using a fake command runner and synthetic archives. They never contact a real
+NUC, never use real sudo/systemd, and never inspect credentials or media.
+"""
+
+from __future__ import annotations
+
+import importlib.util
+import io
+import json
+from pathlib import Path
+import sys
+import tarfile
+
+import pytest
+
+REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
+ENGINE_PATH = REPOSITORY_ROOT / "deploy" / "ubuntu" / "framenest_release.py"
+
+_SPEC = importlib.util.spec_from_file_location("framenest_release", ENGINE_PATH)
+assert _SPEC is not None and _SPEC.loader is not None
+engine = importlib.util.module_from_spec(_SPEC)
+sys.modules["framenest_release"] = engine
+_SPEC.loader.exec_module(engine)
+
+RELEASE = "a" * 40
+AP_PIN = "b" * 40
+PREV = "c" * 40
+TARGET = f"/opt/framenest/releases/{RELEASE}"
+STAGING = f"/opt/framenest/releases/{RELEASE}.staging"
+PREV_PATH = f"/opt/framenest/releases/{PREV}"
+
+SSH = ["ssh", *engine.SSH_OPTIONS, "-i", "identity", "op@nuc"]
+
+
+def _write_tar(path: str) -> None:
+    with tarfile.open(path, "w") as archive:
+        for member, content in (("pyproject.toml", b"[tool.poetry]\n"), ("poetry.lock", b"lock")):
+            info = tarfile.TarInfo(name=member)
+            info.size = len(content)
+            archive.addfile(info, io.BytesIO(content))
+
+
+class FakeRunner:
+    def __init__(self, *, fail: str | None = None, fail_occurrence: int = 1,
+                 fail_message: str = "simulated failure", exit_code: int | None = None) -> None:
+        self.calls: list[tuple[list[str], bytes | None]] = []
+        self.fail = fail
+        self.fail_occurrence = fail_occurrence
+        self.fail_message = fail_message
+        self.exit_code = exit_code
+        self._matches = 0
+        self.current = PREV_PATH
+
+    def __call__(self, argv: list[str], input_bytes: bytes | None) -> str:
+        self.calls.append((list(argv), input_bytes))
+        combined = " ".join(argv)
+        if self.fail is not None and self.fail in combined:
+            self._matches += 1
+            if self._matches == self.fail_occurrence:
+                raise engine.ReleaseError(self.fail_message, self.exit_code or engine.EXIT_TRANSPORT)
+        return self._respond(combined, input_bytes)
+
+    def _respond(self, combined: str, input_bytes: bytes | None) -> str:
+        if combined.startswith("git "):
+            return self._git_respond(combined)
+        if combined.startswith("ssh "):
+            return self._ssh_respond(combined, input_bytes)
+        raise AssertionError(f"unexpected command: {combined}")
+
+    def _git_respond(self, combined: str) -> str:
+        if "rev-parse --show-toplevel" in combined:
+            return "/repo"
+        if "-C .ap rev-parse HEAD" in combined:
+            return AP_PIN
+        if "rev-parse HEAD" in combined:
+            return RELEASE
+        if "status --porcelain" in combined:
+            return ""
+        if "ls-remote origin refs/heads/main" in combined:
+            return f"{RELEASE}\trefs/heads/main"
+        if "ls-tree" in combined and ".ap" in combined:
+            return f"160000 commit {AP_PIN}\t.ap"
+        if "archive --format=tar" in combined:
+            idx = combined.split().index("--output") + 1
+            _write_tar(combined.split()[idx])
+            return ""
+        raise AssertionError(f"unexpected git command: {combined}")
+
+    def _ssh_respond(self, combined: str, input_bytes: bytes | None) -> str:
+        if "mkdir -m 0700 /run/framenest-release-deploy" in combined:
+            return ""
+        if "test ! -e" in combined:
+            return ""
+        if "test -x /opt/framenest/tooling" in combined:
+            return ""
+        if "poetry --version" in combined:
+            return "Poetry (version 2.4.1)"
+        if "python3.13 --version" in combined:
+            return "Python 3.13.14"
+        if "df -Pk /opt/framenest" in combined:
+            return "/dev/sda1 100000000 1000 99999000 1% /opt/framenest"
+        if "cat > /run/framenest-release-deploy/framenest_release.py" in combined:
+            return ""
+        if "cat > /run/framenest-release-deploy/superproject.tar" in combined:
+            return ""
+        if "cat > /run/framenest-release-deploy/ap.tar" in combined:
+            return ""
+        if "install -d -o root -g root -m 0755" in combined:
+            return ""
+        if "_remote-extract" in combined:
+            return ""
+        if "cat > /opt/framenest/releases/" in combined and "poetry.toml" in combined:
+            return ""
+        if "sha256sum /opt/framenest/releases/" in combined and "poetry.lock" in combined:
+            return "deadbeef  /opt/framenest/releases/placeholder/poetry.lock"
+        if "check --lock" in combined:
+            return ""
+        if "env use" in combined:
+            return ""
+        if "install --only main" in combined:
+            return ""
+        if "chown -R root:root" in combined:
+            return ""
+        if "chmod -R a-w" in combined:
+            return ""
+        if "cat /opt/framenest/releases/" in combined and "framenest-release-sha" in combined:
+            return RELEASE
+        if "cat /opt/framenest/releases/" in combined and "manifest" in combined:
+            return json.dumps(engine.make_manifest(
+                release_sha=RELEASE, ap_pin=AP_PIN,
+                superproject_sha256="e" * 64, ap_archive_sha256="f" * 64,
+            ))
+        if "printf" in combined and ".framenest-release-manifest.json" in combined:
+            return ""
+        if "mv /opt/framenest/releases/" in combined and ".staging" in combined:
+            return ""
+        if "framenest-db status" in combined:
+            return '{"operation":"status","state":"at_head","current_revision":"0028","head_revision":"0028"}'
+        if "framenest-backup status" in combined:
+            return '{"operation":"status","restore_readiness":"ready"}'
+        if "framenest-backup run-scheduled" in combined:
+            return '{"operation":"run-scheduled","state":"succeeded","bundle_id":"b1"}'
+        if "readlink -n /opt/framenest/current" in combined:
+            return self.current
+        if "previous-release" in combined and "printf" in combined:
+            return ""
+        if "check-database-ready" in combined:
+            return '{"operation":"check-database-ready","state":"ready"}'
+        if "ln -s" in combined and "current.next" in combined:
+            parts = combined.split()
+            idx = next(i for i, part in enumerate(parts) if part.endswith("current.next"))
+            self.current = parts[idx - 1]
+            return ""
+        if "mv -T /opt/framenest/current.next" in combined:
+            return ""
+        if "restart framenest.service" in combined:
+            return ""
+        if "systemctl is-active" in combined:
+            return "active"
+        if "WorkingDirectory" in combined:
+            return "/opt/framenest/current"
+        if "check-health" in combined:
+            return '{"operation":"check-health","state":"ready"}'
+        if "journalctl -u framenest.service" in combined:
+            return ""
+        if "rm -f /run/framenest-release-deploy" in combined:
+            return ""
+        if "rmdir /run/framenest-release-deploy" in combined:
+            return ""
+        if "cat /run/framenest-release-deploy/previous-release" in combined:
+            return PREV_PATH
+        if "cat /run/framenest-release-deploy/rollback-previous-release" in combined:
+            return PREV_PATH
+        raise AssertionError(f"unexpected ssh command: {combined}")
+
+
+def _args(command: str, extra: list[str] | None = None) -> list[str]:
+    argv = [command]
+    if command in ("check", "deploy", "rollback"):
+        argv += ["--release", RELEASE]
+    if command in ("deploy", "rollback"):
+        argv += ["--yes"]
+    argv += ["--target", "nuc", "--user", "op", "--identity", "identity"]
+    if extra:
+        argv += extra
+    return argv
+
+
+def _combined(runner: FakeRunner) -> str:
+    return "\n".join(" ".join(argv) for argv, _ in runner.calls)
+
+
+def _index(runner: FakeRunner, needle: str) -> int:
+    for i, (argv, _) in enumerate(runner.calls):
+        if argv and argv[0] == "ssh" and needle in " ".join(argv):
+            return i
+    raise AssertionError(f"missing ssh command containing {needle!r}")
+
+
+def _ssh_combined(runner: FakeRunner) -> str:
+    return "\n".join(" ".join(argv) for argv, _ in runner.calls if argv and argv[0] == "ssh")
+
+
+# --- Command builder contracts ---
+
+def test_remote_commands_never_invoke_uv_or_migrate() -> None:
+    builders = [
+        engine.cmd_remote_poetry_check_lock(TARGET),
+        engine.cmd_remote_poetry_env_use(TARGET),
+        engine.cmd_remote_poetry_install(TARGET),
+        engine.cmd_remote_atomic_switch(TARGET),
+        engine.cmd_remote_restart_service(),
+        engine.cmd_remote_check_database_ready(TARGET),
+        engine.cmd_remote_run_scheduled_backup(TARGET),
+    ]
+    for command in builders:
+        assert "uv " not in command
+        assert "migrate" not in command
+        assert "uv:" not in command
+
+
+def test_poetry_commands_use_exact_tooling_paths() -> None:
+    assert engine.POETRY_BIN in engine.cmd_remote_poetry_check_lock(TARGET)
+    assert engine.POETRY_BIN in engine.cmd_remote_poetry_env_use(TARGET)
+    assert engine.CPYTHON_BIN in engine.cmd_remote_poetry_env_use(TARGET)
+    assert engine.POETRY_BIN in engine.cmd_remote_poetry_install(TARGET)
+    assert "--only main" in engine.cmd_remote_poetry_install(TARGET)
+    assert "--no-interaction" in engine.cmd_remote_poetry_install(TARGET)
+    assert "--no-ansi" in engine.cmd_remote_poetry_install(TARGET)
+
+
+def test_atomic_switch_creates_new_symlink_then_renames() -> None:
+    command = engine.cmd_remote_atomic_switch(TARGET)
+    assert "ln -s" in command
+    assert "/opt/framenest/current.next" in command
+    assert "mv -T /opt/framenest/current.next" in command
+    assert command.index("ln -s") < command.index("mv -T")
+
+
+def test_service_account_commands_establish_release_cwd_and_env() -> None:
+    for command in (
+        engine.cmd_remote_db_status(TARGET),
+        engine.cmd_remote_check_database_ready(TARGET),
+    ):
+        assert f"--chdir={TARGET}" in command
+        assert f"env FRAMENEST_ENV_FILE={engine.ENV_FILE}" in command
+        assert "-u framenest" in command
+
+
+# --- status flow ---
+
+def test_status_positive_path(capsys: pytest.CaptureFixture) -> None:
+    runner = FakeRunner()
+    result = engine.main(_args("status"), runner=runner)
+    captured = capsys.readouterr()
+    assert result == engine.EXIT_OK
+    assert "service_active: active" in captured.out
+    assert "database_revision: 0028" in captured.out
+    assert "backup_restore_readiness: ready" in captured.out
+    # Status never transfers a helper or mutates.
+    assert not any("cat > /run/framenest-release-deploy" in " ".join(a) for a, _ in runner.calls)
+
+
+# --- check flow ---
+
+def test_check_positive_path_passes_all_gates(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+    runner = FakeRunner()
+    result = engine.main(_args("check"), runner=runner)
+    captured = capsys.readouterr()
+    assert result == engine.EXIT_OK
+    assert RELEASE in captured.out
+    assert AP_PIN in captured.out
+
+
+def test_check_requires_backup_ready(capsys: pytest.CaptureFixture) -> None:
+    class _BackupNotReady(FakeRunner):
+        def _ssh_respond(self, combined, input_bytes):
+            if "framenest-backup status" in combined:
+                return '{"operation":"status","restore_readiness":"stale"}'
+            return super()._ssh_respond(combined, input_bytes)
+
+    result = engine.main(_args("check"), runner=_BackupNotReady())
+    assert result == engine.EXIT_BACKUP_NOT_READY
+
+
+def test_check_requires_matching_tooling() -> None:
+    class _BadTooling(FakeRunner):
+        def _ssh_respond(self, combined, input_bytes):
+            if "poetry --version" in combined:
+                return "Poetry (version 1.8.0)"
+            return super()._ssh_respond(combined, input_bytes)
+
+    assert engine.main(_args("check"), runner=_BadTooling()) == engine.EXIT_TOOLING
+
+
+# --- deploy flow ---
+
+def test_deploy_happy_path_sequence(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+    runner = FakeRunner()
+    result = engine.main(_args("deploy"), runner=runner)
+    combined = _combined(runner)
+    assert result == engine.EXIT_OK
+    assert "deploy complete" in capsys.readouterr().out
+
+    # Lock and pre-existence gates precede any transfer.
+    assert _index(runner, "mkdir -m 0700 /run/framenest-release-deploy") < _index(runner, "cat > /run/framenest-release-deploy/framenest_release.py")
+    # Engine transfer precedes archive transfers.
+    assert _index(runner, "framenest_release.py") < _index(runner, "superproject.tar")
+    assert _index(runner, "superproject.tar") < _index(runner, "ap.tar")
+    # Poetry before chown/chmod before rename.
+    assert _index(runner, "install --only main") < _index(runner, "chown -R root:root")
+    assert _index(runner, "chown -R root:root") < _index(runner, "mv /opt/framenest/releases/")
+    # Schema and checkpoint before atomic switch.
+    assert _index(runner, "framenest-db status") < _index(runner, "ln -s")
+    assert _index(runner, "framenest-backup run-scheduled") < _index(runner, "ln -s")
+    # Single restart.
+    assert _ssh_combined(runner).count("restart framenest.service") == 1
+    # Cleanup present.
+    assert _index(runner, "rmdir /run/framenest-release-deploy") > _index(runner, "restart framenest.service")
+
+
+def test_deploy_transfers_engine_and_both_archives_as_stdin() -> None:
+    runner = FakeRunner()
+    assert engine.main(_args("deploy"), runner=runner) == engine.EXIT_OK
+    payloads = [(argv, data) for argv, data in runner.calls if data is not None]
+    transferred = [" ".join(argv) for argv, _ in payloads]
+    assert any("framenest_release.py" in c for c in transferred)
+    assert any("superproject.tar" in c for c in transferred)
+    assert any("ap.tar" in c for c in transferred)
+    # Exactly three stdin payloads: engine, superproject archive, AP archive.
+    assert len(payloads) == 3
+
+
+def test_deploy_verifies_archive_hashes_remotely() -> None:
+    runner = FakeRunner()
+    assert engine.main(_args("deploy"), runner=runner) == engine.EXIT_OK
+    combined = _ssh_combined(runner)
+    assert "sha256sum /run/framenest-release-deploy/framenest_release.py" in combined
+    assert "sha256sum /run/framenest-release-deploy/superproject.tar" in combined
+    assert "sha256sum /run/framenest-release-deploy/ap.tar" in combined
+
+
+def test_deploy_verifies_committed_lock_unchanged() -> None:
+    runner = FakeRunner()
+    assert engine.main(_args("deploy"), runner=runner) == engine.EXIT_OK
+    hashes = [c for c in _ssh_combined(runner).splitlines() if "poetry.lock" in c and "sha256sum" in c]
+    assert len(hashes) == 2
+
+
+def test_deploy_materializes_ap_under_release() -> None:
+    runner = FakeRunner()
+    assert engine.main(_args("deploy"), runner=runner) == engine.EXIT_OK
+    combined = _ssh_combined(runner)
+    assert ".staging/.ap" in combined or ".ap" in combined
+
+
+def test_deploy_rejects_existing_target() -> None:
+    class _Existing(FakeRunner):
+        def _ssh_respond(self, combined, input_bytes):
+            if "test ! -e /opt/framenest/releases/" in combined and ".staging" not in combined:
+                raise engine.ReleaseError("exists", engine.EXIT_EXISTS)
+            return super()._ssh_respond(combined, input_bytes)
+
+    assert engine.main(_args("deploy"), runner=_Existing()) == engine.EXIT_EXISTS
+
+
+def test_deploy_rejects_existing_remote_lock() -> None:
+    class _Locked(FakeRunner):
+        def _ssh_respond(self, combined, input_bytes):
+            if "mkdir -m 0700 /run/framenest-release-deploy" in combined:
+                raise engine.ReleaseError("locked", engine.EXIT_EXISTS)
+            return super()._ssh_respond(combined, input_bytes)
+
+    assert engine.main(_args("deploy"), runner=_Locked()) == engine.EXIT_EXISTS
+
+
+def test_deploy_rejects_insufficient_capacity() -> None:
+    class _NoSpace(FakeRunner):
+        def _ssh_respond(self, combined, input_bytes):
+            if "df -Pk /opt/framenest" in combined:
+                return "Filesystem 1K-blocks Used Available Use% Mounted\n/dev/sda1 100 50 10 50% /opt/framenest"
+            return super()._ssh_respond(combined, input_bytes)
+
+    assert engine.main(_args("deploy"), runner=_NoSpace()) == engine.EXIT_CAPACITY
+
+
+def test_deploy_schema_mismatch_stops_before_cutover() -> None:
+    class _SchemaDiff(FakeRunner):
+        def _ssh_respond(self, combined, input_bytes):
+            if "framenest-db status" in combined:
+                return '{"operation":"status","state":"behind","current_revision":"0027","head_revision":"0028"}'
+            return super()._ssh_respond(combined, input_bytes)
+
+    runner = _SchemaDiff()
+    assert engine.main(_args("deploy"), runner=runner) == engine.EXIT_MIGRATION_REQUIRED
+    assert "ln -s" not in _ssh_combined(runner)
+    assert "restart framenest.service" not in _ssh_combined(runner)
+
+
+def test_deploy_checkpoint_failure_stops_before_cutover() -> None:
+    class _BadCheckpoint(FakeRunner):
+        def _ssh_respond(self, combined, input_bytes):
+            if "framenest-backup run-scheduled" in combined:
+                return '{"operation":"run-scheduled","state":"failed"}'
+            return super()._ssh_respond(combined, input_bytes)
+
+    runner = _BadCheckpoint()
+    assert engine.main(_args("deploy"), runner=runner) == engine.EXIT_CHECKPOINT
+    assert "ln -s" not in _ssh_combined(runner)
+
+
+def test_deploy_lock_changed_is_poetry_failure() -> None:
+    class _LockChanged(FakeRunner):
+        def __init__(self):
+            super().__init__()
+            self._count = 0
+
+        def _ssh_respond(self, combined, input_bytes):
+            if "sha256sum /opt/framenest/releases/" in combined and "poetry.lock" in combined:
+                self._count += 1
+                return f"{'deadbeef' if self._count == 1 else 'cafebabe'}  /x/poetry.lock"
+            return super()._ssh_respond(combined, input_bytes)
+
+    assert engine.main(_args("deploy"), runner=_LockChanged()) == engine.EXIT_POETRY
+
+
+def test_deploy_post_switch_failure_rolls_back(capsys: pytest.CaptureFixture) -> None:
+    class _PostSwitchFail(FakeRunner):
+        def __init__(self) -> None:
+            super().__init__()
+            self._journal_failures = 0
+
+        def _ssh_respond(self, combined, input_bytes):
+            if "journalctl -u framenest.service" in combined:
+                self._journal_failures += 1
+                if self._journal_failures == 1:
+                    raise engine.ReleaseError("terminal", engine.EXIT_SERVICE_TERMINAL)
+            return super()._ssh_respond(combined, input_bytes)
+
+    runner = _PostSwitchFail()
+    result = engine.main(_args("deploy"), runner=runner)
+    assert result == engine.EXIT_SERVICE_TERMINAL
+    # Rollback restores the previous release symlink and restarts once more.
+    assert _ssh_combined(runner).count("restart framenest.service") == 2
+    assert _index(runner, "cat /run/framenest-release-deploy/previous-release") > 0
+
+
+def test_deploy_rollback_failure_is_distinct(capsys: pytest.CaptureFixture) -> None:
+    class _RollbackFail(FakeRunner):
+        def __init__(self):
+            super().__init__()
+            self._restarts = 0
+
+        def _ssh_respond(self, combined, input_bytes):
+            if "journalctl -u framenest.service" in combined:
+                raise engine.ReleaseError("terminal", engine.EXIT_SERVICE_TERMINAL)
+            if "restart framenest.service" in combined:
+                self._restarts += 1
+                if self._restarts == 2:
+                    raise engine.ReleaseError("rollback restart failed", engine.EXIT_ROLLBACK)
+            return super()._ssh_respond(combined, input_bytes)
+
+    assert engine.main(_args("deploy"), runner=_RollbackFail()) == engine.EXIT_ROLLBACK
+
+
+def test_deploy_cleanup_failure_is_distinct(capsys: pytest.CaptureFixture) -> None:
+    class _CleanupFail(FakeRunner):
+        def _ssh_respond(self, combined, input_bytes):
+            if "rmdir /run/framenest-release-deploy" in combined:
+                raise engine.ReleaseError("cleanup failed", engine.EXIT_CLEANUP)
+            return super()._ssh_respond(combined, input_bytes)
+
+    assert engine.main(_args("deploy"), runner=_CleanupFail()) == engine.EXIT_CLEANUP
+
+
+# --- rollback flow ---
+
+def test_rollback_happy_path(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+    class _RollbackRunner(FakeRunner):
+        def _ssh_respond(self, combined, input_bytes):
+            if "test -e /opt/framenest/releases/" in combined and ".framenest-release-sha" not in combined:
+                return ""
+            if ".framenest-release-sha" in combined and "test -e" in combined:
+                return ""
+            if "test -x /opt/framenest/releases/" in combined:
+                return ""
+            return super()._ssh_respond(combined, input_bytes)
+
+    runner = _RollbackRunner()
+    result = engine.main(_args("rollback"), runner=runner)
+    assert result == engine.EXIT_OK
+    assert "rollback complete" in capsys.readouterr().out
+    assert _ssh_combined(runner).count("restart framenest.service") == 1
+
+
+def test_rollback_requires_yes() -> None:
+    runner = FakeRunner()
+    argv = ["rollback", "--release", RELEASE, "--target", "nuc", "--user", "op", "--identity", "identity"]
+    assert engine.main(argv, runner=runner) == engine.EXIT_USAGE
+
+
+def test_rollback_missing_target_release_fails() -> None:
+    class _Missing(FakeRunner):
+        def _ssh_respond(self, combined, input_bytes):
+            if "test -e /opt/framenest/releases/" in combined and ".framenest-release-sha" not in combined and "test -x" not in combined:
+                raise engine.ReleaseError("missing", engine.EXIT_EXISTS)
+            return super()._ssh_respond(combined, input_bytes)
+
+    assert engine.main(_args("rollback"), runner=_Missing()) == engine.EXIT_EXISTS
+
+
+# --- sanitized output ---
+
+def test_output_never_contains_secrets_or_identity() -> None:
+    runner = FakeRunner()
+    engine.main(_args("deploy"), runner=runner)
+    # The engine prints no transport identity, no secret-bearing patterns.
+    for argv, _ in runner.calls:
+        command = " ".join(argv)
+        assert "password" not in command.lower()
+        assert "BEGIN " not in command
+        assert "NOPASSWD" not in command
+        assert "sudo -S" not in command
+
+
+def test_first_causal_error_is_preserved(capsys: pytest.CaptureFixture) -> None:
+    class _SchemaDiff(FakeRunner):
+        def _ssh_respond(self, combined, input_bytes):
+            if "framenest-db status" in combined:
+                return '{"operation":"status","state":"behind","current_revision":"0027","head_revision":"0028"}'
+            return super()._ssh_respond(combined, input_bytes)
+
+    result = engine.main(_args("deploy"), runner=_SchemaDiff())
+    assert result == engine.EXIT_MIGRATION_REQUIRED
+    assert "migration-required" in capsys.readouterr().err

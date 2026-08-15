@@ -45,11 +45,14 @@ is ready and an authorized administrator publishes.
 
 There is still no completed desktop shell, GUI Settings, complete Cover Studio,
 arbitrary user-created collections, persistent AI Drafts, multi-model draft
-comparison/promotion, media second-copy backup, or installer. Owner-authoritative
-current production baseline is public/canonical commit
+comparison/promotion, media second-copy backup, or installer. Public `main` and
+the production release may differ; the authoritative mutable production readback
+is `framenest-release status`, never a committed SHA snapshot. A production
+release was previously accepted at public/canonical commit
 `aec2f0091c10aed2fc2033dac154a0d9651b2b6d` on the Ubuntu NUC release path
 `/opt/framenest/releases/aec2f0091c10aed2fc2033dac154a0d9651b2b6d` with schema
-`0028`. Tauri v2 is accepted as the future desktop shell, but no Tauri scaffold
+`0028`; that fact is dated history. Tauri v2 is accepted as the future desktop
+shell, but no Tauri scaffold
 exists yet. Development remains MacBook-first; Ubuntu Server 24.04 on the Intel
 NUC6i5SYH is the current personal production server. This document defines
 approved product direction; it does not claim full product implementation.

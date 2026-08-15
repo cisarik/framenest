@@ -12,12 +12,15 @@ settings, a FastAPI application factory, a typed `GET /health` endpoint,
 in-process contract tests, a loopback-first Uvicorn development server, a
 packaged pre-alpha local web shell at `GET /`, pure-domain identity primitives,
 and a repository-native systemd service foundation targeted at Ubuntu Server
-24.04 on the Intel NUC6i5SYH personal production server. Owner-authoritative
-current production baseline for living status is public/canonical commit
-`aec2f0091c10aed2fc2033dac154a0d9651b2b6d` (schema head `0028`), served from
-`/opt/framenest/releases/aec2f0091c10aed2fc2033dac154a0d9651b2b6d` with
-Tailscale Serve only (Funnel not publicly exposed). There is still no completed
-desktop shell, installer, or generalized multi-source downloader UI.
+24.04 on the Intel NUC6i5SYH personal production server. Public `main` and the
+production release may differ; the authoritative mutable production readback is
+`framenest-release status` (see the Ubuntu NUC runbook), never a committed SHA
+snapshot. A production release was previously accepted at public/canonical
+commit `aec2f0091c10aed2fc2033dac154a0d9651b2b6d` (schema head `0028`), served
+from `/opt/framenest/releases/aec2f0091c10aed2fc2033dac154a0d9651b2b6d` with
+Tailscale Serve only (Funnel not publicly exposed); that fact is dated history.
+There is still no completed desktop shell, installer, or generalized
+multi-source downloader UI.
 
 The repository also contains the first persistence, registry, media catalog,
 local media-analysis, AI suggestion-review, and quarantine upload-transport
@@ -251,11 +254,16 @@ pull is repository capability until later E3 host acceptance. A
 repository-native generic systemd service bundle exists under `deploy/systemd/`,
 the superseded Fedora guide remains in [docs/FEDORA_SERVICE.md](docs/FEDORA_SERVICE.md),
 and the current Ubuntu NUC deployment workflow is documented in
-[docs/UBUNTU_NUC_DEPLOYMENT.md](docs/UBUNTU_NUC_DEPLOYMENT.md). Owner-authoritative
-current production serves commit
+[docs/UBUNTU_NUC_DEPLOYMENT.md](docs/UBUNTU_NUC_DEPLOYMENT.md). A routine
+immutable release-update contract (`deploy/ubuntu/framenest-release`) is
+accepted through
+[ADR-0060](docs/adr/0060-repeatable-immutable-nuc-release-update-contract.md);
+it is repository capability until a later live deployment proves it. A
+production release was previously accepted at commit
 `aec2f0091c10aed2fc2033dac154a0d9651b2b6d` from
 `/opt/framenest/releases/aec2f0091c10aed2fc2033dac154a0d9651b2b6d` over
-Tailscale Serve only.
+Tailscale Serve only; that fact is dated history, and current production state
+is read back through `framenest-release status`.
 
 ## Local Database Foundation
 

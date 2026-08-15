@@ -69,12 +69,17 @@ include:
 
 Ubuntu Server 24.04 on the Intel NUC6i5SYH supersedes Fedora as the active
 deployment target. A repository-native systemd service foundation and Ubuntu
-NUC deployment runbook exist. Owner-authoritative current production serves
-commit `aec2f0091c10aed2fc2033dac154a0d9651b2b6d` from
+NUC deployment runbook exist, and a routine immutable release-update contract
+(`deploy/ubuntu/framenest-release`) is accepted through
+[ADR-0060](docs/adr/0060-repeatable-immutable-nuc-release-update-contract.md).
+Public `main` and the production release may differ; the authoritative mutable
+production readback is `framenest-release status`. A production release was
+previously accepted at commit `aec2f0091c10aed2fc2033dac154a0d9651b2b6d` from
 `/opt/framenest/releases/aec2f0091c10aed2fc2033dac154a0d9651b2b6d` with schema
 `0028`, healthy service, and Tailscale Serve only (Funnel not publicly
-exposed). Further NUC security hardening, AppArmor/UFW completion, production
-database replacement automation, and media second-copy backup remain open. A
+exposed); that fact is dated history. Further NUC security hardening,
+AppArmor/UFW completion, production database replacement automation, and media
+second-copy backup remain open. A
 Tailscale remote-access and identity foundation (root-owned HTTPS Serve to a
 permission-restricted Unix socket, verified-identity mapping, capability
 authorization, and privileged-action audit) is recorded in

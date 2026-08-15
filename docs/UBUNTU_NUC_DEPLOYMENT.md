@@ -7,12 +7,15 @@ operating FrameNest on the Intel NUC6i5SYH running Ubuntu Server 24.04 LTS as a
 personal production server.
 
 It is not a transcript of every historical host command and does not by itself
-grant mutation authority. Owner-authoritative current production baseline is
-public/canonical commit `aec2f0091c10aed2fc2033dac154a0d9651b2b6d` (schema
-`0028`) served from
+grant mutation authority. Public `main` and the production release may differ;
+the authoritative mutable production readback is the authenticated runtime
+command `framenest-release status` (see the Routine Immutable Release Update
+section below), never a committed SHA snapshot. A production release was
+previously accepted at public/canonical commit
+`aec2f0091c10aed2fc2033dac154a0d9651b2b6d` (schema `0028`) served from
 `/opt/framenest/releases/aec2f0091c10aed2fc2033dac154a0d9651b2b6d` with
-Tailscale Serve only. Execute host mutations only under an authorized operator
-task.
+Tailscale Serve only; that fact is dated history, not a current guarantee.
+Execute host mutations only under an authorized operator task.
 
 Classification: deployment operator runbook.
 
@@ -49,8 +52,11 @@ deploy/systemd/framenest.env.example
 deploy/systemd/framenest-ai-credential-nvidia-nim.conf
 deploy/systemd/framenest-ai-credential-vercel-ai-gateway.conf
 deploy/ubuntu/fn-production-env-deploy
+deploy/ubuntu/framenest-release
+deploy/ubuntu/framenest_release.py
 deploy/ubuntu/README.md
 docs/adr/0032-ubuntu-nuc-deployment-foundation.md
+docs/adr/0060-repeatable-immutable-nuc-release-update-contract.md
 docs/adr/0033-catalog-backup-and-recovery-foundation.md
 docs/adr/0036-production-ai-credentials-via-systemd.md
 docs/NUC_HOST_BASELINE.md
@@ -263,6 +269,85 @@ sudo -u framenest --chdir=/opt/framenest/current \
 `status` is read-only. `generate` prints a plan and requires `--yes` or an
 interactive confirmation before writing JPEG derivatives under
 `/var/cache/framenest/gallery-previews`.
+
+## Routine Immutable Release Update
+
+The canonical, discoverable, tested routine immutable release-update entry
+point is:
+
+```text
+deploy/ubuntu/framenest-release
+```
+
+It invokes `deploy/ubuntu/framenest_release.py` (standard library only; Ubuntu
+system Python 3.12 compatible for its private transferred remote mode). The
+architecture decision is [ADR-0060](adr/0060-repeatable-immutable-nuc-release-update-contract.md).
+
+Public commands:
+
+```text
+framenest-release status [transport arguments]
+framenest-release check --release <40-hex-SHA> [transport arguments]
+framenest-release deploy --release <40-hex-SHA> --yes [transport arguments]
+framenest-release rollback --release <40-hex-SHA> --yes [transport arguments]
+```
+
+Transport arguments are `--target`, `--user`, and `--identity`, with public-safe
+fallbacks `FRAMENEST_NUC_SSH_TARGET`, `FRAMENEST_NUC_SSH_USER`, and
+`FRAMENEST_NUC_SSH_IDENTITY`.
+
+### Initial bootstrap versus routine update
+
+Initial host bootstrap provisions the pinned standalone CPython through `uv`,
+installs Poetry tooling, creates the service identity, and performs the first
+release installation. Those are separate, explicitly authorized maintenance
+tasks.
+
+Routine immutable release updates reuse the already accepted tooling exactly:
+
+```text
+Poetry:  /opt/framenest/tooling/poetry/2.4.1/.venv/bin/poetry
+CPython: /opt/framenest/tooling/python/cpython-3.13.14-linux-x86_64-gnu/bin/python3.13
+```
+
+A routine update never invokes `uv`, never requires `uv` on `PATH`, never
+installs or downloads tooling automatically, and fails closed with a sanitized
+result when the exact tooling is missing or mismatched.
+
+### Modes
+
+- `status` and `check` are read-only with respect to the repository, database,
+  service, and host state. They use only fixed, tested commands and create no
+  remote state. They must not transfer a helper, refresh sudo, or transition
+  into deployment automatically.
+- `deploy` re-runs every check gate, then builds and hashes two exact archives
+  (superproject and pinned AP), transfers exact bytes, verifies hashes
+  remotely, prepares a release-local `.venv` from the committed `poetry.lock`,
+  atomically publishes the release, runs a fresh verified catalog checkpoint,
+  and performs the atomic cutover and single restart. `--yes` prevents
+  accidental execution but is not AP or Cooperator authority.
+- `rollback` switches to an already complete release under
+  `/opt/framenest/releases/<SHA>`. It never references a
+  `/opt/framenest/rollback` path.
+
+### Same-schema boundary and privilege release
+
+This first implementation supports same-schema routine updates only. The
+production database revision must equal the packaged target head; any schema
+difference stops before cutover with a sanitized `migration-required` result.
+The helper never runs `framenest-db migrate` and never hides migration
+authority.
+
+Privileged remote phases use `sudo -n` only after the Cooperator has
+established the sudo timestamp outside the helper. At terminal handling the
+Cooperator invalidates the sudo timestamp through the exact supported route
+when the session remains available; if the session is lost first, privilege
+release is reported unknown rather than fabricated.
+
+Interrupted, ambiguous, or failed state retains bounded recovery evidence under
+`/run/framenest-release-deploy` and provides an exact operator recovery
+instruction. A partial target is never deployable; final release publication is
+atomic; no wildcard deletion occurs.
 
 ## 0. Preconditions And Authority
 

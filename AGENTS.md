@@ -27,6 +27,38 @@ Treat `.ap/` as read-only during ordinary project work. Protocol updates require
 a separate explicit AP update task.
 <!-- END MANAGED AP INTEGRATION -->
 
+## NUC Routine Release Update
+
+The sole routine immutable NUC release-update entry point is:
+
+```text
+deploy/ubuntu/framenest-release
+```
+
+It invokes `deploy/ubuntu/framenest_release.py` (standard library only). Future
+Orchestrators and Workers must use it instead of reconstructing deployment
+commands, probing generic PATH locations, or confusing initial host bootstrap
+with a routine release update.
+
+- Always run `framenest-release status` and `framenest-release check --release
+  <40-hex-SHA>` before any deployment. Deployment never follows automatically
+  from a check.
+- Routine updates use exactly:
+
+```text
+Poetry:  /opt/framenest/tooling/poetry/2.4.1/.venv/bin/poetry
+CPython: /opt/framenest/tooling/python/cpython-3.13.14-linux-x86_64-gnu/bin/python3.13
+```
+
+- `uv` is bootstrap and explicit tooling-maintenance tooling only. Routine
+  release updates never invoke `uv` and never require `uv` on `PATH`.
+- Deployed releases contain no `.git` metadata. Release provenance comes from
+  `.framenest-release-sha` and `.framenest-release-manifest.json`, not from
+  `git -C /opt/framenest/current`.
+- Do not improvise routine deployment commands. See
+  [docs/UBUNTU_NUC_DEPLOYMENT.md](docs/UBUNTU_NUC_DEPLOYMENT.md) and
+  [ADR-0060](docs/adr/0060-repeatable-immutable-nuc-release-update-contract.md).
+
 ## AP Upgrade Ledger
 
 AP upgrade ledger declaration:
