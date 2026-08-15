@@ -72,7 +72,9 @@ is `/opt/framenest/current`, and the environment file is
 `/etc/framenest/framenest.env`. Deployed releases intentionally contain no
 `.git` metadata. Provenance is recorded in `.framenest-release-sha` and
 `.framenest-release-manifest.json`, which is how `status` and future probes
-read release identity rather than `git -C /opt/framenest/current`.
+read release identity rather than `git -C /opt/framenest/current`. A
+pre-manifest production tree is observed via `.framenest-release-sha` only;
+synthesizing a manifest on an old immutable tree is forbidden.
 
 ### Source and public gates
 

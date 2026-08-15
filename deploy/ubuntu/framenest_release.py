@@ -267,6 +267,22 @@ def cmd_remote_read_manifest(path: str) -> str:
     return f"sudo -n cat {shlex.quote(path)}/.framenest-release-manifest.json"
 
 
+def cmd_remote_probe_release_markers(path: str) -> str:
+    """Classify current-tree markers without treating absence as transport failure.
+
+    Returns a remote command whose stdout is exactly one of ``manifest``,
+    ``sha``, or ``none`` when sudo succeeds. Absence is not ``test -e`` failure.
+    """
+    manifest = shlex.quote(f"{path}/.framenest-release-manifest.json")
+    sha = shlex.quote(f"{path}/.framenest-release-sha")
+    script = (
+        f"if test -e {manifest}; then echo manifest; "
+        f"elif test -e {sha}; then echo sha; "
+        f"else echo none; fi"
+    )
+    return f"sudo -n sh -c {shlex.quote(script)}"
+
+
 def cmd_remote_test_not_exists(path: str) -> str:
     return f"sudo -n test ! -e {shlex.quote(path)}"
 
@@ -467,7 +483,10 @@ def verify_local_head(runner: Runner, release_sha: str) -> None:
 
 
 def verify_clean_worktrees(runner: Runner) -> None:
-    for argv in (["status", "--porcelain"], ["-C", ".ap", "status", "--porcelain"]):
+    for argv in (
+        ["status", "--porcelain", "--untracked-files=no"],
+        ["-C", ".ap", "status", "--porcelain", "--untracked-files=no"],
+    ):
         output = run_local_git(runner, argv)
         if output.strip():
             raise ReleaseError("worktree is not clean", EXIT_SOURCE_GATE)
@@ -550,11 +569,29 @@ def read_current_release(runner: Runner, transport: dict[str, str]) -> tuple[str
     current_path = raw.strip()
     if not current_path.startswith(RELEASE_ROOT):
         raise ReleaseError("current release path is unexpected", EXIT_TRANSPORT)
-    manifest_raw = ssh(
-        runner, **transport, remote_command=cmd_remote_read_manifest(current_path)
-    )
-    manifest = parse_json_status(manifest_raw)
-    return current_path, manifest_raw, manifest
+    probe = ssh(
+        runner,
+        **transport,
+        remote_command=cmd_remote_probe_release_markers(current_path),
+    ).strip()
+    if probe == "manifest":
+        manifest_raw = ssh(
+            runner, **transport, remote_command=cmd_remote_read_manifest(current_path)
+        )
+        manifest = parse_json_status(manifest_raw)
+        return current_path, manifest_raw, manifest
+    if probe == "sha":
+        sha_raw = ssh(
+            runner, **transport, remote_command=cmd_remote_read_release_sha(current_path)
+        ).strip()
+        if not SHA_PATTERN.match(sha_raw):
+            raise ReleaseError("current release SHA marker is invalid", EXIT_TRANSPORT)
+        return current_path, "", {"framenest_release_sha": sha_raw}
+    if probe == "none":
+        raise ReleaseError(
+            "current release SHA marker and manifest are absent", EXIT_TRANSPORT
+        )
+    raise ReleaseError("current release markers are unreadable", EXIT_TRANSPORT)
 
 
 def read_backup_readiness(runner: Runner, transport: dict[str, str], release_path: str) -> str:
@@ -700,6 +737,8 @@ def _cmd_status(args: argparse.Namespace, runner: Runner) -> int:
     print(f"service_active: {active}")
     print(f"database_revision: {db_revision}")
     print(f"backup_restore_readiness: {backup}")
+    if not manifest_raw:
+        print("release_manifest: absent")
     return EXIT_OK
 
 

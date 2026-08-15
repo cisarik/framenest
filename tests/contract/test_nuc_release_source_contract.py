@@ -154,6 +154,28 @@ def test_verify_clean_worktrees_rejects_dirty_superproject() -> None:
     assert exc.value.exit_code == engine.EXIT_SOURCE_GATE
 
 
+def test_verify_clean_worktrees_ignores_untracked_owner_paths() -> None:
+    class _OwnerUntracked:
+        def __init__(self) -> None:
+            self.calls: list[list[str]] = []
+
+        def __call__(self, argv: list[str], input_bytes: bytes | None) -> str:
+            self.calls.append(list(argv))
+            if argv[0] != "git":
+                raise AssertionError(argv)
+            if "status" in argv and "--porcelain" in argv:
+                if "--untracked-files=no" in argv:
+                    return ""
+                return "?? .playwright-mcp/\n?? uv.lock\n"
+            raise AssertionError(argv)
+
+    runner = _OwnerUntracked()
+    engine.verify_clean_worktrees(runner)
+    assert runner.calls
+    for call in runner.calls:
+        assert "--untracked-files=no" in call
+
+
 def test_verify_public_main_rejects_unpublished_release() -> None:
     runner = FakeGitRunner(
         **{"ls-remote origin refs/heads/main": f"{'f' * 40}\trefs/heads/main"}

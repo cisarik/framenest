@@ -95,6 +95,12 @@ class FakeRunner:
             return ""
         if "test ! -e" in combined:
             return ""
+        if (
+            "echo manifest" in combined
+            and "echo sha" in combined
+            and "echo none" in combined
+        ):
+            return "manifest"
         if "test -x /opt/framenest/tooling" in combined:
             return ""
         if "poetry --version" in combined:
@@ -301,6 +307,98 @@ def test_status_positive_path(capsys: pytest.CaptureFixture) -> None:
     assert "backup_restore_readiness: ready" in captured.out
     # Status never transfers a helper or mutates.
     assert not any("cat > /run/framenest-release-deploy" in " ".join(a) for a, _ in runner.calls)
+
+
+class _PreManifest(FakeRunner):
+    """Live pre-ADR-0060 tree: SHA marker present, manifest absent."""
+
+    def _ssh_respond(self, combined: str, input_bytes: bytes | None) -> str:
+        if (
+            "echo manifest" in combined
+            and "echo sha" in combined
+            and "echo none" in combined
+        ):
+            return "sha"
+        if "framenest-release-manifest.json" in combined and "cat" in combined:
+            raise engine.ReleaseError("command failed", engine.EXIT_TRANSPORT)
+        if "framenest-release-sha" in combined and "cat" in combined:
+            return PREV
+        return super()._ssh_respond(combined, input_bytes)
+
+
+def test_status_pre_manifest_sha_only(capsys: pytest.CaptureFixture) -> None:
+    runner = _PreManifest()
+    result = engine.main(_args("status"), runner=runner)
+    captured = capsys.readouterr()
+    assert result == engine.EXIT_OK
+    assert f"active_release: {PREV}" in captured.out
+    assert "release_manifest: absent" in captured.out
+    assert AP_PIN not in captured.out
+    assert "e" * 64 not in captured.out
+    assert "f" * 64 not in captured.out
+    assert "superproject_archive_sha256" not in captured.out
+    assert "ap_archive_sha256" not in captured.out
+    assert "ap_gitlink" not in captured.out
+
+
+def test_check_pre_manifest_uses_current_path_for_backup(
+    capsys: pytest.CaptureFixture,
+) -> None:
+    runner = _PreManifest()
+    result = engine.main(_args("check"), runner=runner)
+    captured = capsys.readouterr()
+    assert result == engine.EXIT_OK
+    assert "backup_restore_readiness: ready" in captured.out
+    assert f"current_release: {PREV_PATH}" in captured.out
+    assert any(
+        "framenest-backup status" in " ".join(argv) for argv, _ in runner.calls
+    )
+
+
+def test_status_missing_both_markers_fails_closed(capsys: pytest.CaptureFixture) -> None:
+    class _NoMarkers(FakeRunner):
+        def _ssh_respond(self, combined: str, input_bytes: bytes | None) -> str:
+            if (
+                "echo manifest" in combined
+                and "echo sha" in combined
+                and "echo none" in combined
+            ):
+                return "none"
+            if "framenest-release-manifest.json" in combined and "cat" in combined:
+                raise engine.ReleaseError("command failed", engine.EXIT_TRANSPORT)
+            if "framenest-release-sha" in combined and "cat" in combined:
+                raise engine.ReleaseError("command failed", engine.EXIT_TRANSPORT)
+            return super()._ssh_respond(combined, input_bytes)
+
+    result = engine.main(_args("status"), runner=_NoMarkers())
+    captured = capsys.readouterr()
+    assert result != engine.EXIT_OK
+    assert "command failed" not in captured.err
+    assert "absent" in captured.err
+    assert "manifest" in captured.err
+    assert "SHA" in captured.err or "sha" in captured.err
+
+
+def test_status_invalid_sha_marker_fails_closed(capsys: pytest.CaptureFixture) -> None:
+    class _InvalidSha(FakeRunner):
+        def _ssh_respond(self, combined: str, input_bytes: bytes | None) -> str:
+            if (
+                "echo manifest" in combined
+                and "echo sha" in combined
+                and "echo none" in combined
+            ):
+                return "sha"
+            if "framenest-release-manifest.json" in combined and "cat" in combined:
+                raise engine.ReleaseError("command failed", engine.EXIT_TRANSPORT)
+            if "framenest-release-sha" in combined and "cat" in combined:
+                return "not-a-valid-release-sha"
+            return super()._ssh_respond(combined, input_bytes)
+
+    result = engine.main(_args("status"), runner=_InvalidSha())
+    captured = capsys.readouterr()
+    assert result != engine.EXIT_OK
+    assert "command failed" not in captured.err
+    assert "invalid" in captured.err
 
 
 # --- check flow ---
