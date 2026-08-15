@@ -324,8 +324,15 @@ result when the exact tooling is missing or mismatched.
   (superproject and pinned AP), transfers exact bytes, verifies hashes
   remotely, prepares a release-local `.venv` from the committed `poetry.lock`,
   atomically publishes the release, runs a fresh verified catalog checkpoint,
-  and performs the atomic cutover and single restart. `--yes` prevents
-  accidental execution but is not AP or Cooperator authority.
+  and performs the atomic cutover and single restart. Pre-cutover
+  `framenest-production` readiness uses a oneshot `systemd-run` with the unit
+  `EnvironmentFile` because that binary reads only the process environment.
+  After restart, deploy and automatic rollback wait up to 30 seconds
+  (one-second polling) for active state, database readiness, and health;
+  transient `activating` / socket-not-ready / health-not-ready states retry,
+  terminal systemd states fail immediately, and deadline expiry is
+  `EXIT_READINESS_TIMEOUT`. `--yes` prevents accidental execution but is not
+  AP or Cooperator authority.
 - `rollback` switches to an already complete release under
   `/opt/framenest/releases/<SHA>`. It never references a
   `/opt/framenest/rollback` path.

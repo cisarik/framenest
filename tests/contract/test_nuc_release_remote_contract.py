@@ -176,6 +176,10 @@ class FakeRunner:
             return ""
         if "restart framenest.service" in combined:
             return ""
+        if "ActiveState" in combined:
+            return "active"
+        if "-p Result --value" in combined:
+            return "success"
         if "systemctl is-active" in combined:
             return "active"
         if "WorkingDirectory" in combined:
@@ -259,13 +263,25 @@ def test_atomic_switch_creates_new_symlink_then_renames() -> None:
 
 
 def test_service_account_commands_establish_release_cwd_and_env() -> None:
+    command = engine.cmd_remote_db_status(TARGET)
+    assert f"--chdir={TARGET}" in command
+    assert f"env FRAMENEST_ENV_FILE={engine.ENV_FILE}" in command
+    assert "-u framenest" in command
+
+
+def test_production_cli_uses_systemd_environment_file() -> None:
     for command in (
-        engine.cmd_remote_db_status(TARGET),
         engine.cmd_remote_check_database_ready(TARGET),
+        engine.cmd_remote_check_health(TARGET),
     ):
-        assert f"--chdir={TARGET}" in command
-        assert f"env FRAMENEST_ENV_FILE={engine.ENV_FILE}" in command
-        assert "-u framenest" in command
+        assert "systemd-run" in command
+        assert f"--working-directory={TARGET}" in command
+        assert f"EnvironmentFile={engine.ENV_FILE}" in command
+        assert "--uid=framenest" in command
+        assert "--gid=framenest" in command
+        assert "FRAMENEST_ENV_FILE" not in command
+        assert "uv " not in command
+        assert "migrate" not in command
 
 
 def test_cmd_remote_extract_emits_nested_private_argv_and_extracts(
@@ -788,6 +804,95 @@ def test_rollback_missing_target_release_fails() -> None:
             return super()._ssh_respond(combined, input_bytes)
 
     assert engine.main(_args("rollback"), runner=_Missing()) == engine.EXIT_EXISTS
+
+
+class _FakeClock:
+    def __init__(self, *, jump: float) -> None:
+        self.t = 0.0
+        self.jump = jump
+
+    def monotonic(self) -> float:
+        return self.t
+
+    def sleep(self, seconds: float) -> None:
+        self.t += self.jump if self.jump else seconds
+
+
+def test_wait_ready_retries_transient_health_then_succeeds(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    clock = _FakeClock(jump=1)
+    monkeypatch.setattr(engine.time, "monotonic", clock.monotonic)
+    monkeypatch.setattr(engine.time, "sleep", clock.sleep)
+    runner = FakeRunner(fail="check-health", fail_occurrence=1)
+    result = engine.main(_args("deploy"), runner=runner)
+    assert result == engine.EXIT_OK
+    assert "command failed" not in capsys.readouterr().err
+    assert _ssh_combined(runner).count("check-health") >= 2
+
+
+def test_wait_ready_deadline_expiry_is_distinct_when_rollback_succeeds(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    clock = _FakeClock(jump=engine.READINESS_DEADLINE_SECONDS + 1)
+    monkeypatch.setattr(engine.time, "monotonic", clock.monotonic)
+    monkeypatch.setattr(engine.time, "sleep", clock.sleep)
+    runner = FakeRunner(fail="check-health", fail_occurrence=1)
+    result = engine.main(_args("deploy"), runner=runner)
+    captured = capsys.readouterr()
+    assert result == engine.EXIT_READINESS_TIMEOUT
+    assert "service readiness deadline exceeded" in captured.err
+    assert "command failed" not in captured.err
+
+
+def test_rollback_uses_the_same_bounded_readiness(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    clock = _FakeClock(jump=1)
+    monkeypatch.setattr(engine.time, "monotonic", clock.monotonic)
+    monkeypatch.setattr(engine.time, "sleep", clock.sleep)
+
+    class _RollbackRunner(FakeRunner):
+        def _ssh_respond(self, combined, input_bytes):
+            if "test -e /opt/framenest/releases/" in combined and ".framenest-release-sha" not in combined:
+                return ""
+            if ".framenest-release-sha" in combined and "test -e" in combined:
+                return ""
+            if "test -x /opt/framenest/releases/" in combined:
+                return ""
+            return super()._ssh_respond(combined, input_bytes)
+
+    runner = _RollbackRunner(fail="check-health", fail_occurrence=1)
+    result = engine.main(_args("rollback"), runner=runner)
+    assert result == engine.EXIT_OK
+    assert "command failed" not in capsys.readouterr().err
+    assert _ssh_combined(runner).count("check-health") >= 2
+
+
+def test_pre_cutover_readiness_failure_is_classified(
+    capsys: pytest.CaptureFixture,
+) -> None:
+    class _PreCutoverFail(FakeRunner):
+        def __init__(self) -> None:
+            super().__init__()
+            self._production_db_ready = 0
+
+        def _ssh_respond(self, combined, input_bytes):
+            if "systemd-run" in combined and "check-database-ready" in combined:
+                self._production_db_ready += 1
+                if self._production_db_ready == 1:
+                    raise engine.ReleaseError(
+                        "command failed",
+                        engine.EXIT_TRANSPORT,
+                        remote_exit=4,
+                    )
+            return super()._ssh_respond(combined, input_bytes)
+
+    result = engine.main(_args("deploy"), runner=_PreCutoverFail())
+    captured = capsys.readouterr()
+    assert result == engine.EXIT_READINESS
+    assert "pre-cutover target readiness failed" in captured.err
+    assert "command failed" not in captured.err
 
 
 # --- sanitized output ---

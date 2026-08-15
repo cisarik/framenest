@@ -106,12 +106,20 @@ release prefix before the tree is made non-writable. The completed source and
 `.venv` are root-controlled and non-writable by the service account. Staging is
 renamed to the final release only after every gate passes.
 
-Cutover requires target readiness under the accepted service-account contract,
-then atomically replaces `/opt/framenest/current`, restarts
-`framenest.service` exactly once, and verifies active release identity, service
-state, database readiness, health (including Tailscale UDS ingress), working
-directory, and sanitized logs. Automatic rollback restores the captured
-previous release after a post-switch failure.
+Cutover requires target readiness from ``framenest-production
+check-database-ready`` under the unit ``EnvironmentFile`` contract (not
+``FRAMENEST_ENV_FILE``; that binary ignores the file selector), then atomically
+replaces `/opt/framenest/current`, restarts `framenest.service` exactly once,
+and waits up to 30 seconds with one-second polling for active service state,
+database readiness, and health (including Tailscale UDS ingress). Transient
+`activating`, socket-not-ready, and health-not-ready states are retried;
+terminal systemd states fail immediately; deadline expiry uses
+`EXIT_READINESS_TIMEOUT`. Working directory and sanitized logs are verified
+after readiness. Automatic rollback restores the captured previous release
+after a post-switch failure and uses the same bounded readiness contract.
+Sanitized phase results distinguish pre-cutover readiness, atomic switch,
+restart, readiness timeout, terminal service state, and rollback failure
+without emitting raw stderr or host argv.
 
 ### Backup and schema boundary
 

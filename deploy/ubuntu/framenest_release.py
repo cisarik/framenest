@@ -23,6 +23,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import time
 from typing import Callable, Sequence
 
 PROGRAM = "framenest-release"
@@ -41,6 +42,8 @@ CPYTHON_BIN = (
 EXPECTED_POETRY_VERSION = "2.4.1"
 EXPECTED_CPYTHON_VERSION = "3.13.14"
 REMOTE_DEPLOY_DIR = "/run/framenest-release-deploy"
+READINESS_DEADLINE_SECONDS = 30
+READINESS_POLL_INTERVAL_SECONDS = 1
 
 POETRY_TOML = "[virtualenvs]\nin-project = true\n"
 
@@ -76,9 +79,16 @@ EXIT_PRIVILEGE = 21
 class ReleaseError(Exception):
     """Sanitized failure with a stable exit code."""
 
-    def __init__(self, message: str, exit_code: int = EXIT_TRANSPORT) -> None:
+    def __init__(
+        self,
+        message: str,
+        exit_code: int = EXIT_TRANSPORT,
+        *,
+        remote_exit: int | None = None,
+    ) -> None:
         super().__init__(message)
         self.exit_code = exit_code
+        self.remote_exit = remote_exit
 
 
 # A command runner executes ``argv`` with optional stdin bytes and returns the
@@ -92,7 +102,13 @@ def subprocess_runner(argv: Sequence[str], input_bytes: bytes | None) -> str:
         list(argv), input=input_bytes, capture_output=True, text=False
     )
     if result.returncode != 0:
-        raise ReleaseError("command failed")
+        # Keep stderr and argv out of the operator message. Callers map
+        # remote_exit to a sanitized phase; they must not print it raw.
+        raise ReleaseError(
+            "command failed",
+            EXIT_TRANSPORT,
+            remote_exit=result.returncode,
+        )
     return result.stdout.decode("utf-8", "replace")
 
 
@@ -299,6 +315,14 @@ def cmd_remote_service_is_active() -> str:
     return f"sudo -n systemctl is-active {SERVICE}"
 
 
+def cmd_remote_service_active_state() -> str:
+    return f"sudo -n systemctl show -p ActiveState --value {SERVICE}"
+
+
+def cmd_remote_service_result() -> str:
+    return f"sudo -n systemctl show -p Result --value {SERVICE}"
+
+
 def cmd_remote_systemd_working_directory() -> str:
     return f"sudo -n systemctl show -p WorkingDirectory --value {SERVICE}"
 
@@ -348,15 +372,32 @@ def cmd_remote_backup_status(release_path: str) -> str:
     return f"{service_account_prefix(release_path)}/framenest-backup status"
 
 
-def cmd_remote_check_database_ready(release_path: str) -> str:
+def cmd_remote_production_cli(release_path: str, operation: str) -> str:
+    """Run ``framenest-production`` with the unit EnvironmentFile.
+
+    ``framenest-production`` calls ``load_settings(env_file=None)`` and therefore
+    ignores ``FRAMENEST_ENV_FILE``. The systemd unit supplies process
+    environment via ``EnvironmentFile=``; this helper uses the same contract
+    through a oneshot ``systemd-run`` so secrets never enter argv.
+    """
+    if operation not in ("check-database-ready", "check-health"):
+        raise ReleaseError("invalid command", EXIT_USAGE)
     return (
-        f"{service_account_prefix(release_path)}"
-        "/framenest-production check-database-ready"
+        "sudo -n systemd-run --quiet --pipe --wait --collect "
+        f"--uid={SERVICE_USER} --gid={SERVICE_GROUP} "
+        f"--working-directory={shlex.quote(release_path)} "
+        f"--property=EnvironmentFile={shlex.quote(ENV_FILE)} "
+        f"{shlex.quote(f'{release_path}/.venv/bin/framenest-production')} "
+        f"{operation}"
     )
 
 
+def cmd_remote_check_database_ready(release_path: str) -> str:
+    return cmd_remote_production_cli(release_path, "check-database-ready")
+
+
 def cmd_remote_check_health(release_path: str) -> str:
-    return f"{service_account_prefix(release_path)}/framenest-production check-health"
+    return cmd_remote_production_cli(release_path, "check-health")
 
 
 def cmd_remote_run_scheduled_backup(release_path: str) -> str:
@@ -1051,13 +1092,30 @@ def _cmd_deploy(args: argparse.Namespace, runner: Runner) -> int:
 
         try:
             # Pre-cutover readiness under the target release.
-            ssh(
-                runner,
-                **transport,
-                remote_command=cmd_remote_check_database_ready(target),
-            )
-            ssh(runner, **transport, remote_command=cmd_remote_atomic_switch(target))
-            ssh(runner, **transport, remote_command=cmd_remote_restart_service())
+            try:
+                ssh(
+                    runner,
+                    **transport,
+                    remote_command=cmd_remote_check_database_ready(target),
+                )
+            except ReleaseError as exc:
+                raise ReleaseError(
+                    "pre-cutover target readiness failed", EXIT_READINESS
+                ) from exc
+            try:
+                ssh(
+                    runner,
+                    **transport,
+                    remote_command=cmd_remote_atomic_switch(target),
+                )
+            except ReleaseError as exc:
+                raise ReleaseError("atomic switch failed", EXIT_READINESS) from exc
+            try:
+                ssh(
+                    runner, **transport, remote_command=cmd_remote_restart_service()
+                )
+            except ReleaseError as exc:
+                raise ReleaseError("restart failed", EXIT_READINESS) from exc
             _verify_cutover(runner, transport, target)
         except ReleaseError as exc:
             _rollback(runner, transport, remote_prev)
@@ -1085,20 +1143,74 @@ def _verify_cutover(runner: Runner, transport: dict[str, str], target: str) -> N
     ).strip()
     if current_path != target:
         raise ReleaseError("cutover failed", EXIT_READINESS)
-    active = ssh(
-        runner, **transport, remote_command=cmd_remote_service_is_active()
-    ).strip()
-    if active != "active":
-        raise ReleaseError("service terminal failure", EXIT_SERVICE_TERMINAL)
     working_dir = ssh(
         runner, **transport, remote_command=cmd_remote_systemd_working_directory()
     ).strip()
     if working_dir != CURRENT:
         raise ReleaseError("service working directory is unexpected", EXIT_READINESS)
-    ssh(runner, **transport, remote_command=cmd_remote_check_database_ready(target))
-    ssh(runner, **transport, remote_command=cmd_remote_check_health(target))
+    _wait_ready(runner, transport, target)
     logs = ssh(runner, **transport, remote_command=cmd_remote_journal())
     _assert_logs_sanitized(logs)
+
+
+def _wait_ready(runner: Runner, transport: dict[str, str], target: str) -> None:
+    """Poll service readiness for deploy and rollback.
+
+    Retries transient ``activating``, socket-not-ready, and health-not-ready
+    states for up to 30 seconds. Terminal systemd states fail immediately.
+    Deadline expiry uses ``EXIT_READINESS_TIMEOUT``.
+    """
+    deadline = time.monotonic() + READINESS_DEADLINE_SECONDS
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise ReleaseError(
+                "service readiness deadline exceeded", EXIT_READINESS_TIMEOUT
+            )
+        active = ssh(
+            runner, **transport, remote_command=cmd_remote_service_active_state()
+        ).strip()
+        result_state = ssh(
+            runner, **transport, remote_command=cmd_remote_service_result()
+        ).strip()
+        if active == "failed":
+            raise ReleaseError(
+                "service entered terminal failed state", EXIT_SERVICE_TERMINAL
+            )
+        if (
+            active not in ("active", "activating")
+            and result_state
+            and result_state != "success"
+        ):
+            raise ReleaseError(
+                "service entered terminal failed state", EXIT_SERVICE_TERMINAL
+            )
+        if active == "active":
+            health_ok = True
+            try:
+                ssh(
+                    runner,
+                    **transport,
+                    remote_command=cmd_remote_check_health(target),
+                )
+                ssh(
+                    runner,
+                    **transport,
+                    remote_command=cmd_remote_check_database_ready(target),
+                )
+            except ReleaseError:
+                health_ok = False
+            if health_ok:
+                return
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise ReleaseError(
+                "service readiness deadline exceeded", EXIT_READINESS_TIMEOUT
+            )
+        sleep_for = READINESS_POLL_INTERVAL_SECONDS
+        if remaining < sleep_for:
+            sleep_for = remaining
+        time.sleep(sleep_for)
 
 
 def _assert_logs_sanitized(logs: str) -> None:
@@ -1115,12 +1227,29 @@ def _rollback(runner: Runner, transport: dict[str, str], previous_path: str) -> 
             remote_command=f"sudo -n cat {shlex.quote(previous_path)}",
         ).strip()
         validate_remote_path(prev, RELEASE_ROOT)
-        ssh(runner, **transport, remote_command=cmd_remote_atomic_switch(prev))
-        ssh(runner, **transport, remote_command=cmd_remote_check_database_ready(prev))
-        ssh(runner, **transport, remote_command=cmd_remote_restart_service())
+        try:
+            ssh(runner, **transport, remote_command=cmd_remote_atomic_switch(prev))
+        except ReleaseError as exc:
+            raise ReleaseError("rollback switch failed", EXIT_ROLLBACK) from exc
+        try:
+            ssh(
+                runner,
+                **transport,
+                remote_command=cmd_remote_check_database_ready(prev),
+            )
+        except ReleaseError as exc:
+            raise ReleaseError(
+                "rollback pre-restart readiness failed", EXIT_ROLLBACK
+            ) from exc
+        try:
+            ssh(runner, **transport, remote_command=cmd_remote_restart_service())
+        except ReleaseError as exc:
+            raise ReleaseError("rollback restart failed", EXIT_ROLLBACK) from exc
         _verify_cutover(runner, transport, prev)
     except ReleaseError as exc:
-        raise ReleaseError("rollback failed", EXIT_ROLLBACK) from exc
+        if exc.exit_code == EXIT_ROLLBACK:
+            raise
+        raise ReleaseError(f"rollback failed ({exc})", EXIT_ROLLBACK) from exc
 
 
 def _cmd_rollback(args: argparse.Namespace, runner: Runner) -> int:

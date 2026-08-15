@@ -139,3 +139,19 @@ def test_exit_codes_are_distinct_and_documented() -> None:
         "EXIT_PRIVILEGE",
     ):
         assert code in text
+
+
+def test_adr_documents_environmentfile_production_cli_and_bounded_readiness() -> None:
+    adr = _text(ADR_PATH)
+    assert "EnvironmentFile" in adr
+    assert "FRAMENEST_ENV_FILE" in adr
+    assert "30 seconds" in adr
+    assert "EXIT_READINESS_TIMEOUT" in adr
+    assert "one-second polling" in adr
+
+
+def test_runbook_documents_environmentfile_production_cli_and_bounded_readiness() -> None:
+    text = _text(RUNBOOK_PATH)
+    assert "EnvironmentFile" in text
+    assert "EXIT_READINESS_TIMEOUT" in text
+    assert "30 seconds" in text
