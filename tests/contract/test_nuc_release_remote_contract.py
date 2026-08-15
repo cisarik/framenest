@@ -120,6 +120,8 @@ class FakeRunner:
             return ""
         if "_remote-extract" in combined:
             return ""
+        if "_remote-relocate-venv-shebangs" in combined:
+            return ""
         if "cat > /opt/framenest/releases/" in combined and "poetry.toml" in combined:
             return ""
         if (
@@ -300,6 +302,59 @@ def test_cmd_remote_extract_emits_nested_private_argv_and_extracts(
     with pytest.raises(SystemExit) as exc:
         engine._build_parser().parse_args(
             ["_remote-extract", "--archive", str(archive), "--destination", str(destination)]
+        )
+    assert exc.value.code == 2
+
+
+def test_cmd_remote_relocate_venv_shebangs_emits_nested_private_argv(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Transferred-engine shebang relocation must be nested ``_remote _remote-relocate-venv-shebangs``.
+
+    Top-level ``_remote-relocate-venv-shebangs`` is invalid parser input and must stay so.
+    """
+    monkeypatch.setattr(engine, "RELEASE_ROOT", str(tmp_path))
+    sha = RELEASE
+    staging = tmp_path / f"{sha}.staging"
+    final = tmp_path / sha
+    bindir = staging / ".venv" / "bin"
+    bindir.mkdir(parents=True)
+    (bindir / "framenest-db").write_text(
+        f"#!{staging}/.venv/bin/python\nprint('db')\n", encoding="utf-8"
+    )
+    (bindir / "framenest-backup").write_text(
+        f"#!{staging}/.venv/bin/python\nprint('backup')\n", encoding="utf-8"
+    )
+    remote_engine = str(tmp_path / "framenest_release.py")
+
+    command = engine.cmd_remote_relocate_venv_shebangs(
+        str(staging), str(final), remote_engine
+    )
+    argv = shlex.split(command)
+    assert argv[:3] == ["sudo", "-n", "python3"]
+    remaining = argv[4:]
+
+    parsed = engine._build_parser().parse_args(remaining)
+    assert parsed.command == "_remote"
+    assert parsed.remote_command == "_remote-relocate-venv-shebangs"
+    assert parsed.staging == str(staging)
+    assert parsed.final == str(final)
+
+    result = engine.main(remaining)
+    assert result == engine.EXIT_OK
+    assert (bindir / "framenest-db").read_text(encoding="utf-8").startswith(
+        f"#!{final}/.venv/bin/python"
+    )
+
+    with pytest.raises(SystemExit) as exc:
+        engine._build_parser().parse_args(
+            [
+                "_remote-relocate-venv-shebangs",
+                "--staging",
+                str(staging),
+                "--final",
+                str(final),
+            ]
         )
     assert exc.value.code == 2
 
@@ -509,9 +564,21 @@ def test_deploy_happy_path_sequence(tmp_path: Path, capsys: pytest.CaptureFixtur
     # Engine transfer precedes archive transfers.
     assert _index(runner, "framenest_release.py") < _index(runner, "superproject.tar")
     assert _index(runner, "superproject.tar") < _index(runner, "ap.tar")
-    # Poetry before chown/chmod before rename.
-    assert _index(runner, "install --only main") < _index(runner, "chown -R root:root")
+    # Poetry install, then shebang rewrite, then chown/chmod, then rename.
+    assert _index(runner, "install --only main") < _index(
+        runner, "_remote-relocate-venv-shebangs"
+    )
+    assert _index(runner, "_remote-relocate-venv-shebangs") < _index(
+        runner, "chmod -R a-w"
+    )
+    assert _index(runner, "_remote-relocate-venv-shebangs") < _index(
+        runner, "chown -R root:root"
+    )
     assert _index(runner, "chown -R root:root") < _index(runner, "mv /opt/framenest/releases/")
+    assert _index(runner, "chmod -R a-w") < _index(runner, "mv /opt/framenest/releases/")
+    assert _index(runner, "mv /opt/framenest/releases/") < _index(
+        runner, "framenest-db status"
+    )
     # Schema and checkpoint before atomic switch.
     assert _index(runner, "framenest-db status") < _index(runner, "ln -s")
     assert _index(runner, "framenest-backup run-scheduled") < _index(runner, "ln -s")

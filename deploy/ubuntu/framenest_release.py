@@ -375,6 +375,17 @@ def cmd_remote_extract(archive_path: str, destination: str, engine_path: str) ->
     )
 
 
+def cmd_remote_relocate_venv_shebangs(
+    staging_path: str, final_path: str, engine_path: str
+) -> str:
+    return (
+        f"sudo -n python3 {shlex.quote(engine_path)} _remote "
+        f"_remote-relocate-venv-shebangs "
+        f"--staging {shlex.quote(staging_path)} "
+        f"--final {shlex.quote(final_path)}"
+    )
+
+
 def cmd_remote_cat_stdin(path: str) -> str:
     """Write runner stdin to ``path``; payload bytes must not enter the command string."""
     return f"sudo -n sh -c 'umask 077; cat > {shlex.quote(path)}'"
@@ -557,6 +568,57 @@ def remote_extract(runner: Runner, archive: str, destination: str) -> None:
         raise ReleaseError("archive extraction failed", EXIT_UNSAFE_ARCHIVE) from exc
 
 
+def relocate_venv_shebangs(staging_path: str, final_path: str) -> None:
+    """Rewrite staging-prefix shebangs under ``.venv/bin`` to the final release path."""
+    validate_remote_path(staging_path, RELEASE_ROOT)
+    validate_remote_path(final_path, RELEASE_ROOT)
+    if staging_path != f"{final_path}.staging":
+        raise ReleaseError("staging path does not match release", EXIT_TRANSPORT)
+
+    venv_bin = Path(staging_path) / ".venv" / "bin"
+    if not venv_bin.is_dir():
+        raise ReleaseError("release venv is missing", EXIT_POETRY)
+
+    rewritten = 0
+    for path in sorted(venv_bin.iterdir()):
+        if path.is_symlink() or not path.is_file():
+            continue
+        try:
+            text = path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            continue
+        if not text.startswith("#!"):
+            continue
+        if staging_path not in text:
+            continue
+        replacement = text.replace(staging_path, final_path)
+        mode = path.stat().st_mode
+        path.write_text(replacement, encoding="utf-8")
+        path.chmod(mode)
+        rewritten += 1
+
+    if rewritten == 0:
+        raise ReleaseError("venv shebangs were not relocated", EXIT_POETRY)
+
+    for name in ("framenest-db", "framenest-backup"):
+        script = venv_bin / name
+        if not script.is_file() or script.is_symlink():
+            raise ReleaseError("required console script is missing", EXIT_POETRY)
+        content = script.read_text(encoding="utf-8")
+        if ".staging" in content:
+            raise ReleaseError("console script still names staging path", EXIT_POETRY)
+        first = content.splitlines()[0] if content else ""
+        expected = f"#!{final_path}/.venv/bin/python"
+        if not first.startswith(expected):
+            raise ReleaseError("console script does not name release interpreter", EXIT_POETRY)
+
+
+def remote_relocate_venv_shebangs(
+    runner: Runner, staging_path: str, final_path: str
+) -> None:
+    relocate_venv_shebangs(staging_path, final_path)
+
+
 # ---------------------------------------------------------------------------
 # Status and check read-only remote probes
 # ---------------------------------------------------------------------------
@@ -667,6 +729,11 @@ def _build_parser() -> argparse.ArgumentParser:
     remote_extract_p = remote_sub.add_parser("_remote-extract", help=argparse.SUPPRESS)
     remote_extract_p.add_argument("--archive", required=True)
     remote_extract_p.add_argument("--destination", required=True)
+    remote_relocate_p = remote_sub.add_parser(
+        "_remote-relocate-venv-shebangs", help=argparse.SUPPRESS
+    )
+    remote_relocate_p.add_argument("--staging", required=True)
+    remote_relocate_p.add_argument("--final", required=True)
 
     return parser
 
@@ -718,6 +785,9 @@ def main(
 def _cmd_remote(args: argparse.Namespace, runner: Runner) -> int:
     if args.remote_command == "_remote-extract":
         remote_extract(runner, args.archive, args.destination)
+        return EXIT_OK
+    if args.remote_command == "_remote-relocate-venv-shebangs":
+        remote_relocate_venv_shebangs(runner, args.staging, args.final)
         return EXIT_OK
     raise ReleaseError("invalid remote command", EXIT_USAGE)
 
@@ -893,6 +963,13 @@ def _cmd_deploy(args: argparse.Namespace, runner: Runner) -> int:
         if lock_before != lock_after:
             raise ReleaseError("poetry.lock changed during installation", EXIT_POETRY)
 
+        ssh(
+            runner,
+            **transport,
+            remote_command=cmd_remote_relocate_venv_shebangs(
+                staging, target, remote_engine
+            ),
+        )
         ssh(runner, **transport, remote_command=cmd_remote_chown_root(staging))
         ssh(
             runner,

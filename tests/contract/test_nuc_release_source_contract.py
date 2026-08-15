@@ -211,3 +211,46 @@ def test_validate_remote_path_bounds_paths() -> None:
         engine.validate_remote_path("/etc/passwd", engine.RELEASE_ROOT)
     with pytest.raises(engine.ReleaseError):
         engine.validate_remote_path("/opt/framenest/../etc", engine.RELEASE_ROOT)
+
+
+def test_relocate_venv_shebangs_rewrites_staging_prefix_only(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(engine, "RELEASE_ROOT", str(tmp_path))
+    staging = tmp_path / f"{RELEASE}.staging"
+    final = tmp_path / RELEASE
+    bindir = staging / ".venv" / "bin"
+    bindir.mkdir(parents=True)
+    db = bindir / "framenest-db"
+    backup = bindir / "framenest-backup"
+    untouched = bindir / "other-tool"
+    original_untouched = "#!/usr/bin/env python3\nprint('leave me')\n"
+    db.write_text(f"#!{staging}/.venv/bin/python\nprint('db')\n", encoding="utf-8")
+    backup.write_text(f"#!{staging}/.venv/bin/python\nprint('backup')\n", encoding="utf-8")
+    untouched.write_text(original_untouched, encoding="utf-8")
+
+    engine.relocate_venv_shebangs(str(staging), str(final))
+
+    db_text = db.read_text(encoding="utf-8")
+    backup_text = backup.read_text(encoding="utf-8")
+    assert db_text.splitlines()[0] == f"#!{final}/.venv/bin/python"
+    assert backup_text.splitlines()[0] == f"#!{final}/.venv/bin/python"
+    assert ".staging" not in db_text
+    assert ".staging" not in backup_text
+    assert untouched.read_text(encoding="utf-8") == original_untouched
+
+
+def test_relocate_venv_shebangs_fails_closed_when_none_rewritten(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(engine, "RELEASE_ROOT", str(tmp_path))
+    staging = tmp_path / f"{RELEASE}.staging"
+    final = tmp_path / RELEASE
+    bindir = staging / ".venv" / "bin"
+    bindir.mkdir(parents=True)
+    (bindir / "framenest-db").write_text("#!/usr/bin/env python3\n", encoding="utf-8")
+    (bindir / "framenest-backup").write_text("#!/usr/bin/env python3\n", encoding="utf-8")
+
+    with pytest.raises(engine.ReleaseError) as exc:
+        engine.relocate_venv_shebangs(str(staging), str(final))
+    assert exc.value.exit_code == engine.EXIT_POETRY

@@ -99,7 +99,9 @@ member outside its designated root. Pinned AP content is materialized under
 Preparation writes a deployment-local `poetry.toml` (`[virtualenvs]
 in-project = true`), runs `poetry check --lock`, `poetry env use <tooling
 CPython>`, and `poetry install --only main --no-interaction --no-ansi`, and
-verifies the committed `poetry.lock` is not changed. The completed source and
+verifies the committed `poetry.lock` is not changed. Console-script shebangs
+are rewritten from the staging prefix to the final release prefix before the
+tree is made non-writable. The completed source and
 `.venv` are root-controlled and non-writable by the service account. Staging is
 renamed to the final release only after every gate passes.
 
