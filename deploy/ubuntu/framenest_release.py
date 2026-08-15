@@ -569,25 +569,27 @@ def remote_extract(runner: Runner, archive: str, destination: str) -> None:
 
 
 def relocate_venv_shebangs(staging_path: str, final_path: str) -> None:
-    """Rewrite staging-prefix shebangs under ``.venv/bin`` to the final release path."""
+    """Rewrite staging-prefix paths under ``.venv`` to the final release path.
+
+    Covers console-script shebangs and editable-install metadata such as
+    ``.pth`` and ``direct_url.json``.
+    """
     validate_remote_path(staging_path, RELEASE_ROOT)
     validate_remote_path(final_path, RELEASE_ROOT)
     if staging_path != f"{final_path}.staging":
         raise ReleaseError("staging path does not match release", EXIT_TRANSPORT)
 
-    venv_bin = Path(staging_path) / ".venv" / "bin"
-    if not venv_bin.is_dir():
+    venv_root = Path(staging_path) / ".venv"
+    if not venv_root.is_dir():
         raise ReleaseError("release venv is missing", EXIT_POETRY)
 
     rewritten = 0
-    for path in sorted(venv_bin.iterdir()):
+    for path in sorted(venv_root.rglob("*")):
         if path.is_symlink() or not path.is_file():
             continue
         try:
             text = path.read_text(encoding="utf-8")
         except UnicodeDecodeError:
-            continue
-        if not text.startswith("#!"):
             continue
         if staging_path not in text:
             continue
@@ -598,8 +600,9 @@ def relocate_venv_shebangs(staging_path: str, final_path: str) -> None:
         rewritten += 1
 
     if rewritten == 0:
-        raise ReleaseError("venv shebangs were not relocated", EXIT_POETRY)
+        raise ReleaseError("venv staging paths were not relocated", EXIT_POETRY)
 
+    venv_bin = venv_root / "bin"
     for name in ("framenest-db", "framenest-backup"):
         script = venv_bin / name
         if not script.is_file() or script.is_symlink():
@@ -611,6 +614,20 @@ def relocate_venv_shebangs(staging_path: str, final_path: str) -> None:
         expected = f"#!{final_path}/.venv/bin/python"
         if not first.startswith(expected):
             raise ReleaseError("console script does not name release interpreter", EXIT_POETRY)
+
+    for path in sorted(venv_root.rglob("*")):
+        if path.is_symlink() or not path.is_file():
+            continue
+        if path.suffix != ".pth" and path.name != "direct_url.json":
+            continue
+        try:
+            content = path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            raise ReleaseError("editable install metadata is not text", EXIT_POETRY)
+        if ".staging" in content:
+            raise ReleaseError(
+                "editable install metadata still names staging path", EXIT_POETRY
+            )
 
 
 def remote_relocate_venv_shebangs(

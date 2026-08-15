@@ -254,3 +254,89 @@ def test_relocate_venv_shebangs_fails_closed_when_none_rewritten(
     with pytest.raises(engine.ReleaseError) as exc:
         engine.relocate_venv_shebangs(str(staging), str(final))
     assert exc.value.exit_code == engine.EXIT_POETRY
+
+
+def _editable_metadata_tree(tmp_path: Path) -> tuple[Path, Path, Path, Path, Path, Path]:
+    staging = tmp_path / f"{RELEASE}.staging"
+    final = tmp_path / RELEASE
+    bindir = staging / ".venv" / "bin"
+    site = staging / ".venv" / "lib" / "python3.13" / "site-packages"
+    dist = site / "framenest-0.1.0.dist-info"
+    bindir.mkdir(parents=True)
+    dist.mkdir(parents=True)
+    db = bindir / "framenest-db"
+    backup = bindir / "framenest-backup"
+    db.write_text(f"#!{staging}/.venv/bin/python\nprint('db')\n", encoding="utf-8")
+    backup.write_text(f"#!{staging}/.venv/bin/python\nprint('backup')\n", encoding="utf-8")
+    pth = site / "framenest.pth"
+    direct_url = dist / "direct_url.json"
+    sibling = site / "unrelated.txt"
+    return staging, final, pth, direct_url, sibling, db
+
+
+def test_relocate_venv_rewrites_editable_pth_and_direct_url(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(engine, "RELEASE_ROOT", str(tmp_path))
+    staging, final, pth, direct_url, sibling, db = _editable_metadata_tree(tmp_path)
+    pth.write_text(f"{staging}/src\n", encoding="utf-8")
+    direct_url.write_text(
+        f'{{"url": "file://{staging}", "dir_info": {{"editable": true}}}}\n',
+        encoding="utf-8",
+    )
+    original_sibling = "no staging prefix here\n"
+    sibling.write_text(original_sibling, encoding="utf-8")
+
+    engine.relocate_venv_shebangs(str(staging), str(final))
+
+    db_text = db.read_text(encoding="utf-8")
+    pth_text = pth.read_text(encoding="utf-8")
+    direct_text = direct_url.read_text(encoding="utf-8")
+    assert db_text.splitlines()[0] == f"#!{final}/.venv/bin/python"
+    assert pth_text == f"{final}/src\n"
+    assert direct_text == (
+        f'{{"url": "file://{final}", "dir_info": {{"editable": true}}}}\n'
+    )
+    assert ".staging" not in db_text
+    assert ".staging" not in pth_text
+    assert ".staging" not in direct_text
+    assert engine.CPYTHON_BIN not in db_text
+    assert sibling.read_text(encoding="utf-8") == original_sibling
+
+
+def test_relocate_venv_fails_closed_when_pth_retains_staging(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(engine, "RELEASE_ROOT", str(tmp_path))
+    staging, final, pth, direct_url, sibling, _db = _editable_metadata_tree(tmp_path)
+    leftover = tmp_path / f"{'b' * 40}.staging"
+    pth.write_text(f"{leftover}/src\n", encoding="utf-8")
+    direct_url.write_text(
+        f'{{"url": "file://{final}", "dir_info": {{"editable": true}}}}\n',
+        encoding="utf-8",
+    )
+    sibling.write_text("no staging prefix here\n", encoding="utf-8")
+
+    with pytest.raises(engine.ReleaseError) as exc:
+        engine.relocate_venv_shebangs(str(staging), str(final))
+    assert exc.value.exit_code == engine.EXIT_POETRY
+    assert ".staging" in pth.read_text(encoding="utf-8")
+
+
+def test_relocate_venv_fails_closed_when_direct_url_retains_staging(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(engine, "RELEASE_ROOT", str(tmp_path))
+    staging, final, pth, direct_url, sibling, _db = _editable_metadata_tree(tmp_path)
+    leftover = tmp_path / f"{'b' * 40}.staging"
+    pth.write_text(f"{final}/src\n", encoding="utf-8")
+    direct_url.write_text(
+        f'{{"url": "file://{leftover}", "dir_info": {{"editable": true}}}}\n',
+        encoding="utf-8",
+    )
+    sibling.write_text("no staging prefix here\n", encoding="utf-8")
+
+    with pytest.raises(engine.ReleaseError) as exc:
+        engine.relocate_venv_shebangs(str(staging), str(final))
+    assert exc.value.exit_code == engine.EXIT_POETRY
+    assert ".staging" in direct_url.read_text(encoding="utf-8")
