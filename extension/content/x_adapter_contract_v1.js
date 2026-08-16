@@ -16,6 +16,17 @@
       "input[type='file'][accept*='image']",
       "input[type='file']",
     ]),
+    actionGroupSelectors: Object.freeze(["[role='group']"]),
+    actionBarSignals: Object.freeze([
+      "[data-testid='reply']",
+      "[data-testid='retweet']",
+      "[data-testid='like']",
+    ]),
+    shareSelectors: Object.freeze([
+      "[data-testid='share']",
+      "[aria-label='Share post']",
+      "[aria-label='Share']",
+    ]),
     requiredSignals: Object.freeze(["permalink", "composerFileInput"]),
   });
   if (typeof module !== "undefined" && module.exports) {

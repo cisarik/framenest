@@ -8,9 +8,9 @@ deployment, signed-in X probing, or a yt-dlp pin change.
 
 An authenticated FrameNest user can:
 
-- click **Save to FrameNest** on an eligible X post (existing X request
-  lifecycle; static X photographs currently fail closed as
-  `X_NO_SUPPORTED_MEDIA`);
+- click the action-row **Save to FrameNest** control next to Share on an
+  eligible X post (existing X request lifecycle; static X photographs
+  currently fail closed as `X_NO_SUPPORTED_MEDIA`);
 - open the FrameNest picker while an X composer is active;
 - attach one published meme or one of that user's own live successful X media
   items (JPEG/PNG, GIF-style, or short video) onto the composer file input.

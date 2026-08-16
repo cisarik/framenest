@@ -8,6 +8,20 @@
     <article data-framenest-post data-testid="tweet">
       <a href="https://x.com/fixture/status/123456789">permalink</a>
       <time>now</time>
+      <div role="group" aria-label="Tweet actions">
+        <div>
+          <button type="button" data-testid="reply" aria-label="Reply">Reply</button>
+        </div>
+        <div>
+          <button type="button" data-testid="retweet" aria-label="Repost">Repost</button>
+        </div>
+        <div>
+          <button type="button" data-testid="like" aria-label="Like">Like</button>
+        </div>
+        <div>
+          <button type="button" aria-label="Share post">Share</button>
+        </div>
+      </div>
     </article>
     <form data-framenest-composer>
       <div data-testid="tweetTextarea_0" contenteditable="true"></div>

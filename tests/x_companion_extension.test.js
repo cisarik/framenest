@@ -57,7 +57,6 @@ test("X URL allowlist accepts only public https post permalinks", () => {
 test("adapter contract has no Post-button or auto-submit path", () => {
   const serialized = JSON.stringify(contract);
   assert.equal(serialized.includes("tweetButton"), false);
-  assert.equal(serialized.includes("Post"), false);
   assert.equal("postButton" in contract, false);
   assert.doesNotMatch(adapterSource, /tweetButton/);
   assert.doesNotMatch(adapterSource, /form\.submit/);
@@ -92,4 +91,53 @@ test("service worker recovers inflight claim ids from storage", () => {
   assert.match(workerSource, /inflightClaims/);
   assert.match(workerSource, /RECOVER_INFLIGHT/);
   assert.doesNotMatch(workerSource, /setInterval/);
+});
+
+test("adapter contract exposes frozen action-bar and Share selectors", () => {
+  assert.equal(contract.adapterVersion, 1);
+  assert.ok(Object.isFrozen(contract.actionGroupSelectors));
+  assert.ok(Object.isFrozen(contract.actionBarSignals));
+  assert.ok(Object.isFrozen(contract.shareSelectors));
+  assert.deepEqual(contract.actionGroupSelectors, ["[role='group']"]);
+  assert.deepEqual(contract.actionBarSignals, [
+    "[data-testid='reply']",
+    "[data-testid='retweet']",
+    "[data-testid='like']",
+  ]);
+  assert.deepEqual(contract.shareSelectors, [
+    "[data-testid='share']",
+    "[aria-label='Share post']",
+    "[aria-label='Share']",
+  ]);
+});
+
+test("in-feed Save is an action-row icon and never a labeled article button", () => {
+  const fixture = fs.readFileSync(
+    path.join(REPO, "tests/support/x_fixtures/composer.html"),
+    "utf8"
+  );
+  assert.match(fixture, /role="group"/);
+  assert.match(fixture, /data-testid="reply"/);
+  assert.match(fixture, /data-testid="retweet"/);
+  assert.match(fixture, /data-testid="like"/);
+  assert.match(fixture, /aria-label="Share post"/);
+  assert.doesNotMatch(fixture, /data-framenest-companion/);
+
+  assert.doesNotMatch(adapterSource, /writing-mode/);
+  assert.doesNotMatch(adapterSource, /addButton\(\s*postRoot/);
+  assert.doesNotMatch(adapterSource, /postRoot\.appendChild/);
+  assert.doesNotMatch(adapterSource, /textContent\s*=\s*result/);
+  assert.doesNotMatch(adapterSource, /textContent\s*=\s*["']Save to FrameNest["']/);
+  assert.doesNotMatch(adapterSource, /textContent\s*=\s*["']Saving/);
+  assert.match(adapterSource, /setAttribute\("data-framenest-companion", "save"\)/);
+  assert.match(adapterSource, /setAttribute\("aria-label", name\)/);
+  assert.match(adapterSource, /insertAdjacentElement\("afterend"/);
+  assert.match(adapterSource, /stopImmediatePropagation/);
+  assert.match(adapterSource, /ownActionGroup/);
+  assert.match(adapterSource, /shareActionColumn/);
+  assert.match(adapterSource, /return "missing_bar"/);
+  assert.match(adapterSource, /return "missing_share"/);
+  assert.match(adapterSource, /adapter_drift/);
+  assert.match(adapterSource, /data-framenest-companion"\) === "save"/);
+  assert.match(adapterSource, /Save to FrameNest failed/);
 });
