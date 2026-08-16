@@ -21,12 +21,16 @@ def _tailscale_values(**overrides: object) -> dict[str, object]:
     return values
 
 
+VALID_EXTENSION_ORIGIN = "chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+
+
 def test_default_ingress_mode_is_tcp_without_remote_fields() -> None:
     settings = FrameNestSettings(_env_file=None)
     assert settings.ingress_mode == "tcp"
     assert settings.uds_path is None
     assert settings.external_origin is None
     assert settings.identity_map == {}
+    assert settings.companion_extension_origins == []
 
 
 def test_tailscale_uds_mode_accepts_exact_configuration() -> None:
@@ -135,3 +139,51 @@ def test_ingress_env_vars_do_not_leak_into_repr() -> None:
     rendered = repr(settings)
     assert "aecrypto@gmail.com" not in rendered
     assert "framenest.sock" not in rendered
+
+
+def test_companion_extension_origins_accept_exact_chrome_ids() -> None:
+    settings = FrameNestSettings(
+        **_tailscale_values(companion_extension_origins=[VALID_EXTENSION_ORIGIN]),
+        _env_file=None,
+    )
+    assert settings.companion_extension_origins == [VALID_EXTENSION_ORIGIN]
+
+
+@pytest.mark.parametrize(
+    "origins",
+    [
+        ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaQ"],
+        ["chrome-extension://short"],
+        ["https://evil.example"],
+        ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/path"],
+        ["CHROME-EXTENSION://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"],
+        [VALID_EXTENSION_ORIGIN, VALID_EXTENSION_ORIGIN],
+        [VALID_EXTENSION_ORIGIN] * 5,
+        "chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    ],
+)
+def test_companion_extension_origins_reject_inexact_values(origins: object) -> None:
+    with pytest.raises(ValidationError):
+        FrameNestSettings(
+            **_tailscale_values(companion_extension_origins=origins),
+            _env_file=None,
+        )
+
+
+def test_companion_extension_origins_load_from_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("FRAMENEST_INGRESS_MODE", "tailscale_uds")
+    monkeypatch.setenv("FRAMENEST_UDS_PATH", "/run/framenest/framenest.sock")
+    monkeypatch.setenv(
+        "FRAMENEST_EXTERNAL_ORIGIN", "https://nuc-1.tail247768.ts.net"
+    )
+    monkeypatch.setenv(
+        "FRAMENEST_IDENTITY_MAP", '{"aecrypto@gmail.com": "admin"}'
+    )
+    monkeypatch.setenv(
+        "FRAMENEST_COMPANION_EXTENSION_ORIGINS",
+        '["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"]',
+    )
+    settings = FrameNestSettings(_env_file=None)
+    assert settings.companion_extension_origins == [VALID_EXTENSION_ORIGIN]

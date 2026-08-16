@@ -33,10 +33,24 @@ def test_x_request_routes_require_x_request_capability() -> None:
         ("GET", "/api/x/requests"),
         ("GET", "/api/x/requests/00000000-0000-4000-8000-000000000000"),
         ("POST", "/api/x/requests/00000000-0000-4000-8000-000000000000/retry"),
+        ("GET", "/api/x/companion/media"),
     ]:
-        policy, _match = find_route_policy(method, path)
-        assert policy is not None
+        policy, match = find_route_policy(method, path)
+        assert match is not None
         assert policy.capability == CAPABILITY_X_REQUEST
+
+
+def test_only_x_request_mutations_are_companion_flagged() -> None:
+    submit, submit_match = find_route_policy("POST", "/api/x/requests")
+    retry, retry_match = find_route_policy(
+        "POST", "/api/x/requests/00000000-0000-4000-8000-000000000000/retry"
+    )
+    picker, picker_match = find_route_policy("GET", "/api/x/companion/media")
+    tags, tags_match = find_route_policy("POST", "/api/canonical-tags")
+    assert submit_match is not None and submit.companion_mutation is True
+    assert retry_match is not None and retry.companion_mutation is True
+    assert picker_match is not None and picker.companion_mutation is False
+    assert tags_match is not None and tags.companion_mutation is False
 
 
 def test_x_admin_route_requires_x_acquire_capability() -> None:

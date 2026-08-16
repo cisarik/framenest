@@ -1391,3 +1391,145 @@ def test_requester_private_media_detail_reaches_application_through_ingress(
         assert _error_code(foreign_metadata) != "NOT_FOUND"
         assert _error_code(foreign_content) != "NOT_FOUND"
         assert _error_code(foreign_download) != "NOT_FOUND"
+
+
+# --- Companion extension origin allowlist --------------------------------
+
+
+COMPANION_ORIGIN = "chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+SPOOFED_COMPANION_ORIGIN = "chrome-extension://bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+
+
+@pytest.fixture
+def companion_client(tmp_path: Path):
+    settings = FrameNestSettings(
+        database_path=tmp_path / "catalog.sqlite3",
+        gallery_preview_cache_path=tmp_path / "previews",
+        ingress_mode="tailscale_uds",
+        uds_path=tmp_path / "framenest.sock",
+        external_origin=EXTERNAL_ORIGIN,
+        identity_map={ADMIN_LOGIN: "admin", USER_LOGIN: "user"},
+        companion_extension_origins=[COMPANION_ORIGIN],
+        _env_file=None,
+    )
+    upgrade_database_to_head(settings)
+    app = create_app(settings=settings)
+    with TestClient(app) as client:
+        yield client, settings
+
+
+def _companion_mutation_headers(login: str = USER_LOGIN) -> dict[str, str]:
+    return {
+        **_serve_headers(login, "User"),
+        "Origin": COMPANION_ORIGIN,
+        "X-FrameNest-Request": "1",
+    }
+
+
+def test_companion_origin_is_accepted_only_on_flagged_x_request_routes(
+    companion_client,
+) -> None:
+    client, settings = companion_client
+    submit = client.post(
+        "/api/x/requests",
+        headers=_companion_mutation_headers(),
+        json={"url": "https://x.com/a/status/123456789"},
+    )
+    retry = client.post(
+        f"/api/x/requests/{uuid.uuid4()}/retry",
+        headers=_companion_mutation_headers(),
+        json={},
+    )
+    unflagged = client.post(
+        "/api/canonical-tags",
+        headers=_companion_mutation_headers(ADMIN_LOGIN),
+        json={"key": "alpha", "display_name": "Alpha"},
+    )
+
+    assert submit.status_code != 403 or _error_code(submit) != "MUTATION_ORIGIN_FORBIDDEN"
+    assert _error_code(submit) != "MUTATION_ORIGIN_FORBIDDEN"
+    assert retry.status_code != 403 or _error_code(retry) != "MUTATION_ORIGIN_FORBIDDEN"
+    assert _error_code(retry) != "MUTATION_ORIGIN_FORBIDDEN"
+    assert unflagged.status_code == 403
+    assert _error_code(unflagged) == "MUTATION_ORIGIN_FORBIDDEN"
+    assert "access-control-allow-origin" not in submit.headers
+    rows = _audit_rows(settings.database_path)
+    assert any(row["action"] == "x.request.submit" for row in rows)
+
+
+def test_empty_companion_allowlist_rejects_extension_origin(
+    tailscale_client,
+) -> None:
+    client, _ = tailscale_client
+    response = client.post(
+        "/api/x/requests",
+        headers=_companion_mutation_headers(),
+        json={"url": "https://x.com/a/status/123456789"},
+    )
+    assert response.status_code == 403
+    assert _error_code(response) == "MUTATION_ORIGIN_FORBIDDEN"
+
+
+def test_spoofed_or_absent_companion_origin_is_rejected(companion_client) -> None:
+    client, _ = companion_client
+    spoofed = client.post(
+        "/api/x/requests",
+        headers={
+            **_serve_headers(USER_LOGIN, "User"),
+            "Origin": SPOOFED_COMPANION_ORIGIN,
+            "X-FrameNest-Request": "1",
+        },
+        json={"url": "https://x.com/a/status/123456789"},
+    )
+    missing = client.post(
+        "/api/x/requests",
+        headers={
+            **_serve_headers(USER_LOGIN, "User"),
+            "X-FrameNest-Request": "1",
+        },
+        json={"url": "https://x.com/a/status/123456789"},
+    )
+    missing_header = client.post(
+        "/api/x/requests",
+        headers={
+            **_serve_headers(USER_LOGIN, "User"),
+            "Origin": COMPANION_ORIGIN,
+        },
+        json={"url": "https://x.com/a/status/123456789"},
+    )
+    assert spoofed.status_code == 403
+    assert _error_code(spoofed) == "MUTATION_ORIGIN_FORBIDDEN"
+    assert missing.status_code == 403
+    assert _error_code(missing) == "MUTATION_ORIGIN_FORBIDDEN"
+    assert missing_header.status_code == 403
+    assert _error_code(missing_header) == "MUTATION_HEADER_REQUIRED"
+
+
+def test_web_ui_mutation_path_is_unchanged_when_companion_origins_are_configured(
+    companion_client,
+) -> None:
+    client, _ = companion_client
+    response = client.post(
+        "/api/canonical-tags",
+        headers=_mutation_headers(),
+        json={"key": "nu", "display_name": "Nu"},
+    )
+    assert response.status_code == 201
+
+
+def test_companion_picker_route_is_readable_without_mutation_origin(
+    companion_client,
+) -> None:
+    client, _ = companion_client
+    response = client.get(
+        "/api/x/companion/media",
+        headers=_serve_headers(USER_LOGIN, "User"),
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["companion_api_version"] == "framenest-companion.v1"
+    assert payload["items"] == []
+    assert response.headers.get("cache-control") == "no-store"
+    assert "access-control-allow-origin" not in response.headers
+
+

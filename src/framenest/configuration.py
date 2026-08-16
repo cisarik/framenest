@@ -5,6 +5,7 @@ from __future__ import annotations
 from ipaddress import ip_address
 import os
 from pathlib import Path
+import re
 import tempfile
 from typing import Any
 import uuid
@@ -53,9 +54,15 @@ INGRESS_MODE_TCP = "tcp"
 INGRESS_MODE_TAILSCALE_UDS = "tailscale_uds"
 SUPPORTED_INGRESS_MODES = frozenset({INGRESS_MODE_TCP, INGRESS_MODE_TAILSCALE_UDS})
 MAX_EXTERNAL_ORIGIN_LENGTH = 255
+MAX_COMPANION_EXTENSION_ORIGINS = 4
+_CHROME_EXTENSION_ORIGIN_PATTERN = re.compile(r"^chrome-extension://[a-p]{32}$")
 _INGRESS_CONFIGURATION_MESSAGE = (
     "Tailscale UDS ingress requires an explicit UDS path, an exact https "
     "external origin, and at least one configured admin identity."
+)
+_COMPANION_EXTENSION_ORIGIN_MESSAGE = (
+    "companion extension origins must be at most four unique exact "
+    "chrome-extension:// origins"
 )
 
 
@@ -204,6 +211,7 @@ class FrameNestSettings(BaseSettings):
     ingress_mode: str = Field(default=INGRESS_MODE_TCP)
     uds_path: Path | None = Field(default=None, repr=False)
     external_origin: str | None = Field(default=None)
+    companion_extension_origins: list[str] = Field(default_factory=list)
     identity_map: dict[str, str] = Field(default_factory=dict, repr=False)
     automatic_media_analysis_enabled: bool = Field(default=False)
     automatic_media_analysis_max_attempts: int = Field(
@@ -381,6 +389,26 @@ class FrameNestSettings(BaseSettings):
             normalized
         ):
             raise ValueError("external origin must be an exact https origin")
+        return normalized
+
+    @field_validator("companion_extension_origins")
+    @classmethod
+    def validate_companion_extension_origins(cls, value: list[str]) -> list[str]:
+        if not isinstance(value, list):
+            raise ValueError(_COMPANION_EXTENSION_ORIGIN_MESSAGE)
+        if len(value) > MAX_COMPANION_EXTENSION_ORIGINS:
+            raise ValueError(_COMPANION_EXTENSION_ORIGIN_MESSAGE)
+        normalized: list[str] = []
+        seen: set[str] = set()
+        for item in value:
+            if not isinstance(item, str) or _CHROME_EXTENSION_ORIGIN_PATTERN.fullmatch(
+                item
+            ) is None:
+                raise ValueError(_COMPANION_EXTENSION_ORIGIN_MESSAGE)
+            if item in seen:
+                raise ValueError(_COMPANION_EXTENSION_ORIGIN_MESSAGE)
+            seen.add(item)
+            normalized.append(item)
         return normalized
 
     @field_validator("identity_map")

@@ -124,6 +124,7 @@ class RoutePolicy:
         "audit_action",
         "audit_target_type",
         "audit_target_group",
+        "companion_mutation",
     )
 
     def __init__(
@@ -136,6 +137,7 @@ class RoutePolicy:
         audit_action: str | None = None,
         audit_target_type: str | None = None,
         audit_target_group: str | None = None,
+        companion_mutation: bool = False,
     ) -> None:
         self.method = method
         self.pattern = _compile_template(template)
@@ -144,6 +146,7 @@ class RoutePolicy:
         self.audit_action = audit_action
         self.audit_target_type = audit_target_type
         self.audit_target_group = audit_target_group
+        self.companion_mutation = companion_mutation
 
     def match(self, method: str, path: str) -> re.Match[str] | None:
         if method != self.method:
@@ -454,11 +457,17 @@ ROUTE_POLICIES: tuple[RoutePolicy, ...] = (
         audit_target_group="claim_id",
     ),
     RoutePolicy(
+        method="GET",
+        template="/api/x/companion/media",
+        capability=CAPABILITY_X_REQUEST,
+    ),
+    RoutePolicy(
         method="POST",
         template="/api/x/requests",
         capability=CAPABILITY_X_REQUEST,
         audit_action="x.request.submit",
         audit_target_type="x_request",
+        companion_mutation=True,
     ),
     RoutePolicy(
         method="POST",
@@ -467,6 +476,7 @@ ROUTE_POLICIES: tuple[RoutePolicy, ...] = (
         audit_action="x.request.retry",
         audit_target_type="x_request",
         audit_target_group="claim_id",
+        companion_mutation=True,
     ),
     RoutePolicy(
         method="POST",
@@ -547,6 +557,7 @@ class TailscaleIngressMiddleware:
         identity_mapping: Mapping[str, IdentityMappingEntry],
         external_origin: str,
         audit_recorder: object,
+        companion_extension_origins: tuple[str, ...] = (),
     ) -> None:
         if audit_recorder is None:
             raise TypeError("security audit recorder is required")
@@ -555,6 +566,7 @@ class TailscaleIngressMiddleware:
         self._external_origin = external_origin
         self._external_host = external_origin.removeprefix("https://")
         self._audit_recorder = audit_recorder
+        self._companion_extension_origins = frozenset(companion_extension_origins)
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope.get("type") != "http":
@@ -627,7 +639,12 @@ class TailscaleIngressMiddleware:
 
         if method in _UNSAFE_METHODS:
             origin = _decode_text(_single_value(header_map, HEADER_ORIGIN))
-            if origin != self._external_origin:
+            if not _mutation_origin_allowed(
+                origin=origin,
+                external_origin=self._external_origin,
+                companion_mutation=policy.companion_mutation,
+                companion_origins=self._companion_extension_origins,
+            ):
                 await _send_error(
                     send,
                     status=403,
@@ -895,6 +912,20 @@ def _decode_text(value: bytes | None) -> str | None:
     if value is None:
         return None
     return value.decode("utf-8", errors="replace")
+
+
+def _mutation_origin_allowed(
+    *,
+    origin: str | None,
+    external_origin: str,
+    companion_mutation: bool,
+    companion_origins: frozenset[str],
+) -> bool:
+    if origin is None:
+        return False
+    if origin == external_origin:
+        return True
+    return companion_mutation and origin in companion_origins
 
 
 def _normalized_key_or_fallback(login: str) -> str:
