@@ -6,26 +6,53 @@
     <link rel="stylesheet" href="picker.css" />
   </head>
   <body>
-    <main>
+    <header class="picker-brand" aria-label="FrameNest">
+      <span class="brand-mark" aria-hidden="true">FN</span>
       <h1>FrameNest</h1>
+    </header>
+    <main>
       <section id="setup">
         <label for="origin">FrameNest origin</label>
         <input id="origin" type="text" spellcheck="false" autocomplete="off" />
-        <button id="save-origin" type="button">Connect</button>
-        <button id="reset" type="button">Reset</button>
+        <div class="setup-actions">
+          <button id="save-origin" type="button">Connect</button>
+          <button id="reset" type="button">Reset</button>
+        </div>
         <p id="setup-status"></p>
       </section>
       <section id="picker" hidden>
-        <input id="search" type="search" placeholder="Search titles" />
-        <select id="kind">
-          <option value="">All kinds</option>
-          <option value="image">Image</option>
-          <option value="animated_image">GIF-style</option>
-          <option value="video">Video</option>
-        </select>
-        <button id="refresh" type="button">Refresh</button>
+        <div class="header-search" role="search" aria-label="Search catalog">
+          <div class="header-search__control">
+            <span class="header-search__prompt" aria-hidden="true">&gt;</span>
+            <input
+              id="search"
+              class="header-search__input"
+              type="search"
+              placeholder="Search titles"
+              autocomplete="off"
+              maxlength="240"
+              aria-label="Search titles"
+            />
+          </div>
+        </div>
+        <div class="picker-toolbar">
+          <select id="kind" aria-label="Kind filter">
+            <option value="">All kinds</option>
+            <option value="image">Image</option>
+            <option value="animated_image">GIF-style</option>
+            <option value="video">Video</option>
+          </select>
+          <button id="refresh" type="button">Refresh</button>
+        </div>
         <p id="picker-status"></p>
-        <ul id="results"></ul>
+        <div id="preview" class="picker-preview" tabindex="0" hidden>
+          <p id="preview-title"></p>
+          <div class="catalog-pagination__nav" aria-label="Selected item">
+            <button id="preview-prev" type="button" aria-label="Previous">&lt;</button>
+            <button id="preview-next" type="button" aria-label="Next">&gt;</button>
+          </div>
+          <button id="attach-selected" type="button">Attach</button>
+        </div>
       </section>
     </main>
     <script src="../shared/messages.js"></script>

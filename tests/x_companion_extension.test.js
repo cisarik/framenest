@@ -141,3 +141,68 @@ test("in-feed Save is an action-row icon and never a labeled article button", ()
   assert.match(adapterSource, /data-framenest-companion"\) === "save"/);
   assert.match(adapterSource, /Save to FrameNest failed/);
 });
+
+test("companion surfaces copy FrameNest gallery visual tokens", () => {
+  const pickerCss = fs.readFileSync(path.join(REPO, "extension/ui/picker.css"), "utf8");
+  const pickerHtml = fs.readFileSync(path.join(REPO, "extension/ui/picker.html"), "utf8");
+  const pickerJs = fs.readFileSync(path.join(REPO, "extension/ui/picker.js"), "utf8");
+  const tokenNames = [
+    "--background",
+    "--surface",
+    "--surface-input",
+    "--text",
+    "--text-muted",
+    "--text-soft",
+    "--accent",
+    "--accent-strong",
+    "--accent-soft",
+    "--accent-border",
+    "--accent-glow",
+    "--danger",
+    "--focus",
+    "--radius-sm",
+    "--font-mono",
+  ];
+  tokenNames.forEach((token) => {
+    assert.match(pickerCss, new RegExp(token.replace(/-/g, "\\-")));
+  });
+  assert.match(pickerCss, /#00ff41/);
+  assert.match(pickerCss, /#39ff14/);
+  assert.match(adapterSource, /#00ff41/);
+  assert.match(adapterSource, /#39ff14/);
+  assert.doesNotMatch(adapterSource, /copyActionColor/);
+  assert.doesNotMatch(adapterSource, /getComputedStyle\([^)]+\)\.color/);
+  assert.doesNotMatch(adapterSource, /rgba\(127, 127, 127, 0\.12\)/);
+  assert.match(adapterSource, /GALLERY_ACCENT/);
+  assert.match(pickerHtml, /header-search__control/);
+  assert.match(pickerHtml, /header-search__prompt/);
+  assert.match(pickerHtml, /id="preview"/);
+  assert.match(pickerHtml, /id="preview-prev"/);
+  assert.match(pickerHtml, /id="preview-next"/);
+  assert.doesNotMatch(pickerJs, /innerHTML/);
+  assert.doesNotMatch(pickerJs, /form\.submit/);
+});
+
+test("Attach is placed in the composer toolbar, not the textarea", () => {
+  const fixture = fs.readFileSync(
+    path.join(REPO, "tests/support/x_fixtures/composer.html"),
+    "utf8"
+  );
+  assert.ok(Object.isFrozen(contract.composerToolbarSelectors));
+  assert.deepEqual(contract.composerToolbarSelectors, [
+    "[data-testid='toolBar']",
+    "[data-framenest-composer-toolbar]",
+  ]);
+  assert.ok(Object.isFrozen(contract.bookmarkSelectors));
+  assert.match(fixture, /data-testid="toolBar"/);
+  assert.match(fixture, /data-framenest-composer-toolbar/);
+  assert.match(fixture, /data-testid="bookmark"/);
+  assert.doesNotMatch(adapterSource, /addButton\(/);
+  assert.doesNotMatch(adapterSource, /composerRoot\.appendChild/);
+  assert.match(adapterSource, /findComposerToolbar/);
+  assert.match(adapterSource, /toolbar\.appendChild/);
+  assert.match(adapterSource, /getBoundingClientRect/);
+  assert.doesNotMatch(adapterSource, /tweetButton/);
+  assert.doesNotMatch(adapterSource, /form\.submit/);
+  assert.doesNotMatch(adapterSource, /dispatchEvent\(new Event\(["']submit/);
+});

@@ -11,6 +11,15 @@
   let boundComposer = null;
   const SAVE_NAME = "Save to FrameNest";
   const SAVE_UNAVAILABLE = "FrameNest unavailable";
+  const GALLERY_ACCENT = "#00ff41";
+  const GALLERY_ACCENT_STRONG = "#39ff14";
+  const GALLERY_ACCENT_SOFT = "rgba(0, 255, 65, 0.12)";
+  const GALLERY_ACCENT_GLOW = "rgba(0, 255, 65, 0.18)";
+  const GALLERY_ACCENT_BORDER = "rgba(0, 255, 65, 0.42)";
+  const GALLERY_DANGER = "#ff4d4d";
+  const GALLERY_RADIUS_SM = "6px";
+  const GALLERY_FONT_MONO =
+    'ui-monospace, "SF Mono", "JetBrains Mono", "Fira Code", "Cascadia Code", Menlo, Monaco, Consolas, monospace';
 
   function first(root, selectors) {
     for (const selector of selectors) {
@@ -123,20 +132,6 @@
     });
   }
 
-  function addButton(parent, label, onClick) {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.setAttribute("data-framenest-companion", label);
-    button.textContent = label;
-    button.addEventListener("click", (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      onClick(button);
-    });
-    parent.appendChild(button);
-    return button;
-  }
-
   function svgEl(name, attrs) {
     const node = document.createElementNS("http://www.w3.org/2000/svg", name);
     Object.keys(attrs).forEach((key) => {
@@ -189,14 +184,8 @@
       button.removeChild(button.firstChild);
     }
     button.appendChild(saveIconSvg(kind));
-  }
-
-  function copyActionColor(fromNode, toNode) {
-    const source = (fromNode.querySelector && fromNode.querySelector("svg")) || fromNode;
-    const color = window.getComputedStyle(source).color;
-    if (color && color !== "rgba(0, 0, 0, 0)") {
-      toNode.style.color = color;
-    }
+    button.dataset.framenestSaveKind = kind;
+    button.style.color = kind === "failed" ? GALLERY_DANGER : GALLERY_ACCENT;
   }
 
   function applySaveChrome(button) {
@@ -213,7 +202,7 @@
     button.style.margin = "0";
     button.style.border = "0";
     button.style.background = "transparent";
-    button.style.color = "inherit";
+    button.style.color = GALLERY_ACCENT;
     button.style.cursor = "pointer";
     button.style.borderRadius = "999px";
     button.style.flex = "0 0 auto";
@@ -225,14 +214,122 @@
     button.style.overflow = "hidden";
   }
 
-  function applySaveColumnChrome(column) {
-    column.style.display = "flex";
-    column.style.alignItems = "center";
-    column.style.justifyContent = "center";
-    column.style.alignSelf = "center";
-    column.style.flex = "0 0 auto";
+  function matchesAny(node, selectors) {
+    if (!node || !node.matches) {
+      return false;
+    }
+    return selectors.some((selector) => node.matches(selector));
+  }
+
+  function bookmarkActionColumn(actionGroup, shareColumn) {
+    const bookmark = first(actionGroup, contract.bookmarkSelectors);
+    if (!bookmark) {
+      return null;
+    }
+    const column = shareActionColumn(bookmark, actionGroup);
+    if (!column || column === shareColumn) {
+      return null;
+    }
+    return column;
+  }
+
+  function applySaveColumnAlignment(column, button, share, shareColumn, actionGroup) {
+    const shareStyle = window.getComputedStyle(shareColumn);
+    const shareRect = shareColumn.getBoundingClientRect();
+    const styleHeight = Number.parseFloat(shareStyle.height);
+    const height = Math.max(
+      36,
+      Math.round(shareRect.height) || (Number.isFinite(styleHeight) ? Math.round(styleHeight) : 36)
+    );
+    const display = shareStyle.display;
+    column.style.display = display === "flex" || display === "inline-flex" ? display : "flex";
+    column.style.flexDirection = shareStyle.flexDirection;
+    column.style.alignItems = shareStyle.alignItems === "normal" ? "center" : shareStyle.alignItems;
+    column.style.justifyContent =
+      shareStyle.justifyContent === "normal" ? "center" : shareStyle.justifyContent;
+    column.style.height = height + "px";
+    column.style.minHeight = height + "px";
     column.style.minWidth = "36px";
-    column.style.height = "36px";
+    column.style.flex = "0 0 auto";
+    column.style.boxSizing = "border-box";
+    column.style.alignSelf = shareStyle.alignSelf === "auto" ? "stretch" : shareStyle.alignSelf;
+
+    const controlRect = share.getBoundingClientRect();
+    const topOffset = Math.round(controlRect.top - shareRect.top);
+    if (topOffset > 1) {
+      button.style.marginTop = topOffset + "px";
+      column.style.alignItems = "flex-start";
+      column.style.justifyContent = "center";
+    }
+
+    const bookmarkColumn = bookmarkActionColumn(actionGroup, shareColumn);
+    let gap = 0;
+    if (bookmarkColumn) {
+      const bookmarkRect = bookmarkColumn.getBoundingClientRect();
+      gap = Math.round(shareRect.left - bookmarkRect.right);
+      if (!Number.isFinite(gap) || gap < 0) {
+        gap = 0;
+      }
+    }
+    if (gap === 0) {
+      gap = 8;
+    }
+    column.style.marginLeft = gap + "px";
+  }
+
+  function applyAttachChrome(button) {
+    button.style.display = "inline-flex";
+    button.style.alignItems = "center";
+    button.style.justifyContent = "center";
+    button.style.fontFamily = GALLERY_FONT_MONO;
+    button.style.fontSize = "0.78rem";
+    button.style.fontWeight = "700";
+    button.style.background = GALLERY_ACCENT_SOFT;
+    button.style.border = "1px solid " + GALLERY_ACCENT_BORDER;
+    button.style.color = GALLERY_ACCENT;
+    button.style.borderRadius = GALLERY_RADIUS_SM;
+    button.style.padding = "6px 10px";
+    button.style.margin = "4px 0 0 8px";
+    button.style.cursor = "pointer";
+    button.style.lineHeight = "1.2";
+    button.style.flex = "0 0 auto";
+    button.style.alignSelf = "center";
+    button.style.boxSizing = "border-box";
+    button.style.appearance = "none";
+    button.style.webkitAppearance = "none";
+    button.style.whiteSpace = "nowrap";
+  }
+
+  function findComposerToolbar(composerRoot) {
+    if (matchesAny(composerRoot, contract.composerToolbarSelectors)) {
+      return composerRoot;
+    }
+    const nested = first(composerRoot, contract.composerToolbarSelectors);
+    if (nested) {
+      return nested;
+    }
+    let node = composerRoot;
+    let hops = 0;
+    while (node.parentElement && hops < 8) {
+      const parent = node.parentElement;
+      if (matchesAny(parent, contract.composerToolbarSelectors)) {
+        return parent;
+      }
+      for (const child of parent.children) {
+        if (matchesAny(child, contract.composerToolbarSelectors)) {
+          return child;
+        }
+        if (child !== node) {
+          const nestedSibling = first(child, contract.composerToolbarSelectors);
+          if (nestedSibling) {
+            return nestedSibling;
+          }
+        }
+      }
+      node = parent;
+      hops += 1;
+    }
+    return null;
   }
 
   function haltHostAction(event) {
@@ -246,22 +343,27 @@
     event.stopImmediatePropagation();
   }
 
-  function createSaveControl(accepted, share) {
+  function createSaveControl(accepted, share, shareColumn, actionGroup) {
     const column = document.createElement("div");
-    applySaveColumnChrome(column);
     const button = document.createElement("button");
     button.type = "button";
     button.setAttribute("data-framenest-companion", "save");
     applySaveChrome(button);
-    copyActionColor(share, button);
     setSaveStatus(button, "idle", SAVE_NAME, false);
     button.addEventListener("mouseenter", () => {
       if (!button.disabled) {
-        button.style.background = "rgba(127, 127, 127, 0.12)";
+        button.style.background = GALLERY_ACCENT_SOFT;
+        button.style.boxShadow = "0 0 10px " + GALLERY_ACCENT_GLOW;
+        if (button.dataset.framenestSaveKind !== "failed") {
+          button.style.color = GALLERY_ACCENT_STRONG;
+        }
       }
     });
     button.addEventListener("mouseleave", () => {
       button.style.background = "transparent";
+      button.style.boxShadow = "none";
+      button.style.color =
+        button.dataset.framenestSaveKind === "failed" ? GALLERY_DANGER : GALLERY_ACCENT;
     });
     ["pointerdown", "mousedown"].forEach((type) => {
       button.addEventListener(type, haltHostBubble);
@@ -271,6 +373,7 @@
       void savePost(button, accepted);
     });
     column.appendChild(button);
+    applySaveColumnAlignment(column, button, share, shareColumn, actionGroup);
     return column;
   }
 
@@ -315,7 +418,7 @@
     if (!column) {
       return "missing_share";
     }
-    const saveColumn = createSaveControl(accepted, share);
+    const saveColumn = createSaveControl(accepted, share, column, actionGroup);
     column.insertAdjacentElement("afterend", saveColumn);
     injected.add(postRoot);
     return "placed";
@@ -325,6 +428,14 @@
     if (injected.has(composerRoot)) {
       return;
     }
+    const toolbar = findComposerToolbar(composerRoot);
+    if (!toolbar) {
+      return;
+    }
+    if (toolbar.querySelector("[data-framenest-companion='attach']")) {
+      injected.add(composerRoot);
+      return;
+    }
     const fileInput = first(composerRoot, contract.composerFileInputs) ||
       first(document, contract.composerFileInputs);
     if (!fileInput) {
@@ -332,18 +443,26 @@
       return;
     }
     injected.add(composerRoot);
-    addButton(composerRoot, "Attach from FrameNest", async () => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.setAttribute("data-framenest-companion", "attach");
+    button.textContent = "Attach from FrameNest";
+    applyAttachChrome(button);
+    button.addEventListener("click", (event) => {
+      haltHostAction(event);
       if (stale) {
         return;
       }
       boundComposer = { root: composerRoot, fileInput };
-      await request(companion.TYPES.ACK, { composerBound: true });
-      chrome.runtime.sendMessage({
-        v: companion.PROTOCOL,
-        type: companion.TYPES.ACK,
-        payload: { openPicker: true },
+      void request(companion.TYPES.ACK, { composerBound: true }).then(() => {
+        chrome.runtime.sendMessage({
+          v: companion.PROTOCOL,
+          type: companion.TYPES.ACK,
+          payload: { openPicker: true },
+        });
       });
     });
+    toolbar.appendChild(button);
   }
 
   async function pollClaim(claimId) {

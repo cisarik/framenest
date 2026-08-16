@@ -16,6 +16,16 @@
       "input[type='file'][accept*='image']",
       "input[type='file']",
     ]),
+    composerToolbarSelectors: Object.freeze([
+      "[data-testid='toolBar']",
+      "[data-framenest-composer-toolbar]",
+    ]),
+    bookmarkSelectors: Object.freeze([
+      "[data-testid='bookmark']",
+      "[data-testid='removeBookmark']",
+      "[aria-label='Bookmark']",
+      "[aria-label='Add to Bookmarks']",
+    ]),
     actionGroupSelectors: Object.freeze(["[role='group']"]),
     actionBarSignals: Object.freeze([
       "[data-testid='reply']",
