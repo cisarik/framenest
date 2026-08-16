@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 
-from sqlalchemy import distinct, func, select
+from sqlalchemy import and_, distinct, exists, func, or_, select
 from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -16,6 +16,8 @@ from framenest.application.ports.media_catalog_repository import (
     MediaCatalogPage,
     MediaCatalogQuery,
 )
+from framenest.application.ports.media_content import SUPPORTED_MEDIA_CONTENT
+from framenest.domain.media import MediaKind, MediaLocationAvailability
 from framenest.infrastructure.persistence.catalog_schema import (
     canonical_tags,
     logical_media,
@@ -23,6 +25,8 @@ from framenest.infrastructure.persistence.catalog_schema import (
     media_content_publications,
     media_metadata,
     physical_media_locations,
+    x_assets,
+    x_post_claims,
 )
 from framenest.infrastructure.persistence.engine import run_in_transaction
 
@@ -39,43 +43,61 @@ class SqliteMediaCatalogRepository:
     def list_media(self, query: MediaCatalogQuery) -> MediaCatalogPage:
         def operation(connection: Connection) -> MediaCatalogPage:
             tag_values = _distinct_tag_values(query)
+            companion = query.companion_audience_login_key is not None
             filtered = _filtered_media_select(query, tag_values).subquery()
             total = connection.execute(
                 select(func.count()).select_from(filtered)
             ).scalar_one()
-            if query.collection_key is not None:
-                order_columns = [
-                    filtered.c.processed_at_ms.asc(),
-                    filtered.c.id.asc(),
-                ]
-            else:
+            if companion or query.collection_key is None:
                 order_columns = [
                     filtered.c.created_at_ms.desc(),
                     filtered.c.id.asc(),
                 ]
-            page_rows = list(
-                connection.execute(
-                    select(
-                        filtered.c.id,
-                        filtered.c.media_kind,
-                        filtered.c.created_at_ms,
-                        filtered.c.updated_at_ms,
-                        filtered.c.display_title,
-                        filtered.c.description,
-                        filtered.c.collection_key,
-                        filtered.c.processed_at_ms,
-                        filtered.c.content_category,
-                        filtered.c.acquisition_source,
-                        filtered.c.creator_attribution_kind,
-                        filtered.c.creator_stable_id,
-                        filtered.c.creator_handle,
-                        filtered.c.creator_display_name,
-                    )
-                    .order_by(*order_columns)
-                    .limit(query.limit)
-                    .offset(query.offset)
-                ).mappings()
+            else:
+                order_columns = [
+                    filtered.c.processed_at_ms.asc(),
+                    filtered.c.id.asc(),
+                ]
+            page_statement = select(
+                filtered.c.id,
+                filtered.c.media_kind,
+                filtered.c.created_at_ms,
+                filtered.c.updated_at_ms,
+                filtered.c.display_title,
+                filtered.c.description,
+                filtered.c.collection_key,
+                filtered.c.processed_at_ms,
+                filtered.c.content_category,
+                filtered.c.acquisition_source,
+                filtered.c.creator_attribution_kind,
+                filtered.c.creator_stable_id,
+                filtered.c.creator_handle,
+                filtered.c.creator_display_name,
             )
+            if (
+                companion
+                and query.cursor_created_at_ms is not None
+                and query.cursor_media_id is not None
+            ):
+                page_statement = page_statement.where(
+                    or_(
+                        filtered.c.created_at_ms < query.cursor_created_at_ms,
+                        and_(
+                            filtered.c.created_at_ms == query.cursor_created_at_ms,
+                            filtered.c.id > query.cursor_media_id,
+                        ),
+                    )
+                )
+            fetch_limit = query.limit + 1 if companion else query.limit
+            page_statement = page_statement.order_by(*order_columns).limit(fetch_limit)
+            if not companion:
+                page_statement = page_statement.offset(query.offset)
+            page_rows = list(connection.execute(page_statement).mappings())
+            next_cursor = None
+            if companion and len(page_rows) > query.limit:
+                page_rows = page_rows[: query.limit]
+                last = page_rows[-1]
+                next_cursor = f"{int(last['created_at_ms'])}:{last['id']}"
             media_ids = tuple(str(row["id"]) for row in page_rows)
             tags_by_media = _load_tags(connection, media_ids)
             locations_by_media = _load_locations(connection, media_ids)
@@ -136,6 +158,7 @@ class SqliteMediaCatalogRepository:
                 creator_attribution_kind=query.creator_attribution_kind,
                 creator_stable_id=query.creator_stable_id,
                 creator_handle=query.creator_handle,
+                next_cursor=next_cursor,
             )
 
         try:
@@ -233,7 +256,7 @@ def _filtered_media_select(query: MediaCatalogQuery, tag_values: tuple[str, ...]
         media_metadata,
         media_metadata.c.media_id == logical_media.c.id,
     )
-    if query.published_only:
+    if query.published_only and query.companion_audience_login_key is None:
         joined = joined.join(
             media_content_publications,
             media_content_publications.c.media_id == logical_media.c.id,
@@ -296,6 +319,17 @@ def _filtered_media_select(query: MediaCatalogQuery, tag_values: tuple[str, ...]
             == query.creator_attribution_kind,
             media_metadata.c.creator_handle == query.creator_handle,
         )
+    if query.companion_audience_login_key is not None:
+        statement = statement.where(
+            _companion_audience_predicate(query.companion_audience_login_key)
+        )
+        kinds = query.companion_kinds or (
+            MediaKind.IMAGE.value,
+            MediaKind.ANIMATED_IMAGE.value,
+            MediaKind.VIDEO.value,
+        )
+        statement = statement.where(logical_media.c.media_kind.in_(kinds))
+        statement = statement.where(_supported_companion_location_exists())
     if tag_values:
         statement = (
             statement.where(media_canonical_tags.c.tag_key.in_(tag_values))
@@ -318,6 +352,56 @@ def _filtered_media_select(query: MediaCatalogQuery, tag_values: tuple[str, ...]
             .having(func.count(distinct(media_canonical_tags.c.tag_key)) == len(tag_values))
         )
     return statement
+
+
+def _companion_audience_predicate(login_key: str):
+    published = exists(
+        select(1)
+        .select_from(media_content_publications)
+        .where(media_content_publications.c.media_id == logical_media.c.id)
+    )
+    own_x_success = exists(
+        select(1)
+        .select_from(
+            x_assets.join(x_post_claims, x_assets.c.claim_id == x_post_claims.c.id)
+        )
+        .where(
+            x_assets.c.media_id == logical_media.c.id,
+            x_assets.c.state == "cataloged",
+            x_post_claims.c.created_by_login_key == login_key,
+        )
+    )
+    return or_(published, own_x_success)
+
+
+def _supported_companion_location_exists():
+    clauses = []
+    for kind, extension in SUPPORTED_MEDIA_CONTENT:
+        extension_length = len(extension)
+        clauses.append(
+            and_(
+                logical_media.c.media_kind == kind.value,
+                physical_media_locations.c.availability
+                == MediaLocationAvailability.AVAILABLE.value,
+                func.lower(
+                    func.substr(
+                        physical_media_locations.c.relative_path,
+                        func.length(physical_media_locations.c.relative_path)
+                        - extension_length
+                        + 1,
+                    )
+                )
+                == extension,
+            )
+        )
+    return exists(
+        select(1)
+        .select_from(physical_media_locations)
+        .where(
+            physical_media_locations.c.media_id == logical_media.c.id,
+            or_(*clauses),
+        )
+    )
 
 
 def _load_tags(

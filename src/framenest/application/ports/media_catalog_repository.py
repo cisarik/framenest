@@ -27,6 +27,10 @@ class MediaCatalogQuery:
     creator_stable_id: str | None = None
     creator_handle: str | None = None
     published_only: bool = False
+    companion_audience_login_key: str | None = None
+    companion_kinds: tuple[str, ...] = ()
+    cursor_created_at_ms: int | None = None
+    cursor_media_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -88,6 +92,7 @@ class MediaCatalogPage:
     creator_attribution_kind: str | None = None
     creator_stable_id: str | None = None
     creator_handle: str | None = None
+    next_cursor: str | None = None
 
 
 class MediaCatalogRepository(Protocol):

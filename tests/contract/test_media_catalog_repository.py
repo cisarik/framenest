@@ -257,3 +257,44 @@ def test_combined_title_tag_filter_total_before_pagination_and_no_join_duplicate
     assert [item.media_id for item in second_page.items] == [MEDIA_D]
     assert [item.media_id for item in combined.items] == [MEDIA_A]
     assert len({item.media_id for item in first_page.items + second_page.items}) == 2
+
+
+def test_companion_audience_query_plan_executes_without_a_new_index(
+    tmp_path: Path,
+) -> None:
+    from sqlalchemy import text as sql_text
+
+    from framenest.infrastructure.persistence.media_catalog_repository import (
+        _filtered_media_select,
+    )
+
+    repository, engine, first_library, second_library = _repository(tmp_path)
+    _seed_catalog(engine, first_library, second_library)
+    query = MediaCatalogQuery(
+        q=None,
+        tag_keys=(),
+        limit=24,
+        offset=0,
+        collection_key=None,
+        content_category="meme",
+        companion_audience_login_key="owner@example.com",
+        companion_kinds=("image", "animated_image", "video"),
+    )
+    try:
+        compiled = _filtered_media_select(query, ()).compile(
+            compile_kwargs={"literal_binds": True}
+        )
+        with engine.connect() as connection:
+            plan_rows = connection.execute(
+                sql_text(f"EXPLAIN QUERY PLAN {compiled}")
+            ).fetchall()
+        page = repository.list_media(query)
+    finally:
+        engine.dispose()
+
+    plan = " ".join(str(column) for row in plan_rows for column in row).lower()
+    assert plan_rows
+    assert "scan" in plan or "search" in plan
+    assert page.total == 0
+    assert page.items == ()
+

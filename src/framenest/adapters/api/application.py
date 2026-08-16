@@ -94,6 +94,7 @@ from framenest.application.content_publication import (
     PublishContent,
 )
 from framenest.application.media_catalog import GetMediaCatalogItem, ListMediaCatalog
+from framenest.application.companion_picker import ListCompanionPickerMedia
 from framenest.application.media_import import ImportMediaFromScanCandidate
 from framenest.application.media_metadata import (
     CreateCanonicalTag,
@@ -155,6 +156,10 @@ from framenest.application.x_acquisition import (
 from framenest.adapters.api.x_request_api import (
     XRequestApiDependencies,
     create_x_request_api_router,
+)
+from framenest.adapters.api.x_companion_api import (
+    XCompanionApiDependencies,
+    create_x_companion_api_router,
 )
 from framenest.adapters.api.x_admin_api import (
     XAdminApiDependencies,
@@ -302,6 +307,7 @@ def create_app(
     x_extractor: object | None = None,
     x_request_api_dependencies: XRequestApiDependencies | None = None,
     x_admin_api_dependencies: XAdminApiDependencies | None = None,
+    x_companion_api_dependencies: XCompanionApiDependencies | None = None,
     security_audit_recorder: object | None = None,
     lifespan_shutdown_budget_seconds: float | None = None,
     shutdown_clock: object | None = None,
@@ -919,6 +925,15 @@ def create_app(
                 and ip_address(resolved_settings.host).is_loopback
             ),
         )
+    if x_companion_api_dependencies is None:
+        x_companion_api_dependencies = XCompanionApiDependencies(
+            list_media=(
+                None
+                if owned_media_catalog_repository is None
+                else ListCompanionPickerMedia(owned_media_catalog_repository)
+            ),
+            catalog_available=resolved_settings.database_path.exists,
+        )
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
@@ -1100,6 +1115,7 @@ def create_app(
     )
     app.include_router(create_x_request_api_router(x_request_api_dependencies))
     app.include_router(create_x_admin_api_router(x_admin_api_dependencies))
+    app.include_router(create_x_companion_api_router(x_companion_api_dependencies))
     if tailscale_ingress_enabled:
         assert identity_mapping is not None
         app.add_middleware(
@@ -1107,6 +1123,9 @@ def create_app(
             identity_mapping=identity_mapping,
             external_origin=resolved_settings.external_origin,
             audit_recorder=resolved_audit_recorder,
+            companion_extension_origins=tuple(
+                resolved_settings.companion_extension_origins
+            ),
         )
 
     @app.get("/", response_class=HTMLResponse)
