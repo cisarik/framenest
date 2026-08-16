@@ -15,9 +15,10 @@ An authenticated FrameNest user can:
 - attach one published meme or one of that user's own live successful X media
   items (JPEG/PNG, GIF-style, or short video) onto the composer file input.
 
-Save is an accent action-row icon aligned with Share. Attach lives in the
-composer toolbar, not the compose field. The side panel is a compact
-FrameNest search/preview, not the full Gallery.
+Save is an accent action-row icon aligned with Share. Attach is a small
+composer icon beside Content disclosure; it opens the side panel. After
+connect, origin lives under Settings; the search prompt is Search memes.
+The side panel is a compact FrameNest search/preview, not the full Gallery.
 
 The companion never clicks Post, never copies cookies or X credentials, and
 never talks to FrameNest from a content script.

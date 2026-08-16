@@ -15,11 +15,9 @@
   const GALLERY_ACCENT_STRONG = "#39ff14";
   const GALLERY_ACCENT_SOFT = "rgba(0, 255, 65, 0.12)";
   const GALLERY_ACCENT_GLOW = "rgba(0, 255, 65, 0.18)";
-  const GALLERY_ACCENT_BORDER = "rgba(0, 255, 65, 0.42)";
   const GALLERY_DANGER = "#ff4d4d";
-  const GALLERY_RADIUS_SM = "6px";
-  const GALLERY_FONT_MONO =
-    'ui-monospace, "SF Mono", "JetBrains Mono", "Fira Code", "Cascadia Code", Menlo, Monaco, Consolas, monospace';
+  const SAVE_DOWN_NUDGE_PX = 3;
+  const ATTACH_NAME = "Attach from FrameNest";
 
   function first(root, selectors) {
     for (const selector of selectors) {
@@ -103,7 +101,8 @@
         node.removeAttribute("aria-busy");
         return;
       }
-      node.textContent = SAVE_UNAVAILABLE;
+      node.setAttribute("aria-label", SAVE_UNAVAILABLE);
+      node.setAttribute("title", SAVE_UNAVAILABLE);
     });
     void reason;
   }
@@ -256,11 +255,9 @@
 
     const controlRect = share.getBoundingClientRect();
     const topOffset = Math.round(controlRect.top - shareRect.top);
-    if (topOffset > 1) {
-      button.style.marginTop = topOffset + "px";
-      column.style.alignItems = "flex-start";
-      column.style.justifyContent = "center";
-    }
+    button.style.marginTop = Math.max(0, topOffset) + SAVE_DOWN_NUDGE_PX + "px";
+    column.style.alignItems = "flex-start";
+    column.style.justifyContent = "center";
 
     const bookmarkColumn = bookmarkActionColumn(actionGroup, shareColumn);
     let gap = 0;
@@ -281,23 +278,104 @@
     button.style.display = "inline-flex";
     button.style.alignItems = "center";
     button.style.justifyContent = "center";
-    button.style.fontFamily = GALLERY_FONT_MONO;
-    button.style.fontSize = "0.78rem";
-    button.style.fontWeight = "700";
-    button.style.background = GALLERY_ACCENT_SOFT;
-    button.style.border = "1px solid " + GALLERY_ACCENT_BORDER;
+    button.style.width = "36px";
+    button.style.height = "36px";
+    button.style.minWidth = "36px";
+    button.style.minHeight = "36px";
+    button.style.maxWidth = "36px";
+    button.style.maxHeight = "36px";
+    button.style.padding = "0";
+    button.style.margin = "0";
+    button.style.border = "0";
+    button.style.background = "transparent";
     button.style.color = GALLERY_ACCENT;
-    button.style.borderRadius = GALLERY_RADIUS_SM;
-    button.style.padding = "6px 10px";
-    button.style.margin = "4px 0 0 8px";
     button.style.cursor = "pointer";
-    button.style.lineHeight = "1.2";
+    button.style.borderRadius = "999px";
     button.style.flex = "0 0 auto";
     button.style.alignSelf = "center";
     button.style.boxSizing = "border-box";
     button.style.appearance = "none";
     button.style.webkitAppearance = "none";
-    button.style.whiteSpace = "nowrap";
+    button.style.lineHeight = "0";
+    button.style.overflow = "hidden";
+  }
+
+  function applyAttachColumnChrome(column) {
+    column.style.display = "flex";
+    column.style.alignItems = "center";
+    column.style.justifyContent = "center";
+    column.style.flex = "0 0 auto";
+    column.style.width = "36px";
+    column.style.height = "36px";
+    column.style.minWidth = "36px";
+    column.style.minHeight = "36px";
+    column.style.boxSizing = "border-box";
+  }
+
+  function attachIconSvg() {
+    const svg = svgEl("svg", { viewBox: "0 0 24 24", "aria-hidden": "true", focusable: "false" });
+    svg.style.width = "22px";
+    svg.style.height = "22px";
+    svg.style.display = "block";
+    svg.style.flex = "0 0 auto";
+    svg.style.pointerEvents = "none";
+    const g = svgEl("g", {
+      fill: "none",
+      stroke: "currentColor",
+      "stroke-width": "1.75",
+      "stroke-linecap": "round",
+      "stroke-linejoin": "round",
+    });
+    g.appendChild(svgEl("rect", { x: "4.5", y: "4.5", width: "15", height: "15", rx: "2" }));
+    g.appendChild(svgEl("path", { d: "M12 8.5v7M8.5 12h7" }));
+    svg.appendChild(g);
+    return svg;
+  }
+
+  function findContentDisclosure(composerRoot, toolbar) {
+    if (toolbar) {
+      const inToolbar = first(toolbar, contract.contentDisclosureSelectors);
+      if (inToolbar) {
+        return inToolbar;
+      }
+    }
+    if (composerRoot) {
+      return first(composerRoot, contract.contentDisclosureSelectors);
+    }
+    return null;
+  }
+
+  function disclosureActionColumn(disclosure, row) {
+    if (!disclosure || !row) {
+      return null;
+    }
+    let column = disclosure;
+    while (column.parentElement && column.parentElement !== row) {
+      column = column.parentElement;
+    }
+    if (column.parentElement !== row) {
+      return null;
+    }
+    return column;
+  }
+
+  function findDisclosureIconRow(disclosure) {
+    let node = disclosure.parentElement;
+    let hops = 0;
+    while (node && hops < 8) {
+      if (matchesAny(node, contract.composerToolbarSelectors) || node.getAttribute("role") === "toolbar") {
+        return node;
+      }
+      node = node.parentElement;
+      hops += 1;
+    }
+    return disclosure.parentElement;
+  }
+
+  function insertAttachAfterDisclosure(disclosure, row, column) {
+    const disclosureColumn = disclosureActionColumn(disclosure, row);
+    const target = disclosureColumn || disclosure;
+    target.insertAdjacentElement("afterend", column);
   }
 
   function findComposerToolbar(composerRoot) {
@@ -424,30 +502,29 @@
     return "placed";
   }
 
-  function injectAttach(composerRoot) {
-    if (injected.has(composerRoot)) {
-      return;
-    }
-    const toolbar = findComposerToolbar(composerRoot);
-    if (!toolbar) {
-      return;
-    }
-    if (toolbar.querySelector("[data-framenest-companion='attach']")) {
-      injected.add(composerRoot);
-      return;
-    }
-    const fileInput = first(composerRoot, contract.composerFileInputs) ||
-      first(document, contract.composerFileInputs);
-    if (!fileInput) {
-      markStale("missing_composer_file_input");
-      return;
-    }
-    injected.add(composerRoot);
+  function createAttachControl(composerRoot, fileInput) {
     const button = document.createElement("button");
     button.type = "button";
     button.setAttribute("data-framenest-companion", "attach");
-    button.textContent = "Attach from FrameNest";
+    button.setAttribute("aria-label", ATTACH_NAME);
+    button.setAttribute("title", ATTACH_NAME);
     applyAttachChrome(button);
+    button.appendChild(attachIconSvg());
+    button.addEventListener("mouseenter", () => {
+      if (!button.disabled) {
+        button.style.background = GALLERY_ACCENT_SOFT;
+        button.style.boxShadow = "0 0 10px " + GALLERY_ACCENT_GLOW;
+        button.style.color = GALLERY_ACCENT_STRONG;
+      }
+    });
+    button.addEventListener("mouseleave", () => {
+      button.style.background = "transparent";
+      button.style.boxShadow = "none";
+      button.style.color = GALLERY_ACCENT;
+    });
+    ["pointerdown", "mousedown"].forEach((type) => {
+      button.addEventListener(type, haltHostBubble);
+    });
     button.addEventListener("click", (event) => {
       haltHostAction(event);
       if (stale) {
@@ -462,7 +539,55 @@
         });
       });
     });
-    toolbar.appendChild(button);
+    return button;
+  }
+
+  function placeAttachControl(toolbar, disclosure, button) {
+    const column = document.createElement("div");
+    applyAttachColumnChrome(column);
+    column.appendChild(button);
+    if (disclosure) {
+      const row = toolbar || findDisclosureIconRow(disclosure);
+      if (row) {
+        insertAttachAfterDisclosure(disclosure, row, column);
+        return true;
+      }
+    }
+    if (toolbar) {
+      toolbar.appendChild(column);
+      return true;
+    }
+    return false;
+  }
+
+  function injectAttach(composerRoot) {
+    if (injected.has(composerRoot)) {
+      return;
+    }
+    let toolbar = findComposerToolbar(composerRoot);
+    const disclosure = findContentDisclosure(composerRoot, toolbar);
+    if (!toolbar && disclosure) {
+      toolbar = findDisclosureIconRow(disclosure);
+    }
+    if (!toolbar && !disclosure) {
+      return;
+    }
+    const host = toolbar || (disclosure && disclosure.parentElement);
+    if (host && host.querySelector("[data-framenest-companion='attach']")) {
+      injected.add(composerRoot);
+      return;
+    }
+    const fileInput = first(composerRoot, contract.composerFileInputs) ||
+      first(document, contract.composerFileInputs);
+    if (!fileInput) {
+      markStale("missing_composer_file_input");
+      return;
+    }
+    const button = createAttachControl(composerRoot, fileInput);
+    if (!placeAttachControl(toolbar, disclosure, button)) {
+      return;
+    }
+    injected.add(composerRoot);
   }
 
   async function pollClaim(claimId) {

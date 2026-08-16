@@ -20,6 +20,10 @@
       "[data-testid='toolBar']",
       "[data-framenest-composer-toolbar]",
     ]),
+    contentDisclosureSelectors: Object.freeze([
+      "[aria-label='Content disclosure']",
+      "[data-framenest-content-disclosure]",
+    ]),
     bookmarkSelectors: Object.freeze([
       "[data-testid='bookmark']",
       "[data-testid='removeBookmark']",

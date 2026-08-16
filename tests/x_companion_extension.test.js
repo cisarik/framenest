@@ -183,7 +183,7 @@ test("companion surfaces copy FrameNest gallery visual tokens", () => {
   assert.doesNotMatch(pickerJs, /form\.submit/);
 });
 
-test("Attach is placed in the composer toolbar, not the textarea", () => {
+test("Attach is a disclosure-adjacent icon, not a labeled toolbar pill", () => {
   const fixture = fs.readFileSync(
     path.join(REPO, "tests/support/x_fixtures/composer.html"),
     "utf8"
@@ -193,16 +193,57 @@ test("Attach is placed in the composer toolbar, not the textarea", () => {
     "[data-testid='toolBar']",
     "[data-framenest-composer-toolbar]",
   ]);
+  assert.ok(Object.isFrozen(contract.contentDisclosureSelectors));
+  assert.deepEqual(contract.contentDisclosureSelectors, [
+    "[aria-label='Content disclosure']",
+    "[data-framenest-content-disclosure]",
+  ]);
   assert.ok(Object.isFrozen(contract.bookmarkSelectors));
   assert.match(fixture, /data-testid="toolBar"/);
   assert.match(fixture, /data-framenest-composer-toolbar/);
   assert.match(fixture, /data-testid="bookmark"/);
+  assert.match(fixture, /aria-label="Content disclosure"/);
+  assert.match(fixture, /data-framenest-content-disclosure/);
   assert.doesNotMatch(adapterSource, /addButton\(/);
   assert.doesNotMatch(adapterSource, /composerRoot\.appendChild/);
   assert.match(adapterSource, /findComposerToolbar/);
-  assert.match(adapterSource, /toolbar\.appendChild/);
+  assert.match(adapterSource, /findContentDisclosure/);
+  assert.match(adapterSource, /insertAttachAfterDisclosure/);
+  assert.match(adapterSource, /disclosureActionColumn/);
+  assert.match(adapterSource, /setAttribute\("data-framenest-companion", "attach"\)/);
+  assert.match(adapterSource, /setAttribute\("aria-label", ATTACH_NAME\)/);
+  assert.doesNotMatch(adapterSource, /textContent\s*=\s*["']Attach from FrameNest["']/);
+  assert.doesNotMatch(adapterSource, /textContent\s*=\s*ATTACH_NAME/);
   assert.match(adapterSource, /getBoundingClientRect/);
   assert.doesNotMatch(adapterSource, /tweetButton/);
   assert.doesNotMatch(adapterSource, /form\.submit/);
   assert.doesNotMatch(adapterSource, /dispatchEvent\(new Event\(["']submit/);
+});
+
+test("picker is search-first with a Settings Origin sheet", () => {
+  const pickerHtml = fs.readFileSync(path.join(REPO, "extension/ui/picker.html"), "utf8");
+  const pickerJs = fs.readFileSync(path.join(REPO, "extension/ui/picker.js"), "utf8");
+  const pickerCss = fs.readFileSync(path.join(REPO, "extension/ui/picker.css"), "utf8");
+  assert.doesNotMatch(pickerHtml, /Search titles/);
+  assert.doesNotMatch(pickerJs, /Search titles/);
+  assert.match(pickerHtml, /Search memes/);
+  assert.match(pickerHtml, /aria-label="Settings"/);
+  assert.match(pickerHtml, /id="settings-tab-origin"/);
+  assert.match(pickerHtml, /id="settings-dialog"/);
+  assert.match(pickerHtml, /class="settings-dialog"/);
+  assert.match(pickerHtml, /role="tablist"/);
+  assert.match(pickerCss, /--surface-solid:/);
+  assert.match(pickerCss, /--line:/);
+  assert.match(pickerCss, /--radius-lg:/);
+  assert.match(pickerCss, /--shadow-deep:/);
+  assert.match(pickerCss, /--danger-soft:/);
+  assert.match(pickerCss, /--transition-fast:/);
+  assert.match(pickerCss, /\.settings-dialog__tab--active/);
+  assert.match(pickerJs, /showModal/);
+  assert.match(pickerJs, /openSettings/);
+  assert.match(pickerJs, /closeSettings/);
+  assert.match(pickerJs, /renderConnection/);
+  assert.doesNotMatch(pickerJs, /innerHTML/);
+  assert.doesNotMatch(pickerJs, /form\.submit/);
+  assert.doesNotMatch(adapterSource, /tweetButton/);
 });
