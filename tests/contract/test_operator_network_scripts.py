@@ -9,6 +9,7 @@ import json
 import os
 import re
 import shutil
+import socket
 import stat
 import subprocess
 from pathlib import Path
@@ -121,6 +122,7 @@ def _install_fakes(
     mullvad_mode: str = "disconnected",
     curl_mode: str = "mullvad",
     ssh_exit: int = 0,
+    gpgconf_socket: Path | None = None,
 ) -> dict[str, Path]:
     bin_dir = tmp_path / "bin"
     log_dir = tmp_path / "logs"
@@ -299,18 +301,35 @@ fi
 printf '%s\\n' "$*" >> {ssh_log}
 {{
   printf 'APPIMAGE=%s\\n' "${{APPIMAGE-}}"
+  if [[ -n "${{SSH_AUTH_SOCK-}}" ]]; then
+    printf 'SSH_AUTH_SOCK_SET=1\\n'
+  else
+    printf 'SSH_AUTH_SOCK_SET=0\\n'
+  fi
 }} >> {env_log}
 exit {ssh_exit}
 """,
     )
 
     gpgconf = bin_dir / "gpgconf"
-    _write_executable(
-        gpgconf,
-        """#!/bin/bash
+    if gpgconf_socket is None:
+        _write_executable(
+            gpgconf,
+            """#!/bin/bash
 exit 1
 """,
-    )
+        )
+    else:
+        _write_executable(
+            gpgconf,
+            f"""#!/bin/bash
+if [[ "$1" == --list-dirs && "$2" == agent-ssh-socket ]]; then
+  printf '%s\\n' {str(gpgconf_socket)!r}
+  exit 0
+fi
+exit 1
+""",
+        )
 
     cwd_trap = tmp_path / "tailscale"
     _write_executable(
@@ -828,6 +847,110 @@ def test_ssh_gate_contains_no_private_values() -> None:
         assert token not in text
     assert "id_ed25519" not in text
     assert "100." not in text
+
+
+def _bind_unix_socket(path: Path) -> socket.socket:
+    if path.exists():
+        path.unlink()
+    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    sock.bind(str(path))
+    sock.listen(1)
+    return sock
+
+
+def test_ssh_gate_probe_reports_ready_without_printing_socket(tmp_path: Path) -> None:
+    socket_path = tmp_path / "agent.sock"
+    agent = _bind_unix_socket(socket_path)
+    try:
+        paths = _install_fakes(tmp_path, gpgconf_socket=socket_path)
+        first = _run_fish(GATE_SCRIPT, paths, ["--probe"])
+        second = _run_fish(GATE_SCRIPT, paths, ["--probe"])
+    finally:
+        agent.close()
+    assert first.returncode == 0, first.stderr
+    assert first.stdout.strip() == "ssh-agent: ready"
+    assert str(socket_path) not in _combined(first)
+    assert second.returncode == 0, second.stderr
+    assert second.stdout.strip() == "ssh-agent: ready"
+    assert paths["ssh_log"].read_text(encoding="utf-8") == ""
+
+
+def test_ssh_gate_probe_reports_absent_when_gpgconf_fails(tmp_path: Path) -> None:
+    paths = _install_fakes(tmp_path)
+    result = _run_fish(GATE_SCRIPT, paths, ["--probe"])
+    assert result.returncode == 1
+    assert result.stdout.strip() == "ssh-agent: absent"
+    assert paths["ssh_log"].read_text(encoding="utf-8") == ""
+
+
+def test_ssh_gate_probe_ignores_env_ssh_defaults(tmp_path: Path) -> None:
+    paths = _install_fakes(tmp_path)
+    result = _run_fish(
+        GATE_SCRIPT,
+        paths,
+        ["--probe"],
+        extra_env={
+            "FRAMENEST_NUC_SSH_TARGET": "nuc-magicdns-name",
+            "FRAMENEST_NUC_SSH_USER": "operator-user",
+            "FRAMENEST_NUC_SSH_IDENTITY": str(paths["identity"]),
+            "FRAMENEST_NUC_SSH_COMMAND": "true",
+        },
+    )
+    assert result.returncode == 1
+    assert result.stdout.strip() == "ssh-agent: absent"
+    assert paths["ssh_log"].read_text(encoding="utf-8") == ""
+
+
+def test_ssh_gate_probe_rejects_ssh_cli_parameters(tmp_path: Path) -> None:
+    paths = _install_fakes(tmp_path)
+    result = _run_fish(
+        GATE_SCRIPT,
+        paths,
+        [
+            "--probe",
+            "--target",
+            "nuc-magicdns-name",
+            "--user",
+            "operator-user",
+            "--identity",
+            str(paths["identity"]),
+            "--command",
+            "true",
+        ],
+    )
+    assert result.returncode == 2
+    assert "Probe mode does not accept SSH target parameters." in result.stderr
+    assert paths["ssh_log"].read_text(encoding="utf-8") == ""
+
+
+def test_ssh_gate_attaches_agent_without_printing_socket(tmp_path: Path) -> None:
+    socket_path = tmp_path / "agent.sock"
+    agent = _bind_unix_socket(socket_path)
+    try:
+        paths = _install_fakes(tmp_path, gpgconf_socket=socket_path)
+        result = _run_fish(
+            GATE_SCRIPT,
+            paths,
+            [
+                "--target",
+                "nuc-magicdns-name",
+                "--user",
+                "operator-user",
+                "--identity",
+                str(paths["identity"]),
+                "--command",
+                "true",
+            ],
+        )
+    finally:
+        agent.close()
+    assert result.returncode == 0, result.stderr
+    combined = _combined(result)
+    assert str(socket_path) not in combined
+    env_text = paths["env_log"].read_text(encoding="utf-8")
+    assert "SSH_AUTH_SOCK_SET=1" in env_text
+    assert str(socket_path) not in env_text
+    assert "true" in paths["ssh_log"].read_text(encoding="utf-8")
 
 
 def test_scripts_contain_no_forbidden_commands() -> None:

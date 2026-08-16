@@ -29,7 +29,8 @@ The Fish wrapper accepts the same arguments and returns the Bash exit status.
 
 The SSH gate requires explicit `--target` / `--user` / `--identity` /
 `--command` values, or the public-safe environment variables documented in
-the operator contract. It never hardcodes those values.
+the operator contract. It never hardcodes those values. `--probe` validates
+GPG-agent SSH-socket capability without printing the socket or opening SSH.
 
 ## Test-only command resolution
 

@@ -133,6 +133,24 @@ runs `enable`, `verify`, `disable`, or `recover`. Cancel the rollback after a
 successful `verify`. Do not combine this with Serve, firewall, or deployment
 work.
 
+## Cursor Worker SSH gate
+
+Cursor Workers use `scripts/operator/network/framenest_nuc_worker_gate.fish`
+as the sole project-owned NUC SSH route. They must not reconstruct
+`gpgconf --list-dirs agent-ssh-socket` or print `SSH_AUTH_SOCK`.
+
+```text
+scripts/operator/network/framenest_nuc_worker_gate.fish --probe
+```
+
+`--probe` discovers the GPG-agent SSH socket through trusted `gpgconf`,
+validates that it is a socket, and prints only `ssh-agent: ready` or
+`ssh-agent: absent`. It does not print the socket path and does not open SSH.
+A Cursor parent that lacks `SSH_AUTH_SOCK` is expected, not a host defect.
+The BatchMode SSH form above remains the transport when a later task grants
+NUC access; the gate attaches the agent for its own process without printing
+it.
+
 ## Human admin-console gate
 
 Mullvad exit nodes appear only after the Tailscale admin console grants
@@ -232,3 +250,4 @@ WAN SSH. Serve remains the only remote FrameNest ingress.
 Scripts do not store tokens, cookies, account passwords, or private keys.
 The SSH gate requires an operator-supplied identity file path and does not
 hardcode it. Agent sockets discovered via `gpgconf` are used without printing.
+`--probe` reports only `ssh-agent: ready` or `ssh-agent: absent`.

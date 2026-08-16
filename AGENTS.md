@@ -27,6 +27,26 @@ Treat `.ap/` as read-only during ordinary project work. Protocol updates require
 a separate explicit AP update task.
 <!-- END MANAGED AP INTEGRATION -->
 
+## Cursor Worker Execution Boundary
+
+Cursor/AppImage ambient execution is untrusted. Cursor Workers must not
+directly invoke `.venv/bin/python`, `python`, `python3`, or `poetry run` for
+Python evidence.
+
+- Python and tests go through `./.ap/ap project check` and `./.ap/ap exec`
+  with an exact authorized `--baseline`.
+- NUC SSH goes through `scripts/operator/network/framenest_nuc_worker_gate.fish`
+  (`--probe` for agent capability; BatchMode SSH only when a later task grants
+  NUC access). Do not reconstruct `gpgconf` or print agent sockets.
+- Remote sudo lifecycle is Cooperator timestamp (`sudo -v`, then `sudo -n true`)
+  outside the Worker, plus Worker terminal `sudo -K`. Workers must not run
+  `sudo -v` or handle a password. Password-required after predecessor `sudo -K`
+  is expected lifecycle state, not a broken NUC.
+
+Details and classification live in
+[docs/WORKER_EXECUTION_CONTRACT.md](docs/WORKER_EXECUTION_CONTRACT.md). Do not
+duplicate universal AP protocol here.
+
 ## NUC Routine Release Update
 
 The sole routine immutable NUC release-update entry point is:
@@ -178,12 +198,13 @@ stale.
 
 Workers must follow
 [docs/WORKER_EXECUTION_CONTRACT.md](docs/WORKER_EXECUTION_CONTRACT.md) for
-CPython 3.13 / Poetry authority, canonical `.venv` preservation, isolated
-worktree exact-source provenance, Python and JavaScript test invocation,
-repository browser-evidence gates, failure classification, and no-GUI shell
-rules. Implementation authority does not implicitly grant push, publication,
-deployment, production mutation, provider contact, or external X/YouTube
-acquisition.
+the Cursor/AppImage execution boundary, canonical `./.ap/ap exec` Python
+route, NUC SSH gate, remote sudo lifecycle, CPython 3.13 / Poetry authority,
+canonical `.venv` preservation, isolated worktree exact-source provenance,
+Python and JavaScript test invocation, repository browser-evidence gates,
+failure classification, and no-GUI shell rules. Implementation authority does
+not implicitly grant push, publication, deployment, production mutation,
+provider contact, or external X/YouTube acquisition.
 
 ## Git And Lifecycle
 

@@ -3,9 +3,10 @@
 
 set -e APPIMAGE APPDIR ARGV0 LD_LIBRARY_PATH LD_PRELOAD
 
-set -l trusted_path /usr/sbin:/usr/bin:/sbin:/bin
+set -g trusted_path /usr/sbin:/usr/bin:/sbin:/bin
 
 function _gate_usage
+    echo "Usage: framenest_nuc_worker_gate.fish --probe" >&2
     echo "Usage: framenest_nuc_worker_gate.fish --target <name> --user <user> --identity <file> --command <bounded-command>" >&2
 end
 
@@ -78,21 +79,42 @@ function _optional_gpgconf
     end
 end
 
+function _attach_agent
+    set -l gpgconf_bin
+    set gpgconf_bin (_optional_gpgconf)
+    if test -z "$gpgconf_bin"
+        return 1
+    end
+    set -l agent_sock
+    set agent_sock (env -u APPIMAGE -u APPDIR -u ARGV0 -u LD_LIBRARY_PATH -u LD_PRELOAD PATH=$trusted_path $gpgconf_bin --list-dirs agent-ssh-socket 2>/dev/null)
+    if test $status -eq 0; and test -n "$agent_sock"; and test -S "$agent_sock"
+        set -gx SSH_AUTH_SOCK $agent_sock
+        return 0
+    end
+    return 1
+end
+
 set -l target $FRAMENEST_NUC_SSH_TARGET
 set -l remote_user $FRAMENEST_NUC_SSH_USER
 set -l identity $FRAMENEST_NUC_SSH_IDENTITY
 set -l remote_command $FRAMENEST_NUC_SSH_COMMAND
+set -l probe 0
+set -l cli_ssh 0
 
 while test (count $argv) -gt 0
     switch $argv[1]
         case -h --help
             _gate_usage
             exit 0
+        case --probe
+            set probe 1
+            set argv $argv[2..]
         case --target
             if test (count $argv) -lt 2
                 echo "Missing value for --target." >&2
                 exit 2
             end
+            set cli_ssh 1
             set target $argv[2]
             set argv $argv[3..]
         case --user
@@ -100,6 +122,7 @@ while test (count $argv) -gt 0
                 echo "Missing value for --user." >&2
                 exit 2
             end
+            set cli_ssh 1
             set remote_user $argv[2]
             set argv $argv[3..]
         case --identity
@@ -107,6 +130,7 @@ while test (count $argv) -gt 0
                 echo "Missing value for --identity." >&2
                 exit 2
             end
+            set cli_ssh 1
             set identity $argv[2]
             set argv $argv[3..]
         case --command
@@ -114,6 +138,7 @@ while test (count $argv) -gt 0
                 echo "Missing value for --command." >&2
                 exit 2
             end
+            set cli_ssh 1
             set remote_command $argv[2]
             set argv $argv[3..]
         case '*'
@@ -121,6 +146,20 @@ while test (count $argv) -gt 0
             _gate_usage
             exit 2
     end
+end
+
+if test "$probe" = 1
+    if test "$cli_ssh" = 1
+        echo "Probe mode does not accept SSH target parameters." >&2
+        _gate_usage
+        exit 2
+    end
+    if _attach_agent
+        echo "ssh-agent: ready"
+        exit 0
+    end
+    echo "ssh-agent: absent"
+    exit 1
 end
 
 if test -z "$target"
@@ -200,15 +239,8 @@ set -l ssh_bin
 set ssh_bin (_resolve_tool ssh $FRAMENEST_NETWORK_TEST_SSH)
 or exit $status
 
-set -l gpgconf_bin
-set gpgconf_bin (_optional_gpgconf)
-if test -n "$gpgconf_bin"
-    set -l agent_sock
-    set agent_sock (env -u APPIMAGE -u APPDIR -u ARGV0 -u LD_LIBRARY_PATH -u LD_PRELOAD PATH=$trusted_path $gpgconf_bin --list-dirs agent-ssh-socket 2>/dev/null)
-    if test $status -eq 0; and test -n "$agent_sock"; and test -S "$agent_sock"
-        set -gx SSH_AUTH_SOCK $agent_sock
-    end
-end
+_attach_agent
+or true
 
 set -l ssh_args
 set -a ssh_args -o BatchMode=yes
