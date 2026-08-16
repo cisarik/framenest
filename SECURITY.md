@@ -131,7 +131,13 @@ leaves the durable published file untouched under the trusted-loopback
 single-tenant boundary; Tailscale multi-user ownership follows ADR-0053.
 Browser mutation requests with an `Origin` header must match the effective same
 origin; this is a bounded loopback protection and not authentication or
-authorization.
+authorization. In Tailscale UDS mode, `POST /api/x/requests` and
+`POST /api/x/requests/{claim_id}/retry` may also accept an exact allowlisted
+`chrome-extension://` origin after `FRAMENEST_COMPANION_EXTENSION_ORIGINS` is
+set. That allowlist defaults to empty, still requires `X-FrameNest-Request: 1`,
+adds no CORS headers, and does not change any other mutation route. See
+[ADR-0061](docs/adr/0061-x-meme-browser-companion.md) and
+[docs/X_COMPANION.md](docs/X_COMPANION.md).
 
 YouTube manual ingestion is a separate operator-only loopback boundary. It is
 disabled unless its private staging root and the existing upload/publication

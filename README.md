@@ -42,7 +42,12 @@ users may submit private uploads for administrator review; administrators have
 bounded batch actions, safe catalog removal, and content publication.
 Requester-private YouTube and X meme acquisition with explicit administrator
 promotion are implemented (X is video/animated-GIF-like media only; static X
-photos remain deferred). The upload path receives untrusted bytes only into
+photos remain deferred). A loadable unpacked Manifest V3 X companion can save
+eligible posts through the existing X request routes and attach catalog JPEG,
+PNG, GIF-style, or short-video memes to the X composer after an exact
+extension-origin allowlist is configured
+([ADR-0061](docs/adr/0061-x-meme-browser-companion.md),
+[docs/X_COMPANION.md](docs/X_COMPANION.md)). The upload path receives untrusted bytes only into
 configured server quarantine, performs bounded server-side validation, and
 derives canonical identity from validated byte size and SHA-256 digest. The
 current foundation also includes a durable manual cover foundation: at most one

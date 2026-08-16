@@ -84,7 +84,12 @@ Tailscale remote-access and identity foundation (root-owned HTTPS Serve to a
 permission-restricted Unix socket, verified-identity mapping, capability
 authorization, and privileged-action audit) is recorded in
 [ADR-0048](docs/adr/0048-tailscale-remote-access-and-identity-foundation.md)
-and the current runbook. Catalog backup create/verify/restore, automated
+and the current runbook. An unpacked Manifest V3 X companion may submit the
+two flagged X request mutations from an exact allowlisted
+`chrome-extension://` origin and may list requester-visible memes through
+`GET /api/x/companion/media`; it is inert until that allowlist is set
+([ADR-0061](docs/adr/0061-x-meme-browser-companion.md),
+[docs/X_COMPANION.md](docs/X_COMPANION.md)). Catalog backup create/verify/restore, automated
 retention/restore-verification, mounted-filesystem off-device
 copy/restore-verification, and operator-workstation pull foundations are
 documented in

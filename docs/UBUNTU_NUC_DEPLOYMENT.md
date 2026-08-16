@@ -850,6 +850,8 @@ FRAMENEST_INGRESS_MODE=tailscale_uds
 FRAMENEST_UDS_PATH=/run/framenest/framenest.sock
 FRAMENEST_EXTERNAL_ORIGIN=https://<node>.<tailnet>.ts.net
 FRAMENEST_IDENTITY_MAP={"<verified-login>":"<admin|user>"}
+# Optional; empty remains fail-closed. See docs/X_COMPANION.md.
+# FRAMENEST_COMPANION_EXTENSION_ORIGINS=["chrome-extension://<32-char-id>"]
 ```
 
 Rules:

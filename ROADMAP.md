@@ -278,7 +278,9 @@ Implemented within this phase:
 - requester-private YouTube acquisition and administrator promotion;
 - YouTube/X creator taxonomy and immutable source-derived provenance;
 - requester-private X meme acquisition for native X video and animated-GIF-like
-  media delivered as video (static X photos deferred).
+  media delivered as video (static X photos deferred);
+- unpacked Manifest V3 X companion origin trust, requester-private meme picker,
+  and synthetic composer attach ([ADR-0061](docs/adr/0061-x-meme-browser-companion.md)).
 
 Still required for phase exit: broader adapter coverage, generalized downloader
 UI, and additional source adapters beyond the shipped YouTube/X foundations.

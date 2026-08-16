@@ -203,12 +203,14 @@ def test_environment_template_documents_tailscale_ingress_as_commented_options()
     assert "# FRAMENEST_UDS_PATH=/run/framenest/framenest.sock" in text
     assert "# FRAMENEST_EXTERNAL_ORIGIN=https://<node>.<tailnet>.ts.net" in text
     assert "# FRAMENEST_IDENTITY_MAP=" in text
+    assert "# FRAMENEST_COMPANION_EXTENSION_ORIGINS=" in text
     assert "funnel" not in text.lower()
     for line in text.splitlines():
         assert not line.startswith("FRAMENEST_INGRESS_MODE")
         assert not line.startswith("FRAMENEST_UDS_PATH")
         assert not line.startswith("FRAMENEST_EXTERNAL_ORIGIN")
         assert not line.startswith("FRAMENEST_IDENTITY_MAP")
+        assert not line.startswith("FRAMENEST_COMPANION_EXTENSION_ORIGINS")
 
 
 def test_non_secret_environment_template_contains_no_secret_variables() -> None:
