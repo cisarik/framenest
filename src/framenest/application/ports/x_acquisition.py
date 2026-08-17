@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Protocol
 
 from framenest.domain.identities import MediaId, XAssetId, XPostClaimId
+from framenest.domain.media_user_alias import MediaUserAliasContent, PendingMediaUserAlias
 from framenest.domain.uploads import UploadSessionId
 from framenest.domain.x_acquisition import (
     XAcquisitionState,
@@ -191,3 +192,18 @@ class XAcquisitionClaimRepository(Protocol):
         expected_version: int,
     ) -> XAsset:
         """Persist one already-domain-validated optimistic asset snapshot."""
+
+    def get_pending_alias(self, claim_id: XPostClaimId) -> PendingMediaUserAlias | None:
+        """Return the pending alias for one claim, or None."""
+
+    def upsert_pending_alias(
+        self,
+        claim_id: XPostClaimId,
+        login_key: str,
+        content: MediaUserAliasContent,
+        now_ms: int,
+    ) -> PendingMediaUserAlias | None:
+        """Replace pending alias content. Empty content deletes the pending row."""
+
+    def delete_pending_alias(self, claim_id: XPostClaimId) -> None:
+        """Delete pending alias content for one claim if present."""

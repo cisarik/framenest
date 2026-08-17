@@ -43,6 +43,8 @@ from framenest.infrastructure.persistence.catalog_schema import (
     media_covers,
     media_genres,
     media_metadata,
+    media_user_alias_tags,
+    media_user_aliases,
     physical_media_locations,
     upload_publications,
     youtube_acquisition_claims,
@@ -467,6 +469,16 @@ def _delete_analysis_runs(connection: Connection, media_id: MediaId) -> None:
 
 def _delete_metadata_graph(connection: Connection, media_id: MediaId) -> None:
     media_id_text = media_id.to_string()
+    connection.execute(
+        delete(media_user_alias_tags).where(
+            media_user_alias_tags.c.media_id == media_id_text
+        )
+    )
+    connection.execute(
+        delete(media_user_aliases).where(
+            media_user_aliases.c.media_id == media_id_text
+        )
+    )
     connection.execute(
         delete(media_genres).where(media_genres.c.media_id == media_id_text)
     )

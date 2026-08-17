@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 
-from sqlalchemy import and_, func, insert, select
+from sqlalchemy import and_, delete, func, insert, select, update
 from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
@@ -20,6 +20,8 @@ from framenest.domain.identities import (
     XAssetId,
     XPostClaimId,
 )
+from framenest.domain.media_metadata import CanonicalTagKey, MediaDescription, MediaDisplayTitle
+from framenest.domain.media_user_alias import MediaUserAliasContent, PendingMediaUserAlias
 from framenest.domain.uploads import UploadSessionId
 from framenest.domain.x_acquisition import (
     ACTIVE_X_ACQUISITION_STATES,
@@ -37,6 +39,8 @@ from framenest.domain.x_acquisition import (
 )
 from framenest.infrastructure.persistence.catalog_schema import (
     x_assets,
+    x_claim_pending_alias_tags,
+    x_claim_pending_aliases,
     x_post_claims,
 )
 from framenest.infrastructure.persistence.engine import (
@@ -598,6 +602,97 @@ class SqliteXAcquisitionClaimRepository:
                 _REPOSITORY_FAILURE_MESSAGE
             ) from exc
 
+    def get_pending_alias(self, claim_id: XPostClaimId) -> PendingMediaUserAlias | None:
+        def operation(connection: Connection) -> PendingMediaUserAlias | None:
+            return _load_pending_alias(connection, claim_id)
+
+        try:
+            return run_in_transaction(self._engine, operation)
+        except SQLAlchemyError as exc:
+            raise FrameNestXClaimRepositoryError(
+                _REPOSITORY_FAILURE_MESSAGE
+            ) from exc
+
+    def upsert_pending_alias(
+        self,
+        claim_id: XPostClaimId,
+        login_key: str,
+        content: MediaUserAliasContent,
+        now_ms: int,
+    ) -> PendingMediaUserAlias | None:
+        def operation(connection: Connection) -> PendingMediaUserAlias | None:
+            if content.is_empty():
+                _delete_pending_alias(connection, claim_id)
+                return None
+            current = _load_pending_alias(connection, claim_id)
+            claim_id_text = claim_id.to_string()
+            if current is None:
+                connection.execute(
+                    insert(x_claim_pending_aliases).values(
+                        claim_id=claim_id_text,
+                        login_key=login_key,
+                        display_title=_pending_title(content),
+                        description=_pending_description(content),
+                        created_at_ms=now_ms,
+                        updated_at_ms=now_ms,
+                    )
+                )
+                created_at_ms = now_ms
+            else:
+                connection.execute(
+                    update(x_claim_pending_aliases)
+                    .where(x_claim_pending_aliases.c.claim_id == claim_id_text)
+                    .values(
+                        login_key=login_key,
+                        display_title=_pending_title(content),
+                        description=_pending_description(content),
+                        updated_at_ms=now_ms,
+                    )
+                )
+                created_at_ms = current.created_at_ms
+            connection.execute(
+                delete(x_claim_pending_alias_tags).where(
+                    x_claim_pending_alias_tags.c.claim_id == claim_id_text
+                )
+            )
+            for position, key in enumerate(content.tag_keys):
+                connection.execute(
+                    insert(x_claim_pending_alias_tags).values(
+                        claim_id=claim_id_text,
+                        tag_key=key.value,
+                        position=position,
+                    )
+                )
+            return PendingMediaUserAlias(
+                claim_id=claim_id,
+                login_key=login_key,
+                content=content,
+                created_at_ms=created_at_ms,
+                updated_at_ms=now_ms,
+            )
+
+        try:
+            return run_in_transaction(self._engine, operation)
+        except IntegrityError as exc:
+            raise FrameNestXClaimRepositoryError(
+                _REPOSITORY_FAILURE_MESSAGE
+            ) from exc
+        except SQLAlchemyError as exc:
+            raise FrameNestXClaimRepositoryError(
+                _REPOSITORY_FAILURE_MESSAGE
+            ) from exc
+
+    def delete_pending_alias(self, claim_id: XPostClaimId) -> None:
+        def operation(connection: Connection) -> None:
+            _delete_pending_alias(connection, claim_id)
+
+        try:
+            run_in_transaction(self._engine, operation)
+        except SQLAlchemyError as exc:
+            raise FrameNestXClaimRepositoryError(
+                _REPOSITORY_FAILURE_MESSAGE
+            ) from exc
+
     # ------------------------------------------------------------------ helpers
     def _count(self, *conditions: object) -> int:
         def operation(connection: Connection) -> int:
@@ -810,3 +905,61 @@ def _optional_media_location_id(value: object):
     if value is None:
         return None
     return _MediaLocationId.from_string(str(value))
+
+
+def _load_pending_alias(
+    connection: Connection, claim_id: XPostClaimId
+) -> PendingMediaUserAlias | None:
+    claim_id_text = claim_id.to_string()
+    row = (
+        connection.execute(
+            select(x_claim_pending_aliases).where(
+                x_claim_pending_aliases.c.claim_id == claim_id_text
+            )
+        )
+        .mappings()
+        .first()
+    )
+    if row is None:
+        return None
+    tag_rows = connection.execute(
+        select(x_claim_pending_alias_tags.c.tag_key)
+        .where(x_claim_pending_alias_tags.c.claim_id == claim_id_text)
+        .order_by(x_claim_pending_alias_tags.c.position)
+    ).fetchall()
+    title = row["display_title"]
+    description = row["description"]
+    content = MediaUserAliasContent(
+        display_title=None if title is None else MediaDisplayTitle(title),
+        description=None if description is None else MediaDescription(description),
+        tag_keys=tuple(CanonicalTagKey(item[0]) for item in tag_rows),
+    )
+    return PendingMediaUserAlias(
+        claim_id=claim_id,
+        login_key=str(row["login_key"]),
+        content=content,
+        created_at_ms=int(row["created_at_ms"]),
+        updated_at_ms=int(row["updated_at_ms"]),
+    )
+
+
+def _delete_pending_alias(connection: Connection, claim_id: XPostClaimId) -> None:
+    claim_id_text = claim_id.to_string()
+    connection.execute(
+        delete(x_claim_pending_alias_tags).where(
+            x_claim_pending_alias_tags.c.claim_id == claim_id_text
+        )
+    )
+    connection.execute(
+        delete(x_claim_pending_aliases).where(
+            x_claim_pending_aliases.c.claim_id == claim_id_text
+        )
+    )
+
+
+def _pending_title(content: MediaUserAliasContent) -> str | None:
+    return None if content.display_title is None else content.display_title.value
+
+
+def _pending_description(content: MediaUserAliasContent) -> str | None:
+    return None if content.description is None else content.description.value

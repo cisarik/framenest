@@ -6,6 +6,7 @@ from sqlalchemy import (
     CheckConstraint,
     Column,
     ForeignKey,
+    ForeignKeyConstraint,
     Index,
     Integer,
     MetaData,
@@ -1345,6 +1346,178 @@ x_assets = Table(
     Index("ix_x_assets_claim_id", "claim_id", "ordinal"),
     Index("ix_x_assets_state", "state", "updated_at_ms", "id"),
     Index("ix_x_assets_media", "media_id", "media_location_id"),
+)
+
+_LOGIN_KEY_SQL = (
+    "length(login_key) >= 1 AND length(login_key) <= 254 "
+    "AND login_key = lower(login_key) "
+    "AND instr(login_key, ' ') = 0 "
+    "AND instr(login_key, char(9)) = 0 "
+    "AND instr(login_key, char(10)) = 0 "
+    "AND instr(login_key, char(13)) = 0"
+)
+
+media_user_aliases = Table(
+    "media_user_aliases",
+    metadata,
+    Column("media_id", Text(), nullable=False),
+    Column("login_key", Text(), nullable=False),
+    Column("display_title", Text(), nullable=True),
+    Column("description", Text(), nullable=True),
+    Column("created_at_ms", Integer(), nullable=False),
+    Column("updated_at_ms", Integer(), nullable=False),
+    PrimaryKeyConstraint("media_id", "login_key", name="pk_media_user_aliases"),
+    ForeignKeyConstraint(
+        ["media_id"],
+        ["logical_media.id"],
+        name="fk_media_user_aliases_media_id",
+        ondelete="RESTRICT",
+    ),
+    CheckConstraint("length(media_id) = 36", name="ck_media_user_aliases_media_id_length"),
+    CheckConstraint(_LOGIN_KEY_SQL, name="ck_media_user_aliases_login_key"),
+    CheckConstraint(
+        "display_title IS NULL OR (length(display_title) >= 1 AND length(display_title) <= 240)",
+        name="ck_media_user_aliases_title_length",
+    ),
+    CheckConstraint(
+        "description IS NULL OR (length(description) >= 1 AND length(description) <= 10000)",
+        name="ck_media_user_aliases_description_length",
+    ),
+    CheckConstraint(
+        "created_at_ms >= 0",
+        name="ck_media_user_aliases_created_at_ms_non_negative",
+    ),
+    CheckConstraint(
+        "updated_at_ms >= 0",
+        name="ck_media_user_aliases_updated_at_ms_non_negative",
+    ),
+    CheckConstraint(
+        "updated_at_ms >= created_at_ms",
+        name="ck_media_user_aliases_updated_not_before_created",
+    ),
+    Index("ix_media_user_aliases_login_key", "login_key", "updated_at_ms"),
+)
+
+media_user_alias_tags = Table(
+    "media_user_alias_tags",
+    metadata,
+    Column("media_id", Text(), nullable=False),
+    Column("login_key", Text(), nullable=False),
+    Column("tag_key", Text(), nullable=False),
+    Column("position", Integer(), nullable=False),
+    PrimaryKeyConstraint(
+        "media_id", "login_key", "tag_key", name="pk_media_user_alias_tags"
+    ),
+    ForeignKeyConstraint(
+        ["media_id", "login_key"],
+        ["media_user_aliases.media_id", "media_user_aliases.login_key"],
+        name="fk_media_user_alias_tags_alias",
+        ondelete="RESTRICT",
+    ),
+    ForeignKeyConstraint(
+        ["tag_key"],
+        ["canonical_tags.key"],
+        name="fk_media_user_alias_tags_tag_key",
+        ondelete="RESTRICT",
+    ),
+    UniqueConstraint(
+        "media_id",
+        "login_key",
+        "position",
+        name="uq_media_user_alias_tags_position",
+    ),
+    CheckConstraint(
+        "length(media_id) = 36", name="ck_media_user_alias_tags_media_id_length"
+    ),
+    CheckConstraint(_LOGIN_KEY_SQL, name="ck_media_user_alias_tags_login_key"),
+    CheckConstraint(
+        "length(tag_key) >= 1 AND length(tag_key) <= 64",
+        name="ck_media_user_alias_tags_tag_key_length",
+    ),
+    CheckConstraint(
+        "position >= 0 AND position < 32",
+        name="ck_media_user_alias_tags_position_range",
+    ),
+)
+
+x_claim_pending_aliases = Table(
+    "x_claim_pending_aliases",
+    metadata,
+    Column("claim_id", Text(), nullable=False),
+    Column("login_key", Text(), nullable=False),
+    Column("display_title", Text(), nullable=True),
+    Column("description", Text(), nullable=True),
+    Column("created_at_ms", Integer(), nullable=False),
+    Column("updated_at_ms", Integer(), nullable=False),
+    PrimaryKeyConstraint("claim_id", name="pk_x_claim_pending_aliases"),
+    ForeignKeyConstraint(
+        ["claim_id"],
+        ["x_post_claims.id"],
+        name="fk_x_claim_pending_aliases_claim_id",
+        ondelete="RESTRICT",
+    ),
+    CheckConstraint(
+        "length(claim_id) = 36", name="ck_x_claim_pending_aliases_claim_id_length"
+    ),
+    CheckConstraint(_LOGIN_KEY_SQL, name="ck_x_claim_pending_aliases_login_key"),
+    CheckConstraint(
+        "display_title IS NULL OR (length(display_title) >= 1 AND length(display_title) <= 240)",
+        name="ck_x_claim_pending_aliases_title_length",
+    ),
+    CheckConstraint(
+        "description IS NULL OR (length(description) >= 1 AND length(description) <= 10000)",
+        name="ck_x_claim_pending_aliases_description_length",
+    ),
+    CheckConstraint(
+        "created_at_ms >= 0",
+        name="ck_x_claim_pending_aliases_created_at_ms_non_negative",
+    ),
+    CheckConstraint(
+        "updated_at_ms >= 0",
+        name="ck_x_claim_pending_aliases_updated_at_ms_non_negative",
+    ),
+    CheckConstraint(
+        "updated_at_ms >= created_at_ms",
+        name="ck_x_claim_pending_aliases_updated_not_before_created",
+    ),
+)
+
+x_claim_pending_alias_tags = Table(
+    "x_claim_pending_alias_tags",
+    metadata,
+    Column("claim_id", Text(), nullable=False),
+    Column("tag_key", Text(), nullable=False),
+    Column("position", Integer(), nullable=False),
+    PrimaryKeyConstraint(
+        "claim_id", "tag_key", name="pk_x_claim_pending_alias_tags"
+    ),
+    ForeignKeyConstraint(
+        ["claim_id"],
+        ["x_claim_pending_aliases.claim_id"],
+        name="fk_x_claim_pending_alias_tags_pending",
+        ondelete="RESTRICT",
+    ),
+    ForeignKeyConstraint(
+        ["tag_key"],
+        ["canonical_tags.key"],
+        name="fk_x_claim_pending_alias_tags_tag_key",
+        ondelete="RESTRICT",
+    ),
+    UniqueConstraint(
+        "claim_id", "position", name="uq_x_claim_pending_alias_tags_position"
+    ),
+    CheckConstraint(
+        "length(claim_id) = 36",
+        name="ck_x_claim_pending_alias_tags_claim_id_length",
+    ),
+    CheckConstraint(
+        "length(tag_key) >= 1 AND length(tag_key) <= 64",
+        name="ck_x_claim_pending_alias_tags_tag_key_length",
+    ),
+    CheckConstraint(
+        "position >= 0 AND position < 32",
+        name="ck_x_claim_pending_alias_tags_position_range",
+    ),
 )
 
 media_analysis_runs = Table(
