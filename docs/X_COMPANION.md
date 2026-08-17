@@ -9,10 +9,11 @@ deployment, signed-in X probing, or a yt-dlp pin change.
 An authenticated FrameNest user can:
 
 - hover (or keyboard-focus) a green **+** at the bottom-right of each image,
-  video, or GIF in an eligible X post and click **Save to FrameNest**
-  (existing X request lifecycle; the click still submits the post permalink,
-  not a per-asset media URL; static X photographs currently fail closed as
-  `X_NO_SUPPORTED_MEDIA`);
+  video, or GIF in an eligible X post and click **Save to FrameNest** to open
+  a Save popup (Title, Description, Tags, Save, Cancel). Save submits the post
+  permalink plus an optional caller-private alias; it does not send a
+  per-asset media URL. Static X photographs currently fail closed as
+  `X_NO_SUPPORTED_MEDIA`. Cancel closes without a request.
 - click into the reply composer to reveal a floating **+** on the right of
   "Post your reply" (not inserted into the X input row), then open an in-page
   FrameNest search popup above that button;
@@ -20,7 +21,8 @@ An authenticated FrameNest user can:
   items (JPEG/PNG, GIF-style, or short video) onto the composer file input.
 
 Save is a hover/focus overlay at the bottom-right of own media tiles, not an
-action-row control. Text-only posts have no Save. Attach is shown when the
+action-row control. Click opens the Save popup instead of silently posting
+`{ url }`. Text-only posts have no Save. Attach is shown when the
 composer is focused, not on mouseover, and is not the side panel. After
 connect, origin lives under Settings; the search prompt is Search memes. The
 side panel entry remains in the manifest but is not this attach surface.

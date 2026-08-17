@@ -21,7 +21,7 @@ direction.
 FrameNest is currently in foundation-stage, pre-alpha development.
 
 A Poetry package, runnable loopback FastAPI server, packaged local web shell,
-explicit SQLite migration foundation through schema head `0028`, local device
+explicit SQLite migration foundation through schema head `0029`, local device
 and library registries, read-only library scan preview, explicit idempotent
 scan-candidate import into the minimum persistent media catalog, persistent
 display-title and canonical-tag core, local media-analysis preview,
@@ -178,7 +178,9 @@ are accepted through
 [ADR-0055](docs/adr/0055-youtube-creator-taxonomy-and-immutable-provenance.md).
 Requester-private X meme acquisition is implemented for native X video and
 animated-GIF-like media delivered as video; there is no separate X content
-category, and static X photos remain deferred. Movie language metadata should
+category, and static X photos remain deferred. A caller-private per-user alias
+overlay may be named on X Save; Gallery and Details remain canonical
+`media_metadata`. Movie language metadata should
 prefer container or audio metadata and user editing before expensive AI
 analysis, and FrameNest must not automatically upload audio to a cloud provider.
 
