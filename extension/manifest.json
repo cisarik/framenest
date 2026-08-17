@@ -40,7 +40,7 @@
   },
   "web_accessible_resources": [
     {
-      "resources": ["ui/picker.html", "ui/picker.css", "ui/picker.js"],
+      "resources": ["ui/picker.html", "ui/picker.css", "ui/picker.js", "ui/save.html", "ui/save.css", "ui/save.js"],
       "matches": ["https://x.com/*", "https://twitter.com/*"]
     }
   ]

@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Save to FrameNest</title>
+    <link rel="stylesheet" href="save.css" />
+  </head>
+  <body>
+    <main>
+      <form id="save-form" autocomplete="off">
+        <h1>Save to FrameNest</h1>
+        <label for="title">Title</label>
+        <input id="title" name="title" type="text" maxlength="240" spellcheck="true" />
+        <label for="description">Description</label>
+        <textarea id="description" name="description" maxlength="10000" rows="4"></textarea>
+        <fieldset>
+          <legend>Tags</legend>
+          <div id="tags" class="tag-list"></div>
+          <p id="tags-status" class="status"></p>
+        </fieldset>
+        <p id="form-status" class="status" role="status"></p>
+        <div class="actions">
+          <button id="save" type="submit">Save</button>
+          <button id="cancel" type="button">Cancel</button>
+        </div>
+      </form>
+    </main>
+    <script src="../shared/messages.js"></script>
+    <script src="save.js"></script>
+  </body>
+</html>

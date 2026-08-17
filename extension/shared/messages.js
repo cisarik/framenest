@@ -27,6 +27,7 @@
     IDENTITY: "identity",
     ACK: "ack",
     ERROR: "error",
+    CANONICAL_TAGS: "canonical_tags",
   });
 
   function isProtocolMessage(value) {

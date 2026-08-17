@@ -1,0 +1,133 @@
+:root {
+  color-scheme: dark;
+  --background: #000000;
+  --surface: #0a0e0a;
+  --surface-input: #0d1410;
+  --line: rgba(58, 78, 62, 0.45);
+  --text: #e8f0e8;
+  --text-muted: #a8b8a8;
+  --text-soft: #6a7a6a;
+  --accent: #00ff41;
+  --accent-strong: #39ff14;
+  --accent-soft: rgba(0, 255, 65, 0.12);
+  --danger: #ff4d4d;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", "Fira Code", "Cascadia Code", Menlo, Monaco, Consolas, monospace;
+  font-family: var(--font-mono);
+  background: var(--background);
+  color: var(--text);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  padding: 12px;
+  min-width: 260px;
+  background: var(--background);
+  color: var(--text);
+  font-family: var(--font-mono);
+}
+
+h1 {
+  margin: 0 0 12px;
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--accent);
+}
+
+form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+label,
+legend {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+input,
+textarea {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-input);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.85rem;
+  padding: 6px 8px;
+}
+
+input:focus-visible,
+textarea:focus-visible,
+button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+fieldset {
+  margin: 0;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+}
+
+.tag-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-height: 120px;
+  overflow: auto;
+}
+
+.tag-list label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text);
+  font-size: 0.8rem;
+}
+
+.actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+button {
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  background: #000000;
+  color: var(--accent);
+  font: inherit;
+  font-weight: 700;
+  padding: 6px 12px;
+  cursor: pointer;
+}
+
+button:hover {
+  color: var(--accent-strong);
+  border-color: var(--accent-strong);
+}
+
+#cancel {
+  border-color: var(--line);
+  color: var(--text-muted);
+}
+
+.status {
+  min-height: 1.1em;
+  margin: 0;
+  font-size: 0.75rem;
+  color: var(--text-soft);
+}
+
+.status[data-kind="error"] {
+  color: var(--danger);
+}

@@ -65,6 +65,8 @@ async function handle(message) {
       return fetchJson("identity");
     case companion.TYPES.SAVE_POST:
       return savePost(message.payload || {});
+    case companion.TYPES.CANONICAL_TAGS:
+      return fetchJson("canonicalTags");
     case companion.TYPES.POLL_CLAIM:
       return pollClaim(message.payload || {});
     case companion.TYPES.RECOVER_INFLIGHT:
@@ -115,9 +117,10 @@ async function savePost(payload) {
   if (!accepted) {
     return { ok: false, error: "invalid_url" };
   }
+  const alias = sanitizeAlias(payload.alias);
   const response = await fetchJson("xRequests", {
     method: "POST",
-    body: { url: accepted.submittedUrl },
+    body: { url: accepted.submittedUrl, alias: alias },
   });
   if (!response.ok) {
     return response;
@@ -133,6 +136,25 @@ async function savePost(payload) {
     failureCode: response.body.failure_code || null,
     terminal: isTerminal(response.body),
   };
+}
+
+function sanitizeAlias(raw) {
+  if (raw == null || typeof raw !== "object" || Array.isArray(raw)) {
+    return {};
+  }
+  const alias = {};
+  if (typeof raw.display_title === "string") {
+    alias.display_title = raw.display_title.slice(0, 240);
+  }
+  if (typeof raw.description === "string") {
+    alias.description = raw.description.slice(0, 10000);
+  }
+  if (Array.isArray(raw.tag_keys)) {
+    alias.tag_keys = raw.tag_keys
+      .filter((key) => typeof key === "string" && /^[a-z][a-z0-9-]{0,63}$/.test(key))
+      .slice(0, 32);
+  }
+  return alias;
 }
 
 async function pollClaim(payload) {

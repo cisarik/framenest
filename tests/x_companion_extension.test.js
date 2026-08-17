@@ -185,12 +185,14 @@ test("in-feed Save is a per-media hover overlay, not an action-row control", () 
   assert.match(adapterSource, /background: #000000/);
   assert.match(adapterSource, /style\.position = "relative"/);
   assert.match(adapterSource, /return "no_media"/);
-  assert.match(adapterSource, /TYPES\.SAVE_POST/);
   assert.match(adapterSource, /accepted\.submittedUrl/);
   assert.doesNotMatch(adapterSource, /pbs\.twimg\.com/);
   assert.match(adapterSource, /data-framenest-companion"\) === "save"/);
   assert.match(adapterSource, /Save to FrameNest failed/);
-  assert.match(adapterSource, /TYPES\.SAVE_POST, \{\s*url: accepted\.submittedUrl/);
+  assert.match(adapterSource, /openSavePopup/);
+  assert.match(adapterSource, /ui\/save\.html/);
+  assert.doesNotMatch(adapterSource, /TYPES\.SAVE_POST, \{\s*url: accepted\.submittedUrl/);
+  assert.doesNotMatch(adapterSource, /void savePost\(button, accepted\)/);
   assert.doesNotMatch(adapterSource, /M8 8l8 8/);
   assert.doesNotMatch(adapterSource, /M16 8l-8 8/);
   assert.match(adapterSource, /kind === "failed"[\s\S]{0,160}M12 6\.5v11M6\.5 12h11/);
@@ -333,6 +335,9 @@ test("in-page picker iframe WAR is match-limited to X hosts", () => {
     "ui/picker.css",
     "ui/picker.html",
     "ui/picker.js",
+    "ui/save.css",
+    "ui/save.html",
+    "ui/save.js",
   ]);
 });
 

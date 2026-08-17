@@ -12,6 +12,7 @@
   let stale = false;
   let boundComposer = null;
   let attachPopup = null;
+  let savePopup = null;
   let attachPositionBound = false;
   let composerFocusBound = false;
   const SAVE_NAME = "Save to FrameNest";
@@ -319,26 +320,173 @@
     const button = document.createElement("button");
     button.type = "button";
     button.setAttribute("data-framenest-companion", "save");
+    button.setAttribute("aria-haspopup", "dialog");
+    button.setAttribute("aria-expanded", "false");
     setSaveStatus(button, "idle", SAVE_NAME, false);
     ["pointerdown", "mousedown", "click"].forEach((type) => {
       button.addEventListener(type, (event) => {
         haltHostAction(event);
         if (type === "click") {
-          void savePost(button, accepted);
+          openSavePopup(button, accepted);
         }
       });
     });
     return button;
   }
 
-  async function savePost(button, accepted) {
-    if (stale || button.disabled || button.getAttribute("aria-busy") === "true") {
+  function closeSavePopup() {
+    if (!savePopup) {
       return;
     }
-    setSaveStatus(button, "busy", "Saving to FrameNest", true);
-    const result = await request(companion.TYPES.SAVE_POST, {
-      url: accepted.submittedUrl,
-    });
+    const state = savePopup;
+    savePopup = null;
+    window.removeEventListener("resize", state.reposition);
+    window.removeEventListener("scroll", state.reposition, true);
+    document.removeEventListener("keydown", state.onKey, true);
+    document.removeEventListener("mousedown", state.onMouseDown, true);
+    window.removeEventListener("message", state.onMessage);
+    if (state.host && state.host.parentNode) {
+      state.host.parentNode.removeChild(state.host);
+    }
+    if (state.button && document.contains(state.button)) {
+      state.button.setAttribute("aria-expanded", "false");
+    }
+  }
+
+  function positionSavePopup() {
+    if (!savePopup) {
+      return;
+    }
+    const button = savePopup.button;
+    const host = savePopup.host;
+    if (!button || !document.contains(button)) {
+      closeSavePopup();
+      return;
+    }
+    const rect = button.getBoundingClientRect();
+    const width = Math.min(320, Math.max(280, window.innerWidth - 16));
+    const height = Math.min(380, Math.max(240, window.innerHeight - 16));
+    const gap = 8;
+    const enoughAbove = rect.top >= height + gap;
+    let top = enoughAbove ? rect.top - height - gap : rect.bottom + gap;
+    let left = rect.right - width;
+    const maxLeft = window.innerWidth - width - 8;
+    const maxTop = window.innerHeight - height - 8;
+    if (left < 8) {
+      left = 8;
+    }
+    if (left > maxLeft) {
+      left = Math.max(8, maxLeft);
+    }
+    if (top < 8) {
+      top = 8;
+    }
+    if (top > maxTop) {
+      top = Math.max(8, maxTop);
+    }
+    host.style.position = "fixed";
+    host.style.left = String(left) + "px";
+    host.style.top = String(top) + "px";
+    host.style.width = String(width) + "px";
+    host.style.height = String(height) + "px";
+    host.style.zIndex = "2147483646";
+    host.style.margin = "0";
+    host.style.padding = "0";
+    host.style.border = "0";
+  }
+
+  function openSavePopup(button, accepted) {
+    if (stale || !button) {
+      return;
+    }
+    if (savePopup && savePopup.button === button) {
+      closeSavePopup();
+      return;
+    }
+    closeSavePopup();
+    const host = document.createElement("div");
+    host.setAttribute("data-framenest-companion-save-host", "");
+    host.setAttribute("role", "dialog");
+    host.setAttribute("aria-label", SAVE_NAME);
+    const shadow = host.attachShadow({ mode: "closed" });
+    const style = document.createElement("style");
+    style.textContent = [
+      ":host { display: block; }",
+      ".frame { display: flex; flex-direction: column; width: 100%; height: 100%;",
+      "  border: 1px solid #00ff41; border-radius: 8px; background: #000000; overflow: hidden;",
+      "  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.65); }",
+      "iframe { flex: 1 1 auto; width: 100%; height: 100%; border: 0; background: #000000; }",
+    ].join("\n");
+    const frame = document.createElement("div");
+    frame.className = "frame";
+    const iframe = document.createElement("iframe");
+    iframe.src =
+      chrome.runtime.getURL("ui/save.html") +
+      "#url=" +
+      encodeURIComponent(accepted.submittedUrl);
+    iframe.title = SAVE_NAME;
+    iframe.setAttribute("aria-label", SAVE_NAME);
+    frame.appendChild(iframe);
+    shadow.appendChild(style);
+    shadow.appendChild(frame);
+    document.documentElement.appendChild(host);
+    button.setAttribute("aria-expanded", "true");
+    const reposition = () => {
+      positionSavePopup();
+    };
+    const onKey = (event) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        closeSavePopup();
+      }
+    };
+    const onMouseDown = (event) => {
+      if (button.contains(event.target) || host === event.target || host.contains(event.target)) {
+        return;
+      }
+      closeSavePopup();
+    };
+    const onMessage = (event) => {
+      if (!savePopup || event.source !== savePopup.iframe.contentWindow) {
+        return;
+      }
+      const data = event.data;
+      if (
+        !data ||
+        data.v !== companion.PROTOCOL ||
+        data.source !== "framenest-save-popup"
+      ) {
+        return;
+      }
+      if (data.action === "cancel") {
+        closeSavePopup();
+        return;
+      }
+      if (data.action === "result") {
+        const result = data.result || { ok: false };
+        closeSavePopup();
+        applySaveResult(button, result);
+      }
+    };
+    savePopup = {
+      host: host,
+      button: button,
+      iframe: iframe,
+      reposition: reposition,
+      onKey: onKey,
+      onMouseDown: onMouseDown,
+      onMessage: onMessage,
+    };
+    window.addEventListener("resize", reposition);
+    window.addEventListener("scroll", reposition, true);
+    document.addEventListener("keydown", onKey, true);
+    document.addEventListener("mousedown", onMouseDown, true);
+    window.addEventListener("message", onMessage);
+    positionSavePopup();
+  }
+
+  function applySaveResult(button, result) {
     if (!result.ok) {
       setSaveStatus(button, "failed", "Save to FrameNest failed", false);
       return;
