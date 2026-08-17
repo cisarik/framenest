@@ -211,17 +211,28 @@ test("Save popup searches tags, pins Save, and does not execute Analyze", () => 
   assert.match(saveHtml, /aria-label="Close"/);
   assert.match(saveHtml, />Save</);
   assert.match(saveHtml, /id="analyze"/);
-  assert.match(saveHtml, /Analyze by AI is available in FrameNest after this item is saved\./);
-  assert.doesNotMatch(saveHtml, /id="description"/);
-  assert.doesNotMatch(saveHtml, /<textarea/);
+  assert.match(saveHtml, />\s*Save and analyze by AI\s*</);
+  assert.match(
+    saveHtml,
+    /Saves now\. Analyze by AI is available in FrameNest after this item is cataloged\./
+  );
+  assert.doesNotMatch(saveHtml, />Analyze by AI</);
+  assert.match(saveHtml, /id="description"/);
+  assert.match(saveHtml, /<textarea[^>]*id="description"/);
+  assert.match(saveHtml, /maxlength="10000"/);
+  assert.match(saveHtml, /id="title"[\s\S]*id="description"[\s\S]*id="tag-search"/);
+  assert.match(saveHtml, /id="analyze"[\s\S]*id="save"/);
   assert.doesNotMatch(saveHtml, /id="cancel"/);
   assert.doesNotMatch(saveHtml, />Cancel</);
   assert.doesNotMatch(saveHtml, /type="checkbox"/);
   assert.doesNotMatch(saveJs, /innerHTML/);
   assert.doesNotMatch(saveJs, /type\s*=\s*["']checkbox["']/);
-  assert.doesNotMatch(saveJs, /\.description/);
-  assert.doesNotMatch(saveJs, /disabled\s*=\s*false/);
+  assert.match(saveJs, /payload\.description = descriptionValue/);
+  assert.match(saveJs, /analyze\.disabled = false/);
+  assert.match(saveJs, /form\.addEventListener\("submit"[\s\S]*submitSave\(\)/);
+  assert.match(saveJs, /analyze\.addEventListener\("click"[\s\S]*submitSave\(\)/);
   assert.match(saveJs, /TYPES\.IDENTITY/);
+  assert.match(saveJs, /TYPES\.SAVE_POST/);
   assert.match(saveJs, /analysis\.run/);
   assert.match(saveJs, /analyze\.hidden = true/);
   assert.match(saveJs, /analyze\.disabled = true/);
@@ -234,6 +245,8 @@ test("Save popup searches tags, pins Save, and does not execute Analyze", () => 
   assert.match(saveCss, /#0c1a10/);
   assert.match(saveCss, /\.fields \{[\s\S]*?overflow:\s*auto/);
   assert.match(saveCss, /\.actions \{[\s\S]*?flex:\s*0 0 auto/);
+  assert.match(saveCss, /\.actions \{[\s\S]*?justify-content:\s*flex-end/);
+  assert.doesNotMatch(saveCss, /\.actions \{[\s\S]*?justify-content:\s*flex-start/);
   assert.match(saveFn[0], /Math\.min\(\s*360/);
   assert.match(saveFn[0], /Math\.min\(\s*520/);
   assert.doesNotMatch(saveFn[0], /Math\.min\(\s*380/);

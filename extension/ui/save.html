@@ -15,6 +15,8 @@
         <div class="fields">
           <label for="title">Title</label>
           <input id="title" name="title" type="text" maxlength="240" spellcheck="true" />
+          <label for="description">Description</label>
+          <textarea id="description" name="description" maxlength="10000" rows="4"></textarea>
           <label for="tag-search">Tags</label>
           <input
             id="tag-search"
@@ -35,18 +37,18 @@
           <p id="form-status" class="status" role="status"></p>
         </div>
         <div class="actions">
-          <button id="save" type="submit">Save</button>
           <button
             id="analyze"
             class="analyze"
             type="button"
             hidden
             disabled
-            title="Analyze by AI is available in FrameNest after this item is saved."
-            aria-label="Analyze by AI is available in FrameNest after this item is saved."
+            title="Saves now. Analyze by AI is available in FrameNest after this item is cataloged."
+            aria-label="Saves now. Analyze by AI is available in FrameNest after this item is cataloged."
           >
-            Analyze by AI
+            Save and analyze by AI
           </button>
+          <button id="save" type="submit">Save</button>
         </div>
       </form>
     </main>

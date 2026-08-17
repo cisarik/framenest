@@ -104,7 +104,8 @@ label {
   color: var(--text-muted);
 }
 
-input {
+input,
+textarea {
   width: 100%;
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
@@ -115,7 +116,13 @@ input {
   padding: 6px 8px;
 }
 
+textarea {
+  min-height: 5.5rem;
+  resize: none;
+}
+
 input:focus-visible,
+textarea:focus-visible,
 button:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
@@ -197,7 +204,7 @@ button:focus-visible {
 .actions {
   flex: 0 0 auto;
   display: flex;
-  justify-content: flex-start;
+  justify-content: flex-end;
   align-items: center;
   gap: 8px;
   margin: 0;
@@ -227,7 +234,12 @@ button:hover {
 }
 
 .analyze:hover,
-.analyze:focus-visible,
+.analyze:focus-visible {
+  border-color: rgba(0, 200, 83, 0.42);
+  background: #f5f8f5;
+  color: #0c1a10;
+}
+
 .analyze:disabled {
   border-color: rgba(0, 200, 83, 0.42);
   background: #f5f8f5;

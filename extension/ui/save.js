@@ -2,9 +2,11 @@
   const companion = globalThis.FrameNestCompanion;
   const SUGGESTION_LIMIT = 8;
   const TAG_LIMIT = 32;
-  const ANALYZE_HINT = "Analyze by AI is available in FrameNest after this item is saved.";
+  const ANALYZE_HINT =
+    "Saves now. Analyze by AI is available in FrameNest after this item is cataloged.";
   const form = document.getElementById("save-form");
   const title = document.getElementById("title");
+  const description = document.getElementById("description");
   const tagSearch = document.getElementById("tag-search");
   const suggestions = document.getElementById("tag-suggestions");
   const selectedTags = document.getElementById("selected-tags");
@@ -169,9 +171,13 @@
   function aliasPayload() {
     const payload = {};
     const titleValue = title.value;
+    const descriptionValue = description.value.trim();
     const tagKeys = selectedKeys();
     if (titleValue) {
       payload.display_title = titleValue;
+    }
+    if (descriptionValue) {
+      payload.description = descriptionValue;
     }
     if (tagKeys.length) {
       payload.tag_keys = tagKeys;
@@ -191,6 +197,26 @@
       return;
     }
     analyze.hidden = false;
+    analyze.disabled = false;
+  }
+
+  function submitSave() {
+    const url = submittedUrl();
+    if (!url) {
+      setStatus(formStatus, "Invalid post URL.", "error");
+      return;
+    }
+    setStatus(formStatus, "Saving…");
+    request(companion.TYPES.SAVE_POST, { url: url, alias: aliasPayload() }).then(
+      (result) => {
+        if (!result.ok) {
+          setStatus(formStatus, "Save failed.", "error");
+          notifyParent("result", result);
+          return;
+        }
+        notifyParent("result", result);
+      }
+    );
   }
 
   async function loadTags() {
@@ -221,22 +247,7 @@
 
   form.addEventListener("submit", (event) => {
     event.preventDefault();
-    const url = submittedUrl();
-    if (!url) {
-      setStatus(formStatus, "Invalid post URL.", "error");
-      return;
-    }
-    setStatus(formStatus, "Saving…");
-    request(companion.TYPES.SAVE_POST, { url: url, alias: aliasPayload() }).then(
-      (result) => {
-        if (!result.ok) {
-          setStatus(formStatus, "Save failed.", "error");
-          notifyParent("result", result);
-          return;
-        }
-        notifyParent("result", result);
-      }
-    );
+    submitSave();
   });
 
   closeButton.addEventListener("click", () => {
@@ -245,6 +256,7 @@
 
   analyze.addEventListener("click", (event) => {
     event.preventDefault();
+    submitSave();
   });
 
   tagSearch.addEventListener("input", () => {
