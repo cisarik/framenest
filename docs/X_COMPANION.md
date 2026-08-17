@@ -10,10 +10,13 @@ An authenticated FrameNest user can:
 
 - hover (or keyboard-focus) a green **+** at the bottom-right of each image,
   video, or GIF in an eligible X post and click **Save to FrameNest** to open
-  a Save popup (Title, Description, Tags, Save, Cancel). Save submits the post
-  permalink plus an optional caller-private alias; it does not send a
-  per-asset media URL. Static X photographs currently fail closed as
-  `X_NO_SUPPORTED_MEDIA`. Cancel closes without a request.
+  a Save popup (Title, Search tags, Save). The header close **X**, Escape, or
+  a click outside cancel without a request. Description is not collected here.
+  Save submits the post permalink plus an optional caller-private alias
+  (title and selected existing tag keys only); it does not send a per-asset
+  media URL. Static X photographs currently fail closed as
+  `X_NO_SUPPORTED_MEDIA`. Users with `analysis.run` see a disabled **Analyze
+  by AI** control next to Save; analysis does not run from this popup.
 - click into the reply composer to reveal a floating **+** on the right of
   "Post your reply" (not inserted into the X input row), then open an in-page
   FrameNest search popup above that button;

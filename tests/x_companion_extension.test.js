@@ -198,6 +198,49 @@ test("in-feed Save is a per-media hover overlay, not an action-row control", () 
   assert.match(adapterSource, /kind === "failed"[\s\S]{0,160}M12 6\.5v11M6\.5 12h11/);
 });
 
+test("Save popup searches tags, pins Save, and does not execute Analyze", () => {
+  const saveHtml = fs.readFileSync(path.join(REPO, "extension/ui/save.html"), "utf8");
+  const saveCss = fs.readFileSync(path.join(REPO, "extension/ui/save.css"), "utf8");
+  const saveJs = fs.readFileSync(path.join(REPO, "extension/ui/save.js"), "utf8");
+  const saveFn = adapterSource.match(/function positionSavePopup\(\) \{[\s\S]*?\n  \}/);
+  const attachFn = adapterSource.match(/function positionAttachPopup\(\) \{[\s\S]*?\n  \}/);
+  assert.ok(saveFn);
+  assert.ok(attachFn);
+  assert.match(saveHtml, /placeholder="Search tags"/);
+  assert.doesNotMatch(saveHtml, /Search or add a tag/);
+  assert.match(saveHtml, /aria-label="Close"/);
+  assert.match(saveHtml, />Save</);
+  assert.match(saveHtml, /id="analyze"/);
+  assert.match(saveHtml, /Analyze by AI is available in FrameNest after this item is saved\./);
+  assert.doesNotMatch(saveHtml, /id="description"/);
+  assert.doesNotMatch(saveHtml, /<textarea/);
+  assert.doesNotMatch(saveHtml, /id="cancel"/);
+  assert.doesNotMatch(saveHtml, />Cancel</);
+  assert.doesNotMatch(saveHtml, /type="checkbox"/);
+  assert.doesNotMatch(saveJs, /innerHTML/);
+  assert.doesNotMatch(saveJs, /type\s*=\s*["']checkbox["']/);
+  assert.doesNotMatch(saveJs, /\.description/);
+  assert.doesNotMatch(saveJs, /disabled\s*=\s*false/);
+  assert.match(saveJs, /TYPES\.IDENTITY/);
+  assert.match(saveJs, /analysis\.run/);
+  assert.match(saveJs, /analyze\.hidden = true/);
+  assert.match(saveJs, /analyze\.disabled = true/);
+  assert.match(saveJs, /SUGGESTION_LIMIT = 8/);
+  assert.doesNotMatch(saveJs, /\/api\/.*analys/i);
+  assert.doesNotMatch(saveJs, /companion_mutation/);
+  assert.doesNotMatch(saveJs, /TYPES\.[A-Z_]*ANALY/);
+  assert.match(saveCss, /#ff4d4d/);
+  assert.match(saveCss, /#f5f8f5/);
+  assert.match(saveCss, /#0c1a10/);
+  assert.match(saveCss, /\.fields \{[\s\S]*?overflow:\s*auto/);
+  assert.match(saveCss, /\.actions \{[\s\S]*?flex:\s*0 0 auto/);
+  assert.match(saveFn[0], /Math\.min\(\s*360/);
+  assert.match(saveFn[0], /Math\.min\(\s*520/);
+  assert.doesNotMatch(saveFn[0], /Math\.min\(\s*380/);
+  assert.match(attachFn[0], /Math\.min\(\s*420/);
+  assert.doesNotMatch(attachFn[0], /Math\.min\(\s*520/);
+});
+
 test("companion surfaces copy FrameNest gallery visual tokens", () => {
   const pickerCss = fs.readFileSync(path.join(REPO, "extension/ui/picker.css"), "utf8");
   const pickerHtml = fs.readFileSync(path.join(REPO, "extension/ui/picker.html"), "utf8");

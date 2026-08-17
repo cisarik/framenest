@@ -8,20 +8,45 @@
   <body>
     <main>
       <form id="save-form" autocomplete="off">
-        <h1>Save to FrameNest</h1>
-        <label for="title">Title</label>
-        <input id="title" name="title" type="text" maxlength="240" spellcheck="true" />
-        <label for="description">Description</label>
-        <textarea id="description" name="description" maxlength="10000" rows="4"></textarea>
-        <fieldset>
-          <legend>Tags</legend>
-          <div id="tags" class="tag-list"></div>
+        <div class="header">
+          <h1>Save to FrameNest</h1>
+          <button id="close" type="button" aria-label="Close">X</button>
+        </div>
+        <div class="fields">
+          <label for="title">Title</label>
+          <input id="title" name="title" type="text" maxlength="240" spellcheck="true" />
+          <label for="tag-search">Tags</label>
+          <input
+            id="tag-search"
+            name="tag-search"
+            type="text"
+            maxlength="64"
+            spellcheck="false"
+            placeholder="Search tags"
+            role="combobox"
+            aria-autocomplete="list"
+            aria-expanded="false"
+            aria-controls="tag-suggestions"
+            autocomplete="off"
+          />
+          <div id="tag-suggestions" class="tag-suggestions" role="listbox"></div>
+          <div id="selected-tags" class="selected-tags" aria-live="polite"></div>
           <p id="tags-status" class="status"></p>
-        </fieldset>
-        <p id="form-status" class="status" role="status"></p>
+          <p id="form-status" class="status" role="status"></p>
+        </div>
         <div class="actions">
           <button id="save" type="submit">Save</button>
-          <button id="cancel" type="button">Cancel</button>
+          <button
+            id="analyze"
+            class="analyze"
+            type="button"
+            hidden
+            disabled
+            title="Analyze by AI is available in FrameNest after this item is saved."
+            aria-label="Analyze by AI is available in FrameNest after this item is saved."
+          >
+            Analyze by AI
+          </button>
         </div>
       </form>
     </main>

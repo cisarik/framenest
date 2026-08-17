@@ -13,6 +13,7 @@
   --danger: #ff4d4d;
   --radius-sm: 6px;
   --radius-md: 8px;
+  --radius-pill: 999px;
   --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", "Fira Code", "Cascadia Code", Menlo, Monaco, Consolas, monospace;
   font-family: var(--font-mono);
   background: var(--background);
@@ -23,36 +24,87 @@
   box-sizing: border-box;
 }
 
+html,
+body {
+  height: 100%;
+}
+
 body {
   margin: 0;
-  padding: 12px;
+  padding: 0;
   min-width: 260px;
   background: var(--background);
   color: var(--text);
   font-family: var(--font-mono);
+  display: flex;
+  flex-direction: column;
+}
+
+main {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 h1 {
-  margin: 0 0 12px;
+  margin: 0;
   font-size: 0.95rem;
   font-weight: 700;
   color: var(--accent);
 }
 
 form {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.header {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 10px 8px 12px;
+}
+
+#close {
+  flex: 0 0 auto;
+  border: 0;
+  background: transparent;
+  color: #ff4d4d;
+  font: inherit;
+  font-weight: 700;
+  font-size: 0.95rem;
+  line-height: 1;
+  padding: 4px 8px;
+  cursor: pointer;
+}
+
+#close:hover,
+#close:focus-visible {
+  color: #ff4d4d;
+  border-color: transparent;
+}
+
+.fields {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
   display: flex;
   flex-direction: column;
   gap: 8px;
+  padding: 0 12px 8px;
 }
 
-label,
-legend {
+label {
   font-size: 0.75rem;
   color: var(--text-muted);
 }
 
-input,
-textarea {
+input {
   width: 100%;
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
@@ -64,40 +116,92 @@ textarea {
 }
 
 input:focus-visible,
-textarea:focus-visible,
 button:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
 
-fieldset {
-  margin: 0;
-  padding: 8px;
+.tag-suggestions {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 9.5rem;
+  overflow: auto;
   border: 1px solid var(--line);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
 }
 
-.tag-list {
+.tag-suggestions:empty {
+  display: none;
+}
+
+.tag-suggestion {
+  text-align: left;
+  width: 100%;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-weight: 400;
+  font-size: 0.8rem;
+  padding: 6px 8px;
+  cursor: pointer;
+}
+
+.tag-suggestion[aria-selected="true"],
+.tag-suggestion:hover,
+.tag-suggestion:focus-visible {
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
+
+.selected-tags {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  max-height: 120px;
-  overflow: auto;
 }
 
-.tag-list label {
+.tag-chip {
   display: inline-flex;
   align-items: center;
   gap: 4px;
+  max-width: 100%;
+  border: 1px solid rgba(106, 122, 106, 0.3);
+  border-radius: var(--radius-pill);
+  background: var(--surface-input);
+  padding: 3px 4px 3px 8px;
   color: var(--text);
+  font-size: 0.78rem;
+}
+
+.tag-chip__remove {
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-weight: 700;
   font-size: 0.8rem;
+  line-height: 1;
+  padding: 2px 6px;
+  cursor: pointer;
+}
+
+.tag-chip__remove:hover,
+.tag-chip__remove:focus-visible {
+  color: var(--danger);
 }
 
 .actions {
+  flex: 0 0 auto;
   display: flex;
-  justify-content: flex-end;
+  justify-content: flex-start;
+  align-items: center;
   gap: 8px;
-  margin-top: 8px;
+  margin: 0;
+  padding: 8px 12px 12px;
 }
 
 button {
@@ -116,9 +220,23 @@ button:hover {
   border-color: var(--accent-strong);
 }
 
-#cancel {
-  border-color: var(--line);
-  color: var(--text-muted);
+.analyze {
+  border: 1px solid rgba(0, 200, 83, 0.42);
+  background: #f5f8f5;
+  color: #0c1a10;
+}
+
+.analyze:hover,
+.analyze:focus-visible,
+.analyze:disabled {
+  border-color: rgba(0, 200, 83, 0.42);
+  background: #f5f8f5;
+  color: #0c1a10;
+  cursor: not-allowed;
+}
+
+[hidden] {
+  display: none !important;
 }
 
 .status {
