@@ -17,6 +17,7 @@
   --danger: #ff4d4d;
   --focus: #00ff41;
   --shadow-deep: rgba(0, 0, 0, 0.65);
+  --title-bar-height: 36px;
   --radius-sm: 6px;
   --radius-md: 8px;
   --radius-lg: 12px;
@@ -46,6 +47,8 @@ body {
 }
 
 .sidebar-chrome {
+  position: relative;
+  z-index: 3;
   flex: 0 0 auto;
 }
 
@@ -53,7 +56,8 @@ body {
   display: flex;
   align-items: center;
   gap: 8px;
-  min-height: 36px;
+  min-height: var(--title-bar-height);
+  height: var(--title-bar-height);
   padding: 4px 8px;
   background: var(--accent);
   color: #000000;
@@ -154,19 +158,38 @@ body {
 }
 
 .settings-dialog {
-  width: min(420px, calc(100% - 20px));
-  max-height: calc(100vh - 24px);
-  border: 1px solid var(--line-strong);
-  border-radius: var(--radius-lg);
-  background: var(--surface-solid);
+  position: fixed;
+  top: var(--title-bar-height);
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 4;
+  width: 100%;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
   color: var(--text);
   padding: 0;
-  box-shadow: 0 24px 80px var(--shadow-deep);
+  box-shadow: none;
   font-family: var(--font-mono);
 }
 
 .settings-dialog::backdrop {
-  background: rgba(0, 0, 0, 0.6);
+  display: none;
+  background: transparent;
+}
+
+.settings-dialog__sheet {
+  width: 100%;
+  margin: 0;
+  border: none;
+  border-bottom: 1px solid var(--line-strong);
+  border-radius: 0;
+  background: var(--surface-solid);
+  box-shadow: 0 12px 28px var(--shadow-deep);
 }
 
 .settings-dialog__header {
@@ -174,7 +197,7 @@ body {
   align-items: center;
   justify-content: space-between;
   gap: 14px;
-  padding: 16px;
+  padding: 12px 12px 10px;
   border-bottom: 1px solid var(--line);
 }
 
@@ -206,7 +229,7 @@ body {
 .settings-dialog__body {
   display: grid;
   gap: 8px;
-  padding: 16px;
+  padding: 12px;
 }
 
 .settings-dialog__body label {

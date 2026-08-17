@@ -850,6 +850,34 @@ test("toolbar action opens the side-panel shell instead of a picker popup", () =
   assert.equal(warResources.includes("ui/sidebar.css"), false);
 });
 
+test("side-panel Settings is a sheet under the title bar, not a centered modal", () => {
+  const sidebarHtml = fs.readFileSync(path.join(REPO, "extension/ui/sidebar.html"), "utf8");
+  const sidebarJs = fs.readFileSync(path.join(REPO, "extension/ui/sidebar.js"), "utf8");
+  const sidebarCss = fs.readFileSync(path.join(REPO, "extension/ui/sidebar.css"), "utf8");
+  const titleBarAt = sidebarHtml.indexOf('class="title-bar"');
+  const settingsAt = sidebarHtml.indexOf('id="settings-dialog"');
+  const originAt = sidebarHtml.indexOf('id="origin"');
+  const mainAt = sidebarHtml.indexOf('class="sidebar-main"');
+  assert.ok(titleBarAt >= 0 && settingsAt > titleBarAt);
+  assert.ok(originAt > settingsAt && settingsAt < mainAt);
+  assert.match(sidebarHtml, /class="settings-dialog__sheet"/);
+  assert.doesNotMatch(sidebarJs, /showModal/);
+  assert.match(sidebarJs, /settingsDialog\.show\(\)/);
+  assert.match(sidebarCss, /--title-bar-height:\s*36px;/);
+  assert.match(sidebarCss, /\.title-bar\s*\{[\s\S]*?min-height:\s*var\(--title-bar-height\)/);
+  const dialogBlock = sidebarCss.match(/\.settings-dialog\s*\{[\s\S]*?\n\}/);
+  assert.ok(dialogBlock, "settings-dialog CSS block");
+  assert.match(dialogBlock[0], /position:\s*fixed;/);
+  assert.match(dialogBlock[0], /top:\s*var\(--title-bar-height\);/);
+  assert.match(dialogBlock[0], /left:\s*0;/);
+  assert.match(dialogBlock[0], /right:\s*0;/);
+  assert.match(dialogBlock[0], /width:\s*100%;/);
+  assert.match(dialogBlock[0], /margin:\s*0;/);
+  assert.match(dialogBlock[0], /max-width:\s*none;/);
+  assert.doesNotMatch(sidebarCss, /width:\s*min\(420px/);
+  assert.doesNotMatch(sidebarCss, /::backdrop\s*\{[\s\S]*rgba\(0,\s*0,\s*0,\s*0\.6\)/);
+});
+
 test("preview fetch stays UUID-only and picker keeps title when preview is absent", () => {
   assert.equal(companion.TYPES.PREVIEW_FETCH, "preview_fetch");
   assert.equal(

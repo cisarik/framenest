@@ -134,16 +134,19 @@
     if (settingsDialog.open) {
       return;
     }
-    if (typeof settingsDialog.showModal === "function") {
-      settingsDialog.showModal();
+    if (typeof settingsDialog.show === "function") {
+      settingsDialog.show();
+      settingsOpen.setAttribute("aria-expanded", "true");
       originInput.focus();
       return;
     }
     settingsDialog.setAttribute("open", "");
+    settingsOpen.setAttribute("aria-expanded", "true");
     originInput.focus();
   }
 
   function closeSettings() {
+    settingsOpen.setAttribute("aria-expanded", "false");
     if (typeof settingsDialog.close === "function" && settingsDialog.open) {
       settingsDialog.close();
       return;
@@ -288,6 +291,14 @@
   settingsClose.addEventListener("click", closeSettings);
   settingsDialog.addEventListener("click", (event) => {
     if (event.target === settingsDialog) {
+      closeSettings();
+    }
+  });
+  settingsDialog.addEventListener("close", () => {
+    settingsOpen.setAttribute("aria-expanded", "false");
+  });
+  window.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && settingsDialog.open) {
       closeSettings();
     }
   });
