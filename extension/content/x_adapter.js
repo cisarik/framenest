@@ -59,6 +59,13 @@
     "  outline: 2px solid #00ff41;",
     "  outline-offset: 2px;",
     "}",
+    "[data-framenest-companion='save'][data-framenest-save-kind='failed'] {",
+    "  color: #ff4d4d;",
+    "  border-color: #ff4d4d;",
+    "}",
+    "[data-framenest-companion='save'][data-framenest-save-kind='busy'] svg {",
+    "  opacity: 0.7;",
+    "}",
     "[data-framenest-companion='attach'] {",
     "  position: absolute;",
     "  right: 0;",
@@ -247,7 +254,7 @@
     } else if (kind === "done") {
       g.appendChild(svgEl("path", { d: "M6.5 12.25l3.6 3.5 7.4-8" }));
     } else if (kind === "failed") {
-      g.appendChild(svgEl("path", { d: "M8 8l8 8M16 8l-8 8" }));
+      g.appendChild(svgEl("path", { d: "M12 6.5v11M6.5 12h11" }));
     } else {
       g.appendChild(svgEl("path", { d: "M12 6.5v11M6.5 12h11" }));
     }
@@ -273,6 +280,7 @@
     button.appendChild(saveIconSvg(kind));
     button.dataset.framenestSaveKind = kind;
     button.style.color = kind === "failed" ? GALLERY_DANGER : GALLERY_ACCENT;
+    button.style.borderColor = kind === "failed" ? GALLERY_DANGER : GALLERY_ACCENT;
   }
 
   function ensureCompanionStyle() {
@@ -390,20 +398,43 @@
     );
   }
 
+  function isDocumentRoot(node) {
+    return !node || node === document.documentElement || node === document.body;
+  }
+
+  function composerChromeHasSignal(node) {
+    if (!node || isEditableComposerNode(node) || isDocumentRoot(node)) {
+      return false;
+    }
+    if (matchesAny(node, contract.composerChromeSelectors)) {
+      return true;
+    }
+    if (
+      matchesAny(node, contract.composerToolbarSelectors) ||
+      first(node, contract.composerToolbarSelectors)
+    ) {
+      return true;
+    }
+    if (first(node, contract.composerFileInputs)) {
+      return true;
+    }
+    return Boolean(
+      matchesAny(node, contract.composerMediaButtonSelectors) ||
+        first(node, contract.composerMediaButtonSelectors)
+    );
+  }
+
   function findComposerChrome(composerRoot) {
     if (!composerRoot) {
       return null;
     }
     let node = composerRoot;
     let hops = 0;
-    while (node && hops < 12) {
-      if (matchesAny(node, contract.composerChromeSelectors)) {
-        return node;
+    while (node && hops < 48) {
+      if (isDocumentRoot(node)) {
+        return null;
       }
-      const toolbar =
-        matchesAny(node, contract.composerToolbarSelectors) ||
-        first(node, contract.composerToolbarSelectors);
-      if (toolbar && !isEditableComposerNode(node)) {
+      if (composerChromeHasSignal(node) && (node === composerRoot || node.contains(composerRoot))) {
         return node;
       }
       node = node.parentElement;
@@ -428,19 +459,34 @@
     if (!editable || !composerChrome.contains(editable)) {
       return null;
     }
-    let node = editable;
-    while (node.parentElement && node.parentElement !== composerChrome) {
-      node = node.parentElement;
+    let row = editable.parentElement;
+    while (row && isEditableComposerNode(row) && row !== composerChrome) {
+      row = row.parentElement;
     }
-    if (
-      !node ||
-      node === composerChrome ||
-      isEditableComposerNode(node) ||
-      matchesAny(node, contract.composerToolbarSelectors)
-    ) {
+    if (!row) {
       return null;
     }
-    return node;
+    if (row !== composerChrome && !composerChrome.contains(row)) {
+      return null;
+    }
+    if (matchesAny(row, contract.composerToolbarSelectors) || isEditableComposerNode(row)) {
+      return null;
+    }
+    return row;
+  }
+
+  function mountedAttachNode(composerRoot, composerChrome) {
+    const fromChrome =
+      composerChrome && composerChrome.querySelector("[data-framenest-companion='attach']");
+    if (fromChrome && document.contains(fromChrome)) {
+      return fromChrome;
+    }
+    const parent = composerRoot && composerRoot.parentElement;
+    const fromParent = parent && parent.querySelector("[data-framenest-companion='attach']");
+    if (fromParent && document.contains(fromParent)) {
+      return fromParent;
+    }
+    return null;
   }
 
   function attachPopupIsOpen() {
@@ -648,10 +694,13 @@
   }
 
   function injectAttach(composerRoot) {
-    if (injected.has(composerRoot)) {
-      return;
-    }
     const composerChrome = findComposerChrome(composerRoot);
+    if (injected.has(composerRoot)) {
+      const mounted = mountedAttachNode(composerRoot, composerChrome);
+      if (mounted && document.contains(mounted)) {
+        return;
+      }
+    }
     if (!composerChrome) {
       return;
     }
@@ -669,10 +718,8 @@
     }
     const fileInput =
       first(composerChrome, contract.composerFileInputs) ||
-      first(composerRoot, contract.composerFileInputs) ||
-      first(document, contract.composerFileInputs);
+      first(composerRoot, contract.composerFileInputs);
     if (!fileInput) {
-      markStale("missing_composer_file_input");
       return;
     }
     ensureContainingBlock(textRow);
@@ -680,6 +727,14 @@
     textRow.appendChild(button);
     bindComposerAttachVisibility(composerChrome, button);
     injected.add(composerRoot);
+  }
+
+  if (globalThis.FrameNestXAdapterTestHooks) {
+    globalThis.FrameNestXAdapterTestHooks.findComposerChrome = findComposerChrome;
+    globalThis.FrameNestXAdapterTestHooks.findComposerTextRow = findComposerTextRow;
+    globalThis.FrameNestXAdapterTestHooks.injectAttach = injectAttach;
+    globalThis.FrameNestXAdapterTestHooks.saveIconSvg = saveIconSvg;
+    return;
   }
 
   async function pollClaim(claimId) {

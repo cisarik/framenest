@@ -9,6 +9,7 @@
     ]),
     composerRoots: Object.freeze([
       "[data-testid='tweetTextarea_0']",
+      "[aria-label='Post your reply']",
       "[data-framenest-composer]",
     ]),
     composerFileInputs: Object.freeze([
@@ -19,6 +20,12 @@
     composerToolbarSelectors: Object.freeze([
       "[data-testid='toolBar']",
       "[data-framenest-composer-toolbar]",
+      "[role='toolbar']",
+    ]),
+    composerMediaButtonSelectors: Object.freeze([
+      "[data-testid='fileInput']",
+      "[aria-label='Add photos or video']",
+      "[aria-label='Media']",
     ]),
     composerChromeSelectors: Object.freeze(["[data-framenest-composer-chrome]"]),
     composerTextRowSelectors: Object.freeze(["[data-framenest-composer-text-row]"]),

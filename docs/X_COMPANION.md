@@ -26,6 +26,11 @@ connect, origin lives under Settings; the search prompt is Search memes. The
 side panel entry remains in the manifest but is not this attach surface.
 Per-asset Save targeting remains deferred.
 
+Inline reply Attach is re-injected when X replaces the composer tree and the
+previous button is no longer in the document. Save keeps a plus glyph when
+the request fails; failure is the `title` / `aria-label` and a danger border,
+not an ×.
+
 The companion never clicks Post, never copies cookies or X credentials, and
 never talks to FrameNest from a content script.
 
