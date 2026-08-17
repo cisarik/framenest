@@ -9,6 +9,7 @@
   const inflightByClaim = new Map();
   let stale = false;
   let boundComposer = null;
+  let attachPopup = null;
   const SAVE_NAME = "Save to FrameNest";
   const SAVE_UNAVAILABLE = "FrameNest unavailable";
   const GALLERY_ACCENT = "#00ff41";
@@ -17,8 +18,8 @@
   const COMPANION_STYLE = [
     "[data-framenest-companion='save'] {",
     "  position: absolute;",
-    "  top: 0;",
-    "  left: 0;",
+    "  bottom: 0;",
+    "  right: 0;",
     "  margin: 0;",
     "  z-index: 5;",
     "  display: inline-flex;",
@@ -61,7 +62,8 @@
     "[data-framenest-companion='attach'] {",
     "  position: absolute;",
     "  right: 0;",
-    "  bottom: 0;",
+    "  top: 50%;",
+    "  transform: translateY(-50%);",
     "  margin: 0;",
     "  z-index: 5;",
     "  display: inline-flex;",
@@ -82,6 +84,14 @@
     "  -webkit-appearance: none;",
     "  line-height: 0;",
     "  overflow: hidden;",
+    "  opacity: 0;",
+    "  pointer-events: none;",
+    "}",
+    "[data-framenest-companion='attach'][data-framenest-attach-visible],",
+    "[data-framenest-companion='attach']:focus,",
+    "[data-framenest-companion='attach']:focus-visible {",
+    "  opacity: 1;",
+    "  pointer-events: auto;",
     "}",
   ].join("\n");
 
@@ -402,12 +412,225 @@
     return null;
   }
 
-  function createAttachControl(composerRoot, fileInput) {
+  function findComposerTextRow(composerRoot, composerChrome) {
+    if (!composerRoot || !composerChrome) {
+      return null;
+    }
+    const explicit =
+      first(composerChrome, contract.composerTextRowSelectors) ||
+      (composerChrome.contains(composerRoot) ? first(composerRoot, contract.composerTextRowSelectors) : null);
+    if (explicit && composerChrome.contains(explicit) && !isEditableComposerNode(explicit)) {
+      return explicit;
+    }
+    const editable = isEditableComposerNode(composerRoot)
+      ? composerRoot
+      : first(composerChrome, contract.composerRoots);
+    if (!editable || !composerChrome.contains(editable)) {
+      return null;
+    }
+    let node = editable;
+    while (node.parentElement && node.parentElement !== composerChrome) {
+      node = node.parentElement;
+    }
+    if (
+      !node ||
+      node === composerChrome ||
+      isEditableComposerNode(node) ||
+      matchesAny(node, contract.composerToolbarSelectors)
+    ) {
+      return null;
+    }
+    return node;
+  }
+
+  function attachPopupIsOpen() {
+    return Boolean(attachPopup && attachPopup.host && document.contains(attachPopup.host));
+  }
+
+  function composerHoldsFocus(composerChrome, button) {
+    const active = document.activeElement;
+    if (!active) {
+      return false;
+    }
+    if (button && button.contains(active)) {
+      return true;
+    }
+    return Boolean(composerChrome && composerChrome.contains(active));
+  }
+
+  function syncAttachVisibility(composerChrome, button) {
+    if (!button || !document.contains(button)) {
+      return;
+    }
+    if (attachPopupIsOpen() && attachPopup.button === button) {
+      button.setAttribute("data-framenest-attach-visible", "");
+      return;
+    }
+    if (composerHoldsFocus(composerChrome, button)) {
+      button.setAttribute("data-framenest-attach-visible", "");
+      return;
+    }
+    button.removeAttribute("data-framenest-attach-visible");
+  }
+
+  function bindComposerAttachVisibility(composerChrome, button) {
+    composerChrome.addEventListener("focusin", () => {
+      button.setAttribute("data-framenest-attach-visible", "");
+    });
+    composerChrome.addEventListener("focusout", () => {
+      window.setTimeout(() => {
+        syncAttachVisibility(composerChrome, button);
+      }, 0);
+    });
+  }
+
+  function closeAttachPopup() {
+    if (!attachPopup) {
+      return;
+    }
+    const state = attachPopup;
+    attachPopup = null;
+    window.removeEventListener("resize", state.reposition);
+    window.removeEventListener("scroll", state.reposition, true);
+    document.removeEventListener("keydown", state.onKey, true);
+    document.removeEventListener("mousedown", state.onMouseDown, true);
+    if (state.host && state.host.parentNode) {
+      state.host.parentNode.removeChild(state.host);
+    }
+    if (state.button && document.contains(state.button)) {
+      state.button.removeAttribute("aria-expanded");
+      syncAttachVisibility(state.chrome, state.button);
+    }
+  }
+
+  function positionAttachPopup() {
+    if (!attachPopupIsOpen()) {
+      return;
+    }
+    const button = attachPopup.button;
+    const host = attachPopup.host;
+    if (!button || !document.contains(button)) {
+      closeAttachPopup();
+      return;
+    }
+    const rect = button.getBoundingClientRect();
+    const width = Math.min(320, Math.max(280, window.innerWidth - 16));
+    const height = Math.min(420, Math.max(240, window.innerHeight - 16));
+    const gap = 8;
+    const enoughAbove = rect.top >= height + gap;
+    let top = enoughAbove ? rect.top - height - gap : rect.bottom + gap;
+    let left = rect.right - width;
+    const maxLeft = window.innerWidth - width - 8;
+    const maxTop = window.innerHeight - height - 8;
+    if (left < 8) {
+      left = 8;
+    }
+    if (left > maxLeft) {
+      left = Math.max(8, maxLeft);
+    }
+    if (top < 8) {
+      top = 8;
+    }
+    if (top > maxTop) {
+      top = Math.max(8, maxTop);
+    }
+    host.style.position = "fixed";
+    host.style.left = String(left) + "px";
+    host.style.top = String(top) + "px";
+    host.style.width = String(width) + "px";
+    host.style.height = String(height) + "px";
+    host.style.zIndex = "2147483646";
+    host.style.margin = "0";
+    host.style.padding = "0";
+    host.style.border = "0";
+  }
+
+  function openAttachPopup(button, composerChrome) {
+    if (stale || !button) {
+      return;
+    }
+    if (attachPopupIsOpen() && attachPopup.button === button) {
+      closeAttachPopup();
+      return;
+    }
+    closeAttachPopup();
+    const host = document.createElement("div");
+    host.setAttribute("data-framenest-companion-popup-host", "");
+    host.setAttribute("role", "dialog");
+    host.setAttribute("aria-label", ATTACH_NAME);
+    const shadow = host.attachShadow({ mode: "closed" });
+    const style = document.createElement("style");
+    style.textContent = [
+      ":host { display: block; }",
+      ".frame { display: flex; flex-direction: column; width: 100%; height: 100%;",
+      "  border: 1px solid #00ff41; border-radius: 8px; background: #0a0e0a; overflow: hidden;",
+      "  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.65); }",
+      ".close { align-self: flex-end; margin: 6px 6px 0; padding: 2px 8px; border: 0;",
+      "  border-radius: 6px; background: transparent; color: #a8b8a8; cursor: pointer;",
+      "  font: 700 1rem ui-monospace, monospace; line-height: 1; }",
+      ".close:hover, .close:focus-visible { color: #ff4d4d; }",
+      "iframe { flex: 1 1 auto; width: 100%; border: 0; background: #0a0e0a; }",
+    ].join("\n");
+    const frame = document.createElement("div");
+    frame.className = "frame";
+    const closeBtn = document.createElement("button");
+    closeBtn.type = "button";
+    closeBtn.className = "close";
+    closeBtn.setAttribute("aria-label", "Close FrameNest picker");
+    closeBtn.textContent = "\u2715";
+    closeBtn.addEventListener("click", () => {
+      closeAttachPopup();
+    });
+    const iframe = document.createElement("iframe");
+    iframe.src = chrome.runtime.getURL("ui/picker.html");
+    iframe.title = "FrameNest search";
+    iframe.setAttribute("aria-label", "Search memes");
+    frame.appendChild(closeBtn);
+    frame.appendChild(iframe);
+    shadow.appendChild(style);
+    shadow.appendChild(frame);
+    document.documentElement.appendChild(host);
+    button.setAttribute("aria-expanded", "true");
+    button.setAttribute("data-framenest-attach-visible", "");
+    const reposition = () => {
+      positionAttachPopup();
+    };
+    const onKey = (event) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        closeAttachPopup();
+      }
+    };
+    const onMouseDown = (event) => {
+      if (button.contains(event.target) || host === event.target || host.contains(event.target)) {
+        return;
+      }
+      closeAttachPopup();
+    };
+    attachPopup = {
+      host: host,
+      button: button,
+      chrome: composerChrome,
+      reposition: reposition,
+      onKey: onKey,
+      onMouseDown: onMouseDown,
+    };
+    window.addEventListener("resize", reposition);
+    window.addEventListener("scroll", reposition, true);
+    document.addEventListener("keydown", onKey, true);
+    document.addEventListener("mousedown", onMouseDown, true);
+    positionAttachPopup();
+  }
+
+  function createAttachControl(composerRoot, fileInput, composerChrome) {
     const button = document.createElement("button");
     button.type = "button";
     button.setAttribute("data-framenest-companion", "attach");
     button.setAttribute("aria-label", ATTACH_NAME);
     button.setAttribute("title", ATTACH_NAME);
+    button.setAttribute("aria-haspopup", "dialog");
+    button.setAttribute("aria-expanded", "false");
     button.appendChild(attachIconSvg());
     ["pointerdown", "mousedown", "click"].forEach((type) => {
       button.addEventListener(type, (event) => {
@@ -417,11 +640,7 @@
         }
         boundComposer = { root: composerRoot, fileInput };
         void request(companion.TYPES.ACK, { composerBound: true }).then(() => {
-          chrome.runtime.sendMessage({
-            v: companion.PROTOCOL,
-            type: companion.TYPES.ACK,
-            payload: { openPicker: true },
-          });
+          openAttachPopup(button, composerChrome);
         });
       });
     });
@@ -440,6 +659,14 @@
       injected.add(composerRoot);
       return;
     }
+    const textRow = findComposerTextRow(composerRoot, composerChrome);
+    if (!textRow) {
+      return;
+    }
+    if (textRow.querySelector("[data-framenest-companion='attach']")) {
+      injected.add(composerRoot);
+      return;
+    }
     const fileInput =
       first(composerChrome, contract.composerFileInputs) ||
       first(composerRoot, contract.composerFileInputs) ||
@@ -448,8 +675,10 @@
       markStale("missing_composer_file_input");
       return;
     }
-    ensureContainingBlock(composerChrome);
-    composerChrome.appendChild(createAttachControl(composerRoot, fileInput));
+    ensureContainingBlock(textRow);
+    const button = createAttachControl(composerRoot, fileInput, composerChrome);
+    textRow.appendChild(button);
+    bindComposerAttachVisibility(composerChrome, button);
     injected.add(composerRoot);
   }
 

@@ -118,6 +118,8 @@ test("adapter contract exposes frozen action-bar, Share, and media-host selector
     "[data-framenest-media]",
   ]);
   assert.deepEqual(contract.composerChromeSelectors, ["[data-framenest-composer-chrome]"]);
+  assert.ok(Object.isFrozen(contract.composerTextRowSelectors));
+  assert.deepEqual(contract.composerTextRowSelectors, ["[data-framenest-composer-text-row]"]);
 });
 
 test("in-feed Save is a per-media hover overlay, not an action-row control", () => {
@@ -160,8 +162,16 @@ test("in-feed Save is a per-media hover overlay, not an action-row control", () 
   assert.match(adapterSource, /data-framenest-media-host/);
   assert.match(adapterSource, /data-framenest-companion-style/);
   assert.match(adapterSource, /position: absolute/);
-  assert.match(adapterSource, /top: 0/);
-  assert.match(adapterSource, /left: 0/);
+  const saveRule = adapterSource.match(
+    /\[data-framenest-companion='save'\] \{[\s\S]*?\n\}/
+  );
+  assert.ok(saveRule);
+  assert.match(saveRule[0], /bottom:\s*0/);
+  assert.match(saveRule[0], /right:\s*0/);
+  assert.doesNotMatch(saveRule[0], /top:\s*0/);
+  assert.doesNotMatch(saveRule[0], /left:\s*0/);
+  assert.doesNotMatch(adapterSource, /\[data-framenest-companion='save'\][\s\S]{0,80}top:\s*0/);
+  assert.doesNotMatch(adapterSource, /\[data-framenest-companion='save'\][\s\S]{0,80}left:\s*0/);
   assert.match(adapterSource, /opacity: 0/);
   assert.match(adapterSource, /pointer-events: none/);
   assert.match(adapterSource, /background: #000000/);
@@ -215,7 +225,7 @@ test("companion surfaces copy FrameNest gallery visual tokens", () => {
   assert.doesNotMatch(pickerJs, /form\.submit/);
 });
 
-test("Attach is flush in the composer chrome corner, not a disclosure sibling", () => {
+test("Attach is inline on the focused reply text row and opens an in-page popup", () => {
   const fixture = fs.readFileSync(
     path.join(REPO, "tests/support/x_fixtures/composer.html"),
     "utf8"
@@ -234,25 +244,59 @@ test("Attach is flush in the composer chrome corner, not a disclosure sibling", 
   assert.match(fixture, /data-testid="toolBar"/);
   assert.match(fixture, /data-framenest-composer-toolbar/);
   assert.match(fixture, /data-framenest-composer-chrome/);
+  assert.match(fixture, /data-framenest-composer-text-row/);
+  assert.match(fixture, /Post your reply/);
   assert.match(fixture, /data-testid="bookmark"/);
   assert.match(fixture, /aria-label="Content disclosure"/);
   assert.match(fixture, /data-framenest-content-disclosure/);
   assert.doesNotMatch(adapterSource, /addButton\(/);
   assert.doesNotMatch(adapterSource, /composerRoot\.appendChild/);
+  assert.doesNotMatch(adapterSource, /composerChrome\.appendChild/);
   assert.doesNotMatch(adapterSource, /insertAttachAfterDisclosure/);
   assert.doesNotMatch(adapterSource, /findContentDisclosure/);
   assert.doesNotMatch(adapterSource, /disclosureActionColumn/);
   assert.doesNotMatch(adapterSource, /tweetButton/);
   assert.doesNotMatch(adapterSource, /form\.submit/);
   assert.doesNotMatch(adapterSource, /dispatchEvent\(new Event\(["']submit/);
+  assert.doesNotMatch(adapterSource, /openPicker/);
+  assert.doesNotMatch(adapterSource, /sidePanel/);
+  assert.doesNotMatch(adapterSource, /\bfetch\s*\(/);
   assert.match(adapterSource, /findComposerChrome/);
+  assert.match(adapterSource, /findComposerTextRow/);
   assert.match(adapterSource, /composerChromeSelectors/);
+  assert.match(adapterSource, /composerTextRowSelectors/);
   assert.match(adapterSource, /setAttribute\("data-framenest-companion", "attach"\)/);
   assert.match(adapterSource, /setAttribute\("aria-label", ATTACH_NAME\)/);
-  assert.match(adapterSource, /right: 0/);
-  assert.match(adapterSource, /bottom: 0/);
+  assert.match(adapterSource, /textRow\.appendChild/);
+  assert.match(adapterSource, /focusin/);
+  assert.match(adapterSource, /data-framenest-attach-visible/);
+  assert.match(adapterSource, /data-framenest-companion-popup-host/);
+  assert.match(adapterSource, /attachShadow\(\{\s*mode:\s*"closed"\s*\}\)/);
+  assert.match(adapterSource, /getURL\("ui\/picker\.html"\)/);
+  assert.match(adapterSource, /getBoundingClientRect/);
+  assert.match(adapterSource, /enoughAbove/);
   assert.doesNotMatch(adapterSource, /textContent\s*=\s*["']Attach from FrameNest["']/);
   assert.doesNotMatch(adapterSource, /textContent\s*=\s*ATTACH_NAME/);
+  assert.doesNotMatch(
+    adapterSource,
+    /\[data-framenest-composer[^\]]*\]:hover[^\n]*\[data-framenest-companion='attach'\]/
+  );
+});
+
+test("in-page picker iframe WAR is match-limited to X hosts", () => {
+  const dumped = JSON.stringify(manifest);
+  assert.equal(dumped.includes("<all_urls>"), false);
+  const war = manifest.web_accessible_resources;
+  assert.ok(Array.isArray(war));
+  assert.equal(war.length, 1);
+  const entry = war[0];
+  assert.deepEqual(entry.matches.slice().sort(), ["https://twitter.com/*", "https://x.com/*"]);
+  assert.equal(entry.matches.join(" ").includes("ts.net"), false);
+  assert.deepEqual(entry.resources.slice().sort(), [
+    "ui/picker.css",
+    "ui/picker.html",
+    "ui/picker.js",
+  ]);
 });
 
 test("picker is search-first with a Settings Origin sheet", () => {

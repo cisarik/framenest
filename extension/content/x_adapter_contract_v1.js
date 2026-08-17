@@ -21,6 +21,7 @@
       "[data-framenest-composer-toolbar]",
     ]),
     composerChromeSelectors: Object.freeze(["[data-framenest-composer-chrome]"]),
+    composerTextRowSelectors: Object.freeze(["[data-framenest-composer-text-row]"]),
     contentDisclosureSelectors: Object.freeze([
       "[aria-label='Content disclosure']",
       "[data-framenest-content-disclosure]",
