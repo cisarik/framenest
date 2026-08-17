@@ -7,9 +7,13 @@
 
   const injected = new WeakSet();
   const inflightByClaim = new Map();
+  const attachByComposer = new WeakMap();
+  const attachEditable = new WeakMap();
   let stale = false;
   let boundComposer = null;
   let attachPopup = null;
+  let attachPositionBound = false;
+  let composerFocusBound = false;
   const SAVE_NAME = "Save to FrameNest";
   const SAVE_UNAVAILABLE = "FrameNest unavailable";
   const GALLERY_ACCENT = "#00ff41";
@@ -67,12 +71,9 @@
     "  opacity: 0.7;",
     "}",
     "[data-framenest-companion='attach'] {",
-    "  position: absolute;",
-    "  right: 0;",
-    "  top: 50%;",
-    "  transform: translateY(-50%);",
+    "  position: fixed;",
     "  margin: 0;",
-    "  z-index: 5;",
+    "  z-index: 2147483645;",
     "  display: inline-flex;",
     "  align-items: center;",
     "  justify-content: center;",
@@ -93,6 +94,13 @@
     "  overflow: hidden;",
     "  opacity: 0;",
     "  pointer-events: none;",
+    "}",
+    "[data-framenest-companion='attach']::-webkit-inner-spin-button,",
+    "[data-framenest-companion='attach']::-webkit-outer-spin-button {",
+    "  appearance: none;",
+    "  -webkit-appearance: none;",
+    "  margin: 0;",
+    "  display: none;",
     "}",
     "[data-framenest-companion='attach'][data-framenest-attach-visible],",
     "[data-framenest-companion='attach']:focus,",
@@ -475,16 +483,71 @@
     return row;
   }
 
-  function mountedAttachNode(composerRoot, composerChrome) {
-    const fromChrome =
-      composerChrome && composerChrome.querySelector("[data-framenest-companion='attach']");
-    if (fromChrome && document.contains(fromChrome)) {
-      return fromChrome;
+  function findComposerEditable(composerRoot, composerChrome) {
+    if (isEditableComposerNode(composerRoot)) {
+      return composerRoot;
     }
-    const parent = composerRoot && composerRoot.parentElement;
-    const fromParent = parent && parent.querySelector("[data-framenest-companion='attach']");
-    if (fromParent && document.contains(fromParent)) {
-      return fromParent;
+    const selectors = ["[data-testid='tweetTextarea_0']", "[aria-label='Post your reply']"];
+    if (composerChrome) {
+      const fromChrome = first(composerChrome, selectors);
+      if (fromChrome) {
+        return fromChrome;
+      }
+    }
+    return composerRoot ? first(composerRoot, selectors) : null;
+  }
+
+  function mountedAttachNode(composerRoot) {
+    const fromMap = composerRoot && attachByComposer.get(composerRoot);
+    if (fromMap && document.contains(fromMap)) {
+      return fromMap;
+    }
+    return null;
+  }
+
+  function findAttachForEditable(editable) {
+    if (!editable) {
+      return null;
+    }
+    const mapped = attachByComposer.get(editable);
+    if (mapped && document.contains(mapped)) {
+      return mapped;
+    }
+    const nodes = document.querySelectorAll("[data-framenest-companion='attach']");
+    for (let i = 0; i < nodes.length; i += 1) {
+      const button = nodes[i];
+      const bound = attachEditable.get(button);
+      if (!bound) {
+        continue;
+      }
+      if (bound === editable) {
+        return button;
+      }
+      if (bound.contains && bound.contains(editable)) {
+        return button;
+      }
+      if (editable.contains && editable.contains(bound)) {
+        return button;
+      }
+    }
+    return null;
+  }
+
+  function existingAttachFor(composerChrome, editable) {
+    const fromEditable = findAttachForEditable(editable);
+    if (fromEditable) {
+      return fromEditable;
+    }
+    if (!composerChrome) {
+      return null;
+    }
+    const nodes = document.querySelectorAll("[data-framenest-companion='attach']");
+    for (let i = 0; i < nodes.length; i += 1) {
+      const button = nodes[i];
+      const bound = attachEditable.get(button);
+      if (bound && composerChrome.contains(bound) && document.contains(button)) {
+        return button;
+      }
     }
     return null;
   }
@@ -493,41 +556,151 @@
     return Boolean(attachPopup && attachPopup.host && document.contains(attachPopup.host));
   }
 
-  function composerHoldsFocus(composerChrome, button) {
+  function composerHoldsFocus(editable, button) {
     const active = document.activeElement;
     if (!active) {
       return false;
     }
-    if (button && button.contains(active)) {
+    if (button && (active === button || (button.contains && button.contains(active)))) {
       return true;
     }
-    return Boolean(composerChrome && composerChrome.contains(active));
+    if (editable && (active === editable || (editable.contains && editable.contains(active)))) {
+      return true;
+    }
+    return false;
   }
 
-  function syncAttachVisibility(composerChrome, button) {
+  function positionAttachControl(button) {
+    const editable = attachEditable.get(button);
+    if (!button || !editable || !document.contains(button) || !document.contains(editable)) {
+      return;
+    }
+    if (typeof editable.getBoundingClientRect !== "function") {
+      return;
+    }
+    const rect = editable.getBoundingClientRect();
+    const size = 32;
+    const inset = 4;
+    const top = rect.top + rect.height / 2 - size / 2;
+    let left = rect.right - size - inset;
+    if (left < 8) {
+      left = 8;
+    }
+    button.style.position = "fixed";
+    button.style.top = String(top) + "px";
+    button.style.left = String(left) + "px";
+    button.style.right = "auto";
+    button.style.bottom = "auto";
+    button.style.margin = "0";
+    button.style.zIndex = "2147483645";
+  }
+
+  function repositionVisibleAttaches() {
+    const nodes = document.querySelectorAll("[data-framenest-companion='attach']");
+    for (let i = 0; i < nodes.length; i += 1) {
+      const button = nodes[i];
+      if (button.hasAttribute("data-framenest-attach-visible")) {
+        positionAttachControl(button);
+      }
+    }
+  }
+
+  function ensureAttachPositionListeners() {
+    if (attachPositionBound) {
+      return;
+    }
+    attachPositionBound = true;
+    window.addEventListener("resize", repositionVisibleAttaches);
+    window.addEventListener("scroll", repositionVisibleAttaches, true);
+  }
+
+  function showAttachControl(button) {
+    if (!button || !document.contains(button)) {
+      return;
+    }
+    positionAttachControl(button);
+    button.setAttribute("data-framenest-attach-visible", "");
+  }
+
+  function syncAttachVisibility(editable, button) {
     if (!button || !document.contains(button)) {
       return;
     }
     if (attachPopupIsOpen() && attachPopup.button === button) {
-      button.setAttribute("data-framenest-attach-visible", "");
+      showAttachControl(button);
       return;
     }
-    if (composerHoldsFocus(composerChrome, button)) {
-      button.setAttribute("data-framenest-attach-visible", "");
+    if (composerHoldsFocus(editable, button)) {
+      showAttachControl(button);
       return;
     }
     button.removeAttribute("data-framenest-attach-visible");
   }
 
-  function bindComposerAttachVisibility(composerChrome, button) {
-    composerChrome.addEventListener("focusin", () => {
-      button.setAttribute("data-framenest-attach-visible", "");
-    });
-    composerChrome.addEventListener("focusout", () => {
+  function bindComposerAttachVisibility(editable, button) {
+    const show = () => {
+      showAttachControl(button);
+    };
+    const hideSoon = () => {
       window.setTimeout(() => {
-        syncAttachVisibility(composerChrome, button);
+        syncAttachVisibility(editable, button);
       }, 0);
-    });
+    };
+    editable.addEventListener("focusin", show, true);
+    editable.addEventListener("focus", show, true);
+    editable.addEventListener("focusout", hideSoon, true);
+    button.addEventListener("focusin", show, true);
+    button.addEventListener("focusout", hideSoon, true);
+  }
+
+  function onComposerFocusIn(event) {
+    const target = event.target;
+    if (!target) {
+      return;
+    }
+    if (target.getAttribute && target.getAttribute("data-framenest-companion") === "attach") {
+      return;
+    }
+    let editable = null;
+    if (target.matches && (target.matches("[data-testid='tweetTextarea_0']") || target.matches("[aria-label='Post your reply']"))) {
+      editable = target;
+    } else if (target.closest) {
+      editable =
+        target.closest("[data-testid='tweetTextarea_0']") || target.closest("[aria-label='Post your reply']");
+    }
+    if (!editable) {
+      return;
+    }
+    injectAttach(editable);
+    const button = findAttachForEditable(editable);
+    if (button) {
+      showAttachControl(button);
+    }
+  }
+
+  function ensureComposerFocusCapture() {
+    if (composerFocusBound) {
+      return;
+    }
+    composerFocusBound = true;
+    document.addEventListener("focusin", onComposerFocusIn, true);
+  }
+
+  function pruneOrphanAttaches() {
+    const nodes = document.querySelectorAll("[data-framenest-companion='attach']");
+    for (let i = 0; i < nodes.length; i += 1) {
+      const button = nodes[i];
+      if (attachPopupIsOpen() && attachPopup.button === button) {
+        continue;
+      }
+      const editable = attachEditable.get(button);
+      if (editable && document.contains(editable)) {
+        continue;
+      }
+      if (button.parentNode) {
+        button.parentNode.removeChild(button);
+      }
+    }
   }
 
   function closeAttachPopup() {
@@ -545,7 +718,7 @@
     }
     if (state.button && document.contains(state.button)) {
       state.button.removeAttribute("aria-expanded");
-      syncAttachVisibility(state.chrome, state.button);
+      syncAttachVisibility(attachEditable.get(state.button), state.button);
     }
   }
 
@@ -696,24 +869,15 @@
   function injectAttach(composerRoot) {
     const composerChrome = findComposerChrome(composerRoot);
     if (injected.has(composerRoot)) {
-      const mounted = mountedAttachNode(composerRoot, composerChrome);
+      const mounted = mountedAttachNode(composerRoot);
       if (mounted && document.contains(mounted)) {
+        if (mounted.hasAttribute("data-framenest-attach-visible")) {
+          positionAttachControl(mounted);
+        }
         return;
       }
     }
     if (!composerChrome) {
-      return;
-    }
-    if (composerChrome.querySelector("[data-framenest-companion='attach']")) {
-      injected.add(composerRoot);
-      return;
-    }
-    const textRow = findComposerTextRow(composerRoot, composerChrome);
-    if (!textRow) {
-      return;
-    }
-    if (textRow.querySelector("[data-framenest-companion='attach']")) {
-      injected.add(composerRoot);
       return;
     }
     const fileInput =
@@ -722,10 +886,30 @@
     if (!fileInput) {
       return;
     }
-    ensureContainingBlock(textRow);
+    const editable = findComposerEditable(composerRoot, composerChrome);
+    if (!editable) {
+      return;
+    }
+    const existing = existingAttachFor(composerChrome, editable) || mountedAttachNode(composerRoot);
+    if (existing && document.contains(existing)) {
+      attachByComposer.set(composerRoot, existing);
+      attachByComposer.set(editable, existing);
+      injected.add(composerRoot);
+      if (existing.hasAttribute("data-framenest-attach-visible")) {
+        positionAttachControl(existing);
+      }
+      return;
+    }
     const button = createAttachControl(composerRoot, fileInput, composerChrome);
-    textRow.appendChild(button);
-    bindComposerAttachVisibility(composerChrome, button);
+    attachByComposer.set(composerRoot, button);
+    attachByComposer.set(editable, button);
+    attachEditable.set(button, editable);
+    document.documentElement.appendChild(button);
+    ensureAttachPositionListeners();
+    ensureComposerFocusCapture();
+    bindComposerAttachVisibility(editable, button);
+    positionAttachControl(button);
+    syncAttachVisibility(editable, button);
     injected.add(composerRoot);
   }
 
@@ -854,10 +1038,14 @@
     });
     const composers = document.querySelectorAll(contract.composerRoots.join(","));
     composers.forEach((composer) => injectAttach(composer));
+    pruneOrphanAttaches();
+    repositionVisibleAttaches();
   }
 
   const observer = new MutationObserver(() => scan());
   observer.observe(document.documentElement, { childList: true, subtree: true });
+  ensureComposerFocusCapture();
+  ensureAttachPositionListeners();
   scan();
   recover();
 })();

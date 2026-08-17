@@ -13,9 +13,9 @@ An authenticated FrameNest user can:
   (existing X request lifecycle; the click still submits the post permalink,
   not a per-asset media URL; static X photographs currently fail closed as
   `X_NO_SUPPORTED_MEDIA`);
-- click into the reply composer to reveal an inline **+** on the right of
-  "Post your reply", then open an in-page FrameNest search popup above that
-  button;
+- click into the reply composer to reveal a floating **+** on the right of
+  "Post your reply" (not inserted into the X input row), then open an in-page
+  FrameNest search popup above that button;
 - attach one published meme or one of that user's own live successful X media
   items (JPEG/PNG, GIF-style, or short video) onto the composer file input.
 
@@ -26,7 +26,8 @@ connect, origin lives under Settings; the search prompt is Search memes. The
 side panel entry remains in the manifest but is not this attach surface.
 Per-asset Save targeting remains deferred.
 
-Inline reply Attach is re-injected when X replaces the composer tree and the
+Attach floats on the focused reply field; it is not inserted into the X input
+row. Inline reply Attach is re-injected when X replaces the composer tree and the
 previous button is no longer in the document. Save keeps a plus glyph when
 the request fails; failure is the `title` / `aria-label` and a danger border,
 not an ×.

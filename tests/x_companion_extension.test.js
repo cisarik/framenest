@@ -237,7 +237,7 @@ test("companion surfaces copy FrameNest gallery visual tokens", () => {
   assert.doesNotMatch(pickerJs, /form\.submit/);
 });
 
-test("Attach is inline on the focused reply text row and opens an in-page popup", () => {
+test("Attach floats on the focused reply field and opens an in-page popup", () => {
   const fixture = fs.readFileSync(
     path.join(REPO, "tests/support/x_fixtures/composer.html"),
     "utf8"
@@ -258,6 +258,7 @@ test("Attach is inline on the focused reply text row and opens an in-page popup"
   assert.match(fixture, /data-framenest-composer-toolbar/);
   assert.match(fixture, /data-framenest-composer-chrome/);
   assert.match(fixture, /data-framenest-composer-text-row/);
+  assert.match(fixture, /data-framenest-composer-row-canary/);
   assert.match(fixture, /id="inline-reply-only-editable"/);
   assert.match(fixture, /id="inline-reply-deep"/);
   assert.match(fixture, /Post your reply/);
@@ -275,6 +276,8 @@ test("Attach is inline on the focused reply text row and opens an in-page popup"
   assert.doesNotMatch(adapterSource, /addButton\(/);
   assert.doesNotMatch(adapterSource, /composerRoot\.appendChild/);
   assert.doesNotMatch(adapterSource, /composerChrome\.appendChild/);
+  assert.doesNotMatch(adapterSource, /textRow\.appendChild/);
+  assert.doesNotMatch(adapterSource, /ensureContainingBlock\(textRow\)/);
   assert.doesNotMatch(adapterSource, /insertAttachAfterDisclosure/);
   assert.doesNotMatch(adapterSource, /findContentDisclosure/);
   assert.doesNotMatch(adapterSource, /disclosureActionColumn/);
@@ -290,14 +293,25 @@ test("Attach is inline on the focused reply text row and opens an in-page popup"
   assert.match(adapterSource, /composerTextRowSelectors/);
   assert.match(adapterSource, /setAttribute\("data-framenest-companion", "attach"\)/);
   assert.match(adapterSource, /setAttribute\("aria-label", ATTACH_NAME\)/);
-  assert.match(adapterSource, /textRow\.appendChild/);
-  assert.match(adapterSource, /focusin/);
+  assert.match(adapterSource, /document\.documentElement\.appendChild\(button\)/);
+  assert.match(adapterSource, /addEventListener\("focusin", show, true\)/);
+  assert.match(adapterSource, /addEventListener\("focus", show, true\)/);
+  assert.match(adapterSource, /addEventListener\("focusin", onComposerFocusIn, true\)/);
+  assert.match(adapterSource, /addEventListener\("scroll", repositionVisibleAttaches, true\)/);
   assert.match(adapterSource, /data-framenest-attach-visible/);
   assert.match(adapterSource, /data-framenest-companion-popup-host/);
   assert.match(adapterSource, /attachShadow\(\{\s*mode:\s*"closed"\s*\}\)/);
   assert.match(adapterSource, /getURL\("ui\/picker\.html"\)/);
   assert.match(adapterSource, /getBoundingClientRect/);
   assert.match(adapterSource, /enoughAbove/);
+  assert.match(adapterSource, /::-webkit-inner-spin-button/);
+  assert.match(adapterSource, /::-webkit-outer-spin-button/);
+  const attachRule = adapterSource.match(
+    /\[data-framenest-companion='attach'\] \{[\s\S]*?\n\}/
+  );
+  assert.ok(attachRule);
+  assert.match(attachRule[0], /position:\s*fixed/);
+  assert.doesNotMatch(attachRule[0], /position:\s*absolute/);
   assert.doesNotMatch(adapterSource, /textContent\s*=\s*["']Attach from FrameNest["']/);
   assert.doesNotMatch(adapterSource, /textContent\s*=\s*ATTACH_NAME/);
   assert.doesNotMatch(
@@ -387,6 +401,14 @@ function createMiniDom() {
 
     removeAttribute(name) {
       delete this.attrs[name];
+    }
+
+    hasAttribute(name) {
+      return Object.prototype.hasOwnProperty.call(this.attrs, name);
+    }
+
+    getBoundingClientRect() {
+      return { top: 0, left: 0, right: 120, bottom: 40, width: 120, height: 40, x: 0, y: 0 };
     }
 
     matches(selector) {
@@ -595,7 +617,10 @@ test("injectAttach does not treat WeakSet membership as a permanent skip", () =>
   assert.ok(injectFn);
   assert.match(injectFn[0], /injected\.has\(composerRoot\)/);
   assert.match(injectFn[0], /document\.contains/);
+  assert.match(injectFn[0], /document\.documentElement\.appendChild\(button\)/);
   assert.doesNotMatch(injectFn[0], /if \(injected\.has\(composerRoot\)\) \{\s*return;/);
+  assert.doesNotMatch(injectFn[0], /textRow\.appendChild/);
+  assert.doesNotMatch(injectFn[0], /ensureContainingBlock/);
   assert.doesNotMatch(injectFn[0], /markStale/);
   assert.doesNotMatch(adapterSource, /hops < 12/);
   assert.match(adapterSource, /hops < 48/);
@@ -658,15 +683,44 @@ test("injectAttach re-injects after the attach node leaves the document", () => 
   dom.body.appendChild(chrome);
   const hooks = loadAdapterHooks(dom);
   hooks.injectAttach(editable);
-  const firstButton = chrome.querySelector("[data-framenest-companion='attach']");
+  const firstButton = dom.document.documentElement.querySelector("[data-framenest-companion='attach']");
   assert.ok(firstButton);
-  firstButton.parentElement.removeChild(firstButton);
+  assert.equal(firstButton.parentElement, dom.document.documentElement);
   assert.equal(chrome.querySelector("[data-framenest-companion='attach']"), null);
+  firstButton.parentElement.removeChild(firstButton);
+  assert.equal(dom.document.documentElement.querySelector("[data-framenest-companion='attach']"), null);
   assert.equal(dom.document.contains(firstButton), false);
   hooks.injectAttach(editable);
-  const secondButton = chrome.querySelector("[data-framenest-companion='attach']");
+  const secondButton = dom.document.documentElement.querySelector("[data-framenest-companion='attach']");
   assert.ok(secondButton);
   assert.notEqual(secondButton, firstButton);
+  assert.equal(secondButton.parentElement, dom.document.documentElement);
+});
+
+test("injectAttach does not mount inside the text row or set a host containing block", () => {
+  const dom = createMiniDom();
+  const editable = el(dom, "div", {
+    "data-testid": "tweetTextarea_0",
+    contenteditable: "true",
+    "aria-label": "Post your reply",
+  });
+  const row = el(dom, "div", { "data-framenest-composer-text-row": "" }, [editable]);
+  const toolbar = el(dom, "div", { "data-testid": "toolBar", role: "toolbar" });
+  const file = el(dom, "input", { type: "file", accept: "image/*,video/mp4" });
+  const chrome = el(dom, "div", { "data-framenest-composer-chrome": "" }, [row, toolbar, file]);
+  dom.body.appendChild(chrome);
+  dom.window.getComputedStyle = () => ({ position: "static" });
+  const hooks = loadAdapterHooks(dom);
+  hooks.injectAttach(editable);
+  const button = dom.document.documentElement.querySelector("[data-framenest-companion='attach']");
+  assert.ok(button);
+  assert.equal(button.parentElement, dom.document.documentElement);
+  assert.equal(row.querySelector("[data-framenest-companion='attach']"), null);
+  assert.equal(chrome.querySelector("[data-framenest-companion='attach']"), null);
+  assert.notEqual(row.style.position, "relative");
+  assert.notEqual(chrome.style.position, "relative");
+  assert.notEqual(editable.style.position, "relative");
+  assert.equal(button.style.position, "fixed");
 });
 
 test("missing composer file input skips that composer without page-wide stale", () => {
