@@ -34,9 +34,10 @@ action-row control. Click opens the Save popup instead of silently posting
 composer is focused, not on mouseover, and is not the side panel. The in-page
 picker is compact quick attach with preview; it is not the full website.
 After connect, the in-page picker has no Settings sheet; an empty origin tells
-the user to connect FrameNest in the side panel. First-run Connect lives in the
-side-panel green title bar: Settings holds the origin field, and the far-right
-control reads Disconnect (existing Reset) when connected. The toolbar opens
+the user to connect FrameNest in the side panel. First-run and reconnect Connect
+live in side-panel Settings next to the origin field; the title-bar control
+reads Disconnect (existing Reset) when connected and opens Settings when
+disconnected with an empty origin. The toolbar opens
 that shell, which iframes FrameNest only after the stored origin is granted.
 If the iframe does not load, the shell reports that FrameNest did not load and
 does not open a new tab. If the iframe loads without the companion host, the
@@ -84,13 +85,15 @@ Rollback: remove the key or set it to `[]` and restart. No CORS is enabled.
 2. Enable Developer mode.
 3. Load unpacked and select the repository `extension/` directory.
 4. Confirm the ID is `omiihmnlkmieaafaphohakcgmbggppap`.
-5. Open the toolbar side panel. On first run open Settings in the green title
-   bar, enter the exact FrameNest HTTPS origin (`https://<node>.<tailnet>.ts.net`,
-   no path), then click Connect and grant the host permission when prompted.
-   After Connect, the shell iframes that origin and the same control reads
-   Disconnect. The in-page Search memes picker has no Settings sheet.
+5. Open the toolbar side panel. On first run or after Disconnect, open Settings
+   in the green title bar, enter the exact FrameNest HTTPS origin
+   (`https://<node>.<tailnet>.ts.net`, no path), then click Connect in Settings
+   and grant the host permission when prompted. After Connect, Settings closes,
+   the shell iframes that origin, and the title-bar control reads Disconnect.
+   The in-page Search memes picker has no Settings sheet.
 6. Use Disconnect in the side-panel title bar to clear stored origin, in-flight
-   claim ids, and the granted host permission.
+   claim ids, and the granted host permission. Settings then opens so reconnect
+   stays in one place.
 
 Content scripts match only `https://x.com/*` and `https://twitter.com/*`. The
 service worker has no X host permission.

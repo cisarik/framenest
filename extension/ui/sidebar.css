@@ -239,6 +239,18 @@ body {
   font-size: 0.78rem;
 }
 
+.settings-dialog__origin-row {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+}
+
+.settings-dialog__origin-row #origin {
+  flex: 1 1 auto;
+  width: auto;
+  min-width: 0;
+}
+
 #origin {
   display: block;
   width: 100%;
@@ -255,6 +267,27 @@ body {
   outline: 2px solid var(--focus);
   outline-offset: 2px;
   box-shadow: 0 0 10px var(--accent-glow);
+}
+
+.settings-dialog__connect {
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 8px 12px;
+  border: 1px solid var(--accent-border);
+  border-radius: var(--radius-sm);
+  background: var(--accent);
+  color: #000000;
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.settings-dialog__connect:hover,
+.settings-dialog__connect:focus-visible {
+  background: var(--accent-strong);
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
 }
 
 .settings-dialog__note {

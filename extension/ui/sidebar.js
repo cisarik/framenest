@@ -67,7 +67,17 @@
   const settingsDialog = document.getElementById("settings-dialog");
   const settingsOpen = document.getElementById("settings-open");
   const settingsClose = document.getElementById("settings-close");
-  if (!originInput || !shellStatus || !frame || !chromeAction || !settingsDialog || !settingsOpen || !settingsClose) {
+  const settingsConnect = document.getElementById("settings-connect");
+  if (
+    !originInput ||
+    !shellStatus ||
+    !frame ||
+    !chromeAction ||
+    !settingsDialog ||
+    !settingsOpen ||
+    !settingsClose ||
+    !settingsConnect
+  ) {
     return;
   }
 
@@ -131,18 +141,20 @@
   }
 
   function openSettings() {
-    if (settingsDialog.open) {
-      return;
-    }
-    if (typeof settingsDialog.show === "function") {
-      settingsDialog.show();
+    if (!settingsDialog.open) {
+      if (typeof settingsDialog.show === "function") {
+        settingsDialog.show();
+      } else {
+        settingsDialog.setAttribute("open", "");
+      }
       settingsOpen.setAttribute("aria-expanded", "true");
-      originInput.focus();
-      return;
     }
-    settingsDialog.setAttribute("open", "");
-    settingsOpen.setAttribute("aria-expanded", "true");
     originInput.focus();
+  }
+
+  function promptConnectInSettings() {
+    setText(shellStatus, "Connect FrameNest in Settings");
+    openSettings();
   }
 
   function closeSettings() {
@@ -205,11 +217,16 @@
     syncChromeAction();
     clearFrame();
     setText(shellStatus, "Cleared");
+    openSettings();
   }
 
   function onChromeAction() {
     if (storedOrigin) {
       void reset();
+      return;
+    }
+    if (!originInput.value.trim()) {
+      promptConnectInSettings();
       return;
     }
     void connect();
@@ -287,6 +304,9 @@
   }
 
   chromeAction.addEventListener("click", onChromeAction);
+  settingsConnect.addEventListener("click", () => {
+    void connect();
+  });
   settingsOpen.addEventListener("click", openSettings);
   settingsClose.addEventListener("click", closeSettings);
   settingsDialog.addEventListener("click", (event) => {
@@ -319,6 +339,6 @@
     originInput.value = "";
     syncChromeAction();
     clearFrame();
-    setText(shellStatus, "Connect FrameNest to open the library");
+    setText(shellStatus, "Connect FrameNest in Settings");
   });
 })();

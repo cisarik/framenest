@@ -27,9 +27,14 @@
           </div>
           <div class="settings-dialog__body">
             <label for="origin">FrameNest origin</label>
-            <input id="origin" type="text" spellcheck="false" autocomplete="off" />
+            <div class="settings-dialog__origin-row">
+              <input id="origin" type="text" spellcheck="false" autocomplete="off" />
+              <button id="settings-connect" class="settings-dialog__connect" type="button" aria-label="Connect FrameNest">
+                Connect
+              </button>
+            </div>
             <p class="settings-dialog__note">
-              Origin is the FrameNest tailnet URL. Enter it here, then use Connect in the title bar.
+              Origin is the FrameNest tailnet URL (https://&lt;node&gt;.&lt;tailnet&gt;.ts.net). Connect in Settings saves the origin.
             </p>
           </div>
         </div>

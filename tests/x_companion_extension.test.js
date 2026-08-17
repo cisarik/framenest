@@ -878,6 +878,45 @@ test("side-panel Settings is a sheet under the title bar, not a centered modal",
   assert.doesNotMatch(sidebarCss, /::backdrop\s*\{[\s\S]*rgba\(0,\s*0,\s*0,\s*0\.6\)/);
 });
 
+test("side-panel Settings Connect grants origin; empty title-bar Connect opens Settings", () => {
+  const sidebarHtml = fs.readFileSync(path.join(REPO, "extension/ui/sidebar.html"), "utf8");
+  const sidebarJs = fs.readFileSync(path.join(REPO, "extension/ui/sidebar.js"), "utf8");
+  const pickerHtml = fs.readFileSync(path.join(REPO, "extension/ui/picker.html"), "utf8");
+  const originAt = sidebarHtml.indexOf('id="origin"');
+  const settingsConnectAt = sidebarHtml.indexOf('id="settings-connect"');
+  const settingsDialogAt = sidebarHtml.indexOf('id="settings-dialog"');
+  const mainAt = sidebarHtml.indexOf('class="sidebar-main"');
+  assert.ok(settingsConnectAt > originAt && originAt > settingsDialogAt);
+  assert.ok(settingsConnectAt < mainAt);
+  assert.match(sidebarHtml, /id="settings-connect"/);
+  assert.match(sidebarHtml, /Connect in Settings saves the origin/);
+  assert.doesNotMatch(sidebarHtml, /use Connect in the title bar/);
+  assert.doesNotMatch(sidebarHtml, />Reset</);
+  assert.match(sidebarJs, /getElementById\("settings-connect"\)/);
+  assert.match(sidebarJs, /settingsConnect\.addEventListener\("click"/);
+  assert.match(sidebarJs, /TYPES\.CONFIGURE_ORIGIN/);
+  assert.match(sidebarJs, /textContent = connected \? "Disconnect" : "Connect"/);
+  assert.match(sidebarJs, /Connect FrameNest in Settings/);
+  assert.doesNotMatch(sidebarJs, /Connect FrameNest to open the library/);
+  const connectFn = sidebarJs.match(/async function connect\(\) \{[\s\S]*?\n  \}/);
+  assert.ok(connectFn, "connect()");
+  assert.match(connectFn[0], /TYPES\.CONFIGURE_ORIGIN/);
+  assert.match(connectFn[0], /closeSettings\(\)/);
+  assert.match(connectFn[0], /hostFrame\(storedOrigin\)/);
+  const resetFn = sidebarJs.match(/async function reset\(\) \{[\s\S]*?\n  \}/);
+  assert.ok(resetFn, "reset()");
+  assert.match(resetFn[0], /TYPES\.RESET/);
+  assert.match(resetFn[0], /openSettings\(\)/);
+  assert.match(resetFn[0], /clearFrame\(\)/);
+  const chromeFn = sidebarJs.match(/function onChromeAction\(\) \{[\s\S]*?\n  \}/);
+  assert.ok(chromeFn, "onChromeAction()");
+  assert.match(chromeFn[0], /void reset\(\)/);
+  assert.match(chromeFn[0], /promptConnectInSettings\(\)/);
+  assert.match(chromeFn[0], /void connect\(\)/);
+  assert.doesNotMatch(pickerHtml, /id="settings-dialog"/);
+  assert.doesNotMatch(pickerHtml, /<dialog/);
+});
+
 test("preview fetch stays UUID-only and picker keeps title when preview is absent", () => {
   assert.equal(companion.TYPES.PREVIEW_FETCH, "preview_fetch");
   assert.equal(
