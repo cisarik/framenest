@@ -7,6 +7,7 @@ import pytest
 from framenest.adapters.api.tailscale_ingress import find_route_policy
 from framenest.application.content_publication import ContentAudiencePolicy
 from framenest.domain.identity_access import (
+    CAPABILITY_METADATA_ALIAS_WRITE,
     CAPABILITY_X_ACQUIRE,
     CAPABILITY_X_REQUEST,
     IdentityContext,
@@ -47,10 +48,26 @@ def test_only_x_request_mutations_are_companion_flagged() -> None:
     )
     picker, picker_match = find_route_policy("GET", "/api/x/companion/media")
     tags, tags_match = find_route_policy("POST", "/api/canonical-tags")
+    alias_get, alias_get_match = find_route_policy(
+        "GET", "/api/media/00000000-0000-4000-8000-000000000000/alias"
+    )
+    alias_put, alias_put_match = find_route_policy(
+        "PUT", "/api/media/00000000-0000-4000-8000-000000000000/alias"
+    )
     assert submit_match is not None and submit.companion_mutation is True
     assert retry_match is not None and retry.companion_mutation is True
     assert picker_match is not None and picker.companion_mutation is False
     assert tags_match is not None and tags.companion_mutation is False
+    assert alias_get_match is not None and alias_get.companion_mutation is False
+    assert alias_put_match is not None and alias_put.companion_mutation is False
+    assert alias_put.capability == CAPABILITY_METADATA_ALIAS_WRITE
+    from framenest.adapters.api.tailscale_ingress import ROUTE_POLICIES
+
+    flagged = [policy for policy in ROUTE_POLICIES if policy.companion_mutation]
+    assert {(policy.method, policy.pattern.pattern) for policy in flagged} == {
+        (submit.method, submit.pattern.pattern),
+        (retry.method, retry.pattern.pattern),
+    }
 
 
 def test_x_admin_route_requires_x_acquire_capability() -> None:
@@ -66,6 +83,8 @@ def test_roles_carry_x_capabilities() -> None:
     assert CAPABILITY_X_REQUEST in _identity("admin", ROLE_ADMIN).capabilities
     assert CAPABILITY_X_ACQUIRE not in _identity("user", ROLE_USER).capabilities
     assert CAPABILITY_X_ACQUIRE in _identity("admin", ROLE_ADMIN).capabilities
+    assert CAPABILITY_METADATA_ALIAS_WRITE in _identity("user", ROLE_USER).capabilities
+    assert CAPABILITY_METADATA_ALIAS_WRITE in _identity("admin", ROLE_ADMIN).capabilities
 
 
 class _Repo:

@@ -12,6 +12,9 @@ from framenest.adapters.api.tailscale_ingress import (
     SCOPE_AUDIT_EVENT_ID,
     SCOPE_IDENTITY,
 )
+from framenest.application.ports.media_user_alias_repository import (
+    AliasTagNotFoundError,
+)
 from framenest.application.x_acquisition import (
     XAcquisitionInfrastructureError,
     XAcquisitionInvalidRequestError,
@@ -23,6 +26,10 @@ from framenest.application.x_acquisition import (
 from framenest.domain.identity_access import (
     CAPABILITY_X_REQUEST,
     IdentityContext,
+)
+from framenest.domain.media_user_alias import (
+    FrameNestMediaUserAliasError,
+    parse_alias_content,
 )
 from framenest.domain.security_audit import (
     AUDIT_OUTCOME_ALLOWED,
@@ -38,6 +45,8 @@ X_REQUEST_STATE_CONFLICT = "X_REQUEST_STATE_CONFLICT"
 X_REQUEST_UNAVAILABLE = "X_REQUEST_UNAVAILABLE"
 X_REQUEST_INSUFFICIENT_STORAGE = "X_REQUEST_INSUFFICIENT_STORAGE"
 X_REQUEST_IDENTITY_REQUIRED = "IDENTITY_REQUIRED"
+ALIAS_TAG_NOT_FOUND = "ALIAS_TAG_NOT_FOUND"
+ALIAS_INVALID = "ALIAS_INVALID"
 
 _NO_STORE_HEADERS = {"Cache-Control": "no-store"}
 _DEFAULT_LIST_LIMIT = 20
@@ -45,10 +54,19 @@ _MAX_LIST_LIMIT = 50
 LOGGER = get_logger("x_request_api")
 
 
+class XAliasBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    display_title: str | None = None
+    description: str | None = None
+    tag_keys: list[str] | None = None
+
+
 class XRequestCreateBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     url: str
+    alias: XAliasBody | None = None
 
 
 class XAssetResponse(BaseModel):
@@ -120,7 +138,20 @@ def create_x_request_api_router(
         if not dependencies.enabled or dependencies.service is None:
             return _error(X_REQUEST_NOT_CONFIGURED, "X acquisition is unavailable.", 503)
         try:
-            result = dependencies.service.submit(body.url, login_key=identity.login_key)
+            alias_content = None
+            if body.alias is not None:
+                alias_content = parse_alias_content(
+                    body.alias.display_title,
+                    body.alias.description,
+                    body.alias.tag_keys,
+                )
+            result = dependencies.service.submit(
+                body.url, login_key=identity.login_key, alias=alias_content
+            )
+        except FrameNestMediaUserAliasError:
+            return _error(ALIAS_INVALID, "Invalid FrameNest media user alias.", 422)
+        except AliasTagNotFoundError:
+            return _error(ALIAS_TAG_NOT_FOUND, "Canonical tag not found.", 422)
         except (XAcquisitionInvalidRequestError, FrameNestXUrlError):
             return _error(X_REQUEST_INVALID_URL, "Invalid X post URL.", 422)
         except XRequestLimitError as exc:

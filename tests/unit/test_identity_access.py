@@ -113,6 +113,7 @@ def test_resolve_identity_maps_admin_with_full_capabilities() -> None:
     assert identity.capabilities == CAPABILITIES_BY_ROLE[ROLE_ADMIN]
     assert identity.provenance == IDENTITY_PROVENANCE_TAILSCALE_SERVE
     assert identity.has_capability("metadata.canonical.write")
+    assert identity.has_capability("metadata.alias.write")
     assert identity.has_capability("upload.manage")
     assert identity.has_capability("upload.submit")
     assert identity.has_capability(CAPABILITY_YOUTUBE_ACQUIRE)
@@ -134,6 +135,7 @@ def test_resolve_identity_maps_ordinary_user_with_read_capabilities() -> None:
     assert identity.has_capability("upload.submit")
     assert identity.has_capability(CAPABILITY_YOUTUBE_REQUEST)
     assert not identity.has_capability("metadata.canonical.write")
+    assert identity.has_capability("metadata.alias.write")
     assert not identity.has_capability("upload.manage")
     assert not identity.has_capability("analysis.run")
     assert not identity.has_capability("media.workflow.read")

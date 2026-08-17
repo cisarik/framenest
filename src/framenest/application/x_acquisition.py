@@ -22,6 +22,11 @@ from framenest.application.in_process_lifecycle import (
     shutdown_executor_backed_coordinator,
 )
 
+from framenest.application.media_user_alias import apply_alias_content_to_media
+from framenest.application.ports.media_user_alias_repository import (
+    AliasTagNotFoundError,
+    MediaUserAliasRepository,
+)
 from framenest.application.ports.upload_publications import (
     UploadPublicationCandidate,
     UploadPublicationRepository,
@@ -56,6 +61,7 @@ from framenest.domain.media_metadata import (
     FrameNestMediaMetadataError,
     MediaDisplayTitle,
 )
+from framenest.domain.media_user_alias import MediaUserAliasContent
 from framenest.domain.uploads import (
     UploadDuplicateResolutionMode,
     UploadSessionId,
@@ -71,6 +77,7 @@ from framenest.domain.x_acquisition import (
     MAX_CLAIM_STAGING_FOOTPRINT_BYTES,
     REQUESTER_PHASE_COMPLETED,
     SUCCESS_X_ACQUISITION_STATES,
+    SUCCESS_X_ASSET_STATES,
     TERMINAL_X_ACQUISITION_STATES,
     FrameNestXAcquisitionError,
     XAcquisitionState,
@@ -246,20 +253,35 @@ class XAcquisitionRequestService:
         *,
         limits: XRequestLimits,
         now_ms: Callable[[], int] = default_now_ms,
+        alias_repository: MediaUserAliasRepository | None = None,
     ) -> None:
         self._repository = repository
         self._limits = limits
         self._now_ms = now_ms
+        self._alias_repository = alias_repository
 
-    def submit(self, url: str, *, login_key: str) -> XRequestSubmission:
+    def submit(
+        self,
+        url: str,
+        *,
+        login_key: str,
+        alias: MediaUserAliasContent | None = None,
+    ) -> XRequestSubmission:
         identity = accept_x_post_url(url)
         requester = _normalize_requester(login_key)
+        if alias is not None:
+            self._validate_alias_tags(alias)
 
         owned_successful = self._repository.find_owned_successful_by_post_id(
             post_id_key=identity.post_id,
             created_by_login_key=requester,
         )
         if owned_successful is not None:
+            self._store_submit_alias(owned_successful.id, requester, alias)
+            if alias is not None:
+                self._apply_alias_to_successful_assets(
+                    owned_successful, requester, alias
+                )
             return _submission(
                 owned_successful, submission_result="reuse", requester=requester
             )
@@ -269,6 +291,7 @@ class XAcquisitionRequestService:
             created_by_login_key=requester,
         )
         if active is not None:
+            self._store_submit_alias(active.id, requester, alias)
             return _submission(active, submission_result="active_reuse", requester=requester)
 
         self._enforce_admission_limits(requester)
@@ -283,6 +306,7 @@ class XAcquisitionRequestService:
             _submission_result = "active_reuse"
         else:
             _submission_result = "new"
+        self._store_submit_alias(claim.id, requester, alias)
         return XRequestSubmission(
             request_id=claim.id.to_string(),
             submission_result=_submission_result,
@@ -432,6 +456,46 @@ class XAcquisitionRequestService:
             expected_version=previous.version,
         )
 
+    def _validate_alias_tags(self, content: MediaUserAliasContent) -> None:
+        if content.is_empty():
+            return
+        if self._alias_repository is None:
+            raise XAcquisitionInfrastructureError("X alias overlay is unavailable.")
+        if not self._alias_repository.canonical_tag_keys_exist(content.tag_keys):
+            raise AliasTagNotFoundError()
+
+    def _store_submit_alias(
+        self,
+        claim_id: XPostClaimId,
+        requester: str,
+        alias: MediaUserAliasContent | None,
+    ) -> None:
+        if alias is None:
+            return
+        self._repository.upsert_pending_alias(
+            claim_id, requester, alias, self._now_ms()
+        )
+
+    def _apply_alias_to_successful_assets(
+        self,
+        claim: XPostClaim,
+        requester: str,
+        alias: MediaUserAliasContent,
+    ) -> None:
+        if self._alias_repository is None:
+            raise XAcquisitionInfrastructureError("X alias overlay is unavailable.")
+        now_ms = self._now_ms()
+        for asset in self._repository.list_assets_for_post(claim.id):
+            if asset.state not in SUCCESS_X_ASSET_STATES or asset.media_id is None:
+                continue
+            apply_alias_content_to_media(
+                self._alias_repository,
+                media_id=asset.media_id,
+                login_key=requester,
+                content=alias,
+                now_ms=now_ms,
+            )
+
 
 class XAcquisitionCoordinator:
     """Single-worker async state machine for requester-private X claims."""
@@ -452,6 +516,7 @@ class XAcquisitionCoordinator:
         batch_size: int = DEFAULT_ACQUISITION_BATCH_SIZE,
         now_ms: Callable[[], int] = default_now_ms,
         executor: ThreadPoolExecutor | None = None,
+        alias_repository: MediaUserAliasRepository | None = None,
     ) -> None:
         self._repository = repository
         self._extractor = extractor
@@ -472,6 +537,7 @@ class XAcquisitionCoordinator:
         self._executor = executor
         self._owns_executor = executor is None
         self._iteration_failures = IterationFailureLimiter()
+        self._alias_repository = alias_repository
 
     async def start(self) -> None:
         if self._runner_task is None:
@@ -976,6 +1042,23 @@ class XAcquisitionCoordinator:
             completed_at_ms=self._now_ms(),
         )
         self._save_asset(asset, completed)
+        self._apply_pending_alias(claim, completed)
+
+    def _apply_pending_alias(self, claim: XPostClaim, asset: XAsset) -> None:
+        if self._alias_repository is None or asset.media_id is None:
+            return
+        if claim.created_by_login_key is None:
+            return
+        pending = self._repository.get_pending_alias(claim.id)
+        if pending is None:
+            return
+        apply_alias_content_to_media(
+            self._alias_repository,
+            media_id=asset.media_id,
+            login_key=claim.created_by_login_key,
+            content=pending.content,
+            now_ms=self._now_ms(),
+        )
 
     async def _reconcile_cleanup(self, claim: XPostClaim) -> None:
         assets = self._repository.list_assets_for_post(claim.id)

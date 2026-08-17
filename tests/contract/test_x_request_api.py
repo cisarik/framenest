@@ -70,7 +70,7 @@ _VALID_ID = "00000000-0000-4000-8000-000000000001"
 
 def _service_fake():
     return types.SimpleNamespace(
-        submit=lambda url, login_key: types.SimpleNamespace(
+        submit=lambda url, login_key, alias=None: types.SimpleNamespace(
             request_id=_VALID_ID, submission_result="new"
         ),
         list_owned=lambda login_key, limit, cursor: types.SimpleNamespace(
@@ -106,7 +106,7 @@ def test_invalid_url_maps_to_sanitized_422() -> None:
     from framenest.domain.x_acquisition import FrameNestXUrlError
 
     class _InvalidService:
-        def submit(self, url: str, login_key: str):
+        def submit(self, url: str, login_key: str, alias=None):
             raise FrameNestXUrlError("Invalid public X post URL.")
 
     client = TestClient(_app(_InvalidService()))
@@ -133,7 +133,7 @@ def test_invalid_url_maps_to_sanitized_422() -> None:
 
 def test_unexpected_internal_exception_is_not_mislabeled_422() -> None:
     class _BoomService:
-        def submit(self, url: str, login_key: str):
+        def submit(self, url: str, login_key: str, alias=None):
             raise RuntimeError("unexpected internal failure")
 
     # raise_server_exceptions=False lets a genuine internal failure surface as
@@ -145,3 +145,74 @@ def test_unexpected_internal_exception_is_not_mislabeled_422() -> None:
     # An unexpected internal exception must remain an internal failure, not be
     # folded into the requester-invalid 422 contract.
     assert response.status_code == 500
+
+
+def test_omitted_alias_preserves_today_submit_contract() -> None:
+    captured: dict[str, object] = {}
+
+    def submit(url, login_key, alias=None):
+        captured["alias"] = alias
+        return types.SimpleNamespace(request_id=_VALID_ID, submission_result="new")
+
+    service = _service_fake()
+    service.submit = submit
+    client = TestClient(_app(service))
+    response = client.post("/api/x/requests", json={"url": "https://x.com/a/status/123"})
+    assert response.status_code == 200
+    assert captured["alias"] is None
+
+
+def test_optional_alias_is_parsed_and_login_key_is_forbidden() -> None:
+    captured: dict[str, object] = {}
+
+    def submit(url, login_key, alias=None):
+        captured["alias"] = alias
+        return types.SimpleNamespace(request_id=_VALID_ID, submission_result="new")
+
+    service = _service_fake()
+    service.submit = submit
+    client = TestClient(_app(service))
+    response = client.post(
+        "/api/x/requests",
+        json={
+            "url": "https://x.com/a/status/123",
+            "alias": {"display_title": "Mine", "tag_keys": ["meme"]},
+        },
+    )
+    assert response.status_code == 200
+    assert captured["alias"] is not None
+    assert captured["alias"].display_title.value == "Mine"
+    forbidden = client.post(
+        "/api/x/requests",
+        json={"url": "https://x.com/a/status/123", "login_key": "eve@example.com"},
+    )
+    assert forbidden.status_code == 422
+    nested = client.post(
+        "/api/x/requests",
+        json={
+            "url": "https://x.com/a/status/123",
+            "alias": {"login_key": "eve@example.com"},
+        },
+    )
+    assert nested.status_code == 422
+
+
+def test_unknown_alias_tag_maps_to_422() -> None:
+    from framenest.application.ports.media_user_alias_repository import (
+        AliasTagNotFoundError,
+    )
+
+    class _UnknownTagService:
+        def submit(self, url: str, login_key: str, alias=None):
+            raise AliasTagNotFoundError()
+
+    client = TestClient(_app(_UnknownTagService()))
+    response = client.post(
+        "/api/x/requests",
+        json={
+            "url": "https://x.com/a/status/123",
+            "alias": {"tag_keys": ["missing"]},
+        },
+    )
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "ALIAS_TAG_NOT_FOUND"

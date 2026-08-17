@@ -20,6 +20,7 @@ from framenest.application.x_acquisition import (
     XRequestLimits,
 )
 from framenest.domain.identities import MediaId, MediaLocationId
+from framenest.domain.media_user_alias import parse_alias_content
 from framenest.domain.uploads import UploadSessionState
 from framenest.domain.x_acquisition import (
     XAcquisitionState,
@@ -29,6 +30,9 @@ from framenest.domain.x_acquisition import (
     XPostClaimId,
 )
 from framenest.infrastructure.persistence.catalog_schema import metadata
+from framenest.infrastructure.persistence.media_user_alias_repository import (
+    SqliteMediaUserAliasRepository,
+)
 from framenest.infrastructure.persistence.x_acquisition_claim_repository import (
     SqliteXAcquisitionClaimRepository,
 )
@@ -150,9 +154,10 @@ def lifecycle(tmp_path):
     conn.commit()
     pub_repo = _FakePublicationRepository(media_id, location_id)
     notifier = _Notifier()
+    alias_repo = SqliteMediaUserAliasRepository(engine)
     coordinator = XAcquisitionCoordinator(
         repo, extractor, staging, transport, upload_repo, pub_repo,
-        notifier, notifier,
+        notifier, notifier, alias_repository=alias_repo,
     )
     limits = XRequestLimits(
         max_active_per_requester=1,
@@ -161,7 +166,9 @@ def lifecycle(tmp_path):
         max_failed_per_24h=10,
         free_space_bytes=lambda: 10_737_418_240,
     )
-    service = XAcquisitionRequestService(repo, limits=limits)
+    service = XAcquisitionRequestService(
+        repo, limits=limits, alias_repository=alias_repo
+    )
     admin = XAcquisitionAdministrationService(repo)
     yield repo, service, admin, coordinator, extractor, media_id
     conn.close()
@@ -496,3 +503,77 @@ def test_interrupted_acquiring_retries_same_asset_after_staging_clear(lifecycle)
     assert recovered[0].id.to_string() == original_id
     assert recovered[0].stage_key == original_stage_key
     assert wrapper.downloads == 2
+
+
+def _seed_canonical_and_metadata(repo, media_id: MediaId, title: str) -> None:
+    with repo._engine.begin() as connection:
+        connection.execute(
+            text(
+                "INSERT OR IGNORE INTO canonical_tags "
+                "(key, display_name, created_at_ms, updated_at_ms) "
+                "VALUES ('meme', 'Meme', 1, 1)"
+            )
+        )
+        connection.execute(
+            text(
+                "INSERT OR IGNORE INTO media_metadata "
+                "(media_id, display_title, description, content_category, "
+                "acquisition_source, created_at_ms, updated_at_ms) "
+                "VALUES (:id, :title, NULL, 'meme', 'x_manual_claim', 1, 1)"
+            ),
+            {"id": media_id.to_string(), "title": title},
+        )
+
+
+def test_pending_alias_applies_on_complete_without_changing_canonical_title(
+    lifecycle,
+) -> None:
+    repo, service, admin, coordinator, extractor, media_id = lifecycle
+    _seed_canonical_and_metadata(repo, media_id, "Canonical From Tweet")
+    alias_repo = coordinator._alias_repository
+    result = service.submit(
+        URL,
+        login_key="alice",
+        alias=parse_alias_content("Overlay title", "Overlay desc", ["meme"]),
+    )
+    claim = _run(_drain_until_terminal(coordinator, repo, result.request_id))
+    assert claim.state is XAcquisitionState.COMPLETED
+    overlay = alias_repo.get_alias(media_id, "alice")
+    assert overlay is not None
+    assert overlay.content.display_title is not None
+    assert overlay.content.display_title.value == "Overlay title"
+    assert overlay.content.description is not None
+    assert overlay.content.description.value == "Overlay desc"
+    assert overlay.content.tag_keys[0].value == "meme"
+    assert alias_repo.get_alias(media_id, "bob") is None
+    with repo._engine.connect() as connection:
+        canonical = connection.execute(
+            text("SELECT display_title FROM media_metadata WHERE media_id = :id"),
+            {"id": media_id.to_string()},
+        ).scalar_one()
+    assert canonical == "Canonical From Tweet"
+
+
+def test_pending_alias_applies_on_reuse(lifecycle) -> None:
+    repo, service, admin, coordinator, extractor, media_id = lifecycle
+    _seed_canonical_and_metadata(repo, media_id, "Canonical From Tweet")
+    alias_repo = coordinator._alias_repository
+    first = service.submit(URL, login_key="alice")
+    claim = _run(_drain_until_terminal(coordinator, repo, first.request_id))
+    assert claim.state is XAcquisitionState.COMPLETED
+    reused = service.submit(
+        URL,
+        login_key="alice",
+        alias=parse_alias_content("Reuse overlay", None, None),
+    )
+    assert reused.submission_result == "reuse"
+    overlay = alias_repo.get_alias(media_id, "alice")
+    assert overlay is not None
+    assert overlay.content.display_title is not None
+    assert overlay.content.display_title.value == "Reuse overlay"
+    with repo._engine.connect() as connection:
+        canonical = connection.execute(
+            text("SELECT display_title FROM media_metadata WHERE media_id = :id"),
+            {"id": media_id.to_string()},
+        ).scalar_one()
+    assert canonical == "Canonical From Tweet"

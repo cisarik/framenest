@@ -1,0 +1,97 @@
+"""Unit tests for caller-private media alias overlay use cases."""
+
+from __future__ import annotations
+
+import pytest
+
+from framenest.application.media_user_alias import (
+    GetMediaUserAlias,
+    SaveMediaUserAlias,
+)
+from framenest.application.ports.media_user_alias_repository import AliasTagNotFoundError
+from framenest.domain import MediaId
+from framenest.domain.media_metadata import CanonicalTagKey
+from framenest.domain.media_user_alias import (
+    FrameNestMediaUserAliasError,
+    MediaUserAlias,
+    MediaUserAliasContent,
+    parse_alias_content,
+)
+
+MEDIA_ID = MediaId.from_string("12345678-1234-4234-9234-123456789abc")
+LOGIN = "alice@example.com"
+
+
+class _FakeRepository:
+    def __init__(self) -> None:
+        self.aliases: dict[tuple[str, str], MediaUserAlias] = {}
+        self.known_tags = {CanonicalTagKey("meme")}
+        self.upserts: list[object] = []
+
+    def get_alias(self, media_id: MediaId, login_key: str) -> MediaUserAlias | None:
+        return self.aliases.get((media_id.to_string(), login_key))
+
+    def upsert_alias(
+        self,
+        media_id: MediaId,
+        login_key: str,
+        content: MediaUserAliasContent,
+        now_ms: int,
+    ) -> MediaUserAlias | None:
+        self.upserts.append((media_id, login_key, content, now_ms))
+        key = (media_id.to_string(), login_key)
+        if content.is_empty():
+            self.aliases.pop(key, None)
+            return None
+        current = self.aliases.get(key)
+        created = now_ms if current is None else current.created_at_ms
+        alias = MediaUserAlias(
+            media_id=media_id,
+            login_key=login_key,
+            content=content,
+            created_at_ms=created,
+            updated_at_ms=now_ms,
+        )
+        self.aliases[key] = alias
+        return alias
+
+    def delete_alias(self, media_id: MediaId, login_key: str) -> None:
+        self.aliases.pop((media_id.to_string(), login_key), None)
+
+    def canonical_tag_keys_exist(self, tag_keys: tuple[CanonicalTagKey, ...]) -> bool:
+        return all(key in self.known_tags for key in tag_keys)
+
+
+def test_get_alias_returns_empty_view_when_absent() -> None:
+    view = GetMediaUserAlias(_FakeRepository()).execute(MEDIA_ID.to_string(), LOGIN)
+    assert view.display_title is None
+    assert view.description is None
+    assert view.tag_keys == ()
+    assert view.persisted is False
+
+
+def test_save_alias_persists_and_empty_deletes() -> None:
+    repository = _FakeRepository()
+    save = SaveMediaUserAlias(repository, clock_ms=lambda: 50)
+    view = save.execute(MEDIA_ID.to_string(), LOGIN, "Alias title", None, ["meme"])
+    assert view.persisted is True
+    assert view.display_title == "Alias title"
+    assert view.tag_keys == ("meme",)
+    empty = save.execute(MEDIA_ID.to_string(), LOGIN, None, None, None)
+    assert empty.persisted is False
+    assert repository.get_alias(MEDIA_ID, LOGIN) is None
+
+
+def test_save_alias_rejects_unknown_tag() -> None:
+    repository = _FakeRepository()
+    save = SaveMediaUserAlias(repository, clock_ms=lambda: 50)
+    with pytest.raises(AliasTagNotFoundError):
+        save.execute(MEDIA_ID.to_string(), LOGIN, "Title", None, ["missing"])
+
+
+def test_save_alias_rejects_invalid_content() -> None:
+    repository = _FakeRepository()
+    save = SaveMediaUserAlias(repository, clock_ms=lambda: 50)
+    with pytest.raises(FrameNestMediaUserAliasError):
+        save.execute(MEDIA_ID.to_string(), LOGIN, " Title", None, None)
+    assert parse_alias_content("ok", None, None).display_title is not None

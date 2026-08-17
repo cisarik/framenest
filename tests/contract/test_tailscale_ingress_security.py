@@ -48,6 +48,7 @@ USER_CAPABILITIES = {
     "upload.submit",
     "youtube.request",
     "x.request",
+    "metadata.alias.write",
 }
 
 
@@ -1531,5 +1532,71 @@ def test_companion_picker_route_is_readable_without_mutation_origin(
     assert payload["items"] == []
     assert response.headers.get("cache-control") == "no-store"
     assert "access-control-allow-origin" not in response.headers
+
+
+def test_companion_origin_post_with_alias_is_not_origin_forbidden(
+    companion_client,
+) -> None:
+    client, _ = companion_client
+    response = client.post(
+        "/api/x/requests",
+        headers=_companion_mutation_headers(),
+        json={
+            "url": "https://x.com/a/status/123456789",
+            "alias": {"display_title": "Mine"},
+        },
+    )
+    assert response.status_code != 403 or _error_code(response) != "MUTATION_ORIGIN_FORBIDDEN"
+    assert _error_code(response) != "MUTATION_ORIGIN_FORBIDDEN"
+    assert "access-control-allow-origin" not in response.headers
+
+
+def test_companion_origin_put_alias_is_forbidden(companion_client) -> None:
+    client, settings = companion_client
+    media_id = _seed_publication_target(settings.database_path, ready=True)
+    response = client.put(
+        f"/api/media/{media_id}/alias",
+        headers=_companion_mutation_headers(),
+        json={"display_title": "Overlay"},
+    )
+    assert response.status_code == 403
+    assert _error_code(response) == "MUTATION_ORIGIN_FORBIDDEN"
+
+
+def test_web_origin_put_alias_succeeds_for_ordinary_user(companion_client) -> None:
+    client, settings = companion_client
+    media_id = str(uuid.uuid4())
+    connection = sqlite3.connect(settings.database_path)
+    try:
+        connection.execute("PRAGMA foreign_keys=ON")
+        connection.execute(
+            "INSERT INTO logical_media "
+            "(id, media_kind, created_at_ms, updated_at_ms) "
+            "VALUES (?, 'video', 1, 1)",
+            (media_id,),
+        )
+        connection.execute(
+            "INSERT INTO media_content_publications "
+            "(media_id, published_at_ms, publication_origin) "
+            "VALUES (?, 1, 'admin_explicit')",
+            (media_id,),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+    response = client.put(
+        f"/api/media/{media_id}/alias",
+        headers=_mutation_headers(USER_LOGIN),
+        json={"display_title": "Overlay"},
+    )
+    assert response.status_code == 200
+    assert response.json()["display_title"] == "Overlay"
+    canonical = client.put(
+        f"/api/media/{media_id}/metadata",
+        headers=_mutation_headers(USER_LOGIN),
+        json={"display_title": "Canonical", "tag_keys": []},
+    )
+    assert canonical.status_code == 403
+    assert _error_code(canonical) == "CAPABILITY_DENIED"
 
 

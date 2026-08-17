@@ -50,6 +50,10 @@ from framenest.adapters.api.media_metadata_api import (
     MediaMetadataApiDependencies,
     create_media_metadata_api_router,
 )
+from framenest.adapters.api.media_alias_api import (
+    MediaAliasApiDependencies,
+    create_media_alias_api_router,
+)
 from framenest.adapters.api.media_suggestion_api import (
     MediaSuggestionApiDependencies,
     MediaSuggestionStatusRead,
@@ -102,6 +106,7 @@ from framenest.application.media_metadata import (
     ListCanonicalTags,
     SaveMediaMetadata,
 )
+from framenest.application.media_user_alias import GetMediaUserAlias, SaveMediaUserAlias
 from framenest.application.media_analysis import PrepareLocalMediaAnalysis
 from framenest.application.media_content import ResolveMediaContent
 from framenest.application.gallery_preview import GalleryPreviewService
@@ -223,6 +228,9 @@ from framenest.infrastructure.persistence.media_catalog_repository import (
 from framenest.infrastructure.persistence.media_metadata_repository import (
     SqliteMediaMetadataRepository,
 )
+from framenest.infrastructure.persistence.media_user_alias_repository import (
+    SqliteMediaUserAliasRepository,
+)
 from framenest.infrastructure.persistence.upload_session_repository import (
     SqliteUploadSessionRepository,
 )
@@ -287,6 +295,7 @@ def create_app(
     media_import_api_dependencies: MediaImportApiDependencies | None = None,
     media_catalog_api_dependencies: MediaCatalogApiDependencies | None = None,
     media_metadata_api_dependencies: MediaMetadataApiDependencies | None = None,
+    media_alias_api_dependencies: MediaAliasApiDependencies | None = None,
     media_analysis_api_dependencies: MediaAnalysisApiDependencies | None = None,
     media_content_api_dependencies: MediaContentApiDependencies | None = None,
     gallery_preview_api_dependencies: GalleryPreviewApiDependencies | None = None,
@@ -321,6 +330,7 @@ def create_app(
     owned_media_repository = None
     owned_media_catalog_repository = None
     owned_media_metadata_repository = None
+    owned_media_user_alias_repository = None
     owned_upload_session_repository = None
     owned_upload_validation = None
     owned_upload_validation_coordinator = None
@@ -366,6 +376,7 @@ def create_app(
         owned_media_repository = SqliteMediaRepository(owned_engine)
         owned_media_catalog_repository = SqliteMediaCatalogRepository(owned_engine)
         owned_media_metadata_repository = SqliteMediaMetadataRepository(owned_engine)
+        owned_media_user_alias_repository = SqliteMediaUserAliasRepository(owned_engine)
         owned_upload_session_repository = SqliteUploadSessionRepository(owned_engine)
         owned_media_analysis_run_repository = SqliteMediaAnalysisRunRepository(
             owned_engine
@@ -452,6 +463,20 @@ def create_app(
             catalog_available=resolved_settings.database_path.exists,
             audience_policy=owned_content_audience_policy,
         )
+    if media_alias_api_dependencies is None:
+        if owned_media_user_alias_repository is not None:
+            media_alias_api_dependencies = MediaAliasApiDependencies(
+                get_alias=GetMediaUserAlias(owned_media_user_alias_repository),
+                save_alias=SaveMediaUserAlias(owned_media_user_alias_repository),
+                catalog_available=resolved_settings.database_path.exists,
+                audience_policy=owned_content_audience_policy,
+            )
+        else:
+            media_alias_api_dependencies = MediaAliasApiDependencies(
+                get_alias=None,
+                save_alias=None,
+                catalog_available=lambda: False,
+            )
     if media_analysis_api_dependencies is None:
         assert owned_library_repository is not None
         media_analysis_api_dependencies = MediaAnalysisApiDependencies(
@@ -884,6 +909,7 @@ def create_app(
             validation_coordinator=owned_upload_validation_coordinator,
             publication_coordinator=owned_upload_publication_coordinator,
             chunk_size_bytes=resolved_settings.upload_max_patch_bytes,
+            alias_repository=owned_media_user_alias_repository,
         )
         owned_x_admin_service = XAcquisitionAdministrationService(
             owned_x_claim_repository
@@ -907,6 +933,7 @@ def create_app(
                 ),
                 free_space_bytes=_x_request_free_space,
             ),
+            alias_repository=owned_media_user_alias_repository,
         )
     if x_request_api_dependencies is None:
         x_request_api_dependencies = XRequestApiDependencies(
@@ -1084,6 +1111,7 @@ def create_app(
     app.include_router(create_media_import_api_router(media_import_api_dependencies))
     app.include_router(create_media_catalog_api_router(media_catalog_api_dependencies))
     app.include_router(create_media_metadata_api_router(media_metadata_api_dependencies))
+    app.include_router(create_media_alias_api_router(media_alias_api_dependencies))
     app.include_router(create_media_analysis_api_router(media_analysis_api_dependencies))
     app.include_router(create_media_content_api_router(media_content_api_dependencies))
     app.include_router(create_gallery_preview_api_router(gallery_preview_api_dependencies))
