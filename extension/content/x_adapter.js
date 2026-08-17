@@ -12,12 +12,78 @@
   const SAVE_NAME = "Save to FrameNest";
   const SAVE_UNAVAILABLE = "FrameNest unavailable";
   const GALLERY_ACCENT = "#00ff41";
-  const GALLERY_ACCENT_STRONG = "#39ff14";
-  const GALLERY_ACCENT_SOFT = "rgba(0, 255, 65, 0.12)";
-  const GALLERY_ACCENT_GLOW = "rgba(0, 255, 65, 0.18)";
   const GALLERY_DANGER = "#ff4d4d";
-  const SAVE_DOWN_NUDGE_PX = 3;
   const ATTACH_NAME = "Attach from FrameNest";
+  const COMPANION_STYLE = [
+    "[data-framenest-companion='save'] {",
+    "  position: absolute;",
+    "  top: 0;",
+    "  left: 0;",
+    "  margin: 0;",
+    "  z-index: 5;",
+    "  display: inline-flex;",
+    "  align-items: center;",
+    "  justify-content: center;",
+    "  width: 32px;",
+    "  height: 32px;",
+    "  min-width: 32px;",
+    "  min-height: 32px;",
+    "  padding: 0;",
+    "  border: 1px solid #00ff41;",
+    "  border-radius: 6px;",
+    "  background: #000000;",
+    "  color: #00ff41;",
+    "  cursor: pointer;",
+    "  box-sizing: border-box;",
+    "  appearance: none;",
+    "  -webkit-appearance: none;",
+    "  line-height: 0;",
+    "  overflow: hidden;",
+    "  opacity: 0;",
+    "  pointer-events: none;",
+    "}",
+    "[data-framenest-media-host]:hover > [data-framenest-companion='save'],",
+    "[data-framenest-media-host]:focus-within > [data-framenest-companion='save'],",
+    "[data-framenest-companion='save']:focus,",
+    "[data-framenest-companion='save']:focus-visible {",
+    "  opacity: 1;",
+    "  pointer-events: auto;",
+    "}",
+    "[data-framenest-companion='save']:hover,",
+    "[data-framenest-companion='attach']:hover {",
+    "  color: #39ff14;",
+    "}",
+    "[data-framenest-companion='save']:focus-visible,",
+    "[data-framenest-companion='attach']:focus-visible {",
+    "  outline: 2px solid #00ff41;",
+    "  outline-offset: 2px;",
+    "}",
+    "[data-framenest-companion='attach'] {",
+    "  position: absolute;",
+    "  right: 0;",
+    "  bottom: 0;",
+    "  margin: 0;",
+    "  z-index: 5;",
+    "  display: inline-flex;",
+    "  align-items: center;",
+    "  justify-content: center;",
+    "  width: 32px;",
+    "  height: 32px;",
+    "  min-width: 32px;",
+    "  min-height: 32px;",
+    "  padding: 0;",
+    "  border: 1px solid #00ff41;",
+    "  border-radius: 6px;",
+    "  background: #000000;",
+    "  color: #00ff41;",
+    "  cursor: pointer;",
+    "  box-sizing: border-box;",
+    "  appearance: none;",
+    "  -webkit-appearance: none;",
+    "  line-height: 0;",
+    "  overflow: hidden;",
+    "}",
+  ].join("\n");
 
   function first(root, selectors) {
     for (const selector of selectors) {
@@ -27,6 +93,13 @@
       }
     }
     return null;
+  }
+
+  function matchesAny(node, selectors) {
+    if (!node || !node.matches) {
+      return false;
+    }
+    return selectors.some((selector) => node.matches(selector));
   }
 
   function matchesPostRoot(node) {
@@ -47,30 +120,45 @@
     return false;
   }
 
-  function ownActionGroup(postRoot) {
-    for (const groupSelector of contract.actionGroupSelectors) {
-      const groups = postRoot.querySelectorAll(groupSelector);
-      for (const group of groups) {
-        if (isInsideNestedPost(group, postRoot)) {
-          continue;
-        }
-        if (first(group, contract.actionBarSignals)) {
-          return group;
-        }
-      }
+  function isDistinctLinkCard(node, postRoot) {
+    if (!node.closest) {
+      return false;
     }
-    return null;
+    const card = node.closest(
+      "[data-testid='card.wrapper'], [data-testid='card.layoutSmall.media'], [data-testid='card.layoutLarge.media']"
+    );
+    if (!card || !postRoot.contains(card)) {
+      return false;
+    }
+    return !matchesAny(node, [
+      "[data-testid='tweetPhoto']",
+      "[data-testid='videoPlayer']",
+      "[data-testid='videoComponent']",
+    ]);
   }
 
-  function shareActionColumn(share, actionGroup) {
-    let column = share;
-    while (column.parentElement && column.parentElement !== actionGroup) {
-      column = column.parentElement;
+  function ownMediaHosts(postRoot) {
+    const hosts = [];
+    const seen = new Set();
+    for (const selector of contract.mediaHostSelectors) {
+      const nodes = postRoot.querySelectorAll(selector);
+      for (const node of nodes) {
+        if (seen.has(node)) {
+          continue;
+        }
+        if (isInsideNestedPost(node, postRoot)) {
+          continue;
+        }
+        if (isDistinctLinkCard(node, postRoot)) {
+          continue;
+        }
+        seen.add(node);
+        hosts.push(node);
+      }
     }
-    if (column.parentElement !== actionGroup) {
-      return null;
-    }
-    return column;
+    return hosts.filter((node) => {
+      return !hosts.some((other) => other !== node && other.contains(node));
+    });
   }
 
   function permalinkFrom(postRoot) {
@@ -107,15 +195,6 @@
     void reason;
   }
 
-  function send(type, payload) {
-    return chrome.runtime.sendMessage(
-      { v: companion.PROTOCOL, type, payload: payload || {} },
-      function () {
-        return undefined;
-      }
-    );
-  }
-
   function request(type, payload) {
     return new Promise((resolve) => {
       chrome.runtime.sendMessage(
@@ -141,15 +220,15 @@
 
   function saveIconSvg(kind) {
     const svg = svgEl("svg", { viewBox: "0 0 24 24", "aria-hidden": "true", focusable: "false" });
-    svg.style.width = "22px";
-    svg.style.height = "22px";
+    svg.style.width = "18px";
+    svg.style.height = "18px";
     svg.style.display = "block";
     svg.style.flex = "0 0 auto";
     svg.style.pointerEvents = "none";
     const g = svgEl("g", {
       fill: "none",
       stroke: "currentColor",
-      "stroke-width": "1.75",
+      "stroke-width": "2",
       "stroke-linecap": "round",
       "stroke-linejoin": "round",
     });
@@ -160,8 +239,7 @@
     } else if (kind === "failed") {
       g.appendChild(svgEl("path", { d: "M8 8l8 8M16 8l-8 8" }));
     } else {
-      g.appendChild(svgEl("rect", { x: "4.5", y: "4.5", width: "15", height: "15", rx: "2" }));
-      g.appendChild(svgEl("path", { d: "M12 8.5v7M8.5 12h7" }));
+      g.appendChild(svgEl("path", { d: "M12 6.5v11M6.5 12h11" }));
     }
     svg.appendChild(g);
     return svg;
@@ -187,227 +265,22 @@
     button.style.color = kind === "failed" ? GALLERY_DANGER : GALLERY_ACCENT;
   }
 
-  function applySaveChrome(button) {
-    button.style.display = "inline-flex";
-    button.style.alignItems = "center";
-    button.style.justifyContent = "center";
-    button.style.width = "36px";
-    button.style.height = "36px";
-    button.style.minWidth = "36px";
-    button.style.minHeight = "36px";
-    button.style.maxWidth = "36px";
-    button.style.maxHeight = "36px";
-    button.style.padding = "0";
-    button.style.margin = "0";
-    button.style.border = "0";
-    button.style.background = "transparent";
-    button.style.color = GALLERY_ACCENT;
-    button.style.cursor = "pointer";
-    button.style.borderRadius = "999px";
-    button.style.flex = "0 0 auto";
-    button.style.alignSelf = "center";
-    button.style.boxSizing = "border-box";
-    button.style.appearance = "none";
-    button.style.webkitAppearance = "none";
-    button.style.lineHeight = "0";
-    button.style.overflow = "hidden";
+  function ensureCompanionStyle() {
+    if (document.querySelector("style[data-framenest-companion-style]")) {
+      return;
+    }
+    const style = document.createElement("style");
+    style.setAttribute("data-framenest-companion-style", "");
+    style.textContent = COMPANION_STYLE;
+    const parent = document.head || document.documentElement;
+    parent.appendChild(style);
   }
 
-  function matchesAny(node, selectors) {
-    if (!node || !node.matches) {
-      return false;
+  function ensureContainingBlock(node) {
+    const position = window.getComputedStyle(node).position;
+    if (position === "static") {
+      node.style.position = "relative";
     }
-    return selectors.some((selector) => node.matches(selector));
-  }
-
-  function bookmarkActionColumn(actionGroup, shareColumn) {
-    const bookmark = first(actionGroup, contract.bookmarkSelectors);
-    if (!bookmark) {
-      return null;
-    }
-    const column = shareActionColumn(bookmark, actionGroup);
-    if (!column || column === shareColumn) {
-      return null;
-    }
-    return column;
-  }
-
-  function applySaveColumnAlignment(column, button, share, shareColumn, actionGroup) {
-    const shareStyle = window.getComputedStyle(shareColumn);
-    const shareRect = shareColumn.getBoundingClientRect();
-    const styleHeight = Number.parseFloat(shareStyle.height);
-    const height = Math.max(
-      36,
-      Math.round(shareRect.height) || (Number.isFinite(styleHeight) ? Math.round(styleHeight) : 36)
-    );
-    const display = shareStyle.display;
-    column.style.display = display === "flex" || display === "inline-flex" ? display : "flex";
-    column.style.flexDirection = shareStyle.flexDirection;
-    column.style.alignItems = shareStyle.alignItems === "normal" ? "center" : shareStyle.alignItems;
-    column.style.justifyContent =
-      shareStyle.justifyContent === "normal" ? "center" : shareStyle.justifyContent;
-    column.style.height = height + "px";
-    column.style.minHeight = height + "px";
-    column.style.minWidth = "36px";
-    column.style.flex = "0 0 auto";
-    column.style.boxSizing = "border-box";
-    column.style.alignSelf = shareStyle.alignSelf === "auto" ? "stretch" : shareStyle.alignSelf;
-
-    const controlRect = share.getBoundingClientRect();
-    const topOffset = Math.round(controlRect.top - shareRect.top);
-    button.style.marginTop = Math.max(0, topOffset) + SAVE_DOWN_NUDGE_PX + "px";
-    column.style.alignItems = "flex-start";
-    column.style.justifyContent = "center";
-
-    const bookmarkColumn = bookmarkActionColumn(actionGroup, shareColumn);
-    let gap = 0;
-    if (bookmarkColumn) {
-      const bookmarkRect = bookmarkColumn.getBoundingClientRect();
-      gap = Math.round(shareRect.left - bookmarkRect.right);
-      if (!Number.isFinite(gap) || gap < 0) {
-        gap = 0;
-      }
-    }
-    if (gap === 0) {
-      gap = 8;
-    }
-    column.style.marginLeft = gap + "px";
-  }
-
-  function applyAttachChrome(button) {
-    button.style.display = "inline-flex";
-    button.style.alignItems = "center";
-    button.style.justifyContent = "center";
-    button.style.width = "36px";
-    button.style.height = "36px";
-    button.style.minWidth = "36px";
-    button.style.minHeight = "36px";
-    button.style.maxWidth = "36px";
-    button.style.maxHeight = "36px";
-    button.style.padding = "0";
-    button.style.margin = "0";
-    button.style.border = "0";
-    button.style.background = "transparent";
-    button.style.color = GALLERY_ACCENT;
-    button.style.cursor = "pointer";
-    button.style.borderRadius = "999px";
-    button.style.flex = "0 0 auto";
-    button.style.alignSelf = "center";
-    button.style.boxSizing = "border-box";
-    button.style.appearance = "none";
-    button.style.webkitAppearance = "none";
-    button.style.lineHeight = "0";
-    button.style.overflow = "hidden";
-  }
-
-  function applyAttachColumnChrome(column) {
-    column.style.display = "flex";
-    column.style.alignItems = "center";
-    column.style.justifyContent = "center";
-    column.style.flex = "0 0 auto";
-    column.style.width = "36px";
-    column.style.height = "36px";
-    column.style.minWidth = "36px";
-    column.style.minHeight = "36px";
-    column.style.boxSizing = "border-box";
-  }
-
-  function attachIconSvg() {
-    const svg = svgEl("svg", { viewBox: "0 0 24 24", "aria-hidden": "true", focusable: "false" });
-    svg.style.width = "22px";
-    svg.style.height = "22px";
-    svg.style.display = "block";
-    svg.style.flex = "0 0 auto";
-    svg.style.pointerEvents = "none";
-    const g = svgEl("g", {
-      fill: "none",
-      stroke: "currentColor",
-      "stroke-width": "1.75",
-      "stroke-linecap": "round",
-      "stroke-linejoin": "round",
-    });
-    g.appendChild(svgEl("rect", { x: "4.5", y: "4.5", width: "15", height: "15", rx: "2" }));
-    g.appendChild(svgEl("path", { d: "M12 8.5v7M8.5 12h7" }));
-    svg.appendChild(g);
-    return svg;
-  }
-
-  function findContentDisclosure(composerRoot, toolbar) {
-    if (toolbar) {
-      const inToolbar = first(toolbar, contract.contentDisclosureSelectors);
-      if (inToolbar) {
-        return inToolbar;
-      }
-    }
-    if (composerRoot) {
-      return first(composerRoot, contract.contentDisclosureSelectors);
-    }
-    return null;
-  }
-
-  function disclosureActionColumn(disclosure, row) {
-    if (!disclosure || !row) {
-      return null;
-    }
-    let column = disclosure;
-    while (column.parentElement && column.parentElement !== row) {
-      column = column.parentElement;
-    }
-    if (column.parentElement !== row) {
-      return null;
-    }
-    return column;
-  }
-
-  function findDisclosureIconRow(disclosure) {
-    let node = disclosure.parentElement;
-    let hops = 0;
-    while (node && hops < 8) {
-      if (matchesAny(node, contract.composerToolbarSelectors) || node.getAttribute("role") === "toolbar") {
-        return node;
-      }
-      node = node.parentElement;
-      hops += 1;
-    }
-    return disclosure.parentElement;
-  }
-
-  function insertAttachAfterDisclosure(disclosure, row, column) {
-    const disclosureColumn = disclosureActionColumn(disclosure, row);
-    const target = disclosureColumn || disclosure;
-    target.insertAdjacentElement("afterend", column);
-  }
-
-  function findComposerToolbar(composerRoot) {
-    if (matchesAny(composerRoot, contract.composerToolbarSelectors)) {
-      return composerRoot;
-    }
-    const nested = first(composerRoot, contract.composerToolbarSelectors);
-    if (nested) {
-      return nested;
-    }
-    let node = composerRoot;
-    let hops = 0;
-    while (node.parentElement && hops < 8) {
-      const parent = node.parentElement;
-      if (matchesAny(parent, contract.composerToolbarSelectors)) {
-        return parent;
-      }
-      for (const child of parent.children) {
-        if (matchesAny(child, contract.composerToolbarSelectors)) {
-          return child;
-        }
-        if (child !== node) {
-          const nestedSibling = first(child, contract.composerToolbarSelectors);
-          if (nestedSibling) {
-            return nestedSibling;
-          }
-        }
-      }
-      node = parent;
-      hops += 1;
-    }
-    return null;
   }
 
   function haltHostAction(event) {
@@ -416,43 +289,20 @@
     event.stopImmediatePropagation();
   }
 
-  function haltHostBubble(event) {
-    event.stopPropagation();
-    event.stopImmediatePropagation();
-  }
-
-  function createSaveControl(accepted, share, shareColumn, actionGroup) {
-    const column = document.createElement("div");
+  function createSaveControl(accepted) {
     const button = document.createElement("button");
     button.type = "button";
     button.setAttribute("data-framenest-companion", "save");
-    applySaveChrome(button);
     setSaveStatus(button, "idle", SAVE_NAME, false);
-    button.addEventListener("mouseenter", () => {
-      if (!button.disabled) {
-        button.style.background = GALLERY_ACCENT_SOFT;
-        button.style.boxShadow = "0 0 10px " + GALLERY_ACCENT_GLOW;
-        if (button.dataset.framenestSaveKind !== "failed") {
-          button.style.color = GALLERY_ACCENT_STRONG;
+    ["pointerdown", "mousedown", "click"].forEach((type) => {
+      button.addEventListener(type, (event) => {
+        haltHostAction(event);
+        if (type === "click") {
+          void savePost(button, accepted);
         }
-      }
+      });
     });
-    button.addEventListener("mouseleave", () => {
-      button.style.background = "transparent";
-      button.style.boxShadow = "none";
-      button.style.color =
-        button.dataset.framenestSaveKind === "failed" ? GALLERY_DANGER : GALLERY_ACCENT;
-    });
-    ["pointerdown", "mousedown"].forEach((type) => {
-      button.addEventListener(type, haltHostBubble);
-    });
-    button.addEventListener("click", (event) => {
-      haltHostAction(event);
-      void savePost(button, accepted);
-    });
-    column.appendChild(button);
-    applySaveColumnAlignment(column, button, share, shareColumn, actionGroup);
-    return column;
+    return button;
   }
 
   async function savePost(button, accepted) {
@@ -477,29 +327,79 @@
   }
 
   function injectSave(postRoot) {
-    if (injected.has(postRoot)) {
-      return "placed";
-    }
     const accepted = permalinkFrom(postRoot);
     if (!accepted) {
       return "skipped";
     }
-    const actionGroup = ownActionGroup(postRoot);
-    if (!actionGroup) {
-      return "missing_bar";
+    const hosts = ownMediaHosts(postRoot);
+    if (!hosts.length) {
+      return "no_media";
     }
-    const share = first(actionGroup, contract.shareSelectors);
-    if (!share) {
-      return "missing_share";
-    }
-    const column = shareActionColumn(share, actionGroup);
-    if (!column) {
-      return "missing_share";
-    }
-    const saveColumn = createSaveControl(accepted, share, column, actionGroup);
-    column.insertAdjacentElement("afterend", saveColumn);
-    injected.add(postRoot);
+    hosts.forEach((host) => {
+      if (injected.has(host)) {
+        return;
+      }
+      if (host.querySelector(":scope > [data-framenest-companion='save']")) {
+        injected.add(host);
+        return;
+      }
+      host.setAttribute("data-framenest-media-host", "");
+      ensureContainingBlock(host);
+      host.appendChild(createSaveControl(accepted));
+      injected.add(host);
+    });
     return "placed";
+  }
+
+  function attachIconSvg() {
+    const svg = svgEl("svg", { viewBox: "0 0 24 24", "aria-hidden": "true", focusable: "false" });
+    svg.style.width = "18px";
+    svg.style.height = "18px";
+    svg.style.display = "block";
+    svg.style.flex = "0 0 auto";
+    svg.style.pointerEvents = "none";
+    const g = svgEl("g", {
+      fill: "none",
+      stroke: "currentColor",
+      "stroke-width": "2",
+      "stroke-linecap": "round",
+      "stroke-linejoin": "round",
+    });
+    g.appendChild(svgEl("path", { d: "M12 6.5v11M6.5 12h11" }));
+    svg.appendChild(g);
+    return svg;
+  }
+
+  function isEditableComposerNode(node) {
+    if (!node || !node.getAttribute) {
+      return false;
+    }
+    return (
+      node.getAttribute("contenteditable") === "true" ||
+      node.getAttribute("data-testid") === "tweetTextarea_0"
+    );
+  }
+
+  function findComposerChrome(composerRoot) {
+    if (!composerRoot) {
+      return null;
+    }
+    let node = composerRoot;
+    let hops = 0;
+    while (node && hops < 12) {
+      if (matchesAny(node, contract.composerChromeSelectors)) {
+        return node;
+      }
+      const toolbar =
+        matchesAny(node, contract.composerToolbarSelectors) ||
+        first(node, contract.composerToolbarSelectors);
+      if (toolbar && !isEditableComposerNode(node)) {
+        return node;
+      }
+      node = node.parentElement;
+      hops += 1;
+    }
+    return null;
   }
 
   function createAttachControl(composerRoot, fileInput) {
@@ -508,85 +408,48 @@
     button.setAttribute("data-framenest-companion", "attach");
     button.setAttribute("aria-label", ATTACH_NAME);
     button.setAttribute("title", ATTACH_NAME);
-    applyAttachChrome(button);
     button.appendChild(attachIconSvg());
-    button.addEventListener("mouseenter", () => {
-      if (!button.disabled) {
-        button.style.background = GALLERY_ACCENT_SOFT;
-        button.style.boxShadow = "0 0 10px " + GALLERY_ACCENT_GLOW;
-        button.style.color = GALLERY_ACCENT_STRONG;
-      }
-    });
-    button.addEventListener("mouseleave", () => {
-      button.style.background = "transparent";
-      button.style.boxShadow = "none";
-      button.style.color = GALLERY_ACCENT;
-    });
-    ["pointerdown", "mousedown"].forEach((type) => {
-      button.addEventListener(type, haltHostBubble);
-    });
-    button.addEventListener("click", (event) => {
-      haltHostAction(event);
-      if (stale) {
-        return;
-      }
-      boundComposer = { root: composerRoot, fileInput };
-      void request(companion.TYPES.ACK, { composerBound: true }).then(() => {
-        chrome.runtime.sendMessage({
-          v: companion.PROTOCOL,
-          type: companion.TYPES.ACK,
-          payload: { openPicker: true },
+    ["pointerdown", "mousedown", "click"].forEach((type) => {
+      button.addEventListener(type, (event) => {
+        haltHostAction(event);
+        if (type !== "click" || stale) {
+          return;
+        }
+        boundComposer = { root: composerRoot, fileInput };
+        void request(companion.TYPES.ACK, { composerBound: true }).then(() => {
+          chrome.runtime.sendMessage({
+            v: companion.PROTOCOL,
+            type: companion.TYPES.ACK,
+            payload: { openPicker: true },
+          });
         });
       });
     });
     return button;
   }
 
-  function placeAttachControl(toolbar, disclosure, button) {
-    const column = document.createElement("div");
-    applyAttachColumnChrome(column);
-    column.appendChild(button);
-    if (disclosure) {
-      const row = toolbar || findDisclosureIconRow(disclosure);
-      if (row) {
-        insertAttachAfterDisclosure(disclosure, row, column);
-        return true;
-      }
-    }
-    if (toolbar) {
-      toolbar.appendChild(column);
-      return true;
-    }
-    return false;
-  }
-
   function injectAttach(composerRoot) {
     if (injected.has(composerRoot)) {
       return;
     }
-    let toolbar = findComposerToolbar(composerRoot);
-    const disclosure = findContentDisclosure(composerRoot, toolbar);
-    if (!toolbar && disclosure) {
-      toolbar = findDisclosureIconRow(disclosure);
-    }
-    if (!toolbar && !disclosure) {
+    const composerChrome = findComposerChrome(composerRoot);
+    if (!composerChrome) {
       return;
     }
-    const host = toolbar || (disclosure && disclosure.parentElement);
-    if (host && host.querySelector("[data-framenest-companion='attach']")) {
+    if (composerChrome.querySelector("[data-framenest-companion='attach']")) {
       injected.add(composerRoot);
       return;
     }
-    const fileInput = first(composerRoot, contract.composerFileInputs) ||
+    const fileInput =
+      first(composerChrome, contract.composerFileInputs) ||
+      first(composerRoot, contract.composerFileInputs) ||
       first(document, contract.composerFileInputs);
     if (!fileInput) {
       markStale("missing_composer_file_input");
       return;
     }
-    const button = createAttachControl(composerRoot, fileInput);
-    if (!placeAttachControl(toolbar, disclosure, button)) {
-      return;
-    }
+    ensureContainingBlock(composerChrome);
+    composerChrome.appendChild(createAttachControl(composerRoot, fileInput));
     injected.add(composerRoot);
   }
 
@@ -700,28 +563,11 @@
     if (stale) {
       return;
     }
+    ensureCompanionStyle();
     const posts = document.querySelectorAll(contract.postRoots.join(","));
-    let eligible = 0;
-    let placed = 0;
-    let missingBar = 0;
-    let missingShare = 0;
     posts.forEach((post) => {
-      const outcome = injectSave(post);
-      if (outcome === "skipped") {
-        return;
-      }
-      eligible += 1;
-      if (outcome === "placed") {
-        placed += 1;
-      } else if (outcome === "missing_bar") {
-        missingBar += 1;
-      } else if (outcome === "missing_share") {
-        missingShare += 1;
-      }
+      injectSave(post);
     });
-    if (eligible > 0 && placed === 0 && missingShare > 0 && missingBar === 0) {
-      markStale("adapter_drift");
-    }
     const composers = document.querySelectorAll(contract.composerRoots.join(","));
     composers.forEach((composer) => injectAttach(composer));
   }

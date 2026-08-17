@@ -8,6 +8,9 @@
     <article data-framenest-post data-testid="tweet">
       <a href="https://x.com/fixture/status/123456789">permalink</a>
       <time>now</time>
+      <div data-testid="tweetPhoto" data-framenest-media>
+        <img alt="" width="120" height="80" />
+      </div>
       <div role="group" aria-label="Tweet actions">
         <div>
           <button type="button" data-testid="reply" aria-label="Reply">Reply</button>
@@ -26,7 +29,7 @@
         </div>
       </div>
     </article>
-    <form data-framenest-composer>
+    <form data-framenest-composer data-framenest-composer-chrome>
       <div data-testid="tweetTextarea_0" contenteditable="true"></div>
       <div data-testid="toolBar" data-framenest-composer-toolbar role="toolbar" aria-label="Composer tools">
         <div>

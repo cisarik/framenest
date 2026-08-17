@@ -8,17 +8,21 @@ deployment, signed-in X probing, or a yt-dlp pin change.
 
 An authenticated FrameNest user can:
 
-- click the action-row **Save to FrameNest** control next to Share on an
-  eligible X post (existing X request lifecycle; static X photographs
-  currently fail closed as `X_NO_SUPPORTED_MEDIA`);
-- open the FrameNest picker while an X composer is active;
+- hover (or keyboard-focus) a green **+** on each image, video, or GIF in an
+  eligible X post and click **Save to FrameNest** (existing X request
+  lifecycle; the click still submits the post permalink, not a per-asset
+  media URL; static X photographs currently fail closed as
+  `X_NO_SUPPORTED_MEDIA`);
+- open the FrameNest picker from the composer-card bottom-right Attach icon;
 - attach one published meme or one of that user's own live successful X media
   items (JPEG/PNG, GIF-style, or short video) onto the composer file input.
 
-Save is an accent action-row icon aligned with Share. Attach is a small
-composer icon beside Content disclosure; it opens the side panel. After
-connect, origin lives under Settings; the search prompt is Search memes.
-The side panel is a compact FrameNest search/preview, not the full Gallery.
+Save is a hover/focus overlay on own media tiles, not an action-row control.
+Text-only posts have no Save. Attach sits flush in the composer chrome
+corner and opens the side panel. After connect, origin lives under Settings;
+the search prompt is Search memes. The side panel is a compact FrameNest
+search/preview, not the full Gallery. Per-asset Save targeting remains
+deferred.
 
 The companion never clicks Post, never copies cookies or X credentials, and
 never talks to FrameNest from a content script.

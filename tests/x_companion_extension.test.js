@@ -93,11 +93,13 @@ test("service worker recovers inflight claim ids from storage", () => {
   assert.doesNotMatch(workerSource, /setInterval/);
 });
 
-test("adapter contract exposes frozen action-bar and Share selectors", () => {
+test("adapter contract exposes frozen action-bar, Share, and media-host selectors", () => {
   assert.equal(contract.adapterVersion, 1);
   assert.ok(Object.isFrozen(contract.actionGroupSelectors));
   assert.ok(Object.isFrozen(contract.actionBarSignals));
   assert.ok(Object.isFrozen(contract.shareSelectors));
+  assert.ok(Object.isFrozen(contract.mediaHostSelectors));
+  assert.ok(Object.isFrozen(contract.composerChromeSelectors));
   assert.deepEqual(contract.actionGroupSelectors, ["[role='group']"]);
   assert.deepEqual(contract.actionBarSignals, [
     "[data-testid='reply']",
@@ -109,9 +111,16 @@ test("adapter contract exposes frozen action-bar and Share selectors", () => {
     "[aria-label='Share post']",
     "[aria-label='Share']",
   ]);
+  assert.deepEqual(contract.mediaHostSelectors, [
+    "[data-testid='tweetPhoto']",
+    "[data-testid='videoPlayer']",
+    "[data-testid='videoComponent']",
+    "[data-framenest-media]",
+  ]);
+  assert.deepEqual(contract.composerChromeSelectors, ["[data-framenest-composer-chrome]"]);
 });
 
-test("in-feed Save is an action-row icon and never a labeled article button", () => {
+test("in-feed Save is a per-media hover overlay, not an action-row control", () => {
   const fixture = fs.readFileSync(
     path.join(REPO, "tests/support/x_fixtures/composer.html"),
     "utf8"
@@ -121,6 +130,8 @@ test("in-feed Save is an action-row icon and never a labeled article button", ()
   assert.match(fixture, /data-testid="retweet"/);
   assert.match(fixture, /data-testid="like"/);
   assert.match(fixture, /aria-label="Share post"/);
+  assert.match(fixture, /data-testid="tweetPhoto"/);
+  assert.match(fixture, /data-framenest-media/);
   assert.doesNotMatch(fixture, /data-framenest-companion/);
 
   assert.doesNotMatch(adapterSource, /writing-mode/);
@@ -129,15 +140,36 @@ test("in-feed Save is an action-row icon and never a labeled article button", ()
   assert.doesNotMatch(adapterSource, /textContent\s*=\s*result/);
   assert.doesNotMatch(adapterSource, /textContent\s*=\s*["']Save to FrameNest["']/);
   assert.doesNotMatch(adapterSource, /textContent\s*=\s*["']Saving/);
+  assert.doesNotMatch(adapterSource, /ownActionGroup/);
+  assert.doesNotMatch(adapterSource, /shareActionColumn/);
+  assert.doesNotMatch(adapterSource, /SAVE_DOWN_NUDGE/);
+  assert.doesNotMatch(adapterSource, /insertAdjacentElement\("afterend"/);
+  assert.doesNotMatch(adapterSource, /return "missing_bar"/);
+  assert.doesNotMatch(adapterSource, /return "missing_share"/);
+  assert.doesNotMatch(adapterSource, /adapter_drift/);
+  assert.doesNotMatch(adapterSource, /style\.background = "transparent"/);
+  assert.doesNotMatch(
+    adapterSource,
+    /\[data-framenest-companion='save'\][\s\S]{0,500}background:\s*transparent/
+  );
   assert.match(adapterSource, /setAttribute\("data-framenest-companion", "save"\)/);
   assert.match(adapterSource, /setAttribute\("aria-label", name\)/);
-  assert.match(adapterSource, /insertAdjacentElement\("afterend"/);
   assert.match(adapterSource, /stopImmediatePropagation/);
-  assert.match(adapterSource, /ownActionGroup/);
-  assert.match(adapterSource, /shareActionColumn/);
-  assert.match(adapterSource, /return "missing_bar"/);
-  assert.match(adapterSource, /return "missing_share"/);
-  assert.match(adapterSource, /adapter_drift/);
+  assert.match(adapterSource, /ownMediaHosts/);
+  assert.match(adapterSource, /mediaHostSelectors/);
+  assert.match(adapterSource, /data-framenest-media-host/);
+  assert.match(adapterSource, /data-framenest-companion-style/);
+  assert.match(adapterSource, /position: absolute/);
+  assert.match(adapterSource, /top: 0/);
+  assert.match(adapterSource, /left: 0/);
+  assert.match(adapterSource, /opacity: 0/);
+  assert.match(adapterSource, /pointer-events: none/);
+  assert.match(adapterSource, /background: #000000/);
+  assert.match(adapterSource, /style\.position = "relative"/);
+  assert.match(adapterSource, /return "no_media"/);
+  assert.match(adapterSource, /TYPES\.SAVE_POST/);
+  assert.match(adapterSource, /accepted\.submittedUrl/);
+  assert.doesNotMatch(adapterSource, /pbs\.twimg\.com/);
   assert.match(adapterSource, /data-framenest-companion"\) === "save"/);
   assert.match(adapterSource, /Save to FrameNest failed/);
 });
@@ -183,7 +215,7 @@ test("companion surfaces copy FrameNest gallery visual tokens", () => {
   assert.doesNotMatch(pickerJs, /form\.submit/);
 });
 
-test("Attach is a disclosure-adjacent icon, not a labeled toolbar pill", () => {
+test("Attach is flush in the composer chrome corner, not a disclosure sibling", () => {
   const fixture = fs.readFileSync(
     path.join(REPO, "tests/support/x_fixtures/composer.html"),
     "utf8"
@@ -201,23 +233,26 @@ test("Attach is a disclosure-adjacent icon, not a labeled toolbar pill", () => {
   assert.ok(Object.isFrozen(contract.bookmarkSelectors));
   assert.match(fixture, /data-testid="toolBar"/);
   assert.match(fixture, /data-framenest-composer-toolbar/);
+  assert.match(fixture, /data-framenest-composer-chrome/);
   assert.match(fixture, /data-testid="bookmark"/);
   assert.match(fixture, /aria-label="Content disclosure"/);
   assert.match(fixture, /data-framenest-content-disclosure/);
   assert.doesNotMatch(adapterSource, /addButton\(/);
   assert.doesNotMatch(adapterSource, /composerRoot\.appendChild/);
-  assert.match(adapterSource, /findComposerToolbar/);
-  assert.match(adapterSource, /findContentDisclosure/);
-  assert.match(adapterSource, /insertAttachAfterDisclosure/);
-  assert.match(adapterSource, /disclosureActionColumn/);
-  assert.match(adapterSource, /setAttribute\("data-framenest-companion", "attach"\)/);
-  assert.match(adapterSource, /setAttribute\("aria-label", ATTACH_NAME\)/);
-  assert.doesNotMatch(adapterSource, /textContent\s*=\s*["']Attach from FrameNest["']/);
-  assert.doesNotMatch(adapterSource, /textContent\s*=\s*ATTACH_NAME/);
-  assert.match(adapterSource, /getBoundingClientRect/);
+  assert.doesNotMatch(adapterSource, /insertAttachAfterDisclosure/);
+  assert.doesNotMatch(adapterSource, /findContentDisclosure/);
+  assert.doesNotMatch(adapterSource, /disclosureActionColumn/);
   assert.doesNotMatch(adapterSource, /tweetButton/);
   assert.doesNotMatch(adapterSource, /form\.submit/);
   assert.doesNotMatch(adapterSource, /dispatchEvent\(new Event\(["']submit/);
+  assert.match(adapterSource, /findComposerChrome/);
+  assert.match(adapterSource, /composerChromeSelectors/);
+  assert.match(adapterSource, /setAttribute\("data-framenest-companion", "attach"\)/);
+  assert.match(adapterSource, /setAttribute\("aria-label", ATTACH_NAME\)/);
+  assert.match(adapterSource, /right: 0/);
+  assert.match(adapterSource, /bottom: 0/);
+  assert.doesNotMatch(adapterSource, /textContent\s*=\s*["']Attach from FrameNest["']/);
+  assert.doesNotMatch(adapterSource, /textContent\s*=\s*ATTACH_NAME/);
 });
 
 test("picker is search-first with a Settings Origin sheet", () => {
@@ -226,6 +261,10 @@ test("picker is search-first with a Settings Origin sheet", () => {
   const pickerCss = fs.readFileSync(path.join(REPO, "extension/ui/picker.css"), "utf8");
   assert.doesNotMatch(pickerHtml, /Search titles/);
   assert.doesNotMatch(pickerJs, /Search titles/);
+  assert.doesNotMatch(pickerHtml, /class="picker-brand"/);
+  assert.doesNotMatch(pickerHtml, /class="brand-mark"/);
+  assert.doesNotMatch(pickerHtml, /<h1>FrameNest<\/h1>/);
+  assert.doesNotMatch(pickerHtml, />FN<\/span>/);
   assert.match(pickerHtml, /Search memes/);
   assert.match(pickerHtml, /aria-label="Settings"/);
   assert.match(pickerHtml, /id="settings-tab-origin"/);

@@ -20,6 +20,7 @@
       "[data-testid='toolBar']",
       "[data-framenest-composer-toolbar]",
     ]),
+    composerChromeSelectors: Object.freeze(["[data-framenest-composer-chrome]"]),
     contentDisclosureSelectors: Object.freeze([
       "[aria-label='Content disclosure']",
       "[data-framenest-content-disclosure]",
@@ -40,6 +41,12 @@
       "[data-testid='share']",
       "[aria-label='Share post']",
       "[aria-label='Share']",
+    ]),
+    mediaHostSelectors: Object.freeze([
+      "[data-testid='tweetPhoto']",
+      "[data-testid='videoPlayer']",
+      "[data-testid='videoComponent']",
+      "[data-framenest-media]",
     ]),
     requiredSignals: Object.freeze(["permalink", "composerFileInput"]),
   });

@@ -50,34 +50,11 @@ body {
   font-family: var(--font-mono);
 }
 
-.picker-brand {
+.picker-chrome {
   display: flex;
   align-items: center;
-  gap: 10px;
-  margin: 0 0 12px;
-}
-
-.brand-mark {
-  display: grid;
-  width: 36px;
-  height: 36px;
-  place-items: center;
-  border: 1px solid rgba(0, 255, 65, 0.75);
-  border-radius: 50%;
-  background: rgba(0, 0, 0, 0.62);
-  color: var(--accent-strong);
-  font-size: 0.76rem;
-  font-weight: 800;
-  font-family: var(--font-mono);
-  text-shadow: 0 0 10px var(--accent-glow);
-}
-
-h1 {
-  flex: 1 1 auto;
-  font-size: 1.1rem;
-  margin: 0;
-  color: var(--accent);
-  font-family: var(--font-mono);
+  justify-content: flex-end;
+  margin: 0 0 8px;
 }
 
 .picker-settings {
@@ -86,7 +63,7 @@ h1 {
   justify-content: center;
   width: 32px;
   height: 32px;
-  margin-left: auto;
+  margin: 0;
   padding: 0;
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
