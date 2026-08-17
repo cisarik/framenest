@@ -790,14 +790,16 @@ test("Gallery original media action uses the content endpoint and compact placem
   assert.match(cardBody, /mediaContentUrl\(item\.media_id, supportedLocation\.location_id\)/);
   assert.ok(contentUrl.includes("/content`"));
   assert.match(STYLES_SOURCE, /\.catalog-card__action--open-original\s*\{/);
+  assert.match(STYLES_SOURCE, /\.catalog-card__action--top-left\s*\{/);
   assert.match(STYLES_SOURCE, /\.catalog-card__action--attach\s*\{/);
+  assert.match(cardBody, /catalog-card__action--top-left catalog-card__action--attach/);
   assert.match(INDEX_SOURCE, /src="\/assets\/companion_host\.js"/);
   assert.ok(INDEX_SOURCE.indexOf("/assets/companion_host.js") < INDEX_SOURCE.indexOf("/assets/app.js"));
   assert.doesNotMatch(INDEX_SOURCE, /https:\/\//);
   assert.doesNotMatch(cardBody, /addEventListener\("message"/);
 });
 
-test("companion-hosted Gallery replaces open-original with Attach and does not keep both", () => {
+test("companion-hosted Gallery keeps open-original and adds top-left Attach", () => {
   const ordinary = renderCatalogCardForCapabilities([
     "gallery.read",
     "media.original.read",
@@ -812,18 +814,41 @@ test("companion-hosted Gallery replaces open-original with Attach and does not k
     { hosted: true },
   );
   const attach = hosted.card.querySelector(".catalog-card__action--attach");
+  const hostedOriginal = hosted.card.querySelector(".catalog-card__action--open-original");
   assert.ok(attach);
   assert.equal(attach.tagName, "BUTTON");
   assert.equal(attach.type, "button");
   assert.equal(attach.textContent, "📎");
   assert.equal(attach.title, "Attach to X composer");
   assert.equal(attach.getAttribute("aria-label"), "Attach to X composer");
-  assert.match(attach.className, /catalog-card__action--bottom-right/);
-  assert.equal(hosted.card.querySelector(".catalog-card__action--open-original"), null);
+  assert.match(attach.className, /catalog-card__action--top-left/);
+  assert.doesNotMatch(attach.className, /catalog-card__action--top-right/);
+  assert.doesNotMatch(attach.className, /catalog-card__action--bottom-right/);
+  assert.ok(hostedOriginal);
+  assert.match(hostedOriginal.className, /catalog-card__action--bottom-right/);
   attach.click();
   assert.equal(hosted.attachCalls.length, 1);
   assert.equal(hosted.attachCalls[0].mediaId, hosted.item.media_id);
   assert.equal(hosted.attachCalls[0].locationId, hosted.item.locations[0].location_id);
+
+  const hostedAdmin = renderCatalogCardForCapabilities(
+    [
+      "gallery.read",
+      "media.original.read",
+      "media.download",
+      "metadata.canonical.write",
+      "analysis.run",
+    ],
+    {},
+    { hosted: true },
+  );
+  assert.match(hostedAdmin.card.querySelector(".catalog-card__action--attach").className, /catalog-card__action--top-left/);
+  assert.match(hostedAdmin.card.querySelector(".catalog-card__action--analyze").className, /catalog-card__action--top-right/);
+  assert.match(hostedAdmin.card.querySelector(".catalog-card__action--edit").className, /catalog-card__action--bottom-left/);
+  assert.match(
+    hostedAdmin.card.querySelector(".catalog-card__action--open-original").className,
+    /catalog-card__action--bottom-right/,
+  );
 });
 
 test("brain eligibility requires metadata need, both capabilities, supported location, and excludes movies", () => {

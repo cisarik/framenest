@@ -6,22 +6,6 @@
     <link rel="stylesheet" href="picker.css" />
   </head>
   <body>
-    <header class="picker-chrome">
-      <button id="settings-open" class="picker-settings" type="button" aria-label="Settings" title="Settings">
-        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-          <path
-            fill="none"
-            stroke="currentColor"
-            stroke-width="1.75"
-            stroke-linecap="round"
-            d="M4 8h16M4 12h16M4 16h16"
-          />
-          <circle cx="9" cy="8" r="1.55" fill="currentColor" />
-          <circle cx="15" cy="12" r="1.55" fill="currentColor" />
-          <circle cx="11" cy="16" r="1.55" fill="currentColor" />
-        </svg>
-      </button>
-    </header>
     <main>
       <section id="picker">
         <div class="header-search" role="search" aria-label="Search memes">
@@ -61,55 +45,6 @@
         </div>
       </section>
     </main>
-    <dialog id="settings-dialog" class="settings-dialog" aria-label="Settings">
-      <div class="settings-dialog__header">
-        <h2 id="settings-dialog-title" class="settings-dialog__title">Settings</h2>
-        <button id="settings-close" class="settings-dialog__close" type="button" aria-label="Close settings">✕</button>
-      </div>
-      <div class="settings-dialog__tabs" role="tablist" aria-label="Settings sections">
-        <button
-          id="settings-tab-origin"
-          class="settings-dialog__tab settings-dialog__tab--active"
-          type="button"
-          role="tab"
-          aria-selected="true"
-          aria-controls="settings-panel-origin"
-        >
-          Origin
-        </button>
-      </div>
-      <div class="settings-dialog__body">
-        <div
-          id="settings-panel-origin"
-          class="settings-dialog__section"
-          role="tabpanel"
-          aria-labelledby="settings-tab-origin"
-          tabindex="0"
-        >
-          <h3 class="settings-dialog__section-title">Origin</h3>
-          <dl class="settings-status-list settings-status-list--wrap">
-            <div>
-              <dt>Connection</dt>
-              <dd id="settings-connection"></dd>
-            </div>
-            <div>
-              <dt>Origin</dt>
-              <dd id="settings-origin-value"></dd>
-            </div>
-          </dl>
-          <label for="origin">FrameNest origin</label>
-          <input id="origin" type="text" spellcheck="false" autocomplete="off" />
-          <div class="setup-actions">
-            <button id="save-origin" type="button">Connect</button>
-            <button id="reset" type="button">Reset</button>
-          </div>
-          <p id="setup-status"></p>
-          <p id="origin-note" class="settings-dialog__note">
-            Origin is the FrameNest tailnet URL.
-          </p>
-        </div>
-      </div>
-    </dialog>
     <script src="../shared/messages.js"></script>
     <script src="picker.js"></script>
   </body>

@@ -24,18 +24,24 @@ An authenticated FrameNest user can:
 - search memes in that in-page picker, see the selected hit as one JPEG
   preview at a time, and attach it onto the composer file input;
 - open the toolbar side panel to use the real FrameNest website at the stored
-  Tailscale origin, and attach a Gallery item onto the bound X composer.
+  Tailscale origin, and attach a Gallery item onto the bound X composer. In that
+  hosted Gallery, open-original stays bottom-right and Attach sits top-left on
+  the card image. Ordinary browser tabs keep open-original only.
 
 Save is a hover/focus overlay at the bottom-right of own media tiles, not an
 action-row control. Click opens the Save popup instead of silently posting
 `{ url }`. Text-only posts have no Save. Attach is shown when the
 composer is focused, not on mouseover, and is not the side panel. The in-page
 picker is compact quick attach with preview; it is not the full website.
-After connect, the in-page picker keeps origin under Settings. First-run
-Connect for the side panel lives in the side-panel shell. The toolbar opens
+After connect, the in-page picker has no Settings sheet; an empty origin tells
+the user to connect FrameNest in the side panel. First-run Connect lives in the
+side-panel green title bar: Settings holds the origin field, and the far-right
+control reads Disconnect (existing Reset) when connected. The toolbar opens
 that shell, which iframes FrameNest only after the stored origin is granted.
-If the site cannot be framed, the shell shows an error and does not open a
-new tab. Per-asset Save targeting remains deferred.
+If the iframe does not load, the shell reports that FrameNest did not load and
+does not open a new tab. If the iframe loads without the companion host, the
+library stays visible and the shell says this server cannot host companion
+Attach yet. Per-asset Save targeting remains deferred.
 
 Attach floats on the focused reply field; it is not inserted into the X input
 row. Inline reply Attach is re-injected when X replaces the composer tree and the
@@ -78,12 +84,12 @@ Rollback: remove the key or set it to `[]` and restart. No CORS is enabled.
 2. Enable Developer mode.
 3. Load unpacked and select the repository `extension/` directory.
 4. Confirm the ID is `omiihmnlkmieaafaphohakcgmbggppap`.
-5. Open the toolbar side panel. On first run the shell shows Connect/Reset;
-   enter the exact FrameNest HTTPS origin (`https://<node>.<tailnet>.ts.net`,
-   no path) and grant the host permission when prompted. After Connect, the
-   shell iframes that origin. The in-page Search memes picker keeps its own
-   Settings Origin sheet.
-6. Use Reset in the shell or picker Settings to clear stored origin, in-flight
+5. Open the toolbar side panel. On first run open Settings in the green title
+   bar, enter the exact FrameNest HTTPS origin (`https://<node>.<tailnet>.ts.net`,
+   no path), then click Connect and grant the host permission when prompted.
+   After Connect, the shell iframes that origin and the same control reads
+   Disconnect. The in-page Search memes picker has no Settings sheet.
+6. Use Disconnect in the side-panel title bar to clear stored origin, in-flight
    claim ids, and the granted host permission.
 
 Content scripts match only `https://x.com/*` and `https://twitter.com/*`. The
@@ -95,5 +101,8 @@ service worker has no X host permission.
 - Live signed-in X DOM evidence is not part of repository acceptance.
 - Side-panel iframe framing against live Tailscale Serve or Brave Shields is
   a named residual until a later operator probe.
+- A FrameNest origin that does not ship `companion_host.js` can still appear
+  in the side panel; Gallery Attach requires that host script on the served
+  web.
 - Larger-than-32-MiB attach uses optional `chrome.downloads` with Save As;
   it still does not auto-post.

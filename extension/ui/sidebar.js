@@ -38,23 +38,43 @@
     return { mediaId: payload.mediaId, locationId: payload.locationId };
   }
 
+  function framingFailureCopy() {
+    return "FrameNest did not load in this panel.";
+  }
+
+  function companionHostMissingCopy() {
+    return "This FrameNest server cannot host companion Attach yet. The library below is an older web without the companion host.";
+  }
+
+  function handshakeTimeoutCopy(frameLoaded) {
+    return frameLoaded ? companionHostMissingCopy() : framingFailureCopy();
+  }
+
   globalThis.FrameNestSidebarBridge = {
     WEB_PROTOCOL,
     WEB_TYPES,
     acceptIncomingWebMessage,
     attachIdsFromWebRequest,
+    framingFailureCopy,
+    companionHostMissingCopy,
+    handshakeTimeoutCopy,
   };
 
   const originInput = document.getElementById("origin");
   const shellStatus = document.getElementById("shell-status");
   const frame = document.getElementById("frame");
-  if (!originInput || !shellStatus || !frame) {
+  const chromeAction = document.getElementById("chrome-action");
+  const settingsDialog = document.getElementById("settings-dialog");
+  const settingsOpen = document.getElementById("settings-open");
+  const settingsClose = document.getElementById("settings-close");
+  if (!originInput || !shellStatus || !frame || !chromeAction || !settingsDialog || !settingsOpen || !settingsClose) {
     return;
   }
 
   let storedOrigin = "";
   let handshakeTimer = 0;
   let handshakeSeen = false;
+  let frameLoaded = false;
 
   function setText(node, value, kind) {
     node.textContent = value;
@@ -63,6 +83,12 @@
     } else {
       node.removeAttribute("data-kind");
     }
+  }
+
+  function syncChromeAction() {
+    const connected = Boolean(storedOrigin);
+    chromeAction.textContent = connected ? "Disconnect" : "Connect";
+    chromeAction.setAttribute("aria-label", connected ? "Disconnect FrameNest" : "Connect FrameNest");
   }
 
   function request(type, payload) {
@@ -90,12 +116,39 @@
   function clearFrame() {
     clearHandshakeWait();
     handshakeSeen = false;
+    frameLoaded = false;
     frame.removeAttribute("src");
     frame.hidden = true;
   }
 
   function showFramingError() {
-    setText(shellStatus, "FrameNest could not be framed in this panel.", "error");
+    setText(shellStatus, framingFailureCopy(), "error");
+  }
+
+  function showHandshakeTimeout() {
+    const loaded = frameLoaded;
+    setText(shellStatus, handshakeTimeoutCopy(loaded), loaded ? "notice" : "error");
+  }
+
+  function openSettings() {
+    if (settingsDialog.open) {
+      return;
+    }
+    if (typeof settingsDialog.showModal === "function") {
+      settingsDialog.showModal();
+      originInput.focus();
+      return;
+    }
+    settingsDialog.setAttribute("open", "");
+    originInput.focus();
+  }
+
+  function closeSettings() {
+    if (typeof settingsDialog.close === "function" && settingsDialog.open) {
+      settingsDialog.close();
+      return;
+    }
+    settingsDialog.removeAttribute("open");
   }
 
   function hostFrame(origin) {
@@ -104,12 +157,13 @@
       return;
     }
     handshakeSeen = false;
+    frameLoaded = false;
     clearHandshakeWait();
     frame.hidden = false;
     frame.src = origin;
     handshakeTimer = setTimeout(() => {
       if (!handshakeSeen) {
-        showFramingError();
+        showHandshakeTimeout();
       }
     }, HANDSHAKE_WAIT_MS);
   }
@@ -123,6 +177,11 @@
 
   async function connect() {
     const origin = originInput.value.trim();
+    if (!origin) {
+      setText(shellStatus, "Enter a FrameNest origin in Settings", "error");
+      openSettings();
+      return;
+    }
     const result = await request(companion.TYPES.CONFIGURE_ORIGIN, { origin });
     if (!result.ok) {
       setText(shellStatus, result.error || "Failed", "error");
@@ -130,6 +189,8 @@
     }
     storedOrigin = result.origin || origin;
     originInput.value = storedOrigin;
+    syncChromeAction();
+    closeSettings();
     setText(shellStatus, "Connected");
     hostFrame(storedOrigin);
   }
@@ -138,11 +199,28 @@
     await request(companion.TYPES.RESET, {});
     storedOrigin = "";
     originInput.value = "";
+    syncChromeAction();
     clearFrame();
     setText(shellStatus, "Cleared");
   }
 
+  function onChromeAction() {
+    if (storedOrigin) {
+      void reset();
+      return;
+    }
+    void connect();
+  }
+
+  function onFrameLoad() {
+    if (!frame.getAttribute("src")) {
+      return;
+    }
+    frameLoaded = true;
+  }
+
   function onFrameError() {
+    clearHandshakeWait();
     showFramingError();
   }
 
@@ -205,8 +283,15 @@
     }
   }
 
-  document.getElementById("save-origin").addEventListener("click", connect);
-  document.getElementById("reset").addEventListener("click", reset);
+  chromeAction.addEventListener("click", onChromeAction);
+  settingsOpen.addEventListener("click", openSettings);
+  settingsClose.addEventListener("click", closeSettings);
+  settingsDialog.addEventListener("click", (event) => {
+    if (event.target === settingsDialog) {
+      closeSettings();
+    }
+  });
+  frame.addEventListener("load", onFrameLoad);
   frame.addEventListener("error", onFrameError);
   window.addEventListener("message", onWindowMessage);
   chrome.storage.local.get("frameNestOrigin", (stored) => {
@@ -214,10 +299,14 @@
     if (companion.acceptFrameNestOrigin(origin)) {
       storedOrigin = origin;
       originInput.value = origin;
+      syncChromeAction();
       setText(shellStatus, "Connected");
       hostFrame(origin);
       return;
     }
+    storedOrigin = "";
+    originInput.value = "";
+    syncChromeAction();
     clearFrame();
     setText(shellStatus, "Connect FrameNest to open the library");
   });

@@ -7,19 +7,36 @@
   </head>
   <body>
     <header class="sidebar-chrome">
+      <div class="title-bar">
+        <span class="title-bar__wordmark">FrameNest</span>
+        <button id="settings-open" class="title-bar__settings" type="button" aria-label="Settings" title="Settings">
+          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <path
+              fill="currentColor"
+              d="M19.14 12.94c.04-.31.06-.63.06-.94s-.02-.63-.06-.94l2.03-1.58a.5.5 0 0 0 .12-.64l-1.92-3.32a.5.5 0 0 0-.6-.22l-2.39.96a7.07 7.07 0 0 0-1.63-.94l-.36-2.54A.5.5 0 0 0 13.9 2h-3.8a.5.5 0 0 0-.49.42l-.36 2.54c-.59.24-1.13.55-1.63.94l-2.39-.96a.5.5 0 0 0-.6.22L2.81 8.48a.5.5 0 0 0 .12.64L4.96 10.7c-.04.31-.06.63-.06.94s.02.63.06.94L2.93 14.16a.5.5 0 0 0-.12.64l1.92 3.32c.13.23.4.32.6.22l2.39-.96c.5.39 1.04.7 1.63.94l.36 2.54c.05.24.26.42.49.42h3.8c.24 0 .44-.18.49-.42l.36-2.54c.59-.24 1.13-.55 1.63-.94l2.39.96c.23.1.47 0 .6-.22l1.92-3.32a.5.5 0 0 0-.12-.64l-2.03-1.58zM12 15.5A3.5 3.5 0 1 1 12 8.5a3.5 3.5 0 0 1 0 7z"
+            />
+          </svg>
+        </button>
+        <button id="chrome-action" class="title-bar__action" type="button">Connect</button>
+      </div>
       <p id="shell-status" class="shell-status" role="status"></p>
-      <section id="setup" class="setup" aria-label="FrameNest origin">
-        <label for="origin">FrameNest origin</label>
-        <input id="origin" type="text" spellcheck="false" autocomplete="off" />
-        <div class="setup-actions">
-          <button id="save-origin" type="button">Connect</button>
-          <button id="reset" type="button">Reset</button>
-        </div>
-      </section>
     </header>
     <main class="sidebar-main">
       <iframe id="frame" title="FrameNest" hidden></iframe>
     </main>
+    <dialog id="settings-dialog" class="settings-dialog" aria-label="Settings">
+      <div class="settings-dialog__header">
+        <h2 class="settings-dialog__title">Settings</h2>
+        <button id="settings-close" class="settings-dialog__close" type="button" aria-label="Close settings">✕</button>
+      </div>
+      <div class="settings-dialog__body">
+        <label for="origin">FrameNest origin</label>
+        <input id="origin" type="text" spellcheck="false" autocomplete="off" />
+        <p class="settings-dialog__note">
+          Origin is the FrameNest tailnet URL. Enter it here, then use Connect in the title bar.
+        </p>
+      </div>
+    </dialog>
     <script src="../shared/messages.js"></script>
     <script src="sidebar.js"></script>
   </body>

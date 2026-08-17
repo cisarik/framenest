@@ -5884,7 +5884,7 @@ function renderCatalogCard(item) {
     if (companionWebHosted()) {
       const attachButton = document.createElement("button");
       attachButton.type = "button";
-      attachButton.className = "catalog-card__action catalog-card__action--overlay catalog-card__action--bottom-right catalog-card__action--attach";
+      attachButton.className = "catalog-card__action catalog-card__action--overlay catalog-card__action--top-left catalog-card__action--attach";
       attachButton.textContent = "📎";
       attachButton.title = "Attach to X composer";
       attachButton.setAttribute("aria-label", "Attach to X composer");
@@ -5902,17 +5902,16 @@ function renderCatalogCard(item) {
         });
       });
       actions.appendChild(attachButton);
-    } else {
-      const openOriginalLink = document.createElement("a");
-      openOriginalLink.className = "catalog-card__action catalog-card__action--overlay catalog-card__action--open-original catalog-card__action--bottom-right";
-      openOriginalLink.href = mediaContentUrl(item.media_id, supportedLocation.location_id);
-      openOriginalLink.target = "_blank";
-      openOriginalLink.rel = "noopener noreferrer";
-      openOriginalLink.setAttribute("aria-label", `Open original media ${displayTitle}`);
-      openOriginalLink.title = "Open original media";
-      openOriginalLink.appendChild(openOriginalIcon());
-      actions.appendChild(openOriginalLink);
     }
+    const openOriginalLink = document.createElement("a");
+    openOriginalLink.className = "catalog-card__action catalog-card__action--overlay catalog-card__action--open-original catalog-card__action--bottom-right";
+    openOriginalLink.href = mediaContentUrl(item.media_id, supportedLocation.location_id);
+    openOriginalLink.target = "_blank";
+    openOriginalLink.rel = "noopener noreferrer";
+    openOriginalLink.setAttribute("aria-label", `Open original media ${displayTitle}`);
+    openOriginalLink.title = "Open original media";
+    openOriginalLink.appendChild(openOriginalIcon());
+    actions.appendChild(openOriginalLink);
   }
   mediaFrame.appendChild(actions);
   const analysisStatus = document.createElement("p");

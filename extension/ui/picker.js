@@ -1,7 +1,5 @@
 (function () {
   const companion = globalThis.FrameNestCompanion;
-  const originInput = document.getElementById("origin");
-  const setupStatus = document.getElementById("setup-status");
   const pickerStatus = document.getElementById("picker-status");
   const search = document.getElementById("search");
   const kind = document.getElementById("kind");
@@ -11,11 +9,6 @@
   const previewPrev = document.getElementById("preview-prev");
   const previewNext = document.getElementById("preview-next");
   const attachSelected = document.getElementById("attach-selected");
-  const settingsDialog = document.getElementById("settings-dialog");
-  const settingsOpen = document.getElementById("settings-open");
-  const settingsClose = document.getElementById("settings-close");
-  const connectionValue = document.getElementById("settings-connection");
-  const originValue = document.getElementById("settings-origin-value");
   let items = [];
   let selectedIndex = 0;
   let connected = false;
@@ -23,6 +16,10 @@
 
   function setText(node, value) {
     node.textContent = value;
+  }
+
+  function disconnectedStatus() {
+    return "Connect FrameNest in the side panel";
   }
 
   function request(type, payload) {
@@ -101,77 +98,26 @@
     renderPreview();
   }
 
-  function activateSettingsTab(tabId) {
-    document.querySelectorAll(".settings-dialog__tab").forEach((tab) => {
-      const on = tab.id === tabId;
-      tab.classList.toggle("settings-dialog__tab--active", on);
-      tab.setAttribute("aria-selected", on ? "true" : "false");
-      const panelId = tab.getAttribute("aria-controls");
-      const panel = panelId ? document.getElementById(panelId) : null;
-      if (panel) {
-        panel.hidden = !on;
-      }
-    });
-  }
-
-  function openSettings() {
-    activateSettingsTab("settings-tab-origin");
-    if (settingsDialog.open) {
-      return;
-    }
-    if (typeof settingsDialog.showModal === "function") {
-      settingsDialog.showModal();
-      return;
-    }
-    settingsDialog.setAttribute("open", "");
-  }
-
-  function closeSettings() {
-    if (typeof settingsDialog.close === "function" && settingsDialog.open) {
-      settingsDialog.close();
-      return;
-    }
-    settingsDialog.removeAttribute("open");
-  }
-
-  function renderConnection(origin, isConnected) {
-    connected = Boolean(isConnected);
-    setText(connectionValue, connected ? "Connected" : "Disconnected");
-    setText(originValue, origin || "");
-  }
-
   function clearResults() {
     items = [];
     selectedIndex = 0;
     renderPreview();
   }
 
-  async function connect() {
-    const origin = originInput.value.trim();
-    const result = await request(companion.TYPES.CONFIGURE_ORIGIN, { origin });
-    setText(setupStatus, result.ok ? "Connected" : result.error || "Failed");
-    if (result.ok) {
-      renderConnection(origin, true);
-      closeSettings();
-      search.focus();
-      await refresh();
+  function applyOrigin(origin) {
+    connected = companion.acceptFrameNestOrigin(origin);
+    if (!connected) {
+      clearResults();
+      setText(pickerStatus, disconnectedStatus());
+      return false;
     }
-  }
-
-  async function reset() {
-    await request(companion.TYPES.RESET, {});
-    originInput.value = "";
-    setText(setupStatus, "Cleared");
-    clearResults();
-    setText(pickerStatus, "");
-    renderConnection("", false);
-    openSettings();
+    return true;
   }
 
   async function refresh() {
     if (!connected) {
       clearResults();
-      setText(pickerStatus, "Connect FrameNest in Settings");
+      setText(pickerStatus, disconnectedStatus());
       return;
     }
     const result = await request(companion.TYPES.PICKER_QUERY, {
@@ -214,19 +160,7 @@
     void attachItem(item);
   }
 
-  document.getElementById("save-origin").addEventListener("click", connect);
-  document.getElementById("reset").addEventListener("click", reset);
   document.getElementById("refresh").addEventListener("click", refresh);
-  settingsOpen.addEventListener("click", openSettings);
-  settingsClose.addEventListener("click", closeSettings);
-  settingsDialog.addEventListener("click", (event) => {
-    if (event.target === settingsDialog) {
-      closeSettings();
-    }
-  });
-  document.querySelectorAll(".settings-dialog__tab").forEach((tab) => {
-    tab.addEventListener("click", () => activateSettingsTab(tab.id));
-  });
   kind.addEventListener("change", refresh);
   search.addEventListener("input", refresh);
   search.addEventListener("keydown", (event) => {
@@ -244,13 +178,17 @@
   attachSelected.addEventListener("click", () => attachCurrent());
   chrome.storage.local.get("frameNestOrigin", (stored) => {
     const origin = stored.frameNestOrigin || "";
-    if (origin) {
-      originInput.value = origin;
-      renderConnection(origin, true);
+    if (applyOrigin(origin)) {
       void refresh();
+    }
+  });
+  chrome.storage.onChanged.addListener((changes, areaName) => {
+    if (areaName !== "local" || !changes.frameNestOrigin) {
       return;
     }
-    renderConnection("", false);
-    openSettings();
+    const origin = changes.frameNestOrigin.newValue || "";
+    if (applyOrigin(origin)) {
+      void refresh();
+    }
   });
 })();

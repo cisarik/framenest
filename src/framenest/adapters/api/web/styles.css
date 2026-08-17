@@ -2227,6 +2227,11 @@ h2 {
   bottom: 8px;
 }
 
+.catalog-card__action--top-left {
+  top: 8px;
+  left: 8px;
+}
+
 .catalog-card__action--open-original {
   border-color: var(--accent-border);
   background: var(--accent-soft);

@@ -237,3 +237,17 @@ test("shell accepts only the framed stored origin and UUID attach ids", () => {
   assert.match(sidebarSource, /TYPES\.ATTACH_BEGIN/);
   assert.doesNotMatch(sidebarSource, /payload\.url/);
 });
+
+test("handshake timeout copy does not claim framing failed when the iframe loaded", () => {
+  const bridge = loadSidebarBridge();
+  assert.equal(bridge.handshakeTimeoutCopy(false), bridge.framingFailureCopy());
+  assert.equal(bridge.handshakeTimeoutCopy(true), bridge.companionHostMissingCopy());
+  assert.match(bridge.framingFailureCopy(), /did not load in this panel/);
+  assert.match(bridge.companionHostMissingCopy(), /cannot host companion Attach yet/);
+  assert.doesNotMatch(bridge.framingFailureCopy(), /could not be framed/i);
+  assert.doesNotMatch(bridge.companionHostMissingCopy(), /could not be framed/i);
+  assert.doesNotMatch(bridge.handshakeTimeoutCopy(true), /could not be framed/i);
+  assert.doesNotMatch(sidebarSource, /could not be framed/);
+  assert.match(sidebarSource, /frameLoaded = true/);
+  assert.match(sidebarSource, /handshakeTimeoutCopy\(loaded\)/);
+});
