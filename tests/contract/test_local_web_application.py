@@ -141,7 +141,7 @@ def test_root_serves_framenest_application_document(client: TestClient) -> None:
     assert "FrameNest" in html
     assert parsed.main_count == 1
     assert parsed.stylesheet_hrefs == ["/assets/styles.css"]
-    assert parsed.script_srcs == ["/assets/app.js"]
+    assert parsed.script_srcs == ["/assets/companion_host.js", "/assets/app.js"]
 
 
 def test_root_document_references_only_local_application_assets(client: TestClient) -> None:
@@ -163,6 +163,7 @@ def test_root_document_references_only_local_application_assets(client: TestClie
     [
         ("/assets/styles.css", "text/css"),
         ("/assets/app.js", "text/javascript"),
+        ("/assets/companion_host.js", "text/javascript"),
     ],
 )
 def test_local_application_assets_are_served(
@@ -191,13 +192,33 @@ def test_health_contract_remains_unchanged_with_web_application(client: TestClie
     assert response.headers["content-type"].startswith("application/json")
 
 
-@pytest.mark.parametrize("path", ["/", "/assets/styles.css", "/assets/app.js", "/health"])
+@pytest.mark.parametrize(
+    "path",
+    ["/", "/assets/styles.css", "/assets/app.js", "/assets/companion_host.js", "/health"],
+)
 def test_application_responses_do_not_add_wildcard_cors(
     client: TestClient,
     path: str,
 ) -> None:
     response = client.get(path)
     assert response.headers.get("access-control-allow-origin") != "*"
+
+
+def test_companion_host_asset_omits_wildcard_cors_and_wildcard_postmessage(
+    client: TestClient,
+) -> None:
+    response = client.get("/assets/companion_host.js")
+    assert response.status_code == 200
+    body = response.text
+    assert "framenest.companion.web.v1" in body
+    assert "chrome-extension://omiihmnlkmieaafaphohakcgmbggppap" in body
+    assert '"*"' not in body
+    assert "'*'" not in body
+    assert "Access-Control-Allow-Origin" not in body
+    assert "access-control-allow-origin" not in body
+    html = client.get("/").text
+    assert "https://" not in html
+    assert "http://" not in html
 
 
 def test_browser_application_uses_same_origin_health_with_distinct_status_states(

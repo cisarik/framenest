@@ -9,10 +9,35 @@ const STORAGE_KEYS = Object.freeze({
   acknowledged: "adapterAcknowledged",
 });
 
-chrome.runtime.onInstalled.addListener(() => {
+function enableSidePanelOnActionClick() {
   if (chrome.sidePanel && chrome.sidePanel.setPanelBehavior) {
     chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => {});
   }
+}
+
+function isBindableComposerSender(sender) {
+  if (!sender || !sender.tab || typeof sender.tab.id !== "number") {
+    return false;
+  }
+  if (typeof sender.origin !== "string") {
+    return false;
+  }
+  let parsed;
+  try {
+    parsed = new URL(sender.origin);
+  } catch {
+    return false;
+  }
+  if (parsed.protocol !== "https:") {
+    return false;
+  }
+  const host = parsed.hostname.toLowerCase();
+  return host === "x.com" || host === "www.x.com" || host === "twitter.com" || host === "www.twitter.com";
+}
+
+enableSidePanelOnActionClick();
+chrome.runtime.onInstalled.addListener(() => {
+  enableSidePanelOnActionClick();
 });
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -20,7 +45,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (!parsed) {
     return false;
   }
-  if (sender && sender.tab && typeof sender.tab.id === "number") {
+  if (isBindableComposerSender(sender)) {
     boundTabId = sender.tab.id;
   }
   handle(parsed, sender)
@@ -75,6 +100,8 @@ async function handle(message) {
       return pickerQuery(message.payload || {});
     case companion.TYPES.ATTACH_BEGIN:
       return startAttach(message.payload || {});
+    case companion.TYPES.PREVIEW_FETCH:
+      return previewFetch(message.payload || {});
     case companion.TYPES.ACK:
       if (message.payload && message.payload.openPicker) {
         await openPicker();
@@ -261,6 +288,49 @@ async function configuredOrigin() {
     return null;
   }
   return origin;
+}
+
+const MAX_PREVIEW_BYTES = 2 * 1024 * 1024;
+
+async function previewFetch(payload) {
+  const origin = await configuredOrigin();
+  const path = companion.pathFor("preview", {
+    mediaId: payload.mediaId,
+    locationId: payload.locationId,
+  });
+  if (!origin || !path) {
+    return { ok: false, error: "invalid_preview" };
+  }
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), companion.FETCH_TIMEOUT_MS);
+  try {
+    const response = await fetch(origin + path, {
+      method: "GET",
+      headers: { "X-FrameNest-Request": "1" },
+      signal: controller.signal,
+    });
+    if (!response.ok) {
+      return { ok: false, error: "http_" + response.status };
+    }
+    const buffer = await response.arrayBuffer();
+    if (buffer.byteLength <= 0 || buffer.byteLength > MAX_PREVIEW_BYTES) {
+      return { ok: false, error: "too_large_or_invalid" };
+    }
+    const bytes = new Uint8Array(buffer);
+    let binary = "";
+    for (let i = 0; i < bytes.byteLength; i += 1) {
+      binary += String.fromCharCode(bytes[i]);
+    }
+    return {
+      ok: true,
+      mediaType: response.headers.get("content-type") || "image/jpeg",
+      base64: btoa(binary),
+    };
+  } catch {
+    return { ok: false, error: "network_failed" };
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 async function fetchJson(pathName, options) {

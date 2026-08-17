@@ -7,6 +7,7 @@
   const kind = document.getElementById("kind");
   const preview = document.getElementById("preview");
   const previewTitle = document.getElementById("preview-title");
+  const previewMedia = document.getElementById("preview-media");
   const previewPrev = document.getElementById("preview-prev");
   const previewNext = document.getElementById("preview-next");
   const attachSelected = document.getElementById("attach-selected");
@@ -18,6 +19,7 @@
   let items = [];
   let selectedIndex = 0;
   let connected = false;
+  let previewToken = 0;
 
   function setText(node, value) {
     node.textContent = value;
@@ -45,8 +47,16 @@
     return items[selectedIndex];
   }
 
+  function clearPreviewMedia() {
+    previewMedia.removeAttribute("src");
+    previewMedia.hidden = true;
+  }
+
   function renderPreview() {
     const item = selectedItem();
+    const token = previewToken + 1;
+    previewToken = token;
+    clearPreviewMedia();
     if (!item) {
       preview.hidden = true;
       setText(previewTitle, "");
@@ -61,6 +71,26 @@
     previewPrev.disabled = !many;
     previewNext.disabled = !many;
     attachSelected.disabled = false;
+    const locationId = item.location && item.location.location_id;
+    if (!companion.isUuid(item.media_id) || !companion.isUuid(locationId)) {
+      return;
+    }
+    void request(companion.TYPES.PREVIEW_FETCH, {
+      mediaId: item.media_id,
+      locationId: locationId,
+    }).then((result) => {
+      if (token !== previewToken) {
+        return;
+      }
+      if (!result.ok || typeof result.base64 !== "string" || !result.base64) {
+        return;
+      }
+      const mediaType = typeof result.mediaType === "string" && result.mediaType.indexOf("image/") === 0
+        ? result.mediaType
+        : "image/jpeg";
+      previewMedia.src = "data:" + mediaType + ";base64," + result.base64;
+      previewMedia.hidden = false;
+    });
   }
 
   function moveSelection(delta) {

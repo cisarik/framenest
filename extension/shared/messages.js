@@ -22,6 +22,7 @@
     RECOVER_INFLIGHT: "recover_inflight",
     PICKER_QUERY: "picker_query",
     ATTACH_BEGIN: "attach_begin",
+    PREVIEW_FETCH: "preview_fetch",
     CONFIGURE_ORIGIN: "configure_origin",
     RESET: "reset",
     IDENTITY: "identity",

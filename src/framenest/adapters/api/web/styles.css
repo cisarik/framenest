@@ -2241,6 +2241,20 @@ h2 {
   color: var(--accent-strong);
 }
 
+.catalog-card__action--attach {
+  border-color: var(--accent-border);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.catalog-card__action--attach:hover,
+.catalog-card__action--attach:focus-visible {
+  background: rgba(0, 255, 65, 0.2);
+  border-color: var(--accent);
+  box-shadow: 0 0 8px var(--accent-glow);
+  color: var(--accent-strong);
+}
+
 .catalog-card__action--download {
   border-color: var(--accent-border);
   background: var(--accent-soft);

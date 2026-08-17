@@ -882,7 +882,7 @@
     }
     const rect = button.getBoundingClientRect();
     const width = Math.min(320, Math.max(280, window.innerWidth - 16));
-    const height = Math.min(420, Math.max(240, window.innerHeight - 16));
+    const height = Math.min(500, Math.max(240, window.innerHeight - 16));
     const gap = 8;
     const enoughAbove = rect.top >= height + gap;
     let top = enoughAbove ? rect.top - height - gap : rect.bottom + gap;

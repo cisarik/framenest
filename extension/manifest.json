@@ -12,7 +12,6 @@
   },
   "action": {
     "default_title": "FrameNest companion",
-    "default_popup": "ui/picker.html",
     "default_icon": {
       "16": "icons/icon16.png",
       "48": "icons/icon48.png",
@@ -20,7 +19,7 @@
     }
   },
   "side_panel": {
-    "default_path": "ui/picker.html"
+    "default_path": "ui/sidebar.html"
   },
   "content_scripts": [
     {

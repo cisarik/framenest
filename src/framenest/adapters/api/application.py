@@ -279,6 +279,7 @@ class IdentityMeResponse(BaseModel):
 _ASSET_MEDIA_TYPES = {
     "styles.css": "text/css; charset=utf-8",
     "app.js": "text/javascript; charset=utf-8",
+    "companion_host.js": "text/javascript; charset=utf-8",
 }
 
 

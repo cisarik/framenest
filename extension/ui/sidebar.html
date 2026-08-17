@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>FrameNest</title>
+    <link rel="stylesheet" href="sidebar.css" />
+  </head>
+  <body>
+    <header class="sidebar-chrome">
+      <p id="shell-status" class="shell-status" role="status"></p>
+      <section id="setup" class="setup" aria-label="FrameNest origin">
+        <label for="origin">FrameNest origin</label>
+        <input id="origin" type="text" spellcheck="false" autocomplete="off" />
+        <div class="setup-actions">
+          <button id="save-origin" type="button">Connect</button>
+          <button id="reset" type="button">Reset</button>
+        </div>
+      </section>
+    </header>
+    <main class="sidebar-main">
+      <iframe id="frame" title="FrameNest" hidden></iframe>
+    </main>
+    <script src="../shared/messages.js"></script>
+    <script src="sidebar.js"></script>
+  </body>
+</html>

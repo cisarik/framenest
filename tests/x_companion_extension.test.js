@@ -250,8 +250,9 @@ test("Save popup searches tags, pins Save, and does not execute Analyze", () => 
   assert.match(saveFn[0], /Math\.min\(\s*360/);
   assert.match(saveFn[0], /Math\.min\(\s*520/);
   assert.doesNotMatch(saveFn[0], /Math\.min\(\s*380/);
-  assert.match(attachFn[0], /Math\.min\(\s*420/);
+  assert.match(attachFn[0], /Math\.min\(\s*500/);
   assert.doesNotMatch(attachFn[0], /Math\.min\(\s*520/);
+  assert.doesNotMatch(attachFn[0], /Math\.min\(\s*420/);
 });
 
 test("companion surfaces copy FrameNest gallery visual tokens", () => {
@@ -289,6 +290,7 @@ test("companion surfaces copy FrameNest gallery visual tokens", () => {
   assert.match(pickerHtml, /header-search__control/);
   assert.match(pickerHtml, /header-search__prompt/);
   assert.match(pickerHtml, /id="preview"/);
+  assert.match(pickerHtml, /id="preview-media"/);
   assert.match(pickerHtml, /id="preview-prev"/);
   assert.match(pickerHtml, /id="preview-next"/);
   assert.doesNotMatch(pickerJs, /innerHTML/);
@@ -812,4 +814,99 @@ test("failed Save overlay keeps the plus glyph", () => {
   assert.ok(paths.includes("M12 6.5v11M6.5 12h11"));
   assert.equal(paths.some((d) => d.includes("M8 8l8 8") || d.includes("M16 8l-8 8")), false);
   assert.ok(pathDataFrom(idle).includes("M12 6.5v11M6.5 12h11"));
+});
+
+test("toolbar action opens the side-panel shell instead of a picker popup", () => {
+  assert.equal("default_popup" in (manifest.action || {}), false);
+  assert.equal(manifest.side_panel.default_path, "ui/sidebar.html");
+  assert.equal("externally_connectable" in manifest, false);
+  assert.equal("content_security_policy" in manifest, false);
+  assert.match(workerSource, /enableSidePanelOnActionClick\(\);/);
+  assert.match(workerSource, /onInstalled[\s\S]*enableSidePanelOnActionClick/);
+  const sidebarHtml = fs.readFileSync(path.join(REPO, "extension/ui/sidebar.html"), "utf8");
+  const sidebarJs = fs.readFileSync(path.join(REPO, "extension/ui/sidebar.js"), "utf8");
+  assert.match(sidebarHtml, /id="frame"/);
+  assert.match(sidebarHtml, />Connect</);
+  assert.match(sidebarHtml, />Reset</);
+  assert.doesNotMatch(sidebarHtml, /ui\/picker\.html/);
+  assert.doesNotMatch(sidebarJs, /window\.open/);
+  assert.doesNotMatch(sidebarJs, /ui\/picker\.html/);
+  assert.doesNotMatch(sidebarJs, /postMessage\([^)]*,\s*["']\*["']/);
+  assert.match(sidebarJs, /acceptFrameNestOrigin/);
+  const warResources = manifest.web_accessible_resources[0].resources;
+  assert.equal(warResources.includes("ui/sidebar.html"), false);
+  assert.equal(warResources.includes("ui/sidebar.js"), false);
+  assert.equal(warResources.includes("ui/sidebar.css"), false);
+});
+
+test("preview fetch stays UUID-only and picker keeps title when preview is absent", () => {
+  assert.equal(companion.TYPES.PREVIEW_FETCH, "preview_fetch");
+  assert.equal(
+    companion.pathFor("preview", {
+      mediaId: "11111111-1111-4111-8111-111111111111",
+      locationId: "22222222-2222-4222-8222-222222222222",
+    }),
+    "/api/media/11111111-1111-4111-8111-111111111111/locations/22222222-2222-4222-8222-222222222222/gallery-preview"
+  );
+  assert.equal(
+    companion.pathFor("preview", { mediaId: "https://evil.example", locationId: "22222222-2222-4222-8222-222222222222" }),
+    null
+  );
+  assert.match(workerSource, /TYPES\.PREVIEW_FETCH/);
+  assert.match(workerSource, /pathFor\("preview"/);
+  assert.doesNotMatch(workerSource, /fetch\(payload\.url\)/);
+  const pickerHtml = fs.readFileSync(path.join(REPO, "extension/ui/picker.html"), "utf8");
+  const pickerJs = fs.readFileSync(path.join(REPO, "extension/ui/picker.js"), "utf8");
+  assert.match(pickerHtml, /id="preview-media"/);
+  assert.match(pickerJs, /TYPES\.PREVIEW_FETCH/);
+  assert.match(pickerJs, /setText\(previewTitle, item\.display_title \|\| item\.media_id\)/);
+  assert.match(pickerJs, /if \(!result\.ok \|\| typeof result\.base64 !== "string"/);
+  assert.doesNotMatch(pickerJs, /innerHTML/);
+  assert.doesNotMatch(pickerJs, /pbs\.twimg\.com/);
+});
+
+test("boundTabId binds only from X content-script origins", () => {
+  assert.match(workerSource, /function isBindableComposerSender/);
+  assert.doesNotMatch(
+    workerSource,
+    /if \(sender && sender\.tab && typeof sender\.tab\.id === "number"\) \{\s*boundTabId = sender\.tab\.id;/
+  );
+  const start = workerSource.indexOf("function isBindableComposerSender");
+  const bodyStart = workerSource.indexOf("{", start);
+  let depth = 0;
+  let end = bodyStart;
+  for (let index = bodyStart; index < workerSource.length; index += 1) {
+    if (workerSource[index] === "{") depth += 1;
+    if (workerSource[index] === "}") {
+      depth -= 1;
+      if (depth === 0) {
+        end = index + 1;
+        break;
+      }
+    }
+  }
+  const context = { URL };
+  vm.createContext(context);
+  vm.runInContext(workerSource.slice(start, end), context);
+  assert.equal(
+    context.isBindableComposerSender({ tab: { id: 12 }, origin: "https://x.com" }),
+    true
+  );
+  assert.equal(
+    context.isBindableComposerSender({ tab: { id: 12 }, origin: "https://twitter.com" }),
+    true
+  );
+  assert.equal(
+    context.isBindableComposerSender({
+      tab: { id: 12 },
+      origin: "chrome-extension://omiihmnlkmieaafaphohakcgmbggppap",
+    }),
+    false
+  );
+  assert.equal(
+    context.isBindableComposerSender({ tab: { id: 12 }, origin: "https://evil.example" }),
+    false
+  );
+  assert.equal(context.isBindableComposerSender({ tab: { id: 12 } }), false);
+  assert.equal(context.isBindableComposerSender({ origin: "https://x.com" }), false);
 });

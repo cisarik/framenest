@@ -5806,6 +5806,11 @@ function reconcileCatalogSelectedCard() {
   });
 }
 
+function companionWebHosted() {
+  const host = globalThis.FrameNestCompanionWeb;
+  return Boolean(host && typeof host.isHosted === "function" && host.isHosted());
+}
+
 function renderCatalogCard(item) {
   const card = document.createElement("article");
   card.className = "catalog-card";
@@ -5876,15 +5881,38 @@ function renderCatalogCard(item) {
     actions.appendChild(editButton);
   }
   if (supportedLocation) {
-    const openOriginalLink = document.createElement("a");
-    openOriginalLink.className = "catalog-card__action catalog-card__action--overlay catalog-card__action--open-original catalog-card__action--bottom-right";
-    openOriginalLink.href = mediaContentUrl(item.media_id, supportedLocation.location_id);
-    openOriginalLink.target = "_blank";
-    openOriginalLink.rel = "noopener noreferrer";
-    openOriginalLink.setAttribute("aria-label", `Open original media ${displayTitle}`);
-    openOriginalLink.title = "Open original media";
-    openOriginalLink.appendChild(openOriginalIcon());
-    actions.appendChild(openOriginalLink);
+    if (companionWebHosted()) {
+      const attachButton = document.createElement("button");
+      attachButton.type = "button";
+      attachButton.className = "catalog-card__action catalog-card__action--overlay catalog-card__action--bottom-right catalog-card__action--attach";
+      attachButton.textContent = "📎";
+      attachButton.title = "Attach to X composer";
+      attachButton.setAttribute("aria-label", "Attach to X composer");
+      attachButton.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        const host = globalThis.FrameNestCompanionWeb;
+        if (!host || typeof host.attach !== "function") {
+          return;
+        }
+        void host.attach(item.media_id, supportedLocation.location_id).then((result) => {
+          if (result && !result.ok && result.error === "composer_unbound") {
+            attachButton.title = "Composer is not bound";
+          }
+        });
+      });
+      actions.appendChild(attachButton);
+    } else {
+      const openOriginalLink = document.createElement("a");
+      openOriginalLink.className = "catalog-card__action catalog-card__action--overlay catalog-card__action--open-original catalog-card__action--bottom-right";
+      openOriginalLink.href = mediaContentUrl(item.media_id, supportedLocation.location_id);
+      openOriginalLink.target = "_blank";
+      openOriginalLink.rel = "noopener noreferrer";
+      openOriginalLink.setAttribute("aria-label", `Open original media ${displayTitle}`);
+      openOriginalLink.title = "Open original media";
+      openOriginalLink.appendChild(openOriginalIcon());
+      actions.appendChild(openOriginalLink);
+    }
   }
   mediaFrame.appendChild(actions);
   const analysisStatus = document.createElement("p");
@@ -11270,6 +11298,14 @@ loadCatalogTags();
 identityReady.then(() => {
   loadCatalog();
 });
+if (
+  globalThis.FrameNestCompanionWeb
+  && typeof globalThis.FrameNestCompanionWeb.onHostedChange === "function"
+) {
+  globalThis.FrameNestCompanionWeb.onHostedChange(() => {
+    void loadCatalog();
+  });
+}
 identityReady.then(() => {
   restoreYouTubeClaim();
 });

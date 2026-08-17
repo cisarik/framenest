@@ -577,6 +577,7 @@ function createFlowHarness({ confirmAccepted = true, reducedMotion = true } = {}
     extractFunction(APP_SOURCE, "renderCatalogCardTags"),
     extractFunction(APP_SOURCE, "applySavedAiMetadataToCatalogSurfaces"),
     extractFunction(APP_SOURCE, "handleAnalyzeCatalogCard"),
+    extractFunction(APP_SOURCE, "companionWebHosted"),
   ].join("\n");
   vm.createContext(context);
   vm.runInContext(source, context);
@@ -632,11 +633,12 @@ function sampleItem(overrides = {}) {
   };
 }
 
-function renderCatalogCardForCapabilities(capabilities, overrides = {}) {
+function renderCatalogCardForCapabilities(capabilities, overrides = {}, options = {}) {
   const harness = createFlowHarness();
   const { context } = harness;
   const detailsCalls = [];
   const editCalls = [];
+  const attachCalls = [];
   context.identityState.capabilities = new Set(capabilities);
   context.renderCatalogCardMediaSurface = () => new FakeElement("div");
   context.renderCatalogCardTags = () => new FakeElement("div");
@@ -647,12 +649,26 @@ function renderCatalogCardForCapabilities(capabilities, overrides = {}) {
   context.mediaContentUrl = (mediaId, locationId) =>
     `/api/media/${mediaId}/locations/${locationId}/content`;
   context.automaticAnalysisStatusMessage = () => "";
+  if (options.hosted) {
+    context.FrameNestCompanionWeb = {
+      isHosted() {
+        return true;
+      },
+      attach(mediaId, locationId) {
+        attachCalls.push({ mediaId, locationId });
+        return Promise.resolve({ ok: true });
+      },
+      onHostedChange() {},
+    };
+  }
+  vm.runInContext(extractFunction(APP_SOURCE, "companionWebHosted"), context);
   vm.runInContext(extractFunction(APP_SOURCE, "renderCatalogCard"), context);
   const item = sampleItem(overrides);
   return {
     card: vm.runInContext("renderCatalogCard(__item)", Object.assign(context, { __item: item })),
     detailsCalls,
     editCalls,
+    attachCalls,
     item,
   };
 }
@@ -774,6 +790,40 @@ test("Gallery original media action uses the content endpoint and compact placem
   assert.match(cardBody, /mediaContentUrl\(item\.media_id, supportedLocation\.location_id\)/);
   assert.ok(contentUrl.includes("/content`"));
   assert.match(STYLES_SOURCE, /\.catalog-card__action--open-original\s*\{/);
+  assert.match(STYLES_SOURCE, /\.catalog-card__action--attach\s*\{/);
+  assert.match(INDEX_SOURCE, /src="\/assets\/companion_host\.js"/);
+  assert.ok(INDEX_SOURCE.indexOf("/assets/companion_host.js") < INDEX_SOURCE.indexOf("/assets/app.js"));
+  assert.doesNotMatch(INDEX_SOURCE, /https:\/\//);
+  assert.doesNotMatch(cardBody, /addEventListener\("message"/);
+});
+
+test("companion-hosted Gallery replaces open-original with Attach and does not keep both", () => {
+  const ordinary = renderCatalogCardForCapabilities([
+    "gallery.read",
+    "media.original.read",
+    "media.download",
+  ]);
+  assert.ok(ordinary.card.querySelector(".catalog-card__action--open-original"));
+  assert.equal(ordinary.card.querySelector(".catalog-card__action--attach"), null);
+
+  const hosted = renderCatalogCardForCapabilities(
+    ["gallery.read", "media.original.read", "media.download"],
+    {},
+    { hosted: true },
+  );
+  const attach = hosted.card.querySelector(".catalog-card__action--attach");
+  assert.ok(attach);
+  assert.equal(attach.tagName, "BUTTON");
+  assert.equal(attach.type, "button");
+  assert.equal(attach.textContent, "📎");
+  assert.equal(attach.title, "Attach to X composer");
+  assert.equal(attach.getAttribute("aria-label"), "Attach to X composer");
+  assert.match(attach.className, /catalog-card__action--bottom-right/);
+  assert.equal(hosted.card.querySelector(".catalog-card__action--open-original"), null);
+  attach.click();
+  assert.equal(hosted.attachCalls.length, 1);
+  assert.equal(hosted.attachCalls[0].mediaId, hosted.item.media_id);
+  assert.equal(hosted.attachCalls[0].locationId, hosted.item.locations[0].location_id);
 });
 
 test("brain eligibility requires metadata need, both capabilities, supported location, and excludes movies", () => {
