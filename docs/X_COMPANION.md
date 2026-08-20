@@ -21,9 +21,12 @@ An authenticated FrameNest user can:
 - click into the reply composer to reveal a floating **+** on the right of
   "Post your reply" (not inserted into the X input row), then open an in-page
   FrameNest search popup above that button;
+- type `++` in that same reply composer (after start-of-field or whitespace,
+  not inside `C++`) to open the picker and consume those two characters;
 - type a search in that in-page picker (blank or cleared search lists no
-  catalog hit), see the selected meme as one JPEG preview, and attach it with
-  Enter or Attach onto the composer file input;
+  catalog hit and shows no preview chrome; on-screen arrows appear only after
+  two or more hits), see the selected meme as one JPEG preview, and attach it
+  with Enter or Attach onto the composer file input;
 - open the toolbar side panel to use the real FrameNest website at the stored
   Tailscale origin, and attach a Gallery item onto the bound X composer. In that
   hosted Gallery, open-original stays bottom-right and Attach sits top-left on
@@ -36,6 +39,8 @@ action-row control. Click opens the Save popup instead of silently posting
 `{ url }`. Text-only posts have no Save. Attach is shown when the
 composer is focused, not on mouseover, and is not the side panel. The in-page
 picker is compact quick attach with preview; it is not the full website.
+Empty search shows no preview chrome; arrows appear after two or more hits;
+typing `++` in the reply composer opens the picker and consumes the token.
 After connect, the in-page picker has no Settings sheet; an empty origin tells
 the user to connect FrameNest in the side panel. First-run and reconnect Connect
 live in side-panel Settings next to the origin field; the title-bar control

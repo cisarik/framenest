@@ -85,6 +85,12 @@ body {
   min-height: 1.2em;
 }
 
+#picker-status:empty {
+  display: none;
+  min-height: 0;
+  margin: 0;
+}
+
 .header-search {
   flex: 0 0 auto;
   min-width: 0;
@@ -203,6 +209,11 @@ body {
   background: var(--surface);
 }
 
+.picker-preview[hidden],
+#preview[hidden] {
+  display: none;
+}
+
 .picker-preview:focus-visible {
   outline: 2px solid var(--focus);
   outline-offset: 2px;
@@ -236,6 +247,10 @@ body {
   justify-content: flex-end;
   gap: 8px;
   margin: 0 0 6px;
+}
+
+.catalog-pagination__nav[hidden] {
+  display: none;
 }
 
 #attach-selected {

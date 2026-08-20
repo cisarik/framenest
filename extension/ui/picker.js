@@ -8,11 +8,13 @@
   const previewPrev = document.getElementById("preview-prev");
   const previewNext = document.getElementById("preview-next");
   const attachSelected = document.getElementById("attach-selected");
+  const previewNav = document.getElementById("preview-nav");
   let items = [];
   let selectedIndex = 0;
   let connected = false;
   let previewToken = 0;
   let queryToken = 0;
+  let lastLayoutCompact = null;
 
   function setText(node, value) {
     node.textContent = value;
@@ -20,10 +22,6 @@
 
   function disconnectedStatus() {
     return "Connect FrameNest in the side panel";
-  }
-
-  function blankSearchStatus() {
-    return "Type to search memes";
   }
 
   function trimmedQuery() {
@@ -57,6 +55,15 @@
     previewMedia.hidden = true;
   }
 
+  function syncPickerLayout() {
+    const compact = Boolean(preview.hidden);
+    if (lastLayoutCompact === compact) {
+      return;
+    }
+    lastLayoutCompact = compact;
+    void request(companion.TYPES.PICKER_LAYOUT, { compact: compact });
+  }
+
   function renderPreview() {
     const item = selectedItem();
     const token = previewToken + 1;
@@ -64,18 +71,22 @@
     clearPreviewMedia();
     if (!item) {
       preview.hidden = true;
+      previewNav.hidden = true;
       setText(previewTitle, "");
       previewPrev.disabled = true;
       previewNext.disabled = true;
       attachSelected.disabled = true;
+      syncPickerLayout();
       return;
     }
     preview.hidden = false;
     setText(previewTitle, item.display_title || item.media_id);
     const many = items.length > 1;
+    previewNav.hidden = !many;
     previewPrev.disabled = !many;
     previewNext.disabled = !many;
     attachSelected.disabled = false;
+    syncPickerLayout();
     const locationId = item.location && item.location.location_id;
     if (!companion.isUuid(item.media_id) || !companion.isUuid(locationId)) {
       return;
@@ -133,7 +144,7 @@
     if (!q) {
       queryToken += 1;
       clearResults();
-      setText(pickerStatus, blankSearchStatus());
+      setText(pickerStatus, "");
       return;
     }
     const token = queryToken + 1;
@@ -187,6 +198,20 @@
     void request(companion.TYPES.DISMISS_PICKER, {});
   }
 
+  function cycleHitsFromKey(event) {
+    if (event.key === "ArrowLeft" && items.length > 1) {
+      event.preventDefault();
+      moveSelection(-1);
+      return true;
+    }
+    if (event.key === "ArrowRight" && items.length > 1) {
+      event.preventDefault();
+      moveSelection(1);
+      return true;
+    }
+    return false;
+  }
+
   document.getElementById("refresh").addEventListener("click", refresh);
   search.addEventListener("input", refresh);
   search.addEventListener("keydown", (event) => {
@@ -194,21 +219,18 @@
       attachCurrent(event);
       return;
     }
-    if (event.key === "ArrowLeft" && items.length > 1) {
-      event.preventDefault();
-      moveSelection(-1);
-      return;
-    }
-    if (event.key === "ArrowRight" && items.length > 1) {
-      event.preventDefault();
-      moveSelection(1);
-    }
+    cycleHitsFromKey(event);
   });
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape") {
       event.preventDefault();
       dismissPicker();
+      return;
     }
+    if (event.target === search) {
+      return;
+    }
+    cycleHitsFromKey(event);
   });
   preview.addEventListener("keydown", (event) => {
     if (event.key === "Enter") {

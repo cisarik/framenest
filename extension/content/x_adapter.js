@@ -9,6 +9,7 @@
   const inflightByClaim = new Map();
   const attachByComposer = new WeakMap();
   const attachEditable = new WeakMap();
+  const plusPlusBound = new WeakSet();
   let stale = false;
   let boundComposer = null;
   let attachPopup = null;
@@ -645,6 +646,94 @@
     return composerRoot ? first(composerRoot, selectors) : null;
   }
 
+  function plusPlusTokenAtCaret(textBeforeCaret) {
+    if (typeof textBeforeCaret !== "string" || textBeforeCaret.length < 2) {
+      return false;
+    }
+    if (textBeforeCaret.slice(textBeforeCaret.length - 2) !== "++") {
+      return false;
+    }
+    if (textBeforeCaret.length === 2) {
+      return true;
+    }
+    return /\s/.test(textBeforeCaret.charAt(textBeforeCaret.length - 3));
+  }
+
+  function consumePlusPlusFromValue(value, caret) {
+    if (typeof value !== "string" || typeof caret !== "number" || caret < 2 || caret > value.length) {
+      return null;
+    }
+    if (!plusPlusTokenAtCaret(value.slice(0, caret))) {
+      return null;
+    }
+    return {
+      value: value.slice(0, caret - 2) + value.slice(caret),
+      caret: caret - 2,
+    };
+  }
+
+  function composerTextBeforeCaret(editable) {
+    if (!editable) {
+      return "";
+    }
+    if (typeof editable.value === "string" && typeof editable.selectionStart === "number") {
+      return editable.value.slice(0, editable.selectionStart);
+    }
+    const doc = editable.ownerDocument || document;
+    const view = doc.defaultView || window;
+    const selection = view.getSelection ? view.getSelection() : null;
+    if (!selection || selection.rangeCount === 0) {
+      return editable.textContent || "";
+    }
+    try {
+      const range = selection.getRangeAt(0);
+      const root = range.endContainer;
+      if (root !== editable && !(editable.contains && editable.contains(root))) {
+        return editable.textContent || "";
+      }
+      const pre = range.cloneRange();
+      pre.selectNodeContents(editable);
+      pre.setEnd(range.endContainer, range.endOffset);
+      return pre.toString();
+    } catch {
+      return editable.textContent || "";
+    }
+  }
+
+  function deleteBeforeCaret(editable, count) {
+    if (!editable || count <= 0) {
+      return false;
+    }
+    if (typeof editable.value === "string" && typeof editable.selectionStart === "number") {
+      const caret = editable.selectionStart;
+      if (caret < count) {
+        return false;
+      }
+      editable.value = editable.value.slice(0, caret - count) + editable.value.slice(caret);
+      const next = caret - count;
+      editable.selectionStart = next;
+      editable.selectionEnd = next;
+      return true;
+    }
+    const doc = editable.ownerDocument || document;
+    const view = doc.defaultView || window;
+    const selection = view.getSelection ? view.getSelection() : null;
+    if (!selection || typeof selection.modify !== "function") {
+      return false;
+    }
+    if (selection.rangeCount && !selection.isCollapsed && typeof selection.collapseToEnd === "function") {
+      selection.collapseToEnd();
+    }
+    for (let i = 0; i < count; i += 1) {
+      selection.modify("extend", "backward", "character");
+    }
+    if (typeof selection.deleteFromDocument === "function") {
+      selection.deleteFromDocument();
+      return true;
+    }
+    return false;
+  }
+
   function fileInputStillLive(fileInput) {
     return Boolean(fileInput && document.contains(fileInput));
   }
@@ -965,7 +1054,9 @@
     }
     const rect = button.getBoundingClientRect();
     const width = Math.min(320, Math.max(280, window.innerWidth - 16));
-    const height = Math.min(360, Math.max(280, window.innerHeight - 16));
+    const height = attachPopup.compact
+      ? Math.min(128, Math.max(96, window.innerHeight - 16))
+      : Math.min(360, Math.max(280, window.innerHeight - 16));
     const gap = 8;
     const enoughAbove = rect.top >= height + gap;
     let top = enoughAbove ? rect.top - height - gap : rect.bottom + gap;
@@ -995,11 +1086,26 @@
     host.style.border = "0";
   }
 
-  function openAttachPopup(button, composerChrome) {
+  function applyPickerLayout(payload) {
+    if (!attachPopupIsOpen()) {
+      return;
+    }
+    if (!payload || (payload.compact !== true && payload.compact !== false)) {
+      return;
+    }
+    attachPopup.compact = payload.compact === true;
+    positionAttachPopup();
+  }
+
+  function openAttachPopup(button, composerChrome, options) {
     if (stale || !button) {
       return;
     }
+    const keepOpen = Boolean(options && options.keepOpen);
     if (attachPopupIsOpen() && attachPopup.button === button) {
+      if (keepOpen) {
+        return;
+      }
       closeAttachPopup();
       return;
     }
@@ -1062,6 +1168,8 @@
       host: host,
       button: button,
       chrome: composerChrome,
+      iframe: iframe,
+      compact: true,
       reposition: reposition,
       onKey: onKey,
       onMouseDown: onMouseDown,
@@ -1071,6 +1179,77 @@
     document.addEventListener("keydown", onKey, true);
     document.addEventListener("mousedown", onMouseDown, true);
     positionAttachPopup();
+  }
+
+  let plusPlusOpenGuard = false;
+
+  function openAttachPickerFromKeyboard(button, composerRoot, fileInput, composerChrome) {
+    if (stale || !button) {
+      return;
+    }
+    if (plusPlusOpenGuard) {
+      return;
+    }
+    plusPlusOpenGuard = true;
+    window.setTimeout(() => {
+      plusPlusOpenGuard = false;
+    }, 0);
+    boundComposer = { root: composerRoot, fileInput };
+    void request(companion.TYPES.ACK, { composerBound: true }).then(() => {
+      openAttachPopup(button, composerChrome, { keepOpen: true });
+    });
+  }
+
+  function handleComposerPlusPlusInsert(event, editable, button, composerRoot, fileInput, composerChrome) {
+    if (!event || event.isComposing) {
+      return;
+    }
+    const inputType = event.inputType || "insertText";
+    if (inputType !== "insertText" && inputType !== "insertFromPaste" && inputType !== "insertFromDrop") {
+      return;
+    }
+    const data = event.data;
+    if (data !== "+" && data !== "++") {
+      return;
+    }
+    const before = composerTextBeforeCaret(editable);
+    if (!plusPlusTokenAtCaret(before + data)) {
+      return;
+    }
+    if (typeof event.preventDefault === "function") {
+      event.preventDefault();
+    }
+    if (data === "+") {
+      deleteBeforeCaret(editable, 1);
+    }
+    openAttachPickerFromKeyboard(button, composerRoot, fileInput, composerChrome);
+  }
+
+  function handleComposerPlusPlusFallback(event, editable, button, composerRoot, fileInput, composerChrome) {
+    if (event && event.isComposing) {
+      return;
+    }
+    const before = composerTextBeforeCaret(editable);
+    if (!plusPlusTokenAtCaret(before)) {
+      return;
+    }
+    deleteBeforeCaret(editable, 2);
+    openAttachPickerFromKeyboard(button, composerRoot, fileInput, composerChrome);
+  }
+
+  function bindComposerPlusPlus(editable, button, composerRoot, fileInput, composerChrome) {
+    if (!editable || plusPlusBound.has(editable)) {
+      return;
+    }
+    plusPlusBound.add(editable);
+    editable.addEventListener("beforeinput", (event) => {
+      handleComposerPlusPlusInsert(event, editable, button, composerRoot, fileInput, composerChrome);
+    });
+    const onFallback = (event) => {
+      handleComposerPlusPlusFallback(event, editable, button, composerRoot, fileInput, composerChrome);
+    };
+    editable.addEventListener("input", onFallback);
+    editable.addEventListener("compositionend", onFallback);
   }
 
   function createAttachControl(composerRoot, fileInput, composerChrome) {
@@ -1105,6 +1284,13 @@
         if (mounted.hasAttribute("data-framenest-attach-visible")) {
           positionAttachControl(mounted);
         }
+        const liveEditable = findComposerEditable(composerRoot, composerChrome);
+        const liveFile =
+          first(composerChrome, contract.composerFileInputs) ||
+          first(composerRoot, contract.composerFileInputs);
+        if (liveEditable) {
+          bindComposerPlusPlus(liveEditable, mounted, composerRoot, liveFile, composerChrome);
+        }
         return;
       }
     }
@@ -1126,6 +1312,7 @@
       attachByComposer.set(composerRoot, existing);
       attachByComposer.set(editable, existing);
       injected.add(composerRoot);
+      bindComposerPlusPlus(editable, existing, composerRoot, fileInput, composerChrome);
       if (existing.hasAttribute("data-framenest-attach-visible")) {
         positionAttachControl(existing);
       }
@@ -1139,6 +1326,7 @@
     ensureAttachPositionListeners();
     ensureComposerFocusCapture();
     bindComposerAttachVisibility(editable, button);
+    bindComposerPlusPlus(editable, button, composerRoot, fileInput, composerChrome);
     positionAttachControl(button);
     syncAttachVisibility(editable, button);
     injected.add(composerRoot);
@@ -1153,6 +1341,8 @@
     globalThis.FrameNestXAdapterTestHooks.bindComposerIfLive = bindComposerIfLive;
     globalThis.FrameNestXAdapterTestHooks.resolveLiveComposerFileInput = resolveLiveComposerFileInput;
     globalThis.FrameNestXAdapterTestHooks.completeAttachTransfer = completeAttachTransfer;
+    globalThis.FrameNestXAdapterTestHooks.plusPlusTokenAtCaret = plusPlusTokenAtCaret;
+    globalThis.FrameNestXAdapterTestHooks.consumePlusPlusFromValue = consumePlusPlusFromValue;
     return;
   }
 
@@ -1195,6 +1385,11 @@
     }
     if (parsed.type === companion.TYPES.DISMISS_PICKER) {
       closeAttachPopup();
+      sendResponse({ ok: true });
+      return false;
+    }
+    if (parsed.type === companion.TYPES.PICKER_LAYOUT) {
+      applyPickerLayout(parsed.payload || {});
       sendResponse({ ok: true });
       return false;
     }

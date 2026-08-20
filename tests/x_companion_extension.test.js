@@ -21,9 +21,11 @@ const manifest = JSON.parse(
 
 test("unknown protocol versions and types are dropped", () => {
   assert.equal(companion.TYPES.DISMISS_PICKER, "dismiss_picker");
+  assert.equal(companion.TYPES.PICKER_LAYOUT, "picker_layout");
   assert.equal(companion.dropUnknown({ v: "other", type: companion.TYPES.SAVE_POST }), null);
   assert.equal(companion.dropUnknown({ v: companion.PROTOCOL, type: "proxy_fetch" }), null);
   assert.equal(companion.dropUnknown({ v: companion.PROTOCOL, type: "dismiss_popup" }), null);
+  assert.equal(companion.dropUnknown({ v: companion.PROTOCOL, type: "picker_resize" }), null);
   assert.equal(companion.dropUnknown({ url: "https://evil.example" }), null);
   assert.ok(
     companion.dropUnknown({
@@ -36,6 +38,13 @@ test("unknown protocol versions and types are dropped", () => {
     companion.dropUnknown({
       v: companion.PROTOCOL,
       type: companion.TYPES.DISMISS_PICKER,
+    })
+  );
+  assert.ok(
+    companion.dropUnknown({
+      v: companion.PROTOCOL,
+      type: companion.TYPES.PICKER_LAYOUT,
+      payload: { compact: true },
     })
   );
 });
@@ -258,6 +267,9 @@ test("Save popup searches tags, pins Save, and does not execute Analyze", () => 
   assert.match(saveFn[0], /Math\.min\(\s*360/);
   assert.match(saveFn[0], /Math\.min\(\s*520/);
   assert.doesNotMatch(saveFn[0], /Math\.min\(\s*380/);
+  assert.match(attachFn[0], /attachPopup\.compact/);
+  assert.match(attachFn[0], /Math\.min\(\s*128/);
+  assert.match(attachFn[0], /Math\.max\(\s*96/);
   assert.match(attachFn[0], /Math\.min\(\s*360/);
   assert.match(attachFn[0], /Math\.max\(\s*280/);
   assert.doesNotMatch(attachFn[0], /Math\.min\(\s*500/);
@@ -464,8 +476,11 @@ test("in-page picker is search-first, compact, and dismisses on Escape", () => {
   assert.match(pickerJs, /search\.focus\(\)/);
   assert.ok(trimAt >= 0 && emptyAt >= 0 && queryAt >= 0);
   assert.ok(trimAt < emptyAt && emptyAt < queryAt);
-  assert.match(pickerJs, /Type to search memes/);
-  assert.match(refreshFn, /blankSearchStatus\(\)/);
+  assert.doesNotMatch(pickerHtml, /Type to search memes/);
+  assert.doesNotMatch(pickerJs, /Type to search memes/);
+  assert.doesNotMatch(pickerCss, /Type to search memes/);
+  assert.doesNotMatch(pickerJs, /blankSearchStatus/);
+  assert.match(refreshFn, /setText\(pickerStatus, ""\)/);
   assert.match(refreshFn, /No eligible memes/);
   assert.doesNotMatch(refreshFn, /kind:/);
   assert.match(pickerJs, /search\.addEventListener\("keydown"[\s\S]*?Enter[\s\S]*?attachCurrent/);
@@ -480,6 +495,92 @@ test("in-page picker is search-first, compact, and dismisses on Escape", () => {
   assert.doesNotMatch(pickerJs, /targetOrigin:\s*["']\*["']/);
   assert.match(pickerCss, /html,\s*\nbody \{[\s\S]*?overflow:\s*hidden/);
   assert.match(pickerCss, /#picker \{[\s\S]*?overflow:\s*hidden/);
+  assert.match(saveHtml, />Save</);
+  assert.match(saveJs, /TYPES\.SAVE_POST/);
+  assert.match(workerSource, /waitForPortAttachOutcome/);
+  assert.match(workerSource, /payload\.attached === true/);
+  assert.match(adapterSource, /payload: \{ attached: true/);
+});
+
+test("picker hides empty chrome, cycles arrows after two hits, and ++ opens attach", () => {
+  const pickerHtml = fs.readFileSync(path.join(REPO, "extension/ui/picker.html"), "utf8");
+  const pickerJs = fs.readFileSync(path.join(REPO, "extension/ui/picker.js"), "utf8");
+  const pickerCss = fs.readFileSync(path.join(REPO, "extension/ui/picker.css"), "utf8");
+  const saveHtml = fs.readFileSync(path.join(REPO, "extension/ui/save.html"), "utf8");
+  const saveJs = fs.readFileSync(path.join(REPO, "extension/ui/save.js"), "utf8");
+  assert.match(
+    pickerHtml,
+    /id="preview"[\s\S]*id="preview-nav"[\s\S]*id="preview-prev"[\s\S]*id="preview-next"[\s\S]*id="attach-selected"/
+  );
+  assert.doesNotMatch(pickerHtml, /id="kind"/);
+  assert.doesNotMatch(pickerHtml, /id="settings-dialog"/);
+  assert.doesNotMatch(pickerJs, /Type to search memes/);
+  assert.doesNotMatch(pickerJs, /blankSearchStatus/);
+
+  const flexBlock = pickerCss.match(/\.picker-preview \{[\s\S]*?\n\}/);
+  assert.ok(flexBlock);
+  assert.match(flexBlock[0], /display:\s*flex/);
+  const hiddenRule = pickerCss.match(/\.picker-preview\[hidden\],\s*\n#preview\[hidden\] \{[\s\S]*?\n\}/);
+  assert.ok(hiddenRule, "preview [hidden] must beat display:flex");
+  assert.match(hiddenRule[0], /display:\s*none/);
+  assert.ok(pickerCss.indexOf(flexBlock[0]) < pickerCss.indexOf(hiddenRule[0]));
+  assert.match(pickerCss, /\.catalog-pagination__nav\[hidden\] \{[\s\S]*?display:\s*none/);
+  assert.match(pickerCss, /#picker-status:empty/);
+
+  const renderFn = extractNamedFunction(pickerJs, "renderPreview");
+  const cycleFn = extractNamedFunction(pickerJs, "cycleHitsFromKey");
+  const refreshFn = extractNamedFunction(pickerJs, "refresh");
+  assert.match(renderFn, /previewNav\.hidden = !many/);
+  assert.match(renderFn, /items\.length > 1/);
+  assert.match(cycleFn, /event\.key === "ArrowLeft" && items\.length > 1/);
+  assert.match(cycleFn, /event\.key === "ArrowRight" && items\.length > 1/);
+  assert.match(cycleFn, /event\.preventDefault\(\)/);
+  assert.match(pickerJs, /search\.addEventListener\("keydown"/);
+  assert.match(pickerJs, /document\.addEventListener\("keydown"/);
+  assert.match(pickerJs, /if \(event\.target === search\)/);
+  assert.match(refreshFn, /if \(!q\)/);
+  const emptyAt = refreshFn.indexOf("if (!q)");
+  const queryAt = refreshFn.indexOf("TYPES.PICKER_QUERY");
+  assert.ok(emptyAt >= 0 && queryAt > emptyAt);
+  assert.match(pickerJs, /TYPES\.PICKER_LAYOUT/);
+  assert.match(pickerJs, /compact: compact/);
+  assert.doesNotMatch(pickerJs, /postMessage\([^)]*,\s*["']\*["']/);
+  assert.doesNotMatch(adapterSource, /postMessage\([^)]*,\s*["']\*["']/);
+  assert.match(workerSource, /TYPES\.PICKER_LAYOUT/);
+  assert.match(workerSource, /forwardPickerLayout/);
+  assert.match(adapterSource, /TYPES\.PICKER_LAYOUT/);
+  assert.match(adapterSource, /applyPickerLayout/);
+
+  const openFn = extractNamedFunction(adapterSource, "openAttachPopup");
+  const keepAt = openFn.indexOf("keepOpen");
+  const toggleCloseAt = openFn.indexOf("closeAttachPopup()");
+  assert.ok(keepAt >= 0 && toggleCloseAt > keepAt);
+  assert.match(openFn, /if \(keepOpen\) \{\s*return;/);
+  assert.match(adapterSource, /openAttachPopup\(button, composerChrome, \{ keepOpen: true \}\)/);
+  assert.match(adapterSource, /editable\.addEventListener\("beforeinput"/);
+  assert.match(adapterSource, /editable\.addEventListener\("input"/);
+  assert.doesNotMatch(adapterSource, /window\.addEventListener\("beforeinput"/);
+  assert.doesNotMatch(adapterSource, /document\.addEventListener\("beforeinput"/);
+
+  const dom = createMiniDom();
+  const hooks = loadAdapterHooks(dom);
+  assert.equal(hooks.plusPlusTokenAtCaret("++"), true);
+  assert.equal(hooks.plusPlusTokenAtCaret(" ++"), true);
+  assert.equal(hooks.plusPlusTokenAtCaret("\n++"), true);
+  assert.equal(hooks.plusPlusTokenAtCaret("hello ++"), true);
+  assert.equal(hooks.plusPlusTokenAtCaret("C++"), false);
+  assert.equal(hooks.plusPlusTokenAtCaret("foo++"), false);
+  assert.equal(hooks.plusPlusTokenAtCaret("+"), false);
+  assert.equal(hooks.plusPlusTokenAtCaret(""), false);
+  const consumedEmpty = hooks.consumePlusPlusFromValue("++", 2);
+  assert.equal(consumedEmpty.value, "");
+  assert.equal(consumedEmpty.caret, 0);
+  const consumedHello = hooks.consumePlusPlusFromValue("hello ++", 8);
+  assert.equal(consumedHello.value, "hello ");
+  assert.equal(consumedHello.caret, 6);
+  assert.equal(hooks.consumePlusPlusFromValue("C++", 3), null);
+  assert.equal(hooks.consumePlusPlusFromValue("foo++", 5), null);
+
   assert.match(saveHtml, />Save</);
   assert.match(saveJs, /TYPES\.SAVE_POST/);
   assert.match(workerSource, /waitForPortAttachOutcome/);

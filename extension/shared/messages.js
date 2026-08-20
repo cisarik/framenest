@@ -30,6 +30,7 @@
     ERROR: "error",
     CANONICAL_TAGS: "canonical_tags",
     DISMISS_PICKER: "dismiss_picker",
+    PICKER_LAYOUT: "picker_layout",
   });
 
   function isProtocolMessage(value) {

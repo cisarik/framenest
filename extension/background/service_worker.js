@@ -109,6 +109,8 @@ async function handle(message) {
       return { ok: true };
     case companion.TYPES.DISMISS_PICKER:
       return dismissPicker();
+    case companion.TYPES.PICKER_LAYOUT:
+      return forwardPickerLayout(message.payload || {});
     default:
       return { ok: false, error: "unknown_type" };
   }
@@ -254,6 +256,23 @@ async function dismissPicker() {
     return { ok: true };
   } catch {
     return { ok: false, error: "dismiss_failed" };
+  }
+}
+
+async function forwardPickerLayout(payload) {
+  if (boundTabId == null) {
+    return { ok: false, error: "composer_unbound" };
+  }
+  const compact = payload.compact === true;
+  try {
+    await chrome.tabs.sendMessage(boundTabId, {
+      v: companion.PROTOCOL,
+      type: companion.TYPES.PICKER_LAYOUT,
+      payload: { compact: compact },
+    });
+    return { ok: true };
+  } catch {
+    return { ok: false, error: "layout_failed" };
   }
 }
 
