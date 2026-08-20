@@ -368,13 +368,89 @@ async function fetchJson(pathName, options) {
   }
 }
 
+function waitForPortAttachOutcome(port) {
+  let settled = false;
+  let timer = null;
+  let finish = function finishAttachOutcome() {};
+  const promise = new Promise((resolve) => {
+    finish = function finishAttachOutcome(result) {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      if (timer) {
+        clearTimeout(timer);
+        timer = null;
+      }
+      try {
+        port.onMessage.removeListener(onMessage);
+      } catch {
+        /* port may already be gone */
+      }
+      try {
+        port.disconnect();
+      } catch {
+        /* already disconnected */
+      }
+      resolve(result);
+    };
+  });
+  function onMessage(message) {
+    const parsed = companion.dropUnknown(message);
+    if (!parsed) {
+      return;
+    }
+    if (parsed.type === companion.TYPES.ACK && parsed.payload && parsed.payload.attached === true) {
+      finish({ ok: true });
+      return;
+    }
+    if (parsed.type === companion.TYPES.ERROR) {
+      finish({
+        ok: false,
+        error: (parsed.payload && parsed.payload.error) || "attach_failed",
+      });
+    }
+  }
+  port.onMessage.addListener(onMessage);
+  if (port.onDisconnect && typeof port.onDisconnect.addListener === "function") {
+    port.onDisconnect.addListener(() => {
+      finish({ ok: false, error: "attach_disconnected" });
+    });
+  }
+  return {
+    promise,
+    armAckTimeout() {
+      if (settled || timer) {
+        return;
+      }
+      timer = setTimeout(() => {
+        finish({ ok: false, error: "attach_timeout" });
+      }, 15000);
+    },
+    fail(error) {
+      finish({ ok: false, error: error || "attach_failed" });
+      return promise;
+    },
+  };
+}
+
 async function startAttach(payload) {
   if (boundTabId == null) {
     return { ok: false, error: "composer_unbound" };
   }
   const port = chrome.tabs.connect(boundTabId, { name: "framenest-attach" });
-  await transferAttach(port, payload);
-  return { ok: true };
+  const outcome = waitForPortAttachOutcome(port);
+  let transferResult;
+  try {
+    transferResult = await transferAttach(port, payload);
+  } catch {
+    return outcome.fail("attach_failed");
+  }
+  if (!transferResult || !transferResult.ok) {
+    return outcome.fail((transferResult && transferResult.error) || "attach_failed");
+  }
+  outcome.armAckTimeout();
+  return outcome.promise;
 }
 
 async function transferAttach(port, payload) {
@@ -389,7 +465,7 @@ async function transferAttach(port, payload) {
       type: companion.TYPES.ERROR,
       payload: { error: "invalid_attach" },
     });
-    return;
+    return { ok: false, error: "invalid_attach" };
   }
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), companion.FETCH_TIMEOUT_MS);
@@ -410,7 +486,7 @@ async function transferAttach(port, payload) {
         type: companion.TYPES.ERROR,
         payload: { error: "too_large_or_invalid" },
       });
-      return;
+      return { ok: false, error: "too_large_or_invalid" };
     }
     port.postMessage({
       v: companion.PROTOCOL,
@@ -436,7 +512,7 @@ async function transferAttach(port, payload) {
           type: companion.TYPES.ERROR,
           payload: { error: "too_large" },
         });
-        return;
+        return { ok: false, error: "too_large" };
       }
       let offset = 0;
       while (offset < value.byteLength) {
@@ -458,6 +534,18 @@ async function transferAttach(port, payload) {
       type: companion.TYPES.ATTACH_BEGIN,
       payload: { phase: "end" },
     });
+    return { ok: true };
+  } catch {
+    try {
+      port.postMessage({
+        v: companion.PROTOCOL,
+        type: companion.TYPES.ERROR,
+        payload: { error: "attach_failed" },
+      });
+    } catch {
+      /* worker may already be closing */
+    }
+    return { ok: false, error: "attach_failed" };
   } finally {
     clearTimeout(timer);
   }

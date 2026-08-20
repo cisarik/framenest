@@ -645,6 +645,88 @@
     return composerRoot ? first(composerRoot, selectors) : null;
   }
 
+  function fileInputStillLive(fileInput) {
+    return Boolean(fileInput && document.contains(fileInput));
+  }
+
+  function fileInputForComposer(composerRoot) {
+    if (!composerRoot) {
+      return null;
+    }
+    const composerChrome = findComposerChrome(composerRoot);
+    if (!composerChrome) {
+      return null;
+    }
+    const fileInput =
+      first(composerChrome, contract.composerFileInputs) ||
+      first(composerRoot, contract.composerFileInputs);
+    if (!fileInputStillLive(fileInput)) {
+      return null;
+    }
+    return fileInput;
+  }
+
+  function bindComposerIfLive(composerRoot) {
+    const fileInput = fileInputForComposer(composerRoot);
+    if (!fileInput) {
+      return null;
+    }
+    boundComposer = { root: composerRoot, fileInput };
+    return fileInput;
+  }
+
+  function focusedComposerRoot() {
+    const active = document.activeElement;
+    if (!active) {
+      return null;
+    }
+    if (
+      active.matches &&
+      (active.matches("[data-testid='tweetTextarea_0']") ||
+        active.matches("[aria-label='Post your reply']"))
+    ) {
+      return active;
+    }
+    if (active.closest) {
+      return (
+        active.closest("[data-testid='tweetTextarea_0']") ||
+        active.closest("[aria-label='Post your reply']")
+      );
+    }
+    return null;
+  }
+
+  function resolveLiveComposerFileInput() {
+    if (boundComposer && fileInputStillLive(boundComposer.fileInput)) {
+      return boundComposer.fileInput;
+    }
+    return bindComposerIfLive(focusedComposerRoot());
+  }
+
+  function completeAttachTransfer(port, filename, mediaType, chunks, total) {
+    const fileInput = resolveLiveComposerFileInput();
+    if (!fileInput) {
+      port.postMessage({
+        v: companion.PROTOCOL,
+        type: companion.TYPES.ERROR,
+        payload: { error: "composer_unbound" },
+      });
+      return { ok: false, error: "composer_unbound" };
+    }
+    const bytes = companion.concatChunks(chunks, total);
+    const file = new File([bytes], filename, { type: mediaType });
+    const transfer = new DataTransfer();
+    transfer.items.add(file);
+    fileInput.files = transfer.files;
+    fileInput.dispatchEvent(new Event("change", { bubbles: true }));
+    port.postMessage({
+      v: companion.PROTOCOL,
+      type: companion.TYPES.ACK,
+      payload: { attached: true, bytes: total },
+    });
+    return { ok: true, bytes: total };
+  }
+
   function mountedAttachNode(composerRoot) {
     const fromMap = composerRoot && attachByComposer.get(composerRoot);
     if (fromMap && document.contains(fromMap)) {
@@ -820,6 +902,7 @@
       return;
     }
     injectAttach(editable);
+    bindComposerIfLive(editable);
     const button = findAttachForEditable(editable);
     if (button) {
       showAttachControl(button);
@@ -1066,6 +1149,10 @@
     globalThis.FrameNestXAdapterTestHooks.findComposerTextRow = findComposerTextRow;
     globalThis.FrameNestXAdapterTestHooks.injectAttach = injectAttach;
     globalThis.FrameNestXAdapterTestHooks.saveIconSvg = saveIconSvg;
+    globalThis.FrameNestXAdapterTestHooks.onComposerFocusIn = onComposerFocusIn;
+    globalThis.FrameNestXAdapterTestHooks.bindComposerIfLive = bindComposerIfLive;
+    globalThis.FrameNestXAdapterTestHooks.resolveLiveComposerFileInput = resolveLiveComposerFileInput;
+    globalThis.FrameNestXAdapterTestHooks.completeAttachTransfer = completeAttachTransfer;
     return;
   }
 
@@ -1147,26 +1234,7 @@
         return;
       }
       if (parsed.payload && parsed.payload.phase === "end") {
-        const fileInput = boundComposer && boundComposer.fileInput;
-        if (!fileInput) {
-          port.postMessage({
-            v: companion.PROTOCOL,
-            type: companion.TYPES.ERROR,
-            payload: { error: "composer_unbound" },
-          });
-          return;
-        }
-        const bytes = companion.concatChunks(chunks, total);
-        const file = new File([bytes], filename, { type: mediaType });
-        const transfer = new DataTransfer();
-        transfer.items.add(file);
-        fileInput.files = transfer.files;
-        fileInput.dispatchEvent(new Event("change", { bubbles: true }));
-        port.postMessage({
-          v: companion.PROTOCOL,
-          type: companion.TYPES.ACK,
-          payload: { attached: true, bytes: total },
-        });
+        completeAttachTransfer(port, filename, mediaType, chunks, total);
       }
     });
   });

@@ -238,6 +238,15 @@ test("shell accepts only the framed stored origin and UUID attach ids", () => {
   assert.doesNotMatch(sidebarSource, /payload\.url/);
 });
 
+test("sidebar Attached follows ATTACH_BEGIN result.ok", () => {
+  const handle = sidebarSource.match(/async function handleAttachRequest\([\s\S]*?\n  \}/);
+  assert.ok(handle, "handleAttachRequest()");
+  assert.match(handle[0], /TYPES\.ATTACH_BEGIN/);
+  assert.match(handle[0], /const ok = Boolean\(result && result\.ok\)/);
+  assert.match(handle[0], /else if \(ok\) \{\s*setText\(shellStatus, "Attached"\);/);
+  assert.match(handle[0], /error === "composer_unbound"/);
+});
+
 test("handshake timeout copy does not claim framing failed when the iframe loaded", () => {
   const bridge = loadSidebarBridge();
   assert.equal(bridge.handshakeTimeoutCopy(false), bridge.framingFailureCopy());

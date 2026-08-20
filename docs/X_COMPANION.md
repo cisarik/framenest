@@ -26,7 +26,9 @@ An authenticated FrameNest user can:
 - open the toolbar side panel to use the real FrameNest website at the stored
   Tailscale origin, and attach a Gallery item onto the bound X composer. In that
   hosted Gallery, open-original stays bottom-right and Attach sits top-left on
-  the card image. Ordinary browser tabs keep open-original only.
+  the card image. Ordinary browser tabs keep open-original only. Gallery 📎
+  attaches after the reply composer is focused, and the shell reports Attached
+  only when that composer file input accepted the bytes.
 
 Save is a hover/focus overlay at the bottom-right of own media tiles, not an
 action-row control. Click opens the Save popup instead of silently posting

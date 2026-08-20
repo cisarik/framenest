@@ -444,6 +444,7 @@ function createMiniDom() {
       this.style = {};
       this.dataset = {};
       this.ownerDocument = null;
+      this.files = null;
     }
 
     get children() {
@@ -533,6 +534,10 @@ function createMiniDom() {
     addEventListener() {}
 
     removeEventListener() {}
+
+    dispatchEvent() {
+      return true;
+    }
   }
 
   function matchesSelector(el, selector) {
@@ -657,6 +662,29 @@ function loadAdapterHooks(dom) {
     FrameNestCompanion: companion,
     FrameNestXAdapterContractV1: contract,
     FrameNestXAdapterTestHooks: hooks,
+    File: class File {
+      constructor(bits, name, options) {
+        this.bits = bits;
+        this.name = name;
+        this.type = (options && options.type) || "";
+      }
+    },
+    DataTransfer: class DataTransfer {
+      constructor() {
+        this.files = [];
+        this.items = {
+          add: (file) => {
+            this.files = [file];
+          },
+        };
+      }
+    },
+    Event: class Event {
+      constructor(type, init) {
+        this.type = type;
+        this.bubbles = Boolean(init && init.bubbles);
+      }
+    },
   };
   sandbox.globalThis = sandbox;
   vm.runInNewContext(adapterSource, sandbox, { filename: "x_adapter.js" });
@@ -987,4 +1015,190 @@ test("boundTabId binds only from X content-script origins", () => {
   );
   assert.equal(context.isBindableComposerSender({ tab: { id: 12 } }), false);
   assert.equal(context.isBindableComposerSender({ origin: "https://x.com" }), false);
+});
+
+function extractNamedFunction(source, name) {
+  const start = source.indexOf("function " + name);
+  assert.ok(start >= 0, name);
+  const bodyStart = source.indexOf("{", start);
+  let depth = 0;
+  let end = bodyStart;
+  for (let index = bodyStart; index < source.length; index += 1) {
+    if (source[index] === "{") {
+      depth += 1;
+    }
+    if (source[index] === "}") {
+      depth -= 1;
+      if (depth === 0) {
+        end = index + 1;
+        break;
+      }
+    }
+  }
+  return source.slice(start, end);
+}
+
+function fakeAttachPort() {
+  const messageListeners = [];
+  return {
+    posted: [],
+    onMessage: {
+      addListener(fn) {
+        messageListeners.push(fn);
+      },
+      removeListener(fn) {
+        const index = messageListeners.indexOf(fn);
+        if (index >= 0) {
+          messageListeners.splice(index, 1);
+        }
+      },
+    },
+    onDisconnect: {
+      addListener() {},
+    },
+    postMessage(message) {
+      this.posted.push(message);
+    },
+    disconnect() {},
+    emit(message) {
+      messageListeners.slice().forEach((fn) => fn(message));
+    },
+  };
+}
+
+test("startAttach waits for composer ACK instead of returning ok after transfer", () => {
+  const startFn = extractNamedFunction(workerSource, "startAttach");
+  const waitFn = extractNamedFunction(workerSource, "waitForPortAttachOutcome");
+  assert.match(startFn, /waitForPortAttachOutcome/);
+  assert.match(startFn, /armAckTimeout/);
+  assert.doesNotMatch(startFn, /await transferAttach\(port, payload\);\s*return \{ ok: true \};/);
+  assert.doesNotMatch(startFn, /return \{ ok: true \}/);
+  const waitAt = startFn.indexOf("waitForPortAttachOutcome");
+  const transferAt = startFn.indexOf("await transferAttach");
+  assert.ok(waitAt >= 0 && transferAt >= 0 && waitAt < transferAt);
+  assert.match(waitFn, /payload\.attached === true/);
+  assert.match(waitFn, /TYPES\.ERROR/);
+  assert.match(waitFn, /attach_timeout/);
+  assert.match(waitFn, /attach_disconnected/);
+  assert.doesNotMatch(waitFn, /fallbackDownload/);
+  const transferFn = extractNamedFunction(workerSource, "transferAttach");
+  assert.match(transferFn, /return \{ ok: true \}/);
+  assert.match(extractNamedFunction(workerSource, "fallbackDownload"), /chrome\.downloads\.download/);
+});
+
+test("waitForPortAttachOutcome resolves ACK true and composer_unbound ERROR", async () => {
+  const context = { companion, setTimeout, clearTimeout };
+  vm.createContext(context);
+  vm.runInContext(extractNamedFunction(workerSource, "waitForPortAttachOutcome"), context);
+  const ackPort = fakeAttachPort();
+  const ackOutcome = context.waitForPortAttachOutcome(ackPort);
+  ackPort.emit({
+    v: companion.PROTOCOL,
+    type: companion.TYPES.ACK,
+    payload: { attached: true, bytes: 4 },
+  });
+  const acked = await ackOutcome.promise;
+  assert.equal(acked.ok, true);
+
+  const errPort = fakeAttachPort();
+  const errOutcome = context.waitForPortAttachOutcome(errPort);
+  errPort.emit({
+    v: companion.PROTOCOL,
+    type: companion.TYPES.ERROR,
+    payload: { error: "composer_unbound" },
+  });
+  const unbound = await errOutcome.promise;
+  assert.equal(unbound.ok, false);
+  assert.equal(unbound.error, "composer_unbound");
+
+  const failPort = fakeAttachPort();
+  const failOutcome = context.waitForPortAttachOutcome(failPort);
+  const failed = await failOutcome.fail("too_large_or_invalid");
+  assert.equal(failed.ok, false);
+  assert.equal(failed.error, "too_large_or_invalid");
+});
+
+test("port attach resolves a focused Post your reply file input without the + click", () => {
+  const completeFn = extractNamedFunction(adapterSource, "completeAttachTransfer");
+  const focusFn = extractNamedFunction(adapterSource, "onComposerFocusIn");
+  const bindFn = extractNamedFunction(adapterSource, "bindComposerIfLive");
+  const clickWriter = adapterSource.match(
+    /button\.addEventListener\(type, \(event\) => \{[\s\S]*?boundComposer = \{ root: composerRoot, fileInput \};/
+  );
+  assert.ok(clickWriter, "in-page + still binds on click");
+  assert.match(focusFn, /bindComposerIfLive\(editable\)/);
+  assert.match(bindFn, /boundComposer = \{ root: composerRoot, fileInput \}/);
+  assert.match(completeFn, /resolveLiveComposerFileInput/);
+  assert.match(completeFn, /composer_unbound/);
+  assert.doesNotMatch(completeFn, /fallbackDownload/);
+  assert.doesNotMatch(adapterSource, /chrome\.downloads/);
+  assert.doesNotMatch(adapterSource, /\bfetch\s*\(/);
+
+  const dom = createMiniDom();
+  const editable = el(dom, "div", {
+    "data-testid": "tweetTextarea_0",
+    contenteditable: "true",
+    "aria-label": "Post your reply",
+  });
+  const toolbar = el(dom, "div", { "data-testid": "toolBar", role: "toolbar" });
+  const file = el(dom, "input", { type: "file", accept: "image/*,video/mp4" });
+  const chrome = el(dom, "div", {}, [editable, toolbar, file]);
+  dom.body.appendChild(chrome);
+  const hooks = loadAdapterHooks(dom);
+  hooks.injectAttach(editable);
+  assert.equal(hooks.resolveLiveComposerFileInput(), null);
+  dom.document.activeElement = editable;
+  assert.equal(hooks.resolveLiveComposerFileInput(), file);
+  const port = fakeAttachPort();
+  const result = hooks.completeAttachTransfer(port, "framenest-media.bin", "image/jpeg", [], 0);
+  assert.equal(result.ok, true);
+  assert.equal(file.files.length, 1);
+  assert.equal(file.files[0].name, "framenest-media.bin");
+  assert.equal(port.posted[0].type, companion.TYPES.ACK);
+  assert.equal(port.posted[0].payload.attached, true);
+});
+
+test("focus binds the reply composer and detached input falls back to the live focused file input", () => {
+  const dom = createMiniDom();
+  const editable = el(dom, "div", {
+    "data-testid": "tweetTextarea_0",
+    contenteditable: "true",
+    "aria-label": "Post your reply",
+  });
+  const toolbar = el(dom, "div", { "data-testid": "toolBar", role: "toolbar" });
+  const firstFile = el(dom, "input", { type: "file", accept: "image/*,video/mp4" });
+  const chrome = el(dom, "div", {}, [editable, toolbar, firstFile]);
+  dom.body.appendChild(chrome);
+  const hooks = loadAdapterHooks(dom);
+  hooks.onComposerFocusIn({ target: editable });
+  assert.equal(hooks.resolveLiveComposerFileInput(), firstFile);
+  chrome.removeChild(firstFile);
+  assert.equal(dom.document.contains(firstFile), false);
+  assert.equal(hooks.resolveLiveComposerFileInput(), null);
+  const secondFile = el(dom, "input", { type: "file", accept: "image/*,video/mp4" });
+  chrome.appendChild(secondFile);
+  dom.document.activeElement = editable;
+  assert.equal(hooks.resolveLiveComposerFileInput(), secondFile);
+});
+
+test("unbound live file input posts composer_unbound without a download fallback", () => {
+  const completeFn = extractNamedFunction(adapterSource, "completeAttachTransfer");
+  assert.doesNotMatch(completeFn, /fallbackDownload/);
+  assert.doesNotMatch(completeFn, /downloads/);
+  const pickerHtml = fs.readFileSync(path.join(REPO, "extension/ui/picker.html"), "utf8");
+  const saveJs = fs.readFileSync(path.join(REPO, "extension/ui/save.js"), "utf8");
+  assert.doesNotMatch(pickerHtml, /id="settings-dialog"/);
+  assert.doesNotMatch(pickerHtml, /<dialog/);
+  assert.match(saveJs, /TYPES\.SAVE_POST/);
+  assert.match(saveJs, /framenest-save-popup/);
+  assert.doesNotMatch(saveJs, /completeAttachTransfer/);
+  assert.doesNotMatch(saveJs, /waitForPortAttachOutcome/);
+  const dom = createMiniDom();
+  const hooks = loadAdapterHooks(dom);
+  const port = fakeAttachPort();
+  const result = hooks.completeAttachTransfer(port, "framenest-media.bin", "image/jpeg", [], 0);
+  assert.equal(result.ok, false);
+  assert.equal(result.error, "composer_unbound");
+  assert.equal(port.posted[0].type, companion.TYPES.ERROR);
+  assert.equal(port.posted[0].payload.error, "composer_unbound");
 });
