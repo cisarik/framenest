@@ -107,6 +107,8 @@ async function handle(message) {
         await openPicker();
       }
       return { ok: true };
+    case companion.TYPES.DISMISS_PICKER:
+      return dismissPicker();
     default:
       return { ok: false, error: "unknown_type" };
   }
@@ -238,6 +240,21 @@ async function pickerQuery(payload) {
     return { ok: false, error: "version_skew", disable: true };
   }
   return { ok: true, page: response.body };
+}
+
+async function dismissPicker() {
+  if (boundTabId == null) {
+    return { ok: false, error: "composer_unbound" };
+  }
+  try {
+    await chrome.tabs.sendMessage(boundTabId, {
+      v: companion.PROTOCOL,
+      type: companion.TYPES.DISMISS_PICKER,
+    });
+    return { ok: true };
+  } catch {
+    return { ok: false, error: "dismiss_failed" };
+  }
 }
 
 async function openPicker() {

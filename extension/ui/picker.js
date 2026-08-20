@@ -2,7 +2,6 @@
   const companion = globalThis.FrameNestCompanion;
   const pickerStatus = document.getElementById("picker-status");
   const search = document.getElementById("search");
-  const kind = document.getElementById("kind");
   const preview = document.getElementById("preview");
   const previewTitle = document.getElementById("preview-title");
   const previewMedia = document.getElementById("preview-media");
@@ -13,6 +12,7 @@
   let selectedIndex = 0;
   let connected = false;
   let previewToken = 0;
+  let queryToken = 0;
 
   function setText(node, value) {
     node.textContent = value;
@@ -20,6 +20,14 @@
 
   function disconnectedStatus() {
     return "Connect FrameNest in the side panel";
+  }
+
+  function blankSearchStatus() {
+    return "Type to search memes";
+  }
+
+  function trimmedQuery() {
+    return (search.value || "").trim();
   }
 
   function request(type, payload) {
@@ -116,14 +124,26 @@
 
   async function refresh() {
     if (!connected) {
+      queryToken += 1;
       clearResults();
       setText(pickerStatus, disconnectedStatus());
       return;
     }
+    const q = (search.value || "").trim();
+    if (!q) {
+      queryToken += 1;
+      clearResults();
+      setText(pickerStatus, blankSearchStatus());
+      return;
+    }
+    const token = queryToken + 1;
+    queryToken = token;
     const result = await request(companion.TYPES.PICKER_QUERY, {
-      q: search.value || undefined,
-      kind: kind.value || undefined,
+      q: q,
     });
+    if (token !== queryToken) {
+      return;
+    }
     items = [];
     selectedIndex = 0;
     if (!result.ok) {
@@ -153,6 +173,9 @@
     if (event) {
       event.preventDefault();
     }
+    if (!trimmedQuery()) {
+      return;
+    }
     const item = selectedItem();
     if (!item) {
       return;
@@ -160,12 +183,31 @@
     void attachItem(item);
   }
 
+  function dismissPicker() {
+    void request(companion.TYPES.DISMISS_PICKER, {});
+  }
+
   document.getElementById("refresh").addEventListener("click", refresh);
-  kind.addEventListener("change", refresh);
   search.addEventListener("input", refresh);
   search.addEventListener("keydown", (event) => {
     if (event.key === "Enter") {
       attachCurrent(event);
+      return;
+    }
+    if (event.key === "ArrowLeft" && items.length > 1) {
+      event.preventDefault();
+      moveSelection(-1);
+      return;
+    }
+    if (event.key === "ArrowRight" && items.length > 1) {
+      event.preventDefault();
+      moveSelection(1);
+    }
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      dismissPicker();
     }
   });
   preview.addEventListener("keydown", (event) => {
@@ -191,4 +233,5 @@
       void refresh();
     }
   });
+  search.focus();
 })();

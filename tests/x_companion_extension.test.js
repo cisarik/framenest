@@ -20,14 +20,22 @@ const manifest = JSON.parse(
 );
 
 test("unknown protocol versions and types are dropped", () => {
+  assert.equal(companion.TYPES.DISMISS_PICKER, "dismiss_picker");
   assert.equal(companion.dropUnknown({ v: "other", type: companion.TYPES.SAVE_POST }), null);
   assert.equal(companion.dropUnknown({ v: companion.PROTOCOL, type: "proxy_fetch" }), null);
+  assert.equal(companion.dropUnknown({ v: companion.PROTOCOL, type: "dismiss_popup" }), null);
   assert.equal(companion.dropUnknown({ url: "https://evil.example" }), null);
   assert.ok(
     companion.dropUnknown({
       v: companion.PROTOCOL,
       type: companion.TYPES.SAVE_POST,
       payload: { url: "https://x.com/a/status/1" },
+    })
+  );
+  assert.ok(
+    companion.dropUnknown({
+      v: companion.PROTOCOL,
+      type: companion.TYPES.DISMISS_PICKER,
     })
   );
 });
@@ -250,7 +258,9 @@ test("Save popup searches tags, pins Save, and does not execute Analyze", () => 
   assert.match(saveFn[0], /Math\.min\(\s*360/);
   assert.match(saveFn[0], /Math\.min\(\s*520/);
   assert.doesNotMatch(saveFn[0], /Math\.min\(\s*380/);
-  assert.match(attachFn[0], /Math\.min\(\s*500/);
+  assert.match(attachFn[0], /Math\.min\(\s*360/);
+  assert.match(attachFn[0], /Math\.max\(\s*280/);
+  assert.doesNotMatch(attachFn[0], /Math\.min\(\s*500/);
   assert.doesNotMatch(attachFn[0], /Math\.min\(\s*520/);
   assert.doesNotMatch(attachFn[0], /Math\.min\(\s*420/);
 });
@@ -428,6 +438,53 @@ test("picker is search-first without a Settings dialog", () => {
   assert.doesNotMatch(pickerJs, /innerHTML/);
   assert.doesNotMatch(pickerJs, /form\.submit/);
   assert.doesNotMatch(adapterSource, /tweetButton/);
+});
+
+test("in-page picker is search-first, compact, and dismisses on Escape", () => {
+  const pickerHtml = fs.readFileSync(path.join(REPO, "extension/ui/picker.html"), "utf8");
+  const pickerJs = fs.readFileSync(path.join(REPO, "extension/ui/picker.js"), "utf8");
+  const pickerCss = fs.readFileSync(path.join(REPO, "extension/ui/picker.css"), "utf8");
+  const saveHtml = fs.readFileSync(path.join(REPO, "extension/ui/save.html"), "utf8");
+  const saveJs = fs.readFileSync(path.join(REPO, "extension/ui/save.js"), "utf8");
+  const refreshFn = extractNamedFunction(pickerJs, "refresh");
+  const attachCurrentFn = extractNamedFunction(pickerJs, "attachCurrent");
+  const queryAt = refreshFn.indexOf("TYPES.PICKER_QUERY");
+  const trimAt = refreshFn.indexOf('(search.value || "").trim()');
+  const emptyAt = refreshFn.indexOf("if (!q)");
+  assert.doesNotMatch(pickerHtml, /id="kind"/);
+  assert.doesNotMatch(pickerHtml, /All kinds/);
+  assert.doesNotMatch(pickerHtml, /<select/);
+  assert.doesNotMatch(pickerCss, /#kind\b/);
+  assert.doesNotMatch(pickerCss, /\.picker-toolbar/);
+  assert.doesNotMatch(pickerJs, /getElementById\("kind"\)/);
+  assert.doesNotMatch(pickerJs, /kind:\s*kind\.value/);
+  assert.doesNotMatch(pickerHtml, /id="settings-dialog"/);
+  assert.doesNotMatch(pickerHtml, /<dialog/);
+  assert.match(pickerHtml, /\sid="search"[\s\S]*\sautofocus/);
+  assert.match(pickerJs, /search\.focus\(\)/);
+  assert.ok(trimAt >= 0 && emptyAt >= 0 && queryAt >= 0);
+  assert.ok(trimAt < emptyAt && emptyAt < queryAt);
+  assert.match(pickerJs, /Type to search memes/);
+  assert.match(refreshFn, /blankSearchStatus\(\)/);
+  assert.match(refreshFn, /No eligible memes/);
+  assert.doesNotMatch(refreshFn, /kind:/);
+  assert.match(pickerJs, /search\.addEventListener\("keydown"[\s\S]*?Enter[\s\S]*?attachCurrent/);
+  assert.match(attachCurrentFn, /if \(!trimmedQuery\(\)\)/);
+  assert.match(attachCurrentFn, /attachItem\(item\)/);
+  assert.match(pickerJs, /key === "Escape"/);
+  assert.match(pickerJs, /TYPES\.DISMISS_PICKER/);
+  assert.match(workerSource, /TYPES\.DISMISS_PICKER/);
+  assert.match(workerSource, /chrome\.tabs\.sendMessage\(boundTabId/);
+  assert.match(adapterSource, /TYPES\.DISMISS_PICKER[\s\S]{0,80}closeAttachPopup\(\)/);
+  assert.doesNotMatch(pickerJs, /postMessage\([^)]*,\s*["']\*["']/);
+  assert.doesNotMatch(pickerJs, /targetOrigin:\s*["']\*["']/);
+  assert.match(pickerCss, /html,\s*\nbody \{[\s\S]*?overflow:\s*hidden/);
+  assert.match(pickerCss, /#picker \{[\s\S]*?overflow:\s*hidden/);
+  assert.match(saveHtml, />Save</);
+  assert.match(saveJs, /TYPES\.SAVE_POST/);
+  assert.match(workerSource, /waitForPortAttachOutcome/);
+  assert.match(workerSource, /payload\.attached === true/);
+  assert.match(adapterSource, /payload: \{ attached: true/);
 });
 
 function createMiniDom() {

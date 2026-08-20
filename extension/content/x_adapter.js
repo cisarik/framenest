@@ -965,7 +965,7 @@
     }
     const rect = button.getBoundingClientRect();
     const width = Math.min(320, Math.max(280, window.innerWidth - 16));
-    const height = Math.min(500, Math.max(240, window.innerHeight - 16));
+    const height = Math.min(360, Math.max(280, window.innerHeight - 16));
     const gap = 8;
     const enoughAbove = rect.top >= height + gap;
     let top = enoughAbove ? rect.top - height - gap : rect.bottom + gap;
@@ -1191,6 +1191,11 @@
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     const parsed = companion.dropUnknown(message);
     if (!parsed) {
+      return false;
+    }
+    if (parsed.type === companion.TYPES.DISMISS_PICKER) {
+      closeAttachPopup();
+      sendResponse({ ok: true });
       return false;
     }
     if (parsed.type === companion.TYPES.ATTACH_BEGIN) {

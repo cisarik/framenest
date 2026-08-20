@@ -29,6 +29,7 @@
     ACK: "ack",
     ERROR: "error",
     CANONICAL_TAGS: "canonical_tags",
+    DISMISS_PICKER: "dismiss_picker",
   });
 
   function isProtocolMessage(value) {

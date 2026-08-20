@@ -21,8 +21,9 @@ An authenticated FrameNest user can:
 - click into the reply composer to reveal a floating **+** on the right of
   "Post your reply" (not inserted into the X input row), then open an in-page
   FrameNest search popup above that button;
-- search memes in that in-page picker, see the selected hit as one JPEG
-  preview at a time, and attach it onto the composer file input;
+- type a search in that in-page picker (blank or cleared search lists no
+  catalog hit), see the selected meme as one JPEG preview, and attach it with
+  Enter or Attach onto the composer file input;
 - open the toolbar side panel to use the real FrameNest website at the stored
   Tailscale origin, and attach a Gallery item onto the bound X composer. In that
   hosted Gallery, open-original stays bottom-right and Attach sits top-left on
