@@ -89,6 +89,7 @@ two flagged X request mutations from an exact allowlisted
 `chrome-extension://` origin and may list requester-visible memes through
 `GET /api/x/companion/media`; it is inert until that allowlist is set
 ([ADR-0061](docs/adr/0061-x-meme-browser-companion.md),
+[ADR-0064](docs/adr/0064-x-save-category-and-public-photo-acquisition.md),
 [docs/X_COMPANION.md](docs/X_COMPANION.md)). Catalog backup create/verify/restore, automated
 retention/restore-verification, mounted-filesystem off-device
 copy/restore-verification, and operator-workstation pull foundations are

@@ -25,7 +25,7 @@ multi-source downloader UI.
 The repository also contains the first persistence, registry, media catalog,
 local media-analysis, AI suggestion-review, and quarantine upload-transport
 foundations: a centralized SQLite database path setting, synchronous SQLAlchemy
-Core engine helpers, packaged Alembic resources through schema head `0028`,
+Core engine helpers, packaged Alembic resources through schema head `0030`,
 explicit database commands, local device and library registry tables, durable
 upload-session, canonical byte-identity, duplicate-disposition, and
 publication-provenance and upload-to-catalog linkage tables, persistent
@@ -41,12 +41,14 @@ server-provider AI assistance through NVIDIA NIM or Vercel AI Gateway. Ordinary
 users may submit private uploads for administrator review; administrators have
 bounded batch actions, safe catalog removal, and content publication.
 Requester-private YouTube and X meme acquisition with explicit administrator
-promotion are implemented (X is video/animated-GIF-like media only; static X
-photos remain deferred). A loadable unpacked Manifest V3 X companion can save
-eligible posts through the existing X request routes and attach catalog JPEG,
-PNG, GIF-style, or short-video memes to the X composer after an exact
-extension-origin allowlist is configured
+promotion are implemented (X native video, animated-GIF-like media delivered as
+video, and public JPEG/PNG photos; WebP is rejected without transcoding). A
+loadable unpacked Manifest V3 X companion can choose a canonical content
+category at Save, save eligible posts through the existing X request routes,
+and attach catalog JPEG, PNG, GIF-style, or short-video memes to the X composer
+after an exact extension-origin allowlist is configured
 ([ADR-0061](docs/adr/0061-x-meme-browser-companion.md),
+[ADR-0064](docs/adr/0064-x-save-category-and-public-photo-acquisition.md),
 [docs/X_COMPANION.md](docs/X_COMPANION.md)). The upload path receives untrusted bytes only into
 configured server quarantine, performs bounded server-side validation, and
 derives canonical identity from validated byte size and SHA-256 digest. The
@@ -654,6 +656,7 @@ Current foundation files:
 - [`docs/adr/0044-durable-automatic-post-catalog-analysis.md`](docs/adr/0044-durable-automatic-post-catalog-analysis.md) records the accepted automatic-analysis lifecycle.
 - [`docs/adr/0045-content-classification-and-movie-identification.md`](docs/adr/0045-content-classification-and-movie-identification.md) records the accepted content classification and movie-identification decision.
 - [`docs/adr/0046-youtube-manual-ingestion-and-provenance.md`](docs/adr/0046-youtube-manual-ingestion-and-provenance.md) records the accepted YouTube manual-ingestion provenance lifecycle.
+- [`docs/adr/0064-x-save-category-and-public-photo-acquisition.md`](docs/adr/0064-x-save-category-and-public-photo-acquisition.md) records X Save category, public JPEG/PNG photo acquisition, and honest companion Save outcomes.
 
 ## Non-Goals for the Current Stage
 

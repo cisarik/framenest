@@ -136,8 +136,13 @@ authorization. In Tailscale UDS mode, `POST /api/x/requests` and
 `chrome-extension://` origin after `FRAMENEST_COMPANION_EXTENSION_ORIGINS` is
 set. That allowlist defaults to empty, still requires `X-FrameNest-Request: 1`,
 adds no CORS headers, and does not change any other mutation route. See
-[ADR-0061](docs/adr/0061-x-meme-browser-companion.md) and
-[docs/X_COMPANION.md](docs/X_COMPANION.md).
+[ADR-0061](docs/adr/0061-x-meme-browser-companion.md),
+[ADR-0064](docs/adr/0064-x-save-category-and-public-photo-acquisition.md), and
+[docs/X_COMPANION.md](docs/X_COMPANION.md). Public JPEG/PNG X photographs are
+acquired through an isolated status bridge and a strict `pbs.twimg.com`
+transport; WebP is rejected; content scripts never fetch FrameNest or the CDN.
+The companion still adds no CORS headers and does not change any other mutation
+route.
 
 YouTube manual ingestion is a separate operator-only loopback boundary. It is
 disabled unless its private staging root and the existing upload/publication

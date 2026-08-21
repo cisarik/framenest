@@ -88,3 +88,4 @@ An accepted ADR may only be changed by a later ADR that supersedes it. Editing a
 | 0061 | X Meme Browser Companion Origin Trust | Accepted | 2026-08-16 | [0061-x-meme-browser-companion.md](0061-x-meme-browser-companion.md) |
 | 0062 | Per-User Media Alias Overlay | Accepted | 2026-08-17 | [0062-per-user-media-alias-overlay.md](0062-per-user-media-alias-overlay.md) |
 | 0063 | Companion Side-Panel Web Host | Accepted | 2026-08-17 | [0063-companion-side-panel-web-host.md](0063-companion-side-panel-web-host.md) |
+| 0064 | X Save Category and Public Photo Acquisition | Accepted | 2026-08-21 | [0064-x-save-category-and-public-photo-acquisition.md](0064-x-save-category-and-public-photo-acquisition.md) |

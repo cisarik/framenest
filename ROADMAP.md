@@ -113,7 +113,7 @@ The initial scaffold decision gate is complete. A Poetry package scaffold, centr
 
 Broader architecture decisions still open include category and language metadata schema, metadata/tag/search schema, cover and thumbnail cache implementation details, desktop sidecar IPC, initial authentication boundary, offline client cache semantics, multiprocess publication or catalog leases or fencing, media-tool distribution strategy, and Ubuntu NUC host-acceptance details beyond the initial systemd service foundation. Portable media sidecar v1 format, projection, validation, and compare exist through [ADR-0059](docs/adr/0059-portable-media-sidecar-roundtrip-foundation.md); import, rebuild, and synchronization remain open.
 
-Persistence strategy is accepted through [ADR-0010](docs/adr/0010-initial-persistence-foundation.md). The minimal SQLAlchemy/Alembic migration foundation is implemented. The current schema head is revision `0029`: catalog tables and the automatic built-in `Processed` collection are established through `0007`; `0008` through `0018` add durable upload, validation, byte identity, duplicate disposition, storage publication, catalog, automatic-analysis, still-image, classification, movie-identification, and analysis-history foundations; `0019` adds durable YouTube manual-acquisition provenance; `0020` adds durable security audit events; `0021` adds durable content publication with legacy backfill; `0022` adds the durable manual cover foundation per [ADR-0050](docs/adr/0050-durable-manual-cover-foundation.md); `0023` extends the accepted cover source contract to timeless still-image (JPEG/PNG) sources; `0024` adds catalog-removal receipts; `0025` adds upload-session ownership and duplicate mode for ordinary-user submission; `0026` adds YouTube requester ownership; `0027` adds YouTube creator taxonomy fields; `0028` adds requester-private X acquisition; and `0029` adds the caller-private per-user media alias overlay. Gallery and Details remain canonical.
+Persistence strategy is accepted through [ADR-0010](docs/adr/0010-initial-persistence-foundation.md). The minimal SQLAlchemy/Alembic migration foundation is implemented. The current schema head is revision `0030`: catalog tables and the automatic built-in `Processed` collection are established through `0007`; `0008` through `0018` add durable upload, validation, byte identity, duplicate disposition, storage publication, catalog, automatic-analysis, still-image, classification, movie-identification, and analysis-history foundations; `0019` adds durable YouTube manual-acquisition provenance; `0020` adds durable security audit events; `0021` adds durable content publication with legacy backfill; `0022` adds the durable manual cover foundation per [ADR-0050](docs/adr/0050-durable-manual-cover-foundation.md); `0023` extends the accepted cover source contract to timeless still-image (JPEG/PNG) sources; `0024` adds catalog-removal receipts; `0025` adds upload-session ownership and duplicate mode for ordinary-user submission; `0026` adds YouTube requester ownership; `0027` adds YouTube creator taxonomy fields; `0028` adds requester-private X acquisition; `0029` adds the caller-private per-user media alias overlay; and `0030` adds claim-level X Save category plus public JPEG/PNG photo acquisition. Gallery and Details remain canonical.
 
 Stable identity strategy is accepted through [ADR-0011](docs/adr/0011-stable-domain-identities.md). Pure domain identity primitives exist, and minimal logical media, physical location, device, and library entities exist. Storage volume and series entities remain future work beyond identity values.
 
@@ -277,8 +277,9 @@ Implemented within this phase:
 - ordinary-user private upload submission and administrator review boundary;
 - requester-private YouTube acquisition and administrator promotion;
 - YouTube/X creator taxonomy and immutable source-derived provenance;
-- requester-private X meme acquisition for native X video and animated-GIF-like
-  media delivered as video (static X photos deferred);
+- requester-private X meme acquisition for native X video, animated-GIF-like
+  media delivered as video, and public JPEG/PNG photos
+  ([ADR-0064](docs/adr/0064-x-save-category-and-public-photo-acquisition.md));
 - unpacked Manifest V3 X companion origin trust, requester-private meme picker,
   and synthetic composer attach ([ADR-0061](docs/adr/0061-x-meme-browser-companion.md)).
 
@@ -659,7 +660,7 @@ Native Android/iOS architecture remains separate and later.
 Deferred early non-goals include mobile-native completeness, public hosting,
 transcoding cluster, embedded libVLC, automatic global synchronization, every
 source adapter, multi-user SaaS, automatic self-updates, VeraCrypt UI, Kiosk,
-static X photo support, and screenshot-led UI/UX production polish.
+and screenshot-led UI/UX production polish.
 
 These items MUST NOT be pulled into early implementation without explicit
 Orchestrator and Cooperator approval.

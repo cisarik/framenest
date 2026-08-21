@@ -10,12 +10,18 @@ An authenticated FrameNest user can:
 
 - hover (or keyboard-focus) a green **+** at the bottom-right of each image,
   video, or GIF in an eligible X post and click **Save to FrameNest** to open
-  a Save popup (Title, Description, Search tags, Save). The header close
-  **X**, Escape, or a click outside cancel without a request. Save submits
-  the post permalink plus an optional caller-private alias (title,
-  description, and selected existing tag keys); it does not send a per-asset
-  media URL. Static X photographs currently fail closed as
-  `X_NO_SUPPORTED_MEDIA`. Ordinary users see only right-aligned **Save**.
+  a Save popup (Title, Description, Category, Search tags, Save). Category is
+  a compact fieldset with General, Meme, Movie, and YouTube; one choice applies
+  to every media item in the post. The header close **X**, Escape, or a click
+  outside cancel without a request and restore focus to that **+**. Save
+  submits the post permalink, the chosen `content_category`, and an optional
+  caller-private alias (title, description, and selected existing tag keys); it
+  does not send a per-asset media URL. Public JPEG and PNG photographs catalog;
+  WebP and other still formats fail closed without transcoding. Overlay copy
+  distinguishes saving, saved, already saved, partial, failed, catalog-removed,
+  and unknown transport; failed Save keeps the plus glyph and a danger border,
+  not an × and not generic success. Ordinary users see only right-aligned
+  **Save**.
   Users with `analysis.run` also see **Save and analyze by AI** to the left
   of Save; that control saves now and does not run analysis from this popup.
 - click into the reply composer to reveal a floating **+** on the right of
@@ -108,8 +114,9 @@ service worker has no X host permission.
 
 ## Residual gaps
 
-- Static X photograph Save is not implemented in the pinned yt-dlp extractor.
 - Live signed-in X DOM evidence is not part of repository acceptance.
+- Independent INFOSEC R3 of the private status-bridge seam and CDN transport
+  remains a later grant.
 - Side-panel iframe framing against live Tailscale Serve or Brave Shields is
   a named residual until a later operator probe.
 - A FrameNest origin that does not ship `companion_host.js` can still appear

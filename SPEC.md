@@ -4,7 +4,7 @@
 
 FrameNest is in foundation-stage pre-alpha development. This document defines normative requirements for future implementation.
 
-A Poetry package foundation exists with centralized configuration, a FastAPI application factory, a typed health endpoint, a loopback-first Uvicorn runtime dependency and startup command, a minimal SQLAlchemy Core/Alembic SQLite migration foundation through schema head `0029`, pure domain identity primitives, local device and library registries, a minimum persistent logical-media and physical-location catalog foundation, persistent display-title and canonical-tag core, catalog retrieval with display-title search and canonical-tag AND filtering, a manual browser `Current` metadata workspace for display-title and ordered canonical-tag assignment, an automatic built-in `Processed` workflow collection derived from durable tag saves, read-only library scan preview, explicit idempotent scan-candidate import, local media-analysis preview, provider-neutral NVIDIA/Vercel suggestion preview, VLM JPEG derivative transport, a server-operated AI configuration and diagnostics CLI, a packaged local web shell, an explicit editable browser AI suggestion review, a trusted-loopback quarantine upload path with bounded validation, exact-duplicate disposition, and optional atomic publication to an explicitly selected server-owned library, ordinary-user private upload submission with administrator review, requester-private YouTube and X meme acquisition with administrator promotion, durable manual covers, automated catalog backup/retention/restore-verification foundations, mounted off-device catalog copy and operator-workstation pull-based catalog snapshot recovery foundations, Tailscale remote-access and identity foundations, a portable media sidecar v1 projection with `framenest-sidecar` export/validate/compare, and a repository-native systemd service foundation targeted at Ubuntu Server 24.04 on the Intel NUC6i5SYH personal production server. There is no completed desktop shell, arbitrary user-created collections, a general collection manager, suggested filenames, complete Cover Studio, imported/AI/series covers, cover candidates, persistent AI Drafts, or multi-model draft comparison/promotion yet. A durable manual cover foundation is implemented (migration `0022` per [ADR-0050](docs/adr/0050-durable-manual-cover-foundation.md)): one accepted manually selected cover per logical medium with durable artifacts and regenerable cover thumbnails. Unresolved architecture choices remain subject to future architecture decision records.
+A Poetry package foundation exists with centralized configuration, a FastAPI application factory, a typed health endpoint, a loopback-first Uvicorn runtime dependency and startup command, a minimal SQLAlchemy Core/Alembic SQLite migration foundation through schema head `0030`, pure domain identity primitives, local device and library registries, a minimum persistent logical-media and physical-location catalog foundation, persistent display-title and canonical-tag core, catalog retrieval with display-title search and canonical-tag AND filtering, a manual browser `Current` metadata workspace for display-title and ordered canonical-tag assignment, an automatic built-in `Processed` workflow collection derived from durable tag saves, read-only library scan preview, explicit idempotent scan-candidate import, local media-analysis preview, provider-neutral NVIDIA/Vercel suggestion preview, VLM JPEG derivative transport, a server-operated AI configuration and diagnostics CLI, a packaged local web shell, an explicit editable browser AI suggestion review, a trusted-loopback quarantine upload path with bounded validation, exact-duplicate disposition, and optional atomic publication to an explicitly selected server-owned library, ordinary-user private upload submission with administrator review, requester-private YouTube and X meme acquisition with administrator promotion, durable manual covers, automated catalog backup/retention/restore-verification foundations, mounted off-device catalog copy and operator-workstation pull-based catalog snapshot recovery foundations, Tailscale remote-access and identity foundations, a portable media sidecar v1 projection with `framenest-sidecar` export/validate/compare, and a repository-native systemd service foundation targeted at Ubuntu Server 24.04 on the Intel NUC6i5SYH personal production server. There is no completed desktop shell, arbitrary user-created collections, a general collection manager, suggested filenames, complete Cover Studio, imported/AI/series covers, cover candidates, persistent AI Drafts, or multi-model draft comparison/promotion yet. A durable manual cover foundation is implemented (migration `0022` per [ADR-0050](docs/adr/0050-durable-manual-cover-foundation.md)): one accepted manually selected cover per logical medium with durable artifacts and regenerable cover thumbnails. Unresolved architecture choices remain subject to future architecture decision records.
 
 The implemented persistence head also includes durable content-publication
 truth through migration `0021`, published-only ordinary catalog retrieval, a
@@ -877,20 +877,29 @@ creator attribution fields, and immutable ordinary-Save treatment of
 It performs no historical backfill.
 
 Migration `0028` adds requester-private X meme acquisition. First-release X
-support is native X video and animated-GIF-like media delivered as video;
-static X photos remain deferred. X acquisition is requester-private with
+support is native X video and animated-GIF-like media delivered as video.
+X acquisition is requester-private with
 explicit administrator promotion/publication, no automatic AI invocation, and
 no automatic publication. Persisted source-derived metadata for
-`acquisition_source = x_manual_claim` is protected through normal Save,
-including `content_category=meme`, X creator attribution kind, creator stable
-ID where present, creator handle where present, creator display name where
-present, and `acquisition_source=x_manual_claim`. There is no separate X
-content category. `x_author` remains schema-compatible creator attribution.
+`acquisition_source = x_manual_claim` is protected through normal Save
+for acquisition source and X creator attribution (kind, stable ID where
+present, handle where present, and display name where present). Canonical
+`content_category` on X media is chosen at Save and may be corrected by an
+administrator per
+[ADR-0064](docs/adr/0064-x-save-category-and-public-photo-acquisition.md).
+There is no separate X content category. `x_author` remains schema-compatible creator attribution.
 
 Migration `0029` adds a caller-private per-user media alias overlay and pending
 alias rows on X claims per
 [ADR-0062](docs/adr/0062-per-user-media-alias-overlay.md). Gallery and Details
 remain canonical `media_metadata`. The overlay is not a second catalog title.
+
+Migration `0030` adds nullable claim-level `requested_content_category` and
+public JPEG/PNG X photo acquisition with source-key/variant continuity per
+[ADR-0064](docs/adr/0064-x-save-category-and-public-photo-acquisition.md).
+Save offers `general`, `meme`, `movie`, and `youtube`. WebP photographs are
+rejected without transcoding. Administrator metadata Save may correct canonical
+category; acquisition source and X creator provenance remain immutable.
 
 FrameNest MUST use FastAPI for the initial server HTTP API adapter per [ADR-0003](docs/adr/0003-initial-server-api-framework.md).
 
