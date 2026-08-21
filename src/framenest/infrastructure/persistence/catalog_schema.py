@@ -1107,6 +1107,7 @@ x_post_claims = Table(
     Column("failure_code", Text(), nullable=True),
     Column("cleanup_state", Text(), nullable=False),
     Column("cleanup_completed_at_ms", Integer(), nullable=True),
+    Column("requested_content_category", Text(), nullable=True),
     Column("version", Integer(), nullable=False),
     CheckConstraint("length(id) = 36", name="ck_x_post_claims_id_length"),
     CheckConstraint(
@@ -1200,6 +1201,11 @@ x_post_claims = Table(
         "(cleanup_state = 'pending' AND cleanup_completed_at_ms IS NULL) "
         "OR (cleanup_state = 'complete' AND cleanup_completed_at_ms IS NOT NULL)",
         name="ck_x_post_claims_cleanup_pair",
+    ),
+    CheckConstraint(
+        "requested_content_category IS NULL OR "
+        "requested_content_category IN ('general', 'meme', 'movie', 'youtube')",
+        name="ck_x_post_claims_requested_content_category",
     ),
     UniqueConstraint("id", name="uq_x_post_claims_id"),
     Index(

@@ -23,6 +23,9 @@ from framenest.application.in_process_lifecycle import (
 )
 
 from framenest.application.media_user_alias import apply_alias_content_to_media
+from framenest.application.ports.media_metadata_repository import (
+    MediaMetadataRepository,
+)
 from framenest.application.ports.media_user_alias_repository import (
     AliasTagNotFoundError,
     MediaUserAliasRepository,
@@ -125,6 +128,10 @@ class XAcquisitionInvalidRequestError(XAcquisitionError):
     """Submitted URL is outside the accepted X post policy."""
 
 
+class XAcquisitionCategoryConflictError(XAcquisitionError):
+    """Same-requester Save requested a category that conflicts with live catalog truth."""
+
+
 class XRequestLimitError(XAcquisitionError):
     """Ordinary requester admission limit was reached."""
 
@@ -175,7 +182,9 @@ class XClaimSnapshot:
     created_at_ms: int
     updated_at_ms: int
     completed_at_ms: int | None
+    requested_content_category: str | None = None
     can_retry: bool = False
+    submission_result: str | None = None
     assets: tuple[XAssetSnapshot, ...] = ()
 
 
@@ -254,11 +263,13 @@ class XAcquisitionRequestService:
         limits: XRequestLimits,
         now_ms: Callable[[], int] = default_now_ms,
         alias_repository: MediaUserAliasRepository | None = None,
+        metadata_repository: MediaMetadataRepository | None = None,
     ) -> None:
         self._repository = repository
         self._limits = limits
         self._now_ms = now_ms
         self._alias_repository = alias_repository
+        self._metadata_repository = metadata_repository
 
     def submit(
         self,
@@ -266,17 +277,20 @@ class XAcquisitionRequestService:
         *,
         login_key: str,
         alias: MediaUserAliasContent | None = None,
+        content_category: ContentCategory | None = None,
     ) -> XRequestSubmission:
         identity = accept_x_post_url(url)
         requester = _normalize_requester(login_key)
         if alias is not None:
             self._validate_alias_tags(alias)
+        requested = content_category
 
         owned_successful = self._repository.find_owned_successful_by_post_id(
             post_id_key=identity.post_id,
             created_by_login_key=requester,
         )
         if owned_successful is not None:
+            self._reject_category_conflict(owned_successful, requested, live_catalog=True)
             self._store_submit_alias(owned_successful.id, requester, alias)
             if alias is not None:
                 self._apply_alias_to_successful_assets(
@@ -291,6 +305,7 @@ class XAcquisitionRequestService:
             created_by_login_key=requester,
         )
         if active is not None:
+            self._reject_category_conflict(active, requested, live_catalog=False)
             self._store_submit_alias(active.id, requester, alias)
             return _submission(active, submission_result="active_reuse", requester=requester)
 
@@ -300,9 +315,11 @@ class XAcquisitionRequestService:
             submitted_url=url,
             now_ms=self._now_ms(),
             created_by_login_key=requester,
+            requested_content_category=requested,
         )
         claim, created = self._repository.create_or_get_active(claim)
         if not created:
+            self._reject_category_conflict(claim, requested, live_catalog=False)
             _submission_result = "active_reuse"
         else:
             _submission_result = "new"
@@ -314,6 +331,52 @@ class XAcquisitionRequestService:
             x_post_id=claim.x_post_id,
             submitted_url=claim.submitted_url,
         )
+
+    def _reject_category_conflict(
+        self,
+        claim: XPostClaim,
+        requested: ContentCategory | None,
+        *,
+        live_catalog: bool,
+    ) -> None:
+        if requested is None:
+            return
+        if live_catalog:
+            live = self._live_catalog_categories(claim)
+            if live is None:
+                raise XAcquisitionCategoryConflictError(
+                    "Requested category conflicts with the existing FrameNest save."
+                )
+            if len(live) != 1 or next(iter(live)) != requested:
+                raise XAcquisitionCategoryConflictError(
+                    "Requested category conflicts with the existing FrameNest save."
+                )
+            return
+        if claim.requested_content_category != requested:
+            raise XAcquisitionCategoryConflictError(
+                "Requested category conflicts with the existing FrameNest save."
+            )
+
+    def _live_catalog_categories(self, claim: XPostClaim) -> set[ContentCategory] | None:
+        """Return live canonical categories, or None when they cannot be confirmed."""
+        assets = self._repository.list_assets_for_post(claim.id)
+        live: set[ContentCategory] = set()
+        found = False
+        for asset in assets:
+            if asset.state is not XAssetState.CATALOGED or asset.media_id is None:
+                continue
+            found = True
+            if self._metadata_repository is None:
+                return None
+            snapshot = self._metadata_repository.get_media_metadata(asset.media_id)
+            if not snapshot.persisted:
+                return None
+            live.add(snapshot.content_category)
+        if not found:
+            if claim.requested_content_category is None:
+                return None
+            return {claim.requested_content_category}
+        return live
 
     def list_owned(
         self,
@@ -1207,7 +1270,11 @@ def x_classification_for_upload(
         creator_handle = claim.source_author_handle
         creator_display_name = claim.source_author_display_name
     return CatalogUploadClassification(
-        content_category=default_x_category(asset.media_type),
+        content_category=(
+            claim.requested_content_category
+            if claim.requested_content_category is not None
+            else default_x_category(asset.media_type)
+        ),
         acquisition_source=AcquisitionSource.X_MANUAL_CLAIM,
         display_title=_imported_display_title(claim.title),
         creator_attribution_kind=creator_kind,
@@ -1259,6 +1326,11 @@ def _administration_snapshot(
         created_at_ms=claim.created_at_ms,
         updated_at_ms=claim.updated_at_ms,
         completed_at_ms=claim.completed_at_ms,
+        requested_content_category=(
+            None
+            if claim.requested_content_category is None
+            else claim.requested_content_category.value
+        ),
         can_retry=_retry_eligible(claim, assets),
         assets=tuple(_asset_snapshot(a) for a in assets),
     )

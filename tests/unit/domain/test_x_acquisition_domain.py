@@ -89,6 +89,35 @@ def test_claim_initial_state_and_defaults() -> None:
     assert claim.acquisition_source is AcquisitionSource.X_MANUAL_CLAIM
     assert claim.created_by_login_key == "alice"
     assert claim.title == "X post 1234567890123456789"
+    assert claim.requested_content_category is None
+
+
+def test_claim_persists_requested_category() -> None:
+    claim = XPostClaim.new(
+        submitted_url="https://x.com/author/status/1234567890123456789",
+        now_ms=1000,
+        created_by_login_key="alice",
+        requested_content_category=ContentCategory.MOVIE,
+    )
+    assert claim.requested_content_category is ContentCategory.MOVIE
+    queued = claim.advance(XAcquisitionState.QUEUED, updated_at_ms=2000)
+    assert queued.requested_content_category is ContentCategory.MOVIE
+
+
+def test_invalid_requested_category_rejected() -> None:
+    claim = _claim()
+    with pytest.raises(FrameNestXClaimError):
+        XPostClaim(
+            id=claim.id,
+            state=XAcquisitionState.SUBMITTED,
+            submitted_url=claim.submitted_url,
+            canonical_url=claim.canonical_url,
+            x_post_id=claim.x_post_id,
+            extractor_key=claim.extractor_key,
+            created_at_ms=1000,
+            updated_at_ms=1000,
+            requested_content_category="tiktok",  # type: ignore[arg-type]
+        )
 
 
 def test_transition_graph_enforced() -> None:
@@ -170,6 +199,15 @@ def test_category_defaults() -> None:
     assert default_x_category(XMediaType.VIDEO) is ContentCategory.MEME
     assert default_x_category(XMediaType.ANIMATED_GIF) is ContentCategory.MEME
     assert default_x_category(XMediaType.IMAGE) is ContentCategory.GENERAL
+
+
+def test_parse_requested_category_accepts_four_values() -> None:
+    from framenest.domain.x_acquisition import parse_x_requested_content_category
+
+    for value in ("general", "meme", "movie", "youtube"):
+        assert parse_x_requested_content_category(value).value == value
+    with pytest.raises(FrameNestXClaimError):
+        parse_x_requested_content_category("tiktok")
 
 
 def test_creator_normalization() -> None:

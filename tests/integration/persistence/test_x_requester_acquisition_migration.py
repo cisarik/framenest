@@ -80,7 +80,7 @@ def _seed_media_metadata_at_0027(database_path: Path) -> None:
         connection.close()
 
 
-def test_head_is_0029() -> None:
+def test_head_is_0030() -> None:
     from framenest.infrastructure.persistence.migrations import _alembic_config
 
     with _alembic_config(
@@ -89,7 +89,7 @@ def test_head_is_0029() -> None:
         from alembic.script import ScriptDirectory
 
         scripts = ScriptDirectory.from_config(config)
-        assert scripts.get_current_head() == "0029"
+        assert scripts.get_current_head() == "0030"
 
 
 def test_upgrade_0027_to_0028_creates_x_tables_and_preserves_rows(tmp_path: Path) -> None:

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import types
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -70,7 +71,7 @@ _VALID_ID = "00000000-0000-4000-8000-000000000001"
 
 def _service_fake():
     return types.SimpleNamespace(
-        submit=lambda url, login_key, alias=None: types.SimpleNamespace(
+        submit=lambda url, login_key, alias=None, content_category=None: types.SimpleNamespace(
             request_id=_VALID_ID, submission_result="new"
         ),
         list_owned=lambda login_key, limit, cursor: types.SimpleNamespace(
@@ -106,7 +107,7 @@ def test_invalid_url_maps_to_sanitized_422() -> None:
     from framenest.domain.x_acquisition import FrameNestXUrlError
 
     class _InvalidService:
-        def submit(self, url: str, login_key: str, alias=None):
+        def submit(self, url: str, login_key: str, alias=None, content_category=None):
             raise FrameNestXUrlError("Invalid public X post URL.")
 
     client = TestClient(_app(_InvalidService()))
@@ -133,7 +134,7 @@ def test_invalid_url_maps_to_sanitized_422() -> None:
 
 def test_unexpected_internal_exception_is_not_mislabeled_422() -> None:
     class _BoomService:
-        def submit(self, url: str, login_key: str, alias=None):
+        def submit(self, url: str, login_key: str, alias=None, content_category=None):
             raise RuntimeError("unexpected internal failure")
 
     # raise_server_exceptions=False lets a genuine internal failure surface as
@@ -150,7 +151,7 @@ def test_unexpected_internal_exception_is_not_mislabeled_422() -> None:
 def test_omitted_alias_preserves_today_submit_contract() -> None:
     captured: dict[str, object] = {}
 
-    def submit(url, login_key, alias=None):
+    def submit(url, login_key, alias=None, content_category=None):
         captured["alias"] = alias
         return types.SimpleNamespace(request_id=_VALID_ID, submission_result="new")
 
@@ -165,7 +166,7 @@ def test_omitted_alias_preserves_today_submit_contract() -> None:
 def test_optional_alias_is_parsed_and_login_key_is_forbidden() -> None:
     captured: dict[str, object] = {}
 
-    def submit(url, login_key, alias=None):
+    def submit(url, login_key, alias=None, content_category=None):
         captured["alias"] = alias
         return types.SimpleNamespace(request_id=_VALID_ID, submission_result="new")
 
@@ -203,7 +204,7 @@ def test_unknown_alias_tag_maps_to_422() -> None:
     )
 
     class _UnknownTagService:
-        def submit(self, url: str, login_key: str, alias=None):
+        def submit(self, url: str, login_key: str, alias=None, content_category=None):
             raise AliasTagNotFoundError()
 
     client = TestClient(_app(_UnknownTagService()))
@@ -216,3 +217,82 @@ def test_unknown_alias_tag_maps_to_422() -> None:
     )
     assert response.status_code == 422
     assert response.json()["error"]["code"] == "ALIAS_TAG_NOT_FOUND"
+
+
+def test_omitted_category_is_valid_for_old_clients() -> None:
+    captured: dict[str, object] = {}
+
+    def submit(url, login_key, alias=None, content_category=None):
+        captured["content_category"] = content_category
+        return types.SimpleNamespace(request_id=_VALID_ID, submission_result="new")
+
+    service = _service_fake()
+    service.submit = submit
+    client = TestClient(_app(service))
+    response = client.post("/api/x/requests", json={"url": "https://x.com/a/status/123"})
+    assert response.status_code == 200
+    assert captured["content_category"] is None
+
+
+@pytest.mark.parametrize("value", ["general", "meme", "movie", "youtube"])
+def test_valid_category_is_parsed(value: str) -> None:
+    captured: dict[str, object] = {}
+
+    def submit(url, login_key, alias=None, content_category=None):
+        captured["content_category"] = content_category
+        return types.SimpleNamespace(request_id=_VALID_ID, submission_result="new")
+
+    service = _service_fake()
+    service.submit = submit
+    client = TestClient(_app(service))
+    response = client.post(
+        "/api/x/requests",
+        json={"url": "https://x.com/a/status/123", "content_category": value},
+    )
+    assert response.status_code == 200
+    assert captured["content_category"].value == value
+
+
+def test_invalid_category_maps_to_sanitized_422() -> None:
+    client = TestClient(_app(_service_fake()))
+    for hostile in ["tiktok", "MEME", "", "general ", None]:
+        if hostile is None:
+            continue
+        response = client.post(
+            "/api/x/requests",
+            json={"url": "https://x.com/a/status/123", "content_category": hostile},
+        )
+        assert response.status_code == 422, hostile
+        body = response.json()
+        assert body["error"]["code"] == "X_REQUEST_INVALID_CATEGORY", hostile
+
+
+def test_category_conflict_maps_to_sanitized_409() -> None:
+    from framenest.application.x_acquisition import XAcquisitionCategoryConflictError
+
+    class _ConflictService:
+        def submit(self, url: str, login_key: str, alias=None, content_category=None):
+            raise XAcquisitionCategoryConflictError(
+                "Requested category conflicts with the existing FrameNest save."
+            )
+
+    client = TestClient(_app(_ConflictService()))
+    response = client.post(
+        "/api/x/requests",
+        json={"url": "https://x.com/a/status/123", "content_category": "movie"},
+    )
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "X_REQUEST_CATEGORY_CONFLICT"
+
+
+def test_extra_fields_remain_forbidden() -> None:
+    client = TestClient(_app(_service_fake()))
+    response = client.post(
+        "/api/x/requests",
+        json={
+            "url": "https://x.com/a/status/123",
+            "content_category": "meme",
+            "unexpected": True,
+        },
+    )
+    assert response.status_code == 422

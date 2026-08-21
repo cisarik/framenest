@@ -141,8 +141,9 @@ class MediaMetadataRepository(Protocol):
         preserved. A provided value equal to the stored value is accepted. A
         different provided value raises ``AcquisitionSourceImmutableError``.
 
-        For X source-derived values (``x_manual_claim``), ``OMITTED`` preserves
+        For X creator provenance (``x_manual_claim``), ``OMITTED`` preserves
         the existing value, an identical value is a compatible no-op, a
         different value raises ``SourceDerivedMetadataImmutableError``, and an
-        explicit clear (``None`` over a present value) is rejected.
+        explicit clear (``None`` over a present value) is rejected. Canonical
+        ``content_category`` remains administrator-correctable for X media.
         """

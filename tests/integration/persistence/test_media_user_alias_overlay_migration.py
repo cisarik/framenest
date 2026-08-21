@@ -53,7 +53,7 @@ def _connect(database_path: Path) -> sqlite3.Connection:
     return connection
 
 
-def test_head_is_0029() -> None:
+def test_head_is_0030() -> None:
     from framenest.infrastructure.persistence.migrations import _alembic_config
 
     with _alembic_config(
@@ -62,7 +62,7 @@ def test_head_is_0029() -> None:
         from alembic.script import ScriptDirectory
 
         scripts = ScriptDirectory.from_config(config)
-        assert scripts.get_current_head() == "0029"
+        assert scripts.get_current_head() == "0030"
 
 
 def test_upgrade_0028_to_0029_creates_overlay_tables_and_rollback_drops_them(

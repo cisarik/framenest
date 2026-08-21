@@ -197,10 +197,10 @@ class SqliteMediaMetadataRepository:
                         "Acquisition source is immutable provenance and cannot be changed."
                     )
                 if current.acquisition_source is AcquisitionSource.X_MANUAL_CLAIM:
-                    resolved_category = _resolve_x_source_field(
-                        "content category",
-                        current.content_category,
-                        content_category,
+                    resolved_category = (
+                        current.content_category
+                        if content_category in (None, OMITTED)
+                        else content_category
                     )
                     resolved_creator_kind = _resolve_x_source_field(
                         "creator attribution kind",

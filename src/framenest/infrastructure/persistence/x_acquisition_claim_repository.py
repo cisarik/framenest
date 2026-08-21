@@ -20,6 +20,7 @@ from framenest.domain.identities import (
     XAssetId,
     XPostClaimId,
 )
+from framenest.domain.media_classification import ContentCategory
 from framenest.domain.media_metadata import CanonicalTagKey, MediaDescription, MediaDisplayTitle
 from framenest.domain.media_user_alias import MediaUserAliasContent, PendingMediaUserAlias
 from framenest.domain.uploads import UploadSessionId
@@ -774,6 +775,11 @@ def _post_values(claim: XPostClaim) -> dict:
         "failure_code": claim.failure_code,
         "cleanup_state": claim.cleanup_state.value,
         "cleanup_completed_at_ms": claim.cleanup_completed_at_ms,
+        "requested_content_category": (
+            None
+            if claim.requested_content_category is None
+            else claim.requested_content_category.value
+        ),
         "version": claim.version,
     }
 
@@ -813,6 +819,7 @@ def _post_from_row(row: Mapping) -> XPostClaim:
         failure_code=row["failure_code"],
         cleanup_state=XStagingCleanupState(cleanup_state),
         cleanup_completed_at_ms=row["cleanup_completed_at_ms"],
+        requested_content_category=_optional_category(row["requested_content_category"]),
         version=int(row["version"]),
     )
 
@@ -889,6 +896,12 @@ def _optional_post_id(value: object) -> XPostClaimId | None:
     if value is None:
         return None
     return XPostClaimId.from_string(str(value))
+
+
+def _optional_category(value: object) -> ContentCategory | None:
+    if value is None:
+        return None
+    return ContentCategory(str(value))
 
 
 def _optional_media_id(value: object):

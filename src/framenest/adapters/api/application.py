@@ -935,6 +935,7 @@ def create_app(
                 free_space_bytes=_x_request_free_space,
             ),
             alias_repository=owned_media_user_alias_repository,
+            metadata_repository=owned_media_metadata_repository,
         )
     if x_request_api_dependencies is None:
         x_request_api_dependencies = XRequestApiDependencies(

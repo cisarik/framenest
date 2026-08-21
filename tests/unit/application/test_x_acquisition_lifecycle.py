@@ -12,14 +12,17 @@ from sqlalchemy import create_engine, text
 from framenest.application.ports.x_extractor import XExtractionError, XExtractionInterrupted
 from framenest.application.x_acquisition import (
     XAcquisitionAdministrationService,
+    XAcquisitionCategoryConflictError,
     XAcquisitionCoordinator,
     XAcquisitionNotFoundError,
     XAcquisitionRequestService,
     XAcquisitionStateConflictError,
     XRequestLimitError,
     XRequestLimits,
+    x_classification_for_upload,
 )
 from framenest.domain.identities import MediaId, MediaLocationId
+from framenest.domain.media_classification import ContentCategory
 from framenest.domain.media_user_alias import parse_alias_content
 from framenest.domain.uploads import UploadSessionState
 from framenest.domain.x_acquisition import (
@@ -30,6 +33,9 @@ from framenest.domain.x_acquisition import (
     XPostClaimId,
 )
 from framenest.infrastructure.persistence.catalog_schema import metadata
+from framenest.infrastructure.persistence.media_metadata_repository import (
+    SqliteMediaMetadataRepository,
+)
 from framenest.infrastructure.persistence.media_user_alias_repository import (
     SqliteMediaUserAliasRepository,
 )
@@ -155,6 +161,7 @@ def lifecycle(tmp_path):
     pub_repo = _FakePublicationRepository(media_id, location_id)
     notifier = _Notifier()
     alias_repo = SqliteMediaUserAliasRepository(engine)
+    metadata_repo = SqliteMediaMetadataRepository(engine)
     coordinator = XAcquisitionCoordinator(
         repo, extractor, staging, transport, upload_repo, pub_repo,
         notifier, notifier, alias_repository=alias_repo,
@@ -167,7 +174,10 @@ def lifecycle(tmp_path):
         free_space_bytes=lambda: 10_737_418_240,
     )
     service = XAcquisitionRequestService(
-        repo, limits=limits, alias_repository=alias_repo
+        repo,
+        limits=limits,
+        alias_repository=alias_repo,
+        metadata_repository=metadata_repo,
     )
     admin = XAcquisitionAdministrationService(repo)
     yield repo, service, admin, coordinator, extractor, media_id
@@ -577,3 +587,153 @@ def test_pending_alias_applies_on_reuse(lifecycle) -> None:
             {"id": media_id.to_string()},
         ).scalar_one()
     assert canonical == "Canonical From Tweet"
+
+
+def test_submit_persists_explicit_category(lifecycle) -> None:
+    repo, service, admin, coordinator, extractor, media_id = lifecycle
+    result = service.submit(
+        URL, login_key="alice", content_category=ContentCategory.YOUTUBE
+    )
+    claim = repo.get_post(XPostClaimId.from_string(result.request_id))
+    assert claim is not None
+    assert claim.requested_content_category is ContentCategory.YOUTUBE
+    snapshot = service.get_owned(claim.id, login_key="alice")
+    assert snapshot.requested_content_category == "youtube"
+
+
+def test_old_client_omission_leaves_null_category(lifecycle) -> None:
+    repo, service, admin, coordinator, extractor, media_id = lifecycle
+    result = service.submit(URL, login_key="alice")
+    claim = repo.get_post(XPostClaimId.from_string(result.request_id))
+    assert claim is not None
+    assert claim.requested_content_category is None
+
+
+def test_retry_preserves_explicit_category(lifecycle) -> None:
+    repo, service, admin, coordinator, extractor, media_id = lifecycle
+    extractor.inspect_script = [("error", "X_EXTRACTOR_FAILED")]
+    first = service.submit(
+        URL, login_key="alice", content_category=ContentCategory.MOVIE
+    )
+    claim = _run(_drain_until_terminal(coordinator, repo, first.request_id))
+    assert claim.state is XAcquisitionState.FAILED
+    assert claim.requested_content_category is ContentCategory.MOVIE
+    retried = service.retry(claim.id, login_key="alice")
+    restored = repo.get_post(XPostClaimId.from_string(retried.claim_id))
+    assert restored is not None
+    assert restored.requested_content_category is ContentCategory.MOVIE
+
+
+def test_same_category_successful_reuse(lifecycle) -> None:
+    repo, service, admin, coordinator, extractor, media_id = lifecycle
+    first = service.submit(URL, login_key="alice", content_category=ContentCategory.MEME)
+    claim = _run(_drain_until_terminal(coordinator, repo, first.request_id))
+    assert claim.state is XAcquisitionState.COMPLETED
+    _seed_canonical_and_metadata(repo, media_id, "Saved")
+    reused = service.submit(URL, login_key="alice", content_category=ContentCategory.MEME)
+    assert reused.submission_result == "reuse"
+    assert reused.request_id == first.request_id
+
+
+def test_different_category_successful_conflict(lifecycle) -> None:
+    repo, service, admin, coordinator, extractor, media_id = lifecycle
+    first = service.submit(URL, login_key="alice", content_category=ContentCategory.MEME)
+    claim = _run(_drain_until_terminal(coordinator, repo, first.request_id))
+    assert claim.state is XAcquisitionState.COMPLETED
+    _seed_canonical_and_metadata(repo, media_id, "Saved")
+    with pytest.raises(XAcquisitionCategoryConflictError):
+        service.submit(URL, login_key="alice", content_category=ContentCategory.MOVIE)
+    with repo._engine.connect() as connection:
+        title = connection.execute(
+            text("SELECT display_title FROM media_metadata WHERE media_id = :id"),
+            {"id": media_id.to_string()},
+        ).scalar_one()
+    assert title == "Saved"
+
+
+def test_active_same_category_reuse_and_omitted_legacy(lifecycle) -> None:
+    repo, service, admin, coordinator, extractor, media_id = lifecycle
+    first = service.submit(URL, login_key="alice", content_category=ContentCategory.GENERAL)
+    second = service.submit(URL, login_key="alice", content_category=ContentCategory.GENERAL)
+    assert second.submission_result == "active_reuse"
+    assert second.request_id == first.request_id
+    with pytest.raises(XAcquisitionCategoryConflictError):
+        service.submit(URL, login_key="alice", content_category=ContentCategory.MOVIE)
+    omitted = service.submit(URL, login_key="alice")
+    assert omitted.submission_result == "active_reuse"
+
+
+def test_legacy_null_active_rejects_explicit_category(lifecycle) -> None:
+    repo, service, admin, coordinator, extractor, media_id = lifecycle
+    first = service.submit(URL, login_key="alice")
+    claim = repo.get_post(XPostClaimId.from_string(first.request_id))
+    assert claim is not None and claim.requested_content_category is None
+    with pytest.raises(XAcquisitionCategoryConflictError):
+        service.submit(URL, login_key="alice", content_category=ContentCategory.MEME)
+
+
+def test_cross_requester_keep_separate_with_category(lifecycle) -> None:
+    repo, service, admin, coordinator, extractor, media_id = lifecycle
+    alice = service.submit(URL, login_key="alice", content_category=ContentCategory.MEME)
+    bob = service.submit(URL, login_key="bob", content_category=ContentCategory.MOVIE)
+    assert alice.request_id != bob.request_id
+    alice_claim = repo.get_post(XPostClaimId.from_string(alice.request_id))
+    bob_claim = repo.get_post(XPostClaimId.from_string(bob.request_id))
+    assert alice_claim is not None and bob_claim is not None
+    assert alice_claim.requested_content_category is ContentCategory.MEME
+    assert bob_claim.requested_content_category is ContentCategory.MOVIE
+
+
+def test_catalog_handoff_uses_claim_category_or_media_kind_default(lifecycle) -> None:
+    from framenest.domain.uploads import UploadSessionId
+    from framenest.domain.x_acquisition import XAsset, XMediaType
+
+    repo, service, admin, coordinator, extractor, media_id = lifecycle
+    movie = service.submit(
+        URL, login_key="alice", content_category=ContentCategory.MOVIE
+    )
+    movie_claim = repo.get_post(XPostClaimId.from_string(movie.request_id))
+    assert movie_claim is not None
+    asset = XAsset.new(
+        claim_id=movie_claim.id,
+        ordinal=0,
+        media_type=XMediaType.IMAGE,
+        expected_mime="image/jpeg",
+        now_ms=20,
+    )
+    repo.create_assets((asset,))
+    classification = x_classification_for_upload(
+        repo, UploadSessionId.from_string(asset.id.to_string())
+    )
+    assert classification is not None
+    assert classification.content_category is ContentCategory.MOVIE
+
+    omitted = service.submit(
+        "https://x.com/author/status/222222222", login_key="bob"
+    )
+    omitted_claim = repo.get_post(XPostClaimId.from_string(omitted.request_id))
+    assert omitted_claim is not None
+    image = XAsset.new(
+        claim_id=omitted_claim.id,
+        ordinal=0,
+        media_type=XMediaType.IMAGE,
+        expected_mime="image/jpeg",
+        now_ms=30,
+    )
+    video = XAsset.new(
+        claim_id=omitted_claim.id,
+        ordinal=1,
+        media_type=XMediaType.VIDEO,
+        expected_mime="video/mp4",
+        now_ms=30,
+    )
+    repo.create_assets((image, video))
+    image_class = x_classification_for_upload(
+        repo, UploadSessionId.from_string(image.id.to_string())
+    )
+    video_class = x_classification_for_upload(
+        repo, UploadSessionId.from_string(video.id.to_string())
+    )
+    assert image_class is not None and video_class is not None
+    assert image_class.content_category is ContentCategory.GENERAL
+    assert video_class.content_category is ContentCategory.MEME

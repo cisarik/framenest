@@ -16,6 +16,7 @@ from framenest.application.ports.media_user_alias_repository import (
     AliasTagNotFoundError,
 )
 from framenest.application.x_acquisition import (
+    XAcquisitionCategoryConflictError,
     XAcquisitionInfrastructureError,
     XAcquisitionInvalidRequestError,
     XAcquisitionNotFoundError,
@@ -35,7 +36,12 @@ from framenest.domain.security_audit import (
     AUDIT_OUTCOME_ALLOWED,
     SecurityAuditEvent,
 )
-from framenest.domain.x_acquisition import FrameNestXUrlError, XPostClaimId
+from framenest.domain.x_acquisition import (
+    FrameNestXClaimError,
+    FrameNestXUrlError,
+    XPostClaimId,
+    parse_x_requested_content_category,
+)
 from framenest.structured_logging import get_logger
 
 X_REQUEST_NOT_CONFIGURED = "X_REQUEST_NOT_CONFIGURED"
@@ -45,6 +51,8 @@ X_REQUEST_STATE_CONFLICT = "X_REQUEST_STATE_CONFLICT"
 X_REQUEST_UNAVAILABLE = "X_REQUEST_UNAVAILABLE"
 X_REQUEST_INSUFFICIENT_STORAGE = "X_REQUEST_INSUFFICIENT_STORAGE"
 X_REQUEST_IDENTITY_REQUIRED = "IDENTITY_REQUIRED"
+X_REQUEST_INVALID_CATEGORY = "X_REQUEST_INVALID_CATEGORY"
+X_REQUEST_CATEGORY_CONFLICT = "X_REQUEST_CATEGORY_CONFLICT"
 ALIAS_TAG_NOT_FOUND = "ALIAS_TAG_NOT_FOUND"
 ALIAS_INVALID = "ALIAS_INVALID"
 
@@ -67,6 +75,7 @@ class XRequestCreateBody(BaseModel):
 
     url: str
     alias: XAliasBody | None = None
+    content_category: str | None = None
 
 
 class XAssetResponse(BaseModel):
@@ -95,6 +104,12 @@ class XRequestItemResponse(BaseModel):
     retry_of_request_id: str | None
     created_at_ms: int
     updated_at_ms: int
+    requested_content_category: str | None = None
+    discovered_asset_count: int | None = None
+    success_count: int | None = None
+    failure_count: int | None = None
+    can_retry: bool = False
+    submission_result: str | None = None
     assets: list[XAssetResponse] = []
 
 
@@ -145,8 +160,23 @@ def create_x_request_api_router(
                     body.alias.description,
                     body.alias.tag_keys,
                 )
+            requested_category = None
+            if body.content_category is not None:
+                try:
+                    requested_category = parse_x_requested_content_category(
+                        body.content_category
+                    )
+                except FrameNestXClaimError:
+                    return _error(
+                        X_REQUEST_INVALID_CATEGORY,
+                        "Invalid content category.",
+                        422,
+                    )
             result = dependencies.service.submit(
-                body.url, login_key=identity.login_key, alias=alias_content
+                body.url,
+                login_key=identity.login_key,
+                alias=alias_content,
+                content_category=requested_category,
             )
         except FrameNestMediaUserAliasError:
             return _error(ALIAS_INVALID, "Invalid FrameNest media user alias.", 422)
@@ -158,6 +188,12 @@ def create_x_request_api_router(
             return _error(_code_for_limit(exc.code), str(exc), 429)
         except XRequestInsufficientStorageError as exc:
             return _error(X_REQUEST_INSUFFICIENT_STORAGE, str(exc), 507)
+        except XAcquisitionCategoryConflictError:
+            return _error(
+                X_REQUEST_CATEGORY_CONFLICT,
+                "Requested category conflicts with the existing FrameNest save.",
+                409,
+            )
         except XAcquisitionInfrastructureError as exc:
             return _error(X_REQUEST_UNAVAILABLE, str(exc), 503)
         _record_result_classification(
@@ -169,7 +205,7 @@ def create_x_request_api_router(
         )
         return JSONResponse(
             status_code=200,
-            content=_item_dict(claim),
+            content=_item_dict(claim, submission_result=result.submission_result),
             headers=_NO_STORE_HEADERS,
         )
 
@@ -311,7 +347,10 @@ def _error(code: str, message: str, status: int) -> JSONResponse:
     )
 
 
-def _item_dict(claim: object) -> dict:
+def _item_dict(claim: object, *, submission_result: str | None = None) -> dict:
+    requested = getattr(claim, "requested_content_category", None)
+    if requested is not None and not isinstance(requested, str):
+        requested = getattr(requested, "value", requested)
     return {
         "request_id": claim.claim_id,
         "claim_id": claim.claim_id,
@@ -323,7 +362,12 @@ def _item_dict(claim: object) -> dict:
         "title": claim.title,
         "failure_code": claim.failure_code,
         "retry_of_request_id": claim.retry_of_claim_id,
+        "requested_content_category": requested,
+        "discovered_asset_count": getattr(claim, "discovered_asset_count", None),
+        "success_count": getattr(claim, "success_count", None),
+        "failure_count": getattr(claim, "failure_count", None),
         "can_retry": bool(getattr(claim, "can_retry", False)),
+        "submission_result": submission_result,
         "created_at_ms": claim.created_at_ms,
         "updated_at_ms": claim.updated_at_ms,
         "assets": [

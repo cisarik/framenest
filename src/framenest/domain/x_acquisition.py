@@ -413,6 +413,7 @@ class XPostClaim:
     failure_code: str | None = None
     cleanup_state: XStagingCleanupState = XStagingCleanupState.PENDING
     cleanup_completed_at_ms: int | None = None
+    requested_content_category: ContentCategory | None = None
     version: int = field(default=0, compare=False)
 
     def __post_init__(self) -> None:
@@ -476,6 +477,11 @@ class XPostClaim:
             or _FAILURE_CODE_PATTERN.fullmatch(self.failure_code) is None
         ):
             raise FrameNestXClaimError(INVALID_X_CLAIM_MESSAGE)
+        if (
+            self.requested_content_category is not None
+            and not isinstance(self.requested_content_category, ContentCategory)
+        ):
+            raise FrameNestXClaimError(INVALID_X_CLAIM_MESSAGE)
         if not isinstance(self.cleanup_state, XStagingCleanupState):
             raise FrameNestXClaimError(INVALID_X_CLAIM_MESSAGE)
         if (
@@ -501,6 +507,7 @@ class XPostClaim:
         now_ms: int,
         retry_of_claim_id: XPostClaimId | None = None,
         created_by_login_key: str | None = None,
+        requested_content_category: ContentCategory | None = None,
     ) -> XPostClaim:
         identity = accept_x_post_url(submitted_url)
         claim_id = XPostClaimId.new()
@@ -522,6 +529,7 @@ class XPostClaim:
             retry_of_claim_id=retry_of_claim_id,
             created_by_login_key=owner,
             title=default_x_title(identity.post_id),
+            requested_content_category=requested_content_category,
         )
 
     def advance(
@@ -760,6 +768,18 @@ def default_x_category(media_type: XMediaType) -> ContentCategory:
     if media_type is XMediaType.IMAGE:
         return ContentCategory.GENERAL
     return ContentCategory.MEME
+
+
+def parse_x_requested_content_category(value: object) -> ContentCategory:
+    """Parse one explicit Save-time canonical category."""
+    if isinstance(value, ContentCategory):
+        return value
+    if isinstance(value, str):
+        try:
+            return ContentCategory(value)
+        except ValueError as exc:
+            raise FrameNestXClaimError(INVALID_X_CLAIM_MESSAGE) from exc
+    raise FrameNestXClaimError(INVALID_X_CLAIM_MESSAGE)
 
 
 def normalize_x_creator(

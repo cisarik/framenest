@@ -599,37 +599,41 @@ def test_x_identical_meme_category_is_a_noop(tmp_path: Path) -> None:
         ContentCategory.YOUTUBE,
     ],
 )
-def test_x_changing_category_rejects(tmp_path: Path, category) -> None:
+def test_x_changing_category_is_allowed(tmp_path: Path, category) -> None:
     repository, engine = _repository(tmp_path)
     media_id = _seed_x_media(repository, engine)
     try:
-        with pytest.raises(SourceDerivedMetadataImmutableError):
-            repository.save_media_metadata(
-                media_id,
-                MediaDisplayTitle("Renamed"),
-                None,
-                (),
-                now_ms=20,
-                content_category=category,
-            )
+        result = repository.save_media_metadata(
+            media_id,
+            MediaDisplayTitle("Renamed"),
+            None,
+            (),
+            now_ms=20,
+            content_category=category,
+        )
+        assert result.status == "updated"
         loaded = repository.get_media_metadata(media_id)
-        assert loaded.content_category is ContentCategory.MEME
-        assert loaded.display_title == MediaDisplayTitle("X Meme")
+        assert loaded.content_category is category
+        assert loaded.display_title == MediaDisplayTitle("Renamed")
+        assert loaded.acquisition_source is AcquisitionSource.X_MANUAL_CLAIM
+        assert loaded.creator_attribution_kind is CreatorAttributionKind.X_AUTHOR
+        assert loaded.creator_handle == "michal"
     finally:
         engine.dispose()
 
 
-def test_x_clearing_category_rejects(tmp_path: Path) -> None:
+def test_x_omitted_or_none_category_preserves_meme(tmp_path: Path) -> None:
     repository, engine = _repository(tmp_path)
     media_id = _seed_x_media(repository, engine)
     try:
-        with pytest.raises(SourceDerivedMetadataImmutableError):
-            repository.save_media_metadata(
-                media_id, MediaDisplayTitle("Renamed"), None, (), now_ms=20, content_category=None
-            )
+        result = repository.save_media_metadata(
+            media_id, MediaDisplayTitle("Renamed"), None, (), now_ms=20, content_category=None
+        )
+        assert result.status == "updated"
         loaded = repository.get_media_metadata(media_id)
         assert loaded.content_category is ContentCategory.MEME
-        assert loaded.display_title == MediaDisplayTitle("X Meme")
+        assert loaded.display_title == MediaDisplayTitle("Renamed")
+        assert loaded.creator_handle == "michal"
     finally:
         engine.dispose()
 
@@ -761,12 +765,17 @@ def test_x_atomic_rejection_discards_allowed_edits(tmp_path: Path) -> None:
                 (CanonicalTagKey("funny"), CanonicalTagKey("art")),
                 now_ms=20,
                 content_category=ContentCategory.GENERAL,
+                creator_attribution_kind=CreatorAttributionKind.X_AUTHOR,
+                creator_stable_id="12345",
+                creator_handle="other",
+                creator_display_name="Michal",
             )
         loaded = repository.get_media_metadata(media_id)
         assert loaded.display_title == MediaDisplayTitle("X Meme")
         assert loaded.description is None
         assert loaded.tag_keys == ()
         assert loaded.content_category is ContentCategory.MEME
+        assert loaded.creator_handle == "michal"
     finally:
         engine.dispose()
 

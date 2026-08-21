@@ -14,7 +14,7 @@ from framenest.infrastructure.persistence.catalog_schema import upload_sessions
 PRODUCTION_VERSIONS_PACKAGE = (
     "framenest.infrastructure.persistence.alembic_environment.versions"
 )
-CURRENT_HEAD_REVISION = "0029"
+CURRENT_HEAD_REVISION = "0030"
 TARGET_DUPLICATE_DISPOSITION_REVISION = "0012"
 TARGET_BYTE_IDENTITY_REVISION = "0011"
 TARGET_VALIDATION_REVISION = "0010"
@@ -1519,7 +1519,7 @@ def test_migration_0025_ownership_and_duplicate_mode_upgrade_and_downgrade(
     _upgrade_to_revision(database_path, "0025")
     status = inspect_database_migration_status(_settings_for(database_path))
     assert status.current_revision == "0025"
-    assert status.head_revision == "0029"
+    assert status.head_revision == "0030"
     columns = _columns(database_path, "upload_sessions")
     assert "created_by_login_key" in columns
     assert "duplicate_resolution_mode" in columns
