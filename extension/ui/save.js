@@ -4,6 +4,7 @@
   const TAG_LIMIT = 32;
   const ANALYZE_HINT =
     "Saves now. Analyze by AI is available in FrameNest after this item is cataloged.";
+  const UPGRADE_MESSAGE = "FrameNest needs an update before this Save can complete.";
   const form = document.getElementById("save-form");
   const title = document.getElementById("title");
   const description = document.getElementById("description");
@@ -14,9 +15,15 @@
   const formStatus = document.getElementById("form-status");
   const closeButton = document.getElementById("close");
   const analyze = document.getElementById("analyze");
+  const saveButton = document.getElementById("save");
+  const categoryRadios = Array.prototype.slice.call(
+    form.querySelectorAll("input[name='category']")
+  );
   const catalog = [];
   const chosen = [];
   let activeSuggestion = -1;
+  let formBusy = false;
+  let analyzeEnabled = false;
 
   function setStatus(node, value, kind) {
     node.textContent = value;
@@ -24,6 +31,15 @@
       node.setAttribute("data-kind", kind);
     } else {
       node.removeAttribute("data-kind");
+    }
+    if (node === formStatus) {
+      if (kind === "error") {
+        formStatus.setAttribute("role", "alert");
+        formStatus.setAttribute("aria-live", "assertive");
+      } else {
+        formStatus.setAttribute("role", "status");
+        formStatus.setAttribute("aria-live", "polite");
+      }
     }
   }
 
@@ -42,13 +58,29 @@
     });
   }
 
-  function submittedUrl() {
+  function hashParams() {
     const raw = window.location.hash.startsWith("#")
       ? window.location.hash.slice(1)
       : "";
-    const params = new URLSearchParams(raw);
-    const accepted = companion.acceptXPostUrl(params.get("url") || "");
+    return new URLSearchParams(raw);
+  }
+
+  function submittedUrl() {
+    const accepted = companion.acceptXPostUrl(hashParams().get("url") || "");
     return accepted ? accepted.submittedUrl : null;
+  }
+
+  function applyDefaultCategory() {
+    const media = hashParams().get("media") || "unknown";
+    const value = companion.defaultContentCategoryForMediaKind(media);
+    categoryRadios.forEach((radio) => {
+      radio.checked = radio.value === value;
+    });
+  }
+
+  function selectedCategory() {
+    const checked = categoryRadios.find((radio) => radio.checked);
+    return companion.acceptContentCategory(checked && checked.value);
   }
 
   function notifyParent(action, result) {
@@ -92,6 +124,34 @@
       .slice(0, SUGGESTION_LIMIT);
   }
 
+  function tagListOpen() {
+    return tagSearch.getAttribute("aria-expanded") === "true";
+  }
+
+  function closeTagList() {
+    suggestions.replaceChildren();
+    activeSuggestion = -1;
+    tagSearch.setAttribute("aria-expanded", "false");
+  }
+
+  function setFormBusy(busy) {
+    formBusy = busy;
+    if (busy) {
+      form.setAttribute("aria-busy", "true");
+    } else {
+      form.removeAttribute("aria-busy");
+    }
+    title.disabled = busy;
+    description.disabled = busy;
+    tagSearch.disabled = busy;
+    saveButton.disabled = busy;
+    analyze.disabled = busy || !analyzeEnabled;
+    categoryRadios.forEach((radio) => {
+      radio.disabled = busy;
+    });
+    renderSelected();
+  }
+
   function renderSelected() {
     selectedTags.replaceChildren();
     chosen.forEach((item) => {
@@ -104,7 +164,11 @@
       remove.className = "tag-chip__remove";
       remove.textContent = "X";
       remove.setAttribute("aria-label", "Remove " + displayNameOf(item));
+      remove.disabled = formBusy;
       remove.addEventListener("click", () => {
+        if (formBusy) {
+          return;
+        }
         const index = chosen.findIndex((entry) => entry.key === item.key);
         if (index >= 0) {
           chosen.splice(index, 1);
@@ -138,6 +202,7 @@
       button.setAttribute("role", "option");
       button.setAttribute("aria-selected", String(index === activeSuggestion));
       button.textContent = displayNameOf(item);
+      button.disabled = formBusy;
       button.addEventListener("mousedown", (event) => {
         event.preventDefault();
       });
@@ -149,7 +214,7 @@
   }
 
   function addTag(item) {
-    if (!item || typeof item.key !== "string") {
+    if (formBusy || !item || typeof item.key !== "string") {
       return;
     }
     if (chosen.some((entry) => entry.key === item.key)) {
@@ -188,6 +253,7 @@
   function gateAnalyze(identityBody) {
     analyze.hidden = true;
     analyze.disabled = true;
+    analyzeEnabled = false;
     analyze.title = ANALYZE_HINT;
     analyze.setAttribute("aria-label", ANALYZE_HINT);
     if (!identityBody || !Array.isArray(identityBody.capabilities)) {
@@ -198,25 +264,54 @@
     }
     analyze.hidden = false;
     analyze.disabled = false;
+    analyzeEnabled = true;
+    if (formBusy) {
+      analyze.disabled = true;
+    }
+  }
+
+  function failMessage(result) {
+    if (result && result.error === "X_REQUEST_INVALID_CATEGORY") {
+      return UPGRADE_MESSAGE;
+    }
+    if (result && result.error === "X_REQUEST_CATEGORY_CONFLICT") {
+      return "Save failed. A different category is already stored for this post.";
+    }
+    if (result && result.error === "invalid_category") {
+      return UPGRADE_MESSAGE;
+    }
+    return "Save failed.";
   }
 
   function submitSave() {
+    if (formBusy) {
+      return;
+    }
     const url = submittedUrl();
     if (!url) {
       setStatus(formStatus, "Invalid post URL.", "error");
       return;
     }
+    const category = selectedCategory();
+    if (!category) {
+      setStatus(formStatus, "Choose a category.", "error");
+      return;
+    }
+    setFormBusy(true);
     setStatus(formStatus, "Saving…");
-    request(companion.TYPES.SAVE_POST, { url: url, alias: aliasPayload() }).then(
-      (result) => {
-        if (!result.ok) {
-          setStatus(formStatus, "Save failed.", "error");
-          notifyParent("result", result);
-          return;
-        }
+    request(companion.TYPES.SAVE_POST, {
+      url: url,
+      alias: aliasPayload(),
+      contentCategory: category,
+    }).then((result) => {
+      if (!result.ok) {
+        setFormBusy(false);
+        setStatus(formStatus, failMessage(result), "error");
         notifyParent("result", result);
+        return;
       }
-    );
+      notifyParent("result", result);
+    });
   }
 
   async function loadTags() {
@@ -248,6 +343,27 @@
   form.addEventListener("submit", (event) => {
     event.preventDefault();
     submitSave();
+  });
+
+  form.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+      event.preventDefault();
+      submitSave();
+    }
+  });
+
+  title.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" && !event.ctrlKey && !event.metaKey) {
+      event.preventDefault();
+    }
+  });
+
+  categoryRadios.forEach((radio) => {
+    radio.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+      }
+    });
   });
 
   closeButton.addEventListener("click", () => {
@@ -288,12 +404,19 @@
   });
 
   document.addEventListener("keydown", (event) => {
-    if (event.key === "Escape") {
-      event.preventDefault();
-      notifyParent("cancel");
+    if (event.key !== "Escape") {
+      return;
     }
+    event.preventDefault();
+    if (tagListOpen()) {
+      closeTagList();
+      return;
+    }
+    notifyParent("cancel");
   });
 
+  applyDefaultCategory();
   void loadTags();
   void loadIdentity();
+  title.focus();
 })();

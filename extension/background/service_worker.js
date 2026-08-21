@@ -148,25 +148,31 @@ async function savePost(payload) {
   if (!accepted) {
     return { ok: false, error: "invalid_url" };
   }
+  const category = companion.acceptContentCategory(payload.contentCategory);
+  if (!category) {
+    return { ok: false, error: "invalid_category" };
+  }
   const alias = sanitizeAlias(payload.alias);
   const response = await fetchJson("xRequests", {
     method: "POST",
-    body: { url: accepted.submittedUrl, alias: alias },
+    body: {
+      url: accepted.submittedUrl,
+      alias: alias,
+      content_category: category,
+    },
   });
   if (!response.ok) {
+    if (response.error === "network_failed") {
+      return { ok: false, error: "network_failed", ambiguous: true };
+    }
     return response;
   }
   const claimId = response.body.request_id || response.body.claim_id;
-  if (companion.isUuid(claimId)) {
-    await persistInflight(claimId);
+  const snapshot = claimSnapshot(response.body, claimId);
+  if (companion.isUuid(claimId) && !snapshot.terminal) {
+    await persistInflight(claimId, snapshot.postId || accepted.postId);
   }
-  return {
-    ok: true,
-    claimId,
-    state: response.body.state,
-    failureCode: response.body.failure_code || null,
-    terminal: isTerminal(response.body),
-  };
+  return snapshot;
 }
 
 function sanitizeAlias(raw) {
@@ -196,27 +202,26 @@ async function pollClaim(payload) {
     ids: { claimId: payload.claimId },
   });
   if (!response.ok) {
+    if (response.error === "network_failed") {
+      return { ok: false, error: "network_failed", ambiguous: true };
+    }
     return response;
   }
-  const terminal = isTerminal(response.body);
-  if (terminal) {
+  const snapshot = claimSnapshot(response.body, payload.claimId);
+  if (snapshot.terminal) {
     await dropInflight(payload.claimId);
   }
-  return {
-    ok: true,
-    claimId: payload.claimId,
-    state: response.body.state,
-    failureCode: response.body.failure_code || null,
-    terminal,
-  };
+  return snapshot;
 }
 
 async function recoverInflight() {
   const stored = await chrome.storage.local.get(STORAGE_KEYS.inflight);
-  const claimIds = Array.isArray(stored[STORAGE_KEYS.inflight])
-    ? stored[STORAGE_KEYS.inflight].filter(companion.isUuid)
-    : [];
-  return { ok: true, claimIds };
+  const records = normalizeInflightRecords(stored[STORAGE_KEYS.inflight]);
+  return {
+    ok: true,
+    claimIds: records.map((record) => record.claimId),
+    claims: records,
+  };
 }
 
 async function pickerQuery(payload) {
@@ -294,26 +299,70 @@ function isTerminal(body) {
     state === "completed_partial" ||
     state === "failed" ||
     state === "duplicate_resolved" ||
-    Boolean(body && body.failure_code === "X_NO_SUPPORTED_MEDIA")
+    state === "catalog_removed"
   );
 }
 
-async function persistInflight(claimId) {
+function claimSnapshot(body, claimId) {
+  const source = body || {};
+  return {
+    ok: true,
+    claimId: claimId,
+    postId: companion.acceptXPostId(source.x_post_id),
+    state: source.state,
+    phase: source.phase || null,
+    failureCode: source.failure_code || null,
+    submissionResult: source.submission_result || null,
+    successCount: source.success_count == null ? null : source.success_count,
+    discoveredAssetCount:
+      source.discovered_asset_count == null ? null : source.discovered_asset_count,
+    canRetry: Boolean(source.can_retry),
+    requestedContentCategory: source.requested_content_category || null,
+    terminal: isTerminal(source),
+  };
+}
+
+function normalizeInflightRecords(raw) {
+  const records = [];
+  const seen = {};
+  (Array.isArray(raw) ? raw : []).forEach((item) => {
+    let claimId = null;
+    let postId = null;
+    if (typeof item === "string" && companion.isUuid(item)) {
+      claimId = item;
+    } else if (item && typeof item === "object" && companion.isUuid(item.claimId)) {
+      claimId = item.claimId;
+      postId = companion.acceptXPostId(item.postId);
+    }
+    if (!claimId || seen[claimId]) {
+      return;
+    }
+    seen[claimId] = true;
+    records.push({ claimId: claimId, postId: postId });
+  });
+  return records;
+}
+
+async function persistInflight(claimId, postId) {
   const stored = await chrome.storage.local.get(STORAGE_KEYS.inflight);
-  const current = Array.isArray(stored[STORAGE_KEYS.inflight])
-    ? stored[STORAGE_KEYS.inflight]
-    : [];
-  if (!current.includes(claimId)) {
-    current.push(claimId);
+  const current = normalizeInflightRecords(stored[STORAGE_KEYS.inflight]);
+  const existing = current.find((record) => record.claimId === claimId);
+  const acceptedPostId = companion.acceptXPostId(postId);
+  if (existing) {
+    if (!existing.postId && acceptedPostId) {
+      existing.postId = acceptedPostId;
+    }
+  } else {
+    current.push({ claimId: claimId, postId: acceptedPostId });
   }
   await chrome.storage.local.set({ [STORAGE_KEYS.inflight]: current.slice(-16) });
 }
 
 async function dropInflight(claimId) {
   const stored = await chrome.storage.local.get(STORAGE_KEYS.inflight);
-  const current = Array.isArray(stored[STORAGE_KEYS.inflight])
-    ? stored[STORAGE_KEYS.inflight].filter((id) => id !== claimId)
-    : [];
+  const current = normalizeInflightRecords(stored[STORAGE_KEYS.inflight]).filter(
+    (record) => record.claimId !== claimId
+  );
   await chrome.storage.local.set({ [STORAGE_KEYS.inflight]: current });
 }
 

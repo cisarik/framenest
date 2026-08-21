@@ -108,6 +108,8 @@ test("chunk reassembly stays bounded", () => {
 test("service worker recovers inflight claim ids from storage", () => {
   assert.match(workerSource, /inflightClaims/);
   assert.match(workerSource, /RECOVER_INFLIGHT/);
+  assert.match(workerSource, /postId/);
+  assert.match(extractNamedFunction(workerSource, "normalizeInflightRecords"), /claimId/);
   assert.doesNotMatch(workerSource, /setInterval/);
 });
 
@@ -205,7 +207,7 @@ test("in-feed Save is a per-media hover overlay, not an action-row control", () 
   assert.match(adapterSource, /accepted\.submittedUrl/);
   assert.doesNotMatch(adapterSource, /pbs\.twimg\.com/);
   assert.match(adapterSource, /data-framenest-companion"\) === "save"/);
-  assert.match(adapterSource, /Save to FrameNest failed/);
+  assert.equal(companion.reduceXSaveOutcome({ ok: false }).name, "Save to FrameNest failed");
   assert.match(adapterSource, /openSavePopup/);
   assert.match(adapterSource, /ui\/save\.html/);
   assert.doesNotMatch(adapterSource, /TYPES\.SAVE_POST, \{\s*url: accepted\.submittedUrl/);
@@ -213,6 +215,11 @@ test("in-feed Save is a per-media hover overlay, not an action-row control", () 
   assert.doesNotMatch(adapterSource, /M8 8l8 8/);
   assert.doesNotMatch(adapterSource, /M16 8l-8 8/);
   assert.match(adapterSource, /kind === "failed"[\s\S]{0,160}M12 6\.5v11M6\.5 12h11/);
+  assert.match(adapterSource, /reduceXSaveOutcome/);
+  assert.doesNotMatch(
+    extractNamedFunction(adapterSource, "pollClaim"),
+    /Saved to FrameNest/
+  );
 });
 
 test("Save popup searches tags, pins Save, and does not execute Analyze", () => {
@@ -696,6 +703,12 @@ function createMiniDom() {
     dispatchEvent() {
       return true;
     }
+
+    focus() {
+      if (this.ownerDocument) {
+        this.ownerDocument.activeElement = this;
+      }
+    }
   }
 
   function matchesSelector(el, selector) {
@@ -768,6 +781,28 @@ function createMiniDom() {
     querySelectorAll(selector) {
       return documentElement.querySelectorAll(selector);
     },
+    getElementById(id) {
+      const visit = (node) => {
+        if (!node) {
+          return null;
+        }
+        if (node.getAttribute && node.getAttribute("id") === id) {
+          return node;
+        }
+        if (node.id === id) {
+          return node;
+        }
+        const children = node.childNodes || [];
+        for (let index = 0; index < children.length; index += 1) {
+          const found = visit(children[index]);
+          if (found) {
+            return found;
+          }
+        }
+        return null;
+      };
+      return visit(documentElement);
+    },
     addEventListener() {},
     removeEventListener() {},
   };
@@ -797,12 +832,20 @@ function el(dom, tag, attrs, children) {
   return node;
 }
 
-function loadAdapterHooks(dom) {
+function loadAdapterHooks(dom, options) {
   const hooks = {};
+  const sendMessage =
+    options && typeof options.sendMessage === "function"
+      ? options.sendMessage
+      : function sendMessage() {};
   const sandbox = {
     chrome: {
       runtime: {
-        sendMessage() {},
+        sendMessage(message, callback) {
+          if (typeof callback === "function") {
+            sendMessage(message, callback);
+          }
+        },
         onMessage: { addListener() {} },
         onConnect: { addListener() {} },
         getURL(resource) {
@@ -1359,4 +1402,248 @@ test("unbound live file input posts composer_unbound without a download fallback
   assert.equal(result.error, "composer_unbound");
   assert.equal(port.posted[0].type, companion.TYPES.ERROR);
   assert.equal(port.posted[0].payload.error, "composer_unbound");
+});
+
+test("Save popup offers four category radios, helper text, and keyboard contract", () => {
+  const saveHtml = fs.readFileSync(path.join(REPO, "extension/ui/save.html"), "utf8");
+  const saveJs = fs.readFileSync(path.join(REPO, "extension/ui/save.js"), "utf8");
+  const saveCss = fs.readFileSync(path.join(REPO, "extension/ui/save.css"), "utf8");
+  assert.match(saveHtml, /<fieldset[^>]*id="category-fieldset"/);
+  assert.match(saveHtml, /<legend[^>]*>Category</);
+  assert.match(saveHtml, /value="general"/);
+  assert.match(saveHtml, /value="meme"/);
+  assert.match(saveHtml, /value="movie"/);
+  assert.match(saveHtml, /value="youtube"/);
+  assert.match(saveHtml, /> General</);
+  assert.match(saveHtml, /> Meme</);
+  assert.match(saveHtml, /> Movie</);
+  assert.match(saveHtml, /> YouTube</);
+  assert.match(
+    saveHtml,
+    /Category describes the content and applies to every media item in this post\. Movie genres can be added later in FrameNest\./
+  );
+  assert.match(saveHtml, /id="title"[\s\S]*id="description"[\s\S]*id="category-fieldset"[\s\S]*id="tag-search"/);
+  assert.match(saveJs, /contentCategory: category/);
+  assert.match(saveJs, /defaultContentCategoryForMediaKind/);
+  assert.match(saveJs, /title\.focus\(\)/);
+  assert.match(saveJs, /event\.key === "Enter" && !event\.ctrlKey && !event\.metaKey/);
+  assert.match(saveJs, /categoryRadios[\s\S]*Enter[\s\S]*preventDefault/);
+  assert.match(saveJs, /event\.ctrlKey \|\| event\.metaKey/);
+  assert.match(saveJs, /tagListOpen\(\)/);
+  assert.match(saveJs, /aria-busy/);
+  assert.match(saveJs, /FrameNest needs an update before this Save can complete\./);
+  assert.doesNotMatch(saveJs, /content_category/);
+  assert.doesNotMatch(saveJs, /contentCategory:\s*null/);
+  assert.match(saveCss, /\.category /);
+  assert.match(saveCss, /accent-color: var\(--accent\)/);
+});
+
+test("service worker allowlists category, never drops it, and treats catalog_removed as terminal", () => {
+  const savePostFn = extractNamedFunction(workerSource, "savePost");
+  const terminalFn = extractNamedFunction(workerSource, "isTerminal");
+  const persistFn = extractNamedFunction(workerSource, "persistInflight");
+  assert.match(savePostFn, /acceptContentCategory\(payload\.contentCategory\)/);
+  assert.match(savePostFn, /content_category: category/);
+  assert.match(savePostFn, /invalid_category/);
+  assert.match(savePostFn, /ambiguous: true/);
+  assert.doesNotMatch(savePostFn, /content_category:\s*null/);
+  assert.doesNotMatch(savePostFn, /delete .*\.content_category/);
+  assert.match(terminalFn, /catalog_removed/);
+  assert.doesNotMatch(terminalFn, /failure_code/);
+  assert.doesNotMatch(terminalFn, /X_NO_SUPPORTED_MEDIA/);
+  assert.match(persistFn, /postId/);
+  assert.match(extractNamedFunction(workerSource, "claimSnapshot"), /submissionResult/);
+});
+
+test("content-category helper and save-outcome reducer cover every terminal", () => {
+  assert.deepEqual(companion.CONTENT_CATEGORIES, ["general", "meme", "movie", "youtube"]);
+  assert.equal(companion.acceptContentCategory("general"), "general");
+  assert.equal(companion.acceptContentCategory("meme"), "meme");
+  assert.equal(companion.acceptContentCategory("movie"), "movie");
+  assert.equal(companion.acceptContentCategory("youtube"), "youtube");
+  assert.equal(companion.acceptContentCategory("General"), null);
+  assert.equal(companion.acceptContentCategory("other"), null);
+  assert.equal(companion.defaultContentCategoryForMediaKind("image"), "general");
+  assert.equal(companion.defaultContentCategoryForMediaKind("video"), "meme");
+  assert.equal(companion.defaultContentCategoryForMediaKind("unknown"), "general");
+  assert.equal(companion.reduceXSaveOutcome({ ok: true }).kind, "busy");
+  assert.equal(companion.reduceXSaveOutcome({ ok: true }).name, "Saving to FrameNest…");
+  assert.equal(
+    companion.reduceXSaveOutcome({ ok: true, state: "completed" }).name,
+    "Saved to FrameNest"
+  );
+  assert.equal(
+    companion.reduceXSaveOutcome({ ok: true, submissionResult: "reuse" }).name,
+    "Already saved to FrameNest"
+  );
+  assert.equal(
+    companion.reduceXSaveOutcome({ ok: true, state: "duplicate_resolved" }).name,
+    "Already saved to FrameNest"
+  );
+  assert.equal(
+    companion.reduceXSaveOutcome({
+      ok: true,
+      state: "completed_partial",
+      successCount: 1,
+      discoveredAssetCount: 3,
+    }).name,
+    "Partially saved to FrameNest (1 of 3)"
+  );
+  const failed = companion.reduceXSaveOutcome({ ok: true, state: "failed", terminal: true });
+  assert.equal(failed.kind, "failed");
+  assert.equal(failed.name, "Save to FrameNest failed");
+  assert.equal(
+    companion.reduceXSaveOutcome({ ok: true, state: "catalog_removed", terminal: true }).name,
+    "Saved item is no longer available in FrameNest"
+  );
+  const unknown = companion.reduceXSaveOutcome({ ok: false, error: "network_failed" });
+  assert.equal(unknown.kind, "unknown");
+  assert.equal(unknown.name, "Save status unknown—check FrameNest");
+  assert.equal(unknown.retainInflight, true);
+  assert.equal(
+    companion.reduceXSaveOutcome({ ok: false, error: "X_REQUEST_INVALID_CATEGORY" }).name,
+    "Save to FrameNest failed—FrameNest needs an update"
+  );
+  const closed = companion.reduceXSaveOutcome({ ok: true, terminal: true, state: "unexpected" });
+  assert.equal(closed.kind, "unknown");
+});
+
+test("failed Save never paints Saved to FrameNest and mirrors every tile on the post", () => {
+  const CLAIM = "11111111-1111-4111-8111-111111111111";
+  const POST_ID = "123456789";
+  const replies = [];
+  const dom = createMiniDom();
+  const post = el(dom, "article", { "data-testid": "tweet" });
+  const link = el(dom, "a", {
+    href: "https://x.com/fixture/status/" + POST_ID,
+    role: "link",
+  });
+  const photo = el(dom, "div", { "data-testid": "tweetPhoto", "data-framenest-media": "" });
+  const video = el(dom, "div", { "data-testid": "videoPlayer", "data-framenest-media": "" });
+  post.appendChild(link);
+  post.appendChild(photo);
+  post.appendChild(video);
+  dom.body.appendChild(post);
+  const hooks = loadAdapterHooks(dom, {
+    sendMessage(message, callback) {
+      replies.push(message);
+      if (message.type === companion.TYPES.POLL_CLAIM) {
+        callback({
+          ok: true,
+          claimId: CLAIM,
+          postId: POST_ID,
+          state: "failed",
+          terminal: true,
+        });
+        return;
+      }
+      callback({ ok: false, error: "empty_response" });
+    },
+  });
+  assert.equal(hooks.mediaKindForHost(photo), "image");
+  assert.equal(hooks.mediaKindForHost(video), "video");
+  assert.equal(hooks.injectSave(post), "placed");
+  const placed = post.querySelectorAll("[data-framenest-companion='save']");
+  assert.equal(placed.length, 2);
+  const first = placed[0];
+  const second = placed[1];
+  assert.equal(first.getAttribute("data-framenest-post-id"), POST_ID);
+  assert.equal(second.getAttribute("data-framenest-post-id"), POST_ID);
+  hooks.applySaveResult(first, {
+    ok: true,
+    claimId: CLAIM,
+    postId: POST_ID,
+    state: "failed",
+    terminal: true,
+  });
+  assert.equal(first.getAttribute("aria-label"), "Save to FrameNest failed");
+  assert.equal(second.getAttribute("aria-label"), "Save to FrameNest failed");
+  assert.equal(first.getAttribute("data-framenest-save-kind"), "failed");
+  assert.equal(second.getAttribute("data-framenest-save-kind"), "failed");
+  assert.equal(first.getAttribute("aria-label").includes("Saved to FrameNest"), false);
+  const failedIcon = hooks.saveIconSvg("failed");
+  assert.ok(pathDataFrom(failedIcon).includes("M12 6.5v11M6.5 12h11"));
+  assert.equal(
+    pathDataFrom(failedIcon).some((d) => d.includes("M6.5 12.25l3.6 3.5")),
+    false
+  );
+});
+
+test("catalog_removed, reuse, partial, and unknown outcomes paint distinct copy", async () => {
+  const POST_ID = "987654321";
+  const CLAIM = "22222222-2222-4222-8222-222222222222";
+  const dom = createMiniDom();
+  const post = el(dom, "article", { "data-testid": "tweet" });
+  post.appendChild(
+    el(dom, "a", { href: "https://x.com/fixture/status/" + POST_ID, role: "link" })
+  );
+  const photo = el(dom, "div", { "data-testid": "tweetPhoto" });
+  post.appendChild(photo);
+  dom.body.appendChild(post);
+  let pollState = "inspecting";
+  const hooks = loadAdapterHooks(dom, {
+    sendMessage(message, callback) {
+      if (message.type === companion.TYPES.POLL_CLAIM) {
+        callback({
+          ok: true,
+          claimId: CLAIM,
+          postId: POST_ID,
+          state: pollState,
+          terminal: pollState !== "inspecting",
+          successCount: 1,
+          discoveredAssetCount: 2,
+        });
+        return;
+      }
+      if (message.type === companion.TYPES.RECOVER_INFLIGHT) {
+        callback({
+          ok: true,
+          claimIds: [CLAIM],
+          claims: [{ claimId: CLAIM, postId: POST_ID }],
+        });
+        return;
+      }
+      callback({ ok: false, error: "empty_response" });
+    },
+  });
+  hooks.injectSave(post);
+  const button = photo.querySelector("[data-framenest-companion='save']");
+  hooks.applySaveResult(button, { ok: true, submissionResult: "reuse", state: "completed" });
+  assert.equal(button.getAttribute("aria-label"), "Already saved to FrameNest");
+  hooks.applySaveResult(button, {
+    ok: true,
+    state: "completed_partial",
+    successCount: 1,
+    discoveredAssetCount: 2,
+  });
+  assert.equal(button.getAttribute("aria-label"), "Partially saved to FrameNest (1 of 2)");
+  hooks.applySaveResult(button, { ok: true, state: "catalog_removed", terminal: true });
+  assert.equal(
+    button.getAttribute("aria-label"),
+    "Saved item is no longer available in FrameNest"
+  );
+  hooks.applySaveResult(button, { ok: false, error: "network_failed", ambiguous: true });
+  assert.equal(button.getAttribute("aria-label"), "Save status unknown—check FrameNest");
+  hooks.applySaveResult(button, {
+    ok: true,
+    claimId: CLAIM,
+    postId: POST_ID,
+    state: "inspecting",
+  });
+  assert.equal(button.getAttribute("aria-label"), "Saving to FrameNest…");
+  assert.equal(button.getAttribute("aria-busy"), "true");
+  pollState = "catalog_removed";
+  await hooks.pollClaim(CLAIM, POST_ID, null, 0);
+  assert.equal(
+    button.getAttribute("aria-label"),
+    "Saved item is no longer available in FrameNest"
+  );
+  await hooks.recover();
+  assert.equal(button.getAttribute("aria-label"), "Saved item is no longer available in FrameNest");
+});
+
+test("Escape restores focus to the initiating Save control", () => {
+  assert.match(extractNamedFunction(adapterSource, "closeSavePopup"), /button\.focus\(\)/);
+  const saveJs = fs.readFileSync(path.join(REPO, "extension/ui/save.js"), "utf8");
+  assert.match(saveJs, /tagListOpen\(\)[\s\S]*closeTagList\(\)[\s\S]*notifyParent\("cancel"\)/);
 });

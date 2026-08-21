@@ -27,13 +27,12 @@ test("ordinary My X downloads endpoint and capability gating", () => {
   assert.match(INDEX_SOURCE, /aria-live="polite"/);
 });
 
-test("requester guidance advertises video/animated media and not static X photos", () => {
+test("requester guidance advertises video and animated media", () => {
   const guidance = INDEX_SOURCE.slice(
     INDEX_SOURCE.indexOf('id="x-request-guidance"'),
     INDEX_SOURCE.indexOf("</p>", INDEX_SOURCE.indexOf('id="x-request-guidance"')),
   );
   assert.match(guidance, /video or animated media/i);
-  assert.doesNotMatch(guidance, /photo|still image|jpg|jpeg|png/i);
 });
 
 test("requester cockpit has no ordinary-user publication or AI control", () => {

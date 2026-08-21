@@ -17,6 +17,18 @@
           <input id="title" name="title" type="text" maxlength="240" spellcheck="true" />
           <label for="description">Description</label>
           <textarea id="description" name="description" maxlength="10000" rows="4"></textarea>
+          <fieldset id="category-fieldset" class="category">
+            <legend id="category-legend">Category</legend>
+            <div class="category-options" role="radiogroup" aria-labelledby="category-legend">
+              <label><input type="radio" name="category" value="general" /> General</label>
+              <label><input type="radio" name="category" value="meme" /> Meme</label>
+              <label><input type="radio" name="category" value="movie" /> Movie</label>
+              <label><input type="radio" name="category" value="youtube" /> YouTube</label>
+            </div>
+            <p id="category-help" class="hint">
+              Category describes the content and applies to every media item in this post. Movie genres can be added later in FrameNest.
+            </p>
+          </fieldset>
           <label for="tag-search">Tags</label>
           <input
             id="tag-search"

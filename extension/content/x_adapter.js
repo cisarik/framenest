@@ -7,6 +7,7 @@
 
   const injected = new WeakSet();
   const inflightByClaim = new Map();
+  const postOutcomeById = new Map();
   const attachByComposer = new WeakMap();
   const attachEditable = new WeakMap();
   const plusPlusBound = new WeakSet();
@@ -20,6 +21,10 @@
   const SAVE_UNAVAILABLE = "FrameNest unavailable";
   const GALLERY_ACCENT = "#00ff41";
   const GALLERY_DANGER = "#ff4d4d";
+  const GALLERY_WARNING = "#e6b800";
+  const POLL_FAILURE_BUDGET_MS = 120000;
+  const POLL_BASE_DELAY_MS = 1500;
+  const POLL_MAX_DELAY_MS = 15000;
   const ATTACH_NAME = "Attach from FrameNest";
   const COMPANION_STYLE = [
     "[data-framenest-companion='save'] {",
@@ -68,6 +73,18 @@
     "[data-framenest-companion='save'][data-framenest-save-kind='failed'] {",
     "  color: #ff4d4d;",
     "  border-color: #ff4d4d;",
+    "}",
+    "[data-framenest-companion='save'][data-framenest-save-kind='partial'],",
+    "[data-framenest-companion='save'][data-framenest-save-kind='unknown'] {",
+    "  color: #e6b800;",
+    "  border-color: #e6b800;",
+    "}",
+    ".framenest-save-live {",
+    "  position: absolute;",
+    "  width: 1px;",
+    "  height: 1px;",
+    "  overflow: hidden;",
+    "  clip: rect(0 0 0 0);",
     "}",
     "[data-framenest-companion='save'][data-framenest-save-kind='busy'] svg {",
     "  opacity: 0.7;",
@@ -289,8 +306,15 @@
     }
     button.appendChild(saveIconSvg(kind));
     button.dataset.framenestSaveKind = kind;
-    button.style.color = kind === "failed" ? GALLERY_DANGER : GALLERY_ACCENT;
-    button.style.borderColor = kind === "failed" ? GALLERY_DANGER : GALLERY_ACCENT;
+    button.setAttribute("data-framenest-save-kind", kind);
+    let tone = GALLERY_ACCENT;
+    if (kind === "failed") {
+      tone = GALLERY_DANGER;
+    } else if (kind === "partial" || kind === "unknown") {
+      tone = GALLERY_WARNING;
+    }
+    button.style.color = tone;
+    button.style.borderColor = tone;
   }
 
   function ensureCompanionStyle() {
@@ -317,10 +341,91 @@
     event.stopImmediatePropagation();
   }
 
-  function createSaveControl(accepted) {
+  function mediaKindForHost(host) {
+    if (!host) {
+      return "unknown";
+    }
+    if (typeof host.matches === "function" && host.matches("[data-testid='tweetPhoto']")) {
+      return "image";
+    }
+    if (host.querySelector && host.querySelector("[data-testid='tweetPhoto']")) {
+      return "image";
+    }
+    if (
+      typeof host.matches === "function" &&
+      (host.matches("[data-testid='videoPlayer']") ||
+        host.matches("[data-testid='videoComponent']"))
+    ) {
+      return "video";
+    }
+    if (
+      host.querySelector &&
+      (host.querySelector("[data-testid='videoPlayer']") ||
+        host.querySelector("[data-testid='videoComponent']") ||
+        host.querySelector("video"))
+    ) {
+      return "video";
+    }
+    return "unknown";
+  }
+
+  function saveButtonsForPost(postId) {
+    const accepted = companion.acceptXPostId(postId);
+    if (!accepted) {
+      return [];
+    }
+    return Array.prototype.slice.call(
+      document.querySelectorAll(
+        "[data-framenest-companion='save'][data-framenest-post-id='" + accepted + "']"
+      )
+    );
+  }
+
+  function announce(message) {
+    if (typeof message !== "string" || !message || typeof document.getElementById !== "function") {
+      return;
+    }
+    let live = document.getElementById("framenest-save-live");
+    if (!live) {
+      live = document.createElement("div");
+      live.id = "framenest-save-live";
+      live.setAttribute("id", "framenest-save-live");
+      live.setAttribute("aria-live", "polite");
+      live.setAttribute("aria-atomic", "true");
+      live.className = "framenest-save-live";
+      const parent = document.body || document.documentElement;
+      parent.appendChild(live);
+    }
+    live.textContent = "";
+    live.textContent = message;
+  }
+
+  function paintPostSaveOutcome(postId, outcome, claimId) {
+    const accepted = companion.acceptXPostId(postId);
+    if (!accepted || !outcome) {
+      return;
+    }
+    postOutcomeById.set(accepted, {
+      kind: outcome.kind,
+      name: outcome.name,
+      busy: outcome.busy,
+      claimId: claimId || null,
+    });
+    saveButtonsForPost(accepted).forEach((button) => {
+      setSaveStatus(button, outcome.kind, outcome.name, outcome.busy);
+    });
+    announce(outcome.name);
+    if (!outcome.retainInflight && companion.isUuid(claimId)) {
+      inflightByClaim.delete(claimId);
+    }
+  }
+
+  function createSaveControl(accepted, mediaKind) {
     const button = document.createElement("button");
     button.type = "button";
     button.setAttribute("data-framenest-companion", "save");
+    button.setAttribute("data-framenest-post-id", accepted.postId);
+    button.setAttribute("data-framenest-media-kind", mediaKind || "unknown");
     button.setAttribute("aria-haspopup", "dialog");
     button.setAttribute("aria-expanded", "false");
     setSaveStatus(button, "idle", SAVE_NAME, false);
@@ -351,6 +456,9 @@
     }
     if (state.button && document.contains(state.button)) {
       state.button.setAttribute("aria-expanded", "false");
+      if (typeof state.button.focus === "function") {
+        state.button.focus();
+      }
     }
   }
 
@@ -421,12 +529,20 @@
     const frame = document.createElement("div");
     frame.className = "frame";
     const iframe = document.createElement("iframe");
+    const mediaKind = button.getAttribute("data-framenest-media-kind") || "unknown";
     iframe.src =
       chrome.runtime.getURL("ui/save.html") +
       "#url=" +
-      encodeURIComponent(accepted.submittedUrl);
+      encodeURIComponent(accepted.submittedUrl) +
+      "&media=" +
+      encodeURIComponent(mediaKind);
     iframe.title = SAVE_NAME;
     iframe.setAttribute("aria-label", SAVE_NAME);
+    iframe.addEventListener("load", () => {
+      if (typeof iframe.focus === "function") {
+        iframe.focus();
+      }
+    });
     frame.appendChild(iframe);
     shadow.appendChild(style);
     shadow.appendChild(frame);
@@ -488,17 +604,20 @@
   }
 
   function applySaveResult(button, result) {
-    if (!result.ok) {
-      setSaveStatus(button, "failed", "Save to FrameNest failed", false);
-      return;
+    const postId =
+      companion.acceptXPostId(button && button.getAttribute && button.getAttribute("data-framenest-post-id")) ||
+      companion.acceptXPostId(result && result.postId);
+    const outcome = companion.reduceXSaveOutcome(result);
+    const claimId = result && result.claimId;
+    if (postId) {
+      paintPostSaveOutcome(postId, outcome, claimId);
+    } else if (button) {
+      setSaveStatus(button, outcome.kind, outcome.name, outcome.busy);
     }
-    if (result.claimId) {
-      inflightByClaim.set(result.claimId, button);
-      setSaveStatus(button, "busy", "Saving to FrameNest", true);
-      pollClaim(result.claimId);
-      return;
+    if (companion.isUuid(claimId) && outcome.busy && postId) {
+      inflightByClaim.set(claimId, postId);
+      pollClaim(claimId, postId, null, 0);
     }
-    setSaveStatus(button, "done", "Saved to FrameNest", false);
   }
 
   function injectSave(postRoot) {
@@ -520,7 +639,12 @@
       }
       host.setAttribute("data-framenest-media-host", "");
       ensureContainingBlock(host);
-      host.appendChild(createSaveControl(accepted));
+      const button = createSaveControl(accepted, mediaKindForHost(host));
+      host.appendChild(button);
+      const remembered = postOutcomeById.get(accepted.postId);
+      if (remembered) {
+        setSaveStatus(button, remembered.kind, remembered.name, remembered.busy);
+      }
       injected.add(host);
     });
     return "placed";
@@ -1336,6 +1460,7 @@
     globalThis.FrameNestXAdapterTestHooks.findComposerChrome = findComposerChrome;
     globalThis.FrameNestXAdapterTestHooks.findComposerTextRow = findComposerTextRow;
     globalThis.FrameNestXAdapterTestHooks.injectAttach = injectAttach;
+    globalThis.FrameNestXAdapterTestHooks.injectSave = injectSave;
     globalThis.FrameNestXAdapterTestHooks.saveIconSvg = saveIconSvg;
     globalThis.FrameNestXAdapterTestHooks.onComposerFocusIn = onComposerFocusIn;
     globalThis.FrameNestXAdapterTestHooks.bindComposerIfLive = bindComposerIfLive;
@@ -1343,38 +1468,84 @@
     globalThis.FrameNestXAdapterTestHooks.completeAttachTransfer = completeAttachTransfer;
     globalThis.FrameNestXAdapterTestHooks.plusPlusTokenAtCaret = plusPlusTokenAtCaret;
     globalThis.FrameNestXAdapterTestHooks.consumePlusPlusFromValue = consumePlusPlusFromValue;
+    globalThis.FrameNestXAdapterTestHooks.applySaveResult = applySaveResult;
+    globalThis.FrameNestXAdapterTestHooks.createSaveControl = createSaveControl;
+    globalThis.FrameNestXAdapterTestHooks.closeSavePopup = closeSavePopup;
+    globalThis.FrameNestXAdapterTestHooks.mediaKindForHost = mediaKindForHost;
+    globalThis.FrameNestXAdapterTestHooks.paintPostSaveOutcome = paintPostSaveOutcome;
+    globalThis.FrameNestXAdapterTestHooks.pollClaim = pollClaim;
+    globalThis.FrameNestXAdapterTestHooks.recover = recover;
     return;
   }
 
-  async function pollClaim(claimId) {
-    const button = inflightByClaim.get(claimId);
-    if (!button || !document.contains(button)) {
-      return;
-    }
-    const result = await request(companion.TYPES.POLL_CLAIM, { claimId });
+  async function pollClaim(claimId, postId, failureStartedAt, attempt) {
+    const result = await request(companion.TYPES.POLL_CLAIM, { claimId: claimId });
+    const resolvedPostId =
+      companion.acceptXPostId(result && result.postId) || companion.acceptXPostId(postId);
     if (!result.ok) {
-      setSaveStatus(button, "failed", "Save to FrameNest failed", false);
-      inflightByClaim.delete(claimId);
+      const origin = failureStartedAt || Date.now();
+      const elapsed = Date.now() - origin;
+      if (elapsed < POLL_FAILURE_BUDGET_MS) {
+        const step = attempt || 0;
+        const delay = Math.min(
+          POLL_BASE_DELAY_MS * Math.pow(1.5, step),
+          POLL_MAX_DELAY_MS
+        );
+        window.setTimeout(() => {
+          pollClaim(claimId, resolvedPostId, origin, step + 1);
+        }, delay);
+        return;
+      }
+      if (resolvedPostId) {
+        paintPostSaveOutcome(
+          resolvedPostId,
+          companion.reduceXSaveOutcome({ ok: false, error: "network_failed", ambiguous: true }),
+          claimId
+        );
+      }
       return;
     }
-    if (result.terminal) {
-      inflightByClaim.delete(claimId);
-      setSaveStatus(button, "done", "Saved to FrameNest", false);
-      return;
+    const outcome = companion.reduceXSaveOutcome(result);
+    if (resolvedPostId) {
+      if (outcome.busy) {
+        inflightByClaim.set(claimId, resolvedPostId);
+      }
+      paintPostSaveOutcome(resolvedPostId, outcome, claimId);
     }
-    setSaveStatus(button, "busy", "Saving to FrameNest", true);
-    window.setTimeout(() => {
-      pollClaim(claimId);
-    }, 1500);
+    if (outcome.busy) {
+      window.setTimeout(() => {
+        pollClaim(claimId, resolvedPostId, null, 0);
+      }, POLL_BASE_DELAY_MS);
+    }
   }
 
   async function recover() {
     const result = await request(companion.TYPES.RECOVER_INFLIGHT, {});
-    if (!result.ok || !Array.isArray(result.claimIds)) {
+    if (!result.ok) {
       return;
     }
-    result.claimIds.forEach((claimId) => {
-      pollClaim(claimId);
+    const records = Array.isArray(result.claims) ? result.claims : [];
+    const claimIds = Array.isArray(result.claimIds) ? result.claimIds : [];
+    const seen = {};
+    const busyOutcome = companion.reduceXSaveOutcome({ ok: true });
+    records.forEach((record) => {
+      if (!record || !companion.isUuid(record.claimId) || seen[record.claimId]) {
+        return;
+      }
+      seen[record.claimId] = true;
+      const recoveredPostId = companion.acceptXPostId(record.postId);
+      if (recoveredPostId) {
+        inflightByClaim.set(record.claimId, recoveredPostId);
+        paintPostSaveOutcome(recoveredPostId, busyOutcome, record.claimId);
+      }
+      pollClaim(record.claimId, recoveredPostId, null, 0);
+    });
+    claimIds.forEach((claimId) => {
+      if (!companion.isUuid(claimId) || seen[claimId]) {
+        return;
+      }
+      seen[claimId] = true;
+      pollClaim(claimId, inflightByClaim.get(claimId) || null, null, 0);
     });
   }
 

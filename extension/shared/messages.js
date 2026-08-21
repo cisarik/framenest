@@ -15,6 +15,8 @@
   const POST_ID_PATTERN = /^[0-9]{1,19}$/;
   const HANDLE_PATTERN = /^[A-Za-z0-9_]{1,64}$/;
   const X_HOSTS = new Set(["x.com", "www.x.com", "twitter.com", "www.twitter.com"]);
+  const CONTENT_CATEGORIES = Object.freeze(["general", "meme", "movie", "youtube"]);
+  const POST_ID_VALUE_PATTERN = /^[0-9]{1,19}$/;
   const TS_ORIGIN_PATTERN = /^https:\/\/[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+\.ts\.net$/;
   const TYPES = Object.freeze({
     SAVE_POST: "save_post",
@@ -164,6 +166,105 @@
     return out;
   }
 
+  function acceptContentCategory(value) {
+    if (typeof value !== "string") {
+      return null;
+    }
+    return CONTENT_CATEGORIES.indexOf(value) === -1 ? null : value;
+  }
+
+  function defaultContentCategoryForMediaKind(kind) {
+    return kind === "video" ? "meme" : "general";
+  }
+
+  function acceptXPostId(value) {
+    return typeof value === "string" && POST_ID_VALUE_PATTERN.test(value) ? value : null;
+  }
+
+  function reduceXSaveOutcome(result) {
+    if (!result || result.ok !== true) {
+      const error = result && result.error;
+      if (
+        result &&
+        (result.ambiguous === true ||
+          error === "network_failed" ||
+          error === "extension_unavailable" ||
+          error === "empty_response")
+      ) {
+        return {
+          kind: "unknown",
+          name: "Save status unknown—check FrameNest",
+          busy: false,
+          retainInflight: true,
+        };
+      }
+      let name = "Save to FrameNest failed";
+      if (error === "X_REQUEST_INVALID_CATEGORY") {
+        name = "Save to FrameNest failed—FrameNest needs an update";
+      } else if (error === "X_REQUEST_CATEGORY_CONFLICT") {
+        name = "Save to FrameNest failed—category already differs";
+      }
+      return { kind: "failed", name: name, busy: false, retainInflight: false };
+    }
+    const state = result.state;
+    const disposition = result.submissionResult;
+    if (disposition === "reuse" || disposition === "duplicate_resolved" || state === "duplicate_resolved") {
+      return {
+        kind: "done",
+        name: "Already saved to FrameNest",
+        busy: false,
+        retainInflight: false,
+      };
+    }
+    if (state === "completed") {
+      return {
+        kind: "done",
+        name: "Saved to FrameNest",
+        busy: false,
+        retainInflight: false,
+      };
+    }
+    if (state === "completed_partial") {
+      const successCount = result.successCount;
+      const discovered = result.discoveredAssetCount;
+      let name = "Partially saved to FrameNest";
+      if (successCount != null && discovered != null) {
+        name = "Partially saved to FrameNest (" + successCount + " of " + discovered + ")";
+      }
+      return { kind: "partial", name: name, busy: false, retainInflight: false };
+    }
+    if (state === "failed") {
+      return {
+        kind: "failed",
+        name: "Save to FrameNest failed",
+        busy: false,
+        retainInflight: false,
+      };
+    }
+    if (state === "catalog_removed") {
+      return {
+        kind: "failed",
+        name: "Saved item is no longer available in FrameNest",
+        busy: false,
+        retainInflight: false,
+      };
+    }
+    if (result.terminal) {
+      return {
+        kind: "unknown",
+        name: "Save status unknown—check FrameNest",
+        busy: false,
+        retainInflight: true,
+      };
+    }
+    return {
+      kind: "busy",
+      name: "Saving to FrameNest…",
+      busy: true,
+      retainInflight: true,
+    };
+  }
+
   return {
     PROTOCOL,
     API_VERSION,
@@ -171,10 +272,15 @@
     FETCH_TIMEOUT_MS,
     CHUNK_BYTES,
     TYPES,
+    CONTENT_CATEGORIES,
     isProtocolMessage,
     dropUnknown,
     isUuid,
     acceptXPostUrl,
+    acceptXPostId,
+    acceptContentCategory,
+    defaultContentCategoryForMediaKind,
+    reduceXSaveOutcome,
     acceptFrameNestOrigin,
     pathFor,
     bytesFromBase64,
