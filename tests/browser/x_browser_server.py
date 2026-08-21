@@ -145,6 +145,7 @@ class BrowserFakeExtractor:
         media_type: str,
         expected_mime: str,
         source_media_key: str | None,
+        selected_variant: str | None = None,
         stage_key: str,
         submitted_url: str,
         staging: object,
@@ -163,7 +164,7 @@ class BrowserFakeExtractor:
             if media_type in {"video", "animated_gif"}
             else (FIXTURES / "lal.jpg").read_bytes()
         )
-        artifact = pathlib.Path(directory) / "artifact.mp4"
+        artifact = pathlib.Path(directory) / "artifact.bin"
         artifact.write_bytes(payload)
         digest = hashlib.sha256(payload).hexdigest()
         return XAssetAcquisition(size_bytes=len(payload), sha256=digest)

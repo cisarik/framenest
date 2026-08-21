@@ -20,6 +20,7 @@ from framenest.domain.x_acquisition import (
     accept_x_post_url,
     default_x_category,
     derive_x_requester_phase,
+    is_claim_wide_x_failure,
     is_retryable_x_failure,
     normalize_x_creator,
     x_title_from_post_post,
@@ -269,6 +270,13 @@ def test_failure_retryability() -> None:
     assert is_retryable_x_failure("X_DOWNLOAD_TIMEOUT")
     assert not is_retryable_x_failure("X_AUTHENTICATION_REQUIRED")
     assert not is_retryable_x_failure("X_NO_SUPPORTED_MEDIA")
+    assert not is_retryable_x_failure("X_SOURCE_MEDIA_CHANGED")
+    assert not is_retryable_x_failure("X_MULTI_ASSET_FAILED")
+    assert is_claim_wide_x_failure("X_POST_DELETED")
+    assert is_claim_wide_x_failure("X_MULTI_ASSET_FAILED")
+    assert not is_claim_wide_x_failure("X_SOURCE_MEDIA_CHANGED")
+    assert not is_claim_wide_x_failure("X_MEDIA_TYPE_UNSUPPORTED")
+    assert not is_claim_wide_x_failure("X_DOWNLOAD_TIMEOUT")
 
 
 def test_retry_reset_transitions_allowed() -> None:

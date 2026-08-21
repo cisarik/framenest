@@ -467,7 +467,7 @@ def test_interrupted_acquiring_retries_same_asset_after_staging_clear(lifecycle)
             staging = kwargs["staging"]
             stage_key = kwargs["stage_key"]
             directory = staging.prepare(stage_key)
-            artifact = directory / "artifact.mp4"
+            artifact = directory / "artifact.bin"
             if self.downloads == 1:
                 artifact.write_bytes(b"partial-overwrites-bait")
                 self.partial_present = artifact.exists()
@@ -737,3 +737,53 @@ def test_catalog_handoff_uses_claim_category_or_media_kind_default(lifecycle) ->
     assert image_class is not None and video_class is not None
     assert image_class.content_category is ContentCategory.GENERAL
     assert video_class.content_category is ContentCategory.MEME
+
+
+def test_asset_scoped_terminal_failure_continues_later_assets(lifecycle) -> None:
+    repo, service, admin, coordinator, extractor, media_id = lifecycle
+    from framenest.application.ports.x_extractor import XExtractionError as _E
+
+    original_download = extractor.download
+
+    def failing_download(*, ordinal, **kwargs):
+        if ordinal == 0:
+            raise _E("X_SOURCE_MEDIA_CHANGED", "source changed")
+        return original_download(ordinal=ordinal, **kwargs)
+
+    extractor.assets = [
+        XNormalizedAssetDescriptor(
+            ordinal=0, media_type=XMediaType.VIDEO, expected_mime="video/mp4",
+            source_media_key="asset-0", width=320, height=180, duration_seconds=12,
+            selected_variant="x-video-default-mp4-v1",
+        ),
+        XNormalizedAssetDescriptor(
+            ordinal=1, media_type=XMediaType.IMAGE, expected_mime="image/jpeg",
+            source_media_key="asset-1", width=800, height=600,
+            selected_variant="x-photo-orig-jpeg-v1",
+        ),
+    ]
+    extractor.download = failing_download
+    result = service.submit(URL, login_key="alice")
+    claim = _run(_drain_until_terminal(coordinator, repo, result.request_id))
+    assert claim.state is XAcquisitionState.COMPLETED_PARTIAL
+    assets = repo.list_assets_for_post(claim.id)
+    by_ordinal = {asset.ordinal: asset for asset in assets}
+    assert by_ordinal[0].state is XAssetState.FAILED
+    assert by_ordinal[0].failure_code == "X_SOURCE_MEDIA_CHANGED"
+    assert by_ordinal[1].state is XAssetState.CATALOGED
+
+
+def test_all_failed_multi_asset_uses_multi_asset_code(lifecycle) -> None:
+    repo, service, admin, coordinator, extractor, media_id = lifecycle
+    from framenest.application.ports.x_extractor import XExtractionError as _E
+
+    def failing_download(**kwargs):
+        raise _E("X_MEDIA_TYPE_UNSUPPORTED", "unsupported")
+
+    extractor.download = failing_download
+    result = service.submit(URL, login_key="alice")
+    claim = _run(_drain_until_terminal(coordinator, repo, result.request_id))
+    assert claim.state is XAcquisitionState.FAILED
+    assert claim.failure_code == "X_MULTI_ASSET_FAILED"
+    with pytest.raises(XAcquisitionStateConflictError):
+        service.retry(claim.id, login_key="alice")

@@ -27,10 +27,17 @@ class FilesystemYouTubeStaging:
         root: Path,
         *,
         forbidden_roots: tuple[Path, ...] = (),
+        artifact_filename: str = ARTIFACT_FILENAME,
     ) -> None:
         if not isinstance(root, Path) or not root.is_absolute():
             raise YouTubeStagingUnavailableError("YouTube staging unavailable.")
+        if (
+            not isinstance(artifact_filename, str)
+            or _OWNED_ENTRY_PATTERN.fullmatch(artifact_filename) is None
+        ):
+            raise YouTubeStagingUnavailableError("YouTube staging unavailable.")
         self._root = Path(os.path.abspath(root))
+        self._artifact_filename = artifact_filename
         self._forbidden_roots = tuple(
             Path(os.path.abspath(path)) for path in forbidden_roots
         )
@@ -141,10 +148,10 @@ class FilesystemYouTubeStaging:
             if hasattr(os, "O_NOFOLLOW"):
                 flags |= os.O_NOFOLLOW
             try:
-                fd = os.open(ARTIFACT_FILENAME, flags, dir_fd=claim_fd)
+                fd = os.open(self._artifact_filename, flags, dir_fd=claim_fd)
             except OSError as exc:
                 if exc.errno == errno.ENOENT:
-                    raise FileNotFoundError(ARTIFACT_FILENAME) from exc
+                    raise FileNotFoundError(self._artifact_filename) from exc
                 raise YouTubeStagingInconsistentError(
                     "YouTube staging inconsistent."
                 ) from exc
@@ -162,6 +169,7 @@ class FilesystemYouTubeStaging:
                     fd,
                     claim_fd,
                     stat_result,
+                    artifact_filename=self._artifact_filename,
                 )
                 claim_fd = -1
                 return reader
@@ -275,9 +283,12 @@ class _FilesystemStagedArtifactReader:
         fd: int,
         claim_fd: int,
         initial_stat: os.stat_result,
+        *,
+        artifact_filename: str = ARTIFACT_FILENAME,
     ) -> None:
         self._fd = fd
         self._claim_fd = claim_fd
+        self._artifact_filename = artifact_filename
         self._fingerprint = _stat_fingerprint(initial_stat)
         self._size_bytes = initial_stat.st_size
         self._closed = False
@@ -329,7 +340,7 @@ class _FilesystemStagedArtifactReader:
             )
         try:
             path_stat = os.stat(
-                ARTIFACT_FILENAME,
+                self._artifact_filename,
                 dir_fd=self._claim_fd,
                 follow_symlinks=False,
             )

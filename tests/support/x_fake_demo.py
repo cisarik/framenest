@@ -53,6 +53,7 @@ class FakeXExtractor:
                 width=640,
                 height=360,
                 duration_seconds=12,
+                selected_variant="x-video-default-mp4-v1",
             )
         ]
         return XNormalizedInspection(
@@ -75,6 +76,7 @@ class FakeXExtractor:
         media_type: str,
         expected_mime: str,
         source_media_key: str | None,
+        selected_variant: str | None = None,
         stage_key: str,
         submitted_url: str,
         staging: object,
@@ -85,7 +87,7 @@ class FakeXExtractor:
         directory = staging.prepare(stage_key)
         # X uses one fixed FrameNest artifact name regardless of media type;
         # MIME sniffing determines the actual type at handoff.
-        artifact = Path(directory) / "artifact.mp4"
+        artifact = Path(directory) / "artifact.bin"
         artifact.write_bytes(payload)
         digest = hashlib.sha256(payload).hexdigest()
         return XAssetAcquisition(size_bytes=len(payload), sha256=digest)

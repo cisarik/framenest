@@ -249,6 +249,22 @@ class XMediaType(StrEnum):
     IMAGE = "image"
 
 
+X_VARIANT_PHOTO_JPEG = "x-photo-orig-jpeg-v1"
+X_VARIANT_PHOTO_PNG = "x-photo-orig-png-v1"
+X_VARIANT_VIDEO_MP4 = "x-video-default-mp4-v1"
+X_VARIANT_ANIMATED_GIF_MP4 = "x-animated-gif-mp4-v1"
+X_VARIANT_ANIMATED_GIF_LITERAL = "x-animated-gif-literal-gif-v1"
+
+SUPPORTED_X_VARIANTS: frozenset[str] = frozenset(
+    {
+        X_VARIANT_PHOTO_JPEG,
+        X_VARIANT_PHOTO_PNG,
+        X_VARIANT_VIDEO_MP4,
+        X_VARIANT_ANIMATED_GIF_MP4,
+        X_VARIANT_ANIMATED_GIF_LITERAL,
+    }
+)
+
 _X_FAILURE_RETRYABLE: frozenset[str] = frozenset(
     {
         "X_RATE_LIMITED",
@@ -273,6 +289,7 @@ TERMINAL_X_FAILURE_CODES: frozenset[str] = frozenset(
         "X_POST_PROTECTED",
         "X_AUTHENTICATION_REQUIRED",
         "X_EXTRACTOR_MALFORMED",
+        "X_EXTERNAL_LINK_DENIED",
         "X_NO_SUPPORTED_MEDIA",
         "X_MEDIA_TYPE_UNSUPPORTED",
         "X_TOO_MANY_ASSETS",
@@ -282,7 +299,29 @@ TERMINAL_X_FAILURE_CODES: frozenset[str] = frozenset(
         "X_DIMENSIONS_TOO_LARGE",
         "X_CODEC_UNSUPPORTED",
         "X_DUPLICATE_CLAIM",
+        "X_SOURCE_MEDIA_CHANGED",
         "X_PARTIAL_MULTI_ASSET",
+        "X_MULTI_ASSET_FAILED",
+    }
+)
+
+CLAIM_WIDE_X_FAILURE_CODES: frozenset[str] = frozenset(
+    {
+        "X_URL_UNSUPPORTED",
+        "X_URL_INVALID_POST_ID",
+        "X_HOST_UNSUPPORTED",
+        "X_POST_UNAVAILABLE",
+        "X_POST_DELETED",
+        "X_POST_PROTECTED",
+        "X_AUTHENTICATION_REQUIRED",
+        "X_EXTRACTOR_MALFORMED",
+        "X_EXTERNAL_LINK_DENIED",
+        "X_NO_SUPPORTED_MEDIA",
+        "X_TOO_MANY_ASSETS",
+        "X_CLAIM_TOO_LARGE",
+        "X_DUPLICATE_CLAIM",
+        "X_PARTIAL_MULTI_ASSET",
+        "X_MULTI_ASSET_FAILED",
     }
 )
 
@@ -293,6 +332,12 @@ def is_retryable_x_failure(code: object) -> bool:
     if not isinstance(code, str):
         return False
     return code in _X_FAILURE_RETRYABLE
+
+
+def is_claim_wide_x_failure(code: object) -> bool:
+    if not isinstance(code, str):
+        return False
+    return code in CLAIM_WIDE_X_FAILURE_CODES
 
 
 @dataclass(frozen=True, slots=True)
@@ -361,6 +406,7 @@ class XNormalizedAssetDescriptor:
     height: int | None = None
     duration_seconds: int | None = None
     selected_variant: str | None = None
+    provider_download_index: int | None = None
     warnings: tuple[str, ...] = ()
 
 

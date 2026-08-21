@@ -13,7 +13,7 @@ from framenest.infrastructure.youtube.staging import (
     FilesystemYouTubeStaging,
 )
 
-ARTIFACT_FILENAME = "artifact.mp4"
+ARTIFACT_FILENAME = "artifact.bin"
 
 
 class FilesystemXStaging(FilesystemYouTubeStaging):
@@ -25,7 +25,11 @@ class FilesystemXStaging(FilesystemYouTubeStaging):
         *,
         forbidden_roots: tuple[Path, ...] = (),
     ) -> None:
-        super().__init__(root, forbidden_roots=forbidden_roots)
+        super().__init__(
+            root,
+            forbidden_roots=forbidden_roots,
+            artifact_filename=ARTIFACT_FILENAME,
+        )
 
     def clear(self, staging_key: str) -> None:
         """Idempotently remove one owned staging directory."""

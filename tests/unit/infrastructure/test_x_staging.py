@@ -36,3 +36,16 @@ def test_clear_is_idempotent_when_staging_directory_is_absent(tmp_path: Path) ->
     staging = FilesystemXStaging(_private_root(tmp_path))
     staging.clear(STAGING_KEY)
     staging.clear(STAGING_KEY)
+
+
+def test_x_staging_artifact_filename_is_bin(tmp_path: Path) -> None:
+    assert ARTIFACT_FILENAME == "artifact.bin"
+    staging = FilesystemXStaging(_private_root(tmp_path))
+    claim_directory = staging.prepare(STAGING_KEY)
+    artifact = claim_directory / "artifact.bin"
+    artifact.write_bytes(b"x-neutral-name")
+    reader = staging.open_artifact(STAGING_KEY, expected_size_bytes=14)
+    try:
+        assert reader.read(14) == b"x-neutral-name"
+    finally:
+        reader.close()

@@ -58,6 +58,7 @@ class XExtractor(Protocol):
         media_type: str,
         expected_mime: str,
         source_media_key: str | None,
+        selected_variant: str | None,
         stage_key: str,
         submitted_url: str,
         staging: XStagingStorage,

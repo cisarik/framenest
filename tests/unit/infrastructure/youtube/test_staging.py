@@ -56,6 +56,22 @@ def test_prepare_resume_read_and_exact_cleanup(tmp_path: Path) -> None:
     assert root.exists()
 
 
+def test_default_artifact_filename_remains_mp4(tmp_path: Path) -> None:
+    assert ARTIFACT_FILENAME == "artifact.mp4"
+    storage = FilesystemYouTubeStaging(_private_root(tmp_path))
+    claim_directory = storage.prepare(STAGING_KEY)
+    artifact = claim_directory / "artifact.mp4"
+    artifact.write_bytes(b"youtube-default-name")
+    reader = storage.open_artifact(
+        STAGING_KEY,
+        expected_size_bytes=len(b"youtube-default-name"),
+    )
+    try:
+        assert reader.read(20) == b"youtube-default-name"
+    finally:
+        reader.close()
+
+
 def test_symlink_root_and_overlapping_root_are_rejected(tmp_path: Path) -> None:
     real_root = _private_root(tmp_path)
     symlink_root = tmp_path / "linked"

@@ -95,6 +95,7 @@ from framenest.domain.x_acquisition import (
     derive_x_requester_phase,
     ensure_x_asset_transition_allowed,
     ensure_x_transition_allowed,
+    is_claim_wide_x_failure,
     is_retryable_x_failure,
     normalize_x_creator,
     x_title_from_post_post,
@@ -925,6 +926,7 @@ class XAcquisitionCoordinator:
             media_type=asset.media_type.value,
             expected_mime=asset.expected_mime,
             source_media_key=asset.source_media_key,
+            selected_variant=asset.selected_variant,
             stage_key=asset.stage_key,
             submitted_url=claim.submitted_url,
             staging=self._staging,
@@ -965,7 +967,7 @@ class XAcquisitionCoordinator:
                 XAcquisitionState.FAILED,
                 updated_at_ms=self._now_ms(),
                 failure_stage=XFailureStage.ACQUISITION,
-                failure_code="X_PARTIAL_MULTI_ASSET" if len(assets) > 1 else "X_NO_SUPPORTED_MEDIA",
+                failure_code="X_MULTI_ASSET_FAILED" if len(assets) > 1 else (failed[0].failure_code or "X_NO_SUPPORTED_MEDIA"),
                 completed_at_ms=self._now_ms(),
             )
         elif failed and success:
@@ -995,7 +997,7 @@ class XAcquisitionCoordinator:
             else UploadDuplicateResolutionMode.EXPLICIT
         )
         snapshot = self._transport.create_session(
-            display_filename=f"x-{claim.x_post_id}-{asset.ordinal}.{_extension(asset.media_type)}",
+            display_filename=f"x-{claim.x_post_id}-{asset.ordinal}.{_extension_for_mime(asset.expected_mime)}",
             declared_size_bytes=asset.acquired_bytes,
             session_id=upload_id,
             storage_key=upload_storage_key,
@@ -1219,10 +1221,10 @@ class XAcquisitionCoordinator:
             failure_code=code,
         )
         self._save_asset(asset, failed)
-        if is_retryable_x_failure(code):
-            await self._advance_to_handoff(claim, self._repository.list_assets_for_post(claim.id))
-        else:
+        if is_claim_wide_x_failure(code):
             await self._fail(claim, stage=stage, code=code)
+        else:
+            await self._advance_to_handoff(claim, self._repository.list_assets_for_post(claim.id))
 
     def _save(self, previous: XPostClaim, updated: XPostClaim) -> XPostClaim:
         return self._repository.save_post(
@@ -1402,7 +1404,7 @@ def _normalize_requester(login_key: str) -> str:
 
 def _asset_retryable(asset: XAsset) -> bool:
     if asset.state is XAssetState.FAILED:
-        return True
+        return is_retryable_x_failure(asset.failure_code)
     if asset.state in ACTIVE_X_ASSET_STATES:
         return True
     return False
@@ -1440,12 +1442,13 @@ def _code_from_exception(exc: Exception) -> str:
     return "X_EXTRACTOR_FAILED"
 
 
-def _extension(media_type: XMediaType) -> str:
+def _extension_for_mime(expected_mime: str) -> str:
     return {
-        XMediaType.VIDEO: "mp4",
-        XMediaType.ANIMATED_GIF: "mp4",
-        XMediaType.IMAGE: "jpg",
-    }[media_type]
+        "video/mp4": "mp4",
+        "image/jpeg": "jpg",
+        "image/png": "png",
+        "image/gif": "gif",
+    }.get(expected_mime, "bin")
 
 
 def _one_chunk(chunk: bytes) -> AsyncIterator[bytes]:

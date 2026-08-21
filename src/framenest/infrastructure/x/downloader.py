@@ -1,55 +1,32 @@
 """X-specific yt-dlp adapter with a bounded, normalized extractor contract.
 
-The adapter never exposes raw yt-dlp structures. It inspects one validated X
-post and downloads supported assets into claim-owned staging using only an
-argument-vector subprocess with `--ignore-config`, a controlled environment, a
-bounded working directory and strict timeout and process-group termination.
+The adapter never exposes raw yt-dlp structures. Inspection and public-photo
+download go through the isolated status-bridge module
+(``sys.executable -I -m framenest.infrastructure.x.status_bridge``), which
+calls pinned ``TwitterIE._extract_status`` (``yt-dlp==2026.7.4``, runtime
+``2026.07.04``). Video and animated-GIF-as-MP4 download still uses a
+cookie-free, ``--ignore-config`` yt-dlp subprocess into the claim-owned
+``artifact.bin`` staging name after reinspecting and matching
+``source_media_key``.
 
-Mapping is aligned to the exact pinned extractor: ``yt-dlp==2026.7.4``
-(``.venv/lib/python3.13/site-packages/yt_dlp/extractor/twitter.py``).
-
-Verified upstream TwitterIE contract:
-
-* ``id`` is the media id; ``display_id``/top-level ``id`` are the tweet id;
-* ``channel_id`` is the stable numeric user id (``user_id_str``);
-* ``uploader_id`` is the ``screen_name`` (handle);
-* ``uploader`` is the display name;
-* ``description`` is the tweet text; ``timestamp`` is the posted time;
-* a single video returns one merged info dict with ``formats``/``duration``;
-* multiple videos return a ``playlist_result`` with ``_type == 'playlist'``
-  and an ordered ``entries`` list — the adapter preserves entry order and
-  never passes ``--no-playlist`` (which would discard valid attached assets);
-* photo media is filtered by the extractor (``m['type'] != 'photo'``), so the
-  pinned extractor does not emit static still-image entries; photo-only posts
-  surface the typed terminal failure ``X_NO_SUPPORTED_MEDIA``;
-* an animated-GIF-like post is delivered as a short MP4 video entry and is
-  treated as video unless a GIF marker is present.
-
-First-release production capability: X native video and animated-GIF-as-video
-only. Static X photo acquisition is deferred and NOT part of this adapter's
-real contract, because the pinned extractor does not expose ordinary photo
-entries through the selected contract. The normalized domain model retains the
-``XMediaType.IMAGE`` type for internal/fake-fixture use, but a production
-adapter result never normalizes to it.
-
-The configured command never uses cookies, ``.netrc``, browser-cookie
+The configured commands never use cookies, ``.netrc``, browser-cookie
 extraction, arbitrary plugin/config discovery, or requester-supplied shell
-interpolation. It is testable with a fake executable emitting local synthetic
-JSON without any contact with X.
+interpolation. Photo CDN URLs never appear on argv or in persisted inspect
+JSON. Tests inject a synthetic ``extract_status`` seam and never contact X.
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
-import math
 import os
 from pathlib import Path
-import re
 import signal
 import subprocess
+import sys
 import threading
 import time
+from typing import Callable
 
 from framenest.application.in_process_lifecycle import (
     ShutdownDeadline,
@@ -64,11 +41,15 @@ from framenest.application.ports.x_extractor import (
 )
 from framenest.domain.x_acquisition import (
     MAX_ASSETS_PER_POST,
-    MAX_VIDEO_DURATION_SECONDS,
     XMediaType,
     XNormalizedAssetDescriptor,
     XNormalizedInspection,
     accept_x_post_url,
+)
+from framenest.infrastructure.x import status_bridge
+from framenest.infrastructure.x.staging import ARTIFACT_FILENAME
+from framenest.infrastructure.x.status_bridge import (
+    StatusBridgeError,
 )
 
 DEFAULT_INSPECT_TIMEOUT_SECONDS = 60
@@ -77,12 +58,6 @@ DEFAULT_SOCKET_TIMEOUT_SECONDS = 30
 MAX_STDOUT_BYTES = 4_194_304
 TERMINATE_GRACE_SECONDS = 5
 KILL_GRACE_SECONDS = 2
-
-_SUPPORTED_MIME_BY_TYPE = {
-    XMediaType.VIDEO: "video/mp4",
-    XMediaType.ANIMATED_GIF: "video/mp4",
-    XMediaType.IMAGE: "image/jpeg",
-}
 
 
 class YtDlpXExtractor:
@@ -98,6 +73,10 @@ class YtDlpXExtractor:
         socket_timeout_seconds: float = DEFAULT_SOCKET_TIMEOUT_SECONDS,
         working_directory: Path | None = None,
         max_assets: int = MAX_ASSETS_PER_POST,
+        extract_status: Callable[[str], object] | None = None,
+        photo_transport: status_bridge.PhotoTransport | None = None,
+        photo_resolver: status_bridge.PhotoResolver | None = None,
+        bridge_executable: str | None = None,
     ) -> None:
         self._staging = staging
         self._executable = executable
@@ -106,6 +85,10 @@ class YtDlpXExtractor:
         self._socket_timeout_seconds = socket_timeout_seconds
         self._working_directory = working_directory
         self._max_assets = max_assets
+        self._extract_status = extract_status
+        self._photo_transport = photo_transport
+        self._photo_resolver = photo_resolver
+        self._bridge_executable = bridge_executable or sys.executable
         self._guard = threading.Lock()
         self._interrupt = threading.Event()
         self._active_process: subprocess.Popen[bytes] | None = None
@@ -152,30 +135,22 @@ class YtDlpXExtractor:
         identity = accept_x_post_url(submitted_url)
         if identity.post_id != post_id:
             raise XExtractionError("X_URL_INVALID_POST_ID", "Invalid X post identity.")
-        argv = [
-            self._executable,
-            "--ignore-config",
-            "--no-warnings",
-            "--dump-single-json",
-            "--skip-download",
-            "--no-progress",
-            "--socket-timeout",
-            str(int(self._socket_timeout_seconds)),
-            "--",
-            submitted_url,
-        ]
-        completed = self._run_bounded(argv, timeout=self._inspect_timeout_seconds)
-        if completed.timed_out:
-            raise XExtractionError("X_DOWNLOAD_TIMEOUT", "X extraction timed out.")
-        if completed.returncode != 0:
-            raise _extraction_from_exit(completed.returncode)
         try:
-            raw = json.loads(completed.stdout)
-        except (ValueError, TypeError) as exc:
-            raise XExtractionError(
-                "X_EXTRACTOR_MALFORMED", "X extractor returned malformed JSON."
-            ) from exc
-        return _normalize_inspection(raw, identity, self._max_assets)
+            if self._extract_status is not None:
+                inspection = status_bridge.inspect_post(
+                    post_id,
+                    submitted_url,
+                    extract_status=self._extract_status,
+                )
+            else:
+                inspection = self._inspect_via_bridge_subprocess(post_id, submitted_url)
+        except StatusBridgeError as exc:
+            raise _x_error_from_bridge(exc) from exc
+        if len(inspection.assets) > self._max_assets:
+            raise XExtractionError("X_TOO_MANY_ASSETS", "X post exceeds asset limit.")
+        if not inspection.assets:
+            raise XExtractionError("X_NO_SUPPORTED_MEDIA", "X post has no media.")
+        return inspection
 
     def download(
         self,
@@ -185,6 +160,7 @@ class YtDlpXExtractor:
         media_type: str,
         expected_mime: str,
         source_media_key: str | None,
+        selected_variant: str | None,
         stage_key: str,
         submitted_url: str,
         staging: XStagingStorage,
@@ -194,35 +170,48 @@ class YtDlpXExtractor:
         identity = accept_x_post_url(submitted_url)
         if identity.post_id != post_id:
             raise XExtractionError("X_URL_INVALID_POST_ID", "Invalid X post identity.")
-        directory = staging.prepare(stage_key)
-        argv = [
-            self._executable,
-            "--ignore-config",
-            "--no-warnings",
-            "--no-progress",
-            "--no-overwrites",
-            "--output",
-            "artifact.mp4",
-            "--playlist-items",
-            str(int(ordinal) + 1),
-            "--socket-timeout",
-            str(int(self._socket_timeout_seconds)),
-        ]
-        argv += ["--", identity.canonical_url]
-        completed = self._run_bounded(
-            argv,
-            timeout=self._download_timeout_seconds,
-            cwd=_to_path(directory),
+        if not selected_variant or not source_media_key:
+            raise XExtractionError(
+                "X_SOURCE_MEDIA_CHANGED", "X source media is no longer available."
+            )
+        matched = self._reinspect_match(
+            post_id=post_id,
+            submitted_url=submitted_url,
+            source_media_key=source_media_key,
+            selected_variant=selected_variant,
+            media_type=media_type,
         )
-        if completed.timed_out:
-            raise XExtractionError("X_DOWNLOAD_TIMEOUT", "X download timed out.")
-        if completed.returncode != 0:
-            raise _extraction_from_exit(completed.returncode)
-        artifact = _find_artifact(directory)
+        directory = staging.prepare(stage_key)
+        destination = Path(directory) / ARTIFACT_FILENAME
+        try:
+            if matched.media_type is XMediaType.IMAGE:
+                self._download_photo(
+                    post_id=post_id,
+                    submitted_url=submitted_url,
+                    source_media_key=source_media_key,
+                    selected_variant=selected_variant,
+                    destination=destination,
+                )
+            else:
+                self._download_video(
+                    identity=identity,
+                    matched=matched,
+                    source_media_key=source_media_key,
+                    directory=Path(directory),
+                    destination=destination,
+                )
+        except StatusBridgeError as exc:
+            _delete_path(destination)
+            raise _x_error_from_bridge(exc) from exc
+        except XExtractionError:
+            _delete_path(destination)
+            raise
+        artifact = destination if destination.is_file() else _find_artifact(directory)
         if artifact is None:
             raise XExtractionError("X_STAGING_FAILED", "X produced no artifact.")
         size_bytes = os.path.getsize(artifact)
         if size_bytes <= 0:
+            _delete_path(artifact)
             raise XExtractionError("X_MEDIA_TYPE_UNSUPPORTED", "X artifact is empty.")
         digest = hashlib.sha256()
         with open(artifact, "rb") as handle:
@@ -232,6 +221,158 @@ class YtDlpXExtractor:
                     break
                 digest.update(block)
         return XAssetAcquisition(size_bytes=size_bytes, sha256=digest.hexdigest())
+
+    def inspect_argv(self, post_id: str) -> list[str]:
+        return [
+            self._bridge_executable,
+            "-I",
+            "-m",
+            "framenest.infrastructure.x.status_bridge",
+            "inspect",
+            post_id,
+        ]
+
+    def _inspect_via_bridge_subprocess(
+        self, post_id: str, submitted_url: str
+    ) -> XNormalizedInspection:
+        completed = self._run_bounded(
+            self.inspect_argv(post_id),
+            timeout=self._inspect_timeout_seconds,
+        )
+        if completed.timed_out:
+            raise XExtractionError("X_DOWNLOAD_TIMEOUT", "X extraction timed out.")
+        try:
+            payload = json.loads(completed.stdout or b"{}")
+        except (ValueError, TypeError) as exc:
+            raise XExtractionError(
+                "X_EXTRACTOR_MALFORMED", "X extractor returned malformed JSON."
+            ) from exc
+        if completed.returncode != 0:
+            if isinstance(payload, dict) and isinstance(payload.get("error_code"), str):
+                raise XExtractionError(payload["error_code"], "X extraction failed.")
+            raise _extraction_from_exit(completed.returncode)
+        try:
+            return status_bridge.inspection_from_payload(
+                payload, post_id=post_id, submitted_url=submitted_url
+            )
+        except StatusBridgeError as exc:
+            raise _x_error_from_bridge(exc) from exc
+
+    def _reinspect_match(
+        self,
+        *,
+        post_id: str,
+        submitted_url: str,
+        source_media_key: str,
+        selected_variant: str,
+        media_type: str,
+    ) -> XNormalizedAssetDescriptor:
+        inspection = self.inspect(post_id=post_id, submitted_url=submitted_url)
+        matched = None
+        for asset in inspection.assets:
+            if asset.source_media_key == source_media_key:
+                matched = asset
+                break
+        if (
+            matched is None
+            or matched.media_type.value != media_type
+            or matched.selected_variant != selected_variant
+        ):
+            raise XExtractionError(
+                "X_SOURCE_MEDIA_CHANGED", "X source media is no longer available."
+            )
+        return matched
+
+    def _download_photo(
+        self,
+        *,
+        post_id: str,
+        submitted_url: str,
+        source_media_key: str,
+        selected_variant: str,
+        destination: Path,
+    ) -> None:
+        if self._extract_status is not None:
+            status_bridge.download_photo(
+                post_id,
+                submitted_url,
+                source_media_key=source_media_key,
+                selected_variant=selected_variant,
+                destination=destination,
+                extract_status=self._extract_status,
+                resolver=self._photo_resolver,
+                transport=self._photo_transport,
+            )
+            return
+        argv = [
+            self._bridge_executable,
+            "-I",
+            "-m",
+            "framenest.infrastructure.x.status_bridge",
+            "download-photo",
+            post_id,
+            source_media_key,
+            selected_variant,
+            str(destination),
+        ]
+        completed = self._run_bounded(argv, timeout=self._download_timeout_seconds)
+        if completed.timed_out:
+            raise XExtractionError("X_DOWNLOAD_TIMEOUT", "X download timed out.")
+        if completed.returncode != 0:
+            try:
+                payload = json.loads(completed.stdout or b"{}")
+            except (ValueError, TypeError):
+                payload = {}
+            if isinstance(payload, dict) and isinstance(payload.get("error_code"), str):
+                raise XExtractionError(payload["error_code"], "X extraction failed.")
+            raise _extraction_from_exit(completed.returncode)
+
+    def _download_video(
+        self,
+        *,
+        identity: object,
+        matched: XNormalizedAssetDescriptor,
+        source_media_key: str,
+        directory: Path,
+        destination: Path,
+    ) -> None:
+        if matched.provider_download_index is None:
+            raise XExtractionError(
+                "X_SOURCE_MEDIA_CHANGED", "X source media is no longer available."
+            )
+        argv = [
+            self._executable,
+            "--ignore-config",
+            "--no-warnings",
+            "--no-progress",
+            "--no-overwrites",
+            "--print",
+            "after_move:%(id)s",
+            "--output",
+            ARTIFACT_FILENAME,
+            "--playlist-items",
+            str(int(matched.provider_download_index) + 1),
+            "--socket-timeout",
+            str(int(self._socket_timeout_seconds)),
+            "--",
+            identity.canonical_url,
+        ]
+        completed = self._run_bounded(
+            argv,
+            timeout=self._download_timeout_seconds,
+            cwd=directory,
+        )
+        if completed.timed_out:
+            raise XExtractionError("X_DOWNLOAD_TIMEOUT", "X download timed out.")
+        if completed.returncode != 0:
+            raise _extraction_from_exit(completed.returncode)
+        printed = (completed.stdout or b"").decode("utf-8", "replace").strip().splitlines()
+        reported_id = printed[-1].strip() if printed else ""
+        if reported_id != source_media_key:
+            _delete_path(destination)
+            raise XExtractionError(
+                "X_SOURCE_MEDIA_CHANGED", "X source media is no longer available."
+            )
 
     def _run_bounded(
         self,
@@ -324,183 +465,18 @@ class YtDlpXExtractor:
             process.communicate()
 
 
-def _normalize_inspection(
-    raw: object,
-    identity: object,
-    max_assets: int,
-) -> XNormalizedInspection:
-    if not isinstance(raw, dict):
-        raise XExtractionError("X_EXTRACTOR_MALFORMED", "X extractor is malformed.")
-    if raw.get("_type") == "url":
-        raise XExtractionError(
-            "X_EXTERNAL_LINK_DENIED",
-            "X embedded external link is not a supported acquisition target.",
-        )
-    extractor = _clean_text(raw.get("extractor"))
-    if extractor is not None and extractor.lower() != "twitter":
-        raise XExtractionError(
-            "X_EXTERNAL_LINK_DENIED",
-            "X embedded external link is not a supported acquisition target.",
-        )
-    if raw.get("availability") in {"needs_auth", "private", "members_only"} or raw.get(
-        "is_live"
-    ):
-        code = "X_AUTHENTICATION_REQUIRED" if raw.get("availability") in {"needs_auth", "members_only"} else "X_POST_UNAVAILABLE"
-        raise XExtractionError(code, "X post is not publicly available.")
-    description = _clean_text(raw.get("description"))
-    entries = raw.get("entries")
-    if isinstance(entries, list) and entries:
-        assets = _assets_from_entries(entries)
-    else:
-        assets = _assets_from_single(raw)
-    if len(assets) > max_assets:
-        raise XExtractionError("X_TOO_MANY_ASSETS", "X post exceeds asset limit.")
-    if not assets:
-        raise XExtractionError("X_NO_SUPPORTED_MEDIA", "X post has no media.")
-    canonical_url = raw.get("webpage_url")
-    canonical_url = _validated_canonical(canonical_url, identity)
-    # Real TwitterIE contract: `channel_id` is the stable numeric user id,
-    # `uploader_id` is the screen_name (handle), `uploader` is the display name.
-    author_stable_id = _clean_text(raw.get("channel_id")) or _clean_text(
-        raw.get("user_id")
-    )
-    author_handle = _clean_text(raw.get("uploader_id"))
-    author_display_name = _clean_text(raw.get("uploader"))
-    posted_at = raw.get("timestamp")
-    posted_at_ms = None
-    if isinstance(posted_at, (int, float)) and not isinstance(posted_at, bool):
-        posted_at_ms = int(posted_at * 1000)
-    return XNormalizedInspection(
-        post_id=identity.post_id,
-        canonical_url=canonical_url,
-        post_text=description,
-        posted_at_ms=posted_at_ms,
-        author_stable_id=author_stable_id,
-        author_handle=author_handle,
-        author_display_name=author_display_name,
-        assets=tuple(assets),
-        extractor_version=_clean_text(raw.get("extractor_version")),
-    )
+def _x_error_from_bridge(exc: StatusBridgeError) -> XExtractionError:
+    if exc.code == "X_AUTHENTICATION_REQUIRED":
+        return XRequiresAuthenticationError(exc.code, "X post is not publicly available.")
+    return XExtractionError(exc.code, "X extraction failed.")
 
 
-def _assets_from_single(raw: dict) -> list[XNormalizedAssetDescriptor]:
-    media_type = _media_type_from_raw(raw)
-    if media_type is None:
-        return []
-    duration = raw.get("duration")
-    duration_seconds = None
-    if isinstance(duration, (int, float)) and not isinstance(duration, bool):
-        duration_seconds = int(duration)
-        if duration_seconds > MAX_VIDEO_DURATION_SECONDS:
-            raise XExtractionError(
-                "X_DURATION_TOO_LONG", "X media exceeds duration limit."
-            )
-    width = raw.get("width")
-    height = raw.get("height")
-    source_media_key = _clean_text(raw.get("id"))
-    return [
-        XNormalizedAssetDescriptor(
-            ordinal=0,
-            media_type=media_type,
-            expected_mime=_SUPPORTED_MIME_BY_TYPE[media_type],
-            source_media_key=source_media_key,
-            width=_bounded_dim(width),
-            height=_bounded_dim(height),
-            duration_seconds=duration_seconds,
-        )
-    ]
-
-
-def _assets_from_entries(entries: list[object]) -> list[XNormalizedAssetDescriptor]:
-    descriptors: list[XNormalizedAssetDescriptor] = []
-    for offset, entry in enumerate(entries):
-        if not isinstance(entry, dict):
-            continue
-        media_type = _media_type_from_raw(entry)
-        if media_type is None:
-            continue
-        duration = entry.get("duration")
-        duration_seconds = None
-        if isinstance(duration, (int, float)) and not isinstance(duration, bool):
-            duration_seconds = int(duration)
-            if duration_seconds > MAX_VIDEO_DURATION_SECONDS:
-                raise XExtractionError(
-                    "X_DURATION_TOO_LONG", "X media exceeds duration limit."
-                )
-        descriptors.append(
-            XNormalizedAssetDescriptor(
-                ordinal=len(descriptors),
-                media_type=media_type,
-                expected_mime=_SUPPORTED_MIME_BY_TYPE[media_type],
-                source_media_key=_clean_text(entry.get("id")),
-                width=_bounded_dim(entry.get("width")),
-                height=_bounded_dim(entry.get("height")),
-                duration_seconds=duration_seconds,
-            )
-        )
-    return descriptors
-
-
-def _media_type_from_raw(raw: dict) -> XMediaType | None:
-    """Classify an entry emitted by the pinned yt-dlp Twitter extractor.
-
-    The production adapter's real capability is video / animated-GIF-as-video
-    only. The pinned TwitterIE filters ``type == 'photo'`` and never emits
-    ordinary static photo entries through this contract. A remaining still-image
-    marker (e.g. ``ext == 'png'``) is therefore not a supported production
-    asset: it returns ``None`` so a photo-only post yields no supported assets
-    and terminates through ``X_NO_SUPPORTED_MEDIA``.
-    """
-    ext = str(raw.get("ext") or "").lower()
-    extname = str(raw.get("_filename") or "").lower()
-    formats = raw.get("formats")
-    has_formats = isinstance(formats, list) and len(formats) > 0
-    duration = raw.get("duration")
-    has_duration = isinstance(duration, (int, float)) and not isinstance(
-        duration, bool
-    )
-    url = str(raw.get("url") or "")
-    if ext == "gif" or extname.endswith(".gif"):
-        return XMediaType.ANIMATED_GIF
-    if has_formats or has_duration or re.search(r"\.(mp4|m4v|mov|webm|m3u8)(\?|$)", url):
-        return XMediaType.VIDEO
-    # Static photo markers are not a first-release production X capability.
-    return None
-
-
-def _is_visual(format: dict) -> bool:
-    return (
-        format.get("vcodec") not in {None, "none"}
-        and format.get("resolution") not in {None, "audio only"}
-    )
-
-
-
-def _validated_canonical(value: object, identity: object) -> str | None:
-    if not isinstance(value, str) or not value:
-        return None
+def _delete_path(path: Path) -> None:
     try:
-        validated = accept_x_post_url(value)
-        if validated.post_id == identity.post_id:
-            return validated.canonical_url
-    except Exception:
-        return None
-    return None
-
-
-def _bounded_dim(value: object) -> int | None:
-    if not isinstance(value, (int, float)) or isinstance(value, bool):
-        return None
-    if value > 100_000 or value < 0:
-        raise XExtractionError("X_DIMENSIONS_TOO_LARGE", "X dimensions are invalid.")
-    return int(value)
-
-
-def _clean_text(value: object) -> str | None:
-    if not isinstance(value, str):
-        return None
-    cleaned = " ".join(value.split())
-    return cleaned[:500] if cleaned else None
+        if path.exists() or path.is_symlink():
+            path.unlink()
+    except OSError:
+        return
 
 
 def _extraction_from_exit(returncode: int) -> XExtractionError:
@@ -578,12 +554,7 @@ def _terminate_process_group(
 
 
 def _find_artifact(directory: Path) -> Path | None:
-    candidates = sorted(
-        path for path in (Path(directory).iterdir() if directory.is_dir() else [])
-        if path.is_file() and re.search(r"\.(mp4|jpg|jpeg|png|webm|gif)$", path.name)
-    )
-    return candidates[0] if candidates else None
-
-
-def _to_path(value: object) -> Path:
-    return Path(value) if isinstance(value, (str, Path)) else Path(str(value))
+    candidate = Path(directory) / ARTIFACT_FILENAME
+    if candidate.is_file():
+        return candidate
+    return None
