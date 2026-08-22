@@ -10,9 +10,11 @@ from sqlalchemy import func, insert, select, text, update
 
 from framenest.application.ports.upload_publications import (
     UploadCatalogInconsistencyError,
+    UploadCatalogStateConflictError,
 )
 from framenest.application.upload_catalog import (
     CatalogPublishedUpload,
+    CatalogUploadClassification,
     UploadCatalogInfrastructureError,
 )
 from framenest.domain.identities import LibraryId, MediaByteIdentityId, MediaId, MediaLocationId
@@ -22,6 +24,17 @@ from framenest.domain.media import (
     MediaLocation,
     MediaLocationAvailability,
     MediaRelativePath,
+)
+from framenest.domain.media_classification import (
+    AcquisitionSource,
+    ContentCategory,
+    MovieGenre,
+)
+from framenest.domain.media_metadata import (
+    CanonicalTagKey,
+    MediaDescription,
+    MediaDisplayTitle,
+    MediaMetadata,
 )
 from framenest.domain.upload_publications import (
     UploadPublicationCleanupState,
@@ -38,10 +51,14 @@ from framenest.domain.uploads import (
     UploadValidatedMediaKind,
 )
 from framenest.infrastructure.persistence.catalog_schema import (
+    canonical_tags,
     devices,
     libraries,
     logical_media,
     media_byte_identities,
+    media_canonical_tags,
+    media_content_publications,
+    media_metadata,
     metadata,
     physical_media_locations,
     upload_sessions,
@@ -156,6 +173,61 @@ def _counts(engine) -> tuple[int, int]:
             select(func.count()).select_from(physical_media_locations)
         ).scalar_one()
     return int(media_count), int(location_count)
+
+
+def _seed_canonical_tag(engine, key: str = "meme", display_name: str = "Meme") -> None:
+    with engine.begin() as connection:
+        connection.execute(
+            insert(canonical_tags).values(
+                key=key,
+                display_name=display_name,
+                created_at_ms=1,
+                updated_at_ms=1,
+            )
+        )
+
+
+def _x_seed_classification(
+    *,
+    title: str = "Seeded title",
+    description: str | None = "Seeded description",
+    tag_keys: tuple[str, ...] = ("meme",),
+) -> CatalogUploadClassification:
+    return CatalogUploadClassification(
+        content_category=ContentCategory.GENERAL,
+        acquisition_source=AcquisitionSource.X_MANUAL_CLAIM,
+        display_title=MediaDisplayTitle(title),
+        description=None if description is None else MediaDescription(description),
+        tag_keys=tuple(CanonicalTagKey(key) for key in tag_keys),
+    )
+
+
+def _metadata_row(engine, media_id: str):
+    with engine.connect() as connection:
+        return connection.execute(
+            select(media_metadata).where(media_metadata.c.media_id == media_id)
+        ).mappings().one()
+
+
+def _ordered_tags(engine, media_id: str) -> list[str]:
+    with engine.connect() as connection:
+        rows = connection.execute(
+            select(media_canonical_tags.c.tag_key)
+            .where(media_canonical_tags.c.media_id == media_id)
+            .order_by(media_canonical_tags.c.position)
+        ).all()
+    return [str(row[0]) for row in rows]
+
+
+def _publication_count(engine, media_id: str) -> int:
+    with engine.connect() as connection:
+        return int(
+            connection.execute(
+                select(func.count())
+                .select_from(media_content_publications)
+                .where(media_content_publications.c.media_id == media_id)
+            ).scalar_one()
+        )
 
 
 def test_published_upload_creates_no_catalog_rows(tmp_path: Path) -> None:
@@ -320,5 +392,169 @@ def test_catalog_db_failure_rolls_back_and_preserves_published_file(
         assert _counts(engine) == (0, 0)
         assert target.is_file()
         assert target.read_bytes() == b"preserved"
+    finally:
+        dispose_engine(engine)
+
+
+def test_catalog_commit_persists_title_description_and_ordered_tags(tmp_path: Path) -> None:
+    engine = _engine(tmp_path)
+    uploads = SqliteUploadSessionRepository(engine)
+    publications = SqliteUploadPublicationRepository(engine)
+    _seed_canonical_tag(engine, "alpha", "Alpha")
+    _seed_canonical_tag(engine, "beta", "Beta")
+    classification = _x_seed_classification(
+        title="Alt title",
+        description="Full tweet body",
+        tag_keys=("alpha", "beta"),
+    )
+    cataloger = CatalogPublishedUpload(
+        publications,
+        now_ms=lambda: 40,
+        classification_for_upload=lambda _upload_id: classification,
+    )
+    try:
+        completed = _published_complete(engine, uploads, publications)
+        result = cataloger.catalog_owned_blocking(completed.upload.id)
+        assert result.media_id is not None
+        row = _metadata_row(engine, result.media_id)
+        assert row["display_title"] == "Alt title"
+        assert row["description"] == "Full tweet body"
+        assert row["collection_key"] == "processed"
+        assert row["processed_at_ms"] == 40
+        assert _ordered_tags(engine, result.media_id) == ["alpha", "beta"]
+        assert _publication_count(engine, result.media_id) == 0
+    finally:
+        dispose_engine(engine)
+
+
+def test_catalog_commit_empty_tags_leave_collection_null(tmp_path: Path) -> None:
+    engine = _engine(tmp_path)
+    uploads = SqliteUploadSessionRepository(engine)
+    publications = SqliteUploadPublicationRepository(engine)
+    classification = _x_seed_classification(
+        title="Fallback title",
+        description=None,
+        tag_keys=(),
+    )
+    cataloger = CatalogPublishedUpload(
+        publications,
+        now_ms=lambda: 40,
+        classification_for_upload=lambda _upload_id: classification,
+    )
+    try:
+        completed = _published_complete(engine, uploads, publications)
+        result = cataloger.catalog_owned_blocking(completed.upload.id)
+        assert result.media_id is not None
+        row = _metadata_row(engine, result.media_id)
+        assert row["display_title"] == "Fallback title"
+        assert row["description"] is None
+        assert row["collection_key"] is None
+        assert row["processed_at_ms"] is None
+        assert _ordered_tags(engine, result.media_id) == []
+    finally:
+        dispose_engine(engine)
+
+
+def test_catalog_commit_with_tags_is_idempotent(tmp_path: Path) -> None:
+    engine = _engine(tmp_path)
+    uploads = SqliteUploadSessionRepository(engine)
+    publications = SqliteUploadPublicationRepository(engine)
+    _seed_canonical_tag(engine)
+    classification = _x_seed_classification()
+    cataloger = CatalogPublishedUpload(
+        publications,
+        now_ms=lambda: 40,
+        classification_for_upload=lambda _upload_id: classification,
+    )
+    try:
+        completed = _published_complete(engine, uploads, publications)
+        first = cataloger.catalog_owned_blocking(completed.upload.id)
+        second = cataloger.catalog_owned_blocking(completed.upload.id)
+        assert first.media_id == second.media_id
+        assert _counts(engine) == (1, 1)
+        assert _ordered_tags(engine, first.media_id) == ["meme"]
+    finally:
+        dispose_engine(engine)
+
+
+def test_unknown_tag_rolls_back_catalog_without_partial_linkage(tmp_path: Path) -> None:
+    engine = _engine(tmp_path)
+    uploads = SqliteUploadSessionRepository(engine)
+    publications = SqliteUploadPublicationRepository(engine)
+    classification = _x_seed_classification(tag_keys=("missing-tag",))
+    cataloger = CatalogPublishedUpload(
+        publications,
+        now_ms=lambda: 40,
+        classification_for_upload=lambda _upload_id: classification,
+    )
+    try:
+        completed = _published_complete(engine, uploads, publications)
+        with pytest.raises(UploadCatalogInfrastructureError):
+            cataloger.catalog_owned_blocking(completed.upload.id)
+        current = publications.get_candidate(completed.upload.id)
+        assert current is not None
+        assert current.upload.state is UploadSessionState.PUBLISHED
+        assert current.publication is not None
+        assert current.publication.media_id is None
+        assert current.publication.media_location_id is None
+        assert _counts(engine) == (0, 0)
+        with engine.connect() as connection:
+            metadata_count = connection.execute(
+                select(func.count()).select_from(media_metadata)
+            ).scalar_one()
+            tag_count = connection.execute(
+                select(func.count()).select_from(media_canonical_tags)
+            ).scalar_one()
+        assert int(metadata_count) == 0
+        assert int(tag_count) == 0
+    finally:
+        dispose_engine(engine)
+
+
+def test_catalog_commit_still_rejects_genres(tmp_path: Path) -> None:
+    engine = _engine(tmp_path)
+    uploads = SqliteUploadSessionRepository(engine)
+    publications = SqliteUploadPublicationRepository(engine)
+    try:
+        completed = _published_complete(engine, uploads, publications)
+        media = LogicalMedia(
+            id=MediaId.new(),
+            kind=MediaKind.VIDEO,
+            created_at_ms=50,
+            updated_at_ms=50,
+        )
+        with pytest.raises(UploadCatalogStateConflictError):
+            publications.commit_cataloged_publication(
+                completed.upload.id,
+                media=media,
+                location=MediaLocation(
+                    id=MediaLocationId.new(),
+                    media_id=media.id,
+                    library_id=DESTINATION_ID,
+                    relative_path=MediaRelativePath(
+                        completed.publication.relative_path.value
+                    ),
+                    availability=MediaLocationAvailability.AVAILABLE,
+                    observed_size_bytes=8,
+                    observed_mtime_ns=None,
+                    created_at_ms=50,
+                    updated_at_ms=50,
+                ),
+                expected_upload_version=completed.upload.version,
+                expected_publication_version=completed.publication.version,
+                updated_at_ms=50,
+                metadata=MediaMetadata(
+                    media_id=media.id,
+                    display_title=MediaDisplayTitle("Genre seed"),
+                    description=None,
+                    tag_keys=(),
+                    created_at_ms=50,
+                    updated_at_ms=50,
+                    content_category=ContentCategory.MOVIE,
+                    acquisition_source=AcquisitionSource.X_MANUAL_CLAIM,
+                    genre_keys=(MovieGenre.ACTION,),
+                ),
+            )
+        assert _counts(engine) == (0, 0)
     finally:
         dispose_engine(engine)

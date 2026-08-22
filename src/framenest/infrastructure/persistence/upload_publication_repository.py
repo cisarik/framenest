@@ -35,7 +35,7 @@ from framenest.domain.identities import (
     MediaLocationId,
 )
 from framenest.domain.media import LogicalMedia, MediaLocation
-from framenest.domain.media_metadata import MediaMetadata
+from framenest.domain.media_metadata import MediaMetadata, derive_collection_state
 from framenest.domain.upload_publications import (
     FrameNestUploadPublicationError,
     UploadPublication,
@@ -59,6 +59,7 @@ from framenest.domain.uploads import (
 )
 from framenest.infrastructure.persistence.catalog_schema import (
     logical_media,
+    media_canonical_tags,
     media_metadata,
     physical_media_locations,
     upload_publications,
@@ -544,9 +545,7 @@ class SqliteUploadPublicationRepository:
         if location.media_id != media.id:
             raise UploadCatalogStateConflictError("upload catalog state conflict")
         if metadata is not None and (
-            metadata.media_id != media.id
-            or metadata.tag_keys
-            or metadata.genre_keys
+            metadata.media_id != media.id or metadata.genre_keys
         ):
             raise UploadCatalogStateConflictError("upload catalog state conflict")
 
@@ -602,6 +601,12 @@ class SqliteUploadPublicationRepository:
                 _insert_media(connection, media)
                 _insert_location(connection, location)
                 if metadata is not None:
+                    collection = derive_collection_state(
+                        None,
+                        None,
+                        metadata.tag_keys,
+                        metadata.updated_at_ms,
+                    )
                     connection.execute(
                         insert(media_metadata).values(
                             media_id=metadata.media_id.to_string(),
@@ -621,12 +626,24 @@ class SqliteUploadPublicationRepository:
                             creator_stable_id=metadata.creator_stable_id,
                             creator_handle=metadata.creator_handle,
                             creator_display_name=metadata.creator_display_name,
-                            collection_key=None,
-                            processed_at_ms=None,
+                            collection_key=(
+                                None
+                                if collection.collection_key is None
+                                else collection.collection_key.value
+                            ),
+                            processed_at_ms=collection.processed_at_ms,
                             created_at_ms=metadata.created_at_ms,
                             updated_at_ms=metadata.updated_at_ms,
                         )
                     )
+                    for position, key in enumerate(metadata.tag_keys):
+                        connection.execute(
+                            insert(media_canonical_tags).values(
+                                media_id=metadata.media_id.to_string(),
+                                tag_key=key.value,
+                                position=position,
+                            )
+                        )
             except (
                 MediaAlreadyExistsError,
                 MediaLocationAlreadyExistsError,

@@ -737,6 +737,186 @@ def test_catalog_handoff_uses_claim_category_or_media_kind_default(lifecycle) ->
     assert image_class is not None and video_class is not None
     assert image_class.content_category is ContentCategory.GENERAL
     assert video_class.content_category is ContentCategory.MEME
+    assert image_class.description is None
+    assert image_class.tag_keys == ()
+    assert video_class.description is None
+    assert video_class.tag_keys == ()
+
+
+def test_classification_seeds_pending_alias_title_description_and_tags(lifecycle) -> None:
+    from framenest.domain.uploads import UploadSessionId
+    from framenest.domain.x_acquisition import XAsset, XMediaType
+
+    repo, service, admin, coordinator, extractor, media_id = lifecycle
+    _seed_canonical_and_metadata(repo, media_id, "Canonical From Tweet")
+    result = service.submit(
+        URL,
+        login_key="alice",
+        alias=parse_alias_content("Overlay title", "Overlay desc", ["meme"]),
+    )
+    claim = repo.get_post(XPostClaimId.from_string(result.request_id))
+    assert claim is not None
+    asset = XAsset.new(
+        claim_id=claim.id,
+        ordinal=0,
+        media_type=XMediaType.IMAGE,
+        expected_mime="image/jpeg",
+        now_ms=20,
+    )
+    repo.create_assets((asset,))
+    classification = x_classification_for_upload(
+        repo, UploadSessionId.from_string(asset.id.to_string())
+    )
+    assert classification is not None
+    assert classification.display_title is not None
+    assert classification.display_title.value == "Overlay title"
+    assert classification.description is not None
+    assert classification.description.value == "Overlay desc"
+    assert [key.value for key in classification.tag_keys] == ["meme"]
+    assert classification.content_category is ContentCategory.GENERAL
+
+
+def test_empty_save_deletes_pending_and_persisted_alias(lifecycle) -> None:
+    repo, service, admin, coordinator, extractor, media_id = lifecycle
+    _seed_canonical_and_metadata(repo, media_id, "Canonical From Tweet")
+    alias_repo = coordinator._alias_repository
+    first = service.submit(
+        URL,
+        login_key="alice",
+        alias=parse_alias_content("Overlay title", "Overlay desc", ["meme"]),
+    )
+    claim = _run(_drain_until_terminal(coordinator, repo, first.request_id))
+    assert claim.state is XAcquisitionState.COMPLETED
+    assert alias_repo.get_alias(media_id, "alice") is not None
+    emptied = service.submit(
+        URL, login_key="alice", alias=parse_alias_content(None, None, None)
+    )
+    assert emptied.submission_result == "reuse"
+    assert alias_repo.get_alias(media_id, "alice") is None
+    assert repo.get_pending_alias(claim.id) is None
+    with repo._engine.connect() as connection:
+        canonical = connection.execute(
+            text("SELECT display_title FROM media_metadata WHERE media_id = :id"),
+            {"id": media_id.to_string()},
+        ).scalar_one()
+    assert canonical == "Canonical From Tweet"
+
+
+def test_admin_canonical_correction_survives_alias_resave(lifecycle) -> None:
+    repo, service, admin, coordinator, extractor, media_id = lifecycle
+    _seed_canonical_and_metadata(repo, media_id, "Canonical From Tweet")
+    alias_repo = coordinator._alias_repository
+    first = service.submit(
+        URL,
+        login_key="alice",
+        alias=parse_alias_content("Overlay title", None, None),
+    )
+    claim = _run(_drain_until_terminal(coordinator, repo, first.request_id))
+    assert claim.state is XAcquisitionState.COMPLETED
+    with repo._engine.begin() as connection:
+        connection.execute(
+            text(
+                "UPDATE media_metadata SET display_title = :title "
+                "WHERE media_id = :id"
+            ),
+            {"title": "Administrator correction", "id": media_id.to_string()},
+        )
+    reused = service.submit(
+        URL,
+        login_key="alice",
+        alias=parse_alias_content("Caller rename", "Caller description", ["meme"]),
+    )
+    assert reused.submission_result == "reuse"
+    overlay = alias_repo.get_alias(media_id, "alice")
+    assert overlay is not None
+    assert overlay.content.display_title is not None
+    assert overlay.content.display_title.value == "Caller rename"
+    with repo._engine.connect() as connection:
+        canonical = connection.execute(
+            text("SELECT display_title FROM media_metadata WHERE media_id = :id"),
+            {"id": media_id.to_string()},
+        ).scalar_one()
+    assert canonical == "Administrator correction"
+
+
+def test_two_users_keep_isolated_aliases_on_shared_media(lifecycle) -> None:
+    repo, service, admin, coordinator, extractor, media_id = lifecycle
+    _seed_canonical_and_metadata(repo, media_id, "Canonical From Tweet")
+    alias_repo = coordinator._alias_repository
+    alice = service.submit(
+        URL,
+        login_key="alice",
+        alias=parse_alias_content("Alice title", None, None),
+    )
+    _run(_drain_until_terminal(coordinator, repo, alice.request_id))
+    bob = service.submit(
+        URL,
+        login_key="bob",
+        alias=parse_alias_content("Bob title", None, None),
+    )
+    _run(_drain_until_terminal(coordinator, repo, bob.request_id))
+    alice_alias = alias_repo.get_alias(media_id, "alice")
+    bob_alias = alias_repo.get_alias(media_id, "bob")
+    assert alice_alias is not None and bob_alias is not None
+    assert alice_alias.content.display_title is not None
+    assert bob_alias.content.display_title is not None
+    assert alice_alias.content.display_title.value == "Alice title"
+    assert bob_alias.content.display_title.value == "Bob title"
+    with repo._engine.connect() as connection:
+        canonical = connection.execute(
+            text("SELECT display_title FROM media_metadata WHERE media_id = :id"),
+            {"id": media_id.to_string()},
+        ).scalar_one()
+    assert canonical == "Canonical From Tweet"
+
+
+def test_multi_asset_first_create_reads_same_pending_alias(lifecycle) -> None:
+    from framenest.domain.uploads import UploadSessionId
+    from framenest.domain.x_acquisition import XAsset, XMediaType
+
+    repo, service, admin, coordinator, extractor, media_id = lifecycle
+    _seed_canonical_and_metadata(repo, media_id, "Canonical From Tweet")
+    result = service.submit(
+        URL,
+        login_key="alice",
+        alias=parse_alias_content("Shared seed", "Shared description", ["meme"]),
+    )
+    claim = repo.get_post(XPostClaimId.from_string(result.request_id))
+    assert claim is not None
+    first = XAsset.new(
+        claim_id=claim.id,
+        ordinal=0,
+        media_type=XMediaType.IMAGE,
+        expected_mime="image/jpeg",
+        now_ms=20,
+    )
+    second = XAsset.new(
+        claim_id=claim.id,
+        ordinal=1,
+        media_type=XMediaType.VIDEO,
+        expected_mime="video/mp4",
+        now_ms=20,
+    )
+    repo.create_assets((first, second))
+    first_class = x_classification_for_upload(
+        repo, UploadSessionId.from_string(first.id.to_string())
+    )
+    second_class = x_classification_for_upload(
+        repo, UploadSessionId.from_string(second.id.to_string())
+    )
+    assert first_class is not None and second_class is not None
+    assert first_class.display_title is not None
+    assert second_class.display_title is not None
+    assert first_class.display_title.value == "Shared seed"
+    assert second_class.display_title.value == "Shared seed"
+    assert first_class.description is not None
+    assert second_class.description is not None
+    assert first_class.description.value == "Shared description"
+    assert [key.value for key in first_class.tag_keys] == ["meme"]
+    assert [key.value for key in second_class.tag_keys] == ["meme"]
+    assert repo.get_pending_alias(claim.id) is not None
+    assert first_class.content_category is ContentCategory.GENERAL
+    assert second_class.content_category is ContentCategory.MEME
 
 
 def test_asset_scoped_terminal_failure_continues_later_assets(lifecycle) -> None:

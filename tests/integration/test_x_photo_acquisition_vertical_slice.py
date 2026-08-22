@@ -14,14 +14,23 @@ from framenest.application.x_acquisition import (
     XRequestLimits,
     x_classification_for_upload,
 )
+from framenest.application.upload_catalog import CatalogPublishedUpload
+from framenest.domain.content_publication import (
+    MISSING_TAGS,
+    derive_content_publication_readiness,
+)
 from framenest.domain.identities import MediaId, MediaLocationId
 from framenest.domain.media_classification import ContentCategory
+from framenest.domain.media_user_alias import parse_alias_content
 from framenest.domain.uploads import UploadSessionId, UploadValidatedFormat, UploadValidatedMediaKind
 from framenest.domain.x_acquisition import XAcquisitionState, XAssetState, XPostClaimId
 from framenest.infrastructure.media_validation.ffprobe import BoundedUploadMediaValidator
 from framenest.infrastructure.persistence.catalog_schema import metadata
 from framenest.infrastructure.persistence.media_metadata_repository import (
     SqliteMediaMetadataRepository,
+)
+from framenest.infrastructure.persistence.media_user_alias_repository import (
+    SqliteMediaUserAliasRepository,
 )
 from framenest.infrastructure.persistence.x_acquisition_claim_repository import (
     SqliteXAcquisitionClaimRepository,
@@ -206,8 +215,16 @@ def test_photo_fixture_stages_validates_and_classifies(tmp_path: Path) -> None:
         ),
         {"id": location_id.to_string(), "mid": media_id.to_string()},
     )
+    conn.execute(
+        text(
+            "INSERT OR IGNORE INTO canonical_tags "
+            "(key, display_name, created_at_ms, updated_at_ms) "
+            "VALUES ('meme', 'Meme', 1, 1)"
+        )
+    )
     conn.commit()
     notifier = _Notifier()
+    alias_repo = SqliteMediaUserAliasRepository(engine)
     coordinator = XAcquisitionCoordinator(
         repo,
         fake,
@@ -217,6 +234,7 @@ def test_photo_fixture_stages_validates_and_classifies(tmp_path: Path) -> None:
         _FakePublicationRepository(media_id, location_id),
         notifier,
         notifier,
+        alias_repository=alias_repo,
     )
     service = XAcquisitionRequestService(
         repo,
@@ -227,10 +245,13 @@ def test_photo_fixture_stages_validates_and_classifies(tmp_path: Path) -> None:
             max_failed_per_24h=10,
             free_space_bytes=lambda: 10_737_418_240,
         ),
+        alias_repository=alias_repo,
         metadata_repository=SqliteMediaMetadataRepository(engine),
     )
     submitted = service.submit(
-        SUBMITTED, login_key="alice", content_category=ContentCategory.MOVIE
+        SUBMITTED,
+        login_key="alice",
+        alias=parse_alias_content("Photo alt title", "A public photo", ["meme"]),
     )
     claim = _run(_drain_until_terminal(coordinator, repo, submitted.request_id))
     assert claim.state is XAcquisitionState.COMPLETED
@@ -240,7 +261,16 @@ def test_photo_fixture_stages_validates_and_classifies(tmp_path: Path) -> None:
         repo, UploadSessionId.from_string(assets[0].id.to_string())
     )
     assert classification is not None
-    assert classification.content_category is ContentCategory.MOVIE
+    assert classification.content_category is ContentCategory.GENERAL
+    assert classification.display_title is not None
+    assert classification.display_title.value == "Photo alt title"
+    assert classification.description is not None
+    assert classification.description.value == "A public photo"
+    assert [key.value for key in classification.tag_keys] == ["meme"]
+    overlay = alias_repo.get_alias(media_id, "alice")
+    assert overlay is not None
+    assert overlay.content.display_title is not None
+    assert overlay.content.display_title.value == "Photo alt title"
     conn.close()
 
 
@@ -332,3 +362,88 @@ def test_photo_claim_retry_after_retryable_timeout(tmp_path: Path) -> None:
     claim = _run(_drain_until_terminal(coordinator, repo, retried.claim_id))
     assert claim.state is XAcquisitionState.COMPLETED
     conn.close()
+
+
+def test_photo_catalog_seed_stays_unpublished_and_reports_tag_readiness(
+    tmp_path: Path,
+) -> None:
+    from tests.unit.infrastructure.persistence.test_upload_catalog_repository import (
+        _engine,
+        _metadata_row,
+        _ordered_tags,
+        _publication_count,
+        _published_complete,
+        _seed_canonical_tag,
+        _x_seed_classification,
+    )
+    from framenest.infrastructure.persistence.upload_publication_repository import (
+        SqliteUploadPublicationRepository,
+    )
+    from framenest.infrastructure.persistence.upload_session_repository import (
+        SqliteUploadSessionRepository,
+    )
+
+    engine = _engine(tmp_path)
+    uploads = SqliteUploadSessionRepository(engine)
+    publications = SqliteUploadPublicationRepository(engine)
+    _seed_canonical_tag(engine)
+    ready_classification = _x_seed_classification(
+        title="Photo alt title",
+        description="A public photo",
+        tag_keys=("meme",),
+    )
+    cataloger = CatalogPublishedUpload(
+        publications,
+        now_ms=lambda: 40,
+        classification_for_upload=lambda _upload_id: ready_classification,
+    )
+    try:
+        completed = _published_complete(engine, uploads, publications)
+        result = cataloger.catalog_owned_blocking(completed.upload.id)
+        assert result.media_id is not None
+        row = _metadata_row(engine, result.media_id)
+        assert row["display_title"] == "Photo alt title"
+        assert row["description"] == "A public photo"
+        assert _ordered_tags(engine, result.media_id) == ["meme"]
+        assert _publication_count(engine, result.media_id) == 0
+        ready = derive_content_publication_readiness(
+            display_title=row["display_title"],
+            description=row["description"],
+            canonical_tag_count=1,
+        )
+        assert ready.ready is True
+
+        missing_classification = _x_seed_classification(
+            title="Photo alt title",
+            description="A public photo",
+            tag_keys=(),
+        )
+        missing_cataloger = CatalogPublishedUpload(
+            publications,
+            now_ms=lambda: 41,
+            classification_for_upload=lambda _upload_id: missing_classification,
+        )
+        missing_completed = _published_complete(
+            engine,
+            uploads,
+            publications,
+            upload_id="22222222-2222-4222-8222-222222222222",
+        )
+        missing_result = missing_cataloger.catalog_owned_blocking(
+            missing_completed.upload.id
+        )
+        assert missing_result.media_id is not None
+        missing_row = _metadata_row(engine, missing_result.media_id)
+        assert _ordered_tags(engine, missing_result.media_id) == []
+        assert _publication_count(engine, missing_result.media_id) == 0
+        missing = derive_content_publication_readiness(
+            display_title=missing_row["display_title"],
+            description=missing_row["description"],
+            canonical_tag_count=0,
+        )
+        assert missing.ready is False
+        assert MISSING_TAGS in missing.missing_fields
+    finally:
+        from framenest.infrastructure.persistence.engine import dispose_engine
+
+        dispose_engine(engine)

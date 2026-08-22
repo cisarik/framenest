@@ -32,7 +32,12 @@ from framenest.domain.upload_publications import (
     UploadPublicationCleanupState,
     UploadPublicationState,
 )
-from framenest.domain.media_metadata import MediaDisplayTitle, MediaMetadata
+from framenest.domain.media_metadata import (
+    CanonicalTagKey,
+    MediaDescription,
+    MediaDisplayTitle,
+    MediaMetadata,
+)
 from framenest.domain.uploads import UploadSessionId, UploadSessionState
 
 
@@ -51,6 +56,8 @@ class CatalogUploadClassification:
     creator_stable_id: str | None = None
     creator_handle: str | None = None
     creator_display_name: str | None = None
+    description: MediaDescription | None = None
+    tag_keys: tuple[CanonicalTagKey, ...] = ()
 
 
 class UploadCatalogNotFoundError(UploadCatalogError):
@@ -164,8 +171,8 @@ class CatalogPublishedUpload:
                     metadata = MediaMetadata(
                         media_id=media.id,
                         display_title=classification.display_title,
-                        description=None,
-                        tag_keys=(),
+                        description=classification.description,
+                        tag_keys=classification.tag_keys,
                         created_at_ms=now_ms,
                         updated_at_ms=now_ms,
                         content_category=classification.content_category,

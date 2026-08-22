@@ -1271,6 +1271,15 @@ def x_classification_for_upload(
         creator_stable_id = claim.source_author_stable_id
         creator_handle = claim.source_author_handle
         creator_display_name = claim.source_author_display_name
+    pending = repository.get_pending_alias(claim.id)
+    pending_content = None if pending is None else pending.content
+    display_title = (
+        pending_content.display_title
+        if pending_content is not None and pending_content.display_title is not None
+        else _imported_display_title(claim.title)
+    )
+    description = None if pending_content is None else pending_content.description
+    tag_keys = () if pending_content is None else pending_content.tag_keys
     return CatalogUploadClassification(
         content_category=(
             claim.requested_content_category
@@ -1278,11 +1287,13 @@ def x_classification_for_upload(
             else default_x_category(asset.media_type)
         ),
         acquisition_source=AcquisitionSource.X_MANUAL_CLAIM,
-        display_title=_imported_display_title(claim.title),
+        display_title=display_title,
         creator_attribution_kind=creator_kind,
         creator_stable_id=creator_stable_id,
         creator_handle=creator_handle,
         creator_display_name=creator_display_name,
+        description=description,
+        tag_keys=tag_keys,
     )
 
 
