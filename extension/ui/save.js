@@ -13,9 +13,6 @@
   const formStatus = document.getElementById("form-status");
   const closeButton = document.getElementById("close");
   const saveButton = document.getElementById("save");
-  const categoryRadios = Array.prototype.slice.call(
-    form.querySelectorAll("input[name='category']")
-  );
   const catalog = [];
   const chosen = [];
   let activeSuggestion = -1;
@@ -66,36 +63,15 @@
     return accepted ? accepted.submittedUrl : null;
   }
 
-  function applyDefaultCategory() {
-    const media = hashParams().get("media") || "unknown";
-    const value = companion.defaultContentCategoryForMediaKind(media);
-    categoryRadios.forEach((radio) => {
-      radio.checked = radio.value === value;
-    });
-  }
-
-  function selectedCategory() {
-    const checked = categoryRadios.find((radio) => radio.checked);
-    return companion.acceptContentCategory(checked && checked.value);
-  }
-
-  function cycleCategory(delta) {
-    const order = categoryRadios.map((radio) => radio.value);
-    const current = selectedCategory() || order[0];
-    const index = order.indexOf(current);
-    const start = index >= 0 ? index : 0;
-    const next = order[(start + delta + order.length) % order.length];
-    categoryRadios.forEach((radio) => {
-      radio.checked = radio.value === next;
-    });
-    focusCheckedCategory();
-  }
-
-  function focusCheckedCategory() {
-    const checked = categoryRadios.find((radio) => radio.checked) || categoryRadios[0];
-    if (checked && typeof checked.focus === "function") {
-      checked.focus();
+  function clampDescriptionHeight(value) {
+    const height = Math.ceil(Number(value) || 0);
+    if (height < 120) {
+      return 120;
     }
+    if (height > 320) {
+      return 320;
+    }
+    return height;
   }
 
   function applyPrefill(data) {
@@ -107,6 +83,9 @@
     }
     if (typeof data.description === "string" && !description.value) {
       description.value = data.description.slice(0, 10000);
+    }
+    if (typeof data.descriptionHeight === "number") {
+      description.style.height = String(clampDescriptionHeight(data.descriptionHeight)) + "px";
     }
   }
 
@@ -172,9 +151,6 @@
     description.disabled = busy;
     tagSearch.disabled = busy;
     saveButton.disabled = busy;
-    categoryRadios.forEach((radio) => {
-      radio.disabled = busy;
-    });
     renderSelected();
   }
 
@@ -298,17 +274,11 @@
       setStatus(formStatus, "Invalid post URL.", "error");
       return;
     }
-    const category = selectedCategory();
-    if (!category) {
-      setStatus(formStatus, "Choose a category.", "error");
-      return;
-    }
     setFormBusy(true);
     setStatus(formStatus, "Saving…");
     request(companion.TYPES.SAVE_POST, {
       url: url,
       alias: aliasPayload(),
-      contentCategory: category,
     }).then((result) => {
       if (!result.ok) {
         setFormBusy(false);
@@ -354,25 +324,6 @@
       event.preventDefault();
       submitSave();
     }
-  });
-
-  categoryRadios.forEach((radio) => {
-    radio.addEventListener("keydown", (event) => {
-      if (event.key === "Enter" && !event.ctrlKey && !event.metaKey) {
-        event.preventDefault();
-        submitSave();
-        return;
-      }
-      if (event.key === "ArrowRight" || event.key === "ArrowDown") {
-        event.preventDefault();
-        cycleCategory(1);
-        return;
-      }
-      if (event.key === "ArrowLeft" || event.key === "ArrowUp") {
-        event.preventDefault();
-        cycleCategory(-1);
-      }
-    });
   });
 
   closeButton.addEventListener("click", () => {
@@ -428,14 +379,11 @@
     if (!data || data.v !== companion.PROTOCOL || data.source !== "framenest-save-host") {
       return;
     }
-    if (data.action === "focus-category") {
+    if (data.action === "prefill") {
       applyPrefill(data);
-      focusCheckedCategory();
     }
   });
 
-  applyDefaultCategory();
-  focusCheckedCategory();
   void loadTags();
   notifyParent("ready");
 })();

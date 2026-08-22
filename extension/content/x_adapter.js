@@ -459,6 +459,10 @@
 
   const TITLE_MAX = 240;
   const DESCRIPTION_MAX = 10000;
+  const DESCRIPTION_HEIGHT_MIN = 120;
+  const DESCRIPTION_HEIGHT_MAX = 320;
+  const GENERIC_ACCESSIBLE_NAME =
+    /^(image|photo|video|embedded video|gif|media)(?:\s+\d+\s+of\s+\d+)?$/i;
 
   function owningPostRoot(node) {
     let current = node;
@@ -471,17 +475,13 @@
     return null;
   }
 
-  function rawTextOf(node) {
-    if (!node) {
-      return "";
+  function clipCodePoints(value, max) {
+    const text = typeof value === "string" ? value : "";
+    const points = Array.from(text);
+    if (points.length <= max) {
+      return text;
     }
-    if (typeof node.innerText === "string" && node.innerText.trim()) {
-      return node.innerText;
-    }
-    if (typeof node.textContent === "string") {
-      return node.textContent;
-    }
-    return "";
+    return points.slice(0, max).join("");
   }
 
   function clipText(value, max) {
@@ -489,72 +489,161 @@
     if (!text) {
       return "";
     }
-    return text.length <= max ? text : text.slice(0, max);
+    return clipCodePoints(text, max);
   }
 
-  function titleFromDescription(text) {
-    const trimmed = typeof text === "string" ? text.trim() : "";
-    if (!trimmed) {
+  function withoutForbiddenControls(value) {
+    return Array.from(value)
+      .filter((ch) => {
+        if (ch === "\n") {
+          return true;
+        }
+        const code = ch.codePointAt(0);
+        return !(code <= 0x1f || code === 0x7f || (code >= 0x80 && code <= 0x9f));
+      })
+      .join("");
+  }
+
+  function normalizeTweetText(value) {
+    if (typeof value !== "string" || !value) {
       return "";
     }
-    let candidate = trimmed;
-    if (trimmed.indexOf("\n") !== -1 || trimmed.indexOf("\r") !== -1) {
-      const lines = trimmed.split(/\r?\n/);
-      for (let index = 0; index < lines.length; index += 1) {
-        const line = lines[index].trim();
-        if (line) {
-          candidate = line;
-          break;
-        }
+    const normalized = withoutForbiddenControls(
+      value.replace(/\r\n/g, "\n").replace(/\r/g, "\n").normalize("NFC")
+    );
+    return clipCodePoints(normalized, DESCRIPTION_MAX);
+  }
+
+  function descriptionFromTweetNode(node) {
+    if (!node) {
+      return "";
+    }
+    const fromContent =
+      typeof node.textContent === "string" ? normalizeTweetText(node.textContent) : "";
+    const fromInner =
+      typeof node.innerText === "string" ? normalizeTweetText(node.innerText) : "";
+    return fromContent.length >= fromInner.length ? fromContent : fromInner;
+  }
+
+  function usefulTweetSentence(value) {
+    const normalized = String(value || "")
+      .normalize("NFC")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (!normalized) {
+      return "";
+    }
+    const meaningful = normalized
+      .replace(/https?:\/\/\S+/gi, " ")
+      .replace(/(^|\s)#[A-Za-z0-9_]+/g, " ")
+      .replace(/(^|\s)@[A-Za-z0-9_]+/g, " ")
+      .trim();
+    if (!meaningful) {
+      return "";
+    }
+    const sentence = normalized.split(/[.!?](?:\s|$)/)[0].trim();
+    if (!sentence || (sentence.length > 3 && !/[a-zA-Z0-9]/.test(sentence))) {
+      return "";
+    }
+    return clipText(sentence, TITLE_MAX);
+  }
+
+  function isGenericAccessibleName(value) {
+    return typeof value === "string" && GENERIC_ACCESSIBLE_NAME.test(value.trim());
+  }
+
+  function queryFirst(host, selectors) {
+    if (!host || typeof host.querySelector !== "function") {
+      return null;
+    }
+    for (let index = 0; index < selectors.length; index += 1) {
+      const found = host.querySelector(selectors[index]);
+      if (found) {
+        return found;
       }
     }
-    return clipText(candidate, TITLE_MAX);
+    return null;
+  }
+
+  function firstNonGenericName(values) {
+    for (let index = 0; index < values.length; index += 1) {
+      const value = values[index];
+      if (typeof value !== "string") {
+        continue;
+      }
+      const trimmed = value.trim();
+      if (!trimmed || isGenericAccessibleName(trimmed)) {
+        continue;
+      }
+      return clipText(trimmed, TITLE_MAX);
+    }
+    return "";
+  }
+
+  function accessibleNameFrom(host) {
+    if (!host) {
+      return "";
+    }
+    const img = host.querySelector ? host.querySelector("img[alt]") : null;
+    const imgAlt =
+      img && typeof img.getAttribute === "function" ? img.getAttribute("alt") : "";
+    const named = firstNonGenericName([imgAlt]);
+    if (named) {
+      return named;
+    }
+    const media = queryFirst(host, ["video", "[aria-label]", "[title]"]);
+    const hostLabel =
+      host.getAttribute && typeof host.getAttribute === "function"
+        ? host.getAttribute("aria-label")
+        : "";
+    const hostTitle =
+      host.getAttribute && typeof host.getAttribute === "function"
+        ? host.getAttribute("title")
+        : "";
+    const mediaLabel =
+      media && typeof media.getAttribute === "function" ? media.getAttribute("aria-label") : "";
+    const mediaTitle =
+      media && typeof media.getAttribute === "function" ? media.getAttribute("title") : "";
+    const mediaAlt =
+      media && typeof media.getAttribute === "function" ? media.getAttribute("alt") : "";
+    return firstNonGenericName([hostLabel, hostTitle, mediaLabel, mediaTitle, mediaAlt]);
+  }
+
+  function tweetHeightFrom(node) {
+    let height = DESCRIPTION_HEIGHT_MIN;
+    if (node && typeof node.getBoundingClientRect === "function") {
+      const rect = node.getBoundingClientRect();
+      if (rect && typeof rect.height === "number") {
+        height = Math.ceil(rect.height);
+      }
+    }
+    if (height < DESCRIPTION_HEIGHT_MIN) {
+      return DESCRIPTION_HEIGHT_MIN;
+    }
+    if (height > DESCRIPTION_HEIGHT_MAX) {
+      return DESCRIPTION_HEIGHT_MAX;
+    }
+    return height;
   }
 
   function postTextPrefillFrom(postRoot, host) {
     const tweetNode = postRoot ? first(postRoot, contract.tweetTextSelectors) : null;
-    const description = clipText(rawTextOf(tweetNode), DESCRIPTION_MAX);
-    let title = titleFromDescription(description);
-    if (!title && host && typeof host.querySelector === "function") {
-      const img = host.querySelector("img[alt]");
-      const alt = img && typeof img.getAttribute === "function" ? img.getAttribute("alt") : "";
-      title = clipText(alt, TITLE_MAX);
+    const description = descriptionFromTweetNode(tweetNode);
+    let title = accessibleNameFrom(host);
+    if (!title) {
+      title = usefulTweetSentence(description);
     }
-    return { title: title, description: description };
+    return {
+      title: title,
+      description: description,
+      descriptionHeight: tweetHeightFrom(tweetNode),
+    };
   }
 
   function haltHostAction(event) {
     event.preventDefault();
     event.stopPropagation();
     event.stopImmediatePropagation();
-  }
-
-  function mediaKindForHost(host) {
-    if (!host) {
-      return "unknown";
-    }
-    if (typeof host.matches === "function" && host.matches("[data-testid='tweetPhoto']")) {
-      return "image";
-    }
-    if (host.querySelector && host.querySelector("[data-testid='tweetPhoto']")) {
-      return "image";
-    }
-    if (
-      typeof host.matches === "function" &&
-      (host.matches("[data-testid='videoPlayer']") ||
-        host.matches("[data-testid='videoComponent']"))
-    ) {
-      return "video";
-    }
-    if (
-      host.querySelector &&
-      (host.querySelector("[data-testid='videoPlayer']") ||
-        host.querySelector("[data-testid='videoComponent']") ||
-        host.querySelector("video"))
-    ) {
-      return "video";
-    }
-    return "unknown";
   }
 
   function saveButtonsForPost(postId) {
@@ -608,12 +697,11 @@
     }
   }
 
-  function createSaveControl(accepted, mediaKind) {
+  function createSaveControl(accepted) {
     const button = document.createElement("button");
     button.type = "button";
     button.setAttribute("data-framenest-companion", "save");
     button.setAttribute("data-framenest-post-id", accepted.postId);
-    button.setAttribute("data-framenest-media-kind", mediaKind || "unknown");
     button.setAttribute("aria-haspopup", "dialog");
     button.setAttribute("aria-expanded", "false");
     setSaveStatus(button, "idle", SAVE_NAME, false);
@@ -662,7 +750,13 @@
     }
     const rect = button.getBoundingClientRect();
     const width = Math.min(360, Math.max(280, window.innerWidth - 16));
-    const height = Math.min(520, Math.max(240, window.innerHeight - 16));
+    const textareaHeight =
+      savePopup && typeof savePopup.descriptionHeight === "number"
+        ? savePopup.descriptionHeight
+        : DESCRIPTION_HEIGHT_MIN;
+    const desired = 400 + textareaHeight;
+    const viewport = Math.max(0, window.innerHeight - 16);
+    const height = Math.max(240, Math.min(720, viewport, desired));
     const gap = 8;
     const enoughAbove = rect.top >= height + gap;
     let top = enoughAbove ? rect.top - height - gap : rect.bottom + gap;
@@ -718,13 +812,10 @@
     const frame = document.createElement("div");
     frame.className = "frame";
     const iframe = document.createElement("iframe");
-    const mediaKind = button.getAttribute("data-framenest-media-kind") || "unknown";
     iframe.src =
       chrome.runtime.getURL("ui/save.html") +
       "#url=" +
-      encodeURIComponent(accepted.submittedUrl) +
-      "&media=" +
-      encodeURIComponent(mediaKind);
+      encodeURIComponent(accepted.submittedUrl);
     iframe.title = SAVE_NAME;
     iframe.setAttribute("aria-label", SAVE_NAME);
     frame.appendChild(iframe);
@@ -750,9 +841,6 @@
     const onSaveIframeReady = () => {
       if (!savePopup || savePopup.iframe !== iframe) {
         return;
-      }
-      if (typeof iframe.focus === "function") {
-        iframe.focus();
       }
       requestSavePopupHandshake(iframe, prefill);
     };
@@ -785,6 +873,7 @@
       host: host,
       button: button,
       iframe: iframe,
+      descriptionHeight: prefill.descriptionHeight,
       reposition: reposition,
       onKey: onKey,
       onMouseDown: onMouseDown,
@@ -822,9 +911,13 @@
       {
         v: companion.PROTOCOL,
         source: "framenest-save-host",
-        action: "focus-category",
+        action: "prefill",
         title: prefill && typeof prefill.title === "string" ? prefill.title : "",
         description: prefill && typeof prefill.description === "string" ? prefill.description : "",
+        descriptionHeight:
+          prefill && typeof prefill.descriptionHeight === "number"
+            ? prefill.descriptionHeight
+            : DESCRIPTION_HEIGHT_MIN,
       },
       origin
     );
@@ -867,7 +960,7 @@
         injected.add(host);
         return;
       }
-      const button = createSaveControl(accepted, mediaKindForHost(host));
+      const button = createSaveControl(accepted);
       host.appendChild(button);
       const remembered = postOutcomeById.get(accepted.postId);
       if (remembered) {
@@ -1699,7 +1792,6 @@
     globalThis.FrameNestXAdapterTestHooks.applySaveResult = applySaveResult;
     globalThis.FrameNestXAdapterTestHooks.createSaveControl = createSaveControl;
     globalThis.FrameNestXAdapterTestHooks.closeSavePopup = closeSavePopup;
-    globalThis.FrameNestXAdapterTestHooks.mediaKindForHost = mediaKindForHost;
     globalThis.FrameNestXAdapterTestHooks.paintPostSaveOutcome = paintPostSaveOutcome;
     globalThis.FrameNestXAdapterTestHooks.pollClaim = pollClaim;
     globalThis.FrameNestXAdapterTestHooks.recover = recover;

@@ -117,7 +117,11 @@ textarea {
 }
 
 textarea {
-  min-height: 5.5rem;
+  flex: 0 0 auto;
+  min-height: 120px;
+  max-height: 320px;
+  height: 120px;
+  overflow-y: auto;
   resize: none;
 }
 
@@ -128,56 +132,9 @@ button:focus-visible {
   outline-offset: 2px;
 }
 
-.category {
-  margin: 0;
-  padding: 6px 8px 8px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
-  min-width: 0;
-}
-
-.category legend {
-  font-size: 0.75rem;
-  color: var(--text-muted);
-  padding: 0 4px;
-}
-
-.category-options {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px 14px;
-}
-
-.category-options label {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  margin: 0;
-  color: var(--text);
-  font-size: 0.8rem;
-  cursor: pointer;
-}
-
-.category-options input[type="radio"] {
-  width: auto;
-  margin: 0;
-  accent-color: var(--accent);
-}
-
-.category-options input[type="radio"]:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-}
-
 .hint {
   margin: 6px 0 0;
   font-size: 0.72rem;
-  color: var(--text-soft);
-}
-
-.category-options input[type="radio"]:disabled + span,
-.category-options label:has(input:disabled) {
-  cursor: not-allowed;
   color: var(--text-soft);
 }
 
@@ -302,6 +259,18 @@ button {
 
 button:hover {
   color: var(--accent-strong);
+  border-color: var(--accent-strong);
+}
+
+#save {
+  background: var(--accent);
+  color: var(--background);
+}
+
+#save:hover,
+#save:focus-visible {
+  background: var(--accent-strong);
+  color: var(--background);
   border-color: var(--accent-strong);
 }
 

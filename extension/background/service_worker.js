@@ -148,17 +148,12 @@ async function savePost(payload) {
   if (!accepted) {
     return { ok: false, error: "invalid_url" };
   }
-  const category = companion.acceptContentCategory(payload.contentCategory);
-  if (!category) {
-    return { ok: false, error: "invalid_category" };
-  }
   const alias = sanitizeAlias(payload.alias);
   const response = await fetchJson("xRequests", {
     method: "POST",
     body: {
       url: accepted.submittedUrl,
       alias: alias,
-      content_category: category,
     },
   });
   if (!response.ok) {

@@ -223,10 +223,13 @@ test("in-feed Save is a per-media hover overlay, not an action-row control", () 
   assert.match(extractNamedFunction(adapterSource, "openSavePopup"), /requestSavePopupHandshake/);
   assert.match(extractNamedFunction(adapterSource, "openSavePopup"), /onSaveIframeReady/);
   assert.match(extractNamedFunction(adapterSource, "openSavePopup"), /postTextPrefillFrom/);
-  assert.match(extractNamedFunction(adapterSource, "requestSavePopupHandshake"), /focus-category/);
+  assert.match(extractNamedFunction(adapterSource, "requestSavePopupHandshake"), /prefill/);
+  assert.doesNotMatch(extractNamedFunction(adapterSource, "requestSavePopupHandshake"), /focus-category/);
   assert.match(extractNamedFunction(adapterSource, "requestSavePopupHandshake"), /framenest-save-host/);
   assert.match(extractNamedFunction(adapterSource, "requestSavePopupHandshake"), /title:/);
-  assert.match(extractNamedFunction(adapterSource, "requestSavePopupHandshake"), /description:/);
+  assert.match(extractNamedFunction(adapterSource, "requestSavePopupHandshake"), /descriptionHeight/);
+  assert.doesNotMatch(extractNamedFunction(adapterSource, "openSavePopup"), /iframe\.focus/);
+  assert.doesNotMatch(adapterSource, /data-framenest-media-kind/);
   assert.doesNotMatch(
     extractNamedFunction(adapterSource, "requestSavePopupHandshake"),
     /["']\*["']/
@@ -298,8 +301,10 @@ test("Save popup searches tags, pins Save, and does not execute Analyze", () => 
   assert.match(saveCss, /\.actions \{[\s\S]*?justify-content:\s*flex-end/);
   assert.doesNotMatch(saveCss, /\.actions \{[\s\S]*?justify-content:\s*flex-start/);
   assert.match(saveFn[0], /Math\.min\(\s*360/);
-  assert.match(saveFn[0], /Math\.min\(\s*520/);
+  assert.match(saveFn[0], /Math\.min\(\s*720/);
+  assert.match(saveFn[0], /400 \+ textareaHeight/);
   assert.doesNotMatch(saveFn[0], /Math\.min\(\s*380/);
+  assert.doesNotMatch(saveFn[0], /Math\.min\(\s*520/);
   assert.match(attachFn[0], /attachPopup\.compact/);
   assert.match(attachFn[0], /Math\.min\(\s*128/);
   assert.match(attachFn[0], /Math\.max\(\s*96/);
@@ -1438,40 +1443,42 @@ test("unbound live file input posts composer_unbound without a download fallback
   assert.equal(port.posted[0].payload.error, "composer_unbound");
 });
 
-test("Save popup offers X Meme Movie radios, post prefill, and keyboard save", () => {
+test("Save popup is an Edit-media subset without radios, source, or on-open focus", () => {
   const saveHtml = fs.readFileSync(path.join(REPO, "extension/ui/save.html"), "utf8");
   const saveJs = fs.readFileSync(path.join(REPO, "extension/ui/save.js"), "utf8");
   const saveCss = fs.readFileSync(path.join(REPO, "extension/ui/save.css"), "utf8");
-  assert.match(saveHtml, /<fieldset[^>]*id="category-fieldset"/);
-  assert.match(saveHtml, /<legend[^>]*>Category</);
-  assert.match(saveHtml, /value="general"[\s\S]*?> X</);
-  assert.match(saveHtml, /value="meme"/);
-  assert.match(saveHtml, /value="movie"/);
+  assert.doesNotMatch(saveHtml, /category-fieldset/);
+  assert.doesNotMatch(saveHtml, /name="category"/);
+  assert.doesNotMatch(saveHtml, /<legend[^>]*>Category</);
+  assert.doesNotMatch(saveHtml, /value="general"/);
+  assert.doesNotMatch(saveHtml, /value="meme"/);
+  assert.doesNotMatch(saveHtml, /value="movie"/);
   assert.doesNotMatch(saveHtml, /value="youtube"/);
+  assert.doesNotMatch(saveHtml, /> X</);
   assert.doesNotMatch(saveHtml, /> General</);
-  assert.match(saveHtml, /> Meme</);
-  assert.match(saveHtml, /> Movie</);
+  assert.doesNotMatch(saveHtml, /> Meme</);
+  assert.doesNotMatch(saveHtml, /> Movie</);
   assert.doesNotMatch(saveHtml, /> YouTube</);
+  assert.doesNotMatch(saveHtml, /Analyze/);
+  assert.doesNotMatch(saveHtml, /id="source"/);
   assert.doesNotMatch(
     saveHtml,
     /Category describes the content and applies to every media item in this post/
   );
-  assert.doesNotMatch(saveHtml, /id="category-help"/);
-  assert.match(saveHtml, /id="title"[\s\S]*id="description"[\s\S]*id="category-fieldset"[\s\S]*id="tag-search"/);
-  assert.match(saveJs, /contentCategory: category/);
-  assert.match(saveJs, /defaultContentCategoryForMediaKind/);
-  assert.match(saveJs, /function focusCheckedCategory/);
-  assert.match(saveJs, /action === "focus-category"/);
+  assert.match(saveHtml, /id="title"[\s\S]*id="description"[\s\S]*id="tag-search"/);
+  assert.doesNotMatch(saveJs, /contentCategory/);
+  assert.doesNotMatch(saveJs, /defaultContentCategoryForMediaKind/);
+  assert.doesNotMatch(saveJs, /focusCheckedCategory/);
+  assert.doesNotMatch(saveJs, /focus-category/);
+  assert.match(saveJs, /action === "prefill"/);
   assert.match(saveJs, /source !== "framenest-save-host"/);
   assert.match(saveJs, /applyPrefill\(data\)/);
+  assert.match(saveJs, /descriptionHeight/);
   assert.doesNotMatch(saveHtml, /autofocus/);
   assert.match(saveJs, /notifyParent\("ready"\)/);
   assert.match(saveJs, /title\.addEventListener\("keydown"[\s\S]*Enter[\s\S]*submitSave\(\)/);
-  assert.match(saveJs, /categoryRadios[\s\S]*Enter[\s\S]*submitSave\(\)/);
-  assert.match(saveJs, /function cycleCategory/);
-  assert.match(saveJs, /ArrowRight/);
-  assert.doesNotMatch(extractNamedFunction(saveJs, "cycleCategory"), /youtube/);
-  assert.doesNotMatch(extractNamedFunction(saveJs, "cycleCategory"), /description/);
+  assert.doesNotMatch(saveJs, /cycleCategory/);
+  assert.doesNotMatch(saveJs, /categoryRadios/);
   assert.doesNotMatch(saveJs, /description\.addEventListener\("keydown"/);
   assert.match(saveJs, /event\.ctrlKey \|\| event\.metaKey/);
   assert.match(saveJs, /tagListOpen\(\)/);
@@ -1479,8 +1486,12 @@ test("Save popup offers X Meme Movie radios, post prefill, and keyboard save", (
   assert.match(saveJs, /FrameNest needs an update before this Save can complete\./);
   assert.doesNotMatch(saveJs, /content_category/);
   assert.doesNotMatch(saveJs, /contentCategory:\s*null/);
-  assert.match(saveCss, /\.category /);
-  assert.match(saveCss, /accent-color: var\(--accent\)/);
+  assert.doesNotMatch(saveCss, /\.category /);
+  assert.doesNotMatch(saveCss, /accent-color: var\(--accent\)/);
+  assert.match(saveCss, /min-height:\s*120px/);
+  assert.match(saveCss, /max-height:\s*320px/);
+  assert.match(saveCss, /overflow-y:\s*auto/);
+  assert.match(saveCss, /#save \{[\s\S]*background:\s*var\(--accent\)/);
   assert.equal(companion.savePopupDefaultContentCategory(), "general");
   assert.equal(companion.defaultContentCategoryForMediaKind("image"), "general");
   assert.equal(companion.defaultContentCategoryForMediaKind("video"), "general");
@@ -1531,6 +1542,7 @@ test("Save live UX keeps + inset, hides Edit image, and searches canonical tags 
   tweetText.textContent = "First line of the post\nSecond line stays in description";
   post.appendChild(tweetText);
   const photo = el(dom, "div", { "data-testid": "tweetPhoto", "data-framenest-media": "" });
+  photo.appendChild(el(dom, "img", { alt: "Cardano founder still" }));
   const edit = el(dom, "button", { "aria-label": "Edit image", title: "Edit image" });
   const overlayEdit = el(dom, "button", { "aria-label": "Edit image", title: "Edit image" });
   const profile = el(dom, "button", { "aria-label": "Edit profile" });
@@ -1551,7 +1563,8 @@ test("Save live UX keeps + inset, hides Edit image, and searches canonical tags 
   assert.equal(save.getAttribute("aria-label"), "Save to FrameNest");
   const prefill = hooks.postTextPrefillFrom(post, photo);
   assert.equal(prefill.description, "First line of the post\nSecond line stays in description");
-  assert.equal(prefill.title, "First line of the post");
+  assert.equal(prefill.title, "Cardano founder still");
+  assert.equal(prefill.descriptionHeight, 120);
   const emptyPost = el(dom, "article", { "data-testid": "tweet" });
   const emptyPhoto = el(dom, "div", { "data-testid": "tweetPhoto", "data-framenest-media": "" });
   emptyPhoto.appendChild(el(dom, "img", { alt: "Fallback tile alt" }));
@@ -1561,13 +1574,59 @@ test("Save live UX keeps + inset, hides Edit image, and searches canonical tags 
   assert.equal(emptyPrefill.title, "Fallback tile alt");
 });
 
-test("service worker allowlists category, never drops it, and treats catalog_removed as terminal", () => {
+test("Save prefill prefers non-generic alt, clamps height, and keeps hidden DOM text", () => {
+  const dom = createMiniDom();
+  const hooks = loadAdapterHooks(dom);
+  const genericPost = el(dom, "article", { "data-testid": "tweet" });
+  const tweetText = el(dom, "div", { "data-testid": "tweetText" });
+  tweetText.textContent = "Useful tweet sentence about the clip.";
+  tweetText.innerText = "Useful tweet sentence";
+  tweetText.getBoundingClientRect = () => ({
+    top: 0,
+    left: 0,
+    right: 120,
+    bottom: 480,
+    width: 120,
+    height: 480,
+    x: 0,
+    y: 0,
+  });
+  const genericPhoto = el(dom, "div", { "data-testid": "tweetPhoto" });
+  genericPhoto.appendChild(el(dom, "img", { alt: "Image 1 of 4" }));
+  genericPost.appendChild(tweetText);
+  genericPost.appendChild(genericPhoto);
+  const genericPrefill = hooks.postTextPrefillFrom(genericPost, genericPhoto);
+  assert.equal(genericPrefill.title, "Useful tweet sentence about the clip");
+  assert.equal(genericPrefill.description, "Useful tweet sentence about the clip.");
+  assert.equal(genericPrefill.descriptionHeight, 320);
+
+  const videoPost = el(dom, "article", { "data-testid": "tweet" });
+  const videoHost = el(dom, "div", { "data-testid": "videoPlayer" });
+  videoHost.setAttribute("aria-label", "Embedded video");
+  const video = el(dom, "video", { "aria-label": "Founder clip" });
+  videoHost.appendChild(video);
+  videoPost.appendChild(videoHost);
+  const videoPrefill = hooks.postTextPrefillFrom(videoPost, videoHost);
+  assert.equal(videoPrefill.title, "Founder clip");
+
+  const blankPost = el(dom, "article", { "data-testid": "tweet" });
+  const blankHost = el(dom, "div", { "data-testid": "tweetPhoto" });
+  blankHost.appendChild(el(dom, "img", { alt: "Photo" }));
+  blankPost.appendChild(blankHost);
+  const blankPrefill = hooks.postTextPrefillFrom(blankPost, blankHost);
+  assert.equal(blankPrefill.title, "");
+  assert.equal(blankPrefill.description, "");
+  assert.equal(blankPrefill.descriptionHeight, 120);
+});
+
+test("service worker posts alias without content_category and treats catalog_removed as terminal", () => {
   const savePostFn = extractNamedFunction(workerSource, "savePost");
   const terminalFn = extractNamedFunction(workerSource, "isTerminal");
   const persistFn = extractNamedFunction(workerSource, "persistInflight");
-  assert.match(savePostFn, /acceptContentCategory\(payload\.contentCategory\)/);
-  assert.match(savePostFn, /content_category: category/);
-  assert.match(savePostFn, /invalid_category/);
+  assert.doesNotMatch(savePostFn, /acceptContentCategory\(payload\.contentCategory\)/);
+  assert.doesNotMatch(savePostFn, /content_category/);
+  assert.doesNotMatch(savePostFn, /invalid_category/);
+  assert.match(savePostFn, /alias: alias/);
   assert.match(savePostFn, /ambiguous: true/);
   assert.doesNotMatch(savePostFn, /content_category:\s*null/);
   assert.doesNotMatch(savePostFn, /delete .*\.content_category/);
@@ -1663,8 +1722,6 @@ test("failed Save never paints Saved to FrameNest and mirrors every tile on the 
       callback({ ok: false, error: "empty_response" });
     },
   });
-  assert.equal(hooks.mediaKindForHost(photo), "image");
-  assert.equal(hooks.mediaKindForHost(video), "video");
   assert.equal(hooks.injectSave(post), "placed");
   const placed = post.querySelectorAll("[data-framenest-companion='save']");
   assert.equal(placed.length, 2);
