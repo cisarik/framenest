@@ -178,12 +178,15 @@ are accepted through
 [ADR-0055](docs/adr/0055-youtube-creator-taxonomy-and-immutable-provenance.md).
 Requester-private X meme acquisition is implemented for native X video,
 animated-GIF-like media delivered as video, and public JPEG/PNG photographs.
-Save offers the four canonical categories `general`, `meme`, `movie`, and
-`youtube`; `youtube` remains a semantic category under
-[ADR-0055](docs/adr/0055-youtube-creator-taxonomy-and-immutable-provenance.md),
-not an acquisition-source proxy. WebP still photographs are rejected without
-transcoding. A caller-private per-user alias overlay may be named on X Save;
-Gallery and Details remain canonical `media_metadata`. Movie language metadata should
+X Save is an Edit-media subset (Title, Description, existing-tag search, one
+Save) without category radios; omitted `content_category` keeps the existing
+media-type default, and first catalog seeds canonical title, description, and
+selected tags from the pending alias per
+[ADR-0065](docs/adr/0065-x-save-edit-subset-and-acquisition-time-canonical-metadata-seed.md).
+Later Save updates the caller-private alias only. WebP still photographs are
+rejected without transcoding. A caller-private per-user alias overlay may be
+named on X Save; Gallery and Details remain canonical `media_metadata`. Movie
+language metadata should
 prefer container or audio metadata and user editing before expensive AI
 analysis, and FrameNest must not automatically upload audio to a cloud provider.
 

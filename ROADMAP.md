@@ -279,7 +279,8 @@ Implemented within this phase:
 - YouTube/X creator taxonomy and immutable source-derived provenance;
 - requester-private X meme acquisition for native X video, animated-GIF-like
   media delivered as video, and public JPEG/PNG photos
-  ([ADR-0064](docs/adr/0064-x-save-category-and-public-photo-acquisition.md));
+  ([ADR-0064](docs/adr/0064-x-save-category-and-public-photo-acquisition.md),
+  [ADR-0065](docs/adr/0065-x-save-edit-subset-and-acquisition-time-canonical-metadata-seed.md));
 - unpacked Manifest V3 X companion origin trust, requester-private meme picker,
   and synthetic composer attach ([ADR-0061](docs/adr/0061-x-meme-browser-companion.md)).
 

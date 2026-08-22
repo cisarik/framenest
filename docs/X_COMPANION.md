@@ -10,13 +10,15 @@ An authenticated FrameNest user can:
 
 - hover (or keyboard-focus) a green **+** at the bottom-right of each image,
   video, or GIF in an eligible X post and click **Save to FrameNest** to open
-  a Save popup (Title, Description, Category, Search tags, Save). Save from X
-  offers X / Meme / Movie (YouTube parked), defaults to X, prefills post text,
-  one Save button. The header close **X**, Escape, or a click
+  a Save popup (Title, Description, Search tags, Save). Save from X is an
+  Edit-media subset: alt-first Title, tall tweet Description, existing-tag
+  search, one Save, no category radios. The header close **X**, Escape, or a click
   outside cancel without a request and restore focus to that **+**. Save
-  submits the post permalink, the chosen `content_category`, and an optional
-  caller-private alias (title, description, and selected existing tag keys); it
-  does not send a per-asset media URL. Public JPEG and PNG photographs catalog;
+  submits the post permalink and an optional caller-private alias (title,
+  description, and selected existing tag keys); it omits `content_category` and
+  does not send a per-asset media URL. First catalog seeds canonical title,
+  description, and selected tags from that alias; later Save updates the alias
+  only. Public JPEG and PNG photographs catalog;
   WebP and other still formats fail closed without transcoding. Overlay copy
   distinguishes saving, saved, already saved, partial, failed, catalog-removed,
   and unknown transport; failed Save keeps the plus glyph and a danger border,

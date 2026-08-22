@@ -86,6 +86,7 @@ An accepted ADR may only be changed by a later ADR that supersedes it. Editing a
 | 0059 | Portable Media Sidecar Round-Trip Foundation | Accepted | 2026-08-14 | [0059-portable-media-sidecar-roundtrip-foundation.md](0059-portable-media-sidecar-roundtrip-foundation.md) |
 | 0060 | Repeatable Immutable NUC Release-Update Contract | Accepted | 2026-08-15 | [0060-repeatable-immutable-nuc-release-update-contract.md](0060-repeatable-immutable-nuc-release-update-contract.md) |
 | 0061 | X Meme Browser Companion Origin Trust | Accepted | 2026-08-16 | [0061-x-meme-browser-companion.md](0061-x-meme-browser-companion.md) |
-| 0062 | Per-User Media Alias Overlay | Accepted | 2026-08-17 | [0062-per-user-media-alias-overlay.md](0062-per-user-media-alias-overlay.md) |
+| 0062 | Per-User Media Alias Overlay | Accepted; named statements superseded by [ADR-0065](0065-x-save-edit-subset-and-acquisition-time-canonical-metadata-seed.md) | 2026-08-17 | [0062-per-user-media-alias-overlay.md](0062-per-user-media-alias-overlay.md) |
 | 0063 | Companion Side-Panel Web Host | Accepted | 2026-08-17 | [0063-companion-side-panel-web-host.md](0063-companion-side-panel-web-host.md) |
-| 0064 | X Save Category and Public Photo Acquisition | Accepted | 2026-08-21 | [0064-x-save-category-and-public-photo-acquisition.md](0064-x-save-category-and-public-photo-acquisition.md) |
+| 0064 | X Save Category and Public Photo Acquisition | Accepted; named statements superseded by [ADR-0065](0065-x-save-edit-subset-and-acquisition-time-canonical-metadata-seed.md) | 2026-08-21 | [0064-x-save-category-and-public-photo-acquisition.md](0064-x-save-category-and-public-photo-acquisition.md) |
+| 0065 | X Save Edit Subset and Acquisition-Time Canonical Metadata Seed | Accepted | 2026-08-22 | [0065-x-save-edit-subset-and-acquisition-time-canonical-metadata-seed.md](0065-x-save-edit-subset-and-acquisition-time-canonical-metadata-seed.md) |

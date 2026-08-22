@@ -884,20 +884,25 @@ no automatic publication. Persisted source-derived metadata for
 `acquisition_source = x_manual_claim` is protected through normal Save
 for acquisition source and X creator attribution (kind, stable ID where
 present, handle where present, and display name where present). Canonical
-`content_category` on X media is chosen at Save and may be corrected by an
-administrator per
-[ADR-0064](docs/adr/0064-x-save-category-and-public-photo-acquisition.md).
+`content_category` on X media uses the claim’s requested value when present,
+otherwise the media-type default, and may be corrected by an administrator per
+[ADR-0064](docs/adr/0064-x-save-category-and-public-photo-acquisition.md) and
+[ADR-0065](docs/adr/0065-x-save-edit-subset-and-acquisition-time-canonical-metadata-seed.md).
 There is no separate X content category. `x_author` remains schema-compatible creator attribution.
 
 Migration `0029` adds a caller-private per-user media alias overlay and pending
 alias rows on X claims per
 [ADR-0062](docs/adr/0062-per-user-media-alias-overlay.md). Gallery and Details
-remain canonical `media_metadata`. The overlay is not a second catalog title.
+remain canonical `media_metadata`. First catalog may seed canonical title,
+description, and selected existing tags from that pending alias per
+[ADR-0065](docs/adr/0065-x-save-edit-subset-and-acquisition-time-canonical-metadata-seed.md);
+later Save updates the caller-private overlay only.
 
 Migration `0030` adds nullable claim-level `requested_content_category` and
 public JPEG/PNG X photo acquisition with source-key/variant continuity per
 [ADR-0064](docs/adr/0064-x-save-category-and-public-photo-acquisition.md).
-Save offers `general`, `meme`, `movie`, and `youtube`. WebP photographs are
+The new extension omits `content_category`; old explicit clients remain
+compatible. WebP photographs are
 rejected without transcoding. Administrator metadata Save may correct canonical
 category; acquisition source and X creator provenance remain immutable.
 
