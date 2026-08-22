@@ -236,6 +236,15 @@ test("in-feed Save is a per-media hover overlay, not an action-row control", () 
   assert.doesNotMatch(extractNamedFunction(adapterSource, "openSavePopup"), /tabIndex\s*=/);
   assert.match(extractNamedFunction(adapterSource, "openSavePopup"), /#url=/);
   assert.doesNotMatch(extractNamedFunction(adapterSource, "openSavePopup"), /media=/);
+  assert.match(extractNamedFunction(adapterSource, "openSavePopup"), /event\.key === "Enter"/);
+  assert.match(extractNamedFunction(adapterSource, "openSavePopup"), /isComposing/);
+  assert.match(extractNamedFunction(adapterSource, "openSavePopup"), /requestSavePopupSubmit/);
+  assert.match(extractNamedFunction(adapterSource, "requestSavePopupSubmit"), /action:\s*"submit"/);
+  assert.match(extractNamedFunction(adapterSource, "requestSavePopupSubmit"), /framenest-save-host/);
+  assert.doesNotMatch(
+    extractNamedFunction(adapterSource, "requestSavePopupSubmit"),
+    /["']\*["']/
+  );
   assert.doesNotMatch(adapterSource, /data-framenest-media-kind/);
   assert.doesNotMatch(
     extractNamedFunction(adapterSource, "requestSavePopupHandshake"),
@@ -1485,16 +1494,17 @@ test("Save popup is an Edit-media subset without radios, source, or on-open focu
   assert.match(saveJs, /action === "prefill"/);
   assert.match(saveJs, /source !== "framenest-save-host"/);
   assert.match(saveJs, /applyPrefill\(data\)/);
+  assert.match(saveJs, /action === "submit"/);
+  assert.match(saveJs, /action === "submit"[\s\S]{0,80}submitSave\(\)/);
   assert.doesNotMatch(saveJs, /descriptionHeight/);
   assert.match(saveJs, /action: "size"/);
   assert.doesNotMatch(saveJs, /title\.focus/);
   assert.doesNotMatch(saveJs, /description\.focus/);
   assert.doesNotMatch(saveJs, /tagSearch\.focus/);
   assert.doesNotMatch(saveHtml, /autofocus/);
-  assert.doesNotMatch(saveHtml, /tabindex="-1"/);
-  assert.doesNotMatch(saveHtml, /\sid="title"[^>]*tabindex=/);
-  assert.doesNotMatch(saveHtml, /\sid="description"[^>]*tabindex=/);
-  assert.doesNotMatch(saveHtml, /id="tag-search"[\s\S]*?tabindex=/);
+  assert.match(saveHtml, /\sid="title"[^>]*tabindex="-1"/);
+  assert.match(saveHtml, /\sid="description"[^>]*tabindex="-1"/);
+  assert.match(saveHtml, /id="tag-search"[\s\S]*?tabindex="-1"/);
   assert.doesNotMatch(saveJs, /pointerdown/);
   assert.doesNotMatch(saveJs, /overlayArmed/);
   assert.doesNotMatch(saveJs, /armOverlayFocus/);

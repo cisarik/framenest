@@ -434,6 +434,10 @@
     }
     if (data.action === "prefill") {
       applyPrefill(data);
+      return;
+    }
+    if (data.action === "submit") {
+      submitSave();
     }
   });
 

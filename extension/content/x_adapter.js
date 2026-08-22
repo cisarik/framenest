@@ -854,6 +854,15 @@
         event.preventDefault();
         event.stopPropagation();
         closeSavePopup();
+        return;
+      }
+      if (event.key === "Enter" && !event.isComposing) {
+        event.preventDefault();
+        event.stopPropagation();
+        if (event.target === iframe) {
+          return;
+        }
+        requestSavePopupSubmit(iframe);
       }
     };
     const onMouseDown = (event) => {
@@ -946,6 +955,21 @@
         action: "prefill",
         title: prefill && typeof prefill.title === "string" ? prefill.title : "",
         description: prefill && typeof prefill.description === "string" ? prefill.description : "",
+      },
+      origin
+    );
+  }
+
+  function requestSavePopupSubmit(iframe) {
+    const origin = savePopupTargetOrigin();
+    if (!origin || !iframe || !iframe.contentWindow || typeof iframe.contentWindow.postMessage !== "function") {
+      return;
+    }
+    iframe.contentWindow.postMessage(
+      {
+        v: companion.PROTOCOL,
+        source: "framenest-save-host",
+        action: "submit",
       },
       origin
     );
