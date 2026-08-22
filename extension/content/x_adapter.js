@@ -54,13 +54,12 @@
     "  pointer-events: none;",
     "}",
     "[data-framenest-media-host] [aria-label='Edit image'],",
-    "[data-framenest-media-host] [title='Edit image'] {",
-    "  position: absolute !important;",
-    "  left: 8px !important;",
-    "  bottom: 8px !important;",
-    "  right: auto !important;",
-    "  top: auto !important;",
-    "  z-index: 4 !important;",
+    "[data-framenest-media-host] [title='Edit image'],",
+    "article[data-testid='tweet'] [aria-label='Edit image'],",
+    "article[data-testid='tweet'] [title='Edit image'],",
+    "[data-framenest-post] [aria-label='Edit image'],",
+    "[data-framenest-post] [title='Edit image'] {",
+    "  display: none !important;",
     "}",
     "[data-framenest-media-host]:hover > [data-framenest-companion='save'],",
     "[data-framenest-media-host]:focus-within > [data-framenest-companion='save'],",
@@ -382,40 +381,146 @@
     );
   }
 
-  function applyEditImageGeometry(node) {
-    node.style.position = "absolute";
-    node.style.left = "8px";
-    node.style.bottom = "8px";
-    node.style.right = "auto";
-    node.style.top = "auto";
-    node.style.zIndex = "4";
+  function hideEditImageControl(node) {
+    if (!node || !node.style) {
+      return;
+    }
+    node.style.display = "none";
     if (typeof node.style.setProperty === "function") {
-      node.style.setProperty("position", "absolute", "important");
-      node.style.setProperty("left", "8px", "important");
-      node.style.setProperty("bottom", "8px", "important");
-      node.style.setProperty("right", "auto", "important");
-      node.style.setProperty("top", "auto", "important");
-      node.style.setProperty("z-index", "4", "important");
+      node.style.setProperty("display", "none", "important");
     }
   }
 
-  function relocateInHostEditImage(host) {
+  function rectsOverlap(a, b) {
+    if (!a || !b) {
+      return false;
+    }
+    return a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
+  }
+
+  function controlOverlapsHost(node, host) {
+    if (!node || !host || node === host) {
+      return false;
+    }
+    if (host.contains && host.contains(node)) {
+      return true;
+    }
+    if (
+      typeof node.getBoundingClientRect !== "function" ||
+      typeof host.getBoundingClientRect !== "function"
+    ) {
+      return false;
+    }
+    return rectsOverlap(node.getBoundingClientRect(), host.getBoundingClientRect());
+  }
+
+  function isEditImageControl(node) {
+    return Boolean(
+      node &&
+        isCandidateEditImageControl(node) &&
+        inHostAccessibleName(node) === EDIT_IMAGE_NAME
+    );
+  }
+
+  function hideOverlappingEditImage(host, postRoot) {
     if (!host) {
       return;
     }
+    const roots = [host];
+    if (postRoot && postRoot !== host) {
+      roots.push(postRoot);
+    }
+    const seen = [];
     const visit = (node) => {
       if (!node) {
         return;
       }
-      if (node !== host && isCandidateEditImageControl(node) && inHostAccessibleName(node) === EDIT_IMAGE_NAME) {
-        applyEditImageGeometry(node);
+      for (let index = 0; index < seen.length; index += 1) {
+        if (seen[index] === node) {
+          return;
+        }
+      }
+      seen.push(node);
+      if (
+        node !== host &&
+        isEditImageControl(node) &&
+        inHostAccessibleName(node) === EDIT_IMAGE_NAME &&
+        controlOverlapsHost(node, host)
+      ) {
+        hideEditImageControl(node);
       }
       const children = node.children || [];
       for (let index = 0; index < children.length; index += 1) {
         visit(children[index]);
       }
     };
-    visit(host);
+    roots.forEach(visit);
+  }
+
+  const TITLE_MAX = 240;
+  const DESCRIPTION_MAX = 10000;
+
+  function owningPostRoot(node) {
+    let current = node;
+    while (current) {
+      if (matchesPostRoot(current)) {
+        return current;
+      }
+      current = current.parentElement;
+    }
+    return null;
+  }
+
+  function rawTextOf(node) {
+    if (!node) {
+      return "";
+    }
+    if (typeof node.innerText === "string" && node.innerText.trim()) {
+      return node.innerText;
+    }
+    if (typeof node.textContent === "string") {
+      return node.textContent;
+    }
+    return "";
+  }
+
+  function clipText(value, max) {
+    const text = typeof value === "string" ? value.trim() : "";
+    if (!text) {
+      return "";
+    }
+    return text.length <= max ? text : text.slice(0, max);
+  }
+
+  function titleFromDescription(text) {
+    const trimmed = typeof text === "string" ? text.trim() : "";
+    if (!trimmed) {
+      return "";
+    }
+    let candidate = trimmed;
+    if (trimmed.indexOf("\n") !== -1 || trimmed.indexOf("\r") !== -1) {
+      const lines = trimmed.split(/\r?\n/);
+      for (let index = 0; index < lines.length; index += 1) {
+        const line = lines[index].trim();
+        if (line) {
+          candidate = line;
+          break;
+        }
+      }
+    }
+    return clipText(candidate, TITLE_MAX);
+  }
+
+  function postTextPrefillFrom(postRoot, host) {
+    const tweetNode = postRoot ? first(postRoot, contract.tweetTextSelectors) : null;
+    const description = clipText(rawTextOf(tweetNode), DESCRIPTION_MAX);
+    let title = titleFromDescription(description);
+    if (!title && host && typeof host.querySelector === "function") {
+      const img = host.querySelector("img[alt]");
+      const alt = img && typeof img.getAttribute === "function" ? img.getAttribute("alt") : "";
+      title = clipText(alt, TITLE_MAX);
+    }
+    return { title: title, description: description };
   }
 
   function haltHostAction(event) {
@@ -596,6 +701,7 @@
       return;
     }
     closeSavePopup();
+    const prefill = postTextPrefillFrom(owningPostRoot(button), button.parentElement);
     const host = document.createElement("div");
     host.setAttribute("data-framenest-companion-save-host", "");
     host.setAttribute("role", "dialog");
@@ -648,7 +754,7 @@
       if (typeof iframe.focus === "function") {
         iframe.focus();
       }
-      requestSaveTitleFocus(iframe);
+      requestSavePopupHandshake(iframe, prefill);
     };
     const onMessage = (event) => {
       if (!savePopup || event.source !== savePopup.iframe.contentWindow) {
@@ -707,7 +813,7 @@
     return pathStart < 0 ? href : href.slice(0, pathStart);
   }
 
-  function requestSaveTitleFocus(iframe) {
+  function requestSavePopupHandshake(iframe, prefill) {
     const origin = savePopupTargetOrigin();
     if (!origin || !iframe || !iframe.contentWindow || typeof iframe.contentWindow.postMessage !== "function") {
       return;
@@ -716,7 +822,9 @@
       {
         v: companion.PROTOCOL,
         source: "framenest-save-host",
-        action: "focus-title",
+        action: "focus-category",
+        title: prefill && typeof prefill.title === "string" ? prefill.title : "",
+        description: prefill && typeof prefill.description === "string" ? prefill.description : "",
       },
       origin
     );
@@ -751,7 +859,7 @@
     hosts.forEach((host) => {
       host.setAttribute("data-framenest-media-host", "");
       ensureContainingBlock(host);
-      relocateInHostEditImage(host);
+      hideOverlappingEditImage(host, postRoot);
       if (injected.has(host)) {
         return;
       }
@@ -1595,7 +1703,8 @@
     globalThis.FrameNestXAdapterTestHooks.paintPostSaveOutcome = paintPostSaveOutcome;
     globalThis.FrameNestXAdapterTestHooks.pollClaim = pollClaim;
     globalThis.FrameNestXAdapterTestHooks.recover = recover;
-    globalThis.FrameNestXAdapterTestHooks.relocateInHostEditImage = relocateInHostEditImage;
+    globalThis.FrameNestXAdapterTestHooks.hideOverlappingEditImage = hideOverlappingEditImage;
+    globalThis.FrameNestXAdapterTestHooks.postTextPrefillFrom = postTextPrefillFrom;
     return;
   }
 

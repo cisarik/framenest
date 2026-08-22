@@ -56,6 +56,10 @@
       "[data-testid='videoComponent']",
       "[data-framenest-media]",
     ]),
+    tweetTextSelectors: Object.freeze([
+      "[data-testid='tweetText']",
+      "[data-framenest-tweet-text]",
+    ]),
     requiredSignals: Object.freeze(["permalink", "composerFileInput"]),
   });
   if (typeof module !== "undefined" && module.exports) {

@@ -14,57 +14,44 @@
         </div>
         <div class="fields">
           <label for="title">Title</label>
-          <input id="title" name="title" type="text" maxlength="240" spellcheck="true" autocomplete="off" autofocus />
+          <input id="title" name="title" type="text" maxlength="240" spellcheck="true" autocomplete="off" />
           <label for="description">Description</label>
           <textarea id="description" name="description" maxlength="10000" rows="4" autocomplete="off"></textarea>
           <fieldset id="category-fieldset" class="category">
             <legend id="category-legend">Category</legend>
             <div class="category-options" role="radiogroup" aria-labelledby="category-legend">
-              <label><input type="radio" name="category" value="general" /> General</label>
+              <label><input type="radio" name="category" value="general" /> X</label>
               <label><input type="radio" name="category" value="meme" /> Meme</label>
               <label><input type="radio" name="category" value="movie" /> Movie</label>
-              <label><input type="radio" name="category" value="youtube" /> YouTube</label>
             </div>
-            <p id="category-help" class="hint">
-              Category describes the content and applies to every media item in this post. Movie genres can be added later in FrameNest.
-            </p>
           </fieldset>
           <label for="tag-search">Tags</label>
-          <input
-            id="tag-search"
-            name="fn-canonical-tag-query"
-            type="text"
-            maxlength="64"
-            spellcheck="false"
-            placeholder="Search tags"
-            role="combobox"
-            aria-autocomplete="list"
-            aria-expanded="false"
-            aria-controls="tag-suggestions"
-            autocomplete="off"
-            autocapitalize="none"
-            autocorrect="off"
-            data-1p-ignore="true"
-            data-lpignore="true"
-            data-form-type="other"
-          />
-          <div id="tag-suggestions" class="tag-suggestions" role="listbox"></div>
+          <div class="tag-search-panel">
+            <input
+              id="tag-search"
+              name="fn-canonical-tag-query"
+              type="text"
+              maxlength="64"
+              spellcheck="false"
+              placeholder="Search tags"
+              role="combobox"
+              aria-autocomplete="list"
+              aria-expanded="false"
+              aria-controls="tag-suggestions"
+              autocomplete="off"
+              autocapitalize="none"
+              autocorrect="off"
+              data-1p-ignore="true"
+              data-lpignore="true"
+              data-form-type="other"
+            />
+            <div id="tag-suggestions" class="tag-suggestions" role="listbox"></div>
+          </div>
           <div id="selected-tags" class="selected-tags" aria-live="polite"></div>
           <p id="tags-status" class="status"></p>
           <p id="form-status" class="status" role="status"></p>
         </div>
         <div class="actions">
-          <button
-            id="analyze"
-            class="analyze"
-            type="button"
-            hidden
-            disabled
-            title="Saves now. Analyze by AI is available in FrameNest after this item is cataloged."
-            aria-label="Saves now. Analyze by AI is available in FrameNest after this item is cataloged."
-          >
-            Save and analyze by AI
-          </button>
           <button id="save" type="submit">Save</button>
         </div>
       </form>

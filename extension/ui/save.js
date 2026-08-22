@@ -2,8 +2,6 @@
   const companion = globalThis.FrameNestCompanion;
   const SUGGESTION_LIMIT = 8;
   const TAG_LIMIT = 32;
-  const ANALYZE_HINT =
-    "Saves now. Analyze by AI is available in FrameNest after this item is cataloged.";
   const UPGRADE_MESSAGE = "FrameNest needs an update before this Save can complete.";
   const form = document.getElementById("save-form");
   const title = document.getElementById("title");
@@ -14,7 +12,6 @@
   const tagsStatus = document.getElementById("tags-status");
   const formStatus = document.getElementById("form-status");
   const closeButton = document.getElementById("close");
-  const analyze = document.getElementById("analyze");
   const saveButton = document.getElementById("save");
   const categoryRadios = Array.prototype.slice.call(
     form.querySelectorAll("input[name='category']")
@@ -23,7 +20,6 @@
   const chosen = [];
   let activeSuggestion = -1;
   let formBusy = false;
-  let analyzeEnabled = false;
 
   function setStatus(node, value, kind) {
     node.textContent = value;
@@ -83,8 +79,8 @@
     return companion.acceptContentCategory(checked && checked.value);
   }
 
-  function cycleCategoryFromTitle(delta) {
-    const order = companion.CONTENT_CATEGORIES;
+  function cycleCategory(delta) {
+    const order = categoryRadios.map((radio) => radio.value);
     const current = selectedCategory() || order[0];
     const index = order.indexOf(current);
     const start = index >= 0 ? index : 0;
@@ -92,11 +88,25 @@
     categoryRadios.forEach((radio) => {
       radio.checked = radio.value === next;
     });
+    focusCheckedCategory();
   }
 
-  function focusTitleField() {
-    if (title && typeof title.focus === "function") {
-      title.focus();
+  function focusCheckedCategory() {
+    const checked = categoryRadios.find((radio) => radio.checked) || categoryRadios[0];
+    if (checked && typeof checked.focus === "function") {
+      checked.focus();
+    }
+  }
+
+  function applyPrefill(data) {
+    if (!data || formBusy) {
+      return;
+    }
+    if (typeof data.title === "string" && !title.value) {
+      title.value = data.title.slice(0, title.maxLength || 240);
+    }
+    if (typeof data.description === "string" && !description.value) {
+      description.value = data.description.slice(0, 10000);
     }
   }
 
@@ -162,7 +172,6 @@
     description.disabled = busy;
     tagSearch.disabled = busy;
     saveButton.disabled = busy;
-    analyze.disabled = busy || !analyzeEnabled;
     categoryRadios.forEach((radio) => {
       radio.disabled = busy;
     });
@@ -267,26 +276,6 @@
     return payload;
   }
 
-  function gateAnalyze(identityBody) {
-    analyze.hidden = true;
-    analyze.disabled = true;
-    analyzeEnabled = false;
-    analyze.title = ANALYZE_HINT;
-    analyze.setAttribute("aria-label", ANALYZE_HINT);
-    if (!identityBody || !Array.isArray(identityBody.capabilities)) {
-      return;
-    }
-    if (identityBody.capabilities.indexOf("analysis.run") === -1) {
-      return;
-    }
-    analyze.hidden = false;
-    analyze.disabled = false;
-    analyzeEnabled = true;
-    if (formBusy) {
-      analyze.disabled = true;
-    }
-  }
-
   function failMessage(result) {
     if (result && result.error === "X_REQUEST_INVALID_CATEGORY") {
       return UPGRADE_MESSAGE;
@@ -348,15 +337,6 @@
     renderSuggestions();
   }
 
-  async function loadIdentity() {
-    const response = await request(companion.TYPES.IDENTITY, {});
-    if (!response.ok) {
-      gateAnalyze(null);
-      return;
-    }
-    gateAnalyze(response.body || null);
-  }
-
   form.addEventListener("submit", (event) => {
     event.preventDefault();
     submitSave();
@@ -372,34 +352,31 @@
   title.addEventListener("keydown", (event) => {
     if (event.key === "Enter" && !event.ctrlKey && !event.metaKey) {
       event.preventDefault();
-      return;
-    }
-    if (event.key === "ArrowDown" || event.key === "ArrowRight") {
-      event.preventDefault();
-      cycleCategoryFromTitle(1);
-      return;
-    }
-    if (event.key === "ArrowUp" || event.key === "ArrowLeft") {
-      event.preventDefault();
-      cycleCategoryFromTitle(-1);
+      submitSave();
     }
   });
 
   categoryRadios.forEach((radio) => {
     radio.addEventListener("keydown", (event) => {
-      if (event.key === "Enter") {
+      if (event.key === "Enter" && !event.ctrlKey && !event.metaKey) {
         event.preventDefault();
+        submitSave();
+        return;
+      }
+      if (event.key === "ArrowRight" || event.key === "ArrowDown") {
+        event.preventDefault();
+        cycleCategory(1);
+        return;
+      }
+      if (event.key === "ArrowLeft" || event.key === "ArrowUp") {
+        event.preventDefault();
+        cycleCategory(-1);
       }
     });
   });
 
   closeButton.addEventListener("click", () => {
     notifyParent("cancel");
-  });
-
-  analyze.addEventListener("click", (event) => {
-    event.preventDefault();
-    submitSave();
   });
 
   tagSearch.addEventListener("input", () => {
@@ -423,13 +400,14 @@
     }
     if (event.key === "Enter") {
       event.preventDefault();
-      if (!tagListOpen() || activeSuggestion < 0) {
-        return;
+      if (tagListOpen() && activeSuggestion >= 0) {
+        const item = matches[activeSuggestion];
+        if (item) {
+          addTag(item);
+          return;
+        }
       }
-      const item = matches[activeSuggestion];
-      if (item) {
-        addTag(item);
-      }
+      submitSave();
     }
   });
 
@@ -450,14 +428,14 @@
     if (!data || data.v !== companion.PROTOCOL || data.source !== "framenest-save-host") {
       return;
     }
-    if (data.action === "focus-title") {
-      focusTitleField();
+    if (data.action === "focus-category") {
+      applyPrefill(data);
+      focusCheckedCategory();
     }
   });
 
   applyDefaultCategory();
+  focusCheckedCategory();
   void loadTags();
-  void loadIdentity();
-  focusTitleField();
   notifyParent("ready");
 })();

@@ -10,9 +10,9 @@ An authenticated FrameNest user can:
 
 - hover (or keyboard-focus) a green **+** at the bottom-right of each image,
   video, or GIF in an eligible X post and click **Save to FrameNest** to open
-  a Save popup (Title, Description, Category, Search tags, Save). Category is
-  a compact fieldset with General, Meme, Movie, and YouTube; one choice applies
-  to every media item in the post. The header close **X**, Escape, or a click
+  a Save popup (Title, Description, Category, Search tags, Save). Save from X
+  offers X / Meme / Movie (YouTube parked), defaults to X, prefills post text,
+  one Save button. The header close **X**, Escape, or a click
   outside cancel without a request and restore focus to that **+**. Save
   submits the post permalink, the chosen `content_category`, and an optional
   caller-private alias (title, description, and selected existing tag keys); it
@@ -20,10 +20,8 @@ An authenticated FrameNest user can:
   WebP and other still formats fail closed without transcoding. Overlay copy
   distinguishes saving, saved, already saved, partial, failed, catalog-removed,
   and unknown transport; failed Save keeps the plus glyph and a danger border,
-  not an × and not generic success. Ordinary users see only right-aligned
+  not an × and not generic success. Everyone sees a single right-aligned
   **Save**.
-  Users with `analysis.run` also see **Save and analyze by AI** to the left
-  of Save; that control saves now and does not run analysis from this popup.
 - click into the reply composer to reveal a floating **+** on the right of
   "Post your reply" (not inserted into the X input row), then open an in-page
   FrameNest search popup above that button;

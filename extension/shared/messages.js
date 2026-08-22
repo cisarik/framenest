@@ -173,8 +173,13 @@
     return CONTENT_CATEGORIES.indexOf(value) === -1 ? null : value;
   }
 
+  function savePopupDefaultContentCategory() {
+    return "general";
+  }
+
   function defaultContentCategoryForMediaKind(kind) {
-    return kind === "video" ? "meme" : "general";
+    void kind;
+    return savePopupDefaultContentCategory();
   }
 
   function acceptXPostId(value) {
@@ -279,6 +284,7 @@
     acceptXPostUrl,
     acceptXPostId,
     acceptContentCategory,
+    savePopupDefaultContentCategory,
     defaultContentCategoryForMediaKind,
     reduceXSaveOutcome,
     acceptFrameNestOrigin,

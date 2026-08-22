@@ -119,6 +119,7 @@ test("adapter contract exposes frozen action-bar, Share, and media-host selector
   assert.ok(Object.isFrozen(contract.actionBarSignals));
   assert.ok(Object.isFrozen(contract.shareSelectors));
   assert.ok(Object.isFrozen(contract.mediaHostSelectors));
+  assert.ok(Object.isFrozen(contract.tweetTextSelectors));
   assert.ok(Object.isFrozen(contract.composerChromeSelectors));
   assert.ok(Object.isFrozen(contract.composerMediaButtonSelectors));
   assert.deepEqual(contract.actionGroupSelectors, ["[role='group']"]);
@@ -137,6 +138,10 @@ test("adapter contract exposes frozen action-bar, Share, and media-host selector
     "[data-testid='videoPlayer']",
     "[data-testid='videoComponent']",
     "[data-framenest-media]",
+  ]);
+  assert.deepEqual(contract.tweetTextSelectors, [
+    "[data-testid='tweetText']",
+    "[data-framenest-tweet-text]",
   ]);
   assert.deepEqual(contract.composerChromeSelectors, ["[data-framenest-composer-chrome]"]);
   assert.ok(Object.isFrozen(contract.composerTextRowSelectors));
@@ -208,22 +213,22 @@ test("in-feed Save is a per-media hover overlay, not an action-row control", () 
     adapterSource,
     "[data-framenest-media-host] [aria-label='Edit image']"
   );
-  assert.match(editRule, /left:\s*8px/);
-  assert.match(editRule, /bottom:\s*8px/);
-  assert.match(editRule, /right:\s*auto/);
-  assert.match(editRule, /top:\s*auto/);
-  assert.doesNotMatch(editRule, /left:\s*0/);
-  assert.doesNotMatch(editRule, /top:\s*0;/);
+  assert.match(editRule, /display:\s*none\s*!important/);
+  assert.doesNotMatch(editRule, /left:\s*8px/);
+  assert.doesNotMatch(editRule, /bottom:\s*8px/);
   assert.match(adapterSource, /EDIT_IMAGE_NAME = "Edit image"/);
-  assert.match(extractNamedFunction(adapterSource, "relocateInHostEditImage"), /EDIT_IMAGE_NAME/);
+  assert.match(extractNamedFunction(adapterSource, "hideOverlappingEditImage"), /EDIT_IMAGE_NAME/);
+  assert.match(extractNamedFunction(adapterSource, "hideEditImageControl"), /display/);
   assert.match(extractNamedFunction(adapterSource, "inHostAccessibleName"), /aria-label/);
-  assert.match(extractNamedFunction(adapterSource, "applyEditImageGeometry"), /left = "8px"/);
-  assert.match(extractNamedFunction(adapterSource, "openSavePopup"), /requestSaveTitleFocus/);
+  assert.match(extractNamedFunction(adapterSource, "openSavePopup"), /requestSavePopupHandshake/);
   assert.match(extractNamedFunction(adapterSource, "openSavePopup"), /onSaveIframeReady/);
-  assert.match(extractNamedFunction(adapterSource, "requestSaveTitleFocus"), /focus-title/);
-  assert.match(extractNamedFunction(adapterSource, "requestSaveTitleFocus"), /framenest-save-host/);
+  assert.match(extractNamedFunction(adapterSource, "openSavePopup"), /postTextPrefillFrom/);
+  assert.match(extractNamedFunction(adapterSource, "requestSavePopupHandshake"), /focus-category/);
+  assert.match(extractNamedFunction(adapterSource, "requestSavePopupHandshake"), /framenest-save-host/);
+  assert.match(extractNamedFunction(adapterSource, "requestSavePopupHandshake"), /title:/);
+  assert.match(extractNamedFunction(adapterSource, "requestSavePopupHandshake"), /description:/);
   assert.doesNotMatch(
-    extractNamedFunction(adapterSource, "requestSaveTitleFocus"),
+    extractNamedFunction(adapterSource, "requestSavePopupHandshake"),
     /["']\*["']/
   );
   assert.match(adapterSource, /opacity: 0/);
@@ -261,40 +266,34 @@ test("Save popup searches tags, pins Save, and does not execute Analyze", () => 
   assert.doesNotMatch(saveHtml, /Search or add a tag/);
   assert.match(saveHtml, /aria-label="Close"/);
   assert.match(saveHtml, />Save</);
-  assert.match(saveHtml, /id="analyze"/);
-  assert.match(saveHtml, />\s*Save and analyze by AI\s*</);
-  assert.match(
-    saveHtml,
-    /Saves now\. Analyze by AI is available in FrameNest after this item is cataloged\./
-  );
+  assert.doesNotMatch(saveHtml, /id="analyze"/);
+  assert.doesNotMatch(saveHtml, /Save and analyze by AI/);
   assert.doesNotMatch(saveHtml, />Analyze by AI</);
   assert.match(saveHtml, /id="description"/);
   assert.match(saveHtml, /<textarea[^>]*id="description"/);
   assert.match(saveHtml, /maxlength="10000"/);
   assert.match(saveHtml, /id="title"[\s\S]*id="description"[\s\S]*id="tag-search"/);
-  assert.match(saveHtml, /id="analyze"[\s\S]*id="save"/);
+  assert.match(saveHtml, /id="save"/);
   assert.doesNotMatch(saveHtml, /id="cancel"/);
   assert.doesNotMatch(saveHtml, />Cancel</);
   assert.doesNotMatch(saveHtml, /type="checkbox"/);
   assert.doesNotMatch(saveJs, /innerHTML/);
   assert.doesNotMatch(saveJs, /type\s*=\s*["']checkbox["']/);
   assert.match(saveJs, /payload\.description = descriptionValue/);
-  assert.match(saveJs, /analyze\.disabled = false/);
   assert.match(saveJs, /form\.addEventListener\("submit"[\s\S]*submitSave\(\)/);
-  assert.match(saveJs, /analyze\.addEventListener\("click"[\s\S]*submitSave\(\)/);
-  assert.match(saveJs, /TYPES\.IDENTITY/);
+  assert.doesNotMatch(saveJs, /id="analyze"/);
+  assert.doesNotMatch(saveJs, /gateAnalyze/);
+  assert.doesNotMatch(saveJs, /TYPES\.IDENTITY/);
   assert.match(saveJs, /TYPES\.SAVE_POST/);
-  assert.match(saveJs, /analysis\.run/);
-  assert.match(saveJs, /analyze\.hidden = true/);
-  assert.match(saveJs, /analyze\.disabled = true/);
+  assert.doesNotMatch(saveJs, /analysis\.run/);
   assert.match(saveJs, /SUGGESTION_LIMIT = 8/);
   assert.doesNotMatch(saveJs, /\/api\/.*analys/i);
   assert.doesNotMatch(saveJs, /companion_mutation/);
   assert.doesNotMatch(saveJs, /TYPES\.[A-Z_]*ANALY/);
   assert.match(saveCss, /#ff4d4d/);
-  assert.match(saveCss, /#f5f8f5/);
-  assert.match(saveCss, /#0c1a10/);
-  assert.match(saveCss, /\.fields \{[\s\S]*?overflow:\s*auto/);
+  assert.doesNotMatch(saveCss, /#f5f8f5/);
+  assert.doesNotMatch(saveCss, /\.analyze/);
+  assert.match(saveCss, /\.fields \{[\s\S]*?overflow:\s*visible/);
   assert.match(saveCss, /\.actions \{[\s\S]*?flex:\s*0 0 auto/);
   assert.match(saveCss, /\.actions \{[\s\S]*?justify-content:\s*flex-end/);
   assert.doesNotMatch(saveCss, /\.actions \{[\s\S]*?justify-content:\s*flex-start/);
@@ -1439,41 +1438,41 @@ test("unbound live file input posts composer_unbound without a download fallback
   assert.equal(port.posted[0].payload.error, "composer_unbound");
 });
 
-test("Save popup offers four category radios, helper text, and keyboard contract", () => {
+test("Save popup offers X Meme Movie radios, post prefill, and keyboard save", () => {
   const saveHtml = fs.readFileSync(path.join(REPO, "extension/ui/save.html"), "utf8");
   const saveJs = fs.readFileSync(path.join(REPO, "extension/ui/save.js"), "utf8");
   const saveCss = fs.readFileSync(path.join(REPO, "extension/ui/save.css"), "utf8");
   assert.match(saveHtml, /<fieldset[^>]*id="category-fieldset"/);
   assert.match(saveHtml, /<legend[^>]*>Category</);
-  assert.match(saveHtml, /value="general"/);
+  assert.match(saveHtml, /value="general"[\s\S]*?> X</);
   assert.match(saveHtml, /value="meme"/);
   assert.match(saveHtml, /value="movie"/);
-  assert.match(saveHtml, /value="youtube"/);
-  assert.match(saveHtml, /> General</);
+  assert.doesNotMatch(saveHtml, /value="youtube"/);
+  assert.doesNotMatch(saveHtml, /> General</);
   assert.match(saveHtml, /> Meme</);
   assert.match(saveHtml, /> Movie</);
-  assert.match(saveHtml, /> YouTube</);
-  assert.match(
+  assert.doesNotMatch(saveHtml, /> YouTube</);
+  assert.doesNotMatch(
     saveHtml,
-    /Category describes the content and applies to every media item in this post\. Movie genres can be added later in FrameNest\./
+    /Category describes the content and applies to every media item in this post/
   );
+  assert.doesNotMatch(saveHtml, /id="category-help"/);
   assert.match(saveHtml, /id="title"[\s\S]*id="description"[\s\S]*id="category-fieldset"[\s\S]*id="tag-search"/);
   assert.match(saveJs, /contentCategory: category/);
   assert.match(saveJs, /defaultContentCategoryForMediaKind/);
-  assert.match(saveJs, /title\.focus\(\)/);
-  assert.match(saveJs, /function focusTitleField/);
-  assert.match(saveJs, /action === "focus-title"/);
+  assert.match(saveJs, /function focusCheckedCategory/);
+  assert.match(saveJs, /action === "focus-category"/);
   assert.match(saveJs, /source !== "framenest-save-host"/);
-  assert.match(saveHtml, /id="title"[^>]*autofocus/);
+  assert.match(saveJs, /applyPrefill\(data\)/);
+  assert.doesNotMatch(saveHtml, /autofocus/);
   assert.match(saveJs, /notifyParent\("ready"\)/);
-  assert.match(saveJs, /event\.key === "Enter" && !event\.ctrlKey && !event\.metaKey/);
-  assert.match(saveJs, /categoryRadios[\s\S]*Enter[\s\S]*preventDefault/);
-  assert.match(saveJs, /cycleCategoryFromTitle/);
-  assert.match(saveJs, /title\.addEventListener\("keydown"[\s\S]*ArrowDown[\s\S]*ArrowUp/);
-  assert.doesNotMatch(
-    extractNamedFunction(saveJs, "cycleCategoryFromTitle"),
-    /description/
-  );
+  assert.match(saveJs, /title\.addEventListener\("keydown"[\s\S]*Enter[\s\S]*submitSave\(\)/);
+  assert.match(saveJs, /categoryRadios[\s\S]*Enter[\s\S]*submitSave\(\)/);
+  assert.match(saveJs, /function cycleCategory/);
+  assert.match(saveJs, /ArrowRight/);
+  assert.doesNotMatch(extractNamedFunction(saveJs, "cycleCategory"), /youtube/);
+  assert.doesNotMatch(extractNamedFunction(saveJs, "cycleCategory"), /description/);
+  assert.doesNotMatch(saveJs, /description\.addEventListener\("keydown"/);
   assert.match(saveJs, /event\.ctrlKey \|\| event\.metaKey/);
   assert.match(saveJs, /tagListOpen\(\)/);
   assert.match(saveJs, /aria-busy/);
@@ -1482,9 +1481,13 @@ test("Save popup offers four category radios, helper text, and keyboard contract
   assert.doesNotMatch(saveJs, /contentCategory:\s*null/);
   assert.match(saveCss, /\.category /);
   assert.match(saveCss, /accent-color: var\(--accent\)/);
+  assert.equal(companion.savePopupDefaultContentCategory(), "general");
+  assert.equal(companion.defaultContentCategoryForMediaKind("image"), "general");
+  assert.equal(companion.defaultContentCategoryForMediaKind("video"), "general");
+  assert.equal(companion.defaultContentCategoryForMediaKind("unknown"), "general");
 });
 
-test("Save live UX keeps + inset, relocates Edit image, and searches canonical tags only", () => {
+test("Save live UX keeps + inset, hides Edit image, and searches canonical tags only", () => {
   const saveHtml = fs.readFileSync(path.join(REPO, "extension/ui/save.html"), "utf8");
   const saveCss = fs.readFileSync(path.join(REPO, "extension/ui/save.css"), "utf8");
   const saveJs = fs.readFileSync(path.join(REPO, "extension/ui/save.js"), "utf8");
@@ -1499,6 +1502,10 @@ test("Save live UX keeps + inset, relocates Edit image, and searches canonical t
   assert.doesNotMatch(saveHtml, /name="tag-search"/);
   assert.doesNotMatch(saveHtml, /name="(?:name|given-name|family-name|sex|username)"/);
   assert.match(saveHtml, /id="tag-search"[\s\S]*?autocomplete="off"/);
+  assert.match(saveCss, /\.tag-search-panel \{[\s\S]*?position:\s*relative/);
+  assert.match(saveCss, /\.tag-suggestions \{[\s\S]*?position:\s*absolute/);
+  assert.match(saveCss, /\.tag-suggestions \{[\s\S]*?flex-shrink:\s*0/);
+  assert.match(saveCss, /\.tag-suggestions \{[\s\S]*?min-height:\s*2\.25rem/);
   assert.match(saveCss, /\.tag-suggestions \{[\s\S]*?padding:\s*4px/);
   assert.match(saveCss, /\.tag-suggestion \{[\s\S]*?min-height:\s*2\.25rem/);
   assert.match(saveCss, /\.tag-suggestion\[aria-selected="true"\]/);
@@ -1508,6 +1515,7 @@ test("Save live UX keeps + inset, relocates Edit image, and searches canonical t
   assert.doesNotMatch(saveJs, /remove\.textContent = "X"/);
   assert.match(saveJs, /event\.key === "Enter"[\s\S]*tagListOpen\(\)[\s\S]*activeSuggestion/);
   assert.match(saveJs, /addTag\(item\)/);
+  assert.match(saveJs, /submitSave\(\)/);
   assert.doesNotMatch(saveJs, /innerHTML/);
   const attachRule = adapterSource.match(
     /\[data-framenest-companion='attach'\] \{[\s\S]*?\n\}/
@@ -1519,24 +1527,38 @@ test("Save live UX keeps + inset, relocates Edit image, and searches canonical t
   post.appendChild(
     el(dom, "a", { href: "https://x.com/fixture/status/123456789", role: "link" })
   );
+  const tweetText = el(dom, "div", { "data-testid": "tweetText" });
+  tweetText.textContent = "First line of the post\nSecond line stays in description";
+  post.appendChild(tweetText);
   const photo = el(dom, "div", { "data-testid": "tweetPhoto", "data-framenest-media": "" });
   const edit = el(dom, "button", { "aria-label": "Edit image", title: "Edit image" });
+  const overlayEdit = el(dom, "button", { "aria-label": "Edit image", title: "Edit image" });
   const profile = el(dom, "button", { "aria-label": "Edit profile" });
   photo.appendChild(edit);
   post.appendChild(photo);
+  post.appendChild(overlayEdit);
   post.appendChild(profile);
   dom.body.appendChild(post);
   const hooks = loadAdapterHooks(dom);
   assert.equal(hooks.injectSave(post), "placed");
-  assert.equal(edit.style.left, "8px");
-  assert.equal(edit.style.bottom, "8px");
-  assert.equal(edit.style.right, "auto");
-  assert.equal(edit.style.top, "auto");
-  assert.equal(edit.style.position, "absolute");
+  assert.equal(edit.style.display, "none");
+  assert.equal(overlayEdit.style.display, "none");
+  assert.notEqual(edit.style.left, "8px");
+  assert.equal(profile.style.display, undefined);
   assert.equal(profile.style.left, undefined);
   const save = photo.querySelector("[data-framenest-companion='save']");
   assert.ok(save);
   assert.equal(save.getAttribute("aria-label"), "Save to FrameNest");
+  const prefill = hooks.postTextPrefillFrom(post, photo);
+  assert.equal(prefill.description, "First line of the post\nSecond line stays in description");
+  assert.equal(prefill.title, "First line of the post");
+  const emptyPost = el(dom, "article", { "data-testid": "tweet" });
+  const emptyPhoto = el(dom, "div", { "data-testid": "tweetPhoto", "data-framenest-media": "" });
+  emptyPhoto.appendChild(el(dom, "img", { alt: "Fallback tile alt" }));
+  emptyPost.appendChild(emptyPhoto);
+  const emptyPrefill = hooks.postTextPrefillFrom(emptyPost, emptyPhoto);
+  assert.equal(emptyPrefill.description, "");
+  assert.equal(emptyPrefill.title, "Fallback tile alt");
 });
 
 test("service worker allowlists category, never drops it, and treats catalog_removed as terminal", () => {
@@ -1565,7 +1587,7 @@ test("content-category helper and save-outcome reducer cover every terminal", ()
   assert.equal(companion.acceptContentCategory("General"), null);
   assert.equal(companion.acceptContentCategory("other"), null);
   assert.equal(companion.defaultContentCategoryForMediaKind("image"), "general");
-  assert.equal(companion.defaultContentCategoryForMediaKind("video"), "meme");
+  assert.equal(companion.defaultContentCategoryForMediaKind("video"), "general");
   assert.equal(companion.defaultContentCategoryForMediaKind("unknown"), "general");
   assert.equal(companion.reduceXSaveOutcome({ ok: true }).kind, "busy");
   assert.equal(companion.reduceXSaveOutcome({ ok: true }).name, "Saving to FrameNest…");
