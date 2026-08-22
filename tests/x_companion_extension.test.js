@@ -227,8 +227,14 @@ test("in-feed Save is a per-media hover overlay, not an action-row control", () 
   assert.doesNotMatch(extractNamedFunction(adapterSource, "requestSavePopupHandshake"), /focus-category/);
   assert.match(extractNamedFunction(adapterSource, "requestSavePopupHandshake"), /framenest-save-host/);
   assert.match(extractNamedFunction(adapterSource, "requestSavePopupHandshake"), /title:/);
-  assert.match(extractNamedFunction(adapterSource, "requestSavePopupHandshake"), /descriptionHeight/);
+  assert.doesNotMatch(
+    extractNamedFunction(adapterSource, "requestSavePopupHandshake"),
+    /descriptionHeight/
+  );
   assert.doesNotMatch(extractNamedFunction(adapterSource, "openSavePopup"), /iframe\.focus/);
+  assert.match(extractNamedFunction(adapterSource, "openSavePopup"), /tabIndex\s*=\s*-1/);
+  assert.match(extractNamedFunction(adapterSource, "openSavePopup"), /#url=/);
+  assert.doesNotMatch(extractNamedFunction(adapterSource, "openSavePopup"), /media=/);
   assert.doesNotMatch(adapterSource, /data-framenest-media-kind/);
   assert.doesNotMatch(
     extractNamedFunction(adapterSource, "requestSavePopupHandshake"),
@@ -275,7 +281,7 @@ test("Save popup searches tags, pins Save, and does not execute Analyze", () => 
   assert.match(saveHtml, /id="description"/);
   assert.match(saveHtml, /<textarea[^>]*id="description"/);
   assert.match(saveHtml, /maxlength="10000"/);
-  assert.match(saveHtml, /id="title"[\s\S]*id="description"[\s\S]*id="tag-search"/);
+  assert.match(saveHtml, /id="title"[\s\S]*id="tag-search"[\s\S]*id="description"/);
   assert.match(saveHtml, /id="save"/);
   assert.doesNotMatch(saveHtml, /id="cancel"/);
   assert.doesNotMatch(saveHtml, />Cancel</);
@@ -301,8 +307,10 @@ test("Save popup searches tags, pins Save, and does not execute Analyze", () => 
   assert.match(saveCss, /\.actions \{[\s\S]*?justify-content:\s*flex-end/);
   assert.doesNotMatch(saveCss, /\.actions \{[\s\S]*?justify-content:\s*flex-start/);
   assert.match(saveFn[0], /Math\.min\(\s*360/);
-  assert.match(saveFn[0], /Math\.min\(\s*720/);
-  assert.match(saveFn[0], /400 \+ textareaHeight/);
+  assert.match(saveFn[0], /innerHeight - 16/);
+  assert.match(saveFn[0], /contentHeight/);
+  assert.doesNotMatch(saveFn[0], /400 \+ textareaHeight/);
+  assert.doesNotMatch(saveFn[0], /Math\.min\(\s*720/);
   assert.doesNotMatch(saveFn[0], /Math\.min\(\s*380/);
   assert.doesNotMatch(saveFn[0], /Math\.min\(\s*520/);
   assert.match(attachFn[0], /attachPopup\.compact/);
@@ -1465,7 +1473,7 @@ test("Save popup is an Edit-media subset without radios, source, or on-open focu
     saveHtml,
     /Category describes the content and applies to every media item in this post/
   );
-  assert.match(saveHtml, /id="title"[\s\S]*id="description"[\s\S]*id="tag-search"/);
+  assert.match(saveHtml, /id="title"[\s\S]*id="tag-search"[\s\S]*id="description"/);
   assert.doesNotMatch(saveJs, /contentCategory/);
   assert.doesNotMatch(saveJs, /defaultContentCategoryForMediaKind/);
   assert.doesNotMatch(saveJs, /focusCheckedCategory/);
@@ -1473,8 +1481,16 @@ test("Save popup is an Edit-media subset without radios, source, or on-open focu
   assert.match(saveJs, /action === "prefill"/);
   assert.match(saveJs, /source !== "framenest-save-host"/);
   assert.match(saveJs, /applyPrefill\(data\)/);
-  assert.match(saveJs, /descriptionHeight/);
+  assert.doesNotMatch(saveJs, /descriptionHeight/);
+  assert.match(saveJs, /action: "size"/);
+  assert.doesNotMatch(saveJs, /title\.focus/);
+  assert.doesNotMatch(saveJs, /description\.focus/);
   assert.doesNotMatch(saveHtml, /autofocus/);
+  assert.match(saveHtml, /id="title"[^>]*tabindex="-1"/);
+  assert.match(saveHtml, /id="description"[^>]*tabindex="-1"/);
+  assert.match(saveHtml, /id="tag-search"[\s\S]*?tabindex="-1"/);
+  assert.match(saveJs, /pointerdown/);
+  assert.match(saveJs, /armOverlayFocus/);
   assert.match(saveJs, /notifyParent\("ready"\)/);
   assert.match(saveJs, /title\.addEventListener\("keydown"[\s\S]*Enter[\s\S]*submitSave\(\)/);
   assert.doesNotMatch(saveJs, /cycleCategory/);
@@ -1488,9 +1504,13 @@ test("Save popup is an Edit-media subset without radios, source, or on-open focu
   assert.doesNotMatch(saveJs, /contentCategory:\s*null/);
   assert.doesNotMatch(saveCss, /\.category /);
   assert.doesNotMatch(saveCss, /accent-color: var\(--accent\)/);
-  assert.match(saveCss, /min-height:\s*120px/);
-  assert.match(saveCss, /max-height:\s*320px/);
-  assert.match(saveCss, /overflow-y:\s*auto/);
+  assert.match(saveCss, /textarea \{[\s\S]*?height:\s*120px/);
+  assert.match(saveCss, /textarea \{[\s\S]*?min-height:\s*120px/);
+  assert.match(saveCss, /textarea \{[\s\S]*?overflow-y:\s*auto/);
+  assert.match(saveCss, /textarea \{[\s\S]*?resize:\s*none/);
+  assert.doesNotMatch(saveCss, /max-height:\s*320px/);
+  assert.match(saveCss, /\.fields \{[\s\S]*?flex:\s*0 0 auto/);
+  assert.doesNotMatch(saveCss, /html,\s*body \{\s*height:\s*100%/);
   assert.match(saveCss, /#save \{[\s\S]*background:\s*var\(--accent\)/);
   assert.equal(companion.savePopupDefaultContentCategory(), "general");
   assert.equal(companion.defaultContentCategoryForMediaKind("image"), "general");
@@ -1564,7 +1584,7 @@ test("Save live UX keeps + inset, hides Edit image, and searches canonical tags 
   const prefill = hooks.postTextPrefillFrom(post, photo);
   assert.equal(prefill.description, "First line of the post\nSecond line stays in description");
   assert.equal(prefill.title, "Cardano founder still");
-  assert.equal(prefill.descriptionHeight, 120);
+  assert.equal(prefill.descriptionHeight, undefined);
   const emptyPost = el(dom, "article", { "data-testid": "tweet" });
   const emptyPhoto = el(dom, "div", { "data-testid": "tweetPhoto", "data-framenest-media": "" });
   emptyPhoto.appendChild(el(dom, "img", { alt: "Fallback tile alt" }));
@@ -1581,16 +1601,6 @@ test("Save prefill prefers non-generic alt, clamps height, and keeps hidden DOM 
   const tweetText = el(dom, "div", { "data-testid": "tweetText" });
   tweetText.textContent = "Useful tweet sentence about the clip.";
   tweetText.innerText = "Useful tweet sentence";
-  tweetText.getBoundingClientRect = () => ({
-    top: 0,
-    left: 0,
-    right: 120,
-    bottom: 480,
-    width: 120,
-    height: 480,
-    x: 0,
-    y: 0,
-  });
   const genericPhoto = el(dom, "div", { "data-testid": "tweetPhoto" });
   genericPhoto.appendChild(el(dom, "img", { alt: "Image 1 of 4" }));
   genericPost.appendChild(tweetText);
@@ -1598,7 +1608,7 @@ test("Save prefill prefers non-generic alt, clamps height, and keeps hidden DOM 
   const genericPrefill = hooks.postTextPrefillFrom(genericPost, genericPhoto);
   assert.equal(genericPrefill.title, "Useful tweet sentence about the clip");
   assert.equal(genericPrefill.description, "Useful tweet sentence about the clip.");
-  assert.equal(genericPrefill.descriptionHeight, 320);
+  assert.equal(genericPrefill.descriptionHeight, undefined);
 
   const videoPost = el(dom, "article", { "data-testid": "tweet" });
   const videoHost = el(dom, "div", { "data-testid": "videoPlayer" });
@@ -1616,7 +1626,48 @@ test("Save prefill prefers non-generic alt, clamps height, and keeps hidden DOM 
   const blankPrefill = hooks.postTextPrefillFrom(blankPost, blankHost);
   assert.equal(blankPrefill.title, "");
   assert.equal(blankPrefill.description, "");
-  assert.equal(blankPrefill.descriptionHeight, 120);
+  assert.equal(blankPrefill.descriptionHeight, undefined);
+});
+
+test("Save title ignores companion plus inside the photo host", () => {
+  assert.match(extractNamedFunction(adapterSource, "isCompanionChrome"), /data-framenest-companion/);
+  assert.match(extractNamedFunction(adapterSource, "firstNonGenericName"), /isReservedSaveControlName/);
+  assert.match(extractNamedFunction(adapterSource, "accessibleNameFrom"), /isCompanionChrome/);
+  assert.match(extractNamedFunction(adapterSource, "positionSavePopup"), /contentHeight/);
+  assert.match(extractNamedFunction(adapterSource, "openSavePopup"), /action === "size"/);
+  assert.doesNotMatch(adapterSource, /tweetHeightFrom/);
+  const dom = createMiniDom();
+  const hooks = loadAdapterHooks(dom);
+  const post = el(dom, "article", { "data-testid": "tweet" });
+  const tweetText = el(dom, "div", { "data-testid": "tweetText" });
+  tweetText.textContent = "Useful tweet sentence about the photo.";
+  post.appendChild(tweetText);
+  const photo = el(dom, "div", { "data-testid": "tweetPhoto" });
+  photo.appendChild(el(dom, "img", { alt: "Image" }));
+  photo.appendChild(
+    el(dom, "button", {
+      "data-framenest-companion": "save",
+      "aria-label": "Save to FrameNest",
+    })
+  );
+  post.appendChild(photo);
+  const prefill = hooks.postTextPrefillFrom(post, photo);
+  assert.equal(prefill.title, "Useful tweet sentence about the photo");
+  assert.notEqual(prefill.title, "Save to FrameNest");
+  assert.equal(prefill.description, "Useful tweet sentence about the photo.");
+
+  const emptyPost = el(dom, "article", { "data-testid": "tweet" });
+  const emptyPhoto = el(dom, "div", { "data-testid": "tweetPhoto" });
+  emptyPhoto.appendChild(el(dom, "img", { alt: "Image" }));
+  emptyPhoto.appendChild(
+    el(dom, "button", {
+      "data-framenest-companion": "save",
+      "aria-label": "Save to FrameNest",
+    })
+  );
+  emptyPost.appendChild(emptyPhoto);
+  const emptyPrefill = hooks.postTextPrefillFrom(emptyPost, emptyPhoto);
+  assert.equal(emptyPrefill.title, "");
 });
 
 test("service worker posts alias without content_category and treats catalog_removed as terminal", () => {

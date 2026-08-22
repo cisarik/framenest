@@ -459,10 +459,25 @@
 
   const TITLE_MAX = 240;
   const DESCRIPTION_MAX = 10000;
-  const DESCRIPTION_HEIGHT_MIN = 120;
-  const DESCRIPTION_HEIGHT_MAX = 320;
   const GENERIC_ACCESSIBLE_NAME =
     /^(image|photo|video|embedded video|gif|media)(?:\s+\d+\s+of\s+\d+)?$/i;
+  const RESERVED_SAVE_CONTROL_NAMES = (function reservedSaveControlNames() {
+    const names = {};
+    names[SAVE_NAME] = true;
+    const samples = [
+      { ok: false },
+      { ok: false, error: "X_REQUEST_INVALID_CATEGORY" },
+      { ok: false, error: "X_REQUEST_CATEGORY_CONFLICT" },
+      { ok: true, state: "failed", terminal: true },
+    ];
+    for (let index = 0; index < samples.length; index += 1) {
+      const outcome = companion.reduceXSaveOutcome(samples[index]);
+      if (outcome && typeof outcome.name === "string" && outcome.name) {
+        names[outcome.name] = true;
+      }
+    }
+    return names;
+  })();
 
   function owningPostRoot(node) {
     let current = node;
@@ -552,14 +567,39 @@
     return typeof value === "string" && GENERIC_ACCESSIBLE_NAME.test(value.trim());
   }
 
+  function isCompanionChrome(node) {
+    return Boolean(
+      node &&
+        typeof node.getAttribute === "function" &&
+        node.getAttribute("data-framenest-companion")
+    );
+  }
+
+  function isReservedSaveControlName(value) {
+    return Boolean(value && RESERVED_SAVE_CONTROL_NAMES[value]);
+  }
+
   function queryFirst(host, selectors) {
-    if (!host || typeof host.querySelector !== "function") {
+    if (!host) {
       return null;
     }
+    const all =
+      typeof host.querySelectorAll === "function" ? host.querySelectorAll.bind(host) : null;
+    const one = typeof host.querySelector === "function" ? host.querySelector.bind(host) : null;
     for (let index = 0; index < selectors.length; index += 1) {
-      const found = host.querySelector(selectors[index]);
-      if (found) {
-        return found;
+      if (all) {
+        const found = all(selectors[index]);
+        const length = found && typeof found.length === "number" ? found.length : 0;
+        for (let item = 0; item < length; item += 1) {
+          if (found[item] && !isCompanionChrome(found[item])) {
+            return found[item];
+          }
+        }
+      } else if (one) {
+        const found = one(selectors[index]);
+        if (found && !isCompanionChrome(found)) {
+          return found;
+        }
       }
     }
     return null;
@@ -572,7 +612,7 @@
         continue;
       }
       const trimmed = value.trim();
-      if (!trimmed || isGenericAccessibleName(trimmed)) {
+      if (!trimmed || isGenericAccessibleName(trimmed) || isReservedSaveControlName(trimmed)) {
         continue;
       }
       return clipText(trimmed, TITLE_MAX);
@@ -584,7 +624,7 @@
     if (!host) {
       return "";
     }
-    const img = host.querySelector ? host.querySelector("img[alt]") : null;
+    const img = queryFirst(host, ["img[alt]"]);
     const imgAlt =
       img && typeof img.getAttribute === "function" ? img.getAttribute("alt") : "";
     const named = firstNonGenericName([imgAlt]);
@@ -593,11 +633,11 @@
     }
     const media = queryFirst(host, ["video", "[aria-label]", "[title]"]);
     const hostLabel =
-      host.getAttribute && typeof host.getAttribute === "function"
+      !isCompanionChrome(host) && host.getAttribute && typeof host.getAttribute === "function"
         ? host.getAttribute("aria-label")
         : "";
     const hostTitle =
-      host.getAttribute && typeof host.getAttribute === "function"
+      !isCompanionChrome(host) && host.getAttribute && typeof host.getAttribute === "function"
         ? host.getAttribute("title")
         : "";
     const mediaLabel =
@@ -607,23 +647,6 @@
     const mediaAlt =
       media && typeof media.getAttribute === "function" ? media.getAttribute("alt") : "";
     return firstNonGenericName([hostLabel, hostTitle, mediaLabel, mediaTitle, mediaAlt]);
-  }
-
-  function tweetHeightFrom(node) {
-    let height = DESCRIPTION_HEIGHT_MIN;
-    if (node && typeof node.getBoundingClientRect === "function") {
-      const rect = node.getBoundingClientRect();
-      if (rect && typeof rect.height === "number") {
-        height = Math.ceil(rect.height);
-      }
-    }
-    if (height < DESCRIPTION_HEIGHT_MIN) {
-      return DESCRIPTION_HEIGHT_MIN;
-    }
-    if (height > DESCRIPTION_HEIGHT_MAX) {
-      return DESCRIPTION_HEIGHT_MAX;
-    }
-    return height;
   }
 
   function postTextPrefillFrom(postRoot, host) {
@@ -636,7 +659,6 @@
     return {
       title: title,
       description: description,
-      descriptionHeight: tweetHeightFrom(tweetNode),
     };
   }
 
@@ -750,13 +772,10 @@
     }
     const rect = button.getBoundingClientRect();
     const width = Math.min(360, Math.max(280, window.innerWidth - 16));
-    const textareaHeight =
-      savePopup && typeof savePopup.descriptionHeight === "number"
-        ? savePopup.descriptionHeight
-        : DESCRIPTION_HEIGHT_MIN;
-    const desired = 400 + textareaHeight;
     const viewport = Math.max(0, window.innerHeight - 16);
-    const height = Math.max(240, Math.min(720, viewport, desired));
+    const measured =
+      savePopup && typeof savePopup.contentHeight === "number" ? savePopup.contentHeight : 0;
+    const height = Math.min(viewport, measured > 0 ? measured : 240);
     const gap = 8;
     const enoughAbove = rect.top >= height + gap;
     let top = enoughAbove ? rect.top - height - gap : rect.bottom + gap;
@@ -805,13 +824,15 @@
     style.textContent = [
       ":host { display: block; }",
       ".frame { display: flex; flex-direction: column; width: 100%; height: 100%;",
-      "  border: 1px solid #00ff41; border-radius: 8px; background: #000000; overflow: hidden;",
+      "  box-sizing: border-box; border: 1px solid #00ff41; border-radius: 8px;",
+      "  background: #000000; overflow: hidden;",
       "  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.65); }",
       "iframe { flex: 1 1 auto; width: 100%; height: 100%; border: 0; background: #000000; }",
     ].join("\n");
     const frame = document.createElement("div");
     frame.className = "frame";
     const iframe = document.createElement("iframe");
+    iframe.tabIndex = -1;
     iframe.src =
       chrome.runtime.getURL("ui/save.html") +
       "#url=" +
@@ -859,6 +880,14 @@
       if (data.source !== "framenest-save-popup") {
         return;
       }
+      if (data.action === "size") {
+        const next = Math.ceil(Number(data.height) || 0);
+        if (next > 0) {
+          savePopup.contentHeight = next;
+          positionSavePopup();
+        }
+        return;
+      }
       if (data.action === "cancel") {
         closeSavePopup();
         return;
@@ -873,7 +902,7 @@
       host: host,
       button: button,
       iframe: iframe,
-      descriptionHeight: prefill.descriptionHeight,
+      contentHeight: 0,
       reposition: reposition,
       onKey: onKey,
       onMouseDown: onMouseDown,
@@ -914,10 +943,6 @@
         action: "prefill",
         title: prefill && typeof prefill.title === "string" ? prefill.title : "",
         description: prefill && typeof prefill.description === "string" ? prefill.description : "",
-        descriptionHeight:
-          prefill && typeof prefill.descriptionHeight === "number"
-            ? prefill.descriptionHeight
-            : DESCRIPTION_HEIGHT_MIN,
       },
       origin
     );

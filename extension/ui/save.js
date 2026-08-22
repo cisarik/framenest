@@ -17,6 +17,7 @@
   const chosen = [];
   let activeSuggestion = -1;
   let formBusy = false;
+  let overlayArmed = false;
 
   function setStatus(node, value, kind) {
     node.textContent = value;
@@ -63,15 +64,55 @@
     return accepted ? accepted.submittedUrl : null;
   }
 
-  function clampDescriptionHeight(value) {
-    const height = Math.ceil(Number(value) || 0);
-    if (height < 120) {
-      return 120;
+  function overlayContentHeight() {
+    let height = 0;
+    if (form && typeof form.getBoundingClientRect === "function") {
+      const rect = form.getBoundingClientRect();
+      if (rect && typeof rect.height === "number") {
+        height = Math.ceil(rect.height);
+      }
     }
-    if (height > 320) {
-      return 320;
+    if (height < 1 && form && typeof form.offsetHeight === "number") {
+      height = Math.ceil(form.offsetHeight);
     }
     return height;
+  }
+
+  function notifySize() {
+    const height = overlayContentHeight();
+    if (height < 1) {
+      return;
+    }
+    window.parent.postMessage(
+      {
+        v: companion.PROTOCOL,
+        source: "framenest-save-popup",
+        action: "size",
+        height: height,
+        result: null,
+      },
+      "*"
+    );
+  }
+
+  function scheduleSize() {
+    if (typeof requestAnimationFrame === "function") {
+      requestAnimationFrame(notifySize);
+      return;
+    }
+    notifySize();
+  }
+
+  function armOverlayFocus() {
+    if (overlayArmed) {
+      return;
+    }
+    overlayArmed = true;
+    [title, description, tagSearch].forEach((node) => {
+      if (node && node.getAttribute && node.getAttribute("tabindex") === "-1") {
+        node.removeAttribute("tabindex");
+      }
+    });
   }
 
   function applyPrefill(data) {
@@ -84,9 +125,7 @@
     if (typeof data.description === "string" && !description.value) {
       description.value = data.description.slice(0, 10000);
     }
-    if (typeof data.descriptionHeight === "number") {
-      description.style.height = String(clampDescriptionHeight(data.descriptionHeight)) + "px";
-    }
+    scheduleSize();
   }
 
   function notifyParent(action, result) {
@@ -182,6 +221,7 @@
       chip.appendChild(remove);
       selectedTags.appendChild(chip);
     });
+    scheduleSize();
   }
 
   function renderSuggestions() {
@@ -305,6 +345,7 @@
     });
     setStatus(tagsStatus, catalog.length ? "" : "No canonical tags yet.");
     renderSuggestions();
+    scheduleSize();
   }
 
   form.addEventListener("submit", (event) => {
@@ -374,6 +415,9 @@
     notifyParent("cancel");
   });
 
+  document.addEventListener("pointerdown", armOverlayFocus, true);
+  document.addEventListener("keydown", armOverlayFocus, true);
+
   window.addEventListener("message", (event) => {
     const data = event.data;
     if (!data || data.v !== companion.PROTOCOL || data.source !== "framenest-save-host") {
@@ -384,6 +428,17 @@
     }
   });
 
+  if (typeof ResizeObserver === "function" && form) {
+    const observer = new ResizeObserver(() => {
+      notifySize();
+    });
+    observer.observe(form);
+    if (selectedTags) {
+      observer.observe(selectedTags);
+    }
+  }
+
   void loadTags();
   notifyParent("ready");
+  scheduleSize();
 })();

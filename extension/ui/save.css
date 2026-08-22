@@ -26,7 +26,7 @@
 
 html,
 body {
-  height: 100%;
+  height: auto;
 }
 
 body {
@@ -41,8 +41,7 @@ body {
 }
 
 main {
-  flex: 1 1 auto;
-  min-height: 0;
+  flex: 0 0 auto;
   display: flex;
   flex-direction: column;
 }
@@ -55,8 +54,7 @@ h1 {
 }
 
 form {
-  flex: 1 1 auto;
-  min-height: 0;
+  flex: 0 0 auto;
   display: flex;
   flex-direction: column;
 }
@@ -90,8 +88,7 @@ form {
 }
 
 .fields {
-  flex: 1 1 auto;
-  min-height: 0;
+  flex: 0 0 auto;
   overflow: visible;
   display: flex;
   flex-direction: column;
@@ -118,9 +115,8 @@ textarea {
 
 textarea {
   flex: 0 0 auto;
-  min-height: 120px;
-  max-height: 320px;
   height: 120px;
+  min-height: 120px;
   overflow-y: auto;
   resize: none;
 }

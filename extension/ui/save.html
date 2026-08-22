@@ -14,9 +14,7 @@
         </div>
         <div class="fields">
           <label for="title">Title</label>
-          <input id="title" name="title" type="text" maxlength="240" spellcheck="true" autocomplete="off" />
-          <label for="description">Description</label>
-          <textarea id="description" name="description" maxlength="10000" rows="4" autocomplete="off"></textarea>
+          <input id="title" name="title" type="text" maxlength="240" spellcheck="true" autocomplete="off" tabindex="-1" />
           <label for="tag-search">Tags</label>
           <div class="tag-search-panel">
             <input
@@ -33,6 +31,7 @@
               autocomplete="off"
               autocapitalize="none"
               autocorrect="off"
+              tabindex="-1"
               data-1p-ignore="true"
               data-lpignore="true"
               data-form-type="other"
@@ -41,6 +40,8 @@
           </div>
           <div id="selected-tags" class="selected-tags" aria-live="polite"></div>
           <p id="tags-status" class="status"></p>
+          <label for="description">Description</label>
+          <textarea id="description" name="description" maxlength="10000" rows="4" autocomplete="off" tabindex="-1"></textarea>
           <p id="form-status" class="status" role="status"></p>
         </div>
         <div class="actions">
