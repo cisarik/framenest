@@ -19,6 +19,7 @@
   let composerFocusBound = false;
   const SAVE_NAME = "Save to FrameNest";
   const SAVE_UNAVAILABLE = "FrameNest unavailable";
+  const SAVE_FRAME_BORDER_Y = 2;
   const GALLERY_ACCENT = "#00ff41";
   const GALLERY_DANGER = "#ff4d4d";
   const GALLERY_WARNING = "#e6b800";
@@ -775,7 +776,10 @@
     const viewport = Math.max(0, window.innerHeight - 16);
     const measured =
       savePopup && typeof savePopup.contentHeight === "number" ? savePopup.contentHeight : 0;
-    const height = Math.min(viewport, measured > 0 ? measured : 240);
+    const height = Math.min(
+      viewport,
+      measured > 0 ? measured + SAVE_FRAME_BORDER_Y : 240
+    );
     const gap = 8;
     const enoughAbove = rect.top >= height + gap;
     let top = enoughAbove ? rect.top - height - gap : rect.bottom + gap;
@@ -832,7 +836,6 @@
     const frame = document.createElement("div");
     frame.className = "frame";
     const iframe = document.createElement("iframe");
-    iframe.tabIndex = -1;
     iframe.src =
       chrome.runtime.getURL("ui/save.html") +
       "#url=" +

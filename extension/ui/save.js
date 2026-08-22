@@ -17,7 +17,6 @@
   const chosen = [];
   let activeSuggestion = -1;
   let formBusy = false;
-  let overlayArmed = false;
 
   function setStatus(node, value, kind) {
     node.textContent = value;
@@ -101,18 +100,6 @@
       return;
     }
     notifySize();
-  }
-
-  function armOverlayFocus() {
-    if (overlayArmed) {
-      return;
-    }
-    overlayArmed = true;
-    [title, description, tagSearch].forEach((node) => {
-      if (node && node.getAttribute && node.getAttribute("tabindex") === "-1") {
-        node.removeAttribute("tabindex");
-      }
-    });
   }
 
   function applyPrefill(data) {
@@ -272,7 +259,6 @@
     setStatus(tagsStatus, "");
     renderSelected();
     renderSuggestions();
-    tagSearch.focus();
   }
 
   function aliasPayload() {
@@ -415,8 +401,31 @@
     notifyParent("cancel");
   });
 
-  document.addEventListener("pointerdown", armOverlayFocus, true);
-  document.addEventListener("keydown", armOverlayFocus, true);
+  document.addEventListener(
+    "keydown",
+    (event) => {
+      if (event.key !== "Enter") {
+        return;
+      }
+      if (event.isComposing) {
+        return;
+      }
+      if (formBusy) {
+        event.preventDefault();
+        return;
+      }
+      const target = event.target;
+      if (target === description && !event.ctrlKey && !event.metaKey) {
+        return;
+      }
+      if (target === tagSearch && tagListOpen() && activeSuggestion >= 0) {
+        return;
+      }
+      event.preventDefault();
+      submitSave();
+    },
+    true
+  );
 
   window.addEventListener("message", (event) => {
     const data = event.data;

@@ -232,7 +232,8 @@ test("in-feed Save is a per-media hover overlay, not an action-row control", () 
     /descriptionHeight/
   );
   assert.doesNotMatch(extractNamedFunction(adapterSource, "openSavePopup"), /iframe\.focus/);
-  assert.match(extractNamedFunction(adapterSource, "openSavePopup"), /tabIndex\s*=\s*-1/);
+  assert.doesNotMatch(extractNamedFunction(adapterSource, "openSavePopup"), /iframe\.tabIndex/);
+  assert.doesNotMatch(extractNamedFunction(adapterSource, "openSavePopup"), /tabIndex\s*=/);
   assert.match(extractNamedFunction(adapterSource, "openSavePopup"), /#url=/);
   assert.doesNotMatch(extractNamedFunction(adapterSource, "openSavePopup"), /media=/);
   assert.doesNotMatch(adapterSource, /data-framenest-media-kind/);
@@ -309,6 +310,9 @@ test("Save popup searches tags, pins Save, and does not execute Analyze", () => 
   assert.match(saveFn[0], /Math\.min\(\s*360/);
   assert.match(saveFn[0], /innerHeight - 16/);
   assert.match(saveFn[0], /contentHeight/);
+  assert.match(adapterSource, /SAVE_FRAME_BORDER_Y = 2/);
+  assert.match(saveFn[0], /measured > 0 \? measured \+ SAVE_FRAME_BORDER_Y : 240/);
+  assert.doesNotMatch(saveFn[0], /measured > 0 \? measured : 240/);
   assert.doesNotMatch(saveFn[0], /400 \+ textareaHeight/);
   assert.doesNotMatch(saveFn[0], /Math\.min\(\s*720/);
   assert.doesNotMatch(saveFn[0], /Math\.min\(\s*380/);
@@ -1485,18 +1489,23 @@ test("Save popup is an Edit-media subset without radios, source, or on-open focu
   assert.match(saveJs, /action: "size"/);
   assert.doesNotMatch(saveJs, /title\.focus/);
   assert.doesNotMatch(saveJs, /description\.focus/);
+  assert.doesNotMatch(saveJs, /tagSearch\.focus/);
   assert.doesNotMatch(saveHtml, /autofocus/);
-  assert.match(saveHtml, /id="title"[^>]*tabindex="-1"/);
-  assert.match(saveHtml, /id="description"[^>]*tabindex="-1"/);
-  assert.match(saveHtml, /id="tag-search"[\s\S]*?tabindex="-1"/);
-  assert.match(saveJs, /pointerdown/);
-  assert.match(saveJs, /armOverlayFocus/);
+  assert.doesNotMatch(saveHtml, /tabindex="-1"/);
+  assert.doesNotMatch(saveHtml, /\sid="title"[^>]*tabindex=/);
+  assert.doesNotMatch(saveHtml, /\sid="description"[^>]*tabindex=/);
+  assert.doesNotMatch(saveHtml, /id="tag-search"[\s\S]*?tabindex=/);
+  assert.doesNotMatch(saveJs, /pointerdown/);
+  assert.doesNotMatch(saveJs, /overlayArmed/);
+  assert.doesNotMatch(saveJs, /armOverlayFocus/);
   assert.match(saveJs, /notifyParent\("ready"\)/);
   assert.match(saveJs, /title\.addEventListener\("keydown"[\s\S]*Enter[\s\S]*submitSave\(\)/);
   assert.doesNotMatch(saveJs, /cycleCategory/);
   assert.doesNotMatch(saveJs, /categoryRadios/);
   assert.doesNotMatch(saveJs, /description\.addEventListener\("keydown"/);
   assert.match(saveJs, /event\.ctrlKey \|\| event\.metaKey/);
+  assert.match(saveJs, /target === description && !event\.ctrlKey && !event\.metaKey/);
+  assert.match(saveJs, /target === tagSearch && tagListOpen\(\) && activeSuggestion >= 0/);
   assert.match(saveJs, /tagListOpen\(\)/);
   assert.match(saveJs, /aria-busy/);
   assert.match(saveJs, /FrameNest needs an update before this Save can complete\./);
@@ -1511,6 +1520,9 @@ test("Save popup is an Edit-media subset without radios, source, or on-open focu
   assert.doesNotMatch(saveCss, /max-height:\s*320px/);
   assert.match(saveCss, /\.fields \{[\s\S]*?flex:\s*0 0 auto/);
   assert.doesNotMatch(saveCss, /html,\s*body \{\s*height:\s*100%/);
+  assert.match(saveCss, /html,\s*\nbody \{[\s\S]*?overflow:\s*hidden/);
+  assert.match(saveCss, /\.header \{[\s\S]*?padding:\s*6px 10px 6px 12px/);
+  assert.doesNotMatch(saveCss, /padding:\s*10px 10px 8px 12px/);
   assert.match(saveCss, /#save \{[\s\S]*background:\s*var\(--accent\)/);
   assert.equal(companion.savePopupDefaultContentCategory(), "general");
   assert.equal(companion.defaultContentCategoryForMediaKind("image"), "general");
@@ -1634,6 +1646,7 @@ test("Save title ignores companion plus inside the photo host", () => {
   assert.match(extractNamedFunction(adapterSource, "firstNonGenericName"), /isReservedSaveControlName/);
   assert.match(extractNamedFunction(adapterSource, "accessibleNameFrom"), /isCompanionChrome/);
   assert.match(extractNamedFunction(adapterSource, "positionSavePopup"), /contentHeight/);
+  assert.match(extractNamedFunction(adapterSource, "positionSavePopup"), /SAVE_FRAME_BORDER_Y/);
   assert.match(extractNamedFunction(adapterSource, "openSavePopup"), /action === "size"/);
   assert.doesNotMatch(adapterSource, /tweetHeightFrom/);
   const dom = createMiniDom();
