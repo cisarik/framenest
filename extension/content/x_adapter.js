@@ -29,10 +29,10 @@
   const COMPANION_STYLE = [
     "[data-framenest-companion='save'] {",
     "  position: absolute;",
-    "  bottom: 0;",
-    "  right: 0;",
+    "  bottom: 8px;",
+    "  right: 8px;",
     "  margin: 0;",
-    "  z-index: 5;",
+    "  z-index: 8;",
     "  display: inline-flex;",
     "  align-items: center;",
     "  justify-content: center;",
@@ -50,9 +50,17 @@
     "  appearance: none;",
     "  -webkit-appearance: none;",
     "  line-height: 0;",
-    "  overflow: hidden;",
     "  opacity: 0;",
     "  pointer-events: none;",
+    "}",
+    "[data-framenest-media-host] [aria-label='Edit image'],",
+    "[data-framenest-media-host] [title='Edit image'] {",
+    "  position: absolute !important;",
+    "  left: 8px !important;",
+    "  bottom: 8px !important;",
+    "  right: auto !important;",
+    "  top: auto !important;",
+    "  z-index: 4 !important;",
     "}",
     "[data-framenest-media-host]:hover > [data-framenest-companion='save'],",
     "[data-framenest-media-host]:focus-within > [data-framenest-companion='save'],",
@@ -335,6 +343,81 @@
     }
   }
 
+  const EDIT_IMAGE_NAME = "Edit image";
+
+  function inHostAccessibleName(node) {
+    if (!node || typeof node.getAttribute !== "function") {
+      return "";
+    }
+    const labelled = node.getAttribute("aria-label");
+    if (labelled) {
+      return labelled;
+    }
+    const title = node.getAttribute("title");
+    if (title) {
+      return title;
+    }
+    const text = node.textContent;
+    return typeof text === "string" ? text.replace(/\s+/g, " ").trim() : "";
+  }
+
+  function isCandidateEditImageControl(node) {
+    if (!node || !node.tagName) {
+      return false;
+    }
+    if (node.getAttribute && node.getAttribute("data-framenest-companion")) {
+      return false;
+    }
+    const tag = String(node.tagName).toLowerCase();
+    if (tag === "button" || tag === "a") {
+      return true;
+    }
+    const role = node.getAttribute && node.getAttribute("role");
+    if (role === "button") {
+      return true;
+    }
+    return (
+      (node.getAttribute && node.getAttribute("aria-label") === EDIT_IMAGE_NAME) ||
+      (node.getAttribute && node.getAttribute("title") === EDIT_IMAGE_NAME)
+    );
+  }
+
+  function applyEditImageGeometry(node) {
+    node.style.position = "absolute";
+    node.style.left = "8px";
+    node.style.bottom = "8px";
+    node.style.right = "auto";
+    node.style.top = "auto";
+    node.style.zIndex = "4";
+    if (typeof node.style.setProperty === "function") {
+      node.style.setProperty("position", "absolute", "important");
+      node.style.setProperty("left", "8px", "important");
+      node.style.setProperty("bottom", "8px", "important");
+      node.style.setProperty("right", "auto", "important");
+      node.style.setProperty("top", "auto", "important");
+      node.style.setProperty("z-index", "4", "important");
+    }
+  }
+
+  function relocateInHostEditImage(host) {
+    if (!host) {
+      return;
+    }
+    const visit = (node) => {
+      if (!node) {
+        return;
+      }
+      if (node !== host && isCandidateEditImageControl(node) && inHostAccessibleName(node) === EDIT_IMAGE_NAME) {
+        applyEditImageGeometry(node);
+      }
+      const children = node.children || [];
+      for (let index = 0; index < children.length; index += 1) {
+        visit(children[index]);
+      }
+    };
+    visit(host);
+  }
+
   function haltHostAction(event) {
     event.preventDefault();
     event.stopPropagation();
@@ -538,15 +621,9 @@
       encodeURIComponent(mediaKind);
     iframe.title = SAVE_NAME;
     iframe.setAttribute("aria-label", SAVE_NAME);
-    iframe.addEventListener("load", () => {
-      if (typeof iframe.focus === "function") {
-        iframe.focus();
-      }
-    });
     frame.appendChild(iframe);
     shadow.appendChild(style);
     shadow.appendChild(frame);
-    document.documentElement.appendChild(host);
     button.setAttribute("aria-expanded", "true");
     const reposition = () => {
       positionSavePopup();
@@ -564,16 +641,28 @@
       }
       closeSavePopup();
     };
+    const onSaveIframeReady = () => {
+      if (!savePopup || savePopup.iframe !== iframe) {
+        return;
+      }
+      if (typeof iframe.focus === "function") {
+        iframe.focus();
+      }
+      requestSaveTitleFocus(iframe);
+    };
     const onMessage = (event) => {
       if (!savePopup || event.source !== savePopup.iframe.contentWindow) {
         return;
       }
       const data = event.data;
-      if (
-        !data ||
-        data.v !== companion.PROTOCOL ||
-        data.source !== "framenest-save-popup"
-      ) {
+      if (!data || data.v !== companion.PROTOCOL) {
+        return;
+      }
+      if (data.source === "framenest-save-popup" && data.action === "ready") {
+        onSaveIframeReady();
+        return;
+      }
+      if (data.source !== "framenest-save-popup") {
         return;
       }
       if (data.action === "cancel") {
@@ -595,12 +684,42 @@
       onMouseDown: onMouseDown,
       onMessage: onMessage,
     };
+    iframe.addEventListener("load", onSaveIframeReady);
     window.addEventListener("resize", reposition);
     window.addEventListener("scroll", reposition, true);
     document.addEventListener("keydown", onKey, true);
     document.addEventListener("mousedown", onMouseDown, true);
     window.addEventListener("message", onMessage);
+    document.documentElement.appendChild(host);
     positionSavePopup();
+  }
+
+  function savePopupTargetOrigin() {
+    const href = chrome.runtime.getURL("ui/save.html");
+    if (typeof href !== "string" || !href) {
+      return "";
+    }
+    const schemeEnd = href.indexOf("://");
+    if (schemeEnd < 0) {
+      return "";
+    }
+    const pathStart = href.indexOf("/", schemeEnd + 3);
+    return pathStart < 0 ? href : href.slice(0, pathStart);
+  }
+
+  function requestSaveTitleFocus(iframe) {
+    const origin = savePopupTargetOrigin();
+    if (!origin || !iframe || !iframe.contentWindow || typeof iframe.contentWindow.postMessage !== "function") {
+      return;
+    }
+    iframe.contentWindow.postMessage(
+      {
+        v: companion.PROTOCOL,
+        source: "framenest-save-host",
+        action: "focus-title",
+      },
+      origin
+    );
   }
 
   function applySaveResult(button, result) {
@@ -630,6 +749,9 @@
       return "no_media";
     }
     hosts.forEach((host) => {
+      host.setAttribute("data-framenest-media-host", "");
+      ensureContainingBlock(host);
+      relocateInHostEditImage(host);
       if (injected.has(host)) {
         return;
       }
@@ -637,8 +759,6 @@
         injected.add(host);
         return;
       }
-      host.setAttribute("data-framenest-media-host", "");
-      ensureContainingBlock(host);
       const button = createSaveControl(accepted, mediaKindForHost(host));
       host.appendChild(button);
       const remembered = postOutcomeById.get(accepted.postId);
@@ -1475,6 +1595,7 @@
     globalThis.FrameNestXAdapterTestHooks.paintPostSaveOutcome = paintPostSaveOutcome;
     globalThis.FrameNestXAdapterTestHooks.pollClaim = pollClaim;
     globalThis.FrameNestXAdapterTestHooks.recover = recover;
+    globalThis.FrameNestXAdapterTestHooks.relocateInHostEditImage = relocateInHostEditImage;
     return;
   }
 

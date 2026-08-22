@@ -14,9 +14,9 @@
         </div>
         <div class="fields">
           <label for="title">Title</label>
-          <input id="title" name="title" type="text" maxlength="240" spellcheck="true" />
+          <input id="title" name="title" type="text" maxlength="240" spellcheck="true" autocomplete="off" autofocus />
           <label for="description">Description</label>
-          <textarea id="description" name="description" maxlength="10000" rows="4"></textarea>
+          <textarea id="description" name="description" maxlength="10000" rows="4" autocomplete="off"></textarea>
           <fieldset id="category-fieldset" class="category">
             <legend id="category-legend">Category</legend>
             <div class="category-options" role="radiogroup" aria-labelledby="category-legend">
@@ -32,7 +32,7 @@
           <label for="tag-search">Tags</label>
           <input
             id="tag-search"
-            name="tag-search"
+            name="fn-canonical-tag-query"
             type="text"
             maxlength="64"
             spellcheck="false"
@@ -42,6 +42,11 @@
             aria-expanded="false"
             aria-controls="tag-suggestions"
             autocomplete="off"
+            autocapitalize="none"
+            autocorrect="off"
+            data-1p-ignore="true"
+            data-lpignore="true"
+            data-form-type="other"
           />
           <div id="tag-suggestions" class="tag-suggestions" role="listbox"></div>
           <div id="selected-tags" class="selected-tags" aria-live="polite"></div>

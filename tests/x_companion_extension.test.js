@@ -189,16 +189,43 @@ test("in-feed Save is a per-media hover overlay, not an action-row control", () 
   assert.match(adapterSource, /data-framenest-media-host/);
   assert.match(adapterSource, /data-framenest-companion-style/);
   assert.match(adapterSource, /position: absolute/);
-  const saveRule = adapterSource.match(
-    /\[data-framenest-companion='save'\] \{[\s\S]*?\n\}/
+  const saveRule = companionStyleArrayRule(
+    adapterSource,
+    "[data-framenest-companion='save'] {"
   );
-  assert.ok(saveRule);
-  assert.match(saveRule[0], /bottom:\s*0/);
-  assert.match(saveRule[0], /right:\s*0/);
-  assert.doesNotMatch(saveRule[0], /top:\s*0/);
-  assert.doesNotMatch(saveRule[0], /left:\s*0/);
+  assert.match(saveRule, /bottom:\s*8px/);
+  assert.match(saveRule, /right:\s*8px/);
+  assert.doesNotMatch(saveRule, /bottom:\s*0/);
+  assert.doesNotMatch(saveRule, /right:\s*0;/);
+  assert.doesNotMatch(saveRule, /top:\s*0/);
+  assert.doesNotMatch(saveRule, /left:\s*0/);
+  assert.doesNotMatch(saveRule, /overflow:\s*hidden/);
   assert.doesNotMatch(adapterSource, /\[data-framenest-companion='save'\][\s\S]{0,80}top:\s*0/);
   assert.doesNotMatch(adapterSource, /\[data-framenest-companion='save'\][\s\S]{0,80}left:\s*0/);
+  assert.match(adapterSource, /\[data-framenest-media-host\] \[aria-label='Edit image'\]/);
+  assert.match(adapterSource, /\[data-framenest-media-host\] \[title='Edit image'\]/);
+  const editRule = companionStyleArrayRule(
+    adapterSource,
+    "[data-framenest-media-host] [aria-label='Edit image']"
+  );
+  assert.match(editRule, /left:\s*8px/);
+  assert.match(editRule, /bottom:\s*8px/);
+  assert.match(editRule, /right:\s*auto/);
+  assert.match(editRule, /top:\s*auto/);
+  assert.doesNotMatch(editRule, /left:\s*0/);
+  assert.doesNotMatch(editRule, /top:\s*0;/);
+  assert.match(adapterSource, /EDIT_IMAGE_NAME = "Edit image"/);
+  assert.match(extractNamedFunction(adapterSource, "relocateInHostEditImage"), /EDIT_IMAGE_NAME/);
+  assert.match(extractNamedFunction(adapterSource, "inHostAccessibleName"), /aria-label/);
+  assert.match(extractNamedFunction(adapterSource, "applyEditImageGeometry"), /left = "8px"/);
+  assert.match(extractNamedFunction(adapterSource, "openSavePopup"), /requestSaveTitleFocus/);
+  assert.match(extractNamedFunction(adapterSource, "openSavePopup"), /onSaveIframeReady/);
+  assert.match(extractNamedFunction(adapterSource, "requestSaveTitleFocus"), /focus-title/);
+  assert.match(extractNamedFunction(adapterSource, "requestSaveTitleFocus"), /framenest-save-host/);
+  assert.doesNotMatch(
+    extractNamedFunction(adapterSource, "requestSaveTitleFocus"),
+    /["']\*["']/
+  );
   assert.match(adapterSource, /opacity: 0/);
   assert.match(adapterSource, /pointer-events: none/);
   assert.match(adapterSource, /background: #000000/);
@@ -1218,6 +1245,14 @@ test("boundTabId binds only from X content-script origins", () => {
   assert.equal(context.isBindableComposerSender({ origin: "https://x.com" }), false);
 });
 
+function companionStyleArrayRule(source, selectorNeedle) {
+  const start = source.indexOf(selectorNeedle);
+  assert.ok(start >= 0, selectorNeedle);
+  const close = source.indexOf("\n    \"}\"", start);
+  assert.ok(close > start, "rule close " + selectorNeedle);
+  return source.slice(start, close + "\n    \"}\"".length);
+}
+
 function extractNamedFunction(source, name) {
   const start = source.indexOf("function " + name);
   assert.ok(start >= 0, name);
@@ -1426,8 +1461,19 @@ test("Save popup offers four category radios, helper text, and keyboard contract
   assert.match(saveJs, /contentCategory: category/);
   assert.match(saveJs, /defaultContentCategoryForMediaKind/);
   assert.match(saveJs, /title\.focus\(\)/);
+  assert.match(saveJs, /function focusTitleField/);
+  assert.match(saveJs, /action === "focus-title"/);
+  assert.match(saveJs, /source !== "framenest-save-host"/);
+  assert.match(saveHtml, /id="title"[^>]*autofocus/);
+  assert.match(saveJs, /notifyParent\("ready"\)/);
   assert.match(saveJs, /event\.key === "Enter" && !event\.ctrlKey && !event\.metaKey/);
   assert.match(saveJs, /categoryRadios[\s\S]*Enter[\s\S]*preventDefault/);
+  assert.match(saveJs, /cycleCategoryFromTitle/);
+  assert.match(saveJs, /title\.addEventListener\("keydown"[\s\S]*ArrowDown[\s\S]*ArrowUp/);
+  assert.doesNotMatch(
+    extractNamedFunction(saveJs, "cycleCategoryFromTitle"),
+    /description/
+  );
   assert.match(saveJs, /event\.ctrlKey \|\| event\.metaKey/);
   assert.match(saveJs, /tagListOpen\(\)/);
   assert.match(saveJs, /aria-busy/);
@@ -1436,6 +1482,61 @@ test("Save popup offers four category radios, helper text, and keyboard contract
   assert.doesNotMatch(saveJs, /contentCategory:\s*null/);
   assert.match(saveCss, /\.category /);
   assert.match(saveCss, /accent-color: var\(--accent\)/);
+});
+
+test("Save live UX keeps + inset, relocates Edit image, and searches canonical tags only", () => {
+  const saveHtml = fs.readFileSync(path.join(REPO, "extension/ui/save.html"), "utf8");
+  const saveCss = fs.readFileSync(path.join(REPO, "extension/ui/save.css"), "utf8");
+  const saveJs = fs.readFileSync(path.join(REPO, "extension/ui/save.js"), "utf8");
+  assert.match(saveHtml, /placeholder="Search tags"/);
+  assert.doesNotMatch(saveHtml, /Search or add a tag/);
+  assert.doesNotMatch(saveJs, /Search or add a tag/);
+  assert.doesNotMatch(saveJs, /createAndSelectMetadataTag/);
+  assert.doesNotMatch(saveJs, /Add \u201c/);
+  assert.doesNotMatch(saveJs, /Add "/);
+  assert.match(saveHtml, /id="tag-search"/);
+  assert.match(saveHtml, /name="fn-canonical-tag-query"/);
+  assert.doesNotMatch(saveHtml, /name="tag-search"/);
+  assert.doesNotMatch(saveHtml, /name="(?:name|given-name|family-name|sex|username)"/);
+  assert.match(saveHtml, /id="tag-search"[\s\S]*?autocomplete="off"/);
+  assert.match(saveCss, /\.tag-suggestions \{[\s\S]*?padding:\s*4px/);
+  assert.match(saveCss, /\.tag-suggestion \{[\s\S]*?min-height:\s*2\.25rem/);
+  assert.match(saveCss, /\.tag-suggestion\[aria-selected="true"\]/);
+  assert.match(saveCss, /\.tag-chip__remove \{[\s\S]*?border-radius:\s*50%/);
+  assert.match(saveCss, /\.tag-chip__remove \{[\s\S]*?background:\s*var\(--accent\)/);
+  assert.match(saveJs, /textContent = "×"/);
+  assert.doesNotMatch(saveJs, /remove\.textContent = "X"/);
+  assert.match(saveJs, /event\.key === "Enter"[\s\S]*tagListOpen\(\)[\s\S]*activeSuggestion/);
+  assert.match(saveJs, /addTag\(item\)/);
+  assert.doesNotMatch(saveJs, /innerHTML/);
+  const attachRule = adapterSource.match(
+    /\[data-framenest-companion='attach'\] \{[\s\S]*?\n\}/
+  );
+  assert.ok(attachRule);
+  assert.match(attachRule[0], /position:\s*fixed/);
+  const dom = createMiniDom();
+  const post = el(dom, "article", { "data-testid": "tweet" });
+  post.appendChild(
+    el(dom, "a", { href: "https://x.com/fixture/status/123456789", role: "link" })
+  );
+  const photo = el(dom, "div", { "data-testid": "tweetPhoto", "data-framenest-media": "" });
+  const edit = el(dom, "button", { "aria-label": "Edit image", title: "Edit image" });
+  const profile = el(dom, "button", { "aria-label": "Edit profile" });
+  photo.appendChild(edit);
+  post.appendChild(photo);
+  post.appendChild(profile);
+  dom.body.appendChild(post);
+  const hooks = loadAdapterHooks(dom);
+  assert.equal(hooks.injectSave(post), "placed");
+  assert.equal(edit.style.left, "8px");
+  assert.equal(edit.style.bottom, "8px");
+  assert.equal(edit.style.right, "auto");
+  assert.equal(edit.style.top, "auto");
+  assert.equal(edit.style.position, "absolute");
+  assert.equal(profile.style.left, undefined);
+  const save = photo.querySelector("[data-framenest-companion='save']");
+  assert.ok(save);
+  assert.equal(save.getAttribute("aria-label"), "Save to FrameNest");
 });
 
 test("service worker allowlists category, never drops it, and treats catalog_removed as terminal", () => {

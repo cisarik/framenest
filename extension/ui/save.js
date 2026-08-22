@@ -83,6 +83,23 @@
     return companion.acceptContentCategory(checked && checked.value);
   }
 
+  function cycleCategoryFromTitle(delta) {
+    const order = companion.CONTENT_CATEGORIES;
+    const current = selectedCategory() || order[0];
+    const index = order.indexOf(current);
+    const start = index >= 0 ? index : 0;
+    const next = order[(start + delta + order.length) % order.length];
+    categoryRadios.forEach((radio) => {
+      radio.checked = radio.value === next;
+    });
+  }
+
+  function focusTitleField() {
+    if (title && typeof title.focus === "function") {
+      title.focus();
+    }
+  }
+
   function notifyParent(action, result) {
     window.parent.postMessage(
       {
@@ -162,7 +179,7 @@
       const remove = document.createElement("button");
       remove.type = "button";
       remove.className = "tag-chip__remove";
-      remove.textContent = "X";
+      remove.textContent = "×";
       remove.setAttribute("aria-label", "Remove " + displayNameOf(item));
       remove.disabled = formBusy;
       remove.addEventListener("click", () => {
@@ -355,6 +372,16 @@
   title.addEventListener("keydown", (event) => {
     if (event.key === "Enter" && !event.ctrlKey && !event.metaKey) {
       event.preventDefault();
+      return;
+    }
+    if (event.key === "ArrowDown" || event.key === "ArrowRight") {
+      event.preventDefault();
+      cycleCategoryFromTitle(1);
+      return;
+    }
+    if (event.key === "ArrowUp" || event.key === "ArrowLeft") {
+      event.preventDefault();
+      cycleCategoryFromTitle(-1);
     }
   });
 
@@ -396,9 +423,12 @@
     }
     if (event.key === "Enter") {
       event.preventDefault();
-      if (matches.length) {
-        const index = activeSuggestion >= 0 ? activeSuggestion : 0;
-        addTag(matches[index]);
+      if (!tagListOpen() || activeSuggestion < 0) {
+        return;
+      }
+      const item = matches[activeSuggestion];
+      if (item) {
+        addTag(item);
       }
     }
   });
@@ -415,8 +445,19 @@
     notifyParent("cancel");
   });
 
+  window.addEventListener("message", (event) => {
+    const data = event.data;
+    if (!data || data.v !== companion.PROTOCOL || data.source !== "framenest-save-host") {
+      return;
+    }
+    if (data.action === "focus-title") {
+      focusTitleField();
+    }
+  });
+
   applyDefaultCategory();
   void loadTags();
   void loadIdentity();
-  title.focus();
+  focusTitleField();
+  notifyParent("ready");
 })();
