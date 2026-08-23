@@ -3,6 +3,9 @@
   const FIELD_TITLE = "display_title";
   const FIELD_TAGS = "tags";
   const FIELD_DESCRIPTION = "description";
+  const RELOAD_RECOVERY = companion.EXTENSION_CONTEXT_RECOVERY_COPY;
+  let runtimeStale = false;
+  let runtimeStaleHandler = function handleEarlyRuntimeStale() {};
 
   function emptyFields() {
     return { display_title: false, tags: false, description: false };
@@ -48,6 +51,7 @@
     let removed = {};
     let lastError = "";
     let overlayOpen = true;
+    let contextStale = false;
     const openedRunIds = {};
 
     function suggestions() {
@@ -89,9 +93,10 @@
         removed: Object.assign({}, removed),
         overlayOpen: overlayOpen,
         lastError: lastError,
+        runtimeStale: contextStale,
         mappedCount: count,
-        saveEnabled: saveEnabled(fields, count),
-        tagsDisabled: !tagsCanBeChecked(count),
+        saveEnabled: !contextStale && saveEnabled(fields, count),
+        tagsDisabled: contextStale || !tagsCanBeChecked(count),
         suggestion: currentSuggestion(),
         suggestions: suggestions(),
         canonical: detail && detail.canonical,
@@ -101,6 +106,17 @@
 
     function paint() {
       render(snapshot());
+    }
+
+    function handleStaleResponse(response) {
+      if (!response || response.stale !== true) {
+        return false;
+      }
+      contextStale = true;
+      lastError = RELOAD_RECOVERY;
+      overlayOpen = true;
+      paint();
+      return true;
     }
 
     function handleForbidden() {
@@ -123,6 +139,9 @@
         mediaId: openedMediaId,
         analysis_run_id: openedRunId,
       });
+      if (handleStaleResponse(response)) {
+        return response;
+      }
       if (response && (response.forbidden || response.status === 403)) {
         handleForbidden();
         return response;
@@ -139,6 +158,9 @@
         return { ok: true, already_opened: true };
       }
       const response = await postOpened();
+      if (response && response.stale === true) {
+        return response;
+      }
       if (response && (response.forbidden || response.status === 403)) {
         return response;
       }
@@ -153,6 +175,9 @@
 
     async function loadDetail() {
       const response = await request(companion.TYPES.REVIEW_INBOX_DETAIL, { mediaId: mediaId });
+      if (handleStaleResponse(response)) {
+        return response;
+      }
       if (response && (response.forbidden || response.status === 403)) {
         handleForbidden();
         return response;
@@ -185,6 +210,9 @@
     }
 
     async function selectRun(nextRunId) {
+      if (contextStale) {
+        return { ok: false, error: "extension_context_invalidated", stale: true };
+      }
       if (!companion.isUuid(nextRunId) || nextRunId === runId) {
         return { ok: true };
       }
@@ -195,6 +223,9 @@
     }
 
     function setField(name, checked) {
+      if (contextStale) {
+        return;
+      }
       if (name === FIELD_TAGS && checked && mappedCount() < 1) {
         fields.tags = false;
       } else if (Object.prototype.hasOwnProperty.call(fields, name)) {
@@ -204,6 +235,9 @@
     }
 
     function removeChip(key) {
+      if (contextStale) {
+        return;
+      }
       if (typeof key === "string" && key) {
         removed[key] = true;
       }
@@ -214,6 +248,9 @@
     }
 
     async function save() {
+      if (contextStale) {
+        return { ok: false, error: "extension_context_invalidated", stale: true };
+      }
       const selected = [];
       if (fields.display_title) {
         selected.push(FIELD_TITLE);
@@ -249,6 +286,9 @@
         companion.TYPES.REVIEW_INBOX_APPLY,
         Object.assign({ mediaId: mediaId }, body)
       );
+      if (handleStaleResponse(response)) {
+        return response;
+      }
       if (response && (response.forbidden || response.status === 403)) {
         handleForbidden();
         return response;
@@ -295,6 +335,56 @@
     };
   }
 
+  function markRuntimeStale(error) {
+    if (runtimeStale) {
+      return;
+    }
+    runtimeStale = true;
+    runtimeStaleHandler();
+    void error;
+  }
+
+  function runtimeObject() {
+    return globalThis.chrome && globalThis.chrome.runtime;
+  }
+
+  function staleRuntimeResult() {
+    return {
+      ok: false,
+      error: "extension_context_invalidated",
+      status: 0,
+      body: {},
+      forbidden: false,
+      stale: true,
+    };
+  }
+
+  function guardInvalidatedRuntime(runtime, error) {
+    if (!companion.isExtensionContextInvalidated(runtime, error)) {
+      return false;
+    }
+    markRuntimeStale(error);
+    return true;
+  }
+
+  function runtimeUrl(resource) {
+    if (runtimeStale) {
+      return "";
+    }
+    const runtime = runtimeObject();
+    if (guardInvalidatedRuntime(runtime)) {
+      return "";
+    }
+    try {
+      return runtime.getURL(resource);
+    } catch (error) {
+      if (guardInvalidatedRuntime(runtime, error)) {
+        return "";
+      }
+      throw error;
+    }
+  }
+
   function extensionOrigin() {
     try {
       if (typeof location !== "undefined" && location.protocol === "chrome-extension:") {
@@ -303,12 +393,12 @@
     } catch {
       /* ignore */
     }
-    if (chrome.runtime && typeof chrome.runtime.getURL === "function") {
+    const raw = runtimeUrl("ui/review.html");
+    if (raw) {
       try {
-        return new URL(chrome.runtime.getURL("ui/review.html")).origin;
+        return new URL(raw).origin;
       } catch {
-        const raw = chrome.runtime.getURL("ui/review.html");
-        if (typeof raw === "string" && raw.indexOf("chrome-extension://") === 0) {
+        if (raw.indexOf("chrome-extension://") === 0) {
           return raw.split("/").slice(0, 3).join("/");
         }
       }
@@ -317,31 +407,63 @@
   }
 
   function request(type, payload) {
-    return new Promise((resolve) => {
-      chrome.runtime.sendMessage(
-        { v: companion.PROTOCOL, type: type, payload: payload || {} },
-        (response) => {
-          if (chrome.runtime.lastError) {
-            resolve({
-              ok: false,
-              error: "extension_unavailable",
-              status: 0,
-              body: {},
-              forbidden: false,
-            });
-            return;
-          }
-          resolve(
-            response || {
-              ok: false,
-              error: "empty_response",
-              status: 0,
-              body: {},
-              forbidden: false,
+    return new Promise((resolve, reject) => {
+      if (runtimeStale) {
+        resolve(staleRuntimeResult());
+        return;
+      }
+      const runtime = runtimeObject();
+      if (guardInvalidatedRuntime(runtime)) {
+        resolve(staleRuntimeResult());
+        return;
+      }
+      try {
+        runtime.sendMessage(
+          { v: companion.PROTOCOL, type: type, payload: payload || {} },
+          (response) => {
+            let lastError;
+            try {
+              lastError = runtime.lastError;
+            } catch (error) {
+              if (guardInvalidatedRuntime(runtime, error)) {
+                resolve(staleRuntimeResult());
+                return;
+              }
+              reject(error);
+              return;
             }
-          );
+            if (lastError) {
+              if (guardInvalidatedRuntime(runtime, lastError)) {
+                resolve(staleRuntimeResult());
+                return;
+              }
+              resolve({
+                ok: false,
+                error: "extension_unavailable",
+                status: 0,
+                body: {},
+                forbidden: false,
+              });
+              return;
+            }
+            resolve(
+              response || {
+                ok: false,
+                error: "empty_response",
+                status: 0,
+                body: {},
+                forbidden: false,
+              }
+            );
+          }
+        );
+      } catch (error) {
+        if (guardInvalidatedRuntime(runtime, error)) {
+          resolve(staleRuntimeResult());
+          return;
         }
-      );
+        reject(error);
+      }
     });
   }
 
@@ -404,6 +526,16 @@
     ) {
       return null;
     }
+
+    runtimeStaleHandler = function handleRuntimeStale() {
+      status.textContent = RELOAD_RECOVERY;
+      status.setAttribute("data-kind", "error");
+      history.disabled = true;
+      fieldTitle.disabled = true;
+      fieldTags.disabled = true;
+      fieldDescription.disabled = true;
+      saveButton.disabled = true;
+    };
 
     function render(state) {
       if (!state.overlayOpen) {
@@ -493,6 +625,7 @@
           chip.type = "button";
           chip.setAttribute("data-tag-key", tag.key);
           chip.textContent = tag.display_name || tag.value || tag.key;
+          chip.disabled = runtimeStale || state.runtimeStale === true;
           mappedChips.appendChild(chip);
           return;
         }
@@ -504,9 +637,14 @@
       });
       fieldTitle.checked = state.fields.display_title === true;
       fieldTags.checked = state.fields.tags === true;
-      fieldTags.disabled = state.tagsDisabled === true;
       fieldDescription.checked = state.fields.description === true;
-      saveButton.disabled = state.saveEnabled !== true;
+      history.disabled = runtimeStale || state.runtimeStale === true;
+      fieldTitle.disabled = runtimeStale || state.runtimeStale === true;
+      fieldTags.disabled =
+        runtimeStale || state.runtimeStale === true || state.tagsDisabled === true;
+      fieldDescription.disabled = runtimeStale || state.runtimeStale === true;
+      saveButton.disabled =
+        runtimeStale || state.runtimeStale === true || state.saveEnabled !== true;
       status.textContent = state.lastError || "";
       if (state.lastError) {
         status.setAttribute("data-kind", "error");
@@ -576,6 +714,8 @@
       return companion.parseReviewMediaHash(hash);
     },
     createController: createReviewController,
+    request: request,
+    runtimeUrl: runtimeUrl,
   };
 
   if (globalThis.document && globalThis.document.getElementById) {

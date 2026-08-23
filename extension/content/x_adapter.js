@@ -17,8 +17,9 @@
   let savePopup = null;
   let attachPositionBound = false;
   let composerFocusBound = false;
+  let observer = null;
   const SAVE_NAME = "Save to FrameNest";
-  const SAVE_UNAVAILABLE = "FrameNest unavailable";
+  const RELOAD_RECOVERY = companion.EXTENSION_CONTEXT_RECOVERY_COPY;
   const SAVE_FRAME_BORDER_Y = 2;
   const GALLERY_ACCENT = "#00ff41";
   const GALLERY_DANGER = "#ff4d4d";
@@ -233,32 +234,154 @@
   }
 
   function markStale(reason) {
+    if (stale) {
+      return;
+    }
     stale = true;
+    if (observer && typeof observer.disconnect === "function") {
+      observer.disconnect();
+    }
+    closeSavePopup();
+    closeAttachPopup();
+    boundComposer = null;
+    [
+      "[data-framenest-companion-save-host]",
+      "[data-framenest-companion-popup-host]",
+    ].forEach((selector) => {
+      document.querySelectorAll(selector).forEach((node) => {
+        if (node.parentNode) {
+          node.parentNode.removeChild(node);
+        }
+      });
+    });
     document.querySelectorAll("[data-framenest-companion]").forEach((node) => {
       node.setAttribute("disabled", "true");
       if (node.getAttribute("data-framenest-companion") === "save") {
-        setSaveName(node, SAVE_UNAVAILABLE);
+        setSaveName(node, RELOAD_RECOVERY);
         node.removeAttribute("aria-busy");
         return;
       }
-      node.setAttribute("aria-label", SAVE_UNAVAILABLE);
-      node.setAttribute("title", SAVE_UNAVAILABLE);
+      node.setAttribute("aria-label", RELOAD_RECOVERY);
+      node.setAttribute("title", RELOAD_RECOVERY);
     });
+    if (!document.querySelector("[data-framenest-reload-notice]")) {
+      const notice = document.createElement("div");
+      notice.setAttribute("data-framenest-reload-notice", "");
+      notice.setAttribute("role", "alert");
+      notice.textContent = RELOAD_RECOVERY;
+      notice.style.position = "fixed";
+      notice.style.left = "12px";
+      notice.style.right = "12px";
+      notice.style.bottom = "12px";
+      notice.style.zIndex = "2147483647";
+      notice.style.padding = "10px 12px";
+      notice.style.border = "1px solid #ff4d4d";
+      notice.style.borderRadius = "6px";
+      notice.style.background = "#000000";
+      notice.style.color = "#e8f0e8";
+      notice.style.font = "700 13px ui-monospace, monospace";
+      document.documentElement.appendChild(notice);
+    }
     void reason;
   }
 
+  function runtimeObject() {
+    return globalThis.chrome && globalThis.chrome.runtime;
+  }
+
+  function staleRuntimeResult() {
+    return { ok: false, error: "extension_context_invalidated", stale: true };
+  }
+
+  function guardInvalidatedRuntime(runtime, error) {
+    if (!companion.isExtensionContextInvalidated(runtime, error)) {
+      return false;
+    }
+    markStale(error);
+    return true;
+  }
+
+  function runtimeUrl(resource) {
+    if (stale) {
+      return "";
+    }
+    const runtime = runtimeObject();
+    if (guardInvalidatedRuntime(runtime)) {
+      return "";
+    }
+    try {
+      return runtime.getURL(resource);
+    } catch (error) {
+      if (guardInvalidatedRuntime(runtime, error)) {
+        return "";
+      }
+      throw error;
+    }
+  }
+
+  function addRuntimeListener(channelName, listener) {
+    if (stale) {
+      return false;
+    }
+    const runtime = runtimeObject();
+    if (guardInvalidatedRuntime(runtime)) {
+      return false;
+    }
+    try {
+      runtime[channelName].addListener(listener);
+      return true;
+    } catch (error) {
+      if (guardInvalidatedRuntime(runtime, error)) {
+        return false;
+      }
+      throw error;
+    }
+  }
+
   function request(type, payload) {
-    return new Promise((resolve) => {
-      chrome.runtime.sendMessage(
-        { v: companion.PROTOCOL, type, payload: payload || {} },
-        (response) => {
-          if (chrome.runtime.lastError) {
-            resolve({ ok: false, error: "extension_unavailable" });
-            return;
+    return new Promise((resolve, reject) => {
+      if (stale) {
+        resolve(staleRuntimeResult());
+        return;
+      }
+      const runtime = runtimeObject();
+      if (guardInvalidatedRuntime(runtime)) {
+        resolve(staleRuntimeResult());
+        return;
+      }
+      try {
+        runtime.sendMessage(
+          { v: companion.PROTOCOL, type, payload: payload || {} },
+          (response) => {
+            let lastError;
+            try {
+              lastError = runtime.lastError;
+            } catch (error) {
+              if (guardInvalidatedRuntime(runtime, error)) {
+                resolve(staleRuntimeResult());
+                return;
+              }
+              reject(error);
+              return;
+            }
+            if (lastError) {
+              if (guardInvalidatedRuntime(runtime, lastError)) {
+                resolve(staleRuntimeResult());
+                return;
+              }
+              resolve({ ok: false, error: "extension_unavailable" });
+              return;
+            }
+            resolve(response || { ok: false, error: "empty_response" });
           }
-          resolve(response || { ok: false, error: "empty_response" });
+        );
+      } catch (error) {
+        if (guardInvalidatedRuntime(runtime, error)) {
+          resolve(staleRuntimeResult());
+          return;
         }
-      );
+        reject(error);
+      }
     });
   }
 
@@ -818,6 +941,10 @@
       return;
     }
     closeSavePopup();
+    const saveUrl = runtimeUrl("ui/save.html");
+    if (!saveUrl) {
+      return;
+    }
     const prefill = postTextPrefillFrom(owningPostRoot(button), button.parentElement);
     const host = document.createElement("div");
     host.setAttribute("data-framenest-companion-save-host", "");
@@ -837,7 +964,7 @@
     frame.className = "frame";
     const iframe = document.createElement("iframe");
     iframe.src =
-      chrome.runtime.getURL("ui/save.html") +
+      saveUrl +
       "#url=" +
       encodeURIComponent(accepted.submittedUrl);
     iframe.title = SAVE_NAME;
@@ -931,7 +1058,7 @@
   }
 
   function savePopupTargetOrigin() {
-    const href = chrome.runtime.getURL("ui/save.html");
+    const href = runtimeUrl("ui/save.html");
     if (typeof href !== "string" || !href) {
       return "";
     }
@@ -993,6 +1120,9 @@
   }
 
   function injectSave(postRoot) {
+    if (stale) {
+      return "skipped";
+    }
     const accepted = permalinkFrom(postRoot);
     if (!accepted) {
       return "skipped";
@@ -1470,6 +1600,9 @@
   }
 
   function onComposerFocusIn(event) {
+    if (stale) {
+      return;
+    }
     const target = event.target;
     if (!target) {
       return;
@@ -1607,6 +1740,10 @@
       return;
     }
     closeAttachPopup();
+    const pickerUrl = runtimeUrl("ui/picker.html");
+    if (!pickerUrl) {
+      return;
+    }
     const host = document.createElement("div");
     host.setAttribute("data-framenest-companion-popup-host", "");
     host.setAttribute("role", "dialog");
@@ -1635,7 +1772,7 @@
       closeAttachPopup();
     });
     const iframe = document.createElement("iframe");
-    iframe.src = chrome.runtime.getURL("ui/picker.html");
+    iframe.src = pickerUrl;
     iframe.title = "FrameNest search";
     iframe.setAttribute("aria-label", "Search memes");
     frame.appendChild(closeBtn);
@@ -1774,6 +1911,9 @@
   }
 
   function injectAttach(composerRoot) {
+    if (stale) {
+      return;
+    }
     const composerChrome = findComposerChrome(composerRoot);
     if (injected.has(composerRoot)) {
       const mounted = mountedAttachNode(composerRoot);
@@ -1847,6 +1987,12 @@
     globalThis.FrameNestXAdapterTestHooks.paintPostSaveOutcome = paintPostSaveOutcome;
     globalThis.FrameNestXAdapterTestHooks.pollClaim = pollClaim;
     globalThis.FrameNestXAdapterTestHooks.recover = recover;
+    globalThis.FrameNestXAdapterTestHooks.markStale = markStale;
+    globalThis.FrameNestXAdapterTestHooks.request = request;
+    globalThis.FrameNestXAdapterTestHooks.runtimeUrl = runtimeUrl;
+    globalThis.FrameNestXAdapterTestHooks.addRuntimeListener = addRuntimeListener;
+    globalThis.FrameNestXAdapterTestHooks.openSavePopup = openSavePopup;
+    globalThis.FrameNestXAdapterTestHooks.openAttachPopup = openAttachPopup;
     globalThis.FrameNestXAdapterTestHooks.hideOverlappingEditImage = hideOverlappingEditImage;
     globalThis.FrameNestXAdapterTestHooks.postTextPrefillFrom = postTextPrefillFrom;
     return;
@@ -1923,7 +2069,7 @@
     });
   }
 
-  chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  const messageListenerAdded = addRuntimeListener("onMessage", (message, _sender, sendResponse) => {
     const parsed = companion.dropUnknown(message);
     if (!parsed) {
       return false;
@@ -1945,7 +2091,7 @@
     return false;
   });
 
-  chrome.runtime.onConnect.addListener((port) => {
+  const connectListenerAdded = addRuntimeListener("onConnect", (port) => {
     if (!port || port.name !== "framenest-attach") {
       return;
     }
@@ -1984,6 +2130,10 @@
     });
   });
 
+  if (!messageListenerAdded || !connectListenerAdded) {
+    return;
+  }
+
   async function attachSelected() {
     return { ok: Boolean(boundComposer && boundComposer.fileInput) };
   }
@@ -2003,7 +2153,7 @@
     repositionVisibleAttaches();
   }
 
-  const observer = new MutationObserver(() => scan());
+  observer = new MutationObserver(() => scan());
   observer.observe(document.documentElement, { childList: true, subtree: true });
   ensureComposerFocusCapture();
   ensureAttachPositionListeners();

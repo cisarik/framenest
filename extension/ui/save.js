@@ -17,6 +17,8 @@
   const chosen = [];
   let activeSuggestion = -1;
   let formBusy = false;
+  let runtimeStale = false;
+  const RELOAD_RECOVERY = companion.EXTENSION_CONTEXT_RECOVERY_COPY;
 
   function setStatus(node, value, kind) {
     node.textContent = value;
@@ -36,18 +38,76 @@
     }
   }
 
+  function markRuntimeStale(error) {
+    if (runtimeStale) {
+      return;
+    }
+    runtimeStale = true;
+    setFormBusy(true);
+    setStatus(formStatus, RELOAD_RECOVERY, "error");
+    void error;
+  }
+
+  function runtimeObject() {
+    return globalThis.chrome && globalThis.chrome.runtime;
+  }
+
+  function staleRuntimeResult() {
+    return { ok: false, error: "extension_context_invalidated", stale: true };
+  }
+
+  function guardInvalidatedRuntime(runtime, error) {
+    if (!companion.isExtensionContextInvalidated(runtime, error)) {
+      return false;
+    }
+    markRuntimeStale(error);
+    return true;
+  }
+
   function request(type, payload) {
-    return new Promise((resolve) => {
-      chrome.runtime.sendMessage(
-        { v: companion.PROTOCOL, type, payload: payload || {} },
-        (response) => {
-          if (chrome.runtime.lastError) {
-            resolve({ ok: false, error: "extension_unavailable" });
-            return;
+    return new Promise((resolve, reject) => {
+      if (runtimeStale) {
+        resolve(staleRuntimeResult());
+        return;
+      }
+      const runtime = runtimeObject();
+      if (guardInvalidatedRuntime(runtime)) {
+        resolve(staleRuntimeResult());
+        return;
+      }
+      try {
+        runtime.sendMessage(
+          { v: companion.PROTOCOL, type, payload: payload || {} },
+          (response) => {
+            let lastError;
+            try {
+              lastError = runtime.lastError;
+            } catch (error) {
+              if (guardInvalidatedRuntime(runtime, error)) {
+                resolve(staleRuntimeResult());
+                return;
+              }
+              reject(error);
+              return;
+            }
+            if (lastError) {
+              if (guardInvalidatedRuntime(runtime, lastError)) {
+                resolve(staleRuntimeResult());
+                return;
+              }
+              resolve({ ok: false, error: "extension_unavailable" });
+              return;
+            }
+            resolve(response || { ok: false, error: "empty_response" });
           }
-          resolve(response || { ok: false, error: "empty_response" });
+        );
+      } catch (error) {
+        if (guardInvalidatedRuntime(runtime, error)) {
+          resolve(staleRuntimeResult());
+          return;
         }
-      );
+        reject(error);
+      }
     });
   }
 
@@ -292,7 +352,7 @@
   }
 
   function submitSave() {
-    if (formBusy) {
+    if (formBusy || runtimeStale) {
       return;
     }
     const url = submittedUrl();
@@ -306,6 +366,9 @@
       url: url,
       alias: aliasPayload(),
     }).then((result) => {
+      if (runtimeStale || (result && result.stale === true)) {
+        return;
+      }
       if (!result.ok) {
         setFormBusy(false);
         setStatus(formStatus, failMessage(result), "error");
@@ -318,6 +381,9 @@
 
   async function loadTags() {
     const response = await request(companion.TYPES.CANONICAL_TAGS, {});
+    if (runtimeStale || (response && response.stale === true)) {
+      return;
+    }
     if (!response.ok) {
       setStatus(tagsStatus, "Tags unavailable.", "error");
       return;

@@ -256,7 +256,19 @@ function loadWorker(options) {
   return { context, state: fake.state, chrome: fake.chrome };
 }
 
-function loadReviewInbox() {
+function loadReviewInbox(options) {
+  const runtime =
+    (options && options.runtime) ||
+    {
+      id: "sidebar-test",
+      lastError: null,
+      getURL(rel) {
+        return "chrome-extension://abc/" + rel;
+      },
+      sendMessage(_message, callback) {
+        callback({ ok: true });
+      },
+    };
   const context = {
     FrameNestCompanion: companion,
     document: {
@@ -264,7 +276,7 @@ function loadReviewInbox() {
         return null;
       },
     },
-    chrome: {},
+    chrome: { runtime },
     window: {},
     Object,
     Boolean,
@@ -286,7 +298,17 @@ function loadReviewInbox() {
   return context.FrameNestReviewInbox;
 }
 
-function loadReviewOverlay() {
+function loadReviewOverlay(options) {
+  const runtime =
+    (options && options.runtime) ||
+    {
+      id: "review-test",
+      lastError: null,
+      getURL(rel) {
+        return "chrome-extension://abc/" + rel;
+      },
+      sendMessage() {},
+    };
   const context = {
     FrameNestCompanion: companion,
     document: {
@@ -294,15 +316,7 @@ function loadReviewOverlay() {
         return null;
       },
     },
-    chrome: {
-      runtime: {
-        lastError: null,
-        getURL(rel) {
-          return "chrome-extension://abc/" + rel;
-        },
-        sendMessage() {},
-      },
-    },
+    chrome: { runtime },
     window: {},
     location: { hash: "", protocol: "chrome-extension:", origin: "chrome-extension://abc" },
     Object,
@@ -501,6 +515,37 @@ test("review overlay protocol uses UUID pathFor and dropUnknown rejects unknown 
   assert.doesNotMatch(workerSource, /setInterval/);
   assert.doesNotMatch(workerSource, /chrome\.notifications/);
   assert.doesNotMatch(extractNamedFunction(workerSource, "reviewInbox"), /method:\s*"POST"/);
+});
+
+test("shared extension-context classifier is exact and exposes one recovery copy", () => {
+  const signature = companion.EXTENSION_CONTEXT_INVALIDATED_SIGNATURE;
+  const copy = companion.EXTENSION_CONTEXT_RECOVERY_COPY;
+  assert.equal(signature, "Extension context invalidated");
+  assert.equal(copy, "FrameNest was reloaded. Refresh X and reopen the side panel.");
+  assert.equal(companion.isExtensionContextInvalidated(null), true);
+  assert.equal(companion.isExtensionContextInvalidated({ id: "" }), true);
+  assert.equal(
+    companion.isExtensionContextInvalidated(
+      { id: "abc" },
+      new Error("Unchecked runtime.lastError: Extension context invalidated.")
+    ),
+    true
+  );
+  assert.equal(
+    companion.isExtensionContextInvalidated(
+      { id: "abc" },
+      { message: "Extension context invalidated while sending" }
+    ),
+    true
+  );
+  assert.equal(
+    companion.isExtensionContextInvalidated({ id: "abc" }, { message: "Receiving end does not exist" }),
+    false
+  );
+  assert.equal(
+    companion.isExtensionContextInvalidated({ id: "abc" }, "Extension context invalidated"),
+    false
+  );
 });
 
 test("badge text uses unopened_count bounds and never a title", () => {
@@ -1093,6 +1138,123 @@ test("opening overlay keeps #frame mounted and uses exact extension origin", () 
   );
   assert.doesNotMatch(sidebarSource, /postMessage\([^)]*,\s*["']\*["']/);
   assert.doesNotMatch(reviewSource, /postMessage\([^)]*,\s*["']\*["']/);
+});
+
+test("sidebar and review requests recover only invalidated contexts and disable affected UI", async () => {
+  const invalidLastError = {
+    id: "sidebar-test",
+    lastError: { message: "Extension context invalidated." },
+    getURL(rel) {
+      return "chrome-extension://abc/" + rel;
+    },
+    sendMessage(_message, callback) {
+      callback(undefined);
+    },
+  };
+  const staleSidebar = loadReviewInbox({ runtime: invalidLastError });
+  const staleResult = await staleSidebar.request(companion.TYPES.REVIEW_INBOX, {});
+  assert.equal(staleResult.ok, false);
+  assert.equal(staleResult.stale, true);
+  assert.equal(staleResult.error, "extension_context_invalidated");
+
+  const ordinarySidebar = loadReviewInbox({
+    runtime: {
+      id: "sidebar-test",
+      lastError: { message: "Receiving end does not exist" },
+      getURL(rel) {
+        return "chrome-extension://abc/" + rel;
+      },
+      sendMessage(_message, callback) {
+        callback(undefined);
+      },
+    },
+  });
+  const ordinary = await ordinarySidebar.request(companion.TYPES.REVIEW_INBOX, {});
+  assert.equal(ordinary.error, "extension_unavailable");
+  assert.equal(ordinary.stale, undefined);
+
+  const invalidUrlSidebar = loadReviewInbox({
+    runtime: {
+      id: "sidebar-test",
+      lastError: null,
+      getURL() {
+        throw new Error("Extension context invalidated.");
+      },
+      sendMessage() {},
+    },
+  });
+  assert.equal(invalidUrlSidebar.overlayUrl(MEDIA_A), "");
+  const unrelatedUrlSidebar = loadReviewInbox({
+    runtime: {
+      id: "sidebar-test",
+      lastError: null,
+      getURL() {
+        throw new Error("unrelated runtime failure");
+      },
+      sendMessage() {},
+    },
+  });
+  assert.throws(() => unrelatedUrlSidebar.overlayUrl(MEDIA_A), /unrelated runtime failure/);
+
+  const staleReview = loadReviewOverlay({
+    runtime: {
+      id: "review-test",
+      lastError: null,
+      getURL(rel) {
+        return "chrome-extension://abc/" + rel;
+      },
+      sendMessage() {
+        throw new Error("Extension context invalidated.");
+      },
+    },
+  });
+  const reviewResult = await staleReview.request(companion.TYPES.REVIEW_INBOX_DETAIL, {
+    mediaId: MEDIA_A,
+  });
+  assert.equal(reviewResult.stale, true);
+  assert.equal(reviewResult.error, "extension_context_invalidated");
+
+  const unrelatedReview = loadReviewOverlay({
+    runtime: {
+      id: "review-test",
+      lastError: null,
+      getURL(rel) {
+        return "chrome-extension://abc/" + rel;
+      },
+      sendMessage() {
+        throw new Error("unrelated review runtime failure");
+      },
+    },
+  });
+  await assert.rejects(
+    unrelatedReview.request(companion.TYPES.REVIEW_INBOX_DETAIL, { mediaId: MEDIA_A }),
+    /unrelated review runtime failure/
+  );
+
+  let state = null;
+  const controller = loadReviewOverlay().createController({
+    request: async () => ({
+      ok: false,
+      error: "extension_context_invalidated",
+      stale: true,
+    }),
+    notifyParent() {},
+    render(next) {
+      state = next;
+    },
+  });
+  await controller.open(MEDIA_A);
+  assert.equal(state.runtimeStale, true);
+  assert.equal(state.lastError, companion.EXTENSION_CONTEXT_RECOVERY_COPY);
+  assert.equal(state.saveEnabled, false);
+  controller.setField("display_title", true);
+  assert.equal(state.fields.display_title, false);
+
+  assert.match(sidebarSource, /handleRuntimeStale[\s\S]*chromeAction\.disabled = true/);
+  assert.match(sidebarSource, /handleRuntimeStale[\s\S]*settingsConnect\.disabled = true/);
+  assert.match(reviewSource, /handleRuntimeStale[\s\S]*saveButton\.disabled = true/);
+  assert.doesNotMatch(sidebarSource, /catch\s*\{\s*return\s+"";\s*\}/);
+  assert.doesNotMatch(reviewSource, /catch\s*\{\s*return\s+"";\s*\}/);
 });
 
 test("dropdown label, field gates, chip removal, stay-open apply, and 403 wipe", async () => {

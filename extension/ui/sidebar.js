@@ -9,6 +9,9 @@
     ATTACH_RESULT: "attach_result",
   });
   const HANDSHAKE_WAIT_MS = 10000;
+  const RELOAD_RECOVERY = companion.EXTENSION_CONTEXT_RECOVERY_COPY;
+  let runtimeStale = false;
+  let runtimeStaleHandler = function handleEarlyRuntimeStale() {};
 
   function acceptIncomingWebMessage(event, iframeWindow, storedOrigin) {
     if (!iframeWindow || !event || event.source !== iframeWindow) {
@@ -125,14 +128,55 @@
     setReviewHistoryExpanded(nodes.toggle, nodes.history, false);
   }
 
+  function markRuntimeStale(error) {
+    if (runtimeStale) {
+      return;
+    }
+    runtimeStale = true;
+    runtimeStaleHandler();
+    void error;
+  }
+
+  function runtimeObject() {
+    return globalThis.chrome && globalThis.chrome.runtime;
+  }
+
+  function staleRuntimeResult() {
+    return { ok: false, error: "extension_context_invalidated", stale: true };
+  }
+
+  function guardInvalidatedRuntime(runtime, error) {
+    if (!companion.isExtensionContextInvalidated(runtime, error)) {
+      return false;
+    }
+    markRuntimeStale(error);
+    return true;
+  }
+
+  function runtimeUrl(resource) {
+    if (runtimeStale) {
+      return "";
+    }
+    const runtime = runtimeObject();
+    if (guardInvalidatedRuntime(runtime)) {
+      return "";
+    }
+    try {
+      return runtime.getURL(resource);
+    } catch (error) {
+      if (guardInvalidatedRuntime(runtime, error)) {
+        return "";
+      }
+      throw error;
+    }
+  }
+
   function reviewOverlayUrl(mediaId) {
     if (!companion.isUuid(mediaId)) {
       return "";
     }
-    if (!chrome.runtime || typeof chrome.runtime.getURL !== "function") {
-      return "ui/review.html#media=" + mediaId;
-    }
-    return chrome.runtime.getURL("ui/review.html") + "#media=" + mediaId;
+    const base = runtimeUrl("ui/review.html");
+    return base ? base + "#media=" + mediaId : "";
   }
 
   function openReviewOverlay(mediaId, dialogNode, frameNode) {
@@ -174,12 +218,12 @@
     } catch {
       /* ignore */
     }
-    if (chrome.runtime && typeof chrome.runtime.getURL === "function") {
+    const raw = runtimeUrl("ui/review.html");
+    if (raw) {
       try {
-        return new URL(chrome.runtime.getURL("ui/review.html")).origin;
+        return new URL(raw).origin;
       } catch {
-        const raw = chrome.runtime.getURL("ui/review.html");
-        if (typeof raw === "string" && raw.indexOf("chrome-extension://") === 0) {
+        if (raw.indexOf("chrome-extension://") === 0) {
           return raw.split("/").slice(0, 3).join("/");
         }
       }
@@ -194,6 +238,8 @@
     renderCollections: renderReviewCollections,
     hideCollections: hideReviewCollections,
     setHistoryExpanded: setReviewHistoryExpanded,
+    request: request,
+    runtimeUrl: runtimeUrl,
     overlayUrl: reviewOverlayUrl,
     openOverlay: openReviewOverlay,
     closeOverlay: closeReviewOverlay,
@@ -256,6 +302,19 @@
     }
   }
 
+  runtimeStaleHandler = function handleRuntimeStale() {
+    setText(shellStatus, RELOAD_RECOVERY, "error");
+    chromeAction.disabled = true;
+    settingsConnect.disabled = true;
+    reviewHistoryToggle.disabled = true;
+    setReviewHistoryExpanded(reviewHistoryToggle, reviewHistory, false);
+    [reviewHistoryList, reviewInboxList].forEach((list) => {
+      list.querySelectorAll("button").forEach((button) => {
+        button.disabled = true;
+      });
+    });
+  };
+
   function syncChromeAction() {
     const connected = Boolean(storedOrigin);
     chromeAction.textContent = connected ? "Disconnect" : "Connect";
@@ -263,17 +322,49 @@
   }
 
   function request(type, payload) {
-    return new Promise((resolve) => {
-      chrome.runtime.sendMessage(
-        { v: companion.PROTOCOL, type, payload: payload || {} },
-        (response) => {
-          if (chrome.runtime.lastError) {
-            resolve({ ok: false, error: "extension_unavailable" });
-            return;
+    return new Promise((resolve, reject) => {
+      if (runtimeStale) {
+        resolve(staleRuntimeResult());
+        return;
+      }
+      const runtime = runtimeObject();
+      if (guardInvalidatedRuntime(runtime)) {
+        resolve(staleRuntimeResult());
+        return;
+      }
+      try {
+        runtime.sendMessage(
+          { v: companion.PROTOCOL, type, payload: payload || {} },
+          (response) => {
+            let lastError;
+            try {
+              lastError = runtime.lastError;
+            } catch (error) {
+              if (guardInvalidatedRuntime(runtime, error)) {
+                resolve(staleRuntimeResult());
+                return;
+              }
+              reject(error);
+              return;
+            }
+            if (lastError) {
+              if (guardInvalidatedRuntime(runtime, lastError)) {
+                resolve(staleRuntimeResult());
+                return;
+              }
+              resolve({ ok: false, error: "extension_unavailable" });
+              return;
+            }
+            resolve(response || { ok: false, error: "empty_response" });
           }
-          resolve(response || { ok: false, error: "empty_response" });
+        );
+      } catch (error) {
+        if (guardInvalidatedRuntime(runtime, error)) {
+          resolve(staleRuntimeResult());
+          return;
         }
-      );
+        reject(error);
+      }
     });
   }
 
@@ -412,6 +503,9 @@
       return;
     }
     const result = await request(companion.TYPES.CONFIGURE_ORIGIN, { origin });
+    if (runtimeStale || (result && result.stale === true)) {
+      return;
+    }
     if (!result.ok) {
       setText(shellStatus, result.error || "Failed", "error");
       return;
@@ -428,7 +522,10 @@
   async function reset() {
     stopInboxPoll();
     hideInboxSection();
-    await request(companion.TYPES.RESET, {});
+    const result = await request(companion.TYPES.RESET, {});
+    if (runtimeStale || (result && result.stale === true)) {
+      return;
+    }
     storedOrigin = "";
     originInput.value = "";
     syncChromeAction();
@@ -467,6 +564,9 @@
       locationId: ids.locationId,
       filename: "framenest-media.bin",
     });
+    if (runtimeStale || (result && result.stale === true)) {
+      return;
+    }
     const ok = Boolean(result && result.ok);
     const error = (result && result.error) || "attach_failed";
     postToFrame(

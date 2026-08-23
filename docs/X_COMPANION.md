@@ -150,9 +150,12 @@ Rollback: remove the key or set it to `[]` and restart. No CORS is enabled.
    stays in one place.
 
 After using **Reload** for the unpacked extension, refresh already-open X tabs
-and reopen the side panel before using Save or the picker. Those tabs retain the
-old extension context until refreshed; a dedicated in-surface stale-context
-guard remains outside this chrome slice.
+and reopen the side panel before using Save or the picker. If an already-open X
+tab or extension surface reaches the invalidated context first, FrameNest shows
+`FrameNest was reloaded. Refresh X and reopen the side panel.`, closes partial
+Save/picker hosts, and disables the affected controls. The notice is specific to
+a missing runtime ID or the exact `Extension context invalidated` failure;
+unrelated runtime failures keep their existing behavior.
 
 Content scripts match only `https://x.com/*` and `https://twitter.com/*`. The
 service worker has no X host permission.

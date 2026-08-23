@@ -10,6 +10,9 @@
   const MAX_ATTACH_BYTES = 32 * 1024 * 1024;
   const FETCH_TIMEOUT_MS = 60 * 1000;
   const CHUNK_BYTES = 24 * 1024;
+  const EXTENSION_CONTEXT_INVALIDATED_SIGNATURE = "Extension context invalidated";
+  const EXTENSION_CONTEXT_RECOVERY_COPY =
+    "FrameNest was reloaded. Refresh X and reopen the side panel.";
   const UUID_PATTERN =
     /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
   const POST_ID_PATTERN = /^[0-9]{1,19}$/;
@@ -81,6 +84,14 @@
 
   function isUuid(value) {
     return typeof value === "string" && UUID_PATTERN.test(value);
+  }
+
+  function isExtensionContextInvalidated(runtime, error) {
+    if (!runtime || !runtime.id) {
+      return true;
+    }
+    const message = error && typeof error.message === "string" ? error.message : "";
+    return message.indexOf(EXTENSION_CONTEXT_INVALIDATED_SIGNATURE) !== -1;
   }
 
   function acceptXPostUrl(url) {
@@ -532,6 +543,8 @@
     MAX_ATTACH_BYTES,
     FETCH_TIMEOUT_MS,
     CHUNK_BYTES,
+    EXTENSION_CONTEXT_INVALIDATED_SIGNATURE,
+    EXTENSION_CONTEXT_RECOVERY_COPY,
     TYPES,
     CONTENT_CATEGORIES,
     REVIEW_INBOX,
@@ -540,6 +553,7 @@
     isProtocolMessage,
     dropUnknown,
     isUuid,
+    isExtensionContextInvalidated,
     acceptXPostUrl,
     acceptXPostId,
     acceptContentCategory,

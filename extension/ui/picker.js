@@ -2,6 +2,7 @@
   const companion = globalThis.FrameNestCompanion;
   const pickerStatus = document.getElementById("picker-status");
   const search = document.getElementById("search");
+  const refreshButton = document.getElementById("refresh");
   const preview = document.getElementById("preview");
   const previewTitle = document.getElementById("preview-title");
   const previewMedia = document.getElementById("preview-media");
@@ -15,6 +16,8 @@
   let previewToken = 0;
   let queryToken = 0;
   let lastLayoutCompact = null;
+  let runtimeStale = false;
+  const RELOAD_RECOVERY = companion.EXTENSION_CONTEXT_RECOVERY_COPY;
 
   function setText(node, value) {
     node.textContent = value;
@@ -28,18 +31,82 @@
     return (search.value || "").trim();
   }
 
+  function markRuntimeStale(error) {
+    if (runtimeStale) {
+      return;
+    }
+    runtimeStale = true;
+    queryToken += 1;
+    previewToken += 1;
+    setText(pickerStatus, RELOAD_RECOVERY);
+    search.disabled = true;
+    refreshButton.disabled = true;
+    previewPrev.disabled = true;
+    previewNext.disabled = true;
+    attachSelected.disabled = true;
+    void error;
+  }
+
+  function runtimeObject() {
+    return globalThis.chrome && globalThis.chrome.runtime;
+  }
+
+  function staleRuntimeResult() {
+    return { ok: false, error: "extension_context_invalidated", stale: true };
+  }
+
+  function guardInvalidatedRuntime(runtime, error) {
+    if (!companion.isExtensionContextInvalidated(runtime, error)) {
+      return false;
+    }
+    markRuntimeStale(error);
+    return true;
+  }
+
   function request(type, payload) {
-    return new Promise((resolve) => {
-      chrome.runtime.sendMessage(
-        { v: companion.PROTOCOL, type, payload: payload || {} },
-        (response) => {
-          if (chrome.runtime.lastError) {
-            resolve({ ok: false, error: "extension_unavailable" });
-            return;
+    return new Promise((resolve, reject) => {
+      if (runtimeStale) {
+        resolve(staleRuntimeResult());
+        return;
+      }
+      const runtime = runtimeObject();
+      if (guardInvalidatedRuntime(runtime)) {
+        resolve(staleRuntimeResult());
+        return;
+      }
+      try {
+        runtime.sendMessage(
+          { v: companion.PROTOCOL, type, payload: payload || {} },
+          (response) => {
+            let lastError;
+            try {
+              lastError = runtime.lastError;
+            } catch (error) {
+              if (guardInvalidatedRuntime(runtime, error)) {
+                resolve(staleRuntimeResult());
+                return;
+              }
+              reject(error);
+              return;
+            }
+            if (lastError) {
+              if (guardInvalidatedRuntime(runtime, lastError)) {
+                resolve(staleRuntimeResult());
+                return;
+              }
+              resolve({ ok: false, error: "extension_unavailable" });
+              return;
+            }
+            resolve(response || { ok: false, error: "empty_response" });
           }
-          resolve(response || { ok: false, error: "empty_response" });
+        );
+      } catch (error) {
+        if (guardInvalidatedRuntime(runtime, error)) {
+          resolve(staleRuntimeResult());
+          return;
         }
-      );
+        reject(error);
+      }
     });
   }
 
@@ -95,6 +162,9 @@
       mediaId: item.media_id,
       locationId: locationId,
     }).then((result) => {
+      if (runtimeStale || (result && result.stale === true)) {
+        return;
+      }
       if (token !== previewToken) {
         return;
       }
@@ -134,6 +204,9 @@
   }
 
   async function refresh() {
+    if (runtimeStale) {
+      return;
+    }
     if (!connected) {
       queryToken += 1;
       clearResults();
@@ -152,6 +225,9 @@
     const result = await request(companion.TYPES.PICKER_QUERY, {
       q: q,
     });
+    if (runtimeStale || (result && result.stale === true)) {
+      return;
+    }
     if (token !== queryToken) {
       return;
     }
@@ -168,7 +244,7 @@
   }
 
   async function attachItem(item) {
-    if (!item || !item.location) {
+    if (runtimeStale || !item || !item.location) {
       return;
     }
     const result = await request(companion.TYPES.ATTACH_BEGIN, {
@@ -177,6 +253,9 @@
       mediaType: item.location.media_type,
       filename: "framenest-media.bin",
     });
+    if (runtimeStale || (result && result.stale === true)) {
+      return;
+    }
     setText(pickerStatus, result.ok ? "Attached" : result.error || "Attach failed");
   }
 
@@ -184,7 +263,7 @@
     if (event) {
       event.preventDefault();
     }
-    if (!trimmedQuery()) {
+    if (runtimeStale || !trimmedQuery()) {
       return;
     }
     const item = selectedItem();
@@ -195,6 +274,9 @@
   }
 
   function dismissPicker() {
+    if (runtimeStale) {
+      return;
+    }
     void request(companion.TYPES.DISMISS_PICKER, {});
   }
 
@@ -212,7 +294,7 @@
     return false;
   }
 
-  document.getElementById("refresh").addEventListener("click", refresh);
+  refreshButton.addEventListener("click", refresh);
   search.addEventListener("input", refresh);
   search.addEventListener("keydown", (event) => {
     if (event.key === "Enter") {

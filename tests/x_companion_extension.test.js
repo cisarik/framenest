@@ -453,7 +453,7 @@ test("Attach floats on the focused reply field and opens an in-page popup", () =
   assert.match(adapterSource, /data-framenest-attach-visible/);
   assert.match(adapterSource, /data-framenest-companion-popup-host/);
   assert.match(adapterSource, /attachShadow\(\{\s*mode:\s*"closed"\s*\}\)/);
-  assert.match(adapterSource, /getURL\("ui\/picker\.html"\)/);
+  assert.match(adapterSource, /runtimeUrl\("ui\/picker\.html"\)/);
   assert.match(adapterSource, /getBoundingClientRect/);
   assert.match(adapterSource, /enoughAbove/);
   assert.match(adapterSource, /::-webkit-inner-spin-button/);
@@ -554,7 +554,7 @@ test("in-page picker is search-first, compact, and dismisses on Escape", () => {
   assert.match(refreshFn, /No eligible memes/);
   assert.doesNotMatch(refreshFn, /kind:/);
   assert.match(pickerJs, /search\.addEventListener\("keydown"[\s\S]*?Enter[\s\S]*?attachCurrent/);
-  assert.match(attachCurrentFn, /if \(!trimmedQuery\(\)\)/);
+  assert.match(attachCurrentFn, /if \(runtimeStale \|\| !trimmedQuery\(\)\)/);
   assert.match(attachCurrentFn, /attachItem\(item\)/);
   assert.match(pickerJs, /key === "Escape"/);
   assert.match(pickerJs, /TYPES\.DISMISS_PICKER/);
@@ -901,21 +901,46 @@ function loadAdapterHooks(dom, options) {
     options && typeof options.sendMessage === "function"
       ? options.sendMessage
       : function sendMessage() {};
+  const hasRuntimeId = Boolean(
+    options && Object.prototype.hasOwnProperty.call(options, "runtimeId")
+  );
+  const runtime = {
+    id: hasRuntimeId ? options.runtimeId : "x-adapter-test",
+    get lastError() {
+      return (options && options.runtimeLastError) || null;
+    },
+    sendMessage(message, callback) {
+      if (options && options.sendError) {
+        throw options.sendError;
+      }
+      if (typeof callback === "function") {
+        sendMessage(message, callback);
+      }
+    },
+    onMessage: {
+      addListener() {
+        if (options && options.messageListenerError) {
+          throw options.messageListenerError;
+        }
+      },
+    },
+    onConnect: {
+      addListener() {
+        if (options && options.connectListenerError) {
+          throw options.connectListenerError;
+        }
+      },
+    },
+    getURL(resource) {
+      if (options && options.getUrlError) {
+        throw options.getUrlError;
+      }
+      return resource;
+    },
+  };
   const sandbox = {
     chrome: {
-      runtime: {
-        sendMessage(message, callback) {
-          if (typeof callback === "function") {
-            sendMessage(message, callback);
-          }
-        },
-        onMessage: { addListener() {} },
-        onConnect: { addListener() {} },
-        getURL(resource) {
-          return resource;
-        },
-        lastError: null,
-      },
+      runtime,
     },
     document: dom.document,
     window: dom.window,
@@ -954,6 +979,143 @@ function loadAdapterHooks(dom, options) {
   vm.runInNewContext(adapterSource, sandbox, { filename: "x_adapter.js" });
   return hooks;
 }
+
+test("invalidated X contexts become stale once, disable controls, and remove partial hosts", () => {
+  const dom = createMiniDom();
+  const save = el(dom, "button", { "data-framenest-companion": "save" });
+  const attach = el(dom, "button", { "data-framenest-companion": "attach" });
+  const partialSave = el(dom, "div", { "data-framenest-companion-save-host": "" });
+  const partialPicker = el(dom, "div", { "data-framenest-companion-popup-host": "" });
+  dom.body.appendChild(save);
+  dom.body.appendChild(attach);
+  dom.body.appendChild(partialSave);
+  dom.body.appendChild(partialPicker);
+  const hooks = loadAdapterHooks(dom, { runtimeId: "" });
+
+  assert.equal(hooks.runtimeUrl("ui/save.html"), "");
+  assert.equal(save.getAttribute("disabled"), "true");
+  assert.equal(attach.getAttribute("disabled"), "true");
+  assert.equal(save.getAttribute("aria-label"), companion.EXTENSION_CONTEXT_RECOVERY_COPY);
+  assert.equal(attach.getAttribute("title"), companion.EXTENSION_CONTEXT_RECOVERY_COPY);
+  assert.equal(dom.document.contains(partialSave), false);
+  assert.equal(dom.document.contains(partialPicker), false);
+  let notices = dom.document.querySelectorAll("[data-framenest-reload-notice]");
+  assert.equal(notices.length, 1);
+  assert.equal(notices[0].getAttribute("role"), "alert");
+  assert.equal(notices[0].textContent, companion.EXTENSION_CONTEXT_RECOVERY_COPY);
+  assert.equal(notices[0].style.position, "fixed");
+
+  hooks.markStale(new Error("Extension context invalidated."));
+  hooks.runtimeUrl("ui/picker.html");
+  notices = dom.document.querySelectorAll("[data-framenest-reload-notice]");
+  assert.equal(notices.length, 1);
+});
+
+test("Save and picker URL invalidation appends no partial iframe host", () => {
+  const accepted = companion.acceptXPostUrl("https://x.com/fixture/status/123456789");
+  const saveDom = createMiniDom();
+  const saveButton = el(saveDom, "button", { "data-framenest-companion": "save" });
+  saveDom.body.appendChild(saveButton);
+  const saveHooks = loadAdapterHooks(saveDom, {
+    getUrlError: new Error("Extension context invalidated."),
+  });
+  saveHooks.openSavePopup(saveButton, accepted);
+  assert.equal(
+    saveDom.document.querySelector("[data-framenest-companion-save-host]"),
+    null
+  );
+
+  const pickerDom = createMiniDom();
+  const pickerButton = el(pickerDom, "button", { "data-framenest-companion": "attach" });
+  pickerDom.body.appendChild(pickerButton);
+  const pickerHooks = loadAdapterHooks(pickerDom, {
+    getUrlError: new Error("Extension context invalidated."),
+  });
+  pickerHooks.openAttachPopup(pickerButton, pickerDom.body);
+  assert.equal(
+    pickerDom.document.querySelector("[data-framenest-companion-popup-host]"),
+    null
+  );
+});
+
+test("runtime helpers preserve valid behavior and propagate unrelated errors", async () => {
+  const validDom = createMiniDom();
+  const validHooks = loadAdapterHooks(validDom, {
+    sendMessage(_message, callback) {
+      callback({ ok: true, value: "unchanged" });
+    },
+  });
+  assert.equal(validHooks.runtimeUrl("ui/save.html"), "ui/save.html");
+  assert.deepEqual(
+    await validHooks.request(companion.TYPES.IDENTITY, {}),
+    { ok: true, value: "unchanged" }
+  );
+  assert.equal(validHooks.addRuntimeListener("onMessage", () => {}), true);
+
+  const invalidCallbackHooks = loadAdapterHooks(createMiniDom(), {
+    runtimeLastError: { message: "Extension context invalidated." },
+    sendMessage(_message, callback) {
+      callback(undefined);
+    },
+  });
+  const invalidCallback = await invalidCallbackHooks.request(companion.TYPES.IDENTITY, {});
+  assert.equal(invalidCallback.stale, true);
+  assert.equal(invalidCallback.error, "extension_context_invalidated");
+
+  const ordinaryCallbackHooks = loadAdapterHooks(createMiniDom(), {
+    runtimeLastError: { message: "Receiving end does not exist" },
+    sendMessage(_message, callback) {
+      callback(undefined);
+    },
+  });
+  const ordinaryCallback = await ordinaryCallbackHooks.request(companion.TYPES.IDENTITY, {});
+  assert.equal(ordinaryCallback.error, "extension_unavailable");
+  assert.equal(ordinaryCallback.stale, undefined);
+
+  const unrelatedUrlHooks = loadAdapterHooks(createMiniDom(), {
+    getUrlError: new Error("unrelated getURL failure"),
+  });
+  assert.throws(() => unrelatedUrlHooks.runtimeUrl("ui/save.html"), /unrelated getURL failure/);
+
+  const unrelatedSendHooks = loadAdapterHooks(createMiniDom(), {
+    sendError: new Error("unrelated send failure"),
+  });
+  await assert.rejects(
+    unrelatedSendHooks.request(companion.TYPES.IDENTITY, {}),
+    /unrelated send failure/
+  );
+
+  const unrelatedListenerHooks = loadAdapterHooks(createMiniDom(), {
+    messageListenerError: new Error("unrelated listener failure"),
+  });
+  assert.throws(
+    () => unrelatedListenerHooks.addRuntimeListener("onMessage", () => {}),
+    /unrelated listener failure/
+  );
+});
+
+test("every X runtime operation routes through targeted guards and UI requests share recovery copy", () => {
+  const saveSource = fs.readFileSync(path.join(REPO, "extension/ui/save.js"), "utf8");
+  const pickerSource = fs.readFileSync(path.join(REPO, "extension/ui/picker.js"), "utf8");
+  assert.equal((adapterSource.match(/chrome\.runtime/g) || []).length, 1);
+  assert.doesNotMatch(adapterSource, /chrome\.runtime\.(?:getURL|sendMessage|onMessage|onConnect|lastError)/);
+  assert.match(extractNamedFunction(adapterSource, "openSavePopup"), /runtimeUrl\("ui\/save\.html"\)/);
+  assert.match(extractNamedFunction(adapterSource, "savePopupTargetOrigin"), /runtimeUrl\("ui\/save\.html"\)/);
+  assert.match(extractNamedFunction(adapterSource, "openAttachPopup"), /runtimeUrl\("ui\/picker\.html"\)/);
+  assert.match(adapterSource, /addRuntimeListener\("onMessage"/);
+  assert.match(adapterSource, /addRuntimeListener\("onConnect"/);
+  assert.match(extractNamedFunction(adapterSource, "request"), /guardInvalidatedRuntime/);
+  assert.match(extractNamedFunction(adapterSource, "scan"), /if \(stale\)/);
+  assert.match(extractNamedFunction(adapterSource, "injectSave"), /if \(stale\)/);
+  assert.match(extractNamedFunction(adapterSource, "injectAttach"), /if \(stale\)/);
+  assert.match(extractNamedFunction(saveSource, "request"), /guardInvalidatedRuntime/);
+  assert.match(extractNamedFunction(pickerSource, "request"), /guardInvalidatedRuntime/);
+  assert.match(saveSource, /setStatus\(formStatus, RELOAD_RECOVERY, "error"\)/);
+  assert.match(saveSource, /setFormBusy\(true\)/);
+  assert.match(pickerSource, /setText\(pickerStatus, RELOAD_RECOVERY\)/);
+  assert.match(pickerSource, /attachSelected\.disabled = true/);
+  assert.doesNotMatch(workerSource, /EXTENSION_CONTEXT_RECOVERY_COPY/);
+});
 
 function pathDataFrom(node, out) {
   const collected = out || [];
