@@ -13,6 +13,9 @@ const workerSource = fs.readFileSync(
 const sidebarSource = fs.readFileSync(path.join(REPO, "extension/ui/sidebar.js"), "utf8");
 const sidebarHtml = fs.readFileSync(path.join(REPO, "extension/ui/sidebar.html"), "utf8");
 const sidebarCss = fs.readFileSync(path.join(REPO, "extension/ui/sidebar.css"), "utf8");
+const reviewSource = fs.readFileSync(path.join(REPO, "extension/ui/review.js"), "utf8");
+const reviewHtml = fs.readFileSync(path.join(REPO, "extension/ui/review.html"), "utf8");
+const reviewCss = fs.readFileSync(path.join(REPO, "extension/ui/review.css"), "utf8");
 const manifest = JSON.parse(
   fs.readFileSync(path.join(REPO, "extension/manifest.json"), "utf8")
 );
@@ -75,6 +78,15 @@ function createChromeFake(options) {
         next_cursor: null,
       },
     claimBody: (options && options.claimBody) || { state: "completed", assets: [] },
+    detailStatus: (options && options.detailStatus) || 200,
+    detailBody: (options && options.detailBody) || {},
+    openedStatus: (options && options.openedStatus) || 200,
+    openedBody: (options && options.openedBody) || { unopened: false },
+    applyStatus: (options && options.applyStatus) || 200,
+    applyBody:
+      (options && options.applyBody) || {
+        publication: { status: "not_ready", state: "unpublished", ready: false },
+      },
   };
 
   function pickStorage(keys) {
@@ -184,11 +196,21 @@ function createChromeFake(options) {
 
   async function fetchImpl(url, init) {
     state.fetchCalls.push({ url: String(url), init: init || {} });
-    if (typeof url === "string" && url.indexOf("/api/companion/review-inbox") !== -1) {
-      return jsonResponse(state.inboxStatus, state.inboxBody);
-    }
-    if (typeof url === "string" && url.indexOf("/api/x/requests/") !== -1) {
+    const href = String(url);
+    if (href.indexOf("/api/x/requests/") !== -1) {
       return jsonResponse(200, state.claimBody);
+    }
+    if (/\/api\/companion\/review-inbox\/[^/?]+\/apply(?:\?|$)/.test(href)) {
+      return jsonResponse(state.applyStatus, state.applyBody);
+    }
+    if (/\/api\/companion\/review-inbox\/[^/?]+\/opened(?:\?|$)/.test(href)) {
+      return jsonResponse(state.openedStatus, state.openedBody);
+    }
+    if (/\/api\/companion\/review-inbox\/[^/?]+(?:\?|$)/.test(href)) {
+      return jsonResponse(state.detailStatus, state.detailBody);
+    }
+    if (href.indexOf("/api/companion/review-inbox") !== -1) {
+      return jsonResponse(state.inboxStatus, state.inboxBody);
     }
     return jsonResponse(404, {});
   }
@@ -257,6 +279,42 @@ function loadReviewInbox() {
   return context.FrameNestReviewInbox;
 }
 
+function loadReviewOverlay() {
+  const context = {
+    FrameNestCompanion: companion,
+    document: {
+      getElementById() {
+        return null;
+      },
+    },
+    chrome: {
+      runtime: {
+        lastError: null,
+        getURL(rel) {
+          return "chrome-extension://abc/" + rel;
+        },
+        sendMessage() {},
+      },
+    },
+    window: {},
+    location: { hash: "", protocol: "chrome-extension:", origin: "chrome-extension://abc" },
+    Object,
+    Boolean,
+    String,
+    Number,
+    Array,
+    Date,
+    Promise,
+    URL,
+    setTimeout,
+    clearTimeout,
+  };
+  context.globalThis = context;
+  vm.createContext(context);
+  vm.runInContext(reviewSource, context);
+  return context.FrameNestReviewOverlay;
+}
+
 function fakeListNode() {
   const nodes = [];
   const list = {
@@ -277,7 +335,40 @@ function fakeListNode() {
     },
     ownerDocument: {
       createElement(tag) {
-        return { tagName: String(tag).toUpperCase(), textContent: "" };
+        const childNodes = [];
+        const attributes = {};
+        const node = {
+          tagName: String(tag).toUpperCase(),
+          childNodes,
+          attributes,
+          dataset: {},
+          setAttribute(name, value) {
+            attributes[name] = String(value);
+            if (name === "data-media-id") {
+              this.dataset.mediaId = String(value);
+            }
+          },
+          getAttribute(name) {
+            return attributes[name] || null;
+          },
+          appendChild(child) {
+            childNodes.push(child);
+            return child;
+          },
+        };
+        let text = "";
+        Object.defineProperty(node, "textContent", {
+          get() {
+            if (childNodes.length) {
+              return childNodes.map((child) => child.textContent || "").join("");
+            }
+            return text;
+          },
+          set(value) {
+            text = value == null ? "" : String(value);
+          },
+        });
+        return node;
       },
     },
   };
@@ -307,17 +398,40 @@ test("manifest adds alarms, keeps action, and does not add notifications or over
   assert.equal(war.includes("ui/sidebar.js"), false);
   assert.equal(war.includes("ui/review.html"), false);
   assert.equal(war.includes("ui/review.js"), false);
-  assert.equal(fs.existsSync(path.join(REPO, "extension/ui/review.html")), false);
-  assert.equal(fs.existsSync(path.join(REPO, "extension/ui/review.js")), false);
-  assert.equal(fs.existsSync(path.join(REPO, "extension/ui/review.css")), false);
+  assert.equal(war.includes("ui/review.css"), false);
+  assert.equal(fs.existsSync(path.join(REPO, "extension/ui/review.html")), true);
+  assert.equal(fs.existsSync(path.join(REPO, "extension/ui/review.js")), true);
+  assert.equal(fs.existsSync(path.join(REPO, "extension/ui/review.css")), true);
+  assert.doesNotMatch(reviewSource, /innerHTML/);
+  assert.doesNotMatch(reviewSource, /\bfetch\s*\(/);
+  assert.doesNotMatch(reviewSource, /postMessage\([^)]*,\s*["']\*["']/);
+  assert.doesNotMatch(reviewSource, /chrome\.storage/);
 });
 
-test("review inbox protocol uses pathFor GET and dropUnknown still rejects overlay types", () => {
+test("review overlay protocol uses UUID pathFor and dropUnknown rejects unknown types", () => {
   assert.equal(companion.TYPES.REVIEW_INBOX, "review_inbox");
   assert.ok(
     companion.dropUnknown({
       v: companion.PROTOCOL,
       type: companion.TYPES.REVIEW_INBOX,
+    })
+  );
+  assert.ok(
+    companion.dropUnknown({
+      v: companion.PROTOCOL,
+      type: companion.TYPES.REVIEW_INBOX_DETAIL,
+    })
+  );
+  assert.ok(
+    companion.dropUnknown({
+      v: companion.PROTOCOL,
+      type: companion.TYPES.REVIEW_INBOX_OPENED,
+    })
+  );
+  assert.ok(
+    companion.dropUnknown({
+      v: companion.PROTOCOL,
+      type: companion.TYPES.REVIEW_INBOX_APPLY,
     })
   );
   assert.equal(companion.dropUnknown({ v: companion.PROTOCOL, type: "review_apply" }), null);
@@ -329,18 +443,38 @@ test("review inbox protocol uses pathFor GET and dropUnknown still rejects overl
     "/api/companion/review-inbox"
   );
   assert.equal(companion.pathFor("https://evil.example"), null);
+  assert.equal(
+    companion.pathFor("reviewInboxDetail", { mediaId: MEDIA_A }),
+    "/api/companion/review-inbox/" + MEDIA_A
+  );
+  assert.equal(
+    companion.pathFor("reviewInboxOpened", { mediaId: MEDIA_A }),
+    "/api/companion/review-inbox/" + MEDIA_A + "/opened"
+  );
+  assert.equal(
+    companion.pathFor("reviewInboxApply", { mediaId: MEDIA_A }),
+    "/api/companion/review-inbox/" + MEDIA_A + "/apply"
+  );
+  assert.equal(companion.pathFor("reviewInboxDetail", { mediaId: "not-a-uuid" }), null);
+  assert.equal(companion.pathFor("reviewInboxOpened", { mediaId: "../" + MEDIA_A }), null);
+  assert.equal(
+    companion.pathFor("reviewInboxApply", { mediaId: "https://evil.example/" + MEDIA_A }),
+    null
+  );
+  assert.equal(
+    companion.pathFor("reviewInboxDetail", { mediaId: MEDIA_A, url: "https://evil.example" }),
+    "/api/companion/review-inbox/" + MEDIA_A
+  );
   assert.equal(companion.reviewInboxQuerySuffix(1), "?limit=1");
-  assert.equal(companion.reviewInboxQuerySuffix("1"), "");
-  assert.equal(companion.reviewInboxQuerySuffix(101), "");
-  assert.equal(companion.reviewInboxQuerySuffix(0), "");
   assert.doesNotMatch(workerSource, /fetch\(payload\.url\)/);
   assert.doesNotMatch(workerSource, /fetch\(message\.url\)/);
   assert.match(workerSource, /fetchJson\("reviewInbox"/);
+  assert.match(workerSource, /fetchJson\("reviewInboxDetail"/);
+  assert.match(workerSource, /fetchJson\("reviewInboxOpened"/);
+  assert.match(workerSource, /fetchJson\("reviewInboxApply"/);
   assert.doesNotMatch(workerSource, /setInterval/);
   assert.doesNotMatch(workerSource, /chrome\.notifications/);
   assert.doesNotMatch(extractNamedFunction(workerSource, "reviewInbox"), /method:\s*"POST"/);
-  assert.doesNotMatch(workerSource, /review-inbox\/.+\/opened/);
-  assert.doesNotMatch(workerSource, /review-inbox\/.+\/apply/);
 });
 
 test("badge text uses unopened_count bounds and never a title", () => {
@@ -570,7 +704,11 @@ test("S1 chrome sits between status and iframe and empty copy is exact", () => {
   const frameAt = sidebarHtml.indexOf('id="frame"');
   assert.ok(statusAt >= 0 && inboxAt > statusAt && frameAt > inboxAt);
   assert.match(sidebarHtml, />No analyzed items\.</);
-  assert.doesNotMatch(sidebarHtml, /review\.html/);
+  assert.match(sidebarHtml, /id="review-dialog"/);
+  assert.match(sidebarHtml, /id="review-frame"/);
+  assert.match(sidebarSource, /ui\/review\.html/);
+  assert.doesNotMatch(extractNamedFunction(sidebarSource, "openReviewOverlay"), /clearFrame/);
+  assert.doesNotMatch(extractNamedFunction(sidebarSource, "closeReviewOverlay"), /clearFrame/);
   assert.match(sidebarCss, /#review-inbox\.is-collapsed \.review-inbox__panel/);
   assert.match(sidebarCss, /max-height:\s*8\.5rem/);
   assert.match(sidebarCss, /overflow-y:\s*auto/);
@@ -615,6 +753,8 @@ test("native list renders titles with textContent and collapse rules skip title 
   assert.equal(list.childNodes.length, 2);
   assert.equal(list.childNodes[0].textContent, "<img src=x onerror=alert(1)>");
   assert.equal(list.childNodes[0].tagName, "LI");
+  assert.equal(list.childNodes[0].childNodes[0].tagName, "BUTTON");
+  assert.equal(list.childNodes[0].childNodes[0].getAttribute("data-media-id"), MEDIA_A);
   const persistFn = extractNamedFunction(sidebarSource, "persistInboxPrefs");
   assert.match(persistFn, /explicitCollapsedKey/);
   assert.match(persistFn, /seenRunIdKey/);
@@ -644,4 +784,267 @@ test("cataloged asset helper keeps only UUID media ids", () => {
   );
   assert.equal(pruned.length, 1);
   assert.equal(pruned[0].media_id, MEDIA_B);
+});
+
+test("worker GET detail and POST opened/apply send W04 JSON only", async () => {
+  const worker = loadWorker({ storage: { frameNestOrigin: ORIGIN } });
+  worker.state.detailBody = {
+    suggestions: [{ analysis_run_id: RUN_NEW, title: "Secret title" }],
+    canonical: { display_title: "Now" },
+  };
+  const detail = await worker.context.handle({
+    v: companion.PROTOCOL,
+    type: companion.TYPES.REVIEW_INBOX_DETAIL,
+    payload: { mediaId: MEDIA_A, url: "https://evil.example/steal" },
+  });
+  assert.equal(detail.ok, true);
+  assert.equal(detail.forbidden, false);
+  const detailCall = worker.state.fetchCalls[worker.state.fetchCalls.length - 1];
+  assert.equal(detailCall.url, ORIGIN + "/api/companion/review-inbox/" + MEDIA_A);
+  assert.equal((detailCall.init.method || "GET").toUpperCase(), "GET");
+  assert.equal(detailCall.init.headers["X-FrameNest-Request"], "1");
+  assert.equal(detailCall.url.indexOf("evil.example"), -1);
+
+  const opened = await worker.context.handle({
+    v: companion.PROTOCOL,
+    type: companion.TYPES.REVIEW_INBOX_OPENED,
+    payload: { mediaId: MEDIA_A, analysis_run_id: RUN_NEW, title: "ignore me" },
+  });
+  assert.equal(opened.ok, true);
+  const openedCall = worker.state.fetchCalls[worker.state.fetchCalls.length - 1];
+  assert.equal(openedCall.url, ORIGIN + "/api/companion/review-inbox/" + MEDIA_A + "/opened");
+  assert.equal(openedCall.init.method, "POST");
+  assert.deepEqual(JSON.parse(openedCall.init.body), { analysis_run_id: RUN_NEW });
+  assert.equal("title" in JSON.parse(openedCall.init.body), false);
+
+  const apply = await worker.context.handle({
+    v: companion.PROTOCOL,
+    type: companion.TYPES.REVIEW_INBOX_APPLY,
+    payload: {
+      mediaId: MEDIA_A,
+      analysis_run_id: RUN_NEW,
+      fields: ["display_title", "tags"],
+      tag_keys: ["alpha", "beta"],
+      display_title: "client title",
+      description: "client description",
+      url: "https://evil.example/apply",
+    },
+  });
+  assert.equal(apply.ok, true);
+  const applyCall = worker.state.fetchCalls[worker.state.fetchCalls.length - 1];
+  assert.equal(applyCall.url, ORIGIN + "/api/companion/review-inbox/" + MEDIA_A + "/apply");
+  assert.equal(applyCall.init.method, "POST");
+  assert.equal(applyCall.init.headers["X-FrameNest-Request"], "1");
+  const posted = JSON.parse(applyCall.init.body);
+  assert.deepEqual(Object.keys(posted).sort(), ["analysis_run_id", "fields", "tag_keys"]);
+  assert.deepEqual(posted, {
+    analysis_run_id: RUN_NEW,
+    fields: ["display_title", "tags"],
+    tag_keys: ["alpha", "beta"],
+  });
+  assert.equal(applyCall.url.indexOf("evil.example"), -1);
+
+  const rejected = await worker.context.handle({
+    v: companion.PROTOCOL,
+    type: companion.TYPES.REVIEW_INBOX_APPLY,
+    payload: { mediaId: "not-a-uuid", analysis_run_id: RUN_NEW, fields: ["display_title"] },
+  });
+  assert.equal(rejected.ok, false);
+  assert.equal(rejected.error, "invalid_apply");
+});
+
+test("opening overlay keeps #frame mounted and uses exact extension origin", () => {
+  const inbox = loadReviewInbox();
+  const hostFrame = { hidden: false, src: ORIGIN, removed: false };
+  const dialog = {
+    open: false,
+    show() {
+      this.open = true;
+    },
+    close() {
+      this.open = false;
+    },
+    setAttribute() {},
+    removeAttribute() {},
+  };
+  const overlayFrame = {
+    attrs: {},
+    setAttribute(name, value) {
+      this.attrs[name] = value;
+    },
+    removeAttribute(name) {
+      delete this.attrs[name];
+    },
+  };
+  assert.equal(inbox.openOverlay(MEDIA_A, dialog, overlayFrame), true);
+  assert.equal(dialog.open, true);
+  assert.match(overlayFrame.attrs.src, /ui\/review\.html#media=/);
+  assert.ok(String(overlayFrame.attrs.src).indexOf(MEDIA_A) !== -1);
+  assert.equal(hostFrame.hidden, false);
+  assert.equal(hostFrame.src, ORIGIN);
+  inbox.closeOverlay(dialog, overlayFrame);
+  assert.equal(dialog.open, false);
+  assert.equal("src" in overlayFrame.attrs, false);
+  assert.equal(hostFrame.hidden, false);
+  const accepted = companion.acceptReviewOverlayMessage(
+    {
+      source: overlayFrame,
+      origin: "chrome-extension://abc",
+      data: { v: companion.REVIEW_OVERLAY.protocol, type: companion.REVIEW_OVERLAY.types.INBOX_REFRESH },
+    },
+    overlayFrame,
+    "chrome-extension://abc"
+  );
+  assert.equal(accepted.type, companion.REVIEW_OVERLAY.types.INBOX_REFRESH);
+  assert.equal(
+    companion.acceptReviewOverlayMessage(
+      {
+        source: overlayFrame,
+        origin: "chrome-extension://abc",
+        data: { v: companion.REVIEW_OVERLAY.protocol, type: companion.REVIEW_OVERLAY.types.INBOX_REFRESH },
+      },
+      overlayFrame,
+      "*"
+    ),
+    null
+  );
+  assert.doesNotMatch(sidebarSource, /postMessage\([^)]*,\s*["']\*["']/);
+  assert.doesNotMatch(reviewSource, /postMessage\([^)]*,\s*["']\*["']/);
+});
+
+test("dropdown label, field gates, chip removal, stay-open apply, and 403 wipe", async () => {
+  const overlay = loadReviewOverlay();
+  const label = overlay.formatRunLabel({
+    completed_at_ms: Date.UTC(2026, 7, 23, 12, 0, 0),
+    model_id: "meta/llama-test",
+    title: "Suggested title",
+  });
+  assert.match(label, /meta\/llama-test/);
+  assert.match(label, /Suggested title/);
+  assert.match(label, / · /);
+  assert.equal(overlay.parseMediaHash("#media=" + MEDIA_A), MEDIA_A);
+  assert.equal(overlay.parseMediaHash("#url=https://x.com/a/status/1"), null);
+  const tags = [
+    { status: "mapped", key: "alpha", display_name: "Alpha", value: "Alpha" },
+    { status: "unknown", key: null, value: "Nope", status: "unknown" },
+    { status: "mapped", key: "beta", display_name: "Beta", value: "Beta" },
+  ];
+  const remaining = overlay.remainingMappedKeys(tags, { beta: true });
+  assert.equal(remaining.length, 1);
+  assert.equal(remaining[0], "alpha");
+  assert.equal(overlay.tagsCanBeChecked(0), false);
+  assert.equal(overlay.saveEnabled({ display_title: false, tags: false, description: false }, 2), false);
+  assert.equal(overlay.saveEnabled({ display_title: true, tags: false, description: false }, 0), true);
+
+  const calls = [];
+  let lastState = null;
+  const session = overlay.createController({
+    request: async (type, payload) => {
+      calls.push({ type, payload });
+      if (type === companion.TYPES.REVIEW_INBOX_DETAIL) {
+        return {
+          ok: true,
+          status: 200,
+          forbidden: false,
+          body: {
+            suggestions: [
+              {
+                analysis_run_id: RUN_NEW,
+                completed_at_ms: 2,
+                model_id: "meta/llama-test",
+                title: "New title",
+                description: "New description",
+                tags: tags,
+              },
+              {
+                analysis_run_id: RUN_OLD,
+                completed_at_ms: 1,
+                model_id: "meta/llama-old",
+                title: "Old title",
+                description: "Old description",
+                tags: tags,
+              },
+            ],
+            canonical: { display_title: "Current", field_sources: {} },
+            publication: { state: "unpublished", ready: false, missing_fields: ["display_title"] },
+          },
+        };
+      }
+      if (type === companion.TYPES.REVIEW_INBOX_OPENED) {
+        return { ok: true, status: 200, forbidden: false, body: {} };
+      }
+      if (type === companion.TYPES.REVIEW_INBOX_APPLY) {
+        if (payload && payload.fail) {
+          return { ok: false, status: 409, forbidden: false, error: "conflict" };
+        }
+        return {
+          ok: true,
+          status: 200,
+          forbidden: false,
+          body: {
+            canonical: { display_title: "Applied", field_sources: { display_title: { analysis_run_id: RUN_NEW } } },
+            publication: { status: "not_ready", state: "unpublished", ready: false },
+          },
+        };
+      }
+      return { ok: false, error: "unexpected" };
+    },
+    notifyParent() {},
+    render(state) {
+      lastState = state;
+    },
+  });
+
+  await session.open(MEDIA_A);
+  assert.equal(lastState.overlayOpen, true);
+  assert.equal(lastState.runId, RUN_NEW);
+  assert.equal(
+    calls.filter((call) => call.type === companion.TYPES.REVIEW_INBOX_OPENED).length,
+    1
+  );
+  assert.equal(lastState.saveEnabled, false);
+  session.setField("display_title", true);
+  assert.equal(lastState.saveEnabled, true);
+  session.removeChip("alpha");
+  session.removeChip("beta");
+  session.setField("tags", true);
+  assert.equal(lastState.fields.tags, false);
+  assert.equal(lastState.tagsDisabled, true);
+
+  session.setField("display_title", true);
+  const success = await session.save();
+  assert.equal(success.ok, true);
+  const applyCall = calls.filter((call) => call.type === companion.TYPES.REVIEW_INBOX_APPLY).pop();
+  assert.deepEqual(applyCall.payload.fields, ["display_title"]);
+  assert.equal(applyCall.payload.display_title, undefined);
+  assert.equal(applyCall.payload.description, undefined);
+  assert.equal(lastState.overlayOpen, true);
+  assert.equal(lastState.fields.display_title, false);
+  assert.equal(lastState.canonical.display_title, "Applied");
+  assert.equal(lastState.publication.status, "not_ready");
+
+  session.setField("display_title", true);
+  const previousCalls = calls.length;
+  await session.selectRun(RUN_OLD);
+  assert.equal(lastState.fields.display_title, false);
+  assert.equal(lastState.runId, RUN_OLD);
+  const afterSwitch = calls.slice(previousCalls);
+  assert.equal(afterSwitch.some((call) => call.type === companion.TYPES.REVIEW_INBOX_OPENED), true);
+  assert.equal(afterSwitch.some((call) => call.type === companion.TYPES.REVIEW_INBOX_APPLY), false);
+
+  const forbiddenSession = overlay.createController({
+    request: async () => ({ ok: false, status: 403, forbidden: true, error: "http_403" }),
+    notifyParent() {},
+    render(state) {
+      lastState = state;
+    },
+  });
+  await forbiddenSession.open(MEDIA_A);
+  assert.equal(lastState.overlayOpen, false);
+  assert.equal(lastState.suggestion, null);
+  assert.equal(lastState.lastError, "");
+  assert.doesNotMatch(reviewHtml, /<input[^>]+id="suggestion-title"/);
+  assert.match(reviewHtml, /History \(run completion time\)/);
+  assert.match(reviewCss, /--background/);
+  assert.match(reviewCss, /#00ff41/);
 });

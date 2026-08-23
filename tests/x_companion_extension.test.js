@@ -364,11 +364,15 @@ test("companion surfaces copy FrameNest gallery visual tokens", () => {
     "--radius-sm",
     "--font-mono",
   ];
+  const reviewCss = fs.readFileSync(path.join(REPO, "extension/ui/review.css"), "utf8");
   tokenNames.forEach((token) => {
     assert.match(pickerCss, new RegExp(token.replace(/-/g, "\\-")));
+    assert.match(reviewCss, new RegExp(token.replace(/-/g, "\\-")));
   });
   assert.match(pickerCss, /#00ff41/);
+  assert.match(reviewCss, /#00ff41/);
   assert.match(pickerCss, /#39ff14/);
+  assert.match(reviewCss, /#39ff14/);
   assert.match(adapterSource, /#00ff41/);
   assert.match(adapterSource, /#39ff14/);
   assert.doesNotMatch(adapterSource, /copyActionColor/);
