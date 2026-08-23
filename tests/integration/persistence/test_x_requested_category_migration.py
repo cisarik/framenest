@@ -139,7 +139,7 @@ def test_head_is_0030() -> None:
         from alembic.script import ScriptDirectory
 
         scripts = ScriptDirectory.from_config(config)
-        assert scripts.get_current_head() == "0030"
+        assert scripts.get_current_head() == "0031"
 
 
 def test_populated_0029_upgrade_preserves_rows_indexes_and_null_legacy(

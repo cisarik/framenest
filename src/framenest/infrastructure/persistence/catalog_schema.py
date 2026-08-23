@@ -147,7 +147,8 @@ media_content_publications = Table(
         name="ck_media_content_publications_published_at_non_negative",
     ),
     CheckConstraint(
-        "publication_origin IN ('legacy_backfill', 'admin_explicit')",
+        "publication_origin IN "
+        "('legacy_backfill', 'admin_explicit', 'companion_review')",
         name="ck_media_content_publications_origin",
     ),
     Index(
@@ -1675,6 +1676,149 @@ media_analysis_runs = Table(
         "analysis_definition",
         unique=True,
         sqlite_where=text("state IN ('pending', 'analyzing')"),
+    ),
+    Index(
+        "ix_companion_review_successful_inbox",
+        "analysis_definition",
+        "state",
+        "analysis_profile",
+        "completed_at_ms",
+        "id",
+        "media_id",
+    ),
+    Index(
+        "ix_companion_review_per_media_history",
+        "media_id",
+        "analysis_definition",
+        "state",
+        "analysis_profile",
+        "completed_at_ms",
+        "id",
+    ),
+)
+
+_COMPANION_REVIEW_LOGIN_KEY_SQL = (
+    "length({column}) >= 1 AND length({column}) <= 254 "
+    "AND {column} = lower({column}) "
+    "AND instr({column}, ' ') = 0 "
+    "AND instr({column}, char(9)) = 0 "
+    "AND instr({column}, char(10)) = 0 "
+    "AND instr({column}, char(13)) = 0"
+)
+
+companion_review_open_states = Table(
+    "companion_review_open_states",
+    metadata,
+    Column("actor_login_key", Text(), nullable=False),
+    Column(
+        "media_id",
+        Text(),
+        ForeignKey(
+            "logical_media.id",
+            ondelete="CASCADE",
+            name="fk_companion_review_open_states_media_id",
+        ),
+        nullable=False,
+    ),
+    Column(
+        "opened_run_id",
+        Text(),
+        ForeignKey(
+            "media_analysis_runs.id",
+            ondelete="CASCADE",
+            name="fk_companion_review_open_states_opened_run_id",
+        ),
+        nullable=False,
+    ),
+    Column("opened_at_ms", Integer(), nullable=False),
+    PrimaryKeyConstraint(
+        "actor_login_key",
+        "media_id",
+        name="pk_companion_review_open_states",
+    ),
+    CheckConstraint(
+        "length(media_id) = 36",
+        name="ck_companion_review_open_states_media_id_length",
+    ),
+    CheckConstraint(
+        "length(opened_run_id) = 36",
+        name="ck_companion_review_open_states_opened_run_id_length",
+    ),
+    CheckConstraint(
+        _COMPANION_REVIEW_LOGIN_KEY_SQL.format(column="actor_login_key"),
+        name="ck_companion_review_open_states_actor_login_key",
+    ),
+    CheckConstraint(
+        "opened_at_ms >= 0",
+        name="ck_companion_review_open_states_opened_at_ms_non_negative",
+    ),
+    Index(
+        "ix_companion_review_open_states_opened_run_id",
+        "opened_run_id",
+    ),
+)
+
+companion_review_field_sources = Table(
+    "companion_review_field_sources",
+    metadata,
+    Column(
+        "media_id",
+        Text(),
+        ForeignKey(
+            "logical_media.id",
+            ondelete="CASCADE",
+            name="fk_companion_review_field_sources_media_id",
+        ),
+        nullable=False,
+    ),
+    Column("field_name", Text(), nullable=False),
+    Column(
+        "analysis_run_id",
+        Text(),
+        ForeignKey(
+            "media_analysis_runs.id",
+            ondelete="CASCADE",
+            name="fk_companion_review_field_sources_analysis_run_id",
+        ),
+        nullable=False,
+    ),
+    Column("applied_by_login_key", Text(), nullable=False),
+    Column("applied_at_ms", Integer(), nullable=False),
+    Column("value_digest", Text(), nullable=False),
+    PrimaryKeyConstraint(
+        "media_id",
+        "field_name",
+        name="pk_companion_review_field_sources",
+    ),
+    CheckConstraint(
+        "length(media_id) = 36",
+        name="ck_companion_review_field_sources_media_id_length",
+    ),
+    CheckConstraint(
+        "length(analysis_run_id) = 36",
+        name="ck_companion_review_field_sources_analysis_run_id_length",
+    ),
+    CheckConstraint(
+        "field_name IN ('display_title', 'tags', 'description')",
+        name="ck_companion_review_field_sources_field_name",
+    ),
+    CheckConstraint(
+        _COMPANION_REVIEW_LOGIN_KEY_SQL.format(column="applied_by_login_key"),
+        name="ck_companion_review_field_sources_applied_by_login_key",
+    ),
+    CheckConstraint(
+        "applied_at_ms >= 0",
+        name="ck_companion_review_field_sources_applied_at_ms_non_negative",
+    ),
+    CheckConstraint(
+        "length(value_digest) = 64 "
+        "AND value_digest = lower(value_digest) "
+        "AND value_digest NOT GLOB '*[^0-9a-f]*'",
+        name="ck_companion_review_field_sources_value_digest",
+    ),
+    Index(
+        "ix_companion_review_field_sources_analysis_run_id",
+        "analysis_run_id",
     ),
 )
 

@@ -20,6 +20,7 @@ class ContentPublicationOrigin(str, Enum):
 
     LEGACY_BACKFILL = "legacy_backfill"
     ADMIN_EXPLICIT = "admin_explicit"
+    COMPANION_REVIEW = "companion_review"
 
 
 @dataclass(frozen=True, slots=True)
