@@ -60,6 +60,50 @@
     handshakeTimeoutCopy,
   };
 
+  const REVIEW = companion.REVIEW_INBOX;
+
+  function reviewInboxVisualCollapsed(explicitCollapsed, itemCount) {
+    if (itemCount <= 0) {
+      return true;
+    }
+    return explicitCollapsed === true;
+  }
+
+  function reviewInboxNewestRunId(items) {
+    if (!Array.isArray(items) || !items.length) {
+      return "";
+    }
+    const first = items[0];
+    return first && companion.isUuid(first.analysis_run_id) ? first.analysis_run_id : "";
+  }
+
+  function renderReviewInboxList(listNode, items) {
+    if (!listNode) {
+      return;
+    }
+    while (listNode.firstChild) {
+      listNode.removeChild(listNode.firstChild);
+    }
+    const doc = listNode.ownerDocument || globalThis.document;
+    (Array.isArray(items) ? items : []).forEach((item) => {
+      if (!item || typeof item.title !== "string") {
+        return;
+      }
+      const li = doc.createElement("li");
+      li.textContent = item.title;
+      listNode.appendChild(li);
+    });
+  }
+
+  globalThis.FrameNestReviewInbox = {
+    EMPTY_COPY: REVIEW.emptyCopy,
+    HINT_COPY: REVIEW.hintCopy,
+    POLL_MS: REVIEW.pollMs,
+    visualCollapsed: reviewInboxVisualCollapsed,
+    newestRunId: reviewInboxNewestRunId,
+    renderList: renderReviewInboxList,
+  };
+
   const originInput = document.getElementById("origin");
   const shellStatus = document.getElementById("shell-status");
   const frame = document.getElementById("frame");
@@ -68,6 +112,11 @@
   const settingsOpen = document.getElementById("settings-open");
   const settingsClose = document.getElementById("settings-close");
   const settingsConnect = document.getElementById("settings-connect");
+  const reviewInbox = document.getElementById("review-inbox");
+  const reviewInboxToggle = document.getElementById("review-inbox-toggle");
+  const reviewInboxHint = document.getElementById("review-inbox-hint");
+  const reviewInboxEmpty = document.getElementById("review-inbox-empty");
+  const reviewInboxList = document.getElementById("review-inbox-list");
   if (
     !originInput ||
     !shellStatus ||
@@ -76,7 +125,12 @@
     !settingsDialog ||
     !settingsOpen ||
     !settingsClose ||
-    !settingsConnect
+    !settingsConnect ||
+    !reviewInbox ||
+    !reviewInboxToggle ||
+    !reviewInboxHint ||
+    !reviewInboxEmpty ||
+    !reviewInboxList
   ) {
     return;
   }
@@ -85,6 +139,9 @@
   let handshakeTimer = 0;
   let handshakeSeen = false;
   let frameLoaded = false;
+  let inboxPollTimer = 0;
+  let explicitCollapsed = false;
+  let seenRunId = "";
 
   function setText(node, value, kind) {
     node.textContent = value;
@@ -114,6 +171,110 @@
         }
       );
     });
+  }
+
+  function stopInboxPoll() {
+    if (inboxPollTimer) {
+      clearInterval(inboxPollTimer);
+      inboxPollTimer = 0;
+    }
+  }
+
+  function startInboxPoll() {
+    stopInboxPoll();
+    void refreshInbox();
+    inboxPollTimer = setInterval(() => {
+      if (globalThis.document && document.hidden) {
+        return;
+      }
+      void refreshInbox();
+    }, REVIEW.pollMs);
+  }
+
+  function persistInboxPrefs() {
+    const update = {};
+    update[REVIEW.explicitCollapsedKey] = explicitCollapsed === true;
+    if (companion.isUuid(seenRunId)) {
+      update[REVIEW.seenRunIdKey] = seenRunId;
+    }
+    chrome.storage.local.set(update);
+  }
+
+  function hideInboxSection() {
+    reviewInbox.hidden = true;
+    reviewInbox.classList.add("is-collapsed");
+    reviewInboxToggle.setAttribute("aria-expanded", "false");
+    reviewInboxHint.hidden = true;
+    reviewInboxHint.textContent = "";
+    renderReviewInboxList(reviewInboxList, []);
+  }
+
+  function applyInboxCollapse(collapsed) {
+    if (collapsed) {
+      reviewInbox.classList.add("is-collapsed");
+      reviewInboxToggle.setAttribute("aria-expanded", "false");
+    } else {
+      reviewInbox.classList.remove("is-collapsed");
+      reviewInboxToggle.setAttribute("aria-expanded", "true");
+    }
+  }
+
+  function renderInboxHint(awaiting) {
+    const live = companion.normalizeAwaitingRecords(awaiting, Date.now());
+    if (!live.length) {
+      reviewInboxHint.hidden = true;
+      reviewInboxHint.textContent = "";
+      return;
+    }
+    reviewInboxHint.hidden = false;
+    reviewInboxHint.textContent = REVIEW.hintCopy;
+  }
+
+  function applyInboxResult(result) {
+    if (!result || result.forbidden === true || result.status === 403) {
+      hideInboxSection();
+      return;
+    }
+    if (result.ok !== true) {
+      return;
+    }
+    const items = companion.sanitizeReviewInboxItems(result.items);
+    const newest = reviewInboxNewestRunId(items);
+    if (newest && newest !== seenRunId && explicitCollapsed !== true) {
+      explicitCollapsed = false;
+    }
+    if (newest) {
+      seenRunId = newest;
+      persistInboxPrefs();
+    }
+    reviewInbox.hidden = false;
+    const collapsed = reviewInboxVisualCollapsed(explicitCollapsed, items.length);
+    applyInboxCollapse(collapsed);
+    reviewInboxEmpty.hidden = items.length > 0;
+    reviewInboxList.hidden = items.length === 0;
+    renderReviewInboxList(reviewInboxList, items);
+    renderInboxHint(result.awaiting);
+  }
+
+  async function refreshInbox() {
+    if (!storedOrigin) {
+      hideInboxSection();
+      return;
+    }
+    const result = await request(companion.TYPES.REVIEW_INBOX, {});
+    applyInboxResult(result);
+  }
+
+  function onInboxToggle() {
+    const collapsed = reviewInbox.classList.contains("is-collapsed");
+    if (collapsed) {
+      explicitCollapsed = false;
+      applyInboxCollapse(false);
+    } else {
+      explicitCollapsed = true;
+      applyInboxCollapse(true);
+    }
+    persistInboxPrefs();
   }
 
   function clearHandshakeWait() {
@@ -208,12 +369,17 @@
     closeSettings();
     setText(shellStatus, "Connected");
     hostFrame(storedOrigin);
+    startInboxPoll();
   }
 
   async function reset() {
+    stopInboxPoll();
+    hideInboxSection();
     await request(companion.TYPES.RESET, {});
     storedOrigin = "";
     originInput.value = "";
+    explicitCollapsed = false;
+    seenRunId = "";
     syncChromeAction();
     clearFrame();
     setText(shellStatus, "Cleared");
@@ -304,6 +470,16 @@
   }
 
   chromeAction.addEventListener("click", onChromeAction);
+  reviewInboxToggle.addEventListener("click", onInboxToggle);
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) {
+      stopInboxPoll();
+      return;
+    }
+    if (storedOrigin) {
+      startInboxPoll();
+    }
+  });
   settingsConnect.addEventListener("click", () => {
     void connect();
   });
@@ -325,20 +501,28 @@
   frame.addEventListener("load", onFrameLoad);
   frame.addEventListener("error", onFrameError);
   window.addEventListener("message", onWindowMessage);
-  chrome.storage.local.get("frameNestOrigin", (stored) => {
-    const origin = stored.frameNestOrigin || "";
-    if (companion.acceptFrameNestOrigin(origin)) {
-      storedOrigin = origin;
-      originInput.value = origin;
+  chrome.storage.local.get(
+    ["frameNestOrigin", REVIEW.explicitCollapsedKey, REVIEW.seenRunIdKey],
+    (stored) => {
+      explicitCollapsed = stored[REVIEW.explicitCollapsedKey] === true;
+      const storedSeen = stored[REVIEW.seenRunIdKey];
+      seenRunId = companion.isUuid(storedSeen) ? storedSeen : "";
+      const origin = stored.frameNestOrigin || "";
+      if (companion.acceptFrameNestOrigin(origin)) {
+        storedOrigin = origin;
+        originInput.value = origin;
+        syncChromeAction();
+        setText(shellStatus, "Connected");
+        hostFrame(origin);
+        startInboxPoll();
+        return;
+      }
+      storedOrigin = "";
+      originInput.value = "";
       syncChromeAction();
-      setText(shellStatus, "Connected");
-      hostFrame(origin);
-      return;
+      hideInboxSection();
+      clearFrame();
+      setText(shellStatus, "Connect FrameNest in Settings");
     }
-    storedOrigin = "";
-    originInput.value = "";
-    syncChromeAction();
-    clearFrame();
-    setText(shellStatus, "Connect FrameNest in Settings");
-  });
+  );
 })();

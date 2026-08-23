@@ -42,6 +42,24 @@
       <p id="shell-status" class="shell-status" role="status"></p>
     </header>
     <main class="sidebar-main">
+      <section id="review-inbox" hidden>
+        <div class="review-inbox__bar">
+          <button
+            id="review-inbox-toggle"
+            class="review-inbox__toggle"
+            type="button"
+            aria-expanded="false"
+            aria-controls="review-inbox-panel"
+          >
+            Review inbox
+          </button>
+        </div>
+        <div id="review-inbox-panel" class="review-inbox__panel">
+          <p id="review-inbox-hint" class="review-inbox__hint" hidden></p>
+          <p id="review-inbox-empty" class="review-inbox__empty">No analyzed items.</p>
+          <ol id="review-inbox-list" class="review-inbox__list"></ol>
+        </div>
+      </section>
       <iframe id="frame" title="FrameNest" hidden></iframe>
     </main>
     <script src="../shared/messages.js"></script>
