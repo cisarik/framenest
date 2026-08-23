@@ -22,6 +22,7 @@ const manifest = JSON.parse(
 test("unknown protocol versions and types are dropped", () => {
   assert.equal(companion.TYPES.DISMISS_PICKER, "dismiss_picker");
   assert.equal(companion.TYPES.PICKER_LAYOUT, "picker_layout");
+  assert.equal(companion.TYPES.REVIEW_INBOX, "review_inbox");
   assert.equal(companion.dropUnknown({ v: "other", type: companion.TYPES.SAVE_POST }), null);
   assert.equal(companion.dropUnknown({ v: companion.PROTOCOL, type: "proxy_fetch" }), null);
   assert.equal(companion.dropUnknown({ v: companion.PROTOCOL, type: "dismiss_popup" }), null);
@@ -1113,6 +1114,8 @@ test("toolbar action opens the side-panel shell instead of a picker popup", () =
   const sidebarJs = fs.readFileSync(path.join(REPO, "extension/ui/sidebar.js"), "utf8");
   const sidebarCss = fs.readFileSync(path.join(REPO, "extension/ui/sidebar.css"), "utf8");
   assert.match(sidebarHtml, /id="frame"/);
+  assert.ok(sidebarHtml.indexOf('id="shell-status"') < sidebarHtml.indexOf('id="review-inbox"'));
+  assert.ok(sidebarHtml.indexOf('id="review-inbox"') < sidebarHtml.indexOf('id="frame"'));
   assert.match(sidebarHtml, /class="title-bar__wordmark">FrameNest</);
   assert.match(sidebarHtml, /id="chrome-action"/);
   assert.match(sidebarHtml, />Connect</);
@@ -1135,6 +1138,9 @@ test("toolbar action opens the side-panel shell instead of a picker popup", () =
   assert.equal(warResources.includes("ui/sidebar.html"), false);
   assert.equal(warResources.includes("ui/sidebar.js"), false);
   assert.equal(warResources.includes("ui/sidebar.css"), false);
+  assert.equal(warResources.includes("ui/review.html"), false);
+  assert.equal(warResources.includes("ui/review.js"), false);
+  assert.equal(warResources.includes("ui/review.css"), false);
 });
 
 test("side-panel Settings is a sheet under the title bar, not a centered modal", () => {
