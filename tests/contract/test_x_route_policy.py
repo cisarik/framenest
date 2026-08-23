@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import pytest
 
-from framenest.adapters.api.tailscale_ingress import find_route_policy
+from framenest.adapters.api.tailscale_ingress import RoutePolicy, find_route_policy
 from framenest.application.content_publication import ContentAudiencePolicy
 from framenest.domain.identity_access import (
     CAPABILITY_METADATA_ALIAS_WRITE,
+    CAPABILITY_METADATA_CANONICAL_WRITE,
+    CAPABILITY_MEDIA_CONTENT_PUBLISH,
     CAPABILITY_MEDIA_WORKFLOW_READ,
     CAPABILITY_X_ACQUIRE,
     CAPABILITY_X_REQUEST,
@@ -42,10 +44,18 @@ def test_x_request_routes_require_x_request_capability() -> None:
         assert policy.capability == CAPABILITY_X_REQUEST
 
 
-def test_only_x_request_mutations_are_companion_flagged() -> None:
+def test_only_companion_mutations_are_companion_flagged() -> None:
     submit, submit_match = find_route_policy("POST", "/api/x/requests")
     retry, retry_match = find_route_policy(
         "POST", "/api/x/requests/00000000-0000-4000-8000-000000000000/retry"
+    )
+    opened, opened_match = find_route_policy(
+        "POST",
+        "/api/companion/review-inbox/00000000-0000-4000-8000-000000000000/opened",
+    )
+    apply, apply_match = find_route_policy(
+        "POST",
+        "/api/companion/review-inbox/00000000-0000-4000-8000-000000000000/apply",
     )
     picker, picker_match = find_route_policy("GET", "/api/x/companion/media")
     tags, tags_match = find_route_policy("POST", "/api/canonical-tags")
@@ -57,6 +67,8 @@ def test_only_x_request_mutations_are_companion_flagged() -> None:
     )
     assert submit_match is not None and submit.companion_mutation is True
     assert retry_match is not None and retry.companion_mutation is True
+    assert opened_match is not None and opened.companion_mutation is True
+    assert apply_match is not None and apply.companion_mutation is True
     assert picker_match is not None and picker.companion_mutation is False
     assert tags_match is not None and tags.companion_mutation is False
     assert alias_get_match is not None and alias_get.companion_mutation is False
@@ -71,13 +83,50 @@ def test_only_x_request_mutations_are_companion_flagged() -> None:
     assert detail_match is not None and detail.companion_mutation is False
     assert inbox.capability == CAPABILITY_MEDIA_WORKFLOW_READ
     assert detail.capability == CAPABILITY_MEDIA_WORKFLOW_READ
+    assert inbox.additional_capabilities == ()
+    assert detail.additional_capabilities == ()
+    assert opened.capability == CAPABILITY_MEDIA_WORKFLOW_READ
+    assert opened.additional_capabilities == ()
+    assert apply.capability == CAPABILITY_MEDIA_CONTENT_PUBLISH
+    assert apply.additional_capabilities == (CAPABILITY_METADATA_CANONICAL_WRITE,)
     from framenest.adapters.api.tailscale_ingress import ROUTE_POLICIES
 
     flagged = [policy for policy in ROUTE_POLICIES if policy.companion_mutation]
     assert {(policy.method, policy.pattern.pattern) for policy in flagged} == {
         (submit.method, submit.pattern.pattern),
         (retry.method, retry.pattern.pattern),
+        (opened.method, opened.pattern.pattern),
+        (apply.method, apply.pattern.pattern),
     }
+
+
+def test_route_policy_additional_capabilities_default_empty() -> None:
+    from framenest.adapters.api.tailscale_ingress import ROUTE_POLICIES
+
+    constructed = RoutePolicy(method="GET", template="/health", channel="any")
+    assert constructed.additional_capabilities == ()
+    assert constructed.capability is None
+    apply_policy, apply_match = find_route_policy(
+        "POST",
+        "/api/companion/review-inbox/00000000-0000-4000-8000-000000000000/apply",
+    )
+    assert apply_match is not None
+    assert apply_policy.additional_capabilities == (
+        CAPABILITY_METADATA_CANONICAL_WRITE,
+    )
+    for policy in ROUTE_POLICIES:
+        if policy.audit_action == "companion.review.apply_publish":
+            continue
+        assert policy.additional_capabilities == ()
+
+
+def test_route_policy_rejects_additional_capabilities_without_primary() -> None:
+    with pytest.raises(ValueError, match="additional capabilities require a primary"):
+        RoutePolicy(
+            method="POST",
+            template="/api/synthetic",
+            additional_capabilities=("metadata.canonical.write",),
+        )
 
 
 def test_x_admin_route_requires_x_acquire_capability() -> None:

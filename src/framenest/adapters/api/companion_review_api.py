@@ -9,27 +9,36 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict
 
-from framenest.adapters.api.tailscale_ingress import SCOPE_IDENTITY
+from framenest.adapters.api.tailscale_ingress import SCOPE_AUDIT_EVENT_ID, SCOPE_IDENTITY
 from framenest.application.companion_review import (
     COMPANION_REVIEW_QUERY_INVALID_MESSAGE,
     DEFAULT_COMPANION_REVIEW_LIMIT,
     MAX_COMPANION_REVIEW_LIMIT,
+    ApplyCompanionReview,
+    CompanionReviewApplyResult,
     CompanionReviewDetail,
     CompanionReviewInboxItem,
     CompanionReviewInboxPage,
+    CompanionReviewOpenedResult,
     CompanionReviewQueryError,
     GetCompanionReviewDetail,
     ListCompanionReviewInbox,
     MappedSuggestedTag,
+    MarkCompanionReviewOpened,
 )
 from framenest.application.ports.companion_review_repository import (
+    CompanionReviewAnalysisRunNotFoundError,
     CompanionReviewMediaNotFoundError,
     CompanionReviewMovieExcludedError,
+    CompanionReviewRunNotEligibleError,
+    CompanionReviewStaleMappingError,
     CompanionReviewStoredResultError,
     FrameNestCompanionReviewRepositoryError,
 )
 from framenest.domain.identity_access import (
+    CAPABILITY_MEDIA_CONTENT_PUBLISH,
     CAPABILITY_MEDIA_WORKFLOW_READ,
+    CAPABILITY_METADATA_CANONICAL_WRITE,
     IdentityContext,
 )
 
@@ -40,10 +49,23 @@ QUERY_FAILED_CODE = "COMPANION_REVIEW_QUERY_FAILED"
 QUERY_FAILED_MESSAGE = "Companion review query failed."
 MEDIA_NOT_FOUND_CODE = "MEDIA_NOT_FOUND"
 MEDIA_NOT_FOUND_MESSAGE = "The requested media item was not found."
+ANALYSIS_RUN_NOT_FOUND_CODE = "ANALYSIS_RUN_NOT_FOUND"
+ANALYSIS_RUN_NOT_FOUND_MESSAGE = "The requested analysis run was not found."
 MOVIE_EXCLUDED_CODE = "COMPANION_REVIEW_MOVIE_EXCLUDED"
 MOVIE_EXCLUDED_MESSAGE = "Movie workflows are excluded from companion review."
+RUN_NOT_ELIGIBLE_CODE = "COMPANION_REVIEW_RUN_CONFLICT"
+RUN_NOT_ELIGIBLE_MESSAGE = "The requested analysis run is not eligible."
+STALE_MAPPING_CODE = "COMPANION_REVIEW_STALE_MAPPING"
+STALE_MAPPING_MESSAGE = "Submitted tag keys are not an eligible mapping."
 RESULT_INVALID_CODE = "COMPANION_REVIEW_RESULT_INVALID"
 RESULT_INVALID_MESSAGE = "Stored analysis result is invalid."
+APPLY_FAILED_CODE = "COMPANION_REVIEW_APPLY_FAILED"
+APPLY_FAILED_MESSAGE = "Companion review apply failed."
+OPEN_FAILED_CODE = "COMPANION_REVIEW_OPEN_FAILED"
+OPEN_FAILED_MESSAGE = "Companion review open failed."
+AUDIT_UNAVAILABLE_CODE = "AUDIT_UNAVAILABLE"
+AUDIT_UNAVAILABLE_MESSAGE = "The privileged action could not be recorded."
+CAPABILITY_DENIED_CODE = "CAPABILITY_DENIED"
 
 _NO_STORE_HEADERS = {"Cache-Control": "no-store"}
 
@@ -75,13 +97,29 @@ class CompanionReviewInboxListResponse(BaseModel):
     next_cursor: str | None
 
 
+class CompanionReviewOpenedRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    analysis_run_id: str
+
+
+class CompanionReviewApplyRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    analysis_run_id: str
+    fields: list[str]
+    tag_keys: list[str] = []
+
+
 @dataclass(frozen=True, slots=True)
 class CompanionReviewApiDependencies:
-    """Injected companion review read behavior."""
+    """Injected companion review read and mutation behavior."""
 
     list_inbox: ListCompanionReviewInbox | None
     get_detail: GetCompanionReviewDetail | None
     catalog_available: Callable[[], bool]
+    mark_opened: MarkCompanionReviewOpened | None = None
+    apply_review: ApplyCompanionReview | None = None
 
 
 def create_companion_review_api_router(
@@ -188,6 +226,122 @@ def create_companion_review_api_router(
             headers=_NO_STORE_HEADERS,
         )
 
+    @router.post(
+        "/api/companion/review-inbox/{media_id}/opened",
+        responses={
+            404: {"model": CompanionErrorResponse},
+            409: {"model": CompanionErrorResponse},
+            422: {"model": CompanionErrorResponse},
+            500: {"model": CompanionErrorResponse},
+            503: {"model": CompanionErrorResponse},
+        },
+    )
+    def mark_review_opened(
+        media_id: str,
+        payload: CompanionReviewOpenedRequest,
+        request: Request,
+    ) -> JSONResponse:
+        identity = _require_opened_identity(request)
+        audit_error = _require_audit_event(request)
+        if audit_error is not None:
+            return audit_error
+        if (
+            not dependencies.catalog_available()
+            or dependencies.mark_opened is None
+        ):
+            return _error(
+                CATALOG_UNAVAILABLE_CODE, CATALOG_UNAVAILABLE_MESSAGE, 503
+            )
+        try:
+            result = dependencies.mark_opened.execute(
+                media_id=media_id,
+                actor_login_key=identity.login_key,
+                analysis_run_id=payload.analysis_run_id,
+            )
+        except CompanionReviewQueryError:
+            return _error(
+                QUERY_INVALID_CODE, COMPANION_REVIEW_QUERY_INVALID_MESSAGE, 422
+            )
+        except CompanionReviewMediaNotFoundError:
+            return _error(MEDIA_NOT_FOUND_CODE, MEDIA_NOT_FOUND_MESSAGE, 404)
+        except CompanionReviewAnalysisRunNotFoundError:
+            return _error(
+                ANALYSIS_RUN_NOT_FOUND_CODE, ANALYSIS_RUN_NOT_FOUND_MESSAGE, 404
+            )
+        except CompanionReviewMovieExcludedError:
+            return _error(MOVIE_EXCLUDED_CODE, MOVIE_EXCLUDED_MESSAGE, 409)
+        except CompanionReviewRunNotEligibleError:
+            return _error(RUN_NOT_ELIGIBLE_CODE, RUN_NOT_ELIGIBLE_MESSAGE, 409)
+        except CompanionReviewStoredResultError:
+            return _error(RESULT_INVALID_CODE, RESULT_INVALID_MESSAGE, 500)
+        except FrameNestCompanionReviewRepositoryError:
+            return _error(OPEN_FAILED_CODE, OPEN_FAILED_MESSAGE, 500)
+        return JSONResponse(
+            status_code=200,
+            content=_opened_dict(result),
+            headers=_NO_STORE_HEADERS,
+        )
+
+    @router.post(
+        "/api/companion/review-inbox/{media_id}/apply",
+        responses={
+            404: {"model": CompanionErrorResponse},
+            409: {"model": CompanionErrorResponse},
+            422: {"model": CompanionErrorResponse},
+            500: {"model": CompanionErrorResponse},
+            503: {"model": CompanionErrorResponse},
+        },
+    )
+    def apply_review(
+        media_id: str,
+        payload: CompanionReviewApplyRequest,
+        request: Request,
+    ) -> JSONResponse:
+        identity = _require_apply_identity(request)
+        audit_error = _require_audit_event(request)
+        if audit_error is not None:
+            return audit_error
+        if (
+            not dependencies.catalog_available()
+            or dependencies.apply_review is None
+        ):
+            return _error(
+                CATALOG_UNAVAILABLE_CODE, CATALOG_UNAVAILABLE_MESSAGE, 503
+            )
+        try:
+            result = dependencies.apply_review.execute(
+                media_id=media_id,
+                actor_login_key=identity.login_key,
+                analysis_run_id=payload.analysis_run_id,
+                fields=tuple(payload.fields),
+                tag_keys=tuple(payload.tag_keys),
+            )
+        except CompanionReviewQueryError:
+            return _error(
+                QUERY_INVALID_CODE, COMPANION_REVIEW_QUERY_INVALID_MESSAGE, 422
+            )
+        except CompanionReviewMediaNotFoundError:
+            return _error(MEDIA_NOT_FOUND_CODE, MEDIA_NOT_FOUND_MESSAGE, 404)
+        except CompanionReviewAnalysisRunNotFoundError:
+            return _error(
+                ANALYSIS_RUN_NOT_FOUND_CODE, ANALYSIS_RUN_NOT_FOUND_MESSAGE, 404
+            )
+        except CompanionReviewMovieExcludedError:
+            return _error(MOVIE_EXCLUDED_CODE, MOVIE_EXCLUDED_MESSAGE, 409)
+        except CompanionReviewRunNotEligibleError:
+            return _error(RUN_NOT_ELIGIBLE_CODE, RUN_NOT_ELIGIBLE_MESSAGE, 409)
+        except CompanionReviewStaleMappingError:
+            return _error(STALE_MAPPING_CODE, STALE_MAPPING_MESSAGE, 409)
+        except CompanionReviewStoredResultError:
+            return _error(RESULT_INVALID_CODE, RESULT_INVALID_MESSAGE, 500)
+        except FrameNestCompanionReviewRepositoryError:
+            return _error(APPLY_FAILED_CODE, APPLY_FAILED_MESSAGE, 500)
+        return JSONResponse(
+            status_code=200,
+            content=_apply_dict(result),
+            headers=_NO_STORE_HEADERS,
+        )
+
     return router
 
 
@@ -196,8 +350,29 @@ def _require_identity(request: Request) -> IdentityContext:
     if not isinstance(identity, IdentityContext):
         raise HTTPException(status_code=401, detail={"code": "IDENTITY_REQUIRED"})
     if not identity.has_capability(CAPABILITY_MEDIA_WORKFLOW_READ):
-        raise HTTPException(status_code=403, detail={"code": "CAPABILITY_DENIED"})
+        raise HTTPException(status_code=403, detail={"code": CAPABILITY_DENIED_CODE})
     return identity
+
+
+def _require_opened_identity(request: Request) -> IdentityContext:
+    return _require_identity(request)
+
+
+def _require_apply_identity(request: Request) -> IdentityContext:
+    identity = request.scope.get(SCOPE_IDENTITY)
+    if not isinstance(identity, IdentityContext):
+        raise HTTPException(status_code=401, detail={"code": "IDENTITY_REQUIRED"})
+    if not identity.has_capability(CAPABILITY_MEDIA_CONTENT_PUBLISH) or not (
+        identity.has_capability(CAPABILITY_METADATA_CANONICAL_WRITE)
+    ):
+        raise HTTPException(status_code=403, detail={"code": CAPABILITY_DENIED_CODE})
+    return identity
+
+
+def _require_audit_event(request: Request) -> JSONResponse | None:
+    if not request.scope.get(SCOPE_AUDIT_EVENT_ID):
+        return _error(AUDIT_UNAVAILABLE_CODE, AUDIT_UNAVAILABLE_MESSAGE, 500)
+    return None
 
 
 def _inbox_page_dict(page: CompanionReviewInboxPage) -> dict:
@@ -280,6 +455,55 @@ def _tag_dict(tag: MappedSuggestedTag) -> dict:
         "status": tag.status.value,
         "key": tag.key,
         "display_name": tag.display_name,
+    }
+
+
+def _opened_dict(result: CompanionReviewOpenedResult) -> dict:
+    return {
+        "media_id": result.media_id,
+        "opened_run_id": result.opened_run_id,
+        "opened_at_ms": result.opened_at_ms,
+        "unopened": result.unopened,
+    }
+
+
+def _apply_dict(result: CompanionReviewApplyResult) -> dict:
+    canonical = result.canonical
+    publication = result.publication
+    return {
+        "metadata_status": result.metadata_status,
+        "canonical": {
+            "display_title": canonical.display_title,
+            "description": canonical.description,
+            "tags": [
+                {
+                    "key": tag.key,
+                    "display_name": tag.display_name,
+                    "position": tag.position,
+                }
+                for tag in canonical.tags
+            ],
+            "field_sources": {
+                name: None
+                if receipt is None
+                else {
+                    "analysis_run_id": receipt.analysis_run_id,
+                    "completed_at_ms": receipt.completed_at_ms,
+                    "provider_id": receipt.provider_id,
+                    "model_id": receipt.model_id,
+                    "applied_at_ms": receipt.applied_at_ms,
+                }
+                for name, receipt in canonical.field_sources.items()
+            },
+        },
+        "publication": {
+            "status": publication.status,
+            "state": publication.state,
+            "origin": publication.origin,
+            "published_at_ms": publication.published_at_ms,
+            "ready": publication.ready,
+            "missing_fields": list(publication.missing_fields),
+        },
     }
 
 

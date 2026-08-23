@@ -13,6 +13,7 @@ import os
 import sqlite3
 import uuid
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -23,6 +24,13 @@ from framenest.adapters.api.tailscale_ingress import (
     ROUTE_POLICIES,
     _UNCLASSIFIED_FALLBACK_POLICY,
     find_route_policy,
+)
+from framenest.domain.identity_access import (
+    CAPABILITIES_BY_ROLE,
+    CAPABILITY_MEDIA_CONTENT_PUBLISH,
+    CAPABILITY_METADATA_CANONICAL_WRITE,
+    ROLE_ADMIN,
+    ROLE_USER,
 )
 from framenest.configuration import FrameNestSettings
 from framenest.domain import Device, DeviceId, Library, LibraryId, LibraryPathFlavor, LibraryRoot
@@ -1081,6 +1089,35 @@ def test_audit_records_no_credentials_or_raw_headers(tailscale_client) -> None:
     assert "SECRET-TOKEN-MARKER" not in recorded
 
 
+def test_missing_additional_capability_is_denied(tailscale_client) -> None:
+    client, settings = tailscale_client
+    media_id = _seed_publication_target(settings.database_path, ready=True)
+    policy, match = find_route_policy(
+        "PUT", f"/api/admin/media/{media_id}/content-publication"
+    )
+    assert match is not None
+    original = policy.additional_capabilities
+    reduced_admin = CAPABILITIES_BY_ROLE[ROLE_ADMIN] - {
+        CAPABILITY_METADATA_CANONICAL_WRITE
+    }
+    policy.additional_capabilities = (CAPABILITY_METADATA_CANONICAL_WRITE,)
+    try:
+        with patch.dict(
+            "framenest.domain.identity_access.CAPABILITIES_BY_ROLE",
+            {ROLE_ADMIN: reduced_admin, ROLE_USER: CAPABILITIES_BY_ROLE[ROLE_USER]},
+        ):
+            response = client.put(
+                f"/api/admin/media/{media_id}/content-publication",
+                headers=_mutation_headers(),
+            )
+        assert response.status_code == 403
+        assert _error_code(response) == "CAPABILITY_DENIED"
+        assert CAPABILITY_MEDIA_CONTENT_PUBLISH in reduced_admin
+        assert CAPABILITY_METADATA_CANONICAL_WRITE not in reduced_admin
+    finally:
+        policy.additional_capabilities = original
+
+
 def test_audit_failure_blocks_the_privileged_action(tailscale_client) -> None:
     client, settings = tailscale_client
     connection = sqlite3.connect(settings.database_path)
@@ -1427,10 +1464,12 @@ def _companion_mutation_headers(login: str = USER_LOGIN) -> dict[str, str]:
     }
 
 
-def test_companion_origin_is_accepted_only_on_flagged_x_request_routes(
+def test_companion_origin_is_accepted_only_on_flagged_companion_routes(
     companion_client,
 ) -> None:
     client, settings = companion_client
+    media_id = str(uuid.uuid4())
+    run_id = str(uuid.uuid4())
     submit = client.post(
         "/api/x/requests",
         headers=_companion_mutation_headers(),
@@ -1440,6 +1479,20 @@ def test_companion_origin_is_accepted_only_on_flagged_x_request_routes(
         f"/api/x/requests/{uuid.uuid4()}/retry",
         headers=_companion_mutation_headers(),
         json={},
+    )
+    opened = client.post(
+        f"/api/companion/review-inbox/{media_id}/opened",
+        headers=_companion_mutation_headers(ADMIN_LOGIN),
+        json={"analysis_run_id": run_id},
+    )
+    apply = client.post(
+        f"/api/companion/review-inbox/{media_id}/apply",
+        headers=_companion_mutation_headers(ADMIN_LOGIN),
+        json={
+            "analysis_run_id": run_id,
+            "fields": ["display_title"],
+            "tag_keys": [],
+        },
     )
     unflagged = client.post(
         "/api/canonical-tags",
@@ -1451,6 +1504,8 @@ def test_companion_origin_is_accepted_only_on_flagged_x_request_routes(
     assert _error_code(submit) != "MUTATION_ORIGIN_FORBIDDEN"
     assert retry.status_code != 403 or _error_code(retry) != "MUTATION_ORIGIN_FORBIDDEN"
     assert _error_code(retry) != "MUTATION_ORIGIN_FORBIDDEN"
+    assert _error_code(opened) != "MUTATION_ORIGIN_FORBIDDEN"
+    assert _error_code(apply) != "MUTATION_ORIGIN_FORBIDDEN"
     assert unflagged.status_code == 403
     assert _error_code(unflagged) == "MUTATION_ORIGIN_FORBIDDEN"
     assert "access-control-allow-origin" not in submit.headers
@@ -1469,6 +1524,29 @@ def test_empty_companion_allowlist_rejects_extension_origin(
     )
     assert response.status_code == 403
     assert _error_code(response) == "MUTATION_ORIGIN_FORBIDDEN"
+    opened = client.post(
+        f"/api/companion/review-inbox/{uuid.uuid4()}/opened",
+        headers=_companion_mutation_headers(ADMIN_LOGIN),
+        json={"analysis_run_id": str(uuid.uuid4())},
+    )
+    apply = client.post(
+        f"/api/companion/review-inbox/{uuid.uuid4()}/apply",
+        headers=_companion_mutation_headers(ADMIN_LOGIN),
+        json={
+            "analysis_run_id": str(uuid.uuid4()),
+            "fields": ["display_title"],
+            "tag_keys": [],
+        },
+    )
+    assert opened.status_code == 403
+    assert _error_code(opened) == "MUTATION_ORIGIN_FORBIDDEN"
+    assert apply.status_code == 403
+    assert _error_code(apply) == "MUTATION_ORIGIN_FORBIDDEN"
+    inbox = client.get(
+        "/api/companion/review-inbox",
+        headers=_serve_headers(ADMIN_LOGIN),
+    )
+    assert inbox.status_code == 200
 
 
 def test_spoofed_or_absent_companion_origin_is_rejected(companion_client) -> None:
@@ -1598,5 +1676,70 @@ def test_web_origin_put_alias_succeeds_for_ordinary_user(companion_client) -> No
     )
     assert canonical.status_code == 403
     assert _error_code(canonical) == "CAPABILITY_DENIED"
+
+
+def test_companion_apply_requires_dual_capabilities_and_hosted_origin(
+    companion_client,
+) -> None:
+    client, settings = companion_client
+    media_id = str(uuid.uuid4())
+    run_id = str(uuid.uuid4())
+    apply_path = f"/api/companion/review-inbox/{media_id}/apply"
+    body = {
+        "analysis_run_id": run_id,
+        "fields": ["display_title"],
+        "tag_keys": [],
+    }
+    ordinary = client.post(
+        apply_path,
+        headers=_companion_mutation_headers(USER_LOGIN),
+        json=body,
+    )
+    assert ordinary.status_code == 403
+    assert _error_code(ordinary) == "CAPABILITY_DENIED"
+    missing_header = client.post(
+        apply_path,
+        headers={
+            **_serve_headers(ADMIN_LOGIN),
+            "Origin": COMPANION_ORIGIN,
+        },
+        json=body,
+    )
+    assert missing_header.status_code == 403
+    assert _error_code(missing_header) == "MUTATION_HEADER_REQUIRED"
+    hosted = client.post(
+        apply_path,
+        headers=_mutation_headers(ADMIN_LOGIN),
+        json=body,
+    )
+    assert _error_code(hosted) != "MUTATION_ORIGIN_FORBIDDEN"
+    reduced_admin = CAPABILITIES_BY_ROLE[ROLE_ADMIN] - {
+        CAPABILITY_METADATA_CANONICAL_WRITE
+    }
+    with patch.dict(
+        "framenest.domain.identity_access.CAPABILITIES_BY_ROLE",
+        {ROLE_ADMIN: reduced_admin, ROLE_USER: CAPABILITIES_BY_ROLE[ROLE_USER]},
+    ):
+        publish_only = client.post(
+            apply_path,
+            headers=_companion_mutation_headers(ADMIN_LOGIN),
+            json=body,
+        )
+    assert publish_only.status_code == 403
+    assert _error_code(publish_only) == "CAPABILITY_DENIED"
+    canonical_only = CAPABILITIES_BY_ROLE[ROLE_ADMIN] - {
+        CAPABILITY_MEDIA_CONTENT_PUBLISH
+    }
+    with patch.dict(
+        "framenest.domain.identity_access.CAPABILITIES_BY_ROLE",
+        {ROLE_ADMIN: canonical_only, ROLE_USER: CAPABILITIES_BY_ROLE[ROLE_USER]},
+    ):
+        write_only = client.post(
+            apply_path,
+            headers=_companion_mutation_headers(ADMIN_LOGIN),
+            json=body,
+        )
+    assert write_only.status_code == 403
+    assert _error_code(write_only) == "CAPABILITY_DENIED"
 
 

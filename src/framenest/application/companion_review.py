@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import StrEnum
 import base64
@@ -17,6 +18,7 @@ from framenest.application.media_suggestion import (
     TAG_MIN_COUNT,
     TITLE_MAX_LENGTH,
 )
+from framenest.application.upload_transport import default_now_ms
 from framenest.domain.content_publication import (
     ContentPublication,
     ContentPublicationReadiness,
@@ -40,6 +42,9 @@ _CURSOR_B64_PATTERN = re.compile(r"^[A-Za-z0-9_-]+$")
 _FIELD_DISPLAY_TITLE = "display_title"
 _FIELD_DESCRIPTION = "description"
 _FIELD_TAGS = "tags"
+ALLOWED_APPLY_FIELDS = frozenset(
+    {_FIELD_DISPLAY_TITLE, _FIELD_DESCRIPTION, _FIELD_TAGS}
+)
 
 
 class CompanionReviewQueryError(ValueError):
@@ -404,6 +409,179 @@ class GetCompanionReviewDetail:
             actor_login_key=actor_login_key,
             limit=validate_companion_review_limit(limit),
             cursor=decode_companion_review_cursor(cursor),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class CompanionReviewOpenedResult:
+    """Post-state of one monotonic opened write."""
+
+    media_id: str
+    opened_run_id: str
+    opened_at_ms: int
+    unopened: bool
+
+
+@dataclass(frozen=True, slots=True)
+class CompanionReviewApplyCanonical:
+    """Canonical values and matching receipts after one apply transaction."""
+
+    display_title: str | None
+    description: str | None
+    tags: tuple[CompanionReviewCanonicalTag, ...]
+    field_sources: dict[str, CompanionReviewFieldSource | None]
+
+
+@dataclass(frozen=True, slots=True)
+class CompanionReviewApplyPublication:
+    """Publication outcome of one companion apply transaction."""
+
+    status: str
+    state: str
+    origin: str | None
+    published_at_ms: int | None
+    ready: bool
+    missing_fields: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class CompanionReviewApplyResult:
+    """Metadata, receipt, and publication outcome of one apply transaction."""
+
+    metadata_status: str
+    canonical: CompanionReviewApplyCanonical
+    publication: CompanionReviewApplyPublication
+
+
+def eligible_mapped_tag_keys(
+    mapped: tuple[MappedSuggestedTag, ...],
+) -> tuple[str, ...]:
+    """Return mapped keys in suggestion order, excluding non-selectable statuses."""
+    return tuple(
+        tag.key
+        for tag in mapped
+        if tag.status is MappedTagStatus.MAPPED and tag.key is not None
+    )
+
+
+def is_ordered_subsequence(submitted: tuple[str, ...], eligible: tuple[str, ...]) -> bool:
+    """Return True when submitted keys appear in order inside eligible keys."""
+    index = 0
+    for key in submitted:
+        found = False
+        while index < len(eligible):
+            if eligible[index] == key:
+                found = True
+                index += 1
+                break
+            index += 1
+        if not found:
+            return False
+    return True
+
+
+def validate_companion_review_apply_request(
+    *,
+    fields: tuple[str, ...],
+    tag_keys: tuple[str, ...],
+) -> None:
+    """Reject empty, duplicate, or inconsistent apply field/tag selections."""
+    if not fields or len(set(fields)) != len(fields):
+        raise CompanionReviewQueryError(COMPANION_REVIEW_QUERY_INVALID_MESSAGE)
+    if not set(fields) <= ALLOWED_APPLY_FIELDS:
+        raise CompanionReviewQueryError(COMPANION_REVIEW_QUERY_INVALID_MESSAGE)
+    tags_selected = _FIELD_TAGS in fields
+    if tags_selected:
+        if (
+            not tag_keys
+            or len(tag_keys) > TAG_MAX_COUNT
+            or len(set(tag_keys)) != len(tag_keys)
+            or any(not isinstance(key, str) or not key for key in tag_keys)
+        ):
+            raise CompanionReviewQueryError(COMPANION_REVIEW_QUERY_INVALID_MESSAGE)
+        return
+    if tag_keys:
+        raise CompanionReviewQueryError(COMPANION_REVIEW_QUERY_INVALID_MESSAGE)
+
+
+def _parse_media_id(value: str) -> MediaId:
+    try:
+        return MediaId.from_string(value)
+    except FrameNestIdentityError as exc:
+        from framenest.application.ports.companion_review_repository import (
+            CompanionReviewMediaNotFoundError,
+        )
+
+        raise CompanionReviewMediaNotFoundError(
+            "The requested media item was not found."
+        ) from exc
+
+
+def _parse_analysis_run_id(value: str) -> MediaId:
+    try:
+        return MediaId.from_string(value)
+    except FrameNestIdentityError as exc:
+        from framenest.application.ports.companion_review_repository import (
+            CompanionReviewAnalysisRunNotFoundError,
+        )
+
+        raise CompanionReviewAnalysisRunNotFoundError(
+            "The requested analysis run was not found."
+        ) from exc
+
+
+def _require_actor_login_key(actor_login_key: str) -> str:
+    if not isinstance(actor_login_key, str) or not actor_login_key:
+        raise CompanionReviewQueryError(COMPANION_REVIEW_QUERY_INVALID_MESSAGE)
+    return actor_login_key
+
+
+@dataclass(frozen=True, slots=True)
+class MarkCompanionReviewOpened:
+    """Mark one displayed successful generic run as opened for one actor."""
+
+    repository: CompanionReviewRepository
+    now_ms: Callable[[], int] = default_now_ms
+
+    def execute(
+        self,
+        *,
+        media_id: str,
+        actor_login_key: str,
+        analysis_run_id: str,
+    ) -> CompanionReviewOpenedResult:
+        return self.repository.mark_opened(
+            media_id=_parse_media_id(media_id),
+            actor_login_key=_require_actor_login_key(actor_login_key),
+            analysis_run_id=_parse_analysis_run_id(analysis_run_id),
+            now_ms=self.now_ms(),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class ApplyCompanionReview:
+    """Apply selected stored-run fields, upsert receipts, and publish when ready."""
+
+    repository: CompanionReviewRepository
+    now_ms: Callable[[], int] = default_now_ms
+
+    def execute(
+        self,
+        *,
+        media_id: str,
+        actor_login_key: str,
+        analysis_run_id: str,
+        fields: tuple[str, ...],
+        tag_keys: tuple[str, ...],
+    ) -> CompanionReviewApplyResult:
+        validate_companion_review_apply_request(fields=fields, tag_keys=tag_keys)
+        return self.repository.apply_review(
+            media_id=_parse_media_id(media_id),
+            actor_login_key=_require_actor_login_key(actor_login_key),
+            analysis_run_id=_parse_analysis_run_id(analysis_run_id),
+            fields=fields,
+            tag_keys=tag_keys,
+            now_ms=self.now_ms(),
         )
 
 

@@ -29,6 +29,7 @@ from framenest.domain.media_metadata import (
     MediaDescription,
     MediaDisplayTitle,
 )
+from framenest.application.companion_review import canonical_field_digest
 from framenest.domain.identities import MediaId
 
 CANONICAL_MEDIA_ID = "12345678-1234-4234-9234-123456789abc"
@@ -900,6 +901,137 @@ def _seed_movie_media(repository, engine):
     )
     assert created.status == "created"
     return parsed
+
+
+def test_website_save_drops_stale_companion_receipts_only(tmp_path: Path) -> None:
+    repository, engine = _repository(tmp_path)
+    media_id = _insert_media(engine)
+    run_id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+    location_id = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+    device_id = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
+    library_id = "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+    try:
+        repository.create_canonical_tag(
+            CanonicalTagKey("mathematics"), CanonicalTagDisplayName("Math"), 1
+        )
+        repository.save_media_metadata(
+            media_id,
+            MediaDisplayTitle("Original title"),
+            MediaDescription("Original description"),
+            (CanonicalTagKey("mathematics"),),
+            now_ms=10,
+        )
+        with engine.begin() as connection:
+            connection.execute(
+                text("INSERT INTO devices (id, display_name) VALUES (:id, 'Dev')"),
+                {"id": device_id},
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO libraries "
+                    "(id, device_id, display_name, path_flavor, root_path) "
+                    "VALUES (:id, :device, 'Lib', 'posix', '/tmp/synthetic')"
+                ),
+                {"id": library_id, "device": device_id},
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO physical_media_locations ("
+                    "id, media_id, library_id, relative_path, availability, "
+                    "observed_size_bytes, observed_mtime_ns, created_at_ms, updated_at_ms"
+                    ") VALUES (:id, :media, :library, 'clip.mp4', 'available', 8, NULL, 1, 1)"
+                ),
+                {
+                    "id": location_id,
+                    "media": media_id.to_string(),
+                    "library": library_id,
+                },
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO media_analysis_runs ("
+                    "id, media_id, media_location_id, analysis_definition, state, "
+                    "attempt_count, provider_id, model_id, prompt_version, "
+                    "result_schema_version, result_json, error_code, error_message, "
+                    "analysis_profile, created_at_ms, started_at_ms, completed_at_ms, version"
+                    ") VALUES ("
+                    ":id, :media, :location, 'automatic_post_catalog', 'analyzed', 1, "
+                    "'nvidia-nim', 'test-model', 'framenest-media-suggestion-v4', "
+                    "'framenest-media-suggestion-result-v1', '{}', NULL, NULL, "
+                    "'generic_media', 1, 1, 1, 2)"
+                ),
+                {
+                    "id": run_id,
+                    "media": media_id.to_string(),
+                    "location": location_id,
+                },
+            )
+            title_digest = canonical_field_digest("display_title", "Original title")
+            description_digest = canonical_field_digest(
+                "description", "Original description"
+            )
+            tags_digest = canonical_field_digest("tags", ("mathematics",))
+            connection.execute(
+                text(
+                    "INSERT INTO companion_review_field_sources ("
+                    "media_id, field_name, analysis_run_id, applied_by_login_key, "
+                    "applied_at_ms, value_digest"
+                    ") VALUES "
+                    "(:media, 'display_title', :run, 'admin@example.com', 5, :title), "
+                    "(:media, 'description', :run, 'admin@example.com', 5, :description), "
+                    "(:media, 'tags', :run, 'admin@example.com', 5, :tags)"
+                ),
+                {
+                    "media": media_id.to_string(),
+                    "run": run_id,
+                    "title": title_digest,
+                    "description": description_digest,
+                    "tags": tags_digest,
+                },
+            )
+        repository.save_media_metadata(
+            media_id,
+            MediaDisplayTitle("Changed title"),
+            MediaDescription("Original description"),
+            (CanonicalTagKey("mathematics"),),
+            now_ms=20,
+        )
+        with engine.connect() as connection:
+            remaining = {
+                str(row[0]): str(row[1])
+                for row in connection.execute(
+                    text(
+                        "SELECT field_name, value_digest FROM companion_review_field_sources "
+                        "WHERE media_id = :media"
+                    ),
+                    {"media": media_id.to_string()},
+                )
+            }
+        assert "display_title" not in remaining
+        assert remaining["description"] == description_digest
+        assert remaining["tags"] == tags_digest
+        unchanged = repository.save_media_metadata(
+            media_id,
+            MediaDisplayTitle("Changed title"),
+            MediaDescription("Original description"),
+            (CanonicalTagKey("mathematics"),),
+            now_ms=30,
+        )
+        assert unchanged.status == "unchanged"
+        with engine.connect() as connection:
+            after_noop = {
+                str(row[0])
+                for row in connection.execute(
+                    text(
+                        "SELECT field_name FROM companion_review_field_sources "
+                        "WHERE media_id = :media"
+                    ),
+                    {"media": media_id.to_string()},
+                )
+            }
+        assert after_noop == {"description", "tags"}
+    finally:
+        engine.dispose()
 
 
 def test_non_x_movie_metadata_edit_works(tmp_path: Path) -> None:

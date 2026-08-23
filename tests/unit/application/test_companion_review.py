@@ -15,7 +15,9 @@ from framenest.application.companion_review import (
     decode_stored_suggestion_result,
     encode_companion_review_cursor,
     inbox_title,
+    is_ordered_subsequence,
     map_suggested_tags,
+    validate_companion_review_apply_request,
 )
 from framenest.application.media_suggestion import (
     FrameNestMediaSuggestionError,
@@ -150,3 +152,27 @@ def test_cursor_round_trip_and_invalid_values() -> None:
         decode_companion_review_cursor("%%%")
     with pytest.raises(CompanionReviewQueryError):
         decode_companion_review_cursor("not-base64")
+
+
+def test_apply_request_validation_and_ordered_subsequence() -> None:
+    validate_companion_review_apply_request(
+        fields=("display_title", "tags"),
+        tag_keys=("cats", "dogs"),
+    )
+    with pytest.raises(CompanionReviewQueryError):
+        validate_companion_review_apply_request(fields=(), tag_keys=())
+    with pytest.raises(CompanionReviewQueryError):
+        validate_companion_review_apply_request(
+            fields=("display_title", "display_title"),
+            tag_keys=(),
+        )
+    with pytest.raises(CompanionReviewQueryError):
+        validate_companion_review_apply_request(fields=("tags",), tag_keys=())
+    with pytest.raises(CompanionReviewQueryError):
+        validate_companion_review_apply_request(
+            fields=("display_title",), tag_keys=("cats",)
+        )
+    eligible = ("cats", "dogs", "birds")
+    assert is_ordered_subsequence(("cats", "birds"), eligible) is True
+    assert is_ordered_subsequence(("dogs", "cats"), eligible) is False
+    assert is_ordered_subsequence(("trees",), eligible) is False

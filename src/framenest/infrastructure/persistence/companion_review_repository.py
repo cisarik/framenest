@@ -2,30 +2,40 @@
 
 from __future__ import annotations
 
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import and_, delete, func, insert, or_, select, update
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.engine import Connection, Engine
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.sql import Select
 
 from framenest.application.companion_review import (
     CanonicalTagView,
+    CompanionReviewApplyCanonical,
+    CompanionReviewApplyPublication,
+    CompanionReviewApplyResult,
     CompanionReviewCanonicalTag,
     CompanionReviewCodecError,
     CompanionReviewDetail,
     CompanionReviewFieldSource,
     CompanionReviewInboxItem,
     CompanionReviewInboxPage,
+    CompanionReviewOpenedResult,
     CompanionReviewSuggestion,
     canonical_field_digest,
     decode_stored_suggestion_result,
     derive_review_readiness,
+    eligible_mapped_tag_keys,
     encode_companion_review_cursor,
     inbox_title,
+    is_ordered_subsequence,
     map_suggested_tags,
 )
 from framenest.application.ports.companion_review_repository import (
+    CompanionReviewAnalysisRunNotFoundError,
     CompanionReviewMediaNotFoundError,
     CompanionReviewMovieExcludedError,
+    CompanionReviewRunNotEligibleError,
+    CompanionReviewStaleMappingError,
     CompanionReviewStoredResultError,
     FrameNestCompanionReviewRepositoryError,
 )
@@ -38,9 +48,11 @@ from framenest.domain.media_analysis_runs import (
 from framenest.domain.media_classification import (
     AnalysisProfile,
     ContentCategory,
+    DEFAULT_ACQUISITION_SOURCE,
     DEFAULT_CONTENT_CATEGORY,
     MOVIE_IDENTIFICATION_ANALYSIS_DEFINITION,
 )
+from framenest.domain.media_metadata import CanonicalTagKey, MediaCollectionKey, derive_collection_state
 from framenest.infrastructure.persistence.catalog_schema import (
     canonical_tags,
     companion_review_field_sources,
@@ -51,13 +63,22 @@ from framenest.infrastructure.persistence.catalog_schema import (
     media_content_publications,
     media_metadata,
 )
-from framenest.infrastructure.persistence.engine import run_in_transaction
+from framenest.infrastructure.persistence.engine import (
+    run_in_immediate_transaction,
+    run_in_transaction,
+)
 
 _REPOSITORY_FAILURE_MESSAGE = "Companion review query failed."
 _MEDIA_NOT_FOUND_MESSAGE = "The requested media item was not found."
 _MOVIE_EXCLUDED_MESSAGE = "Movie workflows are excluded from companion review."
 _STORED_RESULT_MESSAGE = "Stored analysis result is invalid."
+_RUN_NOT_FOUND_MESSAGE = "The requested analysis run was not found."
+_RUN_NOT_ELIGIBLE_MESSAGE = "The requested analysis run is not eligible."
+_STALE_MAPPING_MESSAGE = "Submitted tag keys are not an eligible mapping."
 _REVIEW_FIELDS = ("display_title", "tags", "description")
+_FIELD_DISPLAY_TITLE = "display_title"
+_FIELD_DESCRIPTION = "description"
+_FIELD_TAGS = "tags"
 
 
 class SqliteCompanionReviewRepository:
@@ -242,6 +263,252 @@ class SqliteCompanionReviewRepository:
         except CompanionReviewCodecError as exc:
             raise CompanionReviewStoredResultError(_STORED_RESULT_MESSAGE) from exc
         except SQLAlchemyError as exc:
+            raise FrameNestCompanionReviewRepositoryError(
+                _REPOSITORY_FAILURE_MESSAGE
+            ) from exc
+
+    def mark_opened(
+        self,
+        *,
+        media_id: MediaId,
+        actor_login_key: str,
+        analysis_run_id: MediaId,
+        now_ms: int,
+    ) -> CompanionReviewOpenedResult:
+        def operation(connection: Connection) -> CompanionReviewOpenedResult:
+            media_id_text = media_id.to_string()
+            requested_run_id = analysis_run_id.to_string()
+            _require_non_movie_media(connection, media_id_text)
+            requested = _require_eligible_run(
+                connection, media_id=media_id_text, analysis_run_id=requested_run_id
+            )
+            current = connection.execute(
+                select(
+                    companion_review_open_states.c.opened_run_id,
+                    companion_review_open_states.c.opened_at_ms,
+                ).where(
+                    companion_review_open_states.c.actor_login_key == actor_login_key,
+                    companion_review_open_states.c.media_id == media_id_text,
+                )
+            ).mappings().first()
+            keep_current = False
+            if current is not None:
+                current_run = _load_run_order_key(
+                    connection, str(current["opened_run_id"])
+                )
+                requested_key = (
+                    int(requested["completed_at_ms"]),
+                    str(requested["id"]),
+                )
+                if current_run is not None and current_run > requested_key:
+                    keep_current = True
+            if keep_current:
+                opened_run_id = str(current["opened_run_id"])
+                opened_at_ms = int(current["opened_at_ms"])
+            else:
+                opened_run_id = requested_run_id
+                opened_at_ms = now_ms
+                _upsert_opened_state(
+                    connection,
+                    actor_login_key=actor_login_key,
+                    media_id=media_id_text,
+                    opened_run_id=opened_run_id,
+                    opened_at_ms=opened_at_ms,
+                )
+            latest = _latest_run_id_for_media(connection, media_id_text)
+            unopened = latest is None or latest != opened_run_id
+            return CompanionReviewOpenedResult(
+                media_id=media_id_text,
+                opened_run_id=opened_run_id,
+                opened_at_ms=opened_at_ms,
+                unopened=unopened,
+            )
+
+        try:
+            return run_in_immediate_transaction(self._engine, operation)
+        except FrameNestCompanionReviewRepositoryError:
+            raise
+        except CompanionReviewCodecError as exc:
+            raise CompanionReviewStoredResultError(_STORED_RESULT_MESSAGE) from exc
+        except (IntegrityError, SQLAlchemyError) as exc:
+            raise FrameNestCompanionReviewRepositoryError(
+                _REPOSITORY_FAILURE_MESSAGE
+            ) from exc
+
+    def apply_review(
+        self,
+        *,
+        media_id: MediaId,
+        actor_login_key: str,
+        analysis_run_id: MediaId,
+        fields: tuple[str, ...],
+        tag_keys: tuple[str, ...],
+        now_ms: int,
+    ) -> CompanionReviewApplyResult:
+        def operation(connection: Connection) -> CompanionReviewApplyResult:
+            media_id_text = media_id.to_string()
+            run_id_text = analysis_run_id.to_string()
+            _require_non_movie_media(connection, media_id_text)
+            selected_run = _require_eligible_run(
+                connection, media_id=media_id_text, analysis_run_id=run_id_text
+            )
+            stored = decode_stored_suggestion_result(str(selected_run["result_json"]))
+            catalog = _load_canonical_catalog(connection)
+            mapped = map_suggested_tags(stored.tags, catalog)
+            eligible_keys = eligible_mapped_tag_keys(mapped)
+            if _FIELD_TAGS in fields and not is_ordered_subsequence(
+                tag_keys, eligible_keys
+            ):
+                raise CompanionReviewStaleMappingError(_STALE_MAPPING_MESSAGE)
+            current = _load_apply_canonical(connection, media_id_text)
+            new_title = (
+                stored.title
+                if _FIELD_DISPLAY_TITLE in fields
+                else current["display_title"]
+            )
+            new_description = (
+                stored.description
+                if _FIELD_DESCRIPTION in fields
+                else current["description"]
+            )
+            new_tag_keys = tag_keys if _FIELD_TAGS in fields else current["tag_keys"]
+            new_collection_key = current["collection_key"]
+            new_processed_at_ms = current["processed_at_ms"]
+            if _FIELD_TAGS in fields:
+                derived = derive_collection_state(
+                    (
+                        None
+                        if current["collection_key"] is None
+                        else MediaCollectionKey(current["collection_key"])
+                    ),
+                    current["processed_at_ms"],
+                    tuple(CanonicalTagKey(key) for key in new_tag_keys),
+                    now_ms,
+                )
+                new_collection_key = (
+                    None
+                    if derived.collection_key is None
+                    else derived.collection_key.value
+                )
+                new_processed_at_ms = derived.processed_at_ms
+            values_changed = (
+                new_title != current["display_title"]
+                or new_description != current["description"]
+                or new_tag_keys != current["tag_keys"]
+                or new_collection_key != current["collection_key"]
+                or new_processed_at_ms != current["processed_at_ms"]
+            )
+            if not current["persisted"]:
+                metadata_status = "created"
+                connection.execute(
+                    insert(media_metadata).values(
+                        media_id=media_id_text,
+                        display_title=new_title,
+                        description=new_description,
+                        content_category=DEFAULT_CONTENT_CATEGORY.value,
+                        acquisition_source=DEFAULT_ACQUISITION_SOURCE.value,
+                        collection_key=new_collection_key,
+                        processed_at_ms=new_processed_at_ms,
+                        created_at_ms=now_ms,
+                        updated_at_ms=now_ms,
+                    )
+                )
+                _replace_tag_assignments(connection, media_id_text, new_tag_keys)
+            elif values_changed:
+                metadata_status = "updated"
+                connection.execute(
+                    update(media_metadata)
+                    .where(media_metadata.c.media_id == media_id_text)
+                    .values(
+                        display_title=new_title,
+                        description=new_description,
+                        collection_key=new_collection_key,
+                        processed_at_ms=new_processed_at_ms,
+                        updated_at_ms=now_ms,
+                    )
+                )
+                if _FIELD_TAGS in fields:
+                    _replace_tag_assignments(connection, media_id_text, new_tag_keys)
+            else:
+                metadata_status = "unchanged"
+            selected_values = {
+                _FIELD_DISPLAY_TITLE: new_title,
+                _FIELD_DESCRIPTION: new_description,
+                _FIELD_TAGS: new_tag_keys,
+            }
+            for field_name in fields:
+                _upsert_field_source(
+                    connection,
+                    media_id=media_id_text,
+                    field_name=field_name,
+                    analysis_run_id=run_id_text,
+                    actor_login_key=actor_login_key,
+                    applied_at_ms=now_ms,
+                    value=selected_values[field_name],
+                )
+            tags = _load_canonical_tags(connection, media_id_text)
+            readiness = derive_review_readiness(
+                display_title=new_title,
+                description=new_description,
+                tag_count=len(tags),
+            )
+            publication = _load_publication(connection, media_id_text)
+            if publication is not None:
+                publication_status = "already_published"
+            elif readiness.ready:
+                connection.execute(
+                    insert(media_content_publications).values(
+                        media_id=media_id_text,
+                        published_at_ms=now_ms,
+                        publication_origin=ContentPublicationOrigin.COMPANION_REVIEW.value,
+                    )
+                )
+                publication = _load_publication(connection, media_id_text)
+                publication_status = "published"
+            else:
+                publication_status = "not_ready"
+            field_sources = _load_field_sources(
+                connection,
+                media_id=media_id_text,
+                display_title=new_title if isinstance(new_title, str) else None,
+                description=(
+                    new_description if isinstance(new_description, str) else None
+                ),
+                tag_keys=tuple(tag.key for tag in tags),
+            )
+            return CompanionReviewApplyResult(
+                metadata_status=metadata_status,
+                canonical=CompanionReviewApplyCanonical(
+                    display_title=new_title if isinstance(new_title, str) else None,
+                    description=(
+                        new_description if isinstance(new_description, str) else None
+                    ),
+                    tags=tags,
+                    field_sources=field_sources,
+                ),
+                publication=CompanionReviewApplyPublication(
+                    status=publication_status,
+                    state="published" if publication is not None else "unpublished",
+                    origin=(
+                        None
+                        if publication is None
+                        else publication.publication_origin.value
+                    ),
+                    published_at_ms=(
+                        None if publication is None else publication.published_at_ms
+                    ),
+                    ready=readiness.ready,
+                    missing_fields=readiness.missing_fields,
+                ),
+            )
+
+        try:
+            return run_in_immediate_transaction(self._engine, operation)
+        except FrameNestCompanionReviewRepositoryError:
+            raise
+        except CompanionReviewCodecError as exc:
+            raise CompanionReviewStoredResultError(_STORED_RESULT_MESSAGE) from exc
+        except (IntegrityError, SQLAlchemyError) as exc:
             raise FrameNestCompanionReviewRepositoryError(
                 _REPOSITORY_FAILURE_MESSAGE
             ) from exc
@@ -511,4 +778,227 @@ def _suggestion_from_run(
         title=stored.title,
         description=stored.description,
         tags=map_suggested_tags(stored.tags, catalog),
+    )
+
+
+def _require_non_movie_media(connection: Connection, media_id: str) -> None:
+    exists = connection.execute(
+        select(logical_media.c.id).where(logical_media.c.id == media_id)
+    ).first()
+    if exists is None:
+        raise CompanionReviewMediaNotFoundError(_MEDIA_NOT_FOUND_MESSAGE)
+    metadata_row = connection.execute(
+        select(media_metadata.c.content_category).where(
+            media_metadata.c.media_id == media_id
+        )
+    ).first()
+    content_category = DEFAULT_CONTENT_CATEGORY.value
+    if metadata_row is not None and metadata_row[0] is not None:
+        content_category = str(metadata_row[0])
+    if content_category == ContentCategory.MOVIE.value:
+        raise CompanionReviewMovieExcludedError(_MOVIE_EXCLUDED_MESSAGE)
+
+
+def _require_eligible_run(
+    connection: Connection, *, media_id: str, analysis_run_id: str
+):
+    existing = connection.execute(
+        select(media_analysis_runs.c.id).where(
+            media_analysis_runs.c.id == analysis_run_id
+        )
+    ).first()
+    if existing is None:
+        raise CompanionReviewAnalysisRunNotFoundError(_RUN_NOT_FOUND_MESSAGE)
+    row = connection.execute(
+        select(
+            media_analysis_runs.c.id,
+            media_analysis_runs.c.media_id,
+            media_analysis_runs.c.completed_at_ms,
+            media_analysis_runs.c.result_json,
+            media_analysis_runs.c.provider_id,
+            media_analysis_runs.c.model_id,
+        )
+        .select_from(
+            media_analysis_runs.outerjoin(
+                media_metadata,
+                media_metadata.c.media_id == media_analysis_runs.c.media_id,
+            )
+        )
+        .where(
+            media_analysis_runs.c.id == analysis_run_id,
+            media_analysis_runs.c.media_id == media_id,
+            *_successful_generic_predicates(),
+        )
+    ).mappings().first()
+    if row is None:
+        raise CompanionReviewRunNotEligibleError(_RUN_NOT_ELIGIBLE_MESSAGE)
+    return row
+
+
+def _load_run_order_key(
+    connection: Connection, analysis_run_id: str
+) -> tuple[int, str] | None:
+    row = connection.execute(
+        select(
+            media_analysis_runs.c.completed_at_ms,
+            media_analysis_runs.c.id,
+        ).where(media_analysis_runs.c.id == analysis_run_id)
+    ).first()
+    if row is None or row[0] is None:
+        return None
+    return int(row[0]), str(row[1])
+
+
+def _latest_run_id_for_media(connection: Connection, media_id: str) -> str | None:
+    latest = _latest_successful_generic().subquery("latest_generic")
+    row = connection.execute(
+        select(latest.c.id).where(latest.c.media_id == media_id)
+    ).first()
+    if row is None:
+        return None
+    return str(row[0])
+
+
+def _upsert_opened_state(
+    connection: Connection,
+    *,
+    actor_login_key: str,
+    media_id: str,
+    opened_run_id: str,
+    opened_at_ms: int,
+) -> None:
+    statement = sqlite_insert(companion_review_open_states).values(
+        actor_login_key=actor_login_key,
+        media_id=media_id,
+        opened_run_id=opened_run_id,
+        opened_at_ms=opened_at_ms,
+    )
+    statement = statement.on_conflict_do_update(
+        index_elements=[
+            companion_review_open_states.c.actor_login_key,
+            companion_review_open_states.c.media_id,
+        ],
+        set_={
+            "opened_run_id": statement.excluded.opened_run_id,
+            "opened_at_ms": statement.excluded.opened_at_ms,
+        },
+    )
+    connection.execute(statement)
+
+
+def _load_apply_canonical(connection: Connection, media_id: str) -> dict[str, object]:
+    metadata_row = connection.execute(
+        select(
+            media_metadata.c.display_title,
+            media_metadata.c.description,
+            media_metadata.c.collection_key,
+            media_metadata.c.processed_at_ms,
+        ).where(media_metadata.c.media_id == media_id)
+    ).mappings().first()
+    tag_rows = connection.execute(
+        select(media_canonical_tags.c.tag_key)
+        .where(media_canonical_tags.c.media_id == media_id)
+        .order_by(media_canonical_tags.c.position, media_canonical_tags.c.tag_key)
+    ).mappings().all()
+    tag_keys = tuple(str(row["tag_key"]) for row in tag_rows)
+    if metadata_row is None:
+        return {
+            "persisted": False,
+            "display_title": None,
+            "description": None,
+            "tag_keys": tag_keys,
+            "collection_key": None,
+            "processed_at_ms": None,
+        }
+    display_title = metadata_row["display_title"]
+    description = metadata_row["description"]
+    if isinstance(display_title, str) and not display_title.strip():
+        display_title = None
+    if isinstance(description, str) and not description.strip():
+        description = None
+    return {
+        "persisted": True,
+        "display_title": display_title if isinstance(display_title, str) else None,
+        "description": description if isinstance(description, str) else None,
+        "tag_keys": tag_keys,
+        "collection_key": metadata_row["collection_key"],
+        "processed_at_ms": metadata_row["processed_at_ms"],
+    }
+
+
+def _replace_tag_assignments(
+    connection: Connection, media_id: str, tag_keys: tuple[str, ...]
+) -> None:
+    connection.execute(
+        delete(media_canonical_tags).where(media_canonical_tags.c.media_id == media_id)
+    )
+    for position, key in enumerate(tag_keys):
+        connection.execute(
+            insert(media_canonical_tags).values(
+                media_id=media_id,
+                tag_key=key,
+                position=position,
+            )
+        )
+
+
+def _upsert_field_source(
+    connection: Connection,
+    *,
+    media_id: str,
+    field_name: str,
+    analysis_run_id: str,
+    actor_login_key: str,
+    applied_at_ms: int,
+    value: object,
+) -> None:
+    digest = canonical_field_digest(field_name, value)
+    statement = sqlite_insert(companion_review_field_sources).values(
+        media_id=media_id,
+        field_name=field_name,
+        analysis_run_id=analysis_run_id,
+        applied_by_login_key=actor_login_key,
+        applied_at_ms=applied_at_ms,
+        value_digest=digest,
+    )
+    statement = statement.on_conflict_do_update(
+        index_elements=[
+            companion_review_field_sources.c.media_id,
+            companion_review_field_sources.c.field_name,
+        ],
+        set_={
+            "analysis_run_id": statement.excluded.analysis_run_id,
+            "applied_by_login_key": statement.excluded.applied_by_login_key,
+            "applied_at_ms": statement.excluded.applied_at_ms,
+            "value_digest": statement.excluded.value_digest,
+        },
+    )
+    connection.execute(statement)
+
+
+def _load_canonical_tags(
+    connection: Connection, media_id: str
+) -> tuple[CompanionReviewCanonicalTag, ...]:
+    tag_rows = connection.execute(
+        select(
+            canonical_tags.c.key,
+            canonical_tags.c.display_name,
+            media_canonical_tags.c.position,
+        )
+        .select_from(
+            media_canonical_tags.join(
+                canonical_tags,
+                canonical_tags.c.key == media_canonical_tags.c.tag_key,
+            )
+        )
+        .where(media_canonical_tags.c.media_id == media_id)
+        .order_by(media_canonical_tags.c.position, canonical_tags.c.key)
+    ).mappings().all()
+    return tuple(
+        CompanionReviewCanonicalTag(
+            key=str(row["key"]),
+            display_name=str(row["display_name"]),
+            position=int(row["position"]),
+        )
+        for row in tag_rows
     )

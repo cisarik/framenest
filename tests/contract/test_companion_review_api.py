@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -28,6 +29,9 @@ MOVIE = "22222222-2222-4222-8222-222222222222"
 MOVIE_LOC = "42222222-2222-4222-8222-222222222222"
 MOVIE_RUN = "52222222-2222-4222-8222-222222222222"
 MISSING = "33333333-3333-4333-8333-333333333333"
+PUBLISH = "44444444-4444-4444-8444-444444444444"
+PUBLISH_LOC = "54444444-4444-4444-8444-444444444444"
+COMPANION_ORIGIN = "chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
 
 def _serve_headers(login: str, name: str = "User") -> dict[str, str]:
@@ -56,7 +60,17 @@ def _result_json(title: str) -> str:
     )
 
 
-def _client(tmp_path: Path) -> TestClient:
+def _mutation_headers(login: str = ADMIN_LOGIN, origin: str = EXTERNAL_ORIGIN) -> dict[str, str]:
+    return {
+        **_serve_headers(login, "Admin"),
+        "Origin": origin,
+        "X-FrameNest-Request": "1",
+    }
+
+
+def _client(
+    tmp_path: Path, *, companion_origins: tuple[str, ...] = ()
+) -> TestClient:
     settings = FrameNestSettings(
         database_path=tmp_path / "catalog.sqlite3",
         gallery_preview_cache_path=tmp_path / "previews",
@@ -67,6 +81,7 @@ def _client(tmp_path: Path) -> TestClient:
             ADMIN_LOGIN: "admin",
             USER_LOGIN: "user",
         },
+        companion_extension_origins=list(companion_origins),
         _env_file=None,
     )
     upgrade_database_to_head(settings)
@@ -99,6 +114,14 @@ def _seed(database_path: Path) -> None:
             )
             _insert_media(connection, GENERIC, GENERIC_LOC, "general", "Inbox title")
             _insert_media(connection, MOVIE, MOVIE_LOC, "movie", "Movie title")
+            _insert_media(connection, PUBLISH, PUBLISH_LOC, "general", "Website ready")
+            connection.execute(
+                text(
+                    "INSERT INTO media_canonical_tags (media_id, tag_key, position) "
+                    "VALUES (:media, 'cats', 0)"
+                ),
+                {"media": PUBLISH},
+            )
             _insert_run(connection, GENERIC_RUN, GENERIC, GENERIC_LOC, "Inbox stored")
             _insert_run(connection, MOVIE_RUN, MOVIE, MOVIE_LOC, "Movie stored")
     finally:
@@ -221,3 +244,150 @@ def test_bad_cursor_is_422_and_movie_detail_is_409(tmp_path: Path) -> None:
             params={"cursor": stale},
         )
         assert valid_cursor.status_code == 200
+
+
+def test_opened_and_apply_contracts(tmp_path: Path) -> None:
+    with _client(tmp_path, companion_origins=(COMPANION_ORIGIN,)) as client:
+        ordinary_opened = client.post(
+            f"/api/companion/review-inbox/{GENERIC}/opened",
+            headers=_mutation_headers(USER_LOGIN, COMPANION_ORIGIN),
+            json={"analysis_run_id": GENERIC_RUN},
+        )
+        assert ordinary_opened.status_code == 403
+        assert ordinary_opened.json()["error"]["code"] == "CAPABILITY_DENIED"
+        extra_apply = client.post(
+            f"/api/companion/review-inbox/{GENERIC}/apply",
+            headers=_mutation_headers(ADMIN_LOGIN, COMPANION_ORIGIN),
+            json={
+                "analysis_run_id": GENERIC_RUN,
+                "fields": ["display_title"],
+                "tag_keys": [],
+                "display_title": "client text",
+            },
+        )
+        assert extra_apply.status_code == 422
+        empty_tags = client.post(
+            f"/api/companion/review-inbox/{GENERIC}/apply",
+            headers=_mutation_headers(ADMIN_LOGIN, COMPANION_ORIGIN),
+            json={
+                "analysis_run_id": GENERIC_RUN,
+                "fields": ["tags"],
+                "tag_keys": [],
+            },
+        )
+        assert empty_tags.status_code == 422
+        opened = client.post(
+            f"/api/companion/review-inbox/{GENERIC}/opened",
+            headers=_mutation_headers(ADMIN_LOGIN, COMPANION_ORIGIN),
+            json={"analysis_run_id": GENERIC_RUN},
+        )
+        assert opened.status_code == 200
+        assert opened.headers.get("cache-control") == "no-store"
+        assert opened.json()["opened_run_id"] == GENERIC_RUN
+        assert opened.json()["unopened"] is False
+        listed = client.get(
+            "/api/companion/review-inbox",
+            headers=_serve_headers(ADMIN_LOGIN, "Admin"),
+        )
+        assert listed.json()["items"][0]["unopened"] is False
+        not_ready = client.post(
+            f"/api/companion/review-inbox/{GENERIC}/apply",
+            headers=_mutation_headers(ADMIN_LOGIN, COMPANION_ORIGIN),
+            json={
+                "analysis_run_id": GENERIC_RUN,
+                "fields": ["display_title"],
+                "tag_keys": [],
+            },
+        )
+        assert not_ready.status_code == 200
+        assert not_ready.json()["publication"]["status"] == "not_ready"
+        assert not_ready.json()["publication"]["state"] == "unpublished"
+        gallery = client.get("/api/media", headers=_serve_headers(USER_LOGIN, "Owner"))
+        assert GENERIC not in {item["media_id"] for item in gallery.json()["items"]}
+        published = client.post(
+            f"/api/companion/review-inbox/{GENERIC}/apply",
+            headers=_mutation_headers(ADMIN_LOGIN, COMPANION_ORIGIN),
+            json={
+                "analysis_run_id": GENERIC_RUN,
+                "fields": ["tags"],
+                "tag_keys": ["cats"],
+            },
+        )
+        assert published.status_code == 200
+        assert published.json()["publication"]["status"] == "published"
+        assert published.json()["publication"]["origin"] == "companion_review"
+        assert published.json()["canonical"]["field_sources"]["tags"] is not None
+        gallery_after = client.get(
+            "/api/media", headers=_serve_headers(USER_LOGIN, "Owner")
+        )
+        assert GENERIC in {
+            item["media_id"] for item in gallery_after.json()["items"]
+        }
+        website = client.put(
+            f"/api/admin/media/{PUBLISH}/content-publication",
+            headers=_mutation_headers(ADMIN_LOGIN),
+        )
+        assert website.status_code == 201
+        assert website.json()["publication"]["publication_origin"] == "admin_explicit"
+        movie = client.post(
+            f"/api/companion/review-inbox/{MOVIE}/apply",
+            headers=_mutation_headers(ADMIN_LOGIN, COMPANION_ORIGIN),
+            json={
+                "analysis_run_id": MOVIE_RUN,
+                "fields": ["display_title"],
+                "tag_keys": [],
+            },
+        )
+        assert movie.status_code == 409
+        missing = client.post(
+            f"/api/companion/review-inbox/{MISSING}/opened",
+            headers=_mutation_headers(ADMIN_LOGIN, COMPANION_ORIGIN),
+            json={"analysis_run_id": GENERIC_RUN},
+        )
+        assert missing.status_code == 404
+
+
+def test_audit_failure_blocks_opened_and_apply(tmp_path: Path) -> None:
+    with _client(tmp_path) as client:
+        connection = sqlite3.connect(tmp_path / "catalog.sqlite3")
+        try:
+            connection.execute("DROP TABLE security_audit_events")
+            connection.commit()
+        finally:
+            connection.close()
+        opened = client.post(
+            f"/api/companion/review-inbox/{GENERIC}/opened",
+            headers=_mutation_headers(),
+            json={"analysis_run_id": GENERIC_RUN},
+        )
+        apply = client.post(
+            f"/api/companion/review-inbox/{GENERIC}/apply",
+            headers=_mutation_headers(),
+            json={
+                "analysis_run_id": GENERIC_RUN,
+                "fields": ["display_title"],
+                "tag_keys": [],
+            },
+        )
+        assert opened.status_code == 500
+        assert opened.json()["error"]["code"] == "AUDIT_UNAVAILABLE"
+        assert apply.status_code == 500
+        assert apply.json()["error"]["code"] == "AUDIT_UNAVAILABLE"
+        listed = client.get(
+            "/api/companion/review-inbox",
+            headers=_serve_headers(ADMIN_LOGIN, "Admin"),
+        )
+        assert listed.json()["items"][0]["unopened"] is True
+        engine = create_sqlite_engine(tmp_path / "catalog.sqlite3")
+        try:
+            with engine.connect() as db:
+                receipts = db.execute(
+                    text("SELECT COUNT(*) FROM companion_review_field_sources")
+                ).scalar_one()
+                publications = db.execute(
+                    text("SELECT COUNT(*) FROM media_content_publications")
+                ).scalar_one()
+            assert int(receipts) == 0
+            assert int(publications) == 0
+        finally:
+            dispose_engine(engine)

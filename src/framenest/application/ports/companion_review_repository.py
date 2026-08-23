@@ -1,12 +1,14 @@
-"""Persistence port for administrator companion review inbox reads."""
+"""Persistence port for administrator companion review inbox reads and mutations."""
 
 from __future__ import annotations
 
 from typing import Protocol
 
 from framenest.application.companion_review import (
+    CompanionReviewApplyResult,
     CompanionReviewDetail,
     CompanionReviewInboxPage,
+    CompanionReviewOpenedResult,
 )
 from framenest.domain.identities import MediaId
 
@@ -27,8 +29,20 @@ class CompanionReviewStoredResultError(FrameNestCompanionReviewRepositoryError):
     """Raised when a stored suggestion payload cannot be decoded."""
 
 
+class CompanionReviewAnalysisRunNotFoundError(FrameNestCompanionReviewRepositoryError):
+    """Raised when the named analysis run does not exist."""
+
+
+class CompanionReviewRunNotEligibleError(FrameNestCompanionReviewRepositoryError):
+    """Raised when the named run is not an eligible generic success for the media."""
+
+
+class CompanionReviewStaleMappingError(FrameNestCompanionReviewRepositoryError):
+    """Raised when submitted tag keys are not an ordered subsequence of mapped keys."""
+
+
 class CompanionReviewRepository(Protocol):
-    """Read-only persistence contract for companion review inbox and history."""
+    """Persistence contract for companion review inbox, history, opened, and apply."""
 
     def list_inbox(
         self,
@@ -48,3 +62,25 @@ class CompanionReviewRepository(Protocol):
         cursor: tuple[int, str] | None,
     ) -> CompanionReviewDetail:
         """Return canonical state and one history page for one medium."""
+
+    def mark_opened(
+        self,
+        *,
+        media_id: MediaId,
+        actor_login_key: str,
+        analysis_run_id: MediaId,
+        now_ms: int,
+    ) -> CompanionReviewOpenedResult:
+        """Record a monotonic opened marker for one actor and medium."""
+
+    def apply_review(
+        self,
+        *,
+        media_id: MediaId,
+        actor_login_key: str,
+        analysis_run_id: MediaId,
+        fields: tuple[str, ...],
+        tag_keys: tuple[str, ...],
+        now_ms: int,
+    ) -> CompanionReviewApplyResult:
+        """Apply selected suggestion fields, upsert receipts, and publish when ready."""

@@ -122,6 +122,7 @@ class RoutePolicy:
         "pattern",
         "channel",
         "capability",
+        "additional_capabilities",
         "audit_action",
         "audit_target_type",
         "audit_target_group",
@@ -135,15 +136,21 @@ class RoutePolicy:
         template: str,
         channel: str = CHANNEL_TAILSCALE,
         capability: str | None = None,
+        additional_capabilities: tuple[str, ...] = (),
         audit_action: str | None = None,
         audit_target_type: str | None = None,
         audit_target_group: str | None = None,
         companion_mutation: bool = False,
     ) -> None:
+        if additional_capabilities and capability is None:
+            raise ValueError(
+                "additional capabilities require a primary capability"
+            )
         self.method = method
         self.pattern = _compile_template(template)
         self.channel = channel
         self.capability = capability
+        self.additional_capabilities = additional_capabilities
         self.audit_action = audit_action
         self.audit_target_type = audit_target_type
         self.audit_target_group = audit_target_group
@@ -487,6 +494,25 @@ ROUTE_POLICIES: tuple[RoutePolicy, ...] = (
     ),
     RoutePolicy(
         method="POST",
+        template="/api/companion/review-inbox/{media_id}/opened",
+        capability=CAPABILITY_MEDIA_WORKFLOW_READ,
+        audit_action="companion.review.open",
+        audit_target_type="media",
+        audit_target_group="media_id",
+        companion_mutation=True,
+    ),
+    RoutePolicy(
+        method="POST",
+        template="/api/companion/review-inbox/{media_id}/apply",
+        capability=CAPABILITY_MEDIA_CONTENT_PUBLISH,
+        additional_capabilities=(CAPABILITY_METADATA_CANONICAL_WRITE,),
+        audit_action="companion.review.apply_publish",
+        audit_target_type="media",
+        audit_target_group="media_id",
+        companion_mutation=True,
+    ),
+    RoutePolicy(
+        method="POST",
         template="/api/x/requests",
         capability=CAPABILITY_X_REQUEST,
         audit_action="x.request.submit",
@@ -720,9 +746,14 @@ class TailscaleIngressMiddleware:
             )
             return
 
-        if policy.capability is not None and not identity.has_capability(
-            policy.capability
-        ):
+        missing_capability = (
+            policy.capability is not None
+            and not identity.has_capability(policy.capability)
+        ) or any(
+            not identity.has_capability(extra)
+            for extra in policy.additional_capabilities
+        )
+        if missing_capability:
             await self._record_denial(
                 policy=policy,
                 policy_match=policy_match,

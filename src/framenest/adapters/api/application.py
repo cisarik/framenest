@@ -100,8 +100,10 @@ from framenest.application.content_publication import (
 from framenest.application.media_catalog import GetMediaCatalogItem, ListMediaCatalog
 from framenest.application.companion_picker import ListCompanionPickerMedia
 from framenest.application.companion_review import (
+    ApplyCompanionReview,
     GetCompanionReviewDetail,
     ListCompanionReviewInbox,
+    MarkCompanionReviewOpened,
 )
 from framenest.application.media_import import ImportMediaFromScanCandidate
 from framenest.application.media_metadata import (
@@ -990,6 +992,16 @@ def create_app(
                 None
                 if owned_companion_review_repository is None
                 else GetCompanionReviewDetail(owned_companion_review_repository)
+            ),
+            mark_opened=(
+                None
+                if owned_companion_review_repository is None
+                else MarkCompanionReviewOpened(owned_companion_review_repository)
+            ),
+            apply_review=(
+                None
+                if owned_companion_review_repository is None
+                else ApplyCompanionReview(owned_companion_review_repository)
             ),
             catalog_available=resolved_settings.database_path.exists,
         )

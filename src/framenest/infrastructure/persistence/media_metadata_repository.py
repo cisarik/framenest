@@ -28,11 +28,11 @@ from framenest.domain.media_classification import (
     CreatorAttributionKind,
     MovieGenre,
 )
+from framenest.application.companion_review import canonical_field_digest
 from framenest.domain.media_metadata import (
     CanonicalTag,
     CanonicalTagDisplayName,
     CanonicalTagKey,
-    CollectionState,
     derive_collection_state,
     FrameNestMediaMetadataError,
     MediaCollectionKey,
@@ -43,6 +43,7 @@ from framenest.domain.media_metadata import (
 )
 from framenest.infrastructure.persistence.catalog_schema import (
     canonical_tags,
+    companion_review_field_sources,
     logical_media,
     media_canonical_tags,
     media_genres,
@@ -352,6 +353,13 @@ class SqliteMediaMetadataRepository:
             )
             _insert_assignments(connection, media_id, tag_keys)
             _insert_genres(connection, media_id, normalized_genres)
+            _delete_stale_companion_receipts(
+                connection,
+                media_id=media_id.to_string(),
+                display_title=None if display_title is None else display_title.value,
+                description=None if description is None else description.value,
+                tag_keys=tuple(key.value for key in tag_keys),
+            )
             snapshot = MediaMetadataSnapshot(
                 media_id=media_id,
                 persisted=True,
@@ -386,6 +394,47 @@ class SqliteMediaMetadataRepository:
             raise FrameNestMediaMetadataRepositoryError(_REPOSITORY_FAILURE_MESSAGE) from exc
         except SQLAlchemyError as exc:
             raise FrameNestMediaMetadataRepositoryError(_REPOSITORY_FAILURE_MESSAGE) from exc
+
+
+def _delete_stale_companion_receipts(
+    connection: Connection,
+    *,
+    media_id: str,
+    display_title: str | None,
+    description: str | None,
+    tag_keys: tuple[str, ...],
+) -> None:
+    """Drop field-source receipts whose digest no longer matches canonical values."""
+    current_digests = {
+        "display_title": (
+            None
+            if display_title is None
+            else canonical_field_digest("display_title", display_title)
+        ),
+        "description": (
+            None
+            if description is None
+            else canonical_field_digest("description", description)
+        ),
+        "tags": canonical_field_digest("tags", tag_keys),
+    }
+    rows = connection.execute(
+        select(
+            companion_review_field_sources.c.field_name,
+            companion_review_field_sources.c.value_digest,
+        ).where(companion_review_field_sources.c.media_id == media_id)
+    ).mappings().all()
+    for row in rows:
+        field_name = str(row["field_name"])
+        expected = current_digests.get(field_name)
+        if expected is not None and str(row["value_digest"]) == expected:
+            continue
+        connection.execute(
+            delete(companion_review_field_sources).where(
+                companion_review_field_sources.c.media_id == media_id,
+                companion_review_field_sources.c.field_name == field_name,
+            )
+        )
 
 
 def _media_exists(connection: Connection, media_id: MediaId) -> bool:

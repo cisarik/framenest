@@ -11,9 +11,13 @@ from sqlalchemy import text
 from framenest.application.companion_review import MappedTagStatus
 from framenest.application.ports.companion_review_repository import (
     CompanionReviewMovieExcludedError,
+    CompanionReviewRunNotEligibleError,
+    CompanionReviewStaleMappingError,
     CompanionReviewStoredResultError,
+    FrameNestCompanionReviewRepositoryError,
 )
 from framenest.configuration import FrameNestSettings
+from framenest.domain.content_publication import ContentPublicationOrigin
 from framenest.domain.identities import MediaId
 from framenest.infrastructure.persistence.companion_review_repository import (
     SqliteCompanionReviewRepository,
@@ -30,6 +34,7 @@ GENERIC = "aaaaaaaa-aaaa-4aaa-8aaa-000000000001"
 GENERIC_LOC = "aaaaaaaa-aaaa-4aaa-8aaa-000000000011"
 GENERIC_RUN = "aaaaaaaa-aaaa-4aaa-8aaa-000000000021"
 GENERIC_FAIL = "aaaaaaaa-aaaa-4aaa-8aaa-000000000031"
+GENERIC_NEWER = "aaaaaaaa-aaaa-4aaa-8aaa-000000000041"
 
 MOVIE = "bbbbbbbb-bbbb-4bbb-8bbb-000000000002"
 MOVIE_LOC = "bbbbbbbb-bbbb-4bbb-8bbb-000000000012"
@@ -428,3 +433,303 @@ def _decode_cursor_tuple(cursor: str) -> tuple[int, str]:
     parsed = decode_companion_review_cursor(cursor)
     assert parsed is not None
     return parsed
+
+
+def test_mark_opened_is_actor_scoped_monotonic_and_idempotent(tmp_path: Path) -> None:
+    repository, engine = _repository(tmp_path)
+    try:
+        with engine.begin() as connection:
+            _insert_analyzed_run(
+                connection,
+                GENERIC_NEWER,
+                GENERIC,
+                GENERIC_LOC,
+                completed_at_ms=300,
+                title="Newer success",
+                tags=["Cats"],
+            )
+        first = repository.mark_opened(
+            media_id=MediaId.from_string(GENERIC),
+            actor_login_key=ADMIN_KEY,
+            analysis_run_id=MediaId.from_string(GENERIC_NEWER),
+            now_ms=400,
+        )
+        assert first.opened_run_id == GENERIC_NEWER
+        assert first.unopened is False
+        second = repository.mark_opened(
+            media_id=MediaId.from_string(GENERIC),
+            actor_login_key=ADMIN_KEY,
+            analysis_run_id=MediaId.from_string(GENERIC_RUN),
+            now_ms=500,
+        )
+        assert second.opened_run_id == GENERIC_NEWER
+        assert second.opened_at_ms == 400
+        assert second.unopened is False
+        refreshed = repository.mark_opened(
+            media_id=MediaId.from_string(GENERIC),
+            actor_login_key=ADMIN_KEY,
+            analysis_run_id=MediaId.from_string(GENERIC_NEWER),
+            now_ms=600,
+        )
+        assert refreshed.opened_run_id == GENERIC_NEWER
+        assert refreshed.opened_at_ms == 600
+        other = repository.list_inbox(actor_login_key=OTHER_KEY, limit=25, cursor=None)
+        other_generic = next(item for item in other.items if item.media_id == GENERIC)
+        assert other_generic.unopened is True
+        admin = repository.list_inbox(actor_login_key=ADMIN_KEY, limit=25, cursor=None)
+        admin_generic = next(item for item in admin.items if item.media_id == GENERIC)
+        assert admin_generic.unopened is False
+        older_only = repository.mark_opened(
+            media_id=MediaId.from_string(HISTORICAL),
+            actor_login_key=ADMIN_KEY,
+            analysis_run_id=MediaId.from_string(HISTORICAL_RUN),
+            now_ms=700,
+        )
+        assert older_only.unopened is False
+        with pytest.raises(CompanionReviewRunNotEligibleError):
+            repository.mark_opened(
+                media_id=MediaId.from_string(GENERIC),
+                actor_login_key=ADMIN_KEY,
+                analysis_run_id=MediaId.from_string(GENERIC_FAIL),
+                now_ms=800,
+            )
+        with pytest.raises(CompanionReviewMovieExcludedError):
+            repository.mark_opened(
+                media_id=MediaId.from_string(MOVIE),
+                actor_login_key=ADMIN_KEY,
+                analysis_run_id=MediaId.from_string(MOVIE_RUN),
+                now_ms=800,
+            )
+    finally:
+        dispose_engine(engine)
+
+
+def test_apply_review_preserves_unselected_fields_and_replaces_tags(
+    tmp_path: Path,
+) -> None:
+    repository, engine = _repository(tmp_path)
+    try:
+        title_only = repository.apply_review(
+            media_id=MediaId.from_string(WEBSITE),
+            actor_login_key=ADMIN_KEY,
+            analysis_run_id=MediaId.from_string(WEBSITE_RUN),
+            fields=("display_title",),
+            tag_keys=(),
+            now_ms=400,
+        )
+        assert title_only.metadata_status == "updated"
+        assert title_only.canonical.display_title == "Website Analyze-by-AI"
+        assert title_only.canonical.description == "Desc"
+        assert title_only.canonical.tags == ()
+        assert title_only.publication.status == "not_ready"
+        inbox = repository.list_inbox(actor_login_key=ADMIN_KEY, limit=25, cursor=None)
+        website = next(item for item in inbox.items if item.media_id == WEBSITE)
+        assert website.unopened is True
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "INSERT INTO media_canonical_tags (media_id, tag_key, position) "
+                    "VALUES (:media, 'dogs', 0)"
+                ),
+                {"media": GENERIC},
+            )
+        replaced = repository.apply_review(
+            media_id=MediaId.from_string(GENERIC),
+            actor_login_key=ADMIN_KEY,
+            analysis_run_id=MediaId.from_string(GENERIC_RUN),
+            fields=("tags",),
+            tag_keys=("cats",),
+            now_ms=401,
+        )
+        assert [tag.key for tag in replaced.canonical.tags] == ["cats"]
+        assert replaced.canonical.display_title == "Canonical generic"
+        assert replaced.canonical.description == "Desc"
+        assert replaced.publication.status == "published"
+        assert replaced.publication.origin == ContentPublicationOrigin.COMPANION_REVIEW.value
+        with engine.connect() as connection:
+            category = connection.execute(
+                text(
+                    "SELECT content_category, acquisition_source FROM media_metadata "
+                    "WHERE media_id = :media"
+                ),
+                {"media": GENERIC},
+            ).first()
+            tag_count = connection.execute(text("SELECT COUNT(*) FROM canonical_tags")).scalar_one()
+        assert category is not None
+        assert category[0] == "general"
+        assert category[1] == "manual_upload"
+        assert int(tag_count) == 8
+        assert replaced.canonical.field_sources["tags"] is not None
+        assert replaced.canonical.field_sources["display_title"] is None
+        repeat = repository.apply_review(
+            media_id=MediaId.from_string(GENERIC),
+            actor_login_key=ADMIN_KEY,
+            analysis_run_id=MediaId.from_string(GENERIC_RUN),
+            fields=("tags",),
+            tag_keys=("cats",),
+            now_ms=402,
+        )
+        assert repeat.publication.status == "already_published"
+        assert repeat.publication.origin == ContentPublicationOrigin.COMPANION_REVIEW.value
+        assert repeat.publication.published_at_ms == 401
+    finally:
+        dispose_engine(engine)
+
+
+def test_apply_review_rejects_stale_mapping_zero_union_and_movie_race(
+    tmp_path: Path,
+) -> None:
+    repository, engine = _repository(tmp_path)
+    try:
+        with pytest.raises(CompanionReviewStaleMappingError):
+            repository.apply_review(
+                media_id=MediaId.from_string(HISTORICAL),
+                actor_login_key=ADMIN_KEY,
+                analysis_run_id=MediaId.from_string(HISTORICAL_RUN),
+                fields=("tags",),
+                tag_keys=("dogs", "cats"),
+                now_ms=10,
+            )
+        with pytest.raises(CompanionReviewStaleMappingError):
+            repository.apply_review(
+                media_id=MediaId.from_string(HISTORICAL),
+                actor_login_key=ADMIN_KEY,
+                analysis_run_id=MediaId.from_string(HISTORICAL_RUN),
+                fields=("tags",),
+                tag_keys=("trees",),
+                now_ms=10,
+            )
+        accepted = repository.apply_review(
+            media_id=MediaId.from_string(HISTORICAL),
+            actor_login_key=ADMIN_KEY,
+            analysis_run_id=MediaId.from_string(HISTORICAL_RUN),
+            fields=("tags",),
+            tag_keys=("cats", "birds"),
+            now_ms=11,
+        )
+        assert [tag.key for tag in accepted.canonical.tags] == ["cats", "birds"]
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "UPDATE media_metadata SET content_category = 'movie' "
+                    "WHERE media_id = :media"
+                ),
+                {"media": WEBSITE},
+            )
+        with pytest.raises(CompanionReviewMovieExcludedError):
+            repository.apply_review(
+                media_id=MediaId.from_string(WEBSITE),
+                actor_login_key=ADMIN_KEY,
+                analysis_run_id=MediaId.from_string(WEBSITE_RUN),
+                fields=("display_title",),
+                tag_keys=(),
+                now_ms=12,
+            )
+        with engine.connect() as connection:
+            title = connection.execute(
+                text("SELECT display_title FROM media_metadata WHERE media_id = :media"),
+                {"media": WEBSITE},
+            ).scalar_one()
+            receipts = connection.execute(
+                text(
+                    "SELECT COUNT(*) FROM companion_review_field_sources "
+                    "WHERE media_id = :media"
+                ),
+                {"media": WEBSITE},
+            ).scalar_one()
+            publications = connection.execute(
+                text(
+                    "SELECT COUNT(*) FROM media_content_publications "
+                    "WHERE media_id = :media"
+                ),
+                {"media": WEBSITE},
+            ).scalar_one()
+        assert title is None
+        assert int(receipts) == 0
+        assert int(publications) == 0
+    finally:
+        dispose_engine(engine)
+
+
+def test_apply_review_same_value_newer_receipt_and_atomic_rollback(
+    tmp_path: Path,
+) -> None:
+    repository, engine = _repository(tmp_path)
+    try:
+        first = repository.apply_review(
+            media_id=MediaId.from_string(GENERIC),
+            actor_login_key=ADMIN_KEY,
+            analysis_run_id=MediaId.from_string(GENERIC_RUN),
+            fields=("display_title",),
+            tag_keys=(),
+            now_ms=20,
+        )
+        assert first.canonical.field_sources["display_title"] is not None
+        assert first.canonical.field_sources["display_title"].analysis_run_id == GENERIC_RUN
+        with engine.begin() as connection:
+            _insert_analyzed_run(
+                connection,
+                GENERIC_NEWER,
+                GENERIC,
+                GENERIC_LOC,
+                completed_at_ms=350,
+                title="Older success",
+                tags=["Cats"],
+            )
+        second = repository.apply_review(
+            media_id=MediaId.from_string(GENERIC),
+            actor_login_key=ADMIN_KEY,
+            analysis_run_id=MediaId.from_string(GENERIC_NEWER),
+            fields=("display_title",),
+            tag_keys=(),
+            now_ms=21,
+        )
+        receipt = second.canonical.field_sources["display_title"]
+        assert receipt is not None
+        assert receipt.analysis_run_id == GENERIC_NEWER
+        assert receipt.applied_at_ms == 21
+        assert second.canonical.display_title == "Older success"
+        from unittest.mock import patch
+
+        from sqlalchemy.exc import SQLAlchemyError
+
+        def _boom(*args, **kwargs):
+            raise SQLAlchemyError("forced failure")
+
+        with patch(
+            "framenest.infrastructure.persistence.companion_review_repository._upsert_field_source",
+            side_effect=_boom,
+        ):
+            with pytest.raises(FrameNestCompanionReviewRepositoryError):
+                repository.apply_review(
+                    media_id=MediaId.from_string(WEBSITE),
+                    actor_login_key=ADMIN_KEY,
+                    analysis_run_id=MediaId.from_string(WEBSITE_RUN),
+                    fields=("display_title", "description", "tags"),
+                    tag_keys=("dogs",),
+                    now_ms=22,
+                )
+        with engine.connect() as connection:
+            title = connection.execute(
+                text("SELECT display_title FROM media_metadata WHERE media_id = :media"),
+                {"media": WEBSITE},
+            ).scalar_one()
+            receipts = connection.execute(
+                text(
+                    "SELECT COUNT(*) FROM companion_review_field_sources "
+                    "WHERE media_id = :media"
+                ),
+                {"media": WEBSITE},
+            ).scalar_one()
+            publications = connection.execute(
+                text(
+                    "SELECT COUNT(*) FROM media_content_publications "
+                    "WHERE media_id = :media"
+                ),
+                {"media": WEBSITE},
+            ).scalar_one()
+        assert title is None
+        assert int(receipts) == 0
+        assert int(publications) == 0
+    finally:
+        dispose_engine(engine)
