@@ -48,6 +48,7 @@
     let removed = {};
     let lastError = "";
     let overlayOpen = true;
+    const openedRunIds = {};
 
     function suggestions() {
       return detail && Array.isArray(detail.suggestions) ? detail.suggestions : [];
@@ -116,16 +117,36 @@
       if (!companion.isUuid(mediaId) || !companion.isUuid(runId)) {
         return { ok: false, error: "invalid_opened" };
       }
+      const openedMediaId = mediaId;
+      const openedRunId = runId;
       const response = await request(companion.TYPES.REVIEW_INBOX_OPENED, {
-        mediaId: mediaId,
-        analysis_run_id: runId,
+        mediaId: openedMediaId,
+        analysis_run_id: openedRunId,
       });
       if (response && (response.forbidden || response.status === 403)) {
         handleForbidden();
         return response;
       }
       if (response && response.ok) {
+        openedRunIds[openedRunId] = true;
         notifyParent(companion.REVIEW_OVERLAY.types.INBOX_REFRESH);
+      }
+      return response;
+    }
+
+    async function ensureOpened() {
+      if (openedRunIds[runId] === true) {
+        return { ok: true, already_opened: true };
+      }
+      const response = await postOpened();
+      if (response && (response.forbidden || response.status === 403)) {
+        return response;
+      }
+      if (!response || !response.ok) {
+        lastError = "This review could not be marked opened.";
+        overlayOpen = true;
+        paint();
+        return response || { ok: false, error: "opened_failed" };
       }
       return response;
     }
@@ -213,6 +234,10 @@
         lastError = "Select at least one field.";
         paint();
         return { ok: false, error: "invalid_apply" };
+      }
+      const openedResponse = await ensureOpened();
+      if (!openedResponse || !openedResponse.ok) {
+        return openedResponse;
       }
       const previousFields = {
         display_title: fields.display_title,

@@ -27,7 +27,8 @@ scan-candidate import into the minimum persistent media catalog, persistent
 display-title and canonical-tag core, local media-analysis preview,
 provider-neutral NVIDIA suggestion prototype, bounded JPEG VLM transport,
 explicit editable browser AI suggestion review, an administrator companion
-review inbox for successful generic analysis runs, ordinary-user private upload
+unread-analysis queue plus title-bar all-item history for successful generic
+analysis runs, ordinary-user private upload
 submission with administrator review, requester-private YouTube acquisition with
 administrator promotion, requester-private X meme acquisition (native X video,
 animated-GIF-like media delivered as video, and public JPEG/PNG photos), and
@@ -45,8 +46,12 @@ ordinary Gallery until persisted title, description, and canonical-tag metadata
 is ready and an authorized administrator publishes.
 
 Website on-demand AI suggestion review remains session-only and is not catalog
-truth. Companion review is a separate durable administrator inbox of successful
-generic runs ([ADR-0067](docs/adr/0067-administrator-companion-review-inbox-and-mutation-trust.md)).
+truth. Companion review is a separate durable administrator surface over
+successful generic runs: unopened latest runs form a quiet attention queue,
+while the title bar expands fully paginated all-item history without replacing
+the hosted FrameNest iframe
+([ADR-0067](docs/adr/0067-administrator-companion-review-inbox-and-mutation-trust.md),
+[ADR-0072](docs/adr/0072-native-side-panel-unread-inbox-and-title-bar-history-chrome.md)).
 Automatic post-catalog analysis stays default-off; administrator-owned X catalog
 events may enqueue generic analysis when
 `FRAMENEST_AUTOMATIC_MEDIA_ANALYSIS_ENABLED` is true
@@ -391,7 +396,7 @@ Ordinary clients should not configure provider credentials or call providers
 directly. Browser status and results must be sanitized. Production
 provider-secret integration remains unresolved.
 
-Suspicious filenames may be manually analyzed, but AI suggestions require confirmation. Current pre-alpha website AI suggestion review is editable, session-only, and not catalog truth. The companion review inbox is a separate durable administrator surface over successful generic runs; it does not replace that website session review.
+Suspicious filenames may be manually analyzed, but AI suggestions require confirmation. Current pre-alpha website AI suggestion review is editable, session-only, and not catalog truth. The companion review surface is a separate durable administrator attention queue plus all-item history over successful generic runs; it does not replace that website session review. Opening or Saving a companion review durably clears unread attention, while history retains the item.
 
 FrameNest must not automatically rename media.
 

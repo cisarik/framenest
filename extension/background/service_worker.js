@@ -587,22 +587,57 @@ async function reviewInboxApply(payload) {
   );
 }
 
-async function reviewInbox() {
-  const response = await fetchJson("reviewInbox");
-  if (!response.ok) {
-    await applyBadgeFromResponse(response);
-    return {
-      ok: false,
-      error: response.error,
-      status: response.status || 0,
-      forbidden: inboxForbidden(response),
-      items: [],
-      unopened_count: 0,
-      awaiting: [],
-    };
+function reviewInboxPageSuffix(cursor) {
+  const query = new URLSearchParams();
+  query.set("limit", String(companion.REVIEW_INBOX.maxLimit));
+  if (typeof cursor === "string" && cursor) {
+    query.set("cursor", cursor);
   }
-  await applyBadgeFromResponse(response);
-  const items = companion.sanitizeReviewInboxItems(response.body && response.body.items);
+  return "?" + query.toString();
+}
+
+async function failedReviewInbox(response, error) {
+  await clearBadgeText();
+  return {
+    ok: false,
+    error: error || (response && response.error) || "request_failed",
+    status: (response && response.status) || 0,
+    forbidden: inboxForbidden(response),
+    items: [],
+    unopened_count: 0,
+    awaiting: [],
+  };
+}
+
+async function reviewInbox() {
+  const items = [];
+  const seenCursors = {};
+  let cursor = "";
+  let unopenedCount = 0;
+  let firstPage = true;
+  while (true) {
+    const response = await fetchJson("reviewInbox", {
+      suffix: reviewInboxPageSuffix(cursor),
+    });
+    if (!response.ok) {
+      return failedReviewInbox(response);
+    }
+    if (firstPage) {
+      unopenedCount = companion.unopenedCountFromBody(response.body);
+      firstPage = false;
+    }
+    items.push(...companion.sanitizeReviewInboxItems(response.body && response.body.items));
+    const nextCursor = response.body && response.body.next_cursor;
+    if (typeof nextCursor !== "string" || !nextCursor) {
+      break;
+    }
+    if (seenCursors[nextCursor]) {
+      return failedReviewInbox(null, "cursor_cycle");
+    }
+    seenCursors[nextCursor] = true;
+    cursor = nextCursor;
+  }
+  await applyBadgeFromResponse({ ok: true, body: { unopened_count: unopenedCount } });
   const inboxIds = items.map((item) => item.media_id);
   const awaiting = companion.pruneAwaitingRecords(
     await readAwaitingRecords(),
@@ -614,7 +649,7 @@ async function reviewInbox() {
     ok: true,
     forbidden: false,
     items: items,
-    unopened_count: companion.unopenedCountFromBody(response.body),
+    unopened_count: unopenedCount,
     awaiting: awaiting,
   };
 }

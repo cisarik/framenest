@@ -77,6 +77,8 @@ function createChromeFake(options) {
         unopened_count: 0,
         next_cursor: null,
       },
+    inboxResponses: (options && options.inboxResponses) || null,
+    inboxResponseIndex: 0,
     claimBody: (options && options.claimBody) || { state: "completed", assets: [] },
     detailStatus: (options && options.detailStatus) || 200,
     detailBody: (options && options.detailBody) || {},
@@ -210,6 +212,11 @@ function createChromeFake(options) {
       return jsonResponse(state.detailStatus, state.detailBody);
     }
     if (href.indexOf("/api/companion/review-inbox") !== -1) {
+      if (Array.isArray(state.inboxResponses)) {
+        const response = state.inboxResponses[state.inboxResponseIndex];
+        state.inboxResponseIndex += 1;
+        return jsonResponse(response.status, response.body);
+      }
       return jsonResponse(state.inboxStatus, state.inboxBody);
     }
     return jsonResponse(404, {});
@@ -373,6 +380,25 @@ function fakeListNode() {
     },
   };
   return list;
+}
+
+function fakeReviewChromeNodes() {
+  const attributes = { "aria-expanded": "false" };
+  return {
+    toggle: {
+      disabled: false,
+      setAttribute(name, value) {
+        attributes[name] = String(value);
+      },
+      getAttribute(name) {
+        return attributes[name] || null;
+      },
+    },
+    history: { hidden: true },
+    historyList: fakeListNode(),
+    inbox: { hidden: true },
+    inboxList: fakeListNode(),
+  };
 }
 
 test("manifest adds alarms, keeps action, and does not add notifications or overlay WAR", () => {
@@ -629,7 +655,7 @@ test("REVIEW_INBOX hides titles on 403 and does not fetch caller URLs", async ()
   assert.equal(listed.items.length, 1);
   assert.equal(listed.items[0].title, "Admin title");
   const listCall = worker.state.fetchCalls[worker.state.fetchCalls.length - 1];
-  assert.equal(listCall.url, ORIGIN + "/api/companion/review-inbox");
+  assert.equal(listCall.url, ORIGIN + "/api/companion/review-inbox?limit=100");
   assert.equal(listCall.url.indexOf("evil.example"), -1);
 
   worker.state.inboxStatus = 403;
@@ -645,6 +671,111 @@ test("REVIEW_INBOX hides titles on 403 and does not fetch caller URLs", async ()
   assert.equal(denied.unopened_count, 0);
   assert.equal(JSON.stringify(denied).indexOf("Ordinary must not see this"), -1);
   assert.equal(worker.state.badgeText, "");
+});
+
+test("REVIEW_INBOX aggregates encoded cursor pages in server order", async () => {
+  const cursor = "next page +/&=";
+  const worker = loadWorker({
+    storage: { frameNestOrigin: ORIGIN },
+    inboxResponses: [
+      {
+        status: 200,
+        body: {
+          items: [
+            {
+              media_id: MEDIA_A,
+              title: "Newest",
+              analysis_run_id: RUN_NEW,
+              completed_at_ms: 20,
+              unopened: true,
+            },
+          ],
+          unopened_count: 1,
+          next_cursor: cursor,
+        },
+      },
+      {
+        status: 200,
+        body: {
+          items: [
+            {
+              media_id: MEDIA_B,
+              title: "Older",
+              analysis_run_id: RUN_OLD,
+              completed_at_ms: 10,
+              unopened: false,
+            },
+          ],
+          unopened_count: 1,
+          next_cursor: null,
+        },
+      },
+    ],
+  });
+  const result = await worker.context.reviewInbox();
+  assert.equal(result.ok, true);
+  assert.equal(result.unopened_count, 1);
+  assert.deepEqual(
+    Array.from(result.items, (item) => item.title),
+    ["Newest", "Older"]
+  );
+  assert.equal(worker.state.fetchCalls.length, 2);
+  const first = new URL(worker.state.fetchCalls[0].url);
+  const second = new URL(worker.state.fetchCalls[1].url);
+  assert.equal(first.searchParams.get("limit"), "100");
+  assert.equal(first.searchParams.has("cursor"), false);
+  assert.equal(second.searchParams.get("limit"), "100");
+  assert.equal(second.searchParams.get("cursor"), cursor);
+  assert.equal(worker.state.badgeText, "1");
+});
+
+test("REVIEW_INBOX rejects cursor cycles and later-page failures without partial titles", async () => {
+  const firstPage = {
+    items: [
+      {
+        media_id: MEDIA_A,
+        title: "Must not escape",
+        analysis_run_id: RUN_NEW,
+        completed_at_ms: 20,
+        unopened: true,
+      },
+    ],
+    unopened_count: 1,
+    next_cursor: "repeat",
+  };
+  const cycleWorker = loadWorker({
+    storage: { frameNestOrigin: ORIGIN },
+    inboxResponses: [
+      { status: 200, body: firstPage },
+      {
+        status: 200,
+        body: { items: [], unopened_count: 1, next_cursor: "repeat" },
+      },
+    ],
+  });
+  cycleWorker.state.badgeText = "9";
+  const cycle = await cycleWorker.context.reviewInbox();
+  assert.equal(cycle.ok, false);
+  assert.equal(cycle.error, "cursor_cycle");
+  assert.deepEqual(Array.from(cycle.items), []);
+  assert.equal(JSON.stringify(cycle).includes("Must not escape"), false);
+  assert.equal(cycleWorker.state.fetchCalls.length, 2);
+  assert.equal(cycleWorker.state.badgeText, "");
+
+  const failedWorker = loadWorker({
+    storage: { frameNestOrigin: ORIGIN },
+    inboxResponses: [
+      { status: 200, body: firstPage },
+      { status: 500, body: { items: [{ title: "also private" }] } },
+    ],
+  });
+  failedWorker.state.badgeText = "8";
+  const failed = await failedWorker.context.reviewInbox();
+  assert.equal(failed.ok, false);
+  assert.equal(failed.status, 500);
+  assert.deepEqual(Array.from(failed.items), []);
+  assert.equal(JSON.stringify(failed).includes("Must not escape"), false);
+  assert.equal(failedWorker.state.badgeText, "");
 });
 
 test("awaiting-analysis stores media UUIDs for 30 minutes and does not change badge math", async () => {
@@ -698,39 +829,65 @@ test("awaiting-analysis stores media UUIDs for 30 minutes and does not change ba
   assert.deepEqual(expired, []);
 });
 
-test("S1 chrome sits between status and iframe and empty copy is exact", () => {
+test("title-bar history and unread chrome have the accepted DOM, ARIA, and status contract", () => {
+  const titleBarAt = sidebarHtml.indexOf('class="title-bar"');
+  const titleBarEnd = sidebarHtml.indexOf("</div>", titleBarAt);
+  const toggleAt = sidebarHtml.indexOf('id="review-history-toggle"');
+  const wordmarkAt = sidebarHtml.indexOf('class="title-bar__wordmark"');
+  const settingsAt = sidebarHtml.indexOf('id="settings-open"');
+  const actionAt = sidebarHtml.indexOf('id="chrome-action"');
+  const historyAt = sidebarHtml.indexOf('id="review-history"');
   const statusAt = sidebarHtml.indexOf('id="shell-status"');
   const inboxAt = sidebarHtml.indexOf('id="review-inbox"');
   const frameAt = sidebarHtml.indexOf('id="frame"');
-  assert.ok(statusAt >= 0 && inboxAt > statusAt && frameAt > inboxAt);
-  assert.match(sidebarHtml, />No analyzed items\.</);
+  assert.ok(titleBarAt >= 0 && toggleAt > titleBarAt && toggleAt < titleBarEnd);
+  assert.ok(wordmarkAt > toggleAt && settingsAt > wordmarkAt && actionAt > settingsAt);
+  assert.ok(historyAt > titleBarEnd && statusAt > historyAt && inboxAt > statusAt && frameAt > inboxAt);
+  assert.match(
+    sidebarHtml,
+    /id="review-history-toggle"[\s\S]*?type="button"[\s\S]*?aria-label="Analysis history"[\s\S]*?aria-expanded="false"[\s\S]*?aria-controls="review-history"[\s\S]*?disabled/
+  );
+  assert.match(sidebarHtml, /id="review-history-list"[^>]+aria-label="Analysis history"/);
+  assert.match(sidebarHtml, /id="review-inbox-list"[^>]+aria-label="Unread analyses"/);
+  assert.doesNotMatch(sidebarHtml, />\s*Review inbox\s*</);
+  assert.doesNotMatch(sidebarHtml, /No analyzed items\./);
+  assert.doesNotMatch(sidebarHtml, /Awaiting analysis/);
   assert.match(sidebarHtml, /id="review-dialog"/);
   assert.match(sidebarHtml, /id="review-frame"/);
   assert.match(sidebarSource, /ui\/review\.html/);
+  assert.doesNotMatch(sidebarSource, /explicitCollapsedKey|seenRunIdKey/);
+  assert.doesNotMatch(sidebarSource, /setText\(shellStatus,\s*"Connected"/);
+  assert.match(sidebarSource, /Connect FrameNest in Settings/);
+  assert.match(sidebarSource, /setText\(shellStatus, "Cleared"\)/);
+  assert.match(sidebarSource, /setText\(shellStatus, "Attached"\)/);
   assert.doesNotMatch(extractNamedFunction(sidebarSource, "openReviewOverlay"), /clearFrame/);
   assert.doesNotMatch(extractNamedFunction(sidebarSource, "closeReviewOverlay"), /clearFrame/);
-  assert.match(sidebarCss, /#review-inbox\.is-collapsed \.review-inbox__panel/);
+  assert.match(sidebarCss, /\.title-bar__history-toggle\s*{[\s\S]*?position:\s*absolute;[\s\S]*?inset:\s*0;/);
+  assert.match(sidebarCss, /\.title-bar__wordmark\s*{[\s\S]*?pointer-events:\s*none/);
+  assert.match(sidebarCss, /\.title-bar__settings\s*{[\s\S]*?z-index:\s*2/);
+  assert.match(sidebarCss, /\.title-bar__action\s*{[\s\S]*?z-index:\s*2/);
+  assert.match(sidebarCss, /\.shell-status:empty\s*{[\s\S]*?display:\s*none/);
+  assert.match(sidebarCss, /\.review-list:empty\s*{[\s\S]*?display:\s*none/);
   assert.match(sidebarCss, /max-height:\s*8\.5rem/);
   assert.match(sidebarCss, /overflow-y:\s*auto/);
   assert.doesNotMatch(extractNamedFunction(sidebarSource, "hideInboxSection"), /clearFrame/);
   assert.doesNotMatch(extractNamedFunction(sidebarSource, "hideInboxSection"), /frame/);
-  assert.doesNotMatch(extractNamedFunction(sidebarSource, "applyInboxCollapse"), /clearFrame/);
-  assert.doesNotMatch(extractNamedFunction(sidebarSource, "onInboxToggle"), /clearFrame/);
+  assert.doesNotMatch(extractNamedFunction(sidebarSource, "setReviewHistoryExpanded"), /frame/);
+  assert.doesNotMatch(extractNamedFunction(sidebarSource, "renderReviewCollections"), /frame/);
+  assert.doesNotMatch(extractNamedFunction(sidebarSource, "hideReviewCollections"), /frame/);
   assert.doesNotMatch(sidebarSource, /innerHTML/);
   assert.doesNotMatch(sidebarSource, /\bfetch\s*\(/);
+  assert.doesNotMatch(sidebarSource, /addEventListener\(["'](?:hover|mouseover|mouseenter|focus|focusin)["']/);
   assert.match(sidebarSource, /setInterval/);
   assert.match(sidebarSource, /visibilitychange/);
   assert.match(sidebarSource, /TYPES\.REVIEW_INBOX/);
+  assert.match(sidebarSource, /onReviewListClick\(event, reviewHistoryList\)/);
+  assert.match(sidebarSource, /onReviewListClick\(event, reviewInboxList\)/);
 });
 
-test("native list renders titles with textContent and collapse rules skip title storage", () => {
+test("history keeps all rows while unread filters exact true and chrome never mutates the iframe", () => {
   const inbox = loadReviewInbox();
-  assert.equal(inbox.EMPTY_COPY, "No analyzed items.");
-  assert.equal(inbox.HINT_COPY, "Awaiting analysis");
   assert.equal(inbox.POLL_MS, 15000);
-  assert.equal(inbox.visualCollapsed(false, 0), true);
-  assert.equal(inbox.visualCollapsed(true, 2), true);
-  assert.equal(inbox.visualCollapsed(false, 2), false);
   const items = [
     {
       media_id: MEDIA_A,
@@ -747,20 +904,46 @@ test("native list renders titles with textContent and collapse rules skip title 
       unopened: false,
     },
   ];
-  assert.equal(inbox.newestRunId(items), RUN_NEW);
-  const list = fakeListNode();
-  inbox.renderList(list, items);
-  assert.equal(list.childNodes.length, 2);
-  assert.equal(list.childNodes[0].textContent, "<img src=x onerror=alert(1)>");
-  assert.equal(list.childNodes[0].tagName, "LI");
-  assert.equal(list.childNodes[0].childNodes[0].tagName, "BUTTON");
-  assert.equal(list.childNodes[0].childNodes[0].getAttribute("data-media-id"), MEDIA_A);
-  const persistFn = extractNamedFunction(sidebarSource, "persistInboxPrefs");
-  assert.match(persistFn, /explicitCollapsedKey/);
-  assert.match(persistFn, /seenRunIdKey/);
-  assert.doesNotMatch(persistFn, /title/);
-  assert.doesNotMatch(persistFn, /description/);
-  assert.doesNotMatch(persistFn, /result_json/);
+  assert.equal(inbox.unreadItems(items).length, 1);
+  assert.equal(inbox.unreadItems(items)[0].analysis_run_id, RUN_NEW);
+  const nodes = fakeReviewChromeNodes();
+  const hostFrame = { hidden: false, src: ORIGIN };
+  const result = inbox.renderCollections(nodes, items);
+  assert.deepEqual(
+    Array.from(result.historyItems, (item) => item.analysis_run_id),
+    [RUN_NEW, RUN_OLD]
+  );
+  assert.deepEqual(Array.from(result.unreadItems, (item) => item.analysis_run_id), [RUN_NEW]);
+  assert.equal(nodes.historyList.childNodes.length, 2);
+  assert.equal(nodes.inboxList.childNodes.length, 1);
+  assert.equal(nodes.historyList.childNodes[0].textContent, "<img src=x onerror=alert(1)>");
+  assert.equal(nodes.inboxList.childNodes[0].textContent, "<img src=x onerror=alert(1)>");
+  assert.equal(nodes.historyList.childNodes[0].tagName, "LI");
+  assert.equal(nodes.historyList.childNodes[0].childNodes[0].tagName, "BUTTON");
+  assert.equal(
+    nodes.historyList.childNodes[0].childNodes[0].getAttribute("data-media-id"),
+    MEDIA_A
+  );
+  assert.equal(inbox.setHistoryExpanded(nodes.toggle, nodes.history, true), true);
+  assert.equal(nodes.toggle.getAttribute("aria-expanded"), "true");
+  assert.equal(nodes.history.hidden, false);
+  assert.equal(inbox.setHistoryExpanded(nodes.toggle, nodes.history, false), false);
+  assert.equal(nodes.history.hidden, true);
+
+  const openedItems = items.map((item) => Object.assign({}, item, { unopened: false }));
+  inbox.renderCollections(nodes, openedItems);
+  assert.equal(nodes.historyList.childNodes.length, 2);
+  assert.equal(nodes.inboxList.childNodes.length, 0);
+  assert.equal(nodes.inbox.hidden, true);
+  inbox.hideCollections(nodes, true);
+  assert.equal(nodes.toggle.disabled, true);
+  assert.equal(nodes.toggle.getAttribute("aria-expanded"), "false");
+  assert.equal(nodes.history.hidden, true);
+  assert.equal(nodes.historyList.childNodes.length, 0);
+  assert.equal(nodes.inboxList.childNodes.length, 0);
+  assert.equal(inbox.setHistoryExpanded(nodes.toggle, nodes.history, true), false);
+  assert.equal(hostFrame.hidden, false);
+  assert.equal(hostFrame.src, ORIGIN);
   assert.doesNotMatch(extractNamedFunction(sidebarSource, "renderReviewInboxList"), /innerHTML/);
 });
 
@@ -1014,6 +1197,10 @@ test("dropdown label, field gates, chip removal, stay-open apply, and 403 wipe",
   session.setField("display_title", true);
   const success = await session.save();
   assert.equal(success.ok, true);
+  assert.equal(
+    calls.filter((call) => call.type === companion.TYPES.REVIEW_INBOX_OPENED).length,
+    1
+  );
   const applyCall = calls.filter((call) => call.type === companion.TYPES.REVIEW_INBOX_APPLY).pop();
   assert.deepEqual(applyCall.payload.fields, ["display_title"]);
   assert.equal(applyCall.payload.display_title, undefined);
@@ -1047,4 +1234,83 @@ test("dropdown label, field gates, chip removal, stay-open apply, and 403 wipe",
   assert.match(reviewHtml, /History \(run completion time\)/);
   assert.match(reviewCss, /--background/);
   assert.match(reviewCss, /#00ff41/);
+});
+
+test("Review Save retries opened after failure and blocks Apply until opened succeeds", async () => {
+  const overlay = loadReviewOverlay();
+  const calls = [];
+  let openedAttempts = 0;
+  let lastState = null;
+  const session = overlay.createController({
+    request: async (type, payload) => {
+      calls.push({ type, payload });
+      if (type === companion.TYPES.REVIEW_INBOX_DETAIL) {
+        return {
+          ok: true,
+          status: 200,
+          forbidden: false,
+          body: {
+            suggestions: [
+              {
+                analysis_run_id: RUN_NEW,
+                completed_at_ms: 2,
+                model_id: "meta/llama-test",
+                title: "New title",
+                description: "New description",
+                tags: [],
+              },
+            ],
+            canonical: { display_title: "Current", field_sources: {} },
+            publication: { state: "unpublished", ready: false, missing_fields: [] },
+          },
+        };
+      }
+      if (type === companion.TYPES.REVIEW_INBOX_OPENED) {
+        openedAttempts += 1;
+        if (openedAttempts <= 2) {
+          return { ok: false, status: 500, forbidden: false, error: "opened_failed" };
+        }
+        return { ok: true, status: 200, forbidden: false, body: { unopened: false } };
+      }
+      if (type === companion.TYPES.REVIEW_INBOX_APPLY) {
+        return {
+          ok: true,
+          status: 200,
+          forbidden: false,
+          body: {
+            canonical: { display_title: "Applied", field_sources: {} },
+            publication: { state: "unpublished", ready: false, status: "not_ready" },
+          },
+        };
+      }
+      return { ok: false, error: "unexpected" };
+    },
+    notifyParent() {},
+    render(state) {
+      lastState = state;
+    },
+  });
+
+  await session.open(MEDIA_A);
+  assert.equal(openedAttempts, 1);
+  session.setField("display_title", true);
+  const blocked = await session.save();
+  assert.equal(blocked.ok, false);
+  assert.equal(openedAttempts, 2);
+  assert.equal(
+    calls.filter((call) => call.type === companion.TYPES.REVIEW_INBOX_APPLY).length,
+    0
+  );
+  assert.equal(lastState.fields.display_title, true);
+  assert.equal(lastState.lastError, "This review could not be marked opened.");
+
+  const applied = await session.save();
+  assert.equal(applied.ok, true);
+  assert.equal(openedAttempts, 3);
+  assert.equal(
+    calls.filter((call) => call.type === companion.TYPES.REVIEW_INBOX_APPLY).length,
+    1
+  );
+  assert.equal(lastState.fields.display_title, false);
+  assert.equal(lastState.canonical.display_title, "Applied");
 });

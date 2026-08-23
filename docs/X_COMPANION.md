@@ -33,20 +33,39 @@ An authenticated FrameNest user can:
   catalog hit and shows no preview chrome; on-screen arrows appear only after
   two or more hits), see the selected meme as one JPEG preview, and attach it
   with Enter or Attach onto the composer file input;
-- open the toolbar side panel to use a native `#review-inbox` list above the
-  surviving hosted FrameNest iframe, and attach a Gallery item onto the bound X
-  composer. In that hosted Gallery, open-original stays bottom-right and Attach
-  sits top-left on the card image. Ordinary browser tabs keep open-original
-  only. Gallery 📎 attaches after the reply composer is focused, and the shell
-  reports Attached only when that composer file input accepted the bytes.
+- open the toolbar side panel to use a heading-free unread-analysis queue above
+  the surviving hosted FrameNest iframe, expand all-item Analysis history from
+  the green title bar, and attach a Gallery item onto the bound X composer. In
+  that hosted Gallery, open-original stays bottom-right and Attach sits top-left
+  on the card image. Ordinary browser tabs keep open-original only. Gallery 📎
+  attaches after the reply composer is focused, and the shell reports Attached
+  only when that composer file input accepted the bytes.
 
-## Review inbox
+## Review inbox and history
 
-The side panel shows a native `#review-inbox` above the surviving iframe. Empty
-copy is exactly `No analyzed items.` An ordinary 403 hides the section and
-badge. The toolbar badge is `unopened_count` as `1`…`99` / `99+` and never a
-title. Alarm `framenest.review-inbox` runs every 1 minute. There is no
-`notifications` permission.
+The side panel shows unopened successful generic analyses in
+`#review-inbox-list` above the surviving iframe. It has no visible heading,
+awaiting hint, or empty-state sentence; an empty unread list consumes no height.
+The whole green title bar opens `#review-history` except where Settings and
+Connect/Disconnect sit above that target. History starts collapsed on every
+panel load, is not persisted, and expands directly under the title bar. It
+contains every fully paginated latest successful generic result in server
+order. A title may appear in both history and unread.
+
+Both lists have bounded scrolling and open the same local review overlay. A row
+leaves unread only after the durable opened mutation succeeds and the lists
+refresh; history retains it. Review Save retries opened before Apply when an
+earlier opened request failed, retains selections and blocks Apply if that retry
+fails, and does not issue a second opened mutation after success. Hover and
+keyboard focus alone do not mark a row opened.
+
+The successful connection status is blank. Configuration guidance, framing and
+request failures, `Cleared`, and `Attached` still use `#shell-status`. An
+ordinary 403 or a complete-list failure hides both lists; 403 also disables and
+collapses history. The toolbar badge remains the server `unopened_count` as
+`1`…`99` / `99+`, never a rendered length or title. Alarm
+`framenest.review-inbox` runs every 1 minute. There is no `notifications`
+permission or second counter.
 
 A second overlay opens local `ui/review.html` through
 `chrome.runtime.getURL` plus `#media=<uuid>`. It is not web-accessible and is
@@ -123,11 +142,17 @@ Rollback: remove the key or set it to `[]` and restart. No CORS is enabled.
    in the green title bar, enter the exact FrameNest HTTPS origin
    (`https://<node>.<tailnet>.ts.net`, no path), then click Connect in Settings
    and grant the host permission when prompted. After Connect, Settings closes,
-   the shell iframes that origin, and the title-bar control reads Disconnect.
+   the success status stays blank, the shell iframes that origin, and the
+   title-bar control reads Disconnect.
    The in-page Search memes picker has no Settings sheet.
 6. Use Disconnect in the side-panel title bar to clear stored origin, in-flight
    claim ids, and the granted host permission. Settings then opens so reconnect
    stays in one place.
+
+After using **Reload** for the unpacked extension, refresh already-open X tabs
+and reopen the side panel before using Save or the picker. Those tabs retain the
+old extension context until refreshed; a dedicated in-surface stale-context
+guard remains outside this chrome slice.
 
 Content scripts match only `https://x.com/*` and `https://twitter.com/*`. The
 service worker has no X host permission.

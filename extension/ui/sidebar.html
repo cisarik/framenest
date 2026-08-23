@@ -8,6 +8,15 @@
   <body>
     <header class="sidebar-chrome">
       <div class="title-bar">
+        <button
+          id="review-history-toggle"
+          class="title-bar__history-toggle"
+          type="button"
+          aria-label="Analysis history"
+          aria-expanded="false"
+          aria-controls="review-history"
+          disabled
+        ></button>
         <span class="title-bar__wordmark">FrameNest</span>
         <button id="settings-open" class="title-bar__settings" type="button" aria-label="Settings" title="Settings" aria-expanded="false" aria-controls="settings-dialog">
           <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
@@ -19,6 +28,9 @@
         </button>
         <button id="chrome-action" class="title-bar__action" type="button">Connect</button>
       </div>
+      <section id="review-history" hidden>
+        <ol id="review-history-list" class="review-list" aria-label="Analysis history"></ol>
+      </section>
       <dialog id="settings-dialog" class="settings-dialog" aria-label="Settings">
         <div class="settings-dialog__sheet">
           <div class="settings-dialog__header">
@@ -43,22 +55,7 @@
     </header>
     <main class="sidebar-main">
       <section id="review-inbox" hidden>
-        <div class="review-inbox__bar">
-          <button
-            id="review-inbox-toggle"
-            class="review-inbox__toggle"
-            type="button"
-            aria-expanded="false"
-            aria-controls="review-inbox-panel"
-          >
-            Review inbox
-          </button>
-        </div>
-        <div id="review-inbox-panel" class="review-inbox__panel">
-          <p id="review-inbox-hint" class="review-inbox__hint" hidden></p>
-          <p id="review-inbox-empty" class="review-inbox__empty">No analyzed items.</p>
-          <ol id="review-inbox-list" class="review-inbox__list"></ol>
-        </div>
+        <ol id="review-inbox-list" class="review-list" aria-label="Unread analyses"></ol>
       </section>
       <iframe id="frame" title="FrameNest" hidden></iframe>
       <dialog id="review-dialog" class="review-dialog" aria-label="Review suggestion">

@@ -53,6 +53,7 @@ body {
 }
 
 .title-bar {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -63,15 +64,46 @@ body {
   color: #000000;
 }
 
+.title-bar__history-toggle {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.title-bar__history-toggle:hover:not(:disabled) {
+  background: rgba(0, 0, 0, 0.08);
+}
+
+.title-bar__history-toggle:focus-visible {
+  outline: 2px solid #000000;
+  outline-offset: -3px;
+}
+
+.title-bar__history-toggle:disabled {
+  cursor: default;
+}
+
 .title-bar__wordmark {
+  position: relative;
+  z-index: 1;
   margin-right: auto;
   color: #000000;
   font-size: 0.92rem;
   font-weight: 800;
   letter-spacing: 0.02em;
+  pointer-events: none;
 }
 
 .title-bar__settings {
+  position: relative;
+  z-index: 2;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -102,6 +134,8 @@ body {
 }
 
 .title-bar__action {
+  position: relative;
+  z-index: 2;
   flex: 0 0 auto;
   margin: 0;
   padding: 6px 12px;
@@ -131,6 +165,10 @@ body {
   min-height: 1.2em;
 }
 
+.shell-status:empty {
+  display: none;
+}
+
 .shell-status[data-kind="error"] {
   color: var(--danger);
 }
@@ -146,83 +184,39 @@ body {
   flex-direction: column;
 }
 
+#review-history,
 #review-inbox {
   flex: 0 0 auto;
-  border-bottom: 1px solid var(--line);
-  background: var(--surface-solid);
 }
 
+#review-history[hidden],
 #review-inbox[hidden] {
   display: none;
 }
 
-.review-inbox__bar {
-  display: flex;
-  align-items: center;
-  min-height: 28px;
-}
-
-.review-inbox__toggle {
-  display: flex;
-  align-items: center;
-  width: 100%;
+.review-list {
   margin: 0;
-  padding: 6px 12px;
-  border: 0;
-  background: transparent;
-  color: var(--text);
-  cursor: pointer;
-  font-family: var(--font-mono);
-  font-size: 0.82rem;
-  font-weight: 700;
-  text-align: left;
-}
-
-.review-inbox__toggle:hover,
-.review-inbox__toggle:focus-visible {
-  background: var(--accent-soft);
-  outline: 2px solid var(--focus);
-  outline-offset: -2px;
-}
-
-.review-inbox__panel {
-  padding: 0 12px 8px;
-}
-
-#review-inbox.is-collapsed .review-inbox__panel {
-  display: none;
-}
-
-.review-inbox__hint,
-.review-inbox__empty {
-  margin: 0 0 6px;
-  color: var(--text-muted);
-  font-size: 0.78rem;
-}
-
-.review-inbox__hint[hidden],
-.review-inbox__empty[hidden],
-.review-inbox__list[hidden] {
-  display: none;
-}
-
-.review-inbox__list {
-  margin: 0;
-  padding: 0 0 0 1.1rem;
+  padding: 8px 12px 8px 1.8rem;
   max-height: 8.5rem;
   overflow-x: hidden;
   overflow-y: auto;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-solid);
   color: var(--text);
   font-size: 0.82rem;
 }
 
-.review-inbox__list li {
+.review-list:empty {
+  display: none;
+}
+
+.review-list li {
   margin: 0 0 4px;
   padding: 0;
   word-break: break-word;
 }
 
-.review-inbox__list button {
+.review-list button {
   display: block;
   width: 100%;
   margin: 0;
@@ -235,8 +229,8 @@ body {
   text-align: left;
 }
 
-.review-inbox__list button:hover,
-.review-inbox__list button:focus-visible {
+.review-list button:hover,
+.review-list button:focus-visible {
   color: var(--accent);
   outline: 2px solid var(--focus);
   outline-offset: 2px;

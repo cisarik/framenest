@@ -283,10 +283,12 @@ Implemented within this phase:
   [ADR-0065](docs/adr/0065-x-save-edit-subset-and-acquisition-time-canonical-metadata-seed.md));
 - unpacked Manifest V3 X companion origin trust, requester-private meme picker,
   and synthetic composer attach ([ADR-0061](docs/adr/0061-x-meme-browser-companion.md));
-- native S1 administrator review inbox above the surviving hosted iframe,
-  toolbar badge from `unopened_count`, MV3 `alarms` (`framenest.review-inbox`,
-  1 minute), and a sibling review overlay
-  ([ADR-0071](docs/adr/0071-native-side-panel-review-inbox-chrome.md));
+- heading-free administrator unread-analysis queue above the surviving hosted
+  iframe, title-bar all-item history with full cursor pagination, blank success
+  status, toolbar badge from `unopened_count`, MV3 `alarms`
+  (`framenest.review-inbox`, 1 minute), and a sibling review overlay
+  ([ADR-0071](docs/adr/0071-native-side-panel-review-inbox-chrome.md),
+  [ADR-0072](docs/adr/0072-native-side-panel-unread-inbox-and-title-bar-history-chrome.md));
 - administrator-owned X automatic generic analysis policy, still default-off
   ([ADR-0066](docs/adr/0066-administrator-owned-x-automatic-generic-analysis.md)).
 

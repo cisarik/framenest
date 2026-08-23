@@ -62,19 +62,8 @@
 
   const REVIEW = companion.REVIEW_INBOX;
 
-  function reviewInboxVisualCollapsed(explicitCollapsed, itemCount) {
-    if (itemCount <= 0) {
-      return true;
-    }
-    return explicitCollapsed === true;
-  }
-
-  function reviewInboxNewestRunId(items) {
-    if (!Array.isArray(items) || !items.length) {
-      return "";
-    }
-    const first = items[0];
-    return first && companion.isUuid(first.analysis_run_id) ? first.analysis_run_id : "";
+  function reviewUnreadItems(items) {
+    return (Array.isArray(items) ? items : []).filter((item) => item && item.unopened === true);
   }
 
   function renderReviewInboxList(listNode, items) {
@@ -106,6 +95,34 @@
       }
       listNode.appendChild(li);
     });
+  }
+
+  function setReviewHistoryExpanded(toggleNode, historyNode, expanded) {
+    const next = Boolean(expanded && toggleNode && toggleNode.disabled !== true);
+    if (toggleNode) {
+      toggleNode.setAttribute("aria-expanded", next ? "true" : "false");
+    }
+    if (historyNode) {
+      historyNode.hidden = !next;
+    }
+    return next;
+  }
+
+  function renderReviewCollections(nodes, rawItems) {
+    const historyItems = companion.sanitizeReviewInboxItems(rawItems);
+    const unreadItems = reviewUnreadItems(historyItems);
+    renderReviewInboxList(nodes.historyList, historyItems);
+    renderReviewInboxList(nodes.inboxList, unreadItems);
+    nodes.inbox.hidden = unreadItems.length === 0;
+    return { historyItems, unreadItems };
+  }
+
+  function hideReviewCollections(nodes, disableToggle) {
+    renderReviewInboxList(nodes.historyList, []);
+    renderReviewInboxList(nodes.inboxList, []);
+    nodes.inbox.hidden = true;
+    nodes.toggle.disabled = disableToggle === true;
+    setReviewHistoryExpanded(nodes.toggle, nodes.history, false);
   }
 
   function reviewOverlayUrl(mediaId) {
@@ -171,12 +188,12 @@
   }
 
   globalThis.FrameNestReviewInbox = {
-    EMPTY_COPY: REVIEW.emptyCopy,
-    HINT_COPY: REVIEW.hintCopy,
     POLL_MS: REVIEW.pollMs,
-    visualCollapsed: reviewInboxVisualCollapsed,
-    newestRunId: reviewInboxNewestRunId,
+    unreadItems: reviewUnreadItems,
     renderList: renderReviewInboxList,
+    renderCollections: renderReviewCollections,
+    hideCollections: hideReviewCollections,
+    setHistoryExpanded: setReviewHistoryExpanded,
     overlayUrl: reviewOverlayUrl,
     openOverlay: openReviewOverlay,
     closeOverlay: closeReviewOverlay,
@@ -190,10 +207,10 @@
   const settingsOpen = document.getElementById("settings-open");
   const settingsClose = document.getElementById("settings-close");
   const settingsConnect = document.getElementById("settings-connect");
+  const reviewHistoryToggle = document.getElementById("review-history-toggle");
+  const reviewHistory = document.getElementById("review-history");
+  const reviewHistoryList = document.getElementById("review-history-list");
   const reviewInbox = document.getElementById("review-inbox");
-  const reviewInboxToggle = document.getElementById("review-inbox-toggle");
-  const reviewInboxHint = document.getElementById("review-inbox-hint");
-  const reviewInboxEmpty = document.getElementById("review-inbox-empty");
   const reviewInboxList = document.getElementById("review-inbox-list");
   const reviewDialog = document.getElementById("review-dialog");
   const reviewFrame = document.getElementById("review-frame");
@@ -206,10 +223,10 @@
     !settingsOpen ||
     !settingsClose ||
     !settingsConnect ||
+    !reviewHistoryToggle ||
+    !reviewHistory ||
+    !reviewHistoryList ||
     !reviewInbox ||
-    !reviewInboxToggle ||
-    !reviewInboxHint ||
-    !reviewInboxEmpty ||
     !reviewInboxList ||
     !reviewDialog ||
     !reviewFrame
@@ -222,8 +239,13 @@
   let handshakeSeen = false;
   let frameLoaded = false;
   let inboxPollTimer = 0;
-  let explicitCollapsed = false;
-  let seenRunId = "";
+  const reviewChromeNodes = {
+    toggle: reviewHistoryToggle,
+    history: reviewHistory,
+    historyList: reviewHistoryList,
+    inbox: reviewInbox,
+    inboxList: reviewInboxList,
+  };
 
   function setText(node, value, kind) {
     node.textContent = value;
@@ -273,69 +295,22 @@
     }, REVIEW.pollMs);
   }
 
-  function persistInboxPrefs() {
-    const update = {};
-    update[REVIEW.explicitCollapsedKey] = explicitCollapsed === true;
-    if (companion.isUuid(seenRunId)) {
-      update[REVIEW.seenRunIdKey] = seenRunId;
-    }
-    chrome.storage.local.set(update);
-  }
-
   function hideInboxSection() {
-    reviewInbox.hidden = true;
-    reviewInbox.classList.add("is-collapsed");
-    reviewInboxToggle.setAttribute("aria-expanded", "false");
-    reviewInboxHint.hidden = true;
-    reviewInboxHint.textContent = "";
-    renderReviewInboxList(reviewInboxList, []);
-  }
-
-  function applyInboxCollapse(collapsed) {
-    if (collapsed) {
-      reviewInbox.classList.add("is-collapsed");
-      reviewInboxToggle.setAttribute("aria-expanded", "false");
-    } else {
-      reviewInbox.classList.remove("is-collapsed");
-      reviewInboxToggle.setAttribute("aria-expanded", "true");
-    }
-  }
-
-  function renderInboxHint(awaiting) {
-    const live = companion.normalizeAwaitingRecords(awaiting, Date.now());
-    if (!live.length) {
-      reviewInboxHint.hidden = true;
-      reviewInboxHint.textContent = "";
-      return;
-    }
-    reviewInboxHint.hidden = false;
-    reviewInboxHint.textContent = REVIEW.hintCopy;
+    hideReviewCollections(reviewChromeNodes, true);
   }
 
   function applyInboxResult(result) {
-    if (!result || result.forbidden === true || result.status === 403) {
+    if (!result || result.ok !== true || result.forbidden === true || result.status === 403) {
       hideInboxSection();
       return;
     }
-    if (result.ok !== true) {
-      return;
-    }
-    const items = companion.sanitizeReviewInboxItems(result.items);
-    const newest = reviewInboxNewestRunId(items);
-    if (newest && newest !== seenRunId && explicitCollapsed !== true) {
-      explicitCollapsed = false;
-    }
-    if (newest) {
-      seenRunId = newest;
-      persistInboxPrefs();
-    }
-    reviewInbox.hidden = false;
-    const collapsed = reviewInboxVisualCollapsed(explicitCollapsed, items.length);
-    applyInboxCollapse(collapsed);
-    reviewInboxEmpty.hidden = items.length > 0;
-    reviewInboxList.hidden = items.length === 0;
-    renderReviewInboxList(reviewInboxList, items);
-    renderInboxHint(result.awaiting);
+    reviewHistoryToggle.disabled = false;
+    renderReviewCollections(reviewChromeNodes, result.items);
+    setReviewHistoryExpanded(
+      reviewHistoryToggle,
+      reviewHistory,
+      reviewHistoryToggle.getAttribute("aria-expanded") === "true"
+    );
   }
 
   async function refreshInbox() {
@@ -347,16 +322,12 @@
     applyInboxResult(result);
   }
 
-  function onInboxToggle() {
-    const collapsed = reviewInbox.classList.contains("is-collapsed");
-    if (collapsed) {
-      explicitCollapsed = false;
-      applyInboxCollapse(false);
-    } else {
-      explicitCollapsed = true;
-      applyInboxCollapse(true);
-    }
-    persistInboxPrefs();
+  function onHistoryToggle() {
+    setReviewHistoryExpanded(
+      reviewHistoryToggle,
+      reviewHistory,
+      reviewHistoryToggle.getAttribute("aria-expanded") !== "true"
+    );
   }
 
   function clearHandshakeWait() {
@@ -449,7 +420,7 @@
     originInput.value = storedOrigin;
     syncChromeAction();
     closeSettings();
-    setText(shellStatus, "Connected");
+    setText(shellStatus, "");
     hostFrame(storedOrigin);
     startInboxPoll();
   }
@@ -460,8 +431,6 @@
     await request(companion.TYPES.RESET, {});
     storedOrigin = "";
     originInput.value = "";
-    explicitCollapsed = false;
-    seenRunId = "";
     syncChromeAction();
     clearFrame();
     setText(shellStatus, "Cleared");
@@ -517,9 +486,9 @@
     }
   }
 
-  function mediaIdFromInboxEvent(event) {
+  function mediaIdFromReviewEvent(event, listNode) {
     let node = event && event.target;
-    while (node && node !== reviewInboxList) {
+    while (node && node !== listNode) {
       const mediaId =
         (node.dataset && node.dataset.mediaId) ||
         (typeof node.getAttribute === "function" ? node.getAttribute("data-media-id") : "");
@@ -531,8 +500,8 @@
     return "";
   }
 
-  function onReviewInboxClick(event) {
-    const mediaId = mediaIdFromInboxEvent(event);
+  function onReviewListClick(event, listNode) {
+    const mediaId = mediaIdFromReviewEvent(event, listNode);
     if (!mediaId) {
       return;
     }
@@ -576,7 +545,7 @@
       handshakeSeen = true;
       clearHandshakeWait();
       postToFrame({ v: WEB_PROTOCOL, type: WEB_TYPES.HOST_HELLO }, event.origin);
-      setText(shellStatus, "Connected");
+      setText(shellStatus, "");
       return;
     }
     if (data.type === WEB_TYPES.HOST_ACK) {
@@ -602,8 +571,13 @@
   }
 
   chromeAction.addEventListener("click", onChromeAction);
-  reviewInboxToggle.addEventListener("click", onInboxToggle);
-  reviewInboxList.addEventListener("click", onReviewInboxClick);
+  reviewHistoryToggle.addEventListener("click", onHistoryToggle);
+  reviewHistoryList.addEventListener("click", (event) => {
+    onReviewListClick(event, reviewHistoryList);
+  });
+  reviewInboxList.addEventListener("click", (event) => {
+    onReviewListClick(event, reviewInboxList);
+  });
   document.addEventListener("visibilitychange", () => {
     if (document.hidden) {
       stopInboxPoll();
@@ -641,17 +615,14 @@
   frame.addEventListener("error", onFrameError);
   window.addEventListener("message", onWindowMessage);
   chrome.storage.local.get(
-    ["frameNestOrigin", REVIEW.explicitCollapsedKey, REVIEW.seenRunIdKey],
+    ["frameNestOrigin"],
     (stored) => {
-      explicitCollapsed = stored[REVIEW.explicitCollapsedKey] === true;
-      const storedSeen = stored[REVIEW.seenRunIdKey];
-      seenRunId = companion.isUuid(storedSeen) ? storedSeen : "";
       const origin = stored.frameNestOrigin || "";
       if (companion.acceptFrameNestOrigin(origin)) {
         storedOrigin = origin;
         originInput.value = origin;
         syncChromeAction();
-        setText(shellStatus, "Connected");
+        setText(shellStatus, "");
         hostFrame(origin);
         startInboxPoll();
         return;
