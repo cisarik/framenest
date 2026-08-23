@@ -131,18 +131,23 @@ leaves the durable published file untouched under the trusted-loopback
 single-tenant boundary; Tailscale multi-user ownership follows ADR-0053.
 Browser mutation requests with an `Origin` header must match the effective same
 origin; this is a bounded loopback protection and not authentication or
-authorization. In Tailscale UDS mode, `POST /api/x/requests` and
-`POST /api/x/requests/{claim_id}/retry` may also accept an exact allowlisted
-`chrome-extension://` origin after `FRAMENEST_COMPANION_EXTENSION_ORIGINS` is
-set. That allowlist defaults to empty, still requires `X-FrameNest-Request: 1`,
-adds no CORS headers, and does not change any other mutation route. See
+authorization. In Tailscale UDS mode, four `companion_mutation` routes may also accept an
+exact allowlisted `chrome-extension://` origin after
+`FRAMENEST_COMPANION_EXTENSION_ORIGINS` is set: `POST /api/x/requests`,
+`POST /api/x/requests/{claim_id}/retry`,
+`POST /api/companion/review-inbox/{media_id}/opened`, and
+`POST /api/companion/review-inbox/{media_id}/apply`. That allowlist defaults to
+empty, still requires `X-FrameNest-Request: 1`, and adds no CORS headers. GET
+inbox routes do not require the allowlist the same way; mutations that carry
+the extension Origin fail closed when the allowlist is empty. See
 [ADR-0061](docs/adr/0061-x-meme-browser-companion.md),
-[ADR-0064](docs/adr/0064-x-save-category-and-public-photo-acquisition.md), and
+[ADR-0064](docs/adr/0064-x-save-category-and-public-photo-acquisition.md),
+[ADR-0067](docs/adr/0067-administrator-companion-review-inbox-and-mutation-trust.md),
+and
 [docs/X_COMPANION.md](docs/X_COMPANION.md). Public JPEG/PNG X photographs are
 acquired through an isolated status bridge and a strict `pbs.twimg.com`
 transport; WebP is rejected; content scripts never fetch FrameNest or the CDN.
-The companion still adds no CORS headers and does not change any other mutation
-route.
+The companion still adds no CORS headers.
 
 YouTube manual ingestion is a separate operator-only loopback boundary. It is
 disabled unless its private staging root and the existing upload/publication

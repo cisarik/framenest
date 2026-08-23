@@ -84,12 +84,19 @@ Tailscale remote-access and identity foundation (root-owned HTTPS Serve to a
 permission-restricted Unix socket, verified-identity mapping, capability
 authorization, and privileged-action audit) is recorded in
 [ADR-0048](docs/adr/0048-tailscale-remote-access-and-identity-foundation.md)
-and the current runbook. An unpacked Manifest V3 X companion may submit the
-two flagged X request mutations from an exact allowlisted
-`chrome-extension://` origin and may list requester-visible memes through
-`GET /api/x/companion/media`; it is inert until that allowlist is set
+and the current runbook. An unpacked Manifest V3 X companion may submit four
+`companion_mutation` routes from an exact allowlisted `chrome-extension://`
+origin: X submit, X retry, review opened, and review apply. It may also list
+requester-visible memes through `GET /api/x/companion/media` and read the
+administrator review inbox through `GET /api/companion/review-inbox` and
+`GET /api/companion/review-inbox/{media_id}`. GET inbox routes work with an
+empty `companion_extension_origins` allowlist; mutations that carry the
+extension Origin fail closed when that allowlist is empty. Hosted
+`external_origin` mutations stay on the Tailscale web origin. The companion
+is mutation-inert until the allowlist is set
 ([ADR-0061](docs/adr/0061-x-meme-browser-companion.md),
 [ADR-0064](docs/adr/0064-x-save-category-and-public-photo-acquisition.md),
+[ADR-0067](docs/adr/0067-administrator-companion-review-inbox-and-mutation-trust.md),
 [docs/X_COMPANION.md](docs/X_COMPANION.md)). Catalog backup create/verify/restore, automated
 retention/restore-verification, mounted-filesystem off-device
 copy/restore-verification, and operator-workstation pull foundations are

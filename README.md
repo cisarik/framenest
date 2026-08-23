@@ -25,7 +25,7 @@ multi-source downloader UI.
 The repository also contains the first persistence, registry, media catalog,
 local media-analysis, AI suggestion-review, and quarantine upload-transport
 foundations: a centralized SQLite database path setting, synchronous SQLAlchemy
-Core engine helpers, packaged Alembic resources through schema head `0030`,
+Core engine helpers, packaged Alembic resources through schema head `0031`,
 explicit database commands, local device and library registry tables, durable
 upload-session, canonical byte-identity, duplicate-disposition, and
 publication-provenance and upload-to-catalog linkage tables, persistent
@@ -43,12 +43,21 @@ bounded batch actions, safe catalog removal, and content publication.
 Requester-private YouTube and X meme acquisition with explicit administrator
 promotion are implemented (X native video, animated-GIF-like media delivered as
 video, and public JPEG/PNG photos; WebP is rejected without transcoding). A
-loadable unpacked Manifest V3 X companion can choose a canonical content
-category at Save, save eligible posts through the existing X request routes,
-and attach catalog JPEG, PNG, GIF-style, or short-video memes to the X composer
-after an exact extension-origin allowlist is configured
+loadable unpacked Manifest V3 X companion uses a frozen ingest Save (Edit-media
+subset, no category radios), an administrator review inbox in the side panel,
+and may publish after review Save when title, description, and at least one tag
+are present. Automatic analysis stays default-off; administrator-owned X may
+enqueue when that flag is later enabled. The companion still attaches catalog
+JPEG, PNG, GIF-style, or short-video memes to the X composer after an exact
+extension-origin allowlist is configured
 ([ADR-0061](docs/adr/0061-x-meme-browser-companion.md),
 [ADR-0064](docs/adr/0064-x-save-category-and-public-photo-acquisition.md),
+[ADR-0066](docs/adr/0066-administrator-owned-x-automatic-generic-analysis.md),
+[ADR-0067](docs/adr/0067-administrator-companion-review-inbox-and-mutation-trust.md),
+[ADR-0068](docs/adr/0068-companion-review-save-and-readiness-triggered-publication.md),
+[ADR-0069](docs/adr/0069-five-tag-generic-media-suggestion-contract.md),
+[ADR-0070](docs/adr/0070-companion-exclusion-of-movie-workflows.md),
+[ADR-0071](docs/adr/0071-native-side-panel-review-inbox-chrome.md),
 [docs/X_COMPANION.md](docs/X_COMPANION.md)). The upload path receives untrusted bytes only into
 configured server quarantine, performs bounded server-side validation, and
 derives canonical identity from validated byte size and SHA-256 digest. The
@@ -551,7 +560,7 @@ FrameNest development follows Analytic Programming through the pinned `.ap/`
 Git submodule. The current AP gitlink is:
 
 ```text
-17b7e085139e9bcbb0e4953d26aef9b6687d541c
+9c5cc44f8b6c92dd56ad2427d13223d7d59c5656
 ```
 
 Universal AP protocol files live under `.ap/`. FrameNest-specific operating
@@ -657,6 +666,12 @@ Current foundation files:
 - [`docs/adr/0045-content-classification-and-movie-identification.md`](docs/adr/0045-content-classification-and-movie-identification.md) records the accepted content classification and movie-identification decision.
 - [`docs/adr/0046-youtube-manual-ingestion-and-provenance.md`](docs/adr/0046-youtube-manual-ingestion-and-provenance.md) records the accepted YouTube manual-ingestion provenance lifecycle.
 - [`docs/adr/0064-x-save-category-and-public-photo-acquisition.md`](docs/adr/0064-x-save-category-and-public-photo-acquisition.md) records X Save category, public JPEG/PNG photo acquisition, and honest companion Save outcomes.
+- [`docs/adr/0066-administrator-owned-x-automatic-generic-analysis.md`](docs/adr/0066-administrator-owned-x-automatic-generic-analysis.md) records administrator-owned X automatic generic analysis (default-off).
+- [`docs/adr/0067-administrator-companion-review-inbox-and-mutation-trust.md`](docs/adr/0067-administrator-companion-review-inbox-and-mutation-trust.md) records the companion review inbox and four `companion_mutation` routes.
+- [`docs/adr/0068-companion-review-save-and-readiness-triggered-publication.md`](docs/adr/0068-companion-review-save-and-readiness-triggered-publication.md) records companion review Save publication when ready.
+- [`docs/adr/0069-five-tag-generic-media-suggestion-contract.md`](docs/adr/0069-five-tag-generic-media-suggestion-contract.md) records the live generic v4 1–5 tag contract.
+- [`docs/adr/0070-companion-exclusion-of-movie-workflows.md`](docs/adr/0070-companion-exclusion-of-movie-workflows.md) records companion exclusion of movie workflows.
+- [`docs/adr/0071-native-side-panel-review-inbox-chrome.md`](docs/adr/0071-native-side-panel-review-inbox-chrome.md) records native side-panel review inbox chrome.
 
 ## Non-Goals for the Current Stage
 

@@ -113,7 +113,7 @@ The initial scaffold decision gate is complete. A Poetry package scaffold, centr
 
 Broader architecture decisions still open include category and language metadata schema, metadata/tag/search schema, cover and thumbnail cache implementation details, desktop sidecar IPC, initial authentication boundary, offline client cache semantics, multiprocess publication or catalog leases or fencing, media-tool distribution strategy, and Ubuntu NUC host-acceptance details beyond the initial systemd service foundation. Portable media sidecar v1 format, projection, validation, and compare exist through [ADR-0059](docs/adr/0059-portable-media-sidecar-roundtrip-foundation.md); import, rebuild, and synchronization remain open.
 
-Persistence strategy is accepted through [ADR-0010](docs/adr/0010-initial-persistence-foundation.md). The minimal SQLAlchemy/Alembic migration foundation is implemented. The current schema head is revision `0030`: catalog tables and the automatic built-in `Processed` collection are established through `0007`; `0008` through `0018` add durable upload, validation, byte identity, duplicate disposition, storage publication, catalog, automatic-analysis, still-image, classification, movie-identification, and analysis-history foundations; `0019` adds durable YouTube manual-acquisition provenance; `0020` adds durable security audit events; `0021` adds durable content publication with legacy backfill; `0022` adds the durable manual cover foundation per [ADR-0050](docs/adr/0050-durable-manual-cover-foundation.md); `0023` extends the accepted cover source contract to timeless still-image (JPEG/PNG) sources; `0024` adds catalog-removal receipts; `0025` adds upload-session ownership and duplicate mode for ordinary-user submission; `0026` adds YouTube requester ownership; `0027` adds YouTube creator taxonomy fields; `0028` adds requester-private X acquisition; `0029` adds the caller-private per-user media alias overlay; and `0030` adds claim-level X Save category plus public JPEG/PNG photo acquisition. Gallery and Details remain canonical.
+Persistence strategy is accepted through [ADR-0010](docs/adr/0010-initial-persistence-foundation.md). The minimal SQLAlchemy/Alembic migration foundation is implemented. The current schema head is revision `0031`: catalog tables and the automatic built-in `Processed` collection are established through `0007`; `0008` through `0018` add durable upload, validation, byte identity, duplicate disposition, storage publication, catalog, automatic-analysis, still-image, classification, movie-identification, and analysis-history foundations; `0019` adds durable YouTube manual-acquisition provenance; `0020` adds durable security audit events; `0021` adds durable content publication with legacy backfill; `0022` adds the durable manual cover foundation per [ADR-0050](docs/adr/0050-durable-manual-cover-foundation.md); `0023` extends the accepted cover source contract to timeless still-image (JPEG/PNG) sources; `0024` adds catalog-removal receipts; `0025` adds upload-session ownership and duplicate mode for ordinary-user submission; `0026` adds YouTube requester ownership; `0027` adds YouTube creator taxonomy fields; `0028` adds requester-private X acquisition; `0029` adds the caller-private per-user media alias overlay; `0030` adds claim-level X Save category plus public JPEG/PNG photo acquisition; and `0031` adds companion-review open state and field-source receipts (`ContentPublicationOrigin.COMPANION_REVIEW`). Gallery and Details remain canonical.
 
 Stable identity strategy is accepted through [ADR-0011](docs/adr/0011-stable-domain-identities.md). Pure domain identity primitives exist, and minimal logical media, physical location, device, and library entities exist. Storage volume and series entities remain future work beyond identity values.
 
@@ -282,7 +282,17 @@ Implemented within this phase:
   ([ADR-0064](docs/adr/0064-x-save-category-and-public-photo-acquisition.md),
   [ADR-0065](docs/adr/0065-x-save-edit-subset-and-acquisition-time-canonical-metadata-seed.md));
 - unpacked Manifest V3 X companion origin trust, requester-private meme picker,
-  and synthetic composer attach ([ADR-0061](docs/adr/0061-x-meme-browser-companion.md)).
+  and synthetic composer attach ([ADR-0061](docs/adr/0061-x-meme-browser-companion.md));
+- native S1 administrator review inbox above the surviving hosted iframe,
+  toolbar badge from `unopened_count`, MV3 `alarms` (`framenest.review-inbox`,
+  1 minute), and a sibling review overlay
+  ([ADR-0071](docs/adr/0071-native-side-panel-review-inbox-chrome.md));
+- administrator-owned X automatic generic analysis policy, still default-off
+  ([ADR-0066](docs/adr/0066-administrator-owned-x-automatic-generic-analysis.md)).
+
+Companion review Save may publish when ready
+([ADR-0068](docs/adr/0068-companion-review-save-and-readiness-triggered-publication.md));
+analysis completion still never auto-publishes.
 
 Still required for phase exit: broader adapter coverage, generalized downloader
 UI, and additional source adapters beyond the shipped YouTube/X foundations.

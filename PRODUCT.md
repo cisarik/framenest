@@ -21,12 +21,13 @@ direction.
 FrameNest is currently in foundation-stage, pre-alpha development.
 
 A Poetry package, runnable loopback FastAPI server, packaged local web shell,
-explicit SQLite migration foundation through schema head `0030`, local device
+explicit SQLite migration foundation through schema head `0031`, local device
 and library registries, read-only library scan preview, explicit idempotent
 scan-candidate import into the minimum persistent media catalog, persistent
 display-title and canonical-tag core, local media-analysis preview,
 provider-neutral NVIDIA suggestion prototype, bounded JPEG VLM transport,
-explicit editable browser AI suggestion review, ordinary-user private upload
+explicit editable browser AI suggestion review, an administrator companion
+review inbox for successful generic analysis runs, ordinary-user private upload
 submission with administrator review, requester-private YouTube acquisition with
 administrator promotion, requester-private X meme acquisition (native X video,
 animated-GIF-like media delivered as video, and public JPEG/PNG photos), and
@@ -42,6 +43,23 @@ portable sidecar projection; it is not bidirectional synchronization. Existing c
 rows are backfilled as published; newly cataloged media remains outside the
 ordinary Gallery until persisted title, description, and canonical-tag metadata
 is ready and an authorized administrator publishes.
+
+Website on-demand AI suggestion review remains session-only and is not catalog
+truth. Companion review is a separate durable administrator inbox of successful
+generic runs ([ADR-0067](docs/adr/0067-administrator-companion-review-inbox-and-mutation-trust.md)).
+Automatic post-catalog analysis stays default-off; administrator-owned X catalog
+events may enqueue generic analysis when
+`FRAMENEST_AUTOMATIC_MEDIA_ANALYSIS_ENABLED` is true
+([ADR-0066](docs/adr/0066-administrator-owned-x-automatic-generic-analysis.md)).
+YouTube remains suppressed. Companion review Save may publish when title,
+description, and at least one tag are present
+([ADR-0068](docs/adr/0068-companion-review-save-and-readiness-triggered-publication.md));
+analysis completion does not publish. The live generic suggestion contract is
+v4 with 1–5 most significant tags
+([ADR-0069](docs/adr/0069-five-tag-generic-media-suggestion-contract.md)).
+Companion maps onto existing catalog tags only and does not create tags. Movie
+and genre workflows stay out of companion
+([ADR-0070](docs/adr/0070-companion-exclusion-of-movie-workflows.md)).
 
 There is still no completed desktop shell, GUI Settings, complete Cover Studio,
 arbitrary user-created collections, persistent AI Drafts, multi-model draft
@@ -373,7 +391,7 @@ Ordinary clients should not configure provider credentials or call providers
 directly. Browser status and results must be sanitized. Production
 provider-secret integration remains unresolved.
 
-Suspicious filenames may be manually analyzed, but AI suggestions require confirmation. Current pre-alpha AI suggestion review is editable, session-only, and not catalog truth.
+Suspicious filenames may be manually analyzed, but AI suggestions require confirmation. Current pre-alpha website AI suggestion review is editable, session-only, and not catalog truth. The companion review inbox is a separate durable administrator surface over successful generic runs; it does not replace that website session review.
 
 FrameNest must not automatically rename media.
 

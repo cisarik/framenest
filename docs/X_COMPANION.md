@@ -33,12 +33,29 @@ An authenticated FrameNest user can:
   catalog hit and shows no preview chrome; on-screen arrows appear only after
   two or more hits), see the selected meme as one JPEG preview, and attach it
   with Enter or Attach onto the composer file input;
-- open the toolbar side panel to use the real FrameNest website at the stored
-  Tailscale origin, and attach a Gallery item onto the bound X composer. In that
-  hosted Gallery, open-original stays bottom-right and Attach sits top-left on
-  the card image. Ordinary browser tabs keep open-original only. Gallery 📎
-  attaches after the reply composer is focused, and the shell reports Attached
-  only when that composer file input accepted the bytes.
+- open the toolbar side panel to use a native `#review-inbox` list above the
+  surviving hosted FrameNest iframe, and attach a Gallery item onto the bound X
+  composer. In that hosted Gallery, open-original stays bottom-right and Attach
+  sits top-left on the card image. Ordinary browser tabs keep open-original
+  only. Gallery 📎 attaches after the reply composer is focused, and the shell
+  reports Attached only when that composer file input accepted the bytes.
+
+## Review inbox
+
+The side panel shows a native `#review-inbox` above the surviving iframe. Empty
+copy is exactly `No analyzed items.` An ordinary 403 hides the section and
+badge. The toolbar badge is `unopened_count` as `1`…`99` / `99+` and never a
+title. Alarm `framenest.review-inbox` runs every 1 minute. There is no
+`notifications` permission.
+
+A second overlay opens local `ui/review.html` through
+`chrome.runtime.getURL` plus `#media=<uuid>`. It is not web-accessible and is
+not inside `#frame`. Ingest Save remains the frozen capture form (no category
+radios).
+
+GET inbox routes work with an empty origin allowlist. Mutations that carry the
+extension Origin fail closed when the allowlist is empty. This document does
+not authorize NUC deployment or enabling automatic analysis.
 
 Save is a hover/focus overlay at the bottom-right of own media tiles, not an
 action-row control. Click opens the Save popup instead of silently posting
@@ -83,9 +100,12 @@ requires an allowlist update.
 
 ## Server allowlist (inert until set)
 
-Default `FRAMENEST_COMPANION_EXTENSION_ORIGINS` is empty. Browser mutations
-other than the two flagged X request routes stay on the exact Tailscale web
-origin. To enable the companion:
+Default `FRAMENEST_COMPANION_EXTENSION_ORIGINS` is empty. Four
+`companion_mutation` routes may accept that exact `chrome-extension://` origin:
+X submit, X retry, review opened, and review apply. GET inbox routes do not
+require the allowlist in the same way; mutations that carry the extension Origin
+fail closed when it is empty. Other browser mutations stay on the exact
+Tailscale web origin. To enable the companion:
 
 ```text
 FRAMENEST_COMPANION_EXTENSION_ORIGINS=["chrome-extension://omiihmnlkmieaafaphohakcgmbggppap"]

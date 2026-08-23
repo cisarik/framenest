@@ -4,7 +4,7 @@
 
 FrameNest is in foundation-stage pre-alpha development. This document defines normative requirements for future implementation.
 
-A Poetry package foundation exists with centralized configuration, a FastAPI application factory, a typed health endpoint, a loopback-first Uvicorn runtime dependency and startup command, a minimal SQLAlchemy Core/Alembic SQLite migration foundation through schema head `0030`, pure domain identity primitives, local device and library registries, a minimum persistent logical-media and physical-location catalog foundation, persistent display-title and canonical-tag core, catalog retrieval with display-title search and canonical-tag AND filtering, a manual browser `Current` metadata workspace for display-title and ordered canonical-tag assignment, an automatic built-in `Processed` workflow collection derived from durable tag saves, read-only library scan preview, explicit idempotent scan-candidate import, local media-analysis preview, provider-neutral NVIDIA/Vercel suggestion preview, VLM JPEG derivative transport, a server-operated AI configuration and diagnostics CLI, a packaged local web shell, an explicit editable browser AI suggestion review, a trusted-loopback quarantine upload path with bounded validation, exact-duplicate disposition, and optional atomic publication to an explicitly selected server-owned library, ordinary-user private upload submission with administrator review, requester-private YouTube and X meme acquisition with administrator promotion, durable manual covers, automated catalog backup/retention/restore-verification foundations, mounted off-device catalog copy and operator-workstation pull-based catalog snapshot recovery foundations, Tailscale remote-access and identity foundations, a portable media sidecar v1 projection with `framenest-sidecar` export/validate/compare, and a repository-native systemd service foundation targeted at Ubuntu Server 24.04 on the Intel NUC6i5SYH personal production server. There is no completed desktop shell, arbitrary user-created collections, a general collection manager, suggested filenames, complete Cover Studio, imported/AI/series covers, cover candidates, persistent AI Drafts, or multi-model draft comparison/promotion yet. A durable manual cover foundation is implemented (migration `0022` per [ADR-0050](docs/adr/0050-durable-manual-cover-foundation.md)): one accepted manually selected cover per logical medium with durable artifacts and regenerable cover thumbnails. Unresolved architecture choices remain subject to future architecture decision records.
+A Poetry package foundation exists with centralized configuration, a FastAPI application factory, a typed health endpoint, a loopback-first Uvicorn runtime dependency and startup command, a minimal SQLAlchemy Core/Alembic SQLite migration foundation through schema head `0031`, pure domain identity primitives, local device and library registries, a minimum persistent logical-media and physical-location catalog foundation, persistent display-title and canonical-tag core, catalog retrieval with display-title search and canonical-tag AND filtering, a manual browser `Current` metadata workspace for display-title and ordered canonical-tag assignment, an automatic built-in `Processed` workflow collection derived from durable tag saves, read-only library scan preview, explicit idempotent scan-candidate import, local media-analysis preview, provider-neutral NVIDIA/Vercel suggestion preview, VLM JPEG derivative transport, a server-operated AI configuration and diagnostics CLI, a packaged local web shell, an explicit editable browser AI suggestion review, an administrator companion review inbox for successful generic analysis runs, a trusted-loopback quarantine upload path with bounded validation, exact-duplicate disposition, and optional atomic publication to an explicitly selected server-owned library, ordinary-user private upload submission with administrator review, requester-private YouTube and X meme acquisition with administrator promotion, durable manual covers, automated catalog backup/retention/restore-verification foundations, mounted off-device catalog copy and operator-workstation pull-based catalog snapshot recovery foundations, Tailscale remote-access and identity foundations, a portable media sidecar v1 projection with `framenest-sidecar` export/validate/compare, and a repository-native systemd service foundation targeted at Ubuntu Server 24.04 on the Intel NUC6i5SYH personal production server. There is no completed desktop shell, arbitrary user-created collections, a general collection manager, suggested filenames, complete Cover Studio, imported/AI/series covers, cover candidates, persistent AI Drafts, or multi-model draft comparison/promotion yet. A durable manual cover foundation is implemented (migration `0022` per [ADR-0050](docs/adr/0050-durable-manual-cover-foundation.md)): one accepted manually selected cover per logical medium with durable artifacts and regenerable cover thumbnails. Unresolved architecture choices remain subject to future architecture decision records.
 
 The implemented persistence head also includes durable content-publication
 truth through migration `0021`, published-only ordinary catalog retrieval, a
@@ -879,8 +879,15 @@ It performs no historical backfill.
 Migration `0028` adds requester-private X meme acquisition. First-release X
 support is native X video and animated-GIF-like media delivered as video.
 X acquisition is requester-private with
-explicit administrator promotion/publication, no automatic AI invocation, and
-no automatic publication. Persisted source-derived metadata for
+explicit administrator promotion/publication. Ordinary and unmapped X, and
+YouTube, MUST remain fail-closed for automatic analysis. Administrator-owned X
+MAY enqueue generic analysis when
+`FRAMENEST_AUTOMATIC_MEDIA_ANALYSIS_ENABLED` is true per
+[ADR-0066](docs/adr/0066-administrator-owned-x-automatic-generic-analysis.md).
+Companion review apply MAY publish with origin `companion_review` when
+readiness holds per
+[ADR-0068](docs/adr/0068-companion-review-save-and-readiness-triggered-publication.md).
+NIM completion MUST NOT publish. Persisted source-derived metadata for
 `acquisition_source = x_manual_claim` is protected through normal Save
 for acquisition source and X creator attribution (kind, stable ID where
 present, handle where present, and display name where present). Canonical
@@ -905,6 +912,31 @@ The new extension omits `content_category`; old explicit clients remain
 compatible. WebP photographs are
 rejected without transcoding. Administrator metadata Save may correct canonical
 category; acquisition source and X creator provenance remain immutable.
+
+Migration `0031` adds companion-review open-state and field-source receipts and
+extends content-publication origin to `companion_review` per
+[ADR-0067](docs/adr/0067-administrator-companion-review-inbox-and-mutation-trust.md)
+and
+[ADR-0068](docs/adr/0068-companion-review-save-and-readiness-triggered-publication.md).
+This whole does not deploy that schema or enable automatic analysis on the
+Ubuntu NUC.
+
+The companion review surface MUST expose `GET /api/companion/review-inbox`,
+`GET /api/companion/review-inbox/{media_id}`,
+`POST /api/companion/review-inbox/{media_id}/opened`, and
+`POST /api/companion/review-inbox/{media_id}/apply`. Exactly four
+`companion_mutation` routes exist: X submit, X retry, review opened, and review
+apply. GET inbox routes MUST work with an empty
+`companion_extension_origins` allowlist. Mutations that carry the extension
+Origin MUST fail closed when that allowlist is empty. Companion apply MUST
+replace selected tags rather than union them, MUST refuse an empty Tags
+selection, MUST map only existing catalog tags, MUST follow the live generic v4
+1–5 tag contract per
+[ADR-0069](docs/adr/0069-five-tag-generic-media-suggestion-contract.md), and
+MUST exclude movie media per
+[ADR-0070](docs/adr/0070-companion-exclusion-of-movie-workflows.md). Ordinary
+`GET /api/media` MUST remain published-only. Website Publish MUST remain
+`admin_explicit`.
 
 FrameNest MUST use FastAPI for the initial server HTTP API adapter per [ADR-0003](docs/adr/0003-initial-server-api-framework.md).
 
