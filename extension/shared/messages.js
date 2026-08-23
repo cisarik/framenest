@@ -33,6 +33,20 @@
     CANONICAL_TAGS: "canonical_tags",
     DISMISS_PICKER: "dismiss_picker",
     PICKER_LAYOUT: "picker_layout",
+    REVIEW_INBOX: "review_inbox",
+  });
+  const REVIEW_INBOX = Object.freeze({
+    alarmName: "framenest.review-inbox",
+    explicitCollapsedKey: "reviewInboxExplicitCollapsed",
+    seenRunIdKey: "reviewInboxSeenRunId",
+    awaitingKey: "reviewInboxAwaitingAnalysis",
+    emptyCopy: "No analyzed items.",
+    hintCopy: "Awaiting analysis",
+    pollMs: 15000,
+    awaitingMs: 30 * 60 * 1000,
+    awaitingCap: 16,
+    badgeLimit: 1,
+    maxLimit: 100,
   });
 
   function isProtocolMessage(value) {
@@ -120,6 +134,8 @@
         return "/api/x/requests/" + safe.claimId + "/retry";
       case "canonicalTags":
         return "/api/canonical-tags";
+      case "reviewInbox":
+        return "/api/companion/review-inbox";
       case "content":
         if (!isUuid(safe.mediaId) || !isUuid(safe.locationId)) {
           return null;
@@ -154,6 +170,112 @@
       bytes[i] = binary.charCodeAt(i);
     }
     return bytes;
+  }
+
+  function reviewInboxQuerySuffix(limit) {
+    if (typeof limit !== "number" || !Number.isInteger(limit) || limit < 1 || limit > REVIEW_INBOX.maxLimit) {
+      return "";
+    }
+    return "?limit=" + String(limit);
+  }
+
+  function badgeTextForUnopenedCount(count) {
+    if (typeof count !== "number" || !Number.isFinite(count) || count <= 0) {
+      return "";
+    }
+    const n = Math.floor(count);
+    if (n > 99) {
+      return "99+";
+    }
+    return String(n);
+  }
+
+  function unopenedCountFromBody(body) {
+    const value = body && body.unopened_count;
+    if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
+      return 0;
+    }
+    return Math.floor(value);
+  }
+
+  function catalogedMediaIdsFromAssets(assets) {
+    if (!Array.isArray(assets)) {
+      return [];
+    }
+    const ids = [];
+    const seen = {};
+    assets.forEach((asset) => {
+      if (!asset || typeof asset !== "object") {
+        return;
+      }
+      const mediaId = asset.media_id;
+      if (!isUuid(mediaId) || seen[mediaId]) {
+        return;
+      }
+      seen[mediaId] = true;
+      ids.push(mediaId);
+    });
+    return ids;
+  }
+
+  function normalizeAwaitingRecords(raw, nowMs) {
+    const now = typeof nowMs === "number" && Number.isFinite(nowMs) ? nowMs : Date.now();
+    const records = [];
+    const seen = {};
+    (Array.isArray(raw) ? raw : []).forEach((item) => {
+      if (!item || typeof item !== "object") {
+        return;
+      }
+      const mediaId = item.media_id;
+      const expires = item.expires_at_ms;
+      if (!isUuid(mediaId) || seen[mediaId]) {
+        return;
+      }
+      if (typeof expires !== "number" || !Number.isFinite(expires) || expires <= now) {
+        return;
+      }
+      seen[mediaId] = true;
+      records.push({ media_id: mediaId, expires_at_ms: expires });
+    });
+    return records.slice(0, REVIEW_INBOX.awaitingCap);
+  }
+
+  function pruneAwaitingRecords(records, inboxMediaIds, nowMs) {
+    const present = {};
+    (Array.isArray(inboxMediaIds) ? inboxMediaIds : []).forEach((id) => {
+      if (isUuid(id)) {
+        present[id] = true;
+      }
+    });
+    return normalizeAwaitingRecords(records, nowMs).filter((record) => !present[record.media_id]);
+  }
+
+  function sanitizeReviewInboxItems(raw) {
+    if (!Array.isArray(raw)) {
+      return [];
+    }
+    const items = [];
+    raw.forEach((item) => {
+      if (!item || typeof item !== "object") {
+        return;
+      }
+      if (!isUuid(item.media_id) || !isUuid(item.analysis_run_id)) {
+        return;
+      }
+      if (typeof item.title !== "string") {
+        return;
+      }
+      const completed = item.completed_at_ms;
+      items.push({
+        media_id: item.media_id,
+        title: item.title,
+        analysis_run_id: item.analysis_run_id,
+        completed_at_ms:
+          typeof completed === "number" && Number.isFinite(completed) ? completed : 0,
+        unopened: item.unopened === true,
+      });
+    });
+    return items;
   }
 
   function concatChunks(chunks, total) {
@@ -278,6 +400,7 @@
     CHUNK_BYTES,
     TYPES,
     CONTENT_CATEGORIES,
+    REVIEW_INBOX,
     isProtocolMessage,
     dropUnknown,
     isUuid,
@@ -289,6 +412,13 @@
     reduceXSaveOutcome,
     acceptFrameNestOrigin,
     pathFor,
+    reviewInboxQuerySuffix,
+    badgeTextForUnopenedCount,
+    unopenedCountFromBody,
+    catalogedMediaIdsFromAssets,
+    normalizeAwaitingRecords,
+    pruneAwaitingRecords,
+    sanitizeReviewInboxItems,
     bytesFromBase64,
     concatChunks,
   };

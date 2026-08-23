@@ -7,6 +7,15 @@ const STORAGE_KEYS = Object.freeze({
   origin: "frameNestOrigin",
   inflight: "inflightClaims",
   acknowledged: "adapterAcknowledged",
+  explicitCollapsed: companion.REVIEW_INBOX.explicitCollapsedKey,
+  seenRunId: companion.REVIEW_INBOX.seenRunIdKey,
+  awaiting: companion.REVIEW_INBOX.awaitingKey,
+});
+const REVIEW_INBOX_ALARM = companion.REVIEW_INBOX.alarmName;
+const SUCCESSFUL_CLAIM_STATES = Object.freeze({
+  completed: true,
+  completed_partial: true,
+  duplicate_resolved: true,
 });
 
 function enableSidePanelOnActionClick() {
@@ -36,9 +45,22 @@ function isBindableComposerSender(sender) {
 }
 
 enableSidePanelOnActionClick();
+void ensureReviewInboxAlarm();
 chrome.runtime.onInstalled.addListener(() => {
   enableSidePanelOnActionClick();
+  void ensureReviewInboxAlarm();
 });
+chrome.runtime.onStartup.addListener(() => {
+  void ensureReviewInboxAlarm();
+});
+if (chrome.alarms && chrome.alarms.onAlarm) {
+  chrome.alarms.onAlarm.addListener((alarm) => {
+    if (!alarm || alarm.name !== REVIEW_INBOX_ALARM) {
+      return;
+    }
+    void refreshReviewInboxBadge();
+  });
+}
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   const parsed = companion.dropUnknown(message);
@@ -111,6 +133,8 @@ async function handle(message) {
       return dismissPicker();
     case companion.TYPES.PICKER_LAYOUT:
       return forwardPickerLayout(message.payload || {});
+    case companion.TYPES.REVIEW_INBOX:
+      return reviewInbox();
     default:
       return { ok: false, error: "unknown_type" };
   }
@@ -126,6 +150,8 @@ async function configureOrigin(payload) {
     return { ok: false, error: "permission_denied" };
   }
   await chrome.storage.local.set({ [STORAGE_KEYS.origin]: origin });
+  await ensureReviewInboxAlarm();
+  await refreshReviewInboxBadge();
   return { ok: true, origin };
 }
 
@@ -140,6 +166,7 @@ async function resetState() {
     }
   }
   await chrome.storage.local.remove(Object.values(STORAGE_KEYS));
+  await clearReviewInboxAlarmAndBadge();
   return { ok: true };
 }
 
@@ -166,6 +193,9 @@ async function savePost(payload) {
   const snapshot = claimSnapshot(response.body, claimId);
   if (companion.isUuid(claimId) && !snapshot.terminal) {
     await persistInflight(claimId, snapshot.postId || accepted.postId);
+  }
+  if (snapshot.terminal) {
+    await persistAwaitingAnalysisFromClaim(response.body, snapshot);
   }
   return snapshot;
 }
@@ -205,6 +235,7 @@ async function pollClaim(payload) {
   const snapshot = claimSnapshot(response.body, payload.claimId);
   if (snapshot.terminal) {
     await dropInflight(payload.claimId);
+    await persistAwaitingAnalysisFromClaim(response.body, snapshot);
   }
   return snapshot;
 }
@@ -368,6 +399,150 @@ async function configuredOrigin() {
     return null;
   }
   return origin;
+}
+
+function isSuccessfulClaim(snapshot) {
+  if (!snapshot || snapshot.ok !== true) {
+    return false;
+  }
+  if (SUCCESSFUL_CLAIM_STATES[snapshot.state]) {
+    return true;
+  }
+  return snapshot.submissionResult === "reuse";
+}
+
+async function ensureReviewInboxAlarm() {
+  const origin = await configuredOrigin();
+  if (!origin || !chrome.alarms || typeof chrome.alarms.create !== "function") {
+    await clearReviewInboxAlarmAndBadge();
+    return false;
+  }
+  try {
+    await Promise.resolve(
+      chrome.alarms.create(REVIEW_INBOX_ALARM, { periodInMinutes: 1 })
+    );
+  } catch {
+    return false;
+  }
+  return true;
+}
+
+async function clearBadgeText() {
+  if (!chrome.action || typeof chrome.action.setBadgeText !== "function") {
+    return;
+  }
+  try {
+    await Promise.resolve(chrome.action.setBadgeText({ text: "" }));
+  } catch {
+    /* badge API may be unavailable in tests */
+  }
+}
+
+async function clearReviewInboxAlarmAndBadge() {
+  if (chrome.alarms && typeof chrome.alarms.clear === "function") {
+    try {
+      await Promise.resolve(chrome.alarms.clear(REVIEW_INBOX_ALARM));
+    } catch {
+      /* alarm may already be absent */
+    }
+  }
+  await clearBadgeText();
+}
+
+async function persistAwaitingAnalysisFromClaim(body, snapshot) {
+  if (!isSuccessfulClaim(snapshot)) {
+    return;
+  }
+  const ids = companion.catalogedMediaIdsFromAssets(body && body.assets);
+  if (!ids.length) {
+    return;
+  }
+  const now = Date.now();
+  const expires = now + companion.REVIEW_INBOX.awaitingMs;
+  const stored = await chrome.storage.local.get(STORAGE_KEYS.awaiting);
+  const current = companion.normalizeAwaitingRecords(stored[STORAGE_KEYS.awaiting], now);
+  ids.forEach((mediaId) => {
+    const existing = current.find((record) => record.media_id === mediaId);
+    if (existing) {
+      existing.expires_at_ms = expires;
+    } else {
+      current.push({ media_id: mediaId, expires_at_ms: expires });
+    }
+  });
+  await chrome.storage.local.set({
+    [STORAGE_KEYS.awaiting]: current.slice(-companion.REVIEW_INBOX.awaitingCap),
+  });
+}
+
+async function readAwaitingRecords() {
+  const stored = await chrome.storage.local.get(STORAGE_KEYS.awaiting);
+  return companion.normalizeAwaitingRecords(stored[STORAGE_KEYS.awaiting], Date.now());
+}
+
+async function storeAwaitingRecords(records) {
+  await chrome.storage.local.set({ [STORAGE_KEYS.awaiting]: records });
+}
+
+function inboxForbidden(response) {
+  return Boolean(response && (response.status === 403 || response.error === "http_403"));
+}
+
+async function applyBadgeFromResponse(response) {
+  if (!response || !response.ok) {
+    await clearBadgeText();
+    return;
+  }
+  const text = companion.badgeTextForUnopenedCount(
+    companion.unopenedCountFromBody(response.body)
+  );
+  if (!chrome.action || typeof chrome.action.setBadgeText !== "function") {
+    return;
+  }
+  try {
+    await Promise.resolve(chrome.action.setBadgeText({ text: text }));
+  } catch {
+    /* badge API may be unavailable in tests */
+  }
+}
+
+async function refreshReviewInboxBadge() {
+  const response = await fetchJson("reviewInbox", {
+    suffix: companion.reviewInboxQuerySuffix(companion.REVIEW_INBOX.badgeLimit),
+  });
+  await applyBadgeFromResponse(response);
+  return response;
+}
+
+async function reviewInbox() {
+  const response = await fetchJson("reviewInbox");
+  if (!response.ok) {
+    await applyBadgeFromResponse(response);
+    return {
+      ok: false,
+      error: response.error,
+      status: response.status || 0,
+      forbidden: inboxForbidden(response),
+      items: [],
+      unopened_count: 0,
+      awaiting: [],
+    };
+  }
+  await applyBadgeFromResponse(response);
+  const items = companion.sanitizeReviewInboxItems(response.body && response.body.items);
+  const inboxIds = items.map((item) => item.media_id);
+  const awaiting = companion.pruneAwaitingRecords(
+    await readAwaitingRecords(),
+    inboxIds,
+    Date.now()
+  );
+  await storeAwaitingRecords(awaiting);
+  return {
+    ok: true,
+    forbidden: false,
+    items: items,
+    unopened_count: companion.unopenedCountFromBody(response.body),
+    awaiting: awaiting,
+  };
 }
 
 const MAX_PREVIEW_BYTES = 2 * 1024 * 1024;

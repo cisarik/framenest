@@ -60,6 +60,11 @@ test("service worker path templates reject caller-supplied URLs and ids", () => 
     "/api/media/11111111-1111-4111-8111-111111111111/locations/22222222-2222-4222-8222-222222222222/content"
   );
   assert.equal(companion.pathFor("identity"), "/api/identity/me");
+  assert.equal(companion.pathFor("reviewInbox"), "/api/companion/review-inbox");
+  assert.equal(
+    companion.pathFor("reviewInbox", { url: "https://evil.example", claimId: "../etc/passwd" }),
+    "/api/companion/review-inbox"
+  );
   assert.match(workerSource, /pathFor\(/);
   assert.doesNotMatch(workerSource, /fetch\(payload\.url\)/);
   assert.doesNotMatch(workerSource, /fetch\(message\.url\)/);
@@ -85,13 +90,14 @@ test("adapter contract has no Post-button or auto-submit path", () => {
 });
 
 test("manifest permissions stay minimized and omit X host access", () => {
-  assert.deepEqual(manifest.permissions.sort(), ["sidePanel", "storage"]);
+  assert.deepEqual(manifest.permissions.sort(), ["alarms", "sidePanel", "storage"]);
   assert.deepEqual(manifest.optional_permissions, ["downloads"]);
   assert.deepEqual(manifest.optional_host_permissions, ["https://*.ts.net/*"]);
   assert.equal("host_permissions" in manifest, false);
   assert.equal("externally_connectable" in manifest, false);
   assert.equal((manifest.permissions || []).includes("tabs"), false);
-  assert.equal((manifest.permissions || []).includes("alarms"), false);
+  assert.equal((manifest.permissions || []).includes("alarms"), true);
+  assert.equal((manifest.permissions || []).includes("notifications"), false);
   assert.equal((manifest.permissions || []).includes("cookies"), false);
   const matches = manifest.content_scripts[0].matches.sort();
   assert.deepEqual(matches, ["https://twitter.com/*", "https://x.com/*"]);
