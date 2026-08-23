@@ -8,6 +8,7 @@ from framenest.adapters.api.tailscale_ingress import find_route_policy
 from framenest.application.content_publication import ContentAudiencePolicy
 from framenest.domain.identity_access import (
     CAPABILITY_METADATA_ALIAS_WRITE,
+    CAPABILITY_MEDIA_WORKFLOW_READ,
     CAPABILITY_X_ACQUIRE,
     CAPABILITY_X_REQUEST,
     IdentityContext,
@@ -61,6 +62,15 @@ def test_only_x_request_mutations_are_companion_flagged() -> None:
     assert alias_get_match is not None and alias_get.companion_mutation is False
     assert alias_put_match is not None and alias_put.companion_mutation is False
     assert alias_put.capability == CAPABILITY_METADATA_ALIAS_WRITE
+    inbox, inbox_match = find_route_policy("GET", "/api/companion/review-inbox")
+    detail, detail_match = find_route_policy(
+        "GET",
+        "/api/companion/review-inbox/00000000-0000-4000-8000-000000000000",
+    )
+    assert inbox_match is not None and inbox.companion_mutation is False
+    assert detail_match is not None and detail.companion_mutation is False
+    assert inbox.capability == CAPABILITY_MEDIA_WORKFLOW_READ
+    assert detail.capability == CAPABILITY_MEDIA_WORKFLOW_READ
     from framenest.adapters.api.tailscale_ingress import ROUTE_POLICIES
 
     flagged = [policy for policy in ROUTE_POLICIES if policy.companion_mutation]

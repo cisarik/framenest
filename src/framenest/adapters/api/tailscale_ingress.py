@@ -476,6 +476,16 @@ ROUTE_POLICIES: tuple[RoutePolicy, ...] = (
         capability=CAPABILITY_X_REQUEST,
     ),
     RoutePolicy(
+        method="GET",
+        template="/api/companion/review-inbox",
+        capability=CAPABILITY_MEDIA_WORKFLOW_READ,
+    ),
+    RoutePolicy(
+        method="GET",
+        template="/api/companion/review-inbox/{media_id}",
+        capability=CAPABILITY_MEDIA_WORKFLOW_READ,
+    ),
+    RoutePolicy(
         method="POST",
         template="/api/x/requests",
         capability=CAPABILITY_X_REQUEST,

@@ -99,6 +99,10 @@ from framenest.application.content_publication import (
 )
 from framenest.application.media_catalog import GetMediaCatalogItem, ListMediaCatalog
 from framenest.application.companion_picker import ListCompanionPickerMedia
+from framenest.application.companion_review import (
+    GetCompanionReviewDetail,
+    ListCompanionReviewInbox,
+)
 from framenest.application.media_import import ImportMediaFromScanCandidate
 from framenest.application.media_metadata import (
     CreateCanonicalTag,
@@ -165,6 +169,10 @@ from framenest.adapters.api.x_request_api import (
 from framenest.adapters.api.x_companion_api import (
     XCompanionApiDependencies,
     create_x_companion_api_router,
+)
+from framenest.adapters.api.companion_review_api import (
+    CompanionReviewApiDependencies,
+    create_companion_review_api_router,
 )
 from framenest.adapters.api.x_admin_api import (
     XAdminApiDependencies,
@@ -238,6 +246,9 @@ from framenest.infrastructure.persistence.upload_publication_repository import (
 )
 from framenest.infrastructure.persistence.media_analysis_run_repository import (
     SqliteMediaAnalysisRunRepository,
+)
+from framenest.infrastructure.persistence.companion_review_repository import (
+    SqliteCompanionReviewRepository,
 )
 from framenest.infrastructure.persistence.security_audit_repository import (
     SqliteSecurityAuditRepository,
@@ -317,6 +328,7 @@ def create_app(
     x_request_api_dependencies: XRequestApiDependencies | None = None,
     x_admin_api_dependencies: XAdminApiDependencies | None = None,
     x_companion_api_dependencies: XCompanionApiDependencies | None = None,
+    companion_review_api_dependencies: CompanionReviewApiDependencies | None = None,
     security_audit_recorder: object | None = None,
     lifespan_shutdown_budget_seconds: float | None = None,
     shutdown_clock: object | None = None,
@@ -358,6 +370,7 @@ def create_app(
     owned_x_acquisition_coordinator = None
     owned_x_request_service = None
     owned_x_admin_service = None
+    owned_companion_review_repository = None
     if (
         library_api_dependencies is None
         or media_import_api_dependencies is None
@@ -390,6 +403,9 @@ def create_app(
             SqliteYouTubeAcquisitionClaimRepository(owned_engine)
         )
         owned_x_claim_repository = SqliteXAcquisitionClaimRepository(owned_engine)
+        owned_companion_review_repository = SqliteCompanionReviewRepository(
+            owned_engine
+        )
         owned_content_audience_policy = ContentAudiencePolicy(
             owned_content_publication_repository,
             youtube_requester_private_access=owned_youtube_claim_repository,
@@ -963,6 +979,20 @@ def create_app(
             ),
             catalog_available=resolved_settings.database_path.exists,
         )
+    if companion_review_api_dependencies is None:
+        companion_review_api_dependencies = CompanionReviewApiDependencies(
+            list_inbox=(
+                None
+                if owned_companion_review_repository is None
+                else ListCompanionReviewInbox(owned_companion_review_repository)
+            ),
+            get_detail=(
+                None
+                if owned_companion_review_repository is None
+                else GetCompanionReviewDetail(owned_companion_review_repository)
+            ),
+            catalog_available=resolved_settings.database_path.exists,
+        )
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
@@ -1144,6 +1174,9 @@ def create_app(
     app.include_router(create_x_request_api_router(x_request_api_dependencies))
     app.include_router(create_x_admin_api_router(x_admin_api_dependencies))
     app.include_router(create_x_companion_api_router(x_companion_api_dependencies))
+    app.include_router(
+        create_companion_review_api_router(companion_review_api_dependencies)
+    )
     if tailscale_ingress_enabled:
         assert identity_mapping is not None
         app.add_middleware(
