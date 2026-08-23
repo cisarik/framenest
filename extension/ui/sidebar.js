@@ -86,13 +86,88 @@
     }
     const doc = listNode.ownerDocument || globalThis.document;
     (Array.isArray(items) ? items : []).forEach((item) => {
-      if (!item || typeof item.title !== "string") {
+      if (!item || typeof item.title !== "string" || !companion.isUuid(item.media_id)) {
         return;
       }
       const li = doc.createElement("li");
-      li.textContent = item.title;
+      const button = doc.createElement("button");
+      button.type = "button";
+      if (typeof button.setAttribute === "function") {
+        button.setAttribute("data-media-id", item.media_id);
+      }
+      button.textContent = item.title;
+      if (typeof li.appendChild === "function") {
+        li.appendChild(button);
+      } else {
+        li.textContent = item.title;
+        if (typeof li.setAttribute === "function") {
+          li.setAttribute("data-media-id", item.media_id);
+        }
+      }
       listNode.appendChild(li);
     });
+  }
+
+  function reviewOverlayUrl(mediaId) {
+    if (!companion.isUuid(mediaId)) {
+      return "";
+    }
+    if (!chrome.runtime || typeof chrome.runtime.getURL !== "function") {
+      return "ui/review.html#media=" + mediaId;
+    }
+    return chrome.runtime.getURL("ui/review.html") + "#media=" + mediaId;
+  }
+
+  function openReviewOverlay(mediaId, dialogNode, frameNode) {
+    if (!companion.isUuid(mediaId) || !dialogNode || !frameNode) {
+      return false;
+    }
+    const url = reviewOverlayUrl(mediaId);
+    if (!url) {
+      return false;
+    }
+    frameNode.setAttribute("src", url);
+    if (typeof dialogNode.show === "function") {
+      dialogNode.show();
+    } else {
+      dialogNode.setAttribute("open", "");
+    }
+    return true;
+  }
+
+  function closeReviewOverlay(dialogNode, frameNode) {
+    if (frameNode) {
+      frameNode.removeAttribute("src");
+    }
+    if (!dialogNode) {
+      return;
+    }
+    if (typeof dialogNode.close === "function" && dialogNode.open) {
+      dialogNode.close();
+      return;
+    }
+    dialogNode.removeAttribute("open");
+  }
+
+  function extensionOrigin() {
+    try {
+      if (typeof location !== "undefined" && location.protocol === "chrome-extension:") {
+        return location.origin;
+      }
+    } catch {
+      /* ignore */
+    }
+    if (chrome.runtime && typeof chrome.runtime.getURL === "function") {
+      try {
+        return new URL(chrome.runtime.getURL("ui/review.html")).origin;
+      } catch {
+        const raw = chrome.runtime.getURL("ui/review.html");
+        if (typeof raw === "string" && raw.indexOf("chrome-extension://") === 0) {
+          return raw.split("/").slice(0, 3).join("/");
+        }
+      }
+    }
+    return "";
   }
 
   globalThis.FrameNestReviewInbox = {
@@ -102,6 +177,9 @@
     visualCollapsed: reviewInboxVisualCollapsed,
     newestRunId: reviewInboxNewestRunId,
     renderList: renderReviewInboxList,
+    overlayUrl: reviewOverlayUrl,
+    openOverlay: openReviewOverlay,
+    closeOverlay: closeReviewOverlay,
   };
 
   const originInput = document.getElementById("origin");
@@ -117,6 +195,8 @@
   const reviewInboxHint = document.getElementById("review-inbox-hint");
   const reviewInboxEmpty = document.getElementById("review-inbox-empty");
   const reviewInboxList = document.getElementById("review-inbox-list");
+  const reviewDialog = document.getElementById("review-dialog");
+  const reviewFrame = document.getElementById("review-frame");
   if (
     !originInput ||
     !shellStatus ||
@@ -130,7 +210,9 @@
     !reviewInboxToggle ||
     !reviewInboxHint ||
     !reviewInboxEmpty ||
-    !reviewInboxList
+    !reviewInboxList ||
+    !reviewDialog ||
+    !reviewFrame
   ) {
     return;
   }
@@ -435,7 +517,57 @@
     }
   }
 
+  function mediaIdFromInboxEvent(event) {
+    let node = event && event.target;
+    while (node && node !== reviewInboxList) {
+      const mediaId =
+        (node.dataset && node.dataset.mediaId) ||
+        (typeof node.getAttribute === "function" ? node.getAttribute("data-media-id") : "");
+      if (companion.isUuid(mediaId)) {
+        return mediaId;
+      }
+      node = node.parentNode;
+    }
+    return "";
+  }
+
+  function onReviewInboxClick(event) {
+    const mediaId = mediaIdFromInboxEvent(event);
+    if (!mediaId) {
+      return;
+    }
+    openReviewOverlay(mediaId, reviewDialog, reviewFrame);
+  }
+
+  function onReviewOverlayMessage(event) {
+    const message = companion.acceptReviewOverlayMessage(
+      event,
+      reviewFrame.contentWindow,
+      extensionOrigin()
+    );
+    if (!message) {
+      return false;
+    }
+    if (message.type === companion.REVIEW_OVERLAY.types.FORBIDDEN) {
+      closeReviewOverlay(reviewDialog, reviewFrame);
+      hideInboxSection();
+      return true;
+    }
+    if (message.type === companion.REVIEW_OVERLAY.types.CLOSE) {
+      closeReviewOverlay(reviewDialog, reviewFrame);
+      return true;
+    }
+    if (message.type === companion.REVIEW_OVERLAY.types.INBOX_REFRESH) {
+      void refreshInbox();
+      return true;
+    }
+    return true;
+  }
+
   function onWindowMessage(event) {
+    if (onReviewOverlayMessage(event)) {
+      return;
+    }
     const data = acceptIncomingWebMessage(event, frame.contentWindow, storedOrigin);
     if (!data) {
       return;
@@ -471,6 +603,7 @@
 
   chromeAction.addEventListener("click", onChromeAction);
   reviewInboxToggle.addEventListener("click", onInboxToggle);
+  reviewInboxList.addEventListener("click", onReviewInboxClick);
   document.addEventListener("visibilitychange", () => {
     if (document.hidden) {
       stopInboxPoll();
@@ -494,9 +627,15 @@
     settingsOpen.setAttribute("aria-expanded", "false");
   });
   window.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && reviewDialog.open) {
+      closeReviewOverlay(reviewDialog, reviewFrame);
+    }
     if (event.key === "Escape" && settingsDialog.open) {
       closeSettings();
     }
+  });
+  reviewDialog.addEventListener("close", () => {
+    reviewFrame.removeAttribute("src");
   });
   frame.addEventListener("load", onFrameLoad);
   frame.addEventListener("error", onFrameError);

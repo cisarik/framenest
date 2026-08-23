@@ -222,6 +222,55 @@ body {
   word-break: break-word;
 }
 
+.review-inbox__list button {
+  display: block;
+  width: 100%;
+  margin: 0;
+  padding: 2px 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.review-inbox__list button:hover,
+.review-inbox__list button:focus-visible {
+  color: var(--accent);
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.review-dialog {
+  position: fixed;
+  top: var(--title-bar-height);
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 5;
+  width: 100%;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: var(--background);
+  color: var(--text);
+}
+
+.review-dialog::backdrop {
+  display: none;
+  background: transparent;
+}
+
+.review-dialog__frame {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: var(--background);
+}
+
 #frame {
   flex: 1 1 auto;
   width: 100%;

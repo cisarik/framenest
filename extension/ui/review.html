@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Review suggestion</title>
+    <link rel="stylesheet" href="review.css" />
+  </head>
+  <body>
+    <main id="review">
+      <header class="review-header">
+        <h1>Review suggestion</h1>
+        <button id="close" type="button" aria-label="Close">X</button>
+      </header>
+      <p id="run-time-caption" class="caption">
+        History labels use run completion time, not a provider timestamp.
+      </p>
+      <label for="run-history">History (run completion time)</label>
+      <select id="run-history"></select>
+      <section id="canonical" class="panel" aria-label="Canonical values"></section>
+      <section id="publication" class="panel" aria-label="Publication state"></section>
+      <section id="receipts" class="panel" aria-label="Field-source receipts"></section>
+      <section class="field-row">
+        <label class="field-check"><input id="field-title" type="checkbox" /> Title</label>
+        <p id="suggestion-title" class="suggestion-text"></p>
+      </section>
+      <section class="field-row">
+        <label class="field-check"><input id="field-tags" type="checkbox" /> Tags</label>
+        <div id="mapped-chips" class="chips"></div>
+        <ul id="dropped-tags" class="dropped"></ul>
+      </section>
+      <section class="field-row">
+        <label class="field-check"><input id="field-description" type="checkbox" /> Description</label>
+        <p id="suggestion-description" class="suggestion-text"></p>
+      </section>
+      <p id="status" role="status"></p>
+      <div class="actions">
+        <button id="save" type="button" disabled>Save</button>
+      </div>
+    </main>
+    <script src="../shared/messages.js"></script>
+    <script src="review.js"></script>
+  </body>
+</html>
