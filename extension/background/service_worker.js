@@ -135,6 +135,12 @@ async function handle(message) {
       return forwardPickerLayout(message.payload || {});
     case companion.TYPES.REVIEW_INBOX:
       return reviewInbox();
+    case companion.TYPES.REVIEW_INBOX_DETAIL:
+      return reviewInboxDetail(message.payload || {});
+    case companion.TYPES.REVIEW_INBOX_OPENED:
+      return reviewInboxOpened(message.payload || {});
+    case companion.TYPES.REVIEW_INBOX_APPLY:
+      return reviewInboxApply(message.payload || {});
     default:
       return { ok: false, error: "unknown_type" };
   }
@@ -513,6 +519,74 @@ async function refreshReviewInboxBadge() {
   return response;
 }
 
+function mediaIdFromPayload(payload) {
+  const mediaId = payload && (payload.mediaId || payload.media_id);
+  return companion.isUuid(mediaId) ? mediaId : "";
+}
+
+function wrapReviewClient(response) {
+  const status = (response && typeof response.status === "number" && Number.isFinite(response.status)
+    ? response.status
+    : 0);
+  const forbidden = Boolean(
+    response && (response.status === 403 || response.error === "http_403")
+  );
+  if (!response || !response.ok) {
+    return {
+      ok: false,
+      error: (response && response.error) || "request_failed",
+      status: status,
+      body: {},
+      forbidden: forbidden,
+    };
+  }
+  return {
+    ok: true,
+    error: null,
+    status: status || 200,
+    body: response.body || {},
+    forbidden: false,
+  };
+}
+
+async function reviewInboxDetail(payload) {
+  const mediaId = mediaIdFromPayload(payload);
+  if (!mediaId) {
+    return { ok: false, error: "invalid_media", status: 0, body: {}, forbidden: false };
+  }
+  return wrapReviewClient(await fetchJson("reviewInboxDetail", { ids: { mediaId: mediaId } }));
+}
+
+async function reviewInboxOpened(payload) {
+  const mediaId = mediaIdFromPayload(payload);
+  const analysisRunId = payload && payload.analysis_run_id;
+  if (!mediaId || !companion.isUuid(analysisRunId)) {
+    return { ok: false, error: "invalid_opened", status: 0, body: {}, forbidden: false };
+  }
+  return wrapReviewClient(
+    await fetchJson("reviewInboxOpened", {
+      ids: { mediaId: mediaId },
+      method: "POST",
+      body: { analysis_run_id: analysisRunId },
+    })
+  );
+}
+
+async function reviewInboxApply(payload) {
+  const mediaId = mediaIdFromPayload(payload);
+  const body = companion.sanitizeReviewApplyBody(payload);
+  if (!mediaId || !body) {
+    return { ok: false, error: "invalid_apply", status: 0, body: {}, forbidden: false };
+  }
+  return wrapReviewClient(
+    await fetchJson("reviewInboxApply", {
+      ids: { mediaId: mediaId },
+      method: "POST",
+      body: body,
+    })
+  );
+}
+
 async function reviewInbox() {
   const response = await fetchJson("reviewInbox");
   if (!response.ok) {
@@ -615,7 +689,7 @@ async function fetchJson(pathName, options) {
       const code = body && body.error && body.error.code;
       return { ok: false, error: code || "http_" + response.status, status: response.status };
     }
-    return { ok: true, body };
+    return { ok: true, status: response.status, body };
   } catch {
     return { ok: false, error: "network_failed" };
   } finally {

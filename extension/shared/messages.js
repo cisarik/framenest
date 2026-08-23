@@ -34,6 +34,19 @@
     DISMISS_PICKER: "dismiss_picker",
     PICKER_LAYOUT: "picker_layout",
     REVIEW_INBOX: "review_inbox",
+    REVIEW_INBOX_DETAIL: "review_inbox_detail",
+    REVIEW_INBOX_OPENED: "review_inbox_opened",
+    REVIEW_INBOX_APPLY: "review_inbox_apply",
+  });
+  const REVIEW_APPLY_FIELDS = Object.freeze(["display_title", "tags", "description"]);
+  const TAG_KEY_PATTERN = /^[a-z][a-z0-9-]{0,63}$/;
+  const REVIEW_OVERLAY = Object.freeze({
+    protocol: "framenest.companion.review.v1",
+    types: Object.freeze({
+      CLOSE: "close",
+      FORBIDDEN: "forbidden",
+      INBOX_REFRESH: "inbox_refresh",
+    }),
   });
   const REVIEW_INBOX = Object.freeze({
     alarmName: "framenest.review-inbox",
@@ -136,6 +149,21 @@
         return "/api/canonical-tags";
       case "reviewInbox":
         return "/api/companion/review-inbox";
+      case "reviewInboxDetail":
+        if (!isUuid(safe.mediaId)) {
+          return null;
+        }
+        return "/api/companion/review-inbox/" + safe.mediaId;
+      case "reviewInboxOpened":
+        if (!isUuid(safe.mediaId)) {
+          return null;
+        }
+        return "/api/companion/review-inbox/" + safe.mediaId + "/opened";
+      case "reviewInboxApply":
+        if (!isUuid(safe.mediaId)) {
+          return null;
+        }
+        return "/api/companion/review-inbox/" + safe.mediaId + "/apply";
       case "content":
         if (!isUuid(safe.mediaId) || !isUuid(safe.locationId)) {
           return null;
@@ -278,6 +306,112 @@
     return items;
   }
 
+  function sanitizeReviewApplyFields(raw) {
+    if (!Array.isArray(raw)) {
+      return [];
+    }
+    const fields = [];
+    const seen = {};
+    raw.forEach((field) => {
+      if (typeof field !== "string" || REVIEW_APPLY_FIELDS.indexOf(field) === -1 || seen[field]) {
+        return;
+      }
+      seen[field] = true;
+      fields.push(field);
+    });
+    return fields;
+  }
+
+  function sanitizeReviewTagKeys(raw) {
+    if (!Array.isArray(raw)) {
+      return [];
+    }
+    const keys = [];
+    const seen = {};
+    raw.forEach((key) => {
+      if (typeof key !== "string" || !TAG_KEY_PATTERN.test(key) || seen[key]) {
+        return;
+      }
+      seen[key] = true;
+      keys.push(key);
+    });
+    return keys.slice(0, 5);
+  }
+
+  function sanitizeReviewApplyBody(payload) {
+    if (!payload || typeof payload !== "object") {
+      return null;
+    }
+    if (!isUuid(payload.analysis_run_id)) {
+      return null;
+    }
+    const fields = sanitizeReviewApplyFields(payload.fields);
+    if (!fields.length) {
+      return null;
+    }
+    const tagsSelected = fields.indexOf("tags") !== -1;
+    const tagKeys = tagsSelected ? sanitizeReviewTagKeys(payload.tag_keys) : [];
+    if (tagsSelected && tagKeys.length < 1) {
+      return null;
+    }
+    return {
+      analysis_run_id: payload.analysis_run_id,
+      fields: fields,
+      tag_keys: tagsSelected ? tagKeys : [],
+    };
+  }
+
+  function parseReviewMediaHash(hash) {
+    const raw = typeof hash === "string" ? hash : "";
+    const trimmed = raw.charAt(0) === "#" ? raw.slice(1) : raw;
+    let mediaId = "";
+    trimmed.split("&").forEach((part) => {
+      const eq = part.indexOf("=");
+      const key = eq === -1 ? part : part.slice(0, eq);
+      const value = eq === -1 ? "" : part.slice(eq + 1);
+      if (key === "media") {
+        try {
+          mediaId = decodeURIComponent(value);
+        } catch {
+          mediaId = value;
+        }
+      }
+    });
+    return isUuid(mediaId) ? mediaId : null;
+  }
+
+  function formatReviewRunLabel(run) {
+    const completed = run && typeof run.completed_at_ms === "number" ? run.completed_at_ms : 0;
+    const model = run && typeof run.model_id === "string" ? run.model_id : "";
+    const title = run && typeof run.title === "string" ? run.title : "";
+    let when = "";
+    try {
+      when = new Date(completed).toLocaleString();
+    } catch {
+      when = String(completed);
+    }
+    return when + " · " + model + " · " + title;
+  }
+
+  function acceptReviewOverlayMessage(event, expectedSource, expectedOrigin) {
+    if (!event || event.source !== expectedSource || event.origin !== expectedOrigin) {
+      return null;
+    }
+    const data = event.data;
+    if (!data || typeof data !== "object" || data.v !== REVIEW_OVERLAY.protocol) {
+      return null;
+    }
+    const types = REVIEW_OVERLAY.types;
+    if (
+      data.type !== types.CLOSE &&
+      data.type !== types.FORBIDDEN &&
+      data.type !== types.INBOX_REFRESH
+    ) {
+      return null;
+    }
+    return { type: data.type };
+  }
+
   function concatChunks(chunks, total) {
     const out = new Uint8Array(total);
     let offset = 0;
@@ -401,6 +535,8 @@
     TYPES,
     CONTENT_CATEGORIES,
     REVIEW_INBOX,
+    REVIEW_OVERLAY,
+    REVIEW_APPLY_FIELDS,
     isProtocolMessage,
     dropUnknown,
     isUuid,
@@ -419,6 +555,10 @@
     normalizeAwaitingRecords,
     pruneAwaitingRecords,
     sanitizeReviewInboxItems,
+    sanitizeReviewApplyBody,
+    parseReviewMediaHash,
+    formatReviewRunLabel,
+    acceptReviewOverlayMessage,
     bytesFromBase64,
     concatChunks,
   };
