@@ -178,7 +178,6 @@ from framenest.domain import LibraryId, LibraryPathFlavor
 from framenest.domain.uploads import UploadSessionId
 from framenest.domain.identity_access import (
     IdentityContext,
-    IdentityMappingEntry,
     build_identity_mapping,
 )
 import framenest.adapters.api.web as web_resources
@@ -326,6 +325,7 @@ def create_app(
     tailscale_ingress_enabled = (
         resolved_settings.ingress_mode == INGRESS_MODE_TAILSCALE_UDS
     )
+    identity_mapping = build_identity_mapping(resolved_settings.identity_map)
     owned_engine = None
     owned_library_repository = None
     owned_media_repository = None
@@ -727,8 +727,8 @@ def create_app(
 
             def _combined_analysis_allowed(upload_id: UploadSessionId) -> bool:
                 if owned_x_claim_repository is not None and (
-                    automatic_analysis_allowed_for_upload(
-                        owned_x_claim_repository, upload_id
+                    x_automatic_analysis_allowed_for_upload(
+                        owned_x_claim_repository, upload_id, identity_mapping
                     )
                     is False
                 ):
@@ -1035,10 +1035,8 @@ def create_app(
             if cancelled is not None:
                 raise cancelled
 
-    identity_mapping: dict[str, IdentityMappingEntry] | None = None
     resolved_audit_recorder = security_audit_recorder
     if tailscale_ingress_enabled:
-        identity_mapping = build_identity_mapping(resolved_settings.identity_map)
         if resolved_audit_recorder is None:
             if owned_engine is None:
                 raise ValueError(

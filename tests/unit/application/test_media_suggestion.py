@@ -204,11 +204,11 @@ def test_request_uses_basename_without_absolute_path() -> None:
     request = build_suggestion_request(prepared)
     assert request.basename == "sample.mp4"
     assert "/" not in request.basename
-    assert request.prompt_version == "framenest-media-suggestion-v3"
+    assert request.prompt_version == "framenest-media-suggestion-v4"
 
 
-def test_prompt_version_is_v3() -> None:
-    assert PROMPT_VERSION == "framenest-media-suggestion-v3"
+def test_prompt_version_is_v4() -> None:
+    assert PROMPT_VERSION == "framenest-media-suggestion-v4"
 
 
 def test_hidden_segments_rejected_for_suggestion_paths() -> None:
@@ -245,6 +245,54 @@ def test_suggestion_validates_bounds_and_unique_tags() -> None:
             model_id="model",
             prompt_version=PROMPT_VERSION,
         )
+
+
+def test_suggestion_rejects_zero_or_six_tags() -> None:
+    with pytest.raises(FrameNestMediaSuggestionError):
+        MediaSuggestion(
+            title="Title",
+            description="Valid description",
+            collection="Home",
+            tags=(),
+            suggested_filename="clip.mp4",
+            confidence=0.5,
+            evidence=("evidence",),
+            uncertainties=(),
+            provider_id="nvidia-nim",
+            model_id="model",
+            prompt_version=PROMPT_VERSION,
+        )
+    with pytest.raises(FrameNestMediaSuggestionError):
+        MediaSuggestion(
+            title="Title",
+            description="Valid description",
+            collection="Home",
+            tags=("one", "two", "three", "four", "five", "six"),
+            suggested_filename="clip.mp4",
+            confidence=0.5,
+            evidence=("evidence",),
+            uncertainties=(),
+            provider_id="nvidia-nim",
+            model_id="model",
+            prompt_version=PROMPT_VERSION,
+        )
+
+
+def test_suggestion_accepts_five_tags() -> None:
+    suggestion = MediaSuggestion(
+        title="Title",
+        description="Valid description",
+        collection="Home",
+        tags=("one", "two", "three", "four", "five"),
+        suggested_filename="clip.mp4",
+        confidence=0.5,
+        evidence=("evidence",),
+        uncertainties=(),
+        provider_id="nvidia-nim",
+        model_id="model",
+        prompt_version=PROMPT_VERSION,
+    )
+    assert suggestion.tags == ("one", "two", "three", "four", "five")
 
 
 @pytest.mark.parametrize("filename", ["CON.mp4", "bad/name.mp4", "clip.mov", "clip.mp4 "])

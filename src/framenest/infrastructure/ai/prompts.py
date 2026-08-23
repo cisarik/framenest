@@ -37,8 +37,11 @@ Requirements:
 - Describe visible action, mood, reaction, and likely reuse context.
 - Distinguish observation from uncertainty.
 - Do not invent dialogue or use marketing language.
-- Return 4 to 10 concise English display tags when evidence permits it, and
-  otherwise return the best non-empty concise tag list.
+- Return 1 to 5 concise English display tags that are most significant for
+  storing this GIF, image, or video. Quality matters more than quantity.
+  Prefer 3 to 5 only when supported by visual evidence. Prioritize important
+  subjects, actions, emotions, and context; omit weak, redundant, speculative,
+  or filename-derived tags. Never return more than five.
 - Tags must be display names, not internal keys.
 - Tags must have no duplicates after case folding.
 - Include visible subject, action, emotion, and context when supported.

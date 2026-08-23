@@ -29,7 +29,7 @@ if TYPE_CHECKING:
     from framenest.application.ports.media_analysis import LocalMediaAnalysisPreparer
     from framenest.application.ports.media_suggestion import MediaSuggestionProvider
 
-PROMPT_VERSION = "framenest-media-suggestion-v3"
+PROMPT_VERSION = "framenest-media-suggestion-v4"
 
 INVALID_SUGGESTION_REQUEST_MESSAGE = "Invalid media suggestion request."
 INVALID_SUGGESTION_MESSAGE = "Invalid media suggestion."
@@ -55,7 +55,7 @@ DESCRIPTION_MAX_LENGTH = 600
 COLLECTION_MAX_LENGTH = 40
 TAG_MAX_LENGTH = 40
 TAG_MIN_COUNT = 1
-TAG_MAX_COUNT = 12
+TAG_MAX_COUNT = 5
 EVIDENCE_MAX_COUNT = 12
 EVIDENCE_MAX_LENGTH = 240
 UNCERTAINTY_MAX_COUNT = 12

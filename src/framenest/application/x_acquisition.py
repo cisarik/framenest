@@ -8,7 +8,7 @@ catalog-handoff discipline without generalizing the YouTube implementation.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Callable, Mapping
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 import functools
@@ -65,6 +65,11 @@ from framenest.domain.media_metadata import (
     MediaDisplayTitle,
 )
 from framenest.domain.media_user_alias import MediaUserAliasContent
+from framenest.domain.identity_access import (
+    ROLE_ADMIN,
+    IdentityMappingEntry,
+    normalize_login,
+)
 from framenest.domain.uploads import (
     UploadDuplicateResolutionMode,
     UploadSessionId,
@@ -1300,9 +1305,26 @@ def x_classification_for_upload(
 def automatic_analysis_allowed_for_upload(
     repository: XAcquisitionClaimRepository,
     upload_id: UploadSessionId,
+    identity_mapping: Mapping[str, IdentityMappingEntry],
 ) -> bool:
-    """Fail closed for linked X acquisitions, even when globally enabled."""
-    return repository.find_asset_by_upload_id(upload_id) is None
+    """Allow automatic analysis only for administrator-owned linked X uploads.
+
+    This helper does not read FRAMENEST_AUTOMATIC_MEDIA_ANALYSIS_ENABLED.
+    The scheduler ``enabled`` flag remains the enqueue gate.
+    """
+    try:
+        if repository.find_asset_by_upload_id(upload_id) is None:
+            return True
+        claim = repository.find_post_by_upload_id(upload_id)
+        if claim is None or claim.created_by_login_key is None:
+            return False
+        login_key = normalize_login(claim.created_by_login_key)
+        entry = identity_mapping.get(login_key)
+        if entry is None:
+            return False
+        return entry.role == ROLE_ADMIN
+    except Exception:
+        return False
 
 
 def _imported_display_title(title: str | None) -> MediaDisplayTitle | None:

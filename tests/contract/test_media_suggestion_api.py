@@ -309,7 +309,7 @@ def test_capability_configured_and_unconfigured_are_sanitized_no_store() -> None
         "provider_id": "nvidia-nim",
         "provider_display_name": "NVIDIA NIM",
         "model_id": "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
-        "prompt_version": "framenest-media-suggestion-v3",
+        "prompt_version": PROMPT_VERSION,
         "execution": "server",
         "status": "configured_unverified",
         "configured": True,
@@ -320,7 +320,7 @@ def test_capability_configured_and_unconfigured_are_sanitized_no_store() -> None
     assert unconfigured.headers["cache-control"] == "no-store"
     assert unconfigured.json() == {
         "available": False,
-        "prompt_version": "framenest-media-suggestion-v3",
+        "prompt_version": PROMPT_VERSION,
         "execution": "server",
         "status": "not_configured",
         "configured": False,
@@ -354,7 +354,7 @@ def test_capability_selected_provider_without_credential_is_actionable_without_r
         "provider_id": "vercel-ai-gateway",
         "provider_display_name": "Vercel AI Gateway",
         "model_id": "google/custom",
-        "prompt_version": "framenest-media-suggestion-v3",
+        "prompt_version": PROMPT_VERSION,
         "execution": "server",
         "status": "credential_unavailable",
         "configured": True,
@@ -427,7 +427,7 @@ def test_success_returns_validated_editable_suggestion_no_frames_or_raw_content(
         "sent_frame_count": 1,
         "provider_id": "nvidia-nim",
         "model_id": "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
-        "prompt_version": "framenest-media-suggestion-v3",
+        "prompt_version": PROMPT_VERSION,
         "suggestion": {
             "title": "Editable title",
             "description": "Editable description",
@@ -517,7 +517,7 @@ def test_imported_media_identity_preview_returns_sanitized_draft_without_path() 
         "sent_frame_count": 1,
         "provider_id": "nvidia-nim",
         "model_id": "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
-        "prompt_version": "framenest-media-suggestion-v3",
+        "prompt_version": PROMPT_VERSION,
         "suggestion": {
             "title": "Editable title",
             "description": "Editable description",

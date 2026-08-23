@@ -10,6 +10,7 @@ from framenest.application.media_analysis import PNG_SIGNATURE
 from framenest.application.media_suggestion import (
     MediaSuggestionProviderAuthError,
     MediaSuggestionRequest,
+    PROMPT_VERSION,
 )
 from framenest.infrastructure.ai.constants import (
     VERCEL_AI_GATEWAY_CHAT_COMPLETIONS_URL,
@@ -61,7 +62,7 @@ def _request() -> MediaSuggestionRequest:
             has_audio=False,
         ),
         representative_frames=(build_representative_frame(timestamp_ms=0, payload=PNG_SIGNATURE + b"frame"),),
-        prompt_version="framenest-media-suggestion-v3",
+        prompt_version=PROMPT_VERSION,
     )
 
 

@@ -4491,7 +4491,7 @@ function renderAiPanelUnavailable(card) {
   elements.capability.textContent = "AI unavailable";
   elements.provider.textContent = aiCapability.provider_id || "nvidia-nim";
   elements.model.textContent = aiCapability.model_id || "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning";
-  elements.prompt.textContent = aiCapability.prompt_version || "framenest-media-suggestion-v3";
+  elements.prompt.textContent = aiCapability.prompt_version || "framenest-media-suggestion-v4";
   elements.execution.textContent = aiCapability.execution || "server";
   elements.status.textContent = "Configure a server-side AI provider before starting FrameNest.";
   elements.checkbox.checked = false;
