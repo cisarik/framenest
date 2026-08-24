@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Literal
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, UUID4, field_validator
 
@@ -224,6 +225,7 @@ class MediaMetadataApiDependencies:
     save_metadata: object
     catalog_available: Callable[[], bool]
     audience_policy: ContentAudiencePolicy | None = None
+    ensure_companion_x_tag: object | None = None
 
 
 def create_media_metadata_api_router(dependencies: MediaMetadataApiDependencies) -> APIRouter:
@@ -275,9 +277,16 @@ def create_media_metadata_api_router(dependencies: MediaMetadataApiDependencies)
         response_model=CanonicalTagListResponse,
         responses={500: {"model": ErrorResponse}, 503: {"model": ErrorResponse}},
     )
-    def list_tags() -> CanonicalTagListResponse | JSONResponse:
+    def list_tags(
+        surface: Literal["x-companion-save"] | None = Query(default=None),
+    ) -> CanonicalTagListResponse | JSONResponse:
         if not dependencies.catalog_available():
             return _catalog_unavailable_response()
+        if surface == "x-companion-save" and dependencies.ensure_companion_x_tag is not None:
+            try:
+                dependencies.ensure_companion_x_tag.execute()
+            except Exception:
+                pass
         try:
             result = dependencies.list_tags.execute()
         except Exception:

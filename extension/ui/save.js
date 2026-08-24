@@ -2,6 +2,8 @@
   const companion = globalThis.FrameNestCompanion;
   const SUGGESTION_LIMIT = 8;
   const TAG_LIMIT = 32;
+  const COMPANION_X_TAG_KEY = "x";
+  const COMPANION_X_TAG_DISPLAY_NAME = "\u{1D54F}";
   const UPGRADE_MESSAGE = "FrameNest needs an update before this Save can complete.";
   const form = document.getElementById("save-form");
   const title = document.getElementById("title");
@@ -395,9 +397,29 @@
         catalog.push({ key: item.key, display_name: displayNameOf(item) });
       }
     });
+    preselectCompanionXTag();
     setStatus(tagsStatus, catalog.length ? "" : "No canonical tags yet.");
+    renderSelected();
     renderSuggestions();
     scheduleSize();
+  }
+
+  function preselectCompanionXTag() {
+    if (chosen.some((entry) => entry.key === COMPANION_X_TAG_KEY)) {
+      return;
+    }
+    const match = catalog.find(
+      (item) =>
+        item.key === COMPANION_X_TAG_KEY &&
+        item.display_name === COMPANION_X_TAG_DISPLAY_NAME
+    );
+    if (!match) {
+      return;
+    }
+    chosen.unshift({
+      key: match.key,
+      display_name: match.display_name,
+    });
   }
 
   form.addEventListener("submit", (event) => {

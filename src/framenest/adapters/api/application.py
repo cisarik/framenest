@@ -106,6 +106,7 @@ from framenest.application.companion_review import (
     MarkCompanionReviewOpened,
 )
 from framenest.application.media_import import ImportMediaFromScanCandidate
+from framenest.application.companion_x_tag import EnsureCompanionXTag
 from framenest.application.media_metadata import (
     CreateCanonicalTag,
     GetMediaMetadata,
@@ -481,6 +482,7 @@ def create_app(
             save_metadata=SaveMediaMetadata(owned_media_metadata_repository),
             catalog_available=resolved_settings.database_path.exists,
             audience_policy=owned_content_audience_policy,
+            ensure_companion_x_tag=EnsureCompanionXTag(owned_media_metadata_repository),
         )
     if media_alias_api_dependencies is None:
         if owned_media_user_alias_repository is not None:

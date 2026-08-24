@@ -157,7 +157,7 @@
         }
         return "/api/x/requests/" + safe.claimId + "/retry";
       case "canonicalTags":
-        return "/api/canonical-tags";
+        return "/api/canonical-tags?surface=x-companion-save";
       case "reviewInbox":
         return "/api/companion/review-inbox";
       case "reviewInboxDetail":

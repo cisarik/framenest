@@ -62,6 +62,18 @@ class _FakeListTags:
 
 
 @dataclass
+class _FakeEnsureCompanionXTag:
+    error: Exception | None = None
+    calls: int = 0
+
+    def execute(self) -> object:
+        self.calls += 1
+        if self.error is not None:
+            raise self.error
+        return CanonicalTagCreateResult(status="created", tag=_tag("x", "\N{MATHEMATICAL DOUBLE-STRUCK CAPITAL X}"))
+
+
+@dataclass
 class _FakeGetMetadata:
     persisted: bool = False
     error: Exception | None = None
@@ -145,6 +157,7 @@ def _client(
     list_tags: _FakeListTags | None = None,
     get_metadata: _FakeGetMetadata | None = None,
     save_metadata: _FakeSaveMetadata | None = None,
+    ensure_companion_x_tag: _FakeEnsureCompanionXTag | None = None,
     database_path: Path | None = None,
 ) -> TestClient:
     settings = FrameNestSettings(
@@ -160,6 +173,7 @@ def _client(
                 get_metadata=get_metadata or _FakeGetMetadata(),
                 save_metadata=save_metadata or _FakeSaveMetadata(),
                 catalog_available=lambda: catalog_available,
+                ensure_companion_x_tag=ensure_companion_x_tag,
             ),
         )
     )
@@ -314,3 +328,86 @@ def test_unexpected_failures_are_sanitized() -> None:
     for response in (tag_failure, metadata_failure):
         assert UNDERLYING_EXCEPTION_TEXT not in response.text
         assert PRIVATE_DATABASE_PATH not in response.text
+
+
+def test_bare_canonical_tag_list_does_not_seed() -> None:
+    ensure = _FakeEnsureCompanionXTag()
+    listed = _client(ensure_companion_x_tag=ensure).get("/api/canonical-tags")
+
+    assert listed.status_code == 200
+    assert listed.json() == {
+        "tags": [
+            {"key": "compression", "display_name": "Compression"},
+            {"key": "mathematics", "display_name": "Math"},
+        ]
+    }
+    assert ensure.calls == 0
+
+
+def test_companion_save_surface_seeds_then_lists_unchanged_shape() -> None:
+    ensure = _FakeEnsureCompanionXTag()
+    listed = _client(ensure_companion_x_tag=ensure).get(
+        "/api/canonical-tags",
+        params={"surface": "x-companion-save"},
+    )
+
+    assert listed.status_code == 200
+    assert listed.json() == {
+        "tags": [
+            {"key": "compression", "display_name": "Compression"},
+            {"key": "mathematics", "display_name": "Math"},
+        ]
+    }
+    assert ensure.calls == 1
+
+
+def test_unknown_canonical_tag_list_surface_returns_422() -> None:
+    ensure = _FakeEnsureCompanionXTag()
+    response = _client(ensure_companion_x_tag=ensure).get(
+        "/api/canonical-tags",
+        params={"surface": "youtube-companion-save"},
+    )
+
+    assert response.status_code == 422
+    assert ensure.calls == 0
+
+
+def test_companion_save_surface_seed_failure_still_lists() -> None:
+    ensure = _FakeEnsureCompanionXTag(error=CanonicalTagDefinitionConflictError("conflict"))
+    listed = _client(ensure_companion_x_tag=ensure).get(
+        "/api/canonical-tags",
+        params={"surface": "x-companion-save"},
+    )
+
+    assert listed.status_code == 200
+    assert listed.json()["tags"] == [
+        {"key": "compression", "display_name": "Compression"},
+        {"key": "mathematics", "display_name": "Math"},
+    ]
+    assert ensure.calls == 1
+
+
+def test_companion_save_surface_preserves_list_failure() -> None:
+    ensure = _FakeEnsureCompanionXTag()
+    listed = _client(
+        ensure_companion_x_tag=ensure,
+        list_tags=_FakeListTags(error=RuntimeError(UNDERLYING_EXCEPTION_TEXT)),
+    ).get("/api/canonical-tags", params={"surface": "x-companion-save"})
+
+    assert listed.status_code == 500
+    assert listed.json()["error"]["code"] == "CANONICAL_TAG_OPERATION_FAILED"
+    assert ensure.calls == 1
+    assert UNDERLYING_EXCEPTION_TEXT not in listed.text
+
+
+def test_canonical_tag_create_post_is_unchanged_and_does_not_seed() -> None:
+    ensure = _FakeEnsureCompanionXTag()
+    created = _client(
+        create_tag=_FakeCreateTag(status="created"),
+        ensure_companion_x_tag=ensure,
+    ).post("/api/canonical-tags", json={"key": "mathematics", "display_name": "Math"})
+
+    assert created.status_code == 201
+    assert created.json()["status"] == "created"
+    assert created.json()["tag"] == {"key": "mathematics", "display_name": "Math"}
+    assert ensure.calls == 0

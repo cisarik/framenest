@@ -61,6 +61,10 @@ test("service worker path templates reject caller-supplied URLs and ids", () => 
     "/api/media/11111111-1111-4111-8111-111111111111/locations/22222222-2222-4222-8222-222222222222/content"
   );
   assert.equal(companion.pathFor("identity"), "/api/identity/me");
+  assert.equal(
+    companion.pathFor("canonicalTags"),
+    "/api/canonical-tags?surface=x-companion-save"
+  );
   assert.equal(companion.pathFor("reviewInbox"), "/api/companion/review-inbox");
   assert.equal(
     companion.pathFor("reviewInbox", { url: "https://evil.example", claimId: "../etc/passwd" }),
@@ -2080,4 +2084,326 @@ test("Escape restores focus to the initiating Save control", () => {
   assert.match(extractNamedFunction(adapterSource, "closeSavePopup"), /button\.focus\(\)/);
   const saveJs = fs.readFileSync(path.join(REPO, "extension/ui/save.js"), "utf8");
   assert.match(saveJs, /tagListOpen\(\)[\s\S]*closeTagList\(\)[\s\S]*notifyParent\("cancel"\)/);
+});
+
+const COMPANION_X_DISPLAY = "\u{1D54F}";
+
+function createSaveNode(tagName, attrs) {
+  const attributes = Object.assign({}, attrs || {});
+  const node = {
+    tagName: String(tagName).toUpperCase(),
+    attributes,
+    childNodes: [],
+    parentNode: null,
+    disabled: false,
+    value: attributes.value || "",
+    type: attributes.type || "",
+    className: attributes.class || attributes.className || "",
+    maxLength: attributes.maxlength ? Number(attributes.maxlength) : undefined,
+    style: {},
+    listeners: {},
+    ownerDocument: null,
+    get children() {
+      return this.childNodes.filter((child) => child && child.tagName);
+    },
+    get textContent() {
+      if (this._text != null && !this.childNodes.length) {
+        return this._text;
+      }
+      return this.childNodes
+        .map((child) => (typeof child === "string" ? child : child.textContent || ""))
+        .join("");
+    },
+    set textContent(value) {
+      this.childNodes = [];
+      this._text = value == null ? "" : String(value);
+    },
+    getAttribute(name) {
+      if (!Object.prototype.hasOwnProperty.call(this.attributes, name)) {
+        return null;
+      }
+      return this.attributes[name];
+    },
+    setAttribute(name, value) {
+      this.attributes[name] = String(value);
+      if (name === "class") {
+        this.className = String(value);
+      }
+      if (name === "id") {
+        this.id = String(value);
+      }
+    },
+    removeAttribute(name) {
+      delete this.attributes[name];
+    },
+    getBoundingClientRect() {
+      return { top: 0, left: 0, right: 120, bottom: 80, width: 120, height: 80, x: 0, y: 0 };
+    },
+    appendChild(child) {
+      if (child.parentNode && child.parentNode.removeChild) {
+        child.parentNode.removeChild(child);
+      }
+      child.parentNode = this;
+      child.ownerDocument = this.ownerDocument;
+      this.childNodes.push(child);
+      return child;
+    },
+    removeChild(child) {
+      const index = this.childNodes.indexOf(child);
+      if (index >= 0) {
+        this.childNodes.splice(index, 1);
+      }
+      child.parentNode = null;
+      return child;
+    },
+    replaceChildren() {
+      this.childNodes.slice().forEach((child) => this.removeChild(child));
+      Array.prototype.slice.call(arguments).forEach((child) => this.appendChild(child));
+    },
+    addEventListener(type, handler) {
+      if (!this.listeners[type]) {
+        this.listeners[type] = [];
+      }
+      this.listeners[type].push(handler);
+    },
+    dispatchEvent(event) {
+      const handlers = this.listeners[event.type] || [];
+      handlers.forEach((handler) => handler(event));
+      if (this.parentNode && event.bubbles && !event._stopped) {
+        this.parentNode.dispatchEvent(event);
+      }
+      return true;
+    },
+    click() {
+      const event = createSaveEvent("click");
+      this.dispatchEvent(event);
+      if (this.type === "submit" && this.parentNode) {
+        let form = this.parentNode;
+        while (form && form.tagName !== "FORM") {
+          form = form.parentNode;
+        }
+        if (form) {
+          form.dispatchEvent(createSaveEvent("submit", { cancelable: true }));
+        }
+      }
+    },
+  };
+  if (attributes.id) {
+    node.id = attributes.id;
+  }
+  node.offsetHeight = 80;
+  return node;
+}
+
+function createSaveEvent(type, init) {
+  return {
+    type,
+    bubbles: Boolean(init && init.bubbles),
+    cancelable: Boolean(init && init.cancelable),
+    key: init && init.key,
+    ctrlKey: Boolean(init && init.ctrlKey),
+    metaKey: Boolean(init && init.metaKey),
+    target: null,
+    preventDefault() {},
+  };
+}
+
+function visitSave(node, fn) {
+  fn(node);
+  (node.childNodes || []).forEach((child) => {
+    if (child && child.tagName) {
+      visitSave(child, fn);
+    }
+  });
+}
+
+async function loadSaveOverlay(options) {
+  const tags = (options && options.tags) || [];
+  const root = createSaveNode("html");
+  const body = createSaveNode("body");
+  const form = createSaveNode("form", { id: "save-form" });
+  const title = createSaveNode("input", { id: "title" });
+  const tagSearch = createSaveNode("input", { id: "tag-search" });
+  const suggestions = createSaveNode("div", { id: "tag-suggestions" });
+  const selectedTags = createSaveNode("div", { id: "selected-tags" });
+  const tagsStatus = createSaveNode("p", { id: "tags-status" });
+  const description = createSaveNode("textarea", { id: "description" });
+  const formStatus = createSaveNode("p", { id: "form-status" });
+  const closeButton = createSaveNode("button", { id: "close", type: "button" });
+  const saveButton = createSaveNode("button", { id: "save", type: "submit" });
+  form.appendChild(title);
+  form.appendChild(tagSearch);
+  form.appendChild(suggestions);
+  form.appendChild(selectedTags);
+  form.appendChild(tagsStatus);
+  form.appendChild(description);
+  form.appendChild(formStatus);
+  form.appendChild(closeButton);
+  form.appendChild(saveButton);
+  body.appendChild(form);
+  root.appendChild(body);
+  const documentRef = {
+    body,
+    documentElement: root,
+    getElementById(id) {
+      let found = null;
+      visitSave(root, (node) => {
+        if (node.id === id || node.getAttribute("id") === id) {
+          found = node;
+        }
+      });
+      return found;
+    },
+    createElement(tag) {
+      const node = createSaveNode(tag);
+      node.ownerDocument = documentRef;
+      return node;
+    },
+    addEventListener(type, handler) {
+      if (!this.listeners) {
+        this.listeners = {};
+      }
+      if (!this.listeners[type]) {
+        this.listeners[type] = [];
+      }
+      this.listeners[type].push(handler);
+    },
+  };
+  root.ownerDocument = documentRef;
+  body.ownerDocument = documentRef;
+  visitSave(root, (node) => {
+    node.ownerDocument = documentRef;
+  });
+  const saves = [];
+  const sandbox = {
+    FrameNestCompanion: companion,
+    document: documentRef,
+    window: {
+      location: { hash: "#url=" + encodeURIComponent("https://x.com/fixture/status/123456789") },
+      parent: { postMessage() {} },
+      addEventListener() {},
+      requestAnimationFrame(callback) {
+        callback();
+        return 1;
+      },
+    },
+    chrome: {
+      runtime: {
+        id: "save-overlay-test",
+        lastError: null,
+        sendMessage(message, callback) {
+          if (message.type === companion.TYPES.CANONICAL_TAGS) {
+            callback({ ok: true, body: { tags: tags } });
+            return;
+          }
+          if (message.type === companion.TYPES.SAVE_POST) {
+            saves.push(message.payload);
+            callback({ ok: true, body: { claim_id: "claim" } });
+          }
+        },
+      },
+    },
+    URLSearchParams,
+    encodeURIComponent,
+    Array,
+    String,
+    Boolean,
+    Number,
+    Object,
+    Promise,
+    setTimeout,
+    clearTimeout,
+  };
+  sandbox.globalThis = sandbox;
+  sandbox.window.document = documentRef;
+  const saveSource = fs.readFileSync(path.join(REPO, "extension/ui/save.js"), "utf8");
+  vm.runInNewContext(saveSource, sandbox, { filename: "save.js" });
+  await new Promise((resolve) => setImmediate(resolve));
+  await new Promise((resolve) => setImmediate(resolve));
+  return {
+    selectedTags,
+    tagSearch,
+    suggestions,
+    form,
+    saves,
+    chipLabels() {
+      return selectedTags.children.map((chip) => {
+        const label = chip.children[0];
+        return label ? label.textContent : chip.textContent;
+      });
+    },
+    removeFirstChip() {
+      const chip = selectedTags.children[0];
+      assert.ok(chip);
+      const remove = chip.children.find((child) => child.className === "tag-chip__remove");
+      assert.ok(remove);
+      remove.click();
+    },
+    addSuggestion(key) {
+      tagSearch.value = key;
+      tagSearch.dispatchEvent(createSaveEvent("input"));
+      const match = suggestions.children.find((child) => child.textContent && child.textContent.length);
+      assert.ok(match, "expected a tag suggestion");
+      match.click();
+    },
+    submit() {
+      form.dispatchEvent(createSaveEvent("submit", { cancelable: true }));
+    },
+  };
+}
+
+test("Save overlay pathFor uses companion seed surface and preselects X once", async () => {
+  const saveJs = fs.readFileSync(path.join(REPO, "extension/ui/save.js"), "utf8");
+  const saveHtml = fs.readFileSync(path.join(REPO, "extension/ui/save.html"), "utf8");
+  assert.equal(
+    companion.pathFor("canonicalTags"),
+    "/api/canonical-tags?surface=x-companion-save"
+  );
+  assert.doesNotMatch(saveJs, /youtube/i);
+  assert.doesNotMatch(saveHtml, /youtube/i);
+  assert.match(saveHtml, /id="title"[\s\S]*id="tag-search"[\s\S]*id="description"/);
+  assert.doesNotMatch(saveHtml, /name="category"/);
+  assert.doesNotMatch(saveHtml, /Analyze/);
+  assert.doesNotMatch(saveJs, /TYPES\.[A-Z_]*ANALY/);
+
+  const seededTags = [
+    { key: "meme", display_name: "Meme" },
+    { key: "x", display_name: COMPANION_X_DISPLAY },
+  ];
+  const present = await loadSaveOverlay({ tags: seededTags });
+  assert.deepEqual(present.chipLabels(), [COMPANION_X_DISPLAY]);
+  present.submit();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(present.saves.length, 1);
+  assert.deepEqual(Array.from(present.saves[0].alias.tag_keys), ["x"]);
+
+  const deselected = await loadSaveOverlay({ tags: seededTags });
+  deselected.removeFirstChip();
+  assert.deepEqual(deselected.chipLabels(), []);
+  deselected.submit();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(deselected.saves.length, 1);
+  assert.equal(deselected.saves[0].alias && deselected.saves[0].alias.tag_keys, undefined);
+
+  const readded = await loadSaveOverlay({ tags: seededTags });
+  readded.removeFirstChip();
+  readded.addSuggestion("x");
+  assert.deepEqual(readded.chipLabels(), [COMPANION_X_DISPLAY]);
+  readded.submit();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(Array.from(readded.saves[0].alias.tag_keys), ["x"]);
+
+  const missing = await loadSaveOverlay({
+    tags: [
+      { key: "meme", display_name: "Meme" },
+      { key: "x", display_name: "Twitter" },
+    ],
+  });
+  assert.deepEqual(missing.chipLabels(), []);
+  missing.submit();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(missing.saves[0].alias && missing.saves[0].alias.tag_keys, undefined);
+
+  const absent = await loadSaveOverlay({ tags: [{ key: "meme", display_name: "Meme" }] });
+  assert.deepEqual(absent.chipLabels(), []);
 });
