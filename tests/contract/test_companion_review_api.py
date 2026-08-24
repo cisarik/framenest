@@ -31,6 +31,10 @@ MOVIE_RUN = "52222222-2222-4222-8222-222222222222"
 MISSING = "33333333-3333-4333-8333-333333333333"
 PUBLISH = "44444444-4444-4444-8444-444444444444"
 PUBLISH_LOC = "54444444-4444-4444-8444-444444444444"
+PENDING = "61111111-1111-4111-8111-111111111111"
+PENDING_LOC = "71111111-1111-4111-8111-111111111111"
+PENDING_CLAIM = "81111111-1111-4111-8111-111111111111"
+PENDING_ASSET = "91111111-1111-4111-8111-111111111111"
 COMPANION_ORIGIN = "chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
 
@@ -115,6 +119,14 @@ def _seed(database_path: Path) -> None:
             _insert_media(connection, GENERIC, GENERIC_LOC, "general", "Inbox title")
             _insert_media(connection, MOVIE, MOVIE_LOC, "movie", "Movie title")
             _insert_media(connection, PUBLISH, PUBLISH_LOC, "general", "Website ready")
+            _insert_media(
+                connection,
+                PENDING,
+                PENDING_LOC,
+                "meme",
+                "Pending canonical",
+                created_at_ms=30,
+            )
             connection.execute(
                 text(
                     "INSERT INTO media_canonical_tags (media_id, tag_key, position) "
@@ -124,17 +136,26 @@ def _seed(database_path: Path) -> None:
             )
             _insert_run(connection, GENERIC_RUN, GENERIC, GENERIC_LOC, "Inbox stored")
             _insert_run(connection, MOVIE_RUN, MOVIE, MOVIE_LOC, "Movie stored")
+            _insert_x_save(connection)
     finally:
         dispose_engine(engine)
 
 
-def _insert_media(connection, media_id: str, location_id: str, category: str, title: str) -> None:
+def _insert_media(
+    connection,
+    media_id: str,
+    location_id: str,
+    category: str,
+    title: str | None,
+    *,
+    created_at_ms: int = 10,
+) -> None:
     connection.execute(
         text(
             "INSERT INTO logical_media (id, media_kind, created_at_ms, updated_at_ms) "
-            "VALUES (:id, 'video', 10, 10)"
+            "VALUES (:id, 'video', :created, :created)"
         ),
-        {"id": media_id},
+        {"id": media_id, "created": created_at_ms},
     )
     connection.execute(
         text(
@@ -153,6 +174,46 @@ def _insert_media(connection, media_id: str, location_id: str, category: str, ti
             ") VALUES (:id, :title, 'Desc', 10, 10, :category, 'manual_upload')"
         ),
         {"id": media_id, "title": title, "category": category},
+    )
+
+
+def _insert_x_save(connection) -> None:
+    connection.execute(
+        text(
+            "INSERT INTO x_post_claims ("
+            "id, state, acquisition_source, submitted_url, canonical_url, "
+            "x_post_id, extractor_key, created_by_login_key, title, "
+            "discovered_asset_count, success_count, failure_count, "
+            "created_at_ms, updated_at_ms, completed_at_ms, cleanup_state, "
+            "cleanup_completed_at_ms, requested_content_category, version"
+            ") VALUES ("
+            ":id, 'completed', 'x_manual_claim', :url, :url, '123456789', 'X', "
+            ":owner, 'Pending claim', 1, 1, 0, 10, 20, 20, 'complete', 20, "
+            "'meme', 1)"
+        ),
+        {
+            "id": PENDING_CLAIM,
+            "url": "https://x.com/a/status/123456789",
+            "owner": ADMIN_LOGIN,
+        },
+    )
+    connection.execute(
+        text(
+            "INSERT INTO x_assets ("
+            "id, claim_id, ordinal, media_type, expected_mime, state, stage_key, "
+            "media_id, media_location_id, created_at_ms, updated_at_ms, "
+            "completed_at_ms, cleanup_state, cleanup_completed_at_ms, version"
+            ") VALUES ("
+            ":id, :claim, 0, 'video', 'video/mp4', 'cataloged', :stage, "
+            ":media, :location, 10, 20, 20, 'complete', 20, 1)"
+        ),
+        {
+            "id": PENDING_ASSET,
+            "claim": PENDING_CLAIM,
+            "stage": "e" * 32,
+            "media": PENDING,
+            "location": PENDING_LOC,
+        },
     )
 
 
@@ -191,8 +252,23 @@ def test_admin_list_and_detail_are_no_store_and_ordinary_is_forbidden(
         assert admin.headers.get("cache-control") == "no-store"
         payload = admin.json()
         assert payload["unopened_count"] == 1
-        assert payload["items"][0]["media_id"] == GENERIC
-        assert payload["items"][0]["unopened"] is True
+        assert [item["media_id"] for item in payload["items"]] == [PENDING, GENERIC]
+        pending = payload["items"][0]
+        assert pending == {
+            "media_id": PENDING,
+            "title": "Pending canonical",
+            "created_at_ms": 30,
+            "analyzed": False,
+            "analysis_run_id": None,
+            "completed_at_ms": None,
+            "unopened": False,
+        }
+        analyzed = payload["items"][1]
+        assert analyzed["created_at_ms"] == 10
+        assert analyzed["analyzed"] is True
+        assert analyzed["analysis_run_id"] == GENERIC_RUN
+        assert analyzed["completed_at_ms"] == 22
+        assert analyzed["unopened"] is True
         assert "collection" not in admin.text
         assert "suggested_filename" not in admin.text
         ordinary = client.get(
@@ -212,6 +288,13 @@ def test_admin_list_and_detail_are_no_store_and_ordinary_is_forbidden(
         assert body["suggestions"][0]["title"] == "Inbox stored"
         assert body["canonical"]["field_sources"]["display_title"] is None
         assert "collection" not in body["suggestions"][0]
+        pending_detail = client.get(
+            f"/api/companion/review-inbox/{PENDING}",
+            headers=_serve_headers(ADMIN_LOGIN, "Admin"),
+        )
+        assert pending_detail.status_code == 200
+        assert pending_detail.json()["canonical"]["display_title"] == "Pending canonical"
+        assert pending_detail.json()["suggestions"] == []
 
 
 def test_bad_cursor_is_422_and_movie_detail_is_409(tmp_path: Path) -> None:
@@ -377,7 +460,10 @@ def test_audit_failure_blocks_opened_and_apply(tmp_path: Path) -> None:
             "/api/companion/review-inbox",
             headers=_serve_headers(ADMIN_LOGIN, "Admin"),
         )
-        assert listed.json()["items"][0]["unopened"] is True
+        analyzed = next(
+            item for item in listed.json()["items"] if item["media_id"] == GENERIC
+        )
+        assert analyzed["unopened"] is True
         engine = create_sqlite_engine(tmp_path / "catalog.sqlite3")
         try:
             with engine.connect() as db:

@@ -3,6 +3,7 @@
   const FIELD_TITLE = "display_title";
   const FIELD_TAGS = "tags";
   const FIELD_DESCRIPTION = "description";
+  const NO_SUCCESSFUL_ANALYSIS = "No successful analysis yet.";
   const RELOAD_RECOVERY = companion.EXTENSION_CONTEXT_RECOVERY_COPY;
   let runtimeStale = false;
   let runtimeStaleHandler = function handleEarlyRuntimeStale() {};
@@ -79,6 +80,7 @@
 
     function snapshot() {
       const count = mappedCount();
+      const pending = currentSuggestion() === null;
       if (fields.tags && count < 1) {
         fields.tags = false;
       }
@@ -94,9 +96,10 @@
         overlayOpen: overlayOpen,
         lastError: lastError,
         runtimeStale: contextStale,
+        pending: pending,
         mappedCount: count,
-        saveEnabled: !contextStale && saveEnabled(fields, count),
-        tagsDisabled: contextStale || !tagsCanBeChecked(count),
+        saveEnabled: !contextStale && !pending && saveEnabled(fields, count),
+        tagsDisabled: contextStale || pending || !tagsCanBeChecked(count),
         suggestion: currentSuggestion(),
         suggestions: suggestions(),
         canonical: detail && detail.canonical,
@@ -193,6 +196,9 @@
         runId = rows[0].analysis_run_id;
       }
       paint();
+      if (!rows.length) {
+        return { ok: true, pending: true };
+      }
       return postOpened();
     }
 
@@ -213,6 +219,9 @@
       if (contextStale) {
         return { ok: false, error: "extension_context_invalidated", stale: true };
       }
+      if (currentSuggestion() === null) {
+        return { ok: false, error: "analysis_pending" };
+      }
       if (!companion.isUuid(nextRunId) || nextRunId === runId) {
         return { ok: true };
       }
@@ -223,7 +232,7 @@
     }
 
     function setField(name, checked) {
-      if (contextStale) {
+      if (contextStale || currentSuggestion() === null) {
         return;
       }
       if (name === FIELD_TAGS && checked && mappedCount() < 1) {
@@ -235,7 +244,7 @@
     }
 
     function removeChip(key) {
-      if (contextStale) {
+      if (contextStale || currentSuggestion() === null) {
         return;
       }
       if (typeof key === "string" && key) {
@@ -250,6 +259,9 @@
     async function save() {
       if (contextStale) {
         return { ok: false, error: "extension_context_invalidated", stale: true };
+      }
+      if (currentSuggestion() === null) {
+        return { ok: false, error: "analysis_pending" };
       }
       const selected = [];
       if (fields.display_title) {
@@ -638,14 +650,21 @@
       fieldTitle.checked = state.fields.display_title === true;
       fieldTags.checked = state.fields.tags === true;
       fieldDescription.checked = state.fields.description === true;
-      history.disabled = runtimeStale || state.runtimeStale === true;
-      fieldTitle.disabled = runtimeStale || state.runtimeStale === true;
+      history.disabled =
+        runtimeStale || state.runtimeStale === true || state.pending === true;
+      fieldTitle.disabled =
+        runtimeStale || state.runtimeStale === true || state.pending === true;
       fieldTags.disabled =
-        runtimeStale || state.runtimeStale === true || state.tagsDisabled === true;
-      fieldDescription.disabled = runtimeStale || state.runtimeStale === true;
+        runtimeStale ||
+        state.runtimeStale === true ||
+        state.pending === true ||
+        state.tagsDisabled === true;
+      fieldDescription.disabled =
+        runtimeStale || state.runtimeStale === true || state.pending === true;
       saveButton.disabled =
         runtimeStale || state.runtimeStale === true || state.saveEnabled !== true;
-      status.textContent = state.lastError || "";
+      status.textContent =
+        state.lastError || (state.pending === true ? NO_SUCCESSFUL_ANALYSIS : "");
       if (state.lastError) {
         status.setAttribute("data-kind", "error");
       } else {

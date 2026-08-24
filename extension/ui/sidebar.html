@@ -12,7 +12,7 @@
           id="review-history-toggle"
           class="title-bar__history-toggle"
           type="button"
-          aria-label="Analysis history"
+          aria-label="Toggle companion history"
           aria-expanded="false"
           aria-controls="review-history"
           disabled
@@ -29,7 +29,7 @@
         <button id="chrome-action" class="title-bar__action" type="button">Connect</button>
       </div>
       <section id="review-history" hidden>
-        <ol id="review-history-list" class="review-list" aria-label="Analysis history"></ol>
+        <ol id="review-history-list" class="review-list" aria-label="Companion history"></ol>
       </section>
       <dialog id="settings-dialog" class="settings-dialog" aria-label="Settings">
         <div class="settings-dialog__sheet">
@@ -54,9 +54,6 @@
       <p id="shell-status" class="shell-status" role="status"></p>
     </header>
     <main class="sidebar-main">
-      <section id="review-inbox" hidden>
-        <ol id="review-inbox-list" class="review-list" aria-label="Unread analyses"></ol>
-      </section>
       <iframe id="frame" title="FrameNest" hidden></iframe>
       <dialog id="review-dialog" class="review-dialog" aria-label="Review suggestion">
         <iframe id="review-frame" class="review-dialog__frame" title="Review suggestion"></iframe>

@@ -1280,8 +1280,10 @@ test("toolbar action opens the side-panel shell instead of a picker popup", () =
   const sidebarJs = fs.readFileSync(path.join(REPO, "extension/ui/sidebar.js"), "utf8");
   const sidebarCss = fs.readFileSync(path.join(REPO, "extension/ui/sidebar.css"), "utf8");
   assert.match(sidebarHtml, /id="frame"/);
-  assert.ok(sidebarHtml.indexOf('id="shell-status"') < sidebarHtml.indexOf('id="review-inbox"'));
-  assert.ok(sidebarHtml.indexOf('id="review-inbox"') < sidebarHtml.indexOf('id="frame"'));
+  assert.ok(sidebarHtml.indexOf('id="review-history-toggle"') < sidebarHtml.indexOf('id="review-history"'));
+  assert.ok(sidebarHtml.indexOf('id="review-history"') < sidebarHtml.indexOf('id="frame"'));
+  assert.equal(sidebarHtml.indexOf('id="review-inbox"'), -1);
+  assert.equal(sidebarHtml.indexOf('id="review-inbox-list"'), -1);
   assert.match(sidebarHtml, /class="title-bar__wordmark">FrameNest</);
   assert.match(sidebarHtml, /id="chrome-action"/);
   assert.match(sidebarHtml, />Connect</);

@@ -298,20 +298,47 @@
       if (!item || typeof item !== "object") {
         return;
       }
-      if (!isUuid(item.media_id) || !isUuid(item.analysis_run_id)) {
+      if (!isUuid(item.media_id)) {
         return;
       }
-      if (typeof item.title !== "string") {
+      if (typeof item.title !== "string" || !item.title.length) {
         return;
       }
+      const created = item.created_at_ms;
       const completed = item.completed_at_ms;
+      if (
+        typeof created !== "number" ||
+        !Number.isInteger(created) ||
+        created < 0 ||
+        typeof item.analyzed !== "boolean" ||
+        typeof item.unopened !== "boolean"
+      ) {
+        return;
+      }
+      if (item.analyzed) {
+        if (
+          !isUuid(item.analysis_run_id) ||
+          typeof completed !== "number" ||
+          !Number.isInteger(completed) ||
+          completed < 0
+        ) {
+          return;
+        }
+      } else if (
+        item.analysis_run_id !== null ||
+        completed !== null ||
+        item.unopened !== false
+      ) {
+        return;
+      }
       items.push({
         media_id: item.media_id,
         title: item.title,
+        created_at_ms: created,
+        analyzed: item.analyzed,
         analysis_run_id: item.analysis_run_id,
-        completed_at_ms:
-          typeof completed === "number" && Number.isFinite(completed) ? completed : 0,
-        unopened: item.unopened === true,
+        completed_at_ms: completed,
+        unopened: item.unopened,
       });
     });
     return items;

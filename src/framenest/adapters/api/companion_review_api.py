@@ -84,8 +84,10 @@ class CompanionReviewInboxItemResponse(BaseModel):
 
     media_id: str
     title: str
-    analysis_run_id: str
-    completed_at_ms: int
+    created_at_ms: int
+    analyzed: bool
+    analysis_run_id: str | None
+    completed_at_ms: int | None
     unopened: bool
 
 
@@ -387,6 +389,8 @@ def _inbox_item_dict(item: CompanionReviewInboxItem) -> dict:
     return {
         "media_id": item.media_id,
         "title": item.title,
+        "created_at_ms": item.created_at_ms,
+        "analyzed": item.analyzed,
         "analysis_run_id": item.analysis_run_id,
         "completed_at_ms": item.completed_at_ms,
         "unopened": item.unopened,

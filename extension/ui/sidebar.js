@@ -65,10 +65,6 @@
 
   const REVIEW = companion.REVIEW_INBOX;
 
-  function reviewUnreadItems(items) {
-    return (Array.isArray(items) ? items : []).filter((item) => item && item.unopened === true);
-  }
-
   function renderReviewInboxList(listNode, items) {
     if (!listNode) {
       return;
@@ -84,6 +80,11 @@
       const li = doc.createElement("li");
       const button = doc.createElement("button");
       button.type = "button";
+      button.className =
+        "review-history-button " +
+        (item.analyzed === true
+          ? "review-history-button--analyzed"
+          : "review-history-button--pending");
       if (typeof button.setAttribute === "function") {
         button.setAttribute("data-media-id", item.media_id);
       }
@@ -113,17 +114,16 @@
 
   function renderReviewCollections(nodes, rawItems) {
     const historyItems = companion.sanitizeReviewInboxItems(rawItems);
-    const unreadItems = reviewUnreadItems(historyItems);
     renderReviewInboxList(nodes.historyList, historyItems);
-    renderReviewInboxList(nodes.inboxList, unreadItems);
-    nodes.inbox.hidden = unreadItems.length === 0;
-    return { historyItems, unreadItems };
+    nodes.toggle.disabled = historyItems.length === 0;
+    if (!historyItems.length) {
+      setReviewHistoryExpanded(nodes.toggle, nodes.history, false);
+    }
+    return { historyItems };
   }
 
   function hideReviewCollections(nodes, disableToggle) {
     renderReviewInboxList(nodes.historyList, []);
-    renderReviewInboxList(nodes.inboxList, []);
-    nodes.inbox.hidden = true;
     nodes.toggle.disabled = disableToggle === true;
     setReviewHistoryExpanded(nodes.toggle, nodes.history, false);
   }
@@ -233,7 +233,6 @@
 
   globalThis.FrameNestReviewInbox = {
     POLL_MS: REVIEW.pollMs,
-    unreadItems: reviewUnreadItems,
     renderList: renderReviewInboxList,
     renderCollections: renderReviewCollections,
     hideCollections: hideReviewCollections,
@@ -256,8 +255,6 @@
   const reviewHistoryToggle = document.getElementById("review-history-toggle");
   const reviewHistory = document.getElementById("review-history");
   const reviewHistoryList = document.getElementById("review-history-list");
-  const reviewInbox = document.getElementById("review-inbox");
-  const reviewInboxList = document.getElementById("review-inbox-list");
   const reviewDialog = document.getElementById("review-dialog");
   const reviewFrame = document.getElementById("review-frame");
   if (
@@ -272,8 +269,6 @@
     !reviewHistoryToggle ||
     !reviewHistory ||
     !reviewHistoryList ||
-    !reviewInbox ||
-    !reviewInboxList ||
     !reviewDialog ||
     !reviewFrame
   ) {
@@ -289,8 +284,6 @@
     toggle: reviewHistoryToggle,
     history: reviewHistory,
     historyList: reviewHistoryList,
-    inbox: reviewInbox,
-    inboxList: reviewInboxList,
   };
 
   function setText(node, value, kind) {
@@ -308,10 +301,8 @@
     settingsConnect.disabled = true;
     reviewHistoryToggle.disabled = true;
     setReviewHistoryExpanded(reviewHistoryToggle, reviewHistory, false);
-    [reviewHistoryList, reviewInboxList].forEach((list) => {
-      list.querySelectorAll("button").forEach((button) => {
-        button.disabled = true;
-      });
+    reviewHistoryList.querySelectorAll("button").forEach((button) => {
+      button.disabled = true;
     });
   };
 
@@ -395,12 +386,12 @@
       hideInboxSection();
       return;
     }
-    reviewHistoryToggle.disabled = false;
-    renderReviewCollections(reviewChromeNodes, result.items);
+    const rendered = renderReviewCollections(reviewChromeNodes, result.items);
     setReviewHistoryExpanded(
       reviewHistoryToggle,
       reviewHistory,
-      reviewHistoryToggle.getAttribute("aria-expanded") === "true"
+      rendered.historyItems.length > 0 &&
+        reviewHistoryToggle.getAttribute("aria-expanded") === "true"
     );
   }
 
@@ -674,9 +665,6 @@
   reviewHistoryToggle.addEventListener("click", onHistoryToggle);
   reviewHistoryList.addEventListener("click", (event) => {
     onReviewListClick(event, reviewHistoryList);
-  });
-  reviewInboxList.addEventListener("click", (event) => {
-    onReviewListClick(event, reviewInboxList);
   });
   document.addEventListener("visibilitychange", () => {
     if (document.hidden) {

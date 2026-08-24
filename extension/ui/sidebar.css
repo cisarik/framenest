@@ -184,13 +184,11 @@ body {
   flex-direction: column;
 }
 
-#review-history,
-#review-inbox {
+#review-history {
   flex: 0 0 auto;
 }
 
-#review-history[hidden],
-#review-inbox[hidden] {
+#review-history[hidden] {
   display: none;
 }
 
@@ -220,7 +218,7 @@ body {
   display: block;
   width: 100%;
   margin: 0;
-  padding: 2px 0;
+  padding: 5px 7px;
   border: 0;
   background: transparent;
   color: inherit;
@@ -229,11 +227,26 @@ body {
   text-align: left;
 }
 
+.review-list .review-history-button--analyzed {
+  background: var(--accent);
+  color: var(--background);
+}
+
+.review-list .review-history-button--pending {
+  background: var(--surface-solid);
+  color: var(--text);
+}
+
 .review-list button:hover,
 .review-list button:focus-visible {
   color: var(--accent);
   outline: 2px solid var(--focus);
   outline-offset: 2px;
+}
+
+.review-list .review-history-button--analyzed:hover,
+.review-list .review-history-button--analyzed:focus-visible {
+  color: var(--background);
 }
 
 .review-dialog {

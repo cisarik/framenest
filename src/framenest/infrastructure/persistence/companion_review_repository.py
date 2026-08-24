@@ -2,7 +2,19 @@
 
 from __future__ import annotations
 
-from sqlalchemy import and_, delete, func, insert, or_, select, update
+from sqlalchemy import (
+    Integer,
+    Text,
+    and_,
+    cast,
+    delete,
+    func,
+    insert,
+    literal,
+    or_,
+    select,
+    update,
+)
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
@@ -26,9 +38,11 @@ from framenest.application.companion_review import (
     derive_review_readiness,
     eligible_mapped_tag_keys,
     encode_companion_review_cursor,
+    encode_companion_review_inbox_cursor,
     inbox_title,
     is_ordered_subsequence,
     map_suggested_tags,
+    pending_inbox_title,
 )
 from framenest.application.ports.companion_review_repository import (
     CompanionReviewAnalysisRunNotFoundError,
@@ -62,6 +76,8 @@ from framenest.infrastructure.persistence.catalog_schema import (
     media_canonical_tags,
     media_content_publications,
     media_metadata,
+    x_assets,
+    x_post_claims,
 )
 from framenest.infrastructure.persistence.engine import (
     run_in_immediate_transaction,
@@ -92,7 +108,7 @@ class SqliteCompanionReviewRepository:
         *,
         actor_login_key: str,
         limit: int,
-        cursor: tuple[int, str] | None,
+        cursor: tuple[int, bool, str] | None,
     ) -> CompanionReviewInboxPage:
         def operation(connection: Connection) -> CompanionReviewInboxPage:
             latest = _latest_successful_generic().subquery("latest_generic")
@@ -100,29 +116,26 @@ class SqliteCompanionReviewRepository:
             unopened_count = connection.execute(
                 _unopened_count_statement(latest, actor_login_key)
             ).scalar_one()
-            statement = (
-                select(
-                    latest.c.id,
-                    latest.c.media_id,
-                    latest.c.completed_at_ms,
-                    latest.c.result_json,
-                    latest.c.display_title,
-                    opened.c.opened_run_id,
-                )
-                .select_from(
-                    latest.outerjoin(
-                        opened,
-                        and_(
-                            opened.c.actor_login_key == actor_login_key,
-                            opened.c.media_id == latest.c.media_id,
-                        ),
-                    )
+            mixed = _mixed_inbox_rows(latest, actor_login_key).subquery(
+                "mixed_review_inbox"
+            )
+            statement = select(
+                mixed,
+                opened.c.opened_run_id,
+            ).select_from(
+                mixed.outerjoin(
+                    opened,
+                    and_(
+                        opened.c.actor_login_key == actor_login_key,
+                        opened.c.media_id == mixed.c.media_id,
+                    ),
                 )
             )
-            statement = _apply_keyset(statement, latest, cursor)
+            statement = _apply_inbox_keyset(statement, mixed, cursor)
             statement = statement.order_by(
-                latest.c.completed_at_ms.desc(),
-                latest.c.id.desc(),
+                mixed.c.activity_at_ms.desc(),
+                mixed.c.analyzed.desc(),
+                mixed.c.sort_id.desc(),
             ).limit(limit + 1)
             rows = connection.execute(statement).mappings().all()
             has_more = len(rows) > limit
@@ -131,9 +144,18 @@ class SqliteCompanionReviewRepository:
             next_cursor = None
             if has_more and items:
                 last = items[-1]
-                next_cursor = encode_companion_review_cursor(
-                    completed_at_ms=last.completed_at_ms,
-                    analysis_run_id=last.analysis_run_id,
+                next_cursor = encode_companion_review_inbox_cursor(
+                    activity_at_ms=(
+                        last.completed_at_ms
+                        if last.analyzed and last.completed_at_ms is not None
+                        else last.created_at_ms
+                    ),
+                    analyzed=last.analyzed,
+                    sort_id=(
+                        last.analysis_run_id
+                        if last.analyzed and last.analysis_run_id is not None
+                        else last.media_id
+                    ),
                 )
             return CompanionReviewInboxPage(
                 items=items,
@@ -543,6 +565,81 @@ def _latest_successful_generic():
     return select(ranked).where(ranked.c.rn == 1)
 
 
+def _mixed_inbox_rows(latest, actor_login_key: str) -> Select:
+    pending_ranked = (
+        select(
+            x_assets.c.media_id,
+            logical_media.c.created_at_ms,
+            media_metadata.c.display_title,
+            x_post_claims.c.title.label("claim_title"),
+            x_post_claims.c.x_post_id,
+            func.row_number()
+            .over(
+                partition_by=x_assets.c.media_id,
+                order_by=(
+                    x_assets.c.completed_at_ms.desc(),
+                    x_assets.c.id.desc(),
+                ),
+            )
+            .label("rn"),
+        )
+        .select_from(
+            x_assets.join(
+                x_post_claims, x_post_claims.c.id == x_assets.c.claim_id
+            )
+            .join(logical_media, logical_media.c.id == x_assets.c.media_id)
+            .outerjoin(
+                media_metadata, media_metadata.c.media_id == x_assets.c.media_id
+            )
+            .outerjoin(latest, latest.c.media_id == x_assets.c.media_id)
+        )
+        .where(
+            x_assets.c.state == "cataloged",
+            x_assets.c.media_id.is_not(None),
+            x_post_claims.c.created_by_login_key == actor_login_key,
+            x_post_claims.c.requested_content_category
+            == ContentCategory.MEME.value,
+            func.coalesce(
+                media_metadata.c.content_category, DEFAULT_CONTENT_CATEGORY.value
+            )
+            != ContentCategory.MOVIE.value,
+            latest.c.media_id.is_(None),
+        )
+    ).subquery("ranked_pending_x")
+    pending = select(pending_ranked).where(pending_ranked.c.rn == 1).subquery(
+        "pending_x"
+    )
+    analyzed_rows = select(
+        latest.c.media_id.label("media_id"),
+        logical_media.c.created_at_ms.label("created_at_ms"),
+        literal(True).label("analyzed"),
+        latest.c.id.label("analysis_run_id"),
+        latest.c.completed_at_ms.label("completed_at_ms"),
+        latest.c.result_json.label("result_json"),
+        latest.c.display_title.label("display_title"),
+        cast(literal(None), Text).label("claim_title"),
+        cast(literal(None), Text).label("x_post_id"),
+        latest.c.completed_at_ms.label("activity_at_ms"),
+        latest.c.id.label("sort_id"),
+    ).select_from(
+        latest.join(logical_media, logical_media.c.id == latest.c.media_id)
+    )
+    pending_rows = select(
+        pending.c.media_id.label("media_id"),
+        pending.c.created_at_ms.label("created_at_ms"),
+        literal(False).label("analyzed"),
+        cast(literal(None), Text).label("analysis_run_id"),
+        literal(None).label("completed_at_ms"),
+        cast(literal(None), Text).label("result_json"),
+        pending.c.display_title.label("display_title"),
+        pending.c.claim_title.label("claim_title"),
+        pending.c.x_post_id.label("x_post_id"),
+        pending.c.created_at_ms.label("activity_at_ms"),
+        pending.c.media_id.label("sort_id"),
+    )
+    return analyzed_rows.union_all(pending_rows)
+
+
 def _successful_generic_predicates() -> tuple[object, ...]:
     return (
         media_analysis_runs.c.state == "analyzed",
@@ -585,20 +682,27 @@ def _unopened_count_statement(latest, actor_login_key: str) -> Select:
     )
 
 
-def _apply_keyset(
+def _apply_inbox_keyset(
     statement: Select,
-    latest,
-    cursor: tuple[int, str] | None,
+    mixed,
+    cursor: tuple[int, bool, str] | None,
 ) -> Select:
     if cursor is None:
         return statement
-    completed_at_ms, analysis_run_id = cursor
+    activity_at_ms, analyzed, sort_id = cursor
+    analyzed_rank = cast(mixed.c.analyzed, Integer)
+    cursor_rank = int(analyzed)
     return statement.where(
         or_(
-            latest.c.completed_at_ms < completed_at_ms,
+            mixed.c.activity_at_ms < activity_at_ms,
             and_(
-                latest.c.completed_at_ms == completed_at_ms,
-                latest.c.id < analysis_run_id,
+                mixed.c.activity_at_ms == activity_at_ms,
+                analyzed_rank < cursor_rank,
+            ),
+            and_(
+                mixed.c.activity_at_ms == activity_at_ms,
+                analyzed_rank == cursor_rank,
+                mixed.c.sort_id < sort_id,
             ),
         )
     )
@@ -606,25 +710,44 @@ def _apply_keyset(
 
 def _inbox_item_from_row(row: object) -> CompanionReviewInboxItem:
     mapping = dict(row)  # type: ignore[arg-type]
-    try:
-        stored = decode_stored_suggestion_result(str(mapping["result_json"]))
-    except CompanionReviewCodecError as exc:
-        raise CompanionReviewStoredResultError(_STORED_RESULT_MESSAGE) from exc
+    analyzed = bool(mapping["analyzed"])
     canonical_title = mapping.get("display_title")
-    title = inbox_title(
-        canonical_display_title=(
-            str(canonical_title) if isinstance(canonical_title, str) else None
-        ),
-        stored=stored,
+    canonical_display_title = (
+        str(canonical_title) if isinstance(canonical_title, str) else None
     )
-    analysis_run_id = str(mapping["id"])
-    opened_run_id = mapping.get("opened_run_id")
-    unopened = opened_run_id is None or str(opened_run_id) != analysis_run_id
+    analysis_run_id: str | None = None
+    completed_at_ms: int | None = None
+    unopened = False
+    if analyzed:
+        try:
+            stored = decode_stored_suggestion_result(str(mapping["result_json"]))
+        except CompanionReviewCodecError as exc:
+            raise CompanionReviewStoredResultError(_STORED_RESULT_MESSAGE) from exc
+        title = inbox_title(
+            canonical_display_title=canonical_display_title,
+            stored=stored,
+        )
+        analysis_run_id = str(mapping["analysis_run_id"])
+        completed_at_ms = int(mapping["completed_at_ms"])
+        opened_run_id = mapping.get("opened_run_id")
+        unopened = opened_run_id is None or str(opened_run_id) != analysis_run_id
+    else:
+        title = pending_inbox_title(
+            canonical_display_title=canonical_display_title,
+            claim_title=(
+                str(mapping["claim_title"])
+                if isinstance(mapping.get("claim_title"), str)
+                else None
+            ),
+            x_post_id=str(mapping["x_post_id"]),
+        )
     return CompanionReviewInboxItem(
         media_id=str(mapping["media_id"]),
         title=title,
+        created_at_ms=int(mapping["created_at_ms"]),
+        analyzed=analyzed,
         analysis_run_id=analysis_run_id,
-        completed_at_ms=int(mapping["completed_at_ms"]),
+        completed_at_ms=completed_at_ms,
         unopened=unopened,
     )
 

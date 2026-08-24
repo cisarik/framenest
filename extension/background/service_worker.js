@@ -611,6 +611,7 @@ async function failedReviewInbox(response, error) {
 
 async function reviewInbox() {
   const items = [];
+  const itemIndexes = {};
   const seenCursors = {};
   let cursor = "";
   let unopenedCount = 0;
@@ -626,7 +627,19 @@ async function reviewInbox() {
       unopenedCount = companion.unopenedCountFromBody(response.body);
       firstPage = false;
     }
-    items.push(...companion.sanitizeReviewInboxItems(response.body && response.body.items));
+    companion
+      .sanitizeReviewInboxItems(response.body && response.body.items)
+      .forEach((item) => {
+        const existingIndex = itemIndexes[item.media_id];
+        if (typeof existingIndex === "number") {
+          if (items[existingIndex].analyzed !== true && item.analyzed === true) {
+            items[existingIndex] = item;
+          }
+          return;
+        }
+        itemIndexes[item.media_id] = items.length;
+        items.push(item);
+      });
     const nextCursor = response.body && response.body.next_cursor;
     if (typeof nextCursor !== "string" || !nextCursor) {
       break;

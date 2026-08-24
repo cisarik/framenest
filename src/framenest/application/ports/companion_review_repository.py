@@ -49,9 +49,9 @@ class CompanionReviewRepository(Protocol):
         *,
         actor_login_key: str,
         limit: int,
-        cursor: tuple[int, str] | None,
+        cursor: tuple[int, bool, str] | None,
     ) -> CompanionReviewInboxPage:
-        """Return one keyset page of latest successful generic runs."""
+        """Return one mixed keyset page of analyzed rows and owned X Saves."""
 
     def get_detail(
         self,

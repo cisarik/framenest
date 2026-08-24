@@ -94,12 +94,14 @@ class MappedSuggestedTag:
 
 @dataclass(frozen=True, slots=True)
 class CompanionReviewInboxItem:
-    """One inbox row: latest successful generic run for one media item."""
+    """One merged-history row for an analyzed or pending media item."""
 
     media_id: str
     title: str
-    analysis_run_id: str
-    completed_at_ms: int
+    created_at_ms: int
+    analyzed: bool
+    analysis_run_id: str | None
+    completed_at_ms: int | None
     unopened: bool
 
 
@@ -300,8 +302,61 @@ def encode_companion_review_cursor(*, completed_at_ms: int, analysis_run_id: str
     )
 
 
+def encode_companion_review_inbox_cursor(
+    *, activity_at_ms: int, analyzed: bool, sort_id: str
+) -> str:
+    """Encode a v2 opaque cursor for the mixed pending/analyzed inbox."""
+    payload = json.dumps(
+        {"v": 2, "at_ms": activity_at_ms, "analyzed": analyzed, "id": sort_id},
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+    return (
+        base64.urlsafe_b64encode(payload.encode("ascii"))
+        .decode("ascii")
+        .rstrip("=")
+    )
+
+
+def decode_companion_review_inbox_cursor(
+    value: str | None,
+) -> tuple[int, bool, str] | None:
+    """Parse a v2 inbox cursor while accepting the analyzed-only legacy shape."""
+    payload = _decode_cursor_payload(value)
+    if payload is None:
+        return None
+    if set(payload) == {"completed_at_ms", "id"}:
+        activity_at_ms = _cursor_timestamp(payload["completed_at_ms"])
+        sort_id = _cursor_uuid(payload["id"])
+        return activity_at_ms, True, sort_id
+    if set(payload) != {"v", "at_ms", "analyzed", "id"}:
+        raise CompanionReviewQueryError(COMPANION_REVIEW_QUERY_INVALID_MESSAGE)
+    if payload["v"] != 2 or isinstance(payload["v"], bool):
+        raise CompanionReviewQueryError(COMPANION_REVIEW_QUERY_INVALID_MESSAGE)
+    analyzed = payload["analyzed"]
+    if not isinstance(analyzed, bool):
+        raise CompanionReviewQueryError(COMPANION_REVIEW_QUERY_INVALID_MESSAGE)
+    return (
+        _cursor_timestamp(payload["at_ms"]),
+        analyzed,
+        _cursor_uuid(payload["id"]),
+    )
+
+
 def decode_companion_review_cursor(value: str | None) -> tuple[int, str] | None:
     """Parse the opaque keyset cursor or raise for malformed input."""
+    payload = _decode_cursor_payload(value)
+    if payload is None:
+        return None
+    if set(payload) != {"completed_at_ms", "id"}:
+        raise CompanionReviewQueryError(COMPANION_REVIEW_QUERY_INVALID_MESSAGE)
+    return (
+        _cursor_timestamp(payload["completed_at_ms"]),
+        _cursor_uuid(payload["id"]),
+    )
+
+
+def _decode_cursor_payload(value: str | None) -> dict[str, object] | None:
     if value is None:
         return None
     if not isinstance(value, str) or not value or not _CURSOR_B64_PATTERN.fullmatch(
@@ -316,25 +371,31 @@ def decode_companion_review_cursor(value: str | None) -> tuple[int, str] | None:
         raise CompanionReviewQueryError(
             COMPANION_REVIEW_QUERY_INVALID_MESSAGE
         ) from exc
-    if not isinstance(payload, dict) or set(payload) != {"completed_at_ms", "id"}:
+    if not isinstance(payload, dict):
         raise CompanionReviewQueryError(COMPANION_REVIEW_QUERY_INVALID_MESSAGE)
-    completed_at_ms = payload["completed_at_ms"]
-    analysis_run_id = payload["id"]
+    return payload
+
+
+def _cursor_timestamp(value: object) -> int:
     if (
-        isinstance(completed_at_ms, bool)
-        or not isinstance(completed_at_ms, int)
-        or completed_at_ms < 0
+        isinstance(value, bool)
+        or not isinstance(value, int)
+        or value < 0
     ):
         raise CompanionReviewQueryError(COMPANION_REVIEW_QUERY_INVALID_MESSAGE)
-    if not isinstance(analysis_run_id, str):
+    return value
+
+
+def _cursor_uuid(value: object) -> str:
+    if not isinstance(value, str):
         raise CompanionReviewQueryError(COMPANION_REVIEW_QUERY_INVALID_MESSAGE)
     try:
-        MediaId.from_string(analysis_run_id)
+        MediaId.from_string(value)
     except FrameNestIdentityError as exc:
         raise CompanionReviewQueryError(
             COMPANION_REVIEW_QUERY_INVALID_MESSAGE
         ) from exc
-    return completed_at_ms, analysis_run_id
+    return value
 
 
 def validate_companion_review_limit(value: int) -> int:
@@ -356,9 +417,20 @@ def inbox_title(*, canonical_display_title: str | None, stored: StoredSuggestion
     return stored.title
 
 
+def pending_inbox_title(
+    *, canonical_display_title: str | None, claim_title: str | None, x_post_id: str
+) -> str:
+    """Resolve a pending X Save title without exposing physical-media details."""
+    if isinstance(canonical_display_title, str) and canonical_display_title.strip():
+        return canonical_display_title
+    if isinstance(claim_title, str) and claim_title.strip():
+        return claim_title
+    return f"X post {x_post_id}"
+
+
 @dataclass(frozen=True, slots=True)
 class ListCompanionReviewInbox:
-    """List the latest successful generic run per in-scope media item."""
+    """List merged successful analyses and the actor's pending X Saves."""
 
     repository: CompanionReviewRepository
 
@@ -374,7 +446,7 @@ class ListCompanionReviewInbox:
         return self.repository.list_inbox(
             actor_login_key=actor_login_key,
             limit=validate_companion_review_limit(limit),
-            cursor=decode_companion_review_cursor(cursor),
+            cursor=decode_companion_review_inbox_cursor(cursor),
         )
 
 

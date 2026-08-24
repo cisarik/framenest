@@ -11,12 +11,15 @@ from framenest.application.companion_review import (
     CompanionReviewCodecError,
     CompanionReviewQueryError,
     MappedTagStatus,
+    decode_companion_review_inbox_cursor,
     decode_companion_review_cursor,
     decode_stored_suggestion_result,
     encode_companion_review_cursor,
+    encode_companion_review_inbox_cursor,
     inbox_title,
     is_ordered_subsequence,
     map_suggested_tags,
+    pending_inbox_title,
     validate_companion_review_apply_request,
 )
 from framenest.application.media_suggestion import (
@@ -139,6 +142,28 @@ def test_inbox_title_prefers_nonblank_canonical() -> None:
     assert inbox_title(canonical_display_title="Canonical", stored=stored) == "Canonical"
     assert inbox_title(canonical_display_title="  ", stored=stored) == stored.title
     assert inbox_title(canonical_display_title=None, stored=stored) == stored.title
+    assert (
+        pending_inbox_title(
+            canonical_display_title="Canonical X",
+            claim_title="Claim title",
+            x_post_id="123",
+        )
+        == "Canonical X"
+    )
+    assert (
+        pending_inbox_title(
+            canonical_display_title=" ",
+            claim_title="Claim title",
+            x_post_id="123",
+        )
+        == "Claim title"
+    )
+    assert (
+        pending_inbox_title(
+            canonical_display_title=None, claim_title=None, x_post_id="123"
+        )
+        == "X post 123"
+    )
 
 
 def test_cursor_round_trip_and_invalid_values() -> None:
@@ -147,7 +172,15 @@ def test_cursor_round_trip_and_invalid_values() -> None:
         completed_at_ms=42, analysis_run_id=run_id
     )
     assert decode_companion_review_cursor(encoded) == (42, run_id)
+    assert decode_companion_review_inbox_cursor(encoded) == (42, True, run_id)
+    mixed = encode_companion_review_inbox_cursor(
+        activity_at_ms=41, analyzed=False, sort_id=run_id
+    )
+    assert decode_companion_review_inbox_cursor(mixed) == (41, False, run_id)
+    with pytest.raises(CompanionReviewQueryError):
+        decode_companion_review_cursor(mixed)
     assert decode_companion_review_cursor(None) is None
+    assert decode_companion_review_inbox_cursor(None) is None
     with pytest.raises(CompanionReviewQueryError):
         decode_companion_review_cursor("%%%")
     with pytest.raises(CompanionReviewQueryError):

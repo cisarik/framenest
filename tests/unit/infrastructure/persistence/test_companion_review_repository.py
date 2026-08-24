@@ -8,7 +8,10 @@ from pathlib import Path
 import pytest
 from sqlalchemy import text
 
-from framenest.application.companion_review import MappedTagStatus
+from framenest.application.companion_review import (
+    MappedTagStatus,
+    decode_companion_review_inbox_cursor,
+)
 from framenest.application.ports.companion_review_repository import (
     CompanionReviewMovieExcludedError,
     CompanionReviewRunNotEligibleError,
@@ -55,6 +58,20 @@ HISTORICAL_RUN = "eeeeeeee-eeee-4eee-8eee-000000000025"
 NULL_PROFILE = "ffffffff-ffff-4fff-8fff-000000000006"
 NULL_PROFILE_LOC = "ffffffff-ffff-4fff-8fff-000000000016"
 NULL_PROFILE_RUN = "ffffffff-ffff-4fff-8fff-000000000026"
+
+PENDING = "12121212-1212-4212-8212-121212121212"
+PENDING_LOC = "13131313-1313-4313-8313-131313131313"
+PENDING_CLAIM = "14141414-1414-4414-8414-141414141414"
+PENDING_ASSET = "15151515-1515-4515-8515-151515151515"
+OTHER_PENDING = "16161616-1616-4616-8616-161616161616"
+OTHER_PENDING_LOC = "17171717-1717-4717-8717-171717171717"
+OTHER_PENDING_CLAIM = "18181818-1818-4818-8818-181818181818"
+OTHER_PENDING_ASSET = "19191919-1919-4919-8919-191919191919"
+DEDUP_CLAIM = "20202020-2020-4020-8020-202020202020"
+DEDUP_ASSET = "21212121-2121-4121-8121-212121212121"
+PENDING_FAIL = "22222222-2222-4222-8222-222222222229"
+MOVIE_PENDING_CLAIM = "23232323-2323-4323-8323-232323232323"
+MOVIE_PENDING_ASSET = "24242424-2424-4424-8424-242424242424"
 
 
 def _result_json(*, title: str, tags: list[str]) -> str:
@@ -197,13 +214,21 @@ def _seed_catalog(engine) -> None:
         )
 
 
-def _insert_media(connection, media_id: str, location_id: str, category: str, title: str | None) -> None:
+def _insert_media(
+    connection,
+    media_id: str,
+    location_id: str,
+    category: str,
+    title: str | None,
+    *,
+    created_at_ms: int = 10,
+) -> None:
     connection.execute(
         text(
             "INSERT INTO logical_media (id, media_kind, created_at_ms, updated_at_ms) "
-            "VALUES (:id, 'video', 10, 10)"
+            "VALUES (:id, 'video', :created, :created)"
         ),
-        {"id": media_id},
+        {"id": media_id, "created": created_at_ms},
     )
     connection.execute(
         text(
@@ -212,7 +237,12 @@ def _insert_media(connection, media_id: str, location_id: str, category: str, ti
             "observed_size_bytes, observed_mtime_ns, created_at_ms, updated_at_ms"
             ") VALUES (:id, :media, :library, :path, 'available', 8, NULL, 10, 10)"
         ),
-        {"id": location_id, "media": media_id, "library": LIBRARY_ID, "path": f"{media_id}.mp4"},
+        {
+            "id": location_id,
+            "media": media_id,
+            "library": LIBRARY_ID,
+            "path": f"{media_id}.mp4",
+        },
     )
     connection.execute(
         text(
@@ -222,6 +252,58 @@ def _insert_media(connection, media_id: str, location_id: str, category: str, ti
             ") VALUES (:id, :title, 'Desc', 10, 10, :category, 'manual_upload')"
         ),
         {"id": media_id, "title": title, "category": category},
+    )
+
+
+def _insert_x_save(
+    connection,
+    *,
+    claim_id: str,
+    asset_id: str,
+    media_id: str,
+    location_id: str,
+    owner: str,
+    post_id: str,
+    title: str | None,
+    stage_key: str,
+) -> None:
+    connection.execute(
+        text(
+            "INSERT INTO x_post_claims ("
+            "id, state, acquisition_source, submitted_url, canonical_url, "
+            "x_post_id, extractor_key, created_by_login_key, title, "
+            "discovered_asset_count, success_count, failure_count, "
+            "created_at_ms, updated_at_ms, completed_at_ms, cleanup_state, "
+            "cleanup_completed_at_ms, requested_content_category, version"
+            ") VALUES ("
+            ":id, 'completed', 'x_manual_claim', :url, :url, :post_id, 'X', "
+            ":owner, :title, 1, 1, 0, 10, 20, 20, 'complete', 20, 'meme', 1)"
+        ),
+        {
+            "id": claim_id,
+            "url": f"https://x.com/a/status/{post_id}",
+            "post_id": post_id,
+            "owner": owner,
+            "title": title,
+        },
+    )
+    connection.execute(
+        text(
+            "INSERT INTO x_assets ("
+            "id, claim_id, ordinal, media_type, expected_mime, state, stage_key, "
+            "media_id, media_location_id, created_at_ms, updated_at_ms, "
+            "completed_at_ms, cleanup_state, cleanup_completed_at_ms, version"
+            ") VALUES ("
+            ":id, :claim, 0, 'video', 'video/mp4', 'cataloged', :stage, "
+            ":media, :location, 10, 20, 20, 'complete', 20, 1)"
+        ),
+        {
+            "id": asset_id,
+            "claim": claim_id,
+            "stage": stage_key,
+            "media": media_id,
+            "location": location_id,
+        },
     )
 
 
@@ -310,6 +392,112 @@ def test_latest_successful_generic_exclusions_and_unopened_empty_table(
         assert all(item.unopened for item in page.items)
         website = next(item for item in page.items if item.media_id == WEBSITE)
         assert website.title == "Website Analyze-by-AI"
+    finally:
+        dispose_engine(engine)
+
+
+def test_mixed_inbox_includes_only_owned_pending_and_analyzed_wins(
+    tmp_path: Path,
+) -> None:
+    repository, engine = _repository(tmp_path)
+    try:
+        with engine.begin() as connection:
+            _insert_media(
+                connection,
+                PENDING,
+                PENDING_LOC,
+                "meme",
+                None,
+                created_at_ms=180,
+            )
+            _insert_x_save(
+                connection,
+                claim_id=PENDING_CLAIM,
+                asset_id=PENDING_ASSET,
+                media_id=PENDING,
+                location_id=PENDING_LOC,
+                owner=ADMIN_KEY,
+                post_id="123456789",
+                title="Pending claim title",
+                stage_key="a" * 32,
+            )
+            _insert_failed_run(
+                connection,
+                PENDING_FAIL,
+                PENDING,
+                PENDING_LOC,
+                completed_at_ms=190,
+            )
+            _insert_media(
+                connection,
+                OTHER_PENDING,
+                OTHER_PENDING_LOC,
+                "meme",
+                "Other private title",
+                created_at_ms=300,
+            )
+            _insert_x_save(
+                connection,
+                claim_id=OTHER_PENDING_CLAIM,
+                asset_id=OTHER_PENDING_ASSET,
+                media_id=OTHER_PENDING,
+                location_id=OTHER_PENDING_LOC,
+                owner=OTHER_KEY,
+                post_id="987654321",
+                title="Other claim title",
+                stage_key="b" * 32,
+            )
+            _insert_x_save(
+                connection,
+                claim_id=DEDUP_CLAIM,
+                asset_id=DEDUP_ASSET,
+                media_id=GENERIC,
+                location_id=GENERIC_LOC,
+                owner=ADMIN_KEY,
+                post_id="111222333",
+                title="Duplicate pending title",
+                stage_key="c" * 32,
+            )
+            _insert_x_save(
+                connection,
+                claim_id=MOVIE_PENDING_CLAIM,
+                asset_id=MOVIE_PENDING_ASSET,
+                media_id=MOVIE,
+                location_id=MOVIE_LOC,
+                owner=ADMIN_KEY,
+                post_id="444555666",
+                title="Private movie title",
+                stage_key="d" * 32,
+            )
+
+        page = repository.list_inbox(
+            actor_login_key=ADMIN_KEY, limit=25, cursor=None
+        )
+        ids = [item.media_id for item in page.items]
+        assert ids.count(GENERIC) == 1
+        assert PENDING in ids
+        assert OTHER_PENDING not in ids
+        assert MOVIE not in ids
+        pending = next(item for item in page.items if item.media_id == PENDING)
+        assert pending.title == "Pending claim title"
+        assert pending.created_at_ms == 180
+        assert pending.analyzed is False
+        assert pending.analysis_run_id is None
+        assert pending.completed_at_ms is None
+        assert pending.unopened is False
+        generic = next(item for item in page.items if item.media_id == GENERIC)
+        assert generic.analyzed is True
+        assert generic.analysis_run_id == GENERIC_RUN
+        assert ids.index(WEBSITE) < ids.index(PENDING)
+        assert page.unopened_count == sum(item.analyzed for item in page.items)
+
+        other_page = repository.list_inbox(
+            actor_login_key=OTHER_KEY, limit=25, cursor=None
+        )
+        other_ids = [item.media_id for item in other_page.items]
+        assert OTHER_PENDING in other_ids
+        assert PENDING not in other_ids
+        assert other_page.unopened_count == page.unopened_count
     finally:
         dispose_engine(engine)
 
@@ -427,10 +615,8 @@ def test_corrupt_result_json_is_not_silent(tmp_path: Path) -> None:
         dispose_engine(engine)
 
 
-def _decode_cursor_tuple(cursor: str) -> tuple[int, str]:
-    from framenest.application.companion_review import decode_companion_review_cursor
-
-    parsed = decode_companion_review_cursor(cursor)
+def _decode_cursor_tuple(cursor: str) -> tuple[int, bool, str]:
+    parsed = decode_companion_review_inbox_cursor(cursor)
     assert parsed is not None
     return parsed
 
