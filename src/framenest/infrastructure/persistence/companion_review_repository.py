@@ -634,8 +634,11 @@ def _mixed_inbox_rows(latest, actor_login_key: str) -> Select:
             x_assets.c.state == "cataloged",
             x_assets.c.media_id.is_not(None),
             x_post_claims.c.created_by_login_key == actor_login_key,
-            x_post_claims.c.requested_content_category
-            == ContentCategory.MEME.value,
+            or_(
+                x_post_claims.c.requested_content_category.is_(None),
+                x_post_claims.c.requested_content_category
+                != ContentCategory.MOVIE.value,
+            ),
             func.coalesce(
                 media_metadata.c.content_category, DEFAULT_CONTENT_CATEGORY.value
             )

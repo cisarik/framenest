@@ -74,6 +74,18 @@ DEDUP_ASSET = "21212121-2121-4121-8121-212121212121"
 PENDING_FAIL = "22222222-2222-4222-8222-222222222229"
 MOVIE_PENDING_CLAIM = "23232323-2323-4323-8323-232323232323"
 MOVIE_PENDING_ASSET = "24242424-2424-4424-8424-242424242424"
+OMITTED = "25252525-2525-4252-8252-252525252525"
+OMITTED_LOC = "26262626-2626-4262-8262-262626262626"
+OMITTED_CLAIM = "27272727-2727-4272-8272-272727272727"
+OMITTED_ASSET = "28282828-2828-4282-8282-282828282828"
+CLAIM_MOVIE = "29292929-2929-4292-8292-292929292929"
+CLAIM_MOVIE_LOC = "30303030-3030-4303-8303-303030303030"
+CLAIM_MOVIE_CLAIM = "31313131-3131-4313-8313-313131313131"
+CLAIM_MOVIE_ASSET = "32323232-3232-4323-8323-323232323232"
+OTHER_OMITTED = "33333333-3333-4333-8333-333333333333"
+OTHER_OMITTED_LOC = "34343434-3434-4343-8343-343434343434"
+OTHER_OMITTED_CLAIM = "35353535-3535-4353-8353-353535353535"
+OTHER_OMITTED_ASSET = "36363636-3636-4363-8363-363636363636"
 
 
 def _result_json(*, title: str, tags: list[str]) -> str:
@@ -268,6 +280,7 @@ def _insert_x_save(
     post_id: str,
     title: str | None,
     stage_key: str,
+    requested_content_category: str | None = "meme",
 ) -> None:
     connection.execute(
         text(
@@ -279,7 +292,7 @@ def _insert_x_save(
             "cleanup_completed_at_ms, requested_content_category, version"
             ") VALUES ("
             ":id, 'completed', 'x_manual_claim', :url, :url, :post_id, 'X', "
-            ":owner, :title, 1, 1, 0, 10, 20, 20, 'complete', 20, 'meme', 1)"
+            ":owner, :title, 1, 1, 0, 10, 20, 20, 'complete', 20, :category, 1)"
         ),
         {
             "id": claim_id,
@@ -287,6 +300,7 @@ def _insert_x_save(
             "post_id": post_id,
             "owner": owner,
             "title": title,
+            "category": requested_content_category,
         },
     )
     connection.execute(
@@ -528,6 +542,130 @@ def test_mixed_inbox_includes_only_owned_pending_and_analyzed_wins(
         other_ids = [item.media_id for item in other_page.items]
         assert OTHER_PENDING in other_ids
         assert PENDING not in other_ids
+        assert other_page.unopened_count == page.unopened_count
+    finally:
+        dispose_engine(engine)
+
+
+def test_mixed_inbox_includes_omitted_category_owned_general_saves(
+    tmp_path: Path,
+) -> None:
+    repository, engine = _repository(tmp_path)
+    try:
+        with engine.begin() as connection:
+            _insert_media(
+                connection,
+                OMITTED,
+                OMITTED_LOC,
+                "general",
+                None,
+                created_at_ms=210,
+            )
+            _insert_x_save(
+                connection,
+                claim_id=OMITTED_CLAIM,
+                asset_id=OMITTED_ASSET,
+                media_id=OMITTED,
+                location_id=OMITTED_LOC,
+                owner=ADMIN_KEY,
+                post_id="555666777",
+                title="Omitted category title",
+                stage_key="e" * 32,
+                requested_content_category=None,
+            )
+            _insert_media(
+                connection,
+                CLAIM_MOVIE,
+                CLAIM_MOVIE_LOC,
+                "general",
+                None,
+                created_at_ms=220,
+            )
+            _insert_x_save(
+                connection,
+                claim_id=CLAIM_MOVIE_CLAIM,
+                asset_id=CLAIM_MOVIE_ASSET,
+                media_id=CLAIM_MOVIE,
+                location_id=CLAIM_MOVIE_LOC,
+                owner=ADMIN_KEY,
+                post_id="666777888",
+                title="Movie claim title",
+                stage_key="f" * 32,
+                requested_content_category="movie",
+            )
+            _insert_media(
+                connection,
+                OTHER_OMITTED,
+                OTHER_OMITTED_LOC,
+                "general",
+                None,
+                created_at_ms=230,
+            )
+            _insert_x_save(
+                connection,
+                claim_id=OTHER_OMITTED_CLAIM,
+                asset_id=OTHER_OMITTED_ASSET,
+                media_id=OTHER_OMITTED,
+                location_id=OTHER_OMITTED_LOC,
+                owner=OTHER_KEY,
+                post_id="777888999",
+                title="Other omitted title",
+                stage_key="1" * 32,
+                requested_content_category=None,
+            )
+            _insert_x_save(
+                connection,
+                claim_id=DEDUP_CLAIM,
+                asset_id=DEDUP_ASSET,
+                media_id=GENERIC,
+                location_id=GENERIC_LOC,
+                owner=ADMIN_KEY,
+                post_id="111222334",
+                title="Duplicate omitted title",
+                stage_key="2" * 32,
+                requested_content_category=None,
+            )
+            _insert_x_save(
+                connection,
+                claim_id=MOVIE_PENDING_CLAIM,
+                asset_id=MOVIE_PENDING_ASSET,
+                media_id=MOVIE,
+                location_id=MOVIE_LOC,
+                owner=ADMIN_KEY,
+                post_id="444555667",
+                title="Private movie omitted title",
+                stage_key="3" * 32,
+                requested_content_category=None,
+            )
+
+        page = repository.list_inbox(
+            actor_login_key=ADMIN_KEY, limit=25, cursor=None
+        )
+        ids = [item.media_id for item in page.items]
+        assert OMITTED in ids
+        assert CLAIM_MOVIE not in ids
+        assert OTHER_OMITTED not in ids
+        assert MOVIE not in ids
+        assert ids.count(GENERIC) == 1
+        omitted = next(item for item in page.items if item.media_id == OMITTED)
+        assert omitted.title == "Omitted category title"
+        assert omitted.created_at_ms == 210
+        assert omitted.analyzed is False
+        assert omitted.analysis_run_id is None
+        assert omitted.completed_at_ms is None
+        assert omitted.unopened is False
+        generic = next(item for item in page.items if item.media_id == GENERIC)
+        assert generic.analyzed is True
+        assert generic.analysis_run_id == GENERIC_RUN
+        assert page.unopened_count == sum(item.analyzed for item in page.items)
+
+        other_page = repository.list_inbox(
+            actor_login_key=OTHER_KEY, limit=25, cursor=None
+        )
+        other_ids = [item.media_id for item in other_page.items]
+        assert OTHER_OMITTED in other_ids
+        assert OMITTED not in other_ids
+        assert CLAIM_MOVIE not in other_ids
         assert other_page.unopened_count == page.unopened_count
     finally:
         dispose_engine(engine)

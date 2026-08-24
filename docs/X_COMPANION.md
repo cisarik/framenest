@@ -56,9 +56,11 @@ web-bridge type `open_details`; the extension review overlay is not that click
 path. History starts collapsed only when empty, is not persisted, and expands
 directly under the title bar. Analyzed rows use `review-history-button--analyzed`
 (accent green). Pending rows use `review-history-button--pending` (dark), stay
-out of the compact five, and remain visible when **All** is expanded. Clicking a
-row never removes it. A pending overlay shows `No successful analysis yet.` and
-does not send an opened mutation. Review Save retries opened before Apply when
+out of the compact five, and remain visible when **All** is expanded. Pending
+history includes administrator-owned cataloged X Saves with omitted Save
+category; movie remains excluded. Clicking a row never removes it. A pending
+overlay shows `No successful analysis yet.` and does not send an opened
+mutation. Review Save retries opened before Apply when
 an earlier opened request failed, retains selections and blocks Apply if that
 retry fails, and does not issue a second opened mutation after success. Hover
 and keyboard focus alone do not mark a row opened.
