@@ -60,7 +60,7 @@ body {
   min-height: var(--title-bar-height);
   height: var(--title-bar-height);
   padding: 4px 8px;
-  background: var(--accent);
+  background: color-mix(in srgb, var(--accent) 90%, transparent);
   color: #000000;
 }
 
@@ -193,8 +193,9 @@ body {
 }
 
 .review-list {
+  list-style: none;
   margin: 0;
-  padding: 8px 12px 8px 1.8rem;
+  padding: 8px 12px;
   max-height: 8.5rem;
   overflow-x: hidden;
   overflow-y: auto;
@@ -202,6 +203,12 @@ body {
   background: var(--surface-solid);
   color: var(--text);
   font-size: 0.82rem;
+}
+
+.review-list--compact {
+  max-height: none;
+  overflow: hidden;
+  border-bottom: 0;
 }
 
 .review-list:empty {
@@ -237,6 +244,53 @@ body {
   color: var(--text);
 }
 
+.review-list--compact > li:nth-child(1) > button {
+  opacity: 1;
+}
+
+.review-list--compact > li:nth-child(2) > button {
+  opacity: 0.9;
+}
+
+.review-list--compact > li:nth-child(3) > button {
+  opacity: 0.8;
+}
+
+.review-list--compact > li:nth-child(4) > button {
+  opacity: 0.7;
+}
+
+.review-list--compact > li:nth-child(5) > button {
+  opacity: 0.6;
+}
+
+.review-history-all {
+  display: block;
+  width: 100%;
+  margin: 0;
+  padding: 5px 19px 8px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-solid);
+  color: var(--text);
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+  text-align: left;
+  opacity: 0.9;
+}
+
+.review-history-all[hidden] {
+  display: none;
+}
+
+.review-list--compact > li > button:hover,
+.review-list--compact > li > button:focus-visible,
+.review-history-all:hover,
+.review-history-all:focus-visible {
+  opacity: 1;
+}
+
 .review-list button:hover,
 .review-list button:focus-visible {
   color: var(--accent);
@@ -247,6 +301,10 @@ body {
 .review-list .review-history-button--analyzed:hover,
 .review-list .review-history-button--analyzed:focus-visible {
   color: var(--background);
+}
+
+.review-list--expanded .review-history-button {
+  opacity: 1;
 }
 
 .review-dialog {

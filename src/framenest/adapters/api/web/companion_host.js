@@ -15,6 +15,7 @@
     HOST_ACK: "host_ack",
     ATTACH_REQUEST: "attach_request",
     ATTACH_RESULT: "attach_result",
+    OPEN_DETAILS: "open_details",
   });
 
   function isUuid(value) {
@@ -30,6 +31,7 @@
     const parentWindow = (env && env.parent) || (win && win.parent);
     const framed = Boolean(win && parentWindow && parentWindow !== win);
     const listeners = [];
+    const openDetailsListeners = [];
     const pending = [];
     let hosted = false;
     let attachSeq = 0;
@@ -78,6 +80,20 @@
         postToParent({ v: PROTOCOL, type: TYPES.HOST_ACK });
         return;
       }
+      if (data.type === TYPES.OPEN_DETAILS) {
+        const payload = data.payload && typeof data.payload === "object" ? data.payload : {};
+        if (!isUuid(payload.mediaId)) {
+          return;
+        }
+        openDetailsListeners.slice().forEach((listener) => {
+          try {
+            listener(payload.mediaId);
+          } catch {
+            // listener failure must not break the host
+          }
+        });
+        return;
+      }
       if (data.type === TYPES.ATTACH_RESULT) {
         const payload = data.payload && typeof data.payload === "object" ? data.payload : {};
         const waiter = pending.shift();
@@ -119,6 +135,10 @@
       postToParent({ v: PROTOCOL, type: TYPES.WEB_READY });
     }
 
+    if (env && typeof env.onOpenDetails === "function") {
+      openDetailsListeners.push(env.onOpenDetails);
+    }
+
     start();
     return {
       isHosted: function isHosted() {
@@ -128,6 +148,11 @@
       onHostedChange: function onHostedChange(listener) {
         if (typeof listener === "function") {
           listeners.push(listener);
+        }
+      },
+      onOpenDetails: function onOpenDetails(listener) {
+        if (typeof listener === "function") {
+          openDetailsListeners.push(listener);
         }
       },
       handleMessage: onMessage,
@@ -159,6 +184,11 @@
     onHostedChange: function onHostedChange(listener) {
       if (defaultHost) {
         defaultHost.onHostedChange(listener);
+      }
+    },
+    onOpenDetails: function onOpenDetails(listener) {
+      if (defaultHost) {
+        defaultHost.onOpenDetails(listener);
       }
     },
   };

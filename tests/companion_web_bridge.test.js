@@ -51,6 +51,8 @@ test("web and shell share the companion web protocol and never use a wildcard ta
   assert.doesNotMatch(hostSource, /postMessage\([^)]*,\s*["']\*["']/);
   assert.doesNotMatch(sidebarSource, /postMessage\([^)]*,\s*["']\*["']/);
   assert.doesNotMatch(appSource, /addEventListener\(\s*["']message["']/);
+  assert.equal(webHost.TYPES.OPEN_DETAILS, "open_details");
+  assert.equal(bridge.WEB_TYPES.OPEN_DETAILS, "open_details");
   assert.doesNotMatch(hostSource, /framenest\.companion\.v1/);
 });
 
@@ -236,6 +238,71 @@ test("shell accepts only the framed stored origin and UUID attach ids", () => {
   assert.equal(Object.prototype.hasOwnProperty.call(ids, "url"), false);
   assert.match(sidebarSource, /TYPES\.ATTACH_BEGIN/);
   assert.doesNotMatch(sidebarSource, /payload\.url/);
+});
+
+test("open_details opens hosted media-details from the pinned extension only", () => {
+  const opened = [];
+  const posted = [];
+  const parentWindow = {
+    postMessage(message, targetOrigin) {
+      posted.push({ message, targetOrigin });
+    },
+  };
+  const iframeWindow = {
+    parent: parentWindow,
+    addEventListener() {},
+  };
+  const host = webHost.createHost({
+    window: iframeWindow,
+    parent: parentWindow,
+    onOpenDetails(mediaId) {
+      opened.push(mediaId);
+    },
+  });
+  host.handleMessage({
+    origin: PIN,
+    source: parentWindow,
+    data: { v: webHost.PROTOCOL, type: webHost.TYPES.HOST_HELLO },
+  });
+  const mediaId = "11111111-1111-4111-8111-111111111111";
+  host.handleMessage({
+    origin: "https://evil.example",
+    source: parentWindow,
+    data: {
+      v: webHost.PROTOCOL,
+      type: webHost.TYPES.OPEN_DETAILS,
+      payload: { mediaId: mediaId },
+    },
+  });
+  assert.deepEqual(opened, []);
+  host.handleMessage({
+    origin: PIN,
+    source: parentWindow,
+    data: {
+      v: webHost.PROTOCOL,
+      type: webHost.TYPES.OPEN_DETAILS,
+      payload: { mediaId: "not-a-uuid" },
+    },
+  });
+  assert.deepEqual(opened, []);
+  host.handleMessage({
+    origin: PIN,
+    source: parentWindow,
+    data: {
+      v: webHost.PROTOCOL,
+      type: webHost.TYPES.OPEN_DETAILS,
+      payload: { mediaId: mediaId },
+    },
+  });
+  assert.deepEqual(opened, [mediaId]);
+  assert.equal(webHost.TYPES.OPEN_DETAILS, "open_details");
+  const bridge = loadSidebarBridge();
+  assert.equal(bridge.WEB_TYPES.OPEN_DETAILS, webHost.TYPES.OPEN_DETAILS);
+  assert.match(appSource, /onOpenDetails/);
+  assert.match(appSource, /openDetailsDialog\(\s*\{\s*media_id:\s*mediaId\s*\}/);
+  posted.forEach((entry) => {
+    assert.equal(entry.targetOrigin, PIN);
+  });
 });
 
 test("sidebar Attached follows ATTACH_BEGIN result.ok", () => {

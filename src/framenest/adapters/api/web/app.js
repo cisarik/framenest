@@ -11305,6 +11305,14 @@ if (
     void loadCatalog();
   });
 }
+if (
+  globalThis.FrameNestCompanionWeb
+  && typeof globalThis.FrameNestCompanionWeb.onOpenDetails === "function"
+) {
+  globalThis.FrameNestCompanionWeb.onOpenDetails((mediaId) => {
+    openDetailsDialog({ media_id: mediaId }, detailsCloseButton);
+  });
+}
 identityReady.then(() => {
   restoreYouTubeClaim();
 });

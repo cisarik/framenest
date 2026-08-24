@@ -401,6 +401,10 @@ function fakeListNode() {
 
 function fakeReviewChromeNodes() {
   const attributes = { "aria-expanded": "false" };
+  const allAttributes = {
+    "aria-expanded": "false",
+    "aria-label": "Show full companion history",
+  };
   return {
     toggle: {
       disabled: false,
@@ -413,6 +417,18 @@ function fakeReviewChromeNodes() {
     },
     history: { hidden: true },
     historyList: fakeListNode(),
+    allButton: {
+      hidden: true,
+      disabled: false,
+      textContent: "All",
+      setAttribute(name, value) {
+        allAttributes[name] = String(value);
+      },
+      getAttribute(name) {
+        return allAttributes[name] || null;
+      },
+    },
+    expandedList: fakeListNode(),
   };
 }
 
@@ -912,6 +928,13 @@ test("title-bar merged history has the accepted DOM, ARIA, and status contract",
     /id="review-history-toggle"[\s\S]*?type="button"[\s\S]*?aria-label="Toggle companion history"[\s\S]*?aria-expanded="false"[\s\S]*?aria-controls="review-history"[\s\S]*?disabled/
   );
   assert.match(sidebarHtml, /id="review-history-list"[^>]+aria-label="Companion history"/);
+  assert.match(sidebarHtml, /<ul id="review-history-list"/);
+  assert.match(
+    sidebarHtml,
+    /id="review-history-all"[\s\S]*?aria-label="Show full companion history"[\s\S]*?>\s*All\s*</
+  );
+  assert.match(sidebarHtml, /id="review-history-expanded"[^>]+aria-label="Full companion history"/);
+  assert.doesNotMatch(sidebarHtml, /<ol\b/);
   assert.doesNotMatch(sidebarHtml, /id="review-inbox(?:-list)?"/);
   assert.doesNotMatch(sidebarHtml, />\s*Review inbox\s*</);
   assert.doesNotMatch(sidebarHtml, /No analyzed items\./);
@@ -932,6 +955,21 @@ test("title-bar merged history has the accepted DOM, ARIA, and status contract",
   assert.match(sidebarCss, /\.title-bar__action\s*{[\s\S]*?z-index:\s*2/);
   assert.match(sidebarCss, /\.shell-status:empty\s*{[\s\S]*?display:\s*none/);
   assert.match(sidebarCss, /\.review-list:empty\s*{[\s\S]*?display:\s*none/);
+  assert.match(sidebarCss, /list-style:\s*none/);
+  assert.match(
+    sidebarCss,
+    /\.title-bar\s*\{[\s\S]*?background:\s*color-mix\(in srgb,\s*var\(--accent\) 90%,\s*transparent\)/
+  );
+  assert.match(sidebarCss, /\.review-list--compact\s*>\s*li:nth-child\(1\)\s*>\s*button\s*\{[\s\S]*?opacity:\s*1;/);
+  assert.match(sidebarCss, /\.review-list--compact\s*>\s*li:nth-child\(2\)\s*>\s*button\s*\{[\s\S]*?opacity:\s*0\.9;/);
+  assert.match(sidebarCss, /\.review-list--compact\s*>\s*li:nth-child\(3\)\s*>\s*button\s*\{[\s\S]*?opacity:\s*0\.8;/);
+  assert.match(sidebarCss, /\.review-list--compact\s*>\s*li:nth-child\(4\)\s*>\s*button\s*\{[\s\S]*?opacity:\s*0\.7;/);
+  assert.match(sidebarCss, /\.review-list--compact\s*>\s*li:nth-child\(5\)\s*>\s*button\s*\{[\s\S]*?opacity:\s*0\.6;/);
+  assert.match(sidebarCss, /\.review-history-all\s*\{[\s\S]*?opacity:\s*0\.9;/);
+  assert.match(
+    sidebarCss,
+    /\.review-list--compact\s*>\s*li\s*>\s*button:hover[\s\S]*?\.review-history-all:focus-visible\s*\{[\s\S]*?opacity:\s*1;/
+  );
   assert.match(sidebarCss, /max-height:\s*8\.5rem/);
   assert.match(sidebarCss, /overflow-y:\s*auto/);
   assert.match(
@@ -954,6 +992,10 @@ test("title-bar merged history has the accepted DOM, ARIA, and status contract",
   assert.match(sidebarSource, /visibilitychange/);
   assert.match(sidebarSource, /TYPES\.REVIEW_INBOX/);
   assert.match(sidebarSource, /onReviewListClick\(event, reviewHistoryList\)/);
+  assert.match(sidebarSource, /onReviewListClick\(event, reviewHistoryExpanded\)/);
+  assert.match(extractNamedFunction(sidebarSource, "onReviewListClick"), /activateHistoryItem/);
+  assert.doesNotMatch(extractNamedFunction(sidebarSource, "openHostedDetails"), /openReviewOverlay/);
+  assert.doesNotMatch(extractNamedFunction(sidebarSource, "openHostedDetails"), /review\.html/);
   assert.doesNotMatch(sidebarSource, /reviewInboxList|unreadItems/);
 });
 
@@ -987,22 +1029,30 @@ test("merged history renders analyzed and pending rows and never mutates the ifr
     Array.from(result.historyItems, (item) => item.analysis_run_id),
     [RUN_NEW, null]
   );
-  assert.equal(nodes.historyList.childNodes.length, 2);
+  assert.equal(result.compact.length, 1);
+  assert.equal(result.expanded.length, 1);
+  assert.equal(nodes.historyList.childNodes.length, 1);
   assert.equal(nodes.historyList.childNodes[0].textContent, "<img src=x onerror=alert(1)>");
+  assert.doesNotMatch(nodes.historyList.childNodes[0].textContent, /^\d+\.\s/);
   assert.equal(nodes.historyList.childNodes[0].tagName, "LI");
   assert.equal(nodes.historyList.childNodes[0].childNodes[0].tagName, "BUTTON");
   assert.equal(
     nodes.historyList.childNodes[0].childNodes[0].className,
     "review-history-button review-history-button--analyzed"
   );
+  assert.equal(nodes.allButton.hidden, false);
+  assert.equal(nodes.allButton.textContent, "All");
+  assert.equal(nodes.expandedList.childNodes.length, 1);
   assert.equal(
-    nodes.historyList.childNodes[1].childNodes[0].className,
+    nodes.expandedList.childNodes[0].childNodes[0].className,
     "review-history-button review-history-button--pending"
   );
   assert.equal(
     nodes.historyList.childNodes[0].childNodes[0].getAttribute("data-media-id"),
     MEDIA_A
   );
+  assert.equal(nodes.history.hidden, false);
+  assert.equal(nodes.toggle.getAttribute("aria-expanded"), "true");
   assert.equal(inbox.setHistoryExpanded(nodes.toggle, nodes.history, true), true);
   assert.equal(nodes.toggle.getAttribute("aria-expanded"), "true");
   assert.equal(nodes.history.hidden, false);
@@ -1011,16 +1061,145 @@ test("merged history renders analyzed and pending rows and never mutates the ifr
 
   const openedItems = items.map((item) => Object.assign({}, item, { unopened: false }));
   inbox.renderCollections(nodes, openedItems);
-  assert.equal(nodes.historyList.childNodes.length, 2);
+  assert.equal(nodes.historyList.childNodes.length, 1);
+  assert.equal(nodes.expandedList.childNodes.length, 1);
   inbox.hideCollections(nodes, true);
   assert.equal(nodes.toggle.disabled, true);
   assert.equal(nodes.toggle.getAttribute("aria-expanded"), "false");
   assert.equal(nodes.history.hidden, true);
   assert.equal(nodes.historyList.childNodes.length, 0);
+  assert.equal(nodes.expandedList.childNodes.length, 0);
+  assert.equal(nodes.allButton.hidden, true);
   assert.equal(inbox.setHistoryExpanded(nodes.toggle, nodes.history, true), false);
   assert.equal(hostFrame.hidden, false);
   assert.equal(hostFrame.src, ORIGIN);
   assert.doesNotMatch(extractNamedFunction(sidebarSource, "renderReviewInboxList"), /innerHTML/);
+});
+
+test("compact analyzed history is newest-first, capped at five, then All", () => {
+  const inbox = loadReviewInbox();
+  const media = [
+    MEDIA_A,
+    MEDIA_B,
+    "33333333-3333-4333-8333-333333333333",
+    "44444444-4444-4444-8444-444444444444",
+    "55555555-5555-4555-8555-555555555555",
+    "66666666-6666-4666-8666-666666666666",
+    "77777777-7777-4777-8777-777777777777",
+  ];
+  const items = media.map((mediaId, index) => ({
+    media_id: mediaId,
+    title: "Synthetic analyzed " + String.fromCharCode(65 + index),
+    created_at_ms: index + 1,
+    analyzed: true,
+    analysis_run_id: RUN_NEW,
+    completed_at_ms: index + 1,
+    unopened: true,
+  }));
+  items.push({
+    media_id: "88888888-8888-4888-8888-888888888888",
+    title: "Synthetic pending",
+    created_at_ms: 99,
+    analyzed: false,
+    analysis_run_id: null,
+    completed_at_ms: null,
+    unopened: false,
+  });
+  const partitioned = inbox.partitionHistoryItems(items);
+  assert.equal(partitioned.compact.length <= inbox.COMPACT_ANALYZED_LIMIT, true);
+  assert.equal(partitioned.compact.length, 5);
+  assert.deepEqual(
+    partitioned.compact.map((item) => item.title),
+    [
+      "Synthetic analyzed G",
+      "Synthetic analyzed F",
+      "Synthetic analyzed E",
+      "Synthetic analyzed D",
+      "Synthetic analyzed C",
+    ]
+  );
+  assert.equal(
+    partitioned.compact.every((item) => item.analyzed === true),
+    true
+  );
+  assert.equal(partitioned.expanded.length, 3);
+  assert.equal(partitioned.expanded[0].title, "Synthetic pending");
+  assert.equal(partitioned.expanded[0].analyzed, false);
+  const nodes = fakeReviewChromeNodes();
+  const rendered = inbox.renderCollections(nodes, items);
+  assert.equal(rendered.compact.length, 5);
+  assert.equal(nodes.historyList.childNodes.length, 5);
+  assert.equal(nodes.historyList.childNodes[0].childNodes[0].textContent, "Synthetic analyzed G");
+  Array.from(nodes.historyList.childNodes).forEach((li) => {
+    assert.doesNotMatch(li.childNodes[0].textContent, /^\d+\.\s/);
+  });
+  assert.equal(nodes.allButton.hidden, false);
+  assert.equal(nodes.allButton.disabled, false);
+  assert.equal(nodes.allButton.textContent, "All");
+  assert.equal(nodes.allButton.getAttribute("aria-label"), "Show full companion history");
+  assert.equal(inbox.setAllExpanded(nodes, true), true);
+  assert.equal(nodes.allButton.getAttribute("aria-expanded"), "true");
+  assert.equal(nodes.expandedList.hidden, false);
+  assert.equal(nodes.expandedList.childNodes.length, 3);
+  assert.match(
+    nodes.expandedList.childNodes[0].childNodes[0].className,
+    /review-history-button--pending/
+  );
+  assert.match(
+    nodes.expandedList.childNodes[1].childNodes[0].className,
+    /review-history-button--analyzed/
+  );
+});
+
+test("analyzed history click posts open_details and pending keeps the overlay", () => {
+  const inbox = loadReviewInbox();
+  const details = [];
+  const pending = [];
+  const analyzed = { media_id: MEDIA_A, title: "Synthetic analyzed", analyzed: true };
+  assert.equal(inbox.historyClickKind(analyzed), "open_details");
+  assert.equal(
+    inbox.activateHistoryItem(
+      analyzed,
+      (id) => {
+        details.push(id);
+      },
+      (id) => {
+        pending.push(id);
+      }
+    ),
+    "open_details"
+  );
+  assert.deepEqual(details, [MEDIA_A]);
+  assert.deepEqual(pending, []);
+  const waiting = { media_id: MEDIA_B, title: "Synthetic pending", analyzed: false };
+  assert.equal(inbox.historyClickKind(waiting), "pending_overlay");
+  assert.equal(
+    inbox.activateHistoryItem(
+      waiting,
+      (id) => {
+        details.push(id);
+      },
+      (id) => {
+        pending.push(id);
+      }
+    ),
+    "pending_overlay"
+  );
+  assert.deepEqual(details, [MEDIA_A]);
+  assert.deepEqual(pending, [MEDIA_B]);
+  const message = inbox.openDetailsMessage(MEDIA_A);
+  assert.equal(message.v, "framenest.companion.web.v1");
+  assert.equal(message.type, "open_details");
+  assert.equal(message.payload.mediaId, MEDIA_A);
+  assert.equal("mediaId" in message.payload, true);
+  assert.equal(Object.prototype.hasOwnProperty.call(message.payload, "url"), false);
+  assert.equal(inbox.openDetailsMessage("not-a-uuid"), null);
+  assert.match(extractNamedFunction(sidebarSource, "openHostedDetails"), /postToFrame\(message, storedOrigin\)/);
+  assert.match(extractNamedFunction(sidebarSource, "openHostedDetails"), /handshakeTimeoutCopy/);
+  assert.doesNotMatch(extractNamedFunction(sidebarSource, "openHostedDetails"), /openReviewOverlay/);
+  assert.doesNotMatch(extractNamedFunction(sidebarSource, "activateHistoryItem"), /REVIEW_INBOX_OPENED/);
+  assert.doesNotMatch(extractNamedFunction(sidebarSource, "onReviewListClick"), /REVIEW_INBOX_OPENED/);
+  assert.match(reviewSource, /No successful analysis yet\./);
 });
 
 test("cataloged asset helper keeps only UUID media ids", () => {

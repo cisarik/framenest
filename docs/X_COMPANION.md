@@ -35,8 +35,9 @@ An authenticated FrameNest user can:
   with Enter or Attach onto the composer file input;
 - open the toolbar side panel to use one merged title-bar companion history
   (`#review-history-toggle`, `#review-history`, `#review-history-list`) above
-  the surviving hosted FrameNest iframe, with analyzed rows green and pending
-  rows dark, and attach a Gallery item onto the bound X composer. In that hosted
+  the surviving hosted FrameNest iframe. Compact analyzed titles sit newest
+  first; pending rows stay dark under **All**. Analyzed history opens hosted
+  media-details via `open_details`. In that hosted
   Gallery, open-original stays bottom-right and Attach sits top-left on the card
   image. Ordinary browser tabs keep open-original only. Gallery 📎 attaches
   after the reply composer is focused, and the shell reports Attached only when
@@ -45,17 +46,22 @@ An authenticated FrameNest user can:
 ## Review history
 
 The side panel has one merged title-bar history (`#review-history-toggle`,
-`#review-history`, `#review-history-list`) above the surviving iframe. There is
-no `#review-inbox` list. History starts collapsed on every panel load, is not
-persisted, and expands directly under the title bar. Analyzed rows use
-`review-history-button--analyzed` (accent green). Pending rows use
-`review-history-button--pending` (dark). Clicking a row never removes it. A
-pending overlay shows `No successful analysis yet.` and does not send an opened
-mutation. An analyzed row still marks opened through the durable route; Review
-Save retries opened before Apply when an earlier opened request failed, retains
-selections and blocks Apply if that retry fails, and does not issue a second
-opened mutation after success. Hover and keyboard focus alone do not mark a
-row opened.
+`#review-history`, `#review-history-list`, `#review-history-all`) above the
+surviving iframe. There is no `#review-inbox` list. When connected history
+exists, a compact analyzed strip is visible directly under the title bar
+(newest `completed_at_ms` first; titles only, no ordinal markers). At most five
+analyzed rows fade by position; **All** reveals pending rows and remaining
+analyzed items. Analyzed history opens hosted FrameNest media-details via the
+web-bridge type `open_details`; the extension review overlay is not that click
+path. History starts collapsed only when empty, is not persisted, and expands
+directly under the title bar. Analyzed rows use `review-history-button--analyzed`
+(accent green). Pending rows use `review-history-button--pending` (dark), stay
+out of the compact five, and remain visible when **All** is expanded. Clicking a
+row never removes it. A pending overlay shows `No successful analysis yet.` and
+does not send an opened mutation. Review Save retries opened before Apply when
+an earlier opened request failed, retains selections and blocks Apply if that
+retry fails, and does not issue a second opened mutation after success. Hover
+and keyboard focus alone do not mark a row opened.
 
 Save from X best-effort seeds `GET /api/canonical-tags?surface=x-companion-save`
 with the fixed `x` / `𝕏` pair and prepends that exact pair once when the list
@@ -77,9 +83,9 @@ radios or Analyze. Exactly four `companion_mutation` routes remain: X submit, X
 retry, review opened, and review apply.
 
 A second overlay opens local `ui/review.html` through
-`chrome.runtime.getURL` plus `#media=<uuid>`. It is not web-accessible and is
-not inside `#frame`. Ingest Save remains the frozen capture form (no category
-radios).
+`chrome.runtime.getURL` plus `#media=<uuid>` for pending history. It is not the
+analyzed-history click path, is not web-accessible, and is not inside `#frame`.
+Ingest Save remains the frozen capture form (no category radios).
 
 GET inbox routes work with an empty origin allowlist. Mutations that carry the
 extension Origin fail closed when the allowlist is empty. This document does

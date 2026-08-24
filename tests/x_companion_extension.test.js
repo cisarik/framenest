@@ -1361,7 +1361,7 @@ test("toolbar action opens the side-panel shell instead of a picker popup", () =
   assert.ok(sidebarHtml.indexOf('class="title-bar"') < sidebarHtml.indexOf('id="origin"'));
   assert.ok(sidebarHtml.indexOf('id="settings-dialog"') < sidebarHtml.indexOf('id="origin"'));
   assert.match(sidebarCss, /\.title-bar\s*\{/);
-  assert.match(sidebarCss, /background: var\(--accent\)/);
+  assert.match(sidebarCss, /background: color-mix\(in srgb, var\(--accent\) 90%, transparent\)/);
   assert.doesNotMatch(sidebarHtml, /ui\/picker\.html/);
   assert.doesNotMatch(sidebarJs, /window\.open/);
   assert.doesNotMatch(sidebarJs, /ui\/picker\.html/);

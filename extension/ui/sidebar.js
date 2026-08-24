@@ -7,6 +7,7 @@
     HOST_ACK: "host_ack",
     ATTACH_REQUEST: "attach_request",
     ATTACH_RESULT: "attach_result",
+    OPEN_DETAILS: "open_details",
   });
   const HANDSHAKE_WAIT_MS = 10000;
   const RELOAD_RECOVERY = companion.EXTENSION_CONTEXT_RECOVERY_COPY;
@@ -64,6 +65,75 @@
   };
 
   const REVIEW = companion.REVIEW_INBOX;
+  const COMPACT_ANALYZED_LIMIT = 5;
+
+  function historyStampMs(item) {
+    if (!item) {
+      return 0;
+    }
+    if (item.analyzed === true) {
+      return item.completed_at_ms;
+    }
+    return item.created_at_ms;
+  }
+
+  function compareHistoryNewestFirst(left, right) {
+    const rightStamp = historyStampMs(right);
+    const leftStamp = historyStampMs(left);
+    if (rightStamp !== leftStamp) {
+      return rightStamp - leftStamp;
+    }
+    const leftId = left && typeof left.media_id === "string" ? left.media_id : "";
+    const rightId = right && typeof right.media_id === "string" ? right.media_id : "";
+    if (leftId < rightId) {
+      return -1;
+    }
+    if (leftId > rightId) {
+      return 1;
+    }
+    return 0;
+  }
+
+  function partitionHistoryItems(rawItems) {
+    const items = companion.sanitizeReviewInboxItems(rawItems);
+    const analyzed = items.filter((item) => item.analyzed === true).slice().sort(compareHistoryNewestFirst);
+    const pending = items.filter((item) => item.analyzed !== true).slice().sort(compareHistoryNewestFirst);
+    const compact = analyzed.slice(0, COMPACT_ANALYZED_LIMIT);
+    const remainderAnalyzed = analyzed.slice(COMPACT_ANALYZED_LIMIT);
+    const expanded = pending.concat(remainderAnalyzed).sort(compareHistoryNewestFirst);
+    return { items, analyzed, pending, compact, expanded };
+  }
+
+  function historyClickKind(item) {
+    if (item && item.analyzed === true) {
+      return "open_details";
+    }
+    return "pending_overlay";
+  }
+
+  function openDetailsMessage(mediaId) {
+    if (!companion.isUuid(mediaId)) {
+      return null;
+    }
+    return {
+      v: WEB_PROTOCOL,
+      type: WEB_TYPES.OPEN_DETAILS,
+      payload: { mediaId: mediaId },
+    };
+  }
+
+  function activateHistoryItem(item, openDetails, openPending) {
+    if (historyClickKind(item) === "open_details") {
+      if (typeof openDetails === "function") {
+        openDetails(item.media_id);
+      }
+      return "open_details";
+    }
+    if (typeof openPending === "function") {
+      openPending(item && item.media_id);
+    }
+    return "pending_overlay";
+  }
 
   function renderReviewInboxList(listNode, items) {
     if (!listNode) {
@@ -112,20 +182,56 @@
     return next;
   }
 
-  function renderReviewCollections(nodes, rawItems) {
-    const historyItems = companion.sanitizeReviewInboxItems(rawItems);
-    renderReviewInboxList(nodes.historyList, historyItems);
-    nodes.toggle.disabled = historyItems.length === 0;
-    if (!historyItems.length) {
-      setReviewHistoryExpanded(nodes.toggle, nodes.history, false);
+  function setAllExpanded(nodes, expanded) {
+    const allButton = nodes && nodes.allButton;
+    const expandedList = nodes && nodes.expandedList;
+    const next = Boolean(expanded && allButton && allButton.hidden !== true && allButton.disabled !== true);
+    if (allButton && typeof allButton.setAttribute === "function") {
+      allButton.setAttribute("aria-expanded", next ? "true" : "false");
     }
-    return { historyItems };
+    if (expandedList) {
+      expandedList.hidden = !next;
+    }
+    return next;
+  }
+
+  function renderReviewCollections(nodes, rawItems) {
+    const partitioned = partitionHistoryItems(rawItems);
+    renderReviewInboxList(nodes.historyList, partitioned.compact);
+    if (nodes.expandedList) {
+      renderReviewInboxList(nodes.expandedList, partitioned.expanded);
+    }
+    const hasHistory = partitioned.items.length > 0;
+    nodes.toggle.disabled = !hasHistory;
+    if (nodes.allButton) {
+      nodes.allButton.hidden = !hasHistory;
+      nodes.allButton.disabled = !hasHistory;
+    }
+    if (!hasHistory) {
+      setReviewHistoryExpanded(nodes.toggle, nodes.history, false);
+      setAllExpanded(nodes, false);
+    } else {
+      setReviewHistoryExpanded(nodes.toggle, nodes.history, true);
+    }
+    return {
+      historyItems: partitioned.items,
+      compact: partitioned.compact,
+      expanded: partitioned.expanded,
+    };
   }
 
   function hideReviewCollections(nodes, disableToggle) {
     renderReviewInboxList(nodes.historyList, []);
+    if (nodes.expandedList) {
+      renderReviewInboxList(nodes.expandedList, []);
+    }
     nodes.toggle.disabled = disableToggle === true;
     setReviewHistoryExpanded(nodes.toggle, nodes.history, false);
+    if (nodes.allButton) {
+      nodes.allButton.hidden = true;
+      nodes.allButton.disabled = true;
+    }
+    setAllExpanded(nodes, false);
   }
 
   function markRuntimeStale(error) {
@@ -233,10 +339,16 @@
 
   globalThis.FrameNestReviewInbox = {
     POLL_MS: REVIEW.pollMs,
+    COMPACT_ANALYZED_LIMIT: COMPACT_ANALYZED_LIMIT,
     renderList: renderReviewInboxList,
     renderCollections: renderReviewCollections,
     hideCollections: hideReviewCollections,
     setHistoryExpanded: setReviewHistoryExpanded,
+    setAllExpanded: setAllExpanded,
+    partitionHistoryItems: partitionHistoryItems,
+    historyClickKind: historyClickKind,
+    activateHistoryItem: activateHistoryItem,
+    openDetailsMessage: openDetailsMessage,
     request: request,
     runtimeUrl: runtimeUrl,
     overlayUrl: reviewOverlayUrl,
@@ -255,6 +367,8 @@
   const reviewHistoryToggle = document.getElementById("review-history-toggle");
   const reviewHistory = document.getElementById("review-history");
   const reviewHistoryList = document.getElementById("review-history-list");
+  const reviewHistoryAll = document.getElementById("review-history-all");
+  const reviewHistoryExpanded = document.getElementById("review-history-expanded");
   const reviewDialog = document.getElementById("review-dialog");
   const reviewFrame = document.getElementById("review-frame");
   if (
@@ -269,6 +383,8 @@
     !reviewHistoryToggle ||
     !reviewHistory ||
     !reviewHistoryList ||
+    !reviewHistoryAll ||
+    !reviewHistoryExpanded ||
     !reviewDialog ||
     !reviewFrame
   ) {
@@ -280,10 +396,13 @@
   let handshakeSeen = false;
   let frameLoaded = false;
   let inboxPollTimer = 0;
+  let lastHistoryItems = [];
   const reviewChromeNodes = {
     toggle: reviewHistoryToggle,
     history: reviewHistory,
     historyList: reviewHistoryList,
+    allButton: reviewHistoryAll,
+    expandedList: reviewHistoryExpanded,
   };
 
   function setText(node, value, kind) {
@@ -300,8 +419,13 @@
     chromeAction.disabled = true;
     settingsSave.disabled = true;
     reviewHistoryToggle.disabled = true;
+    reviewHistoryAll.disabled = true;
     setReviewHistoryExpanded(reviewHistoryToggle, reviewHistory, false);
+    setAllExpanded(reviewChromeNodes, false);
     reviewHistoryList.querySelectorAll("button").forEach((button) => {
+      button.disabled = true;
+    });
+    reviewHistoryExpanded.querySelectorAll("button").forEach((button) => {
       button.disabled = true;
     });
   };
@@ -378,21 +502,20 @@
   }
 
   function hideInboxSection() {
+    lastHistoryItems = [];
     hideReviewCollections(reviewChromeNodes, true);
   }
 
   function applyInboxResult(result) {
     if (!result || result.ok !== true || result.forbidden === true || result.status === 403) {
       hideInboxSection();
+      lastHistoryItems = [];
       return;
     }
+    const allWasExpanded = reviewHistoryAll.getAttribute("aria-expanded") === "true";
     const rendered = renderReviewCollections(reviewChromeNodes, result.items);
-    setReviewHistoryExpanded(
-      reviewHistoryToggle,
-      reviewHistory,
-      rendered.historyItems.length > 0 &&
-        reviewHistoryToggle.getAttribute("aria-expanded") === "true"
-    );
+    lastHistoryItems = rendered.historyItems;
+    setAllExpanded(reviewChromeNodes, allWasExpanded && rendered.expanded.length > 0);
   }
 
   async function refreshInbox() {
@@ -410,6 +533,35 @@
       reviewHistory,
       reviewHistoryToggle.getAttribute("aria-expanded") !== "true"
     );
+  }
+
+  function onAllClick() {
+    setAllExpanded(reviewChromeNodes, reviewHistoryAll.getAttribute("aria-expanded") !== "true");
+  }
+
+  function openHostedDetails(mediaId) {
+    const message = openDetailsMessage(mediaId);
+    if (!message) {
+      return false;
+    }
+    if (!handshakeSeen || !storedOrigin || !companion.acceptFrameNestOrigin(storedOrigin)) {
+      const loaded = frameLoaded;
+      setText(shellStatus, handshakeTimeoutCopy(loaded), loaded ? "notice" : "error");
+      return false;
+    }
+    postToFrame(message, storedOrigin);
+    return true;
+  }
+
+  function historyItemForMediaId(mediaId) {
+    let index = 0;
+    while (index < lastHistoryItems.length) {
+      if (lastHistoryItems[index].media_id === mediaId) {
+        return lastHistoryItems[index];
+      }
+      index += 1;
+    }
+    return null;
   }
 
   function clearHandshakeWait() {
@@ -610,7 +762,19 @@
     if (!mediaId) {
       return;
     }
-    openReviewOverlay(mediaId, reviewDialog, reviewFrame);
+    const item = historyItemForMediaId(mediaId);
+    if (!item) {
+      return;
+    }
+    activateHistoryItem(
+      item,
+      function openAnalyzedDetails(id) {
+        openHostedDetails(id);
+      },
+      function openPendingOverlay(id) {
+        openReviewOverlay(id, reviewDialog, reviewFrame);
+      }
+    );
   }
 
   function onReviewOverlayMessage(event) {
@@ -677,8 +841,12 @@
 
   chromeAction.addEventListener("click", onChromeAction);
   reviewHistoryToggle.addEventListener("click", onHistoryToggle);
+  reviewHistoryAll.addEventListener("click", onAllClick);
   reviewHistoryList.addEventListener("click", (event) => {
     onReviewListClick(event, reviewHistoryList);
+  });
+  reviewHistoryExpanded.addEventListener("click", (event) => {
+    onReviewListClick(event, reviewHistoryExpanded);
   });
   document.addEventListener("visibilitychange", () => {
     if (document.hidden) {
