@@ -147,8 +147,8 @@ async function handle(message) {
 }
 
 async function configureOrigin(payload) {
-  const origin = payload.origin;
-  if (!companion.acceptFrameNestOrigin(origin)) {
+  const origin = companion.canonicalizeFrameNestOrigin(payload.origin);
+  if (!origin) {
     return { ok: false, error: "invalid_origin" };
   }
   const granted = await chrome.permissions.request({ origins: [origin + "/*"] });

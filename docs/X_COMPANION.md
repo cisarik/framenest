@@ -149,9 +149,10 @@ Rollback: remove the key or set it to `[]` and restart. No CORS is enabled.
 3. Load unpacked and select the repository `extension/` directory.
 4. Confirm the ID is `omiihmnlkmieaafaphohakcgmbggppap`.
 5. Open the toolbar side panel. On first run or after Disconnect, open Settings
-   in the green title bar, enter the exact FrameNest HTTPS origin
-   (`https://<node>.<tailnet>.ts.net`, no path), then click Save under the origin
-   field and grant the host permission when prompted. After Save, Settings closes,
+   in the green title bar, enter a FrameNest HTTPS tailnet origin
+   (`https://<node>.<tailnet>.ts.net`, no path). Save accepts that pasted origin
+   and canonicalizes a trailing slash or host case. Then click Save under the
+   origin field and grant the host permission when prompted. After Save, Settings closes,
    the success status stays blank, the shell iframes that origin, and the
    title-bar control reads Disconnect. Save stays disabled until the origin
    differs from the stored value. Connect and Disconnect live in the title bar.

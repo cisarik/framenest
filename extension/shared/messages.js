@@ -133,8 +133,50 @@
     };
   }
 
+  function canonicalizeFrameNestOrigin(value) {
+    if (typeof value !== "string") {
+      return null;
+    }
+    const trimmed = value.trim();
+    if (!trimmed) {
+      return null;
+    }
+    const candidate = /^[A-Za-z][A-Za-z0-9+.-]*:/.test(trimmed) ? trimmed : "https://" + trimmed;
+    let parsed;
+    try {
+      parsed = new URL(candidate);
+    } catch {
+      return null;
+    }
+    if (parsed.username || parsed.password || parsed.search || parsed.hash) {
+      return null;
+    }
+    if (parsed.pathname !== "" && parsed.pathname !== "/") {
+      return null;
+    }
+    let protocol = parsed.protocol;
+    if (protocol === "http:") {
+      protocol = "https:";
+    }
+    if (protocol !== "https:") {
+      return null;
+    }
+    if (parsed.port && parsed.port !== "443") {
+      return null;
+    }
+    const hostname = parsed.hostname;
+    if (!hostname) {
+      return null;
+    }
+    const origin = "https://" + hostname;
+    if (!TS_ORIGIN_PATTERN.test(origin)) {
+      return null;
+    }
+    return origin;
+  }
+
   function acceptFrameNestOrigin(value) {
-    return typeof value === "string" && TS_ORIGIN_PATTERN.test(value);
+    return canonicalizeFrameNestOrigin(value) !== null;
   }
 
   function pathFor(name, ids) {
@@ -588,6 +630,7 @@
     defaultContentCategoryForMediaKind,
     reduceXSaveOutcome,
     acceptFrameNestOrigin,
+    canonicalizeFrameNestOrigin,
     pathFor,
     reviewInboxQuerySuffix,
     badgeTextForUnopenedCount,

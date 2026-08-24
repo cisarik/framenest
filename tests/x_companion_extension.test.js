@@ -82,6 +82,44 @@ test("X URL allowlist accepts only public https post permalinks", () => {
   assert.equal(companion.acceptXPostUrl("https://x.com/fixture/status/123456789?foo=1"), null);
 });
 
+test("FrameNest origin canonicalizer accepts ordinary tailnet paste variants", () => {
+  const canonical = "https://nuc.example.ts.net";
+  const accepted = [
+    "https://nuc.example.ts.net",
+    "https://nuc.example.ts.net/",
+    "https://Nuc.Example.ts.net",
+    "HTTPS://nuc.example.ts.net",
+    "https://nuc.example.ts.net:443",
+    "http://nuc.example.ts.net",
+    "nuc.example.ts.net",
+    "  https://nuc.example.ts.net/  ",
+  ];
+  accepted.forEach((value) => {
+    assert.equal(companion.canonicalizeFrameNestOrigin(value), canonical, value);
+    assert.equal(companion.acceptFrameNestOrigin(value), true, value);
+  });
+  const rejected = [
+    "https://example.ts.net",
+    "https://nuc.example.ts.net/path",
+    "https://nuc.example.ts.net?x=1",
+    "http://127.0.0.1:8000",
+    "https://127.0.0.1",
+    "https://example.com",
+    "",
+  ];
+  rejected.forEach((value) => {
+    assert.equal(companion.canonicalizeFrameNestOrigin(value), null, JSON.stringify(value));
+    assert.equal(companion.acceptFrameNestOrigin(value), false, JSON.stringify(value));
+  });
+  const sidebarJs = fs.readFileSync(path.join(REPO, "extension/ui/sidebar.js"), "utf8");
+  assert.match(
+    sidebarJs,
+    /Use the FrameNest HTTPS tailnet origin \(https:\/\/<node>\.<tailnet>\.ts\.net\), with no path\./
+  );
+  assert.match(workerSource, /canonicalizeFrameNestOrigin/);
+  assert.doesNotMatch(workerSource, /origins: \[origin \+ "\/\/\*"\]/);
+});
+
 test("adapter contract has no Post-button or auto-submit path", () => {
   const serialized = JSON.stringify(contract);
   assert.equal(serialized.includes("tweetButton"), false);

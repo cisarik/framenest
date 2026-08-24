@@ -505,7 +505,12 @@
       return;
     }
     if (!result.ok) {
-      setText(shellStatus, result.error || "Failed", "error");
+      const error = result.error;
+      const copy =
+        error === "invalid_origin"
+          ? "Use the FrameNest HTTPS tailnet origin (https://<node>.<tailnet>.ts.net), with no path."
+          : error || "Failed";
+      setText(shellStatus, copy, "error");
       return;
     }
     storedOrigin = result.origin || origin;
