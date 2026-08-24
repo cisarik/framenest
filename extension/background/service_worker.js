@@ -211,8 +211,9 @@ function sanitizeAlias(raw) {
     return {};
   }
   const alias = {};
-  if (typeof raw.display_title === "string") {
-    alias.display_title = raw.display_title.slice(0, 240);
+  const displayTitle = companion.canonicalizeCompanionAliasTitle(raw.display_title);
+  if (displayTitle) {
+    alias.display_title = displayTitle;
   }
   if (typeof raw.description === "string") {
     alias.description = raw.description.slice(0, 10000);

@@ -684,7 +684,7 @@
     if (!sentence || (sentence.length > 3 && !/[a-zA-Z0-9]/.test(sentence))) {
       return "";
     }
-    return clipText(sentence, TITLE_MAX);
+    return companion.canonicalizeCompanionAliasTitle(sentence) || "";
   }
 
   function isGenericAccessibleName(value) {
@@ -731,15 +731,11 @@
 
   function firstNonGenericName(values) {
     for (let index = 0; index < values.length; index += 1) {
-      const value = values[index];
-      if (typeof value !== "string") {
+      const canonical = companion.canonicalizeCompanionAliasTitle(values[index]);
+      if (!canonical || isGenericAccessibleName(canonical) || isReservedSaveControlName(canonical)) {
         continue;
       }
-      const trimmed = value.trim();
-      if (!trimmed || isGenericAccessibleName(trimmed) || isReservedSaveControlName(trimmed)) {
-        continue;
-      }
-      return clipText(trimmed, TITLE_MAX);
+      return canonical;
     }
     return "";
   }

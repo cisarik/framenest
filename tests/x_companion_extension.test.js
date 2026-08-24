@@ -120,6 +120,32 @@ test("FrameNest origin canonicalizer accepts ordinary tailnet paste variants", (
   assert.doesNotMatch(workerSource, /origins: \[origin \+ "\/\/\*"\]/);
 });
 
+test("companion alias title canonicalizer maps controls and omits empty titles", () => {
+  assert.equal(companion.canonicalizeCompanionAliasTitle("A two\nline alt"), "A two line alt");
+  assert.equal(companion.canonicalizeCompanionAliasTitle("  A two\nline alt  "), "A two line alt");
+  assert.equal(companion.canonicalizeCompanionAliasTitle("A two\r\nline alt"), "A two line alt");
+  assert.equal(companion.canonicalizeCompanionAliasTitle(""), null);
+  assert.equal(companion.canonicalizeCompanionAliasTitle("   "), null);
+  assert.equal(companion.canonicalizeCompanionAliasTitle("\n\n"), null);
+  assert.equal(companion.canonicalizeCompanionAliasTitle(null), null);
+  assert.equal(companion.canonicalizeCompanionAliasTitle(1), null);
+  const longTitle = "A".repeat(300);
+  const clipped = companion.canonicalizeCompanionAliasTitle(longTitle);
+  assert.equal(typeof clipped, "string");
+  assert.equal(Array.from(clipped).length, 240);
+  assert.equal(clipped, "A".repeat(240));
+  const saveJs = fs.readFileSync(path.join(REPO, "extension/ui/save.js"), "utf8");
+  assert.match(saveJs, /canonicalizeCompanionAliasTitle/);
+  assert.match(workerSource, /canonicalizeCompanionAliasTitle/);
+  assert.match(adapterSource, /canonicalizeCompanionAliasTitle/);
+  assert.match(
+    extractNamedFunction(adapterSource, "firstNonGenericName"),
+    /canonicalizeCompanionAliasTitle/
+  );
+  assert.match(extractNamedFunction(saveJs, "aliasPayload"), /canonicalizeCompanionAliasTitle/);
+  assert.match(extractNamedFunction(workerSource, "sanitizeAlias"), /canonicalizeCompanionAliasTitle/);
+});
+
 test("adapter contract has no Post-button or auto-submit path", () => {
   const serialized = JSON.stringify(contract);
   assert.equal(serialized.includes("tweetButton"), false);
@@ -1884,6 +1910,18 @@ test("Save live UX keeps + inset, hides Edit image, and searches canonical tags 
   const emptyPrefill = hooks.postTextPrefillFrom(emptyPost, emptyPhoto);
   assert.equal(emptyPrefill.description, "");
   assert.equal(emptyPrefill.title, "Fallback tile alt");
+});
+
+test("Save prefill canonicalizes synthetic multiline alt into a single-line title", () => {
+  const dom = createMiniDom();
+  const hooks = loadAdapterHooks(dom);
+  const post = el(dom, "article", { "data-testid": "tweet" });
+  const photo = el(dom, "div", { "data-testid": "tweetPhoto" });
+  photo.appendChild(el(dom, "img", { alt: "A two\nline alt" }));
+  post.appendChild(photo);
+  const prefill = hooks.postTextPrefillFrom(post, photo);
+  assert.equal(prefill.title, "A two line alt");
+  assert.equal(prefill.description, "");
 });
 
 test("Save prefill prefers non-generic alt, clamps height, and keeps hidden DOM text", () => {

@@ -325,7 +325,7 @@
 
   function aliasPayload() {
     const payload = {};
-    const titleValue = title.value;
+    const titleValue = companion.canonicalizeCompanionAliasTitle(title.value);
     const descriptionValue = description.value.trim();
     const tagKeys = selectedKeys();
     if (titleValue) {

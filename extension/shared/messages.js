@@ -179,6 +179,27 @@
     return canonicalizeFrameNestOrigin(value) !== null;
   }
 
+  function canonicalizeCompanionAliasTitle(value) {
+    if (typeof value !== "string") {
+      return null;
+    }
+    const chars = Array.from(value.normalize("NFC"));
+    let mapped = "";
+    for (let index = 0; index < chars.length; index += 1) {
+      mapped += /\p{Cc}/u.test(chars[index]) ? " " : chars[index];
+    }
+    const collapsed = mapped.replace(/\s+/gu, " ").trim();
+    if (!collapsed) {
+      return null;
+    }
+    const points = Array.from(collapsed);
+    if (points.length <= 240) {
+      return collapsed;
+    }
+    const clipped = points.slice(0, 240).join("").trim();
+    return clipped || null;
+  }
+
   function pathFor(name, ids) {
     const safe = ids || {};
     switch (name) {
@@ -631,6 +652,7 @@
     reduceXSaveOutcome,
     acceptFrameNestOrigin,
     canonicalizeFrameNestOrigin,
+    canonicalizeCompanionAliasTitle,
     pathFor,
     reviewInboxQuerySuffix,
     badgeTextForUnopenedCount,
