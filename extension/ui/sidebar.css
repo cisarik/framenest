@@ -372,18 +372,6 @@ body {
   font-size: 0.78rem;
 }
 
-.settings-dialog__origin-row {
-  display: flex;
-  align-items: stretch;
-  gap: 8px;
-}
-
-.settings-dialog__origin-row #origin {
-  flex: 1 1 auto;
-  width: auto;
-  min-width: 0;
-}
-
 #origin {
   display: block;
   width: 100%;
@@ -402,8 +390,8 @@ body {
   box-shadow: 0 0 10px var(--accent-glow);
 }
 
-.settings-dialog__connect {
-  flex: 0 0 auto;
+.settings-dialog__save {
+  justify-self: start;
   margin: 0;
   padding: 8px 12px;
   border: 1px solid var(--accent-border);
@@ -416,11 +404,16 @@ body {
   font-weight: 800;
 }
 
-.settings-dialog__connect:hover,
-.settings-dialog__connect:focus-visible {
+.settings-dialog__save:hover:not(:disabled),
+.settings-dialog__save:focus-visible:not(:disabled) {
   background: var(--accent-strong);
   outline: 2px solid var(--focus);
   outline-offset: 2px;
+}
+
+.settings-dialog__save:disabled {
+  opacity: 0.45;
+  cursor: default;
 }
 
 .settings-dialog__note {

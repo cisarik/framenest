@@ -1282,7 +1282,7 @@ test("sidebar and review requests recover only invalidated contexts and disable 
   assert.equal(state.fields.display_title, false);
 
   assert.match(sidebarSource, /handleRuntimeStale[\s\S]*chromeAction\.disabled = true/);
-  assert.match(sidebarSource, /handleRuntimeStale[\s\S]*settingsConnect\.disabled = true/);
+  assert.match(sidebarSource, /handleRuntimeStale[\s\S]*settingsSave\.disabled = true/);
   assert.match(reviewSource, /handleRuntimeStale[\s\S]*saveButton\.disabled = true/);
   assert.doesNotMatch(sidebarSource, /catch\s*\{\s*return\s+"";\s*\}/);
   assert.doesNotMatch(reviewSource, /catch\s*\{\s*return\s+"";\s*\}/);

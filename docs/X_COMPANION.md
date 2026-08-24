@@ -93,10 +93,11 @@ picker is compact quick attach with preview; it is not the full website.
 Empty search shows no preview chrome; arrows appear after two or more hits;
 typing `++` in the reply composer opens the picker and consumes the token.
 After connect, the in-page picker has no Settings sheet; an empty origin tells
-the user to connect FrameNest in the side panel. First-run and reconnect Connect
-live in side-panel Settings next to the origin field; the title-bar control
-reads Disconnect (existing Reset) when connected and opens Settings when
-disconnected with an empty origin. The toolbar opens
+the user to connect FrameNest in the side panel. Settings persists the origin
+with Save under the origin field. The title-bar control is Connect when
+disconnected and Disconnect (existing Reset) when connected. Empty title-bar
+Connect opens Settings. Save writes settings; Connect and Disconnect in the
+title bar attach or clear the session. The toolbar opens
 that shell, which iframes FrameNest only after the stored origin is granted.
 If the iframe does not load, the shell reports that FrameNest did not load and
 does not open a new tab. If the iframe loads without the companion host, the
@@ -149,14 +150,15 @@ Rollback: remove the key or set it to `[]` and restart. No CORS is enabled.
 4. Confirm the ID is `omiihmnlkmieaafaphohakcgmbggppap`.
 5. Open the toolbar side panel. On first run or after Disconnect, open Settings
    in the green title bar, enter the exact FrameNest HTTPS origin
-   (`https://<node>.<tailnet>.ts.net`, no path), then click Connect in Settings
-   and grant the host permission when prompted. After Connect, Settings closes,
+   (`https://<node>.<tailnet>.ts.net`, no path), then click Save under the origin
+   field and grant the host permission when prompted. After Save, Settings closes,
    the success status stays blank, the shell iframes that origin, and the
-   title-bar control reads Disconnect.
+   title-bar control reads Disconnect. Save stays disabled until the origin
+   differs from the stored value. Connect and Disconnect live in the title bar.
    The in-page Search memes picker has no Settings sheet.
 6. Use Disconnect in the side-panel title bar to clear stored origin, in-flight
    claim ids, and the granted host permission. Settings then opens so reconnect
-   stays in one place.
+   stays in one place. Clearing the origin field does not Disconnect.
 
 After using **Reload** for the unpacked extension, refresh already-open X tabs
 and reopen the side panel before using Save or the picker. If an already-open X

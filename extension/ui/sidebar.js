@@ -251,7 +251,7 @@
   const settingsDialog = document.getElementById("settings-dialog");
   const settingsOpen = document.getElementById("settings-open");
   const settingsClose = document.getElementById("settings-close");
-  const settingsConnect = document.getElementById("settings-connect");
+  const settingsSave = document.getElementById("settings-save");
   const reviewHistoryToggle = document.getElementById("review-history-toggle");
   const reviewHistory = document.getElementById("review-history");
   const reviewHistoryList = document.getElementById("review-history-list");
@@ -265,7 +265,7 @@
     !settingsDialog ||
     !settingsOpen ||
     !settingsClose ||
-    !settingsConnect ||
+    !settingsSave ||
     !reviewHistoryToggle ||
     !reviewHistory ||
     !reviewHistoryList ||
@@ -298,7 +298,7 @@
   runtimeStaleHandler = function handleRuntimeStale() {
     setText(shellStatus, RELOAD_RECOVERY, "error");
     chromeAction.disabled = true;
-    settingsConnect.disabled = true;
+    settingsSave.disabled = true;
     reviewHistoryToggle.disabled = true;
     setReviewHistoryExpanded(reviewHistoryToggle, reviewHistory, false);
     reviewHistoryList.querySelectorAll("button").forEach((button) => {
@@ -436,6 +436,12 @@
     setText(shellStatus, handshakeTimeoutCopy(loaded), loaded ? "notice" : "error");
   }
 
+  function syncSettingsSave() {
+    const origin = originInput.value.trim();
+    const dirty = origin !== storedOrigin;
+    settingsSave.disabled = runtimeStale || !origin || !dirty;
+  }
+
   function openSettings() {
     if (!settingsDialog.open) {
       if (typeof settingsDialog.show === "function") {
@@ -445,6 +451,7 @@
       }
       settingsOpen.setAttribute("aria-expanded", "true");
     }
+    syncSettingsSave();
     originInput.focus();
   }
 
@@ -504,6 +511,7 @@
     storedOrigin = result.origin || origin;
     originInput.value = storedOrigin;
     syncChromeAction();
+    syncSettingsSave();
     closeSettings();
     setText(shellStatus, "");
     hostFrame(storedOrigin);
@@ -520,6 +528,7 @@
     storedOrigin = "";
     originInput.value = "";
     syncChromeAction();
+    syncSettingsSave();
     clearFrame();
     setText(shellStatus, "Cleared");
     openSettings();
@@ -675,9 +684,14 @@
       startInboxPoll();
     }
   });
-  settingsConnect.addEventListener("click", () => {
+  settingsSave.addEventListener("click", () => {
+    if (settingsSave.disabled) {
+      return;
+    }
     void connect();
   });
+  originInput.addEventListener("input", syncSettingsSave);
+  originInput.addEventListener("change", syncSettingsSave);
   settingsOpen.addEventListener("click", openSettings);
   settingsClose.addEventListener("click", closeSettings);
   settingsDialog.addEventListener("click", (event) => {
@@ -710,6 +724,7 @@
         storedOrigin = origin;
         originInput.value = origin;
         syncChromeAction();
+        syncSettingsSave();
         setText(shellStatus, "");
         hostFrame(origin);
         startInboxPoll();
@@ -718,6 +733,7 @@
       storedOrigin = "";
       originInput.value = "";
       syncChromeAction();
+      syncSettingsSave();
       hideInboxSection();
       clearFrame();
       setText(shellStatus, "Connect FrameNest in Settings");

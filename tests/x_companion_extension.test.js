@@ -1343,22 +1343,44 @@ test("side-panel Settings is a sheet under the title bar, not a centered modal",
   assert.doesNotMatch(sidebarCss, /::backdrop\s*\{[\s\S]*rgba\(0,\s*0,\s*0,\s*0\.6\)/);
 });
 
-test("side-panel Settings Connect grants origin; empty title-bar Connect opens Settings", () => {
+test("side-panel Settings Save sits under origin; empty title-bar Connect opens Settings", () => {
   const sidebarHtml = fs.readFileSync(path.join(REPO, "extension/ui/sidebar.html"), "utf8");
   const sidebarJs = fs.readFileSync(path.join(REPO, "extension/ui/sidebar.js"), "utf8");
+  const sidebarCss = fs.readFileSync(path.join(REPO, "extension/ui/sidebar.css"), "utf8");
   const pickerHtml = fs.readFileSync(path.join(REPO, "extension/ui/picker.html"), "utf8");
   const originAt = sidebarHtml.indexOf('id="origin"');
-  const settingsConnectAt = sidebarHtml.indexOf('id="settings-connect"');
+  const settingsSaveAt = sidebarHtml.indexOf('id="settings-save"');
   const settingsDialogAt = sidebarHtml.indexOf('id="settings-dialog"');
+  const chromeActionAt = sidebarHtml.indexOf('id="chrome-action"');
   const mainAt = sidebarHtml.indexOf('class="sidebar-main"');
-  assert.ok(settingsConnectAt > originAt && originAt > settingsDialogAt);
-  assert.ok(settingsConnectAt < mainAt);
-  assert.match(sidebarHtml, /id="settings-connect"/);
-  assert.match(sidebarHtml, /Connect in Settings saves the origin/);
-  assert.doesNotMatch(sidebarHtml, /use Connect in the title bar/);
+  assert.ok(originAt > settingsDialogAt);
+  assert.ok(settingsSaveAt > originAt && settingsSaveAt < mainAt);
+  assert.ok(chromeActionAt >= 0 && chromeActionAt < settingsDialogAt);
+  assert.doesNotMatch(sidebarHtml, /id="settings-connect"/);
+  assert.doesNotMatch(sidebarHtml, /settings-dialog__origin-row/);
+  assert.match(sidebarHtml, /id="settings-save"/);
+  assert.match(sidebarHtml, /aria-label="Save settings"/);
+  assert.match(sidebarHtml, />\s*Save\s*</);
+  assert.match(sidebarHtml, /id="chrome-action"/);
+  assert.match(sidebarHtml, />Connect</);
+  assert.match(sidebarHtml, /Save writes settings/);
+  assert.match(sidebarHtml, /Connect and Disconnect in the title bar/);
+  assert.doesNotMatch(sidebarHtml, /Connect in Settings saves the origin/);
   assert.doesNotMatch(sidebarHtml, />Reset</);
-  assert.match(sidebarJs, /getElementById\("settings-connect"\)/);
-  assert.match(sidebarJs, /settingsConnect\.addEventListener\("click"/);
+  assert.doesNotMatch(sidebarCss, /settings-dialog__origin-row/);
+  assert.doesNotMatch(sidebarCss, /settings-dialog__connect/);
+  assert.match(sidebarCss, /\.settings-dialog__save/);
+  assert.match(sidebarCss, /\.settings-dialog__save:disabled/);
+  assert.match(sidebarJs, /getElementById\("settings-save"\)/);
+  assert.match(sidebarJs, /settingsSave\.addEventListener\("click"/);
+  assert.doesNotMatch(sidebarJs, /settings-connect/);
+  assert.doesNotMatch(sidebarJs, /settingsConnect/);
+  assert.match(sidebarJs, /function syncSettingsSave/);
+  assert.match(sidebarJs, /originInput\.value\.trim\(\)/);
+  assert.match(sidebarJs, /origin !== storedOrigin/);
+  assert.match(sidebarJs, /settingsSave\.disabled = runtimeStale \|\| !origin \|\| !dirty/);
+  assert.match(sidebarJs, /originInput\.addEventListener\("input", syncSettingsSave\)/);
+  assert.match(sidebarJs, /originInput\.addEventListener\("change", syncSettingsSave\)/);
   assert.match(sidebarJs, /TYPES\.CONFIGURE_ORIGIN/);
   assert.match(sidebarJs, /textContent = connected \? "Disconnect" : "Connect"/);
   assert.match(sidebarJs, /Connect FrameNest in Settings/);
@@ -1380,6 +1402,32 @@ test("side-panel Settings Connect grants origin; empty title-bar Connect opens S
   assert.match(chromeFn[0], /void connect\(\)/);
   assert.doesNotMatch(pickerHtml, /id="settings-dialog"/);
   assert.doesNotMatch(pickerHtml, /<dialog/);
+
+  const mini = createMiniDom();
+  const originInput = mini.document.createElement("input");
+  originInput.setAttribute("id", "origin");
+  originInput.value = "https://nuc.example.ts.net";
+  const settingsSave = mini.document.createElement("button");
+  settingsSave.setAttribute("id", "settings-save");
+  let storedOrigin = "https://nuc.example.ts.net";
+  let runtimeStale = false;
+  function syncSettingsSave() {
+    const origin = String(originInput.value || "").trim();
+    const dirty = origin !== storedOrigin;
+    settingsSave.disabled = runtimeStale || !origin || !dirty;
+  }
+  syncSettingsSave();
+  assert.equal(settingsSave.disabled, true, "unchanged stored origin leaves Save disabled");
+  originInput.value = "https://other.example.ts.net";
+  syncSettingsSave();
+  assert.equal(settingsSave.disabled, false, "dirty origin enables Save");
+  originInput.value = "   ";
+  syncSettingsSave();
+  assert.equal(settingsSave.disabled, true, "empty origin disables Save");
+  originInput.value = "https://other.example.ts.net";
+  runtimeStale = true;
+  syncSettingsSave();
+  assert.equal(settingsSave.disabled, true, "stale runtime disables Save");
 });
 
 test("preview fetch stays UUID-only and picker keeps title when preview is absent", () => {
