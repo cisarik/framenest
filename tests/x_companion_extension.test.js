@@ -1361,7 +1361,18 @@ test("toolbar action opens the side-panel shell instead of a picker popup", () =
   assert.ok(sidebarHtml.indexOf('class="title-bar"') < sidebarHtml.indexOf('id="origin"'));
   assert.ok(sidebarHtml.indexOf('id="settings-dialog"') < sidebarHtml.indexOf('id="origin"'));
   assert.match(sidebarCss, /\.title-bar\s*\{/);
-  assert.match(sidebarCss, /background: color-mix\(in srgb, var\(--accent\) 90%, transparent\)/);
+  assert.match(sidebarCss, /--history-green-1:\s*#00ff41;/);
+  assert.match(sidebarCss, /--history-green-2:\s*#00cc34;/);
+  assert.match(sidebarCss, /--history-green-3:\s*#009928;/);
+  assert.match(sidebarCss, /--history-green-4:\s*#00661b;/);
+  assert.match(sidebarCss, /--history-green-5:\s*#00330d;/);
+  const titleBarChrome = sidebarCss.match(/\.title-bar\s*\{[\s\S]*?\n\}/);
+  assert.ok(titleBarChrome, "title-bar fill");
+  assert.match(titleBarChrome[0], /background:\s*var\(--accent\)/);
+  assert.match(sidebarCss, /--accent:\s*#00ff41;/);
+  assert.doesNotMatch(titleBarChrome[0], /transparent/);
+  assert.doesNotMatch(titleBarChrome[0], /opacity/);
+  assert.doesNotMatch(titleBarChrome[0], /color-mix/);
   const titleBarAction = sidebarCss.match(/\.title-bar__action\s*\{[\s\S]*?\n\}/);
   assert.ok(titleBarAction, "title-bar action fill");
   assert.match(titleBarAction[0], /background:\s*transparent/);
@@ -1375,21 +1386,12 @@ test("toolbar action opens the side-panel shell instead of a picker popup", () =
   );
   const historyAll = sidebarCss.match(/\.review-history-all\s*\{[\s\S]*?\n\}/);
   assert.ok(compactFillOne && compactFillFive && historyAll, "compact/All fill rules");
-  assert.match(
-    compactFillOne[0],
-    /background:\s*color-mix\(in srgb,\s*var\(--accent\) 100%,\s*transparent\)/
-  );
-  assert.match(
-    compactFillFive[0],
-    /background:\s*color-mix\(in srgb,\s*var\(--accent\) 60%,\s*transparent\)/
-  );
-  assert.match(
-    historyAll[0],
-    /background:\s*color-mix\(in srgb,\s*var\(--accent\) 90%,\s*transparent\)/
-  );
-  assert.doesNotMatch(compactFillOne[0], /opacity/);
-  assert.doesNotMatch(compactFillFive[0], /opacity/);
-  assert.doesNotMatch(historyAll[0], /opacity/);
+  assert.match(compactFillOne[0], /background:\s*var\(--history-green-1\)/);
+  assert.match(compactFillFive[0], /background:\s*var\(--history-green-5\)/);
+  assert.match(historyAll[0], /background:\s*var\(--history-green-2\)/);
+  assert.doesNotMatch(compactFillOne[0], /opacity|transparent|color-mix/);
+  assert.doesNotMatch(compactFillFive[0], /opacity|transparent|color-mix/);
+  assert.doesNotMatch(historyAll[0], /opacity|transparent|color-mix/);
   assert.doesNotMatch(sidebarHtml, /ui\/picker\.html/);
   assert.doesNotMatch(sidebarJs, /window\.open/);
   assert.doesNotMatch(sidebarJs, /ui\/picker\.html/);

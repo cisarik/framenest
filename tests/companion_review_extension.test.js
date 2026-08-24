@@ -956,26 +956,34 @@ test("title-bar merged history has the accepted DOM, ARIA, and status contract",
   assert.match(sidebarCss, /\.shell-status:empty\s*{[\s\S]*?display:\s*none/);
   assert.match(sidebarCss, /\.review-list:empty\s*{[\s\S]*?display:\s*none/);
   assert.match(sidebarCss, /list-style:\s*none/);
+  assert.match(sidebarCss, /--history-green-1:\s*#00ff41;/);
+  assert.match(sidebarCss, /--history-green-2:\s*#00cc34;/);
+  assert.match(sidebarCss, /--history-green-3:\s*#009928;/);
+  assert.match(sidebarCss, /--history-green-4:\s*#00661b;/);
+  assert.match(sidebarCss, /--history-green-5:\s*#00330d;/);
+  assert.match(sidebarCss, /--accent:\s*#00ff41;/);
   assert.match(
     sidebarCss,
-    /\.title-bar\s*\{[\s\S]*?background:\s*color-mix\(in srgb,\s*var\(--accent\) 90%,\s*transparent\)/
+    /\.title-bar\s*\{[\s\S]*?background:\s*var\(--accent\)/
   );
   const titleBarChrome = sidebarCss.match(/\.title-bar\s*\{[\s\S]*?\n\}/);
   assert.ok(titleBarChrome, "title-bar fill rule");
   assert.doesNotMatch(titleBarChrome[0], /opacity/);
+  assert.doesNotMatch(titleBarChrome[0], /transparent/);
+  assert.doesNotMatch(titleBarChrome[0], /color-mix/);
   const titleBarAction = sidebarCss.match(/\.title-bar__action\s*\{[\s\S]*?\n\}/);
   assert.ok(titleBarAction, "title-bar action rule");
   assert.match(titleBarAction[0], /background:\s*transparent/);
   assert.doesNotMatch(titleBarAction[0], /--accent-strong/);
   assert.doesNotMatch(titleBarAction[0], /opacity/);
   const compactFillStops = [
-    ["1", "100%"],
-    ["2", "90%"],
-    ["3", "80%"],
-    ["4", "70%"],
-    ["5", "60%"],
+    ["1", "--history-green-1"],
+    ["2", "--history-green-2"],
+    ["3", "--history-green-3"],
+    ["4", "--history-green-4"],
+    ["5", "--history-green-5"],
   ];
-  compactFillStops.forEach(([nth, mix]) => {
+  compactFillStops.forEach(([nth, token]) => {
     const stop = sidebarCss.match(
       new RegExp(
         String.raw`\.review-list--compact\s*>\s*li:nth-child\(` +
@@ -986,22 +994,19 @@ test("title-bar merged history has the accepted DOM, ARIA, and status contract",
     assert.ok(stop, "compact fill stop " + nth);
     assert.match(
       stop[0],
-      new RegExp(
-        String.raw`background:\s*color-mix\(in srgb,\s*var\(--accent\) ` +
-          mix.replace("%", "\\%") +
-          String.raw`,\s*transparent\)`
-      )
+      new RegExp(String.raw`background:\s*var\(` + token.replace(/-/g, "\\-") + String.raw`\)`)
     );
     assert.doesNotMatch(stop[0], /opacity/);
+    assert.doesNotMatch(stop[0], /transparent/);
+    assert.doesNotMatch(stop[0], /color-mix/);
   });
   const historyAll = sidebarCss.match(/\.review-history-all\s*\{[\s\S]*?\n\}/);
   assert.ok(historyAll, "All fill rule");
-  assert.match(
-    historyAll[0],
-    /background:\s*color-mix\(in srgb,\s*var\(--accent\) 90%,\s*transparent\)/
-  );
+  assert.match(historyAll[0], /background:\s*var\(--history-green-2\)/);
   assert.match(historyAll[0], /padding:\s*5px 7px/);
   assert.doesNotMatch(historyAll[0], /opacity/);
+  assert.doesNotMatch(historyAll[0], /transparent/);
+  assert.doesNotMatch(historyAll[0], /color-mix/);
   assert.doesNotMatch(historyAll[0], /--surface-solid/);
   assert.match(
     sidebarCss,
@@ -1011,11 +1016,10 @@ test("title-bar merged history has the accepted DOM, ARIA, and status contract",
     /\.review-list--compact\s*>\s*li\s*>\s*button:hover[\s\S]*?\.review-history-all:focus-visible\s*\{[\s\S]*?\n\}/
   );
   assert.ok(compactHover, "compact/All hover fill");
-  assert.match(
-    compactHover[0],
-    /background:\s*color-mix\(in srgb,\s*var\(--accent\) 100%,\s*transparent\)/
-  );
+  assert.match(compactHover[0], /background:\s*var\(--history-green-1\)/);
   assert.doesNotMatch(compactHover[0], /opacity/);
+  assert.doesNotMatch(compactHover[0], /transparent/);
+  assert.doesNotMatch(compactHover[0], /color-mix/);
   assert.match(sidebarCss, /max-height:\s*8\.5rem/);
   assert.match(sidebarCss, /overflow-y:\s*auto/);
   assert.match(
