@@ -118,7 +118,7 @@ def _seed_populated_0030(database_path: Path) -> None:
         connection.close()
 
 
-def test_head_is_0031() -> None:
+def test_head_is_0032() -> None:
     from framenest.infrastructure.persistence.migrations import _alembic_config
 
     with _alembic_config(
@@ -127,7 +127,7 @@ def test_head_is_0031() -> None:
         from alembic.script import ScriptDirectory
 
         scripts = ScriptDirectory.from_config(config)
-        assert scripts.get_current_head() == "0031"
+        assert scripts.get_current_head() == "0032"
 
 
 def test_empty_database_upgrades_to_0031(tmp_path: Path) -> None:
@@ -293,3 +293,228 @@ def test_downgrade_refuses_companion_review_publication(tmp_path: Path) -> None:
         connection.close()
     with pytest.raises(Exception, match="companion-review inbox downgrade"):
         _migrate(database_path, "0030", downgrade=True)
+
+
+def test_empty_database_upgrades_to_0032(tmp_path: Path) -> None:
+    database_path = tmp_path / "empty.sqlite3"
+    _migrate(database_path, "0032")
+    connection = _connect(database_path)
+    try:
+        tables = {
+            row[0]
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+        }
+        assert "companion_review_tag_sources" in tables
+        assert "companion_review_field_sources" in tables
+        revision = connection.execute(
+            "SELECT version_num FROM alembic_version"
+        ).fetchone()
+        assert revision == ("0032",)
+        assert connection.execute(
+            "SELECT COUNT(*) FROM companion_review_tag_sources"
+        ).fetchone() == (0,)
+        indexes = {
+            row[1]
+            for row in connection.execute(
+                "SELECT * FROM sqlite_master WHERE type='index'"
+            ).fetchall()
+        }
+        assert "ix_companion_review_tag_sources_analysis_run_id" in indexes
+    finally:
+        connection.close()
+
+
+def test_populated_0031_upgrade_does_not_backfill_tag_sources(tmp_path: Path) -> None:
+    database_path = tmp_path / "catalog.sqlite3"
+    _migrate(database_path, "0030")
+    _seed_populated_0030(database_path)
+    _migrate(database_path, "0031")
+    connection = _connect(database_path)
+    try:
+        connection.execute(
+            """
+            INSERT INTO media_metadata (
+                media_id, display_title, description, created_at_ms, updated_at_ms,
+                content_category, acquisition_source
+            ) VALUES (?, 'Title', 'Desc', 10, 10, 'general', 'manual_upload')
+            """,
+            (CLAIM_MEDIA,),
+        )
+        connection.execute(
+            """
+            INSERT INTO canonical_tags (key, display_name, created_at_ms, updated_at_ms)
+            VALUES ('alpha', 'Alpha', 1, 1)
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO media_canonical_tags (media_id, tag_key, position)
+            VALUES (?, 'alpha', 0)
+            """,
+            (CLAIM_MEDIA,),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+    _migrate(database_path, "0032")
+    connection = _connect(database_path)
+    try:
+        assert connection.execute(
+            "SELECT COUNT(*) FROM media_canonical_tags"
+        ).fetchone() == (1,)
+        assert connection.execute(
+            "SELECT COUNT(*) FROM companion_review_tag_sources"
+        ).fetchone() == (0,)
+        revision = connection.execute(
+            "SELECT version_num FROM alembic_version"
+        ).fetchone()
+        assert revision == ("0032",)
+        fks = connection.execute(
+            "PRAGMA foreign_key_list(companion_review_tag_sources)"
+        ).fetchall()
+        by_table = {item[2]: item[6] for item in fks}
+        assert by_table["media_metadata"] == "CASCADE"
+        assert by_table["canonical_tags"] == "RESTRICT"
+        assert by_table["media_analysis_runs"] == "CASCADE"
+        assert "media_canonical_tags" not in by_table
+    finally:
+        connection.close()
+
+
+def test_0032_foreign_keys_and_assignment_delete_preserve_sources(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "catalog.sqlite3"
+    _migrate(database_path, "0032")
+    _seed_populated_0030(database_path)
+    connection = _connect(database_path)
+    try:
+        connection.execute(
+            """
+            INSERT INTO media_metadata (
+                media_id, display_title, description, created_at_ms, updated_at_ms,
+                content_category, acquisition_source
+            ) VALUES (?, 'Title', 'Desc', 10, 10, 'general', 'manual_upload')
+            """,
+            (CLAIM_MEDIA,),
+        )
+        connection.execute(
+            """
+            INSERT INTO canonical_tags (key, display_name, created_at_ms, updated_at_ms)
+            VALUES ('alpha', 'Alpha', 1, 1), ('beta', 'Beta', 1, 1)
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO media_canonical_tags (media_id, tag_key, position)
+            VALUES (?, 'alpha', 0)
+            """,
+            (CLAIM_MEDIA,),
+        )
+        connection.execute(
+            """
+            INSERT INTO companion_review_tag_sources (
+                media_id, tag_key, analysis_run_id, applied_by_login_key, applied_at_ms
+            ) VALUES (?, 'alpha', ?, 'admin@example.com', 20)
+            """,
+            (CLAIM_MEDIA, RUN_ID),
+        )
+        connection.commit()
+        connection.execute(
+            "DELETE FROM media_canonical_tags WHERE media_id = ? AND tag_key = 'alpha'",
+            (CLAIM_MEDIA,),
+        )
+        connection.commit()
+        assert connection.execute(
+            "SELECT COUNT(*) FROM companion_review_tag_sources"
+        ).fetchone() == (1,)
+        with pytest.raises(sqlite3.IntegrityError):
+            connection.execute("DELETE FROM canonical_tags WHERE key = 'alpha'")
+            connection.commit()
+        connection.rollback()
+        connection.execute(
+            "DELETE FROM media_analysis_runs WHERE id = ?",
+            (RUN_ID,),
+        )
+        connection.commit()
+        assert connection.execute(
+            "SELECT COUNT(*) FROM companion_review_tag_sources"
+        ).fetchone() == (0,)
+        connection.execute(
+            """
+            INSERT INTO media_analysis_runs (
+                id, media_id, media_location_id, analysis_definition, state,
+                attempt_count, provider_id, model_id, prompt_version,
+                result_schema_version, result_json, error_code, error_message,
+                analysis_profile, created_at_ms, started_at_ms, completed_at_ms,
+                version
+            ) VALUES (
+                ?, ?, ?, 'automatic_post_catalog', 'analyzed', 1,
+                'nvidia-nim', 'test-model', 'framenest-media-suggestion-v3',
+                'framenest-media-suggestion-result-v1', ?, NULL, NULL,
+                'generic_media', 10, 11, 12, 2
+            )
+            """,
+            (RUN_ID, CLAIM_MEDIA, LOCATION_ID, RESULT_JSON),
+        )
+        connection.execute(
+            """
+            INSERT INTO companion_review_tag_sources (
+                media_id, tag_key, analysis_run_id, applied_by_login_key, applied_at_ms
+            ) VALUES (?, 'beta', ?, 'admin@example.com', 21)
+            """,
+            (CLAIM_MEDIA, RUN_ID),
+        )
+        connection.commit()
+        connection.execute(
+            "DELETE FROM media_metadata WHERE media_id = ?",
+            (CLAIM_MEDIA,),
+        )
+        connection.commit()
+        assert connection.execute(
+            "SELECT COUNT(*) FROM companion_review_tag_sources"
+        ).fetchone() == (0,)
+        assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
+        assert connection.execute("PRAGMA integrity_check").fetchall() == [("ok",)]
+    finally:
+        connection.close()
+
+
+def test_empty_0032_downgrade_restores_0031_and_head_reupgrade(tmp_path: Path) -> None:
+    database_path = tmp_path / "catalog.sqlite3"
+    _migrate(database_path, "0032")
+    _migrate(database_path, "0031", downgrade=True)
+    connection = _connect(database_path)
+    try:
+        tables = {
+            row[0]
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+        }
+        assert "companion_review_tag_sources" not in tables
+        assert "companion_review_field_sources" in tables
+        revision = connection.execute(
+            "SELECT version_num FROM alembic_version"
+        ).fetchone()
+        assert revision == ("0031",)
+    finally:
+        connection.close()
+    _migrate(database_path, "0032")
+    connection = _connect(database_path)
+    try:
+        tables = {
+            row[0]
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+        }
+        assert "companion_review_tag_sources" in tables
+        revision = connection.execute(
+            "SELECT version_num FROM alembic_version"
+        ).fetchone()
+        assert revision == ("0032",)
+    finally:
+        connection.close()

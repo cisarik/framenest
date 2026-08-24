@@ -44,6 +44,7 @@ from framenest.domain.media_metadata import (
 from framenest.infrastructure.persistence.catalog_schema import (
     canonical_tags,
     companion_review_field_sources,
+    companion_review_tag_sources,
     logical_media,
     media_canonical_tags,
     media_genres,
@@ -360,6 +361,11 @@ class SqliteMediaMetadataRepository:
                 description=None if description is None else description.value,
                 tag_keys=tuple(key.value for key in tag_keys),
             )
+            _delete_removed_companion_tag_sources(
+                connection,
+                media_id=media_id.to_string(),
+                tag_keys=tuple(key.value for key in tag_keys),
+            )
             snapshot = MediaMetadataSnapshot(
                 media_id=media_id,
                 persisted=True,
@@ -435,6 +441,28 @@ def _delete_stale_companion_receipts(
                 companion_review_field_sources.c.field_name == field_name,
             )
         )
+
+
+def _delete_removed_companion_tag_sources(
+    connection: Connection,
+    *,
+    media_id: str,
+    tag_keys: tuple[str, ...],
+) -> None:
+    """Drop per-tag AI sources only for keys removed from the submitted vector."""
+    if not tag_keys:
+        connection.execute(
+            delete(companion_review_tag_sources).where(
+                companion_review_tag_sources.c.media_id == media_id
+            )
+        )
+        return
+    connection.execute(
+        delete(companion_review_tag_sources).where(
+            companion_review_tag_sources.c.media_id == media_id,
+            companion_review_tag_sources.c.tag_key.notin_(tag_keys),
+        )
+    )
 
 
 def _media_exists(connection: Connection, media_id: MediaId) -> bool:

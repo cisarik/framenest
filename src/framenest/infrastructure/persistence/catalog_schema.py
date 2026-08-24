@@ -1822,6 +1822,83 @@ companion_review_field_sources = Table(
     ),
 )
 
+companion_review_tag_sources = Table(
+    "companion_review_tag_sources",
+    metadata,
+    Column(
+        "media_id",
+        Text(),
+        ForeignKey(
+            "media_metadata.media_id",
+            ondelete="CASCADE",
+            name="fk_companion_review_tag_sources_media_id",
+        ),
+        nullable=False,
+    ),
+    Column(
+        "tag_key",
+        Text(),
+        ForeignKey(
+            "canonical_tags.key",
+            ondelete="RESTRICT",
+            name="fk_companion_review_tag_sources_tag_key",
+        ),
+        nullable=False,
+    ),
+    Column(
+        "analysis_run_id",
+        Text(),
+        ForeignKey(
+            "media_analysis_runs.id",
+            ondelete="CASCADE",
+            name="fk_companion_review_tag_sources_analysis_run_id",
+        ),
+        nullable=False,
+    ),
+    Column("applied_by_login_key", Text(), nullable=False),
+    Column("applied_at_ms", Integer(), nullable=False),
+    PrimaryKeyConstraint(
+        "media_id",
+        "tag_key",
+        name="pk_companion_review_tag_sources",
+    ),
+    CheckConstraint(
+        "length(media_id) = 36",
+        name="ck_companion_review_tag_sources_media_id_length",
+    ),
+    CheckConstraint(
+        "length(tag_key) >= 1 AND length(tag_key) <= 64",
+        name="ck_companion_review_tag_sources_tag_key_length",
+    ),
+    CheckConstraint(
+        "tag_key = lower(tag_key)",
+        name="ck_companion_review_tag_sources_tag_key_lowercase",
+    ),
+    CheckConstraint(
+        "tag_key GLOB '[a-z]*' "
+        "AND tag_key NOT GLOB '*[^a-z0-9-]*' "
+        "AND tag_key NOT LIKE '%--%' "
+        "AND substr(tag_key, length(tag_key), 1) != '-'",
+        name="ck_companion_review_tag_sources_tag_key_slug",
+    ),
+    CheckConstraint(
+        "length(analysis_run_id) = 36",
+        name="ck_companion_review_tag_sources_analysis_run_id_length",
+    ),
+    CheckConstraint(
+        _COMPANION_REVIEW_LOGIN_KEY_SQL.format(column="applied_by_login_key"),
+        name="ck_companion_review_tag_sources_applied_by_login_key",
+    ),
+    CheckConstraint(
+        "applied_at_ms >= 0",
+        name="ck_companion_review_tag_sources_applied_at_ms_non_negative",
+    ),
+    Index(
+        "ix_companion_review_tag_sources_analysis_run_id",
+        "analysis_run_id",
+    ),
+)
+
 security_audit_events = Table(
     "security_audit_events",
     metadata,

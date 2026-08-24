@@ -17,6 +17,7 @@ from framenest.application.companion_review import (
     ApplyCompanionReview,
     CompanionReviewApplyResult,
     CompanionReviewDetail,
+    CompanionReviewFieldSource,
     CompanionReviewInboxItem,
     CompanionReviewInboxPage,
     CompanionReviewOpenedResult,
@@ -33,6 +34,7 @@ from framenest.application.ports.companion_review_repository import (
     CompanionReviewRunNotEligibleError,
     CompanionReviewStaleMappingError,
     CompanionReviewStoredResultError,
+    CompanionReviewTagLimitConflictError,
     FrameNestCompanionReviewRepositoryError,
 )
 from framenest.domain.identity_access import (
@@ -57,6 +59,10 @@ RUN_NOT_ELIGIBLE_CODE = "COMPANION_REVIEW_RUN_CONFLICT"
 RUN_NOT_ELIGIBLE_MESSAGE = "The requested analysis run is not eligible."
 STALE_MAPPING_CODE = "COMPANION_REVIEW_STALE_MAPPING"
 STALE_MAPPING_MESSAGE = "Submitted tag keys are not an eligible mapping."
+TAG_LIMIT_CONFLICT_CODE = "COMPANION_REVIEW_TAG_LIMIT_CONFLICT"
+TAG_LIMIT_CONFLICT_MESSAGE = (
+    "Applying the selected tags would exceed the canonical tag limit."
+)
 RESULT_INVALID_CODE = "COMPANION_REVIEW_RESULT_INVALID"
 RESULT_INVALID_MESSAGE = "Stored analysis result is invalid."
 APPLY_FAILED_CODE = "COMPANION_REVIEW_APPLY_FAILED"
@@ -334,6 +340,8 @@ def create_companion_review_api_router(
             return _error(RUN_NOT_ELIGIBLE_CODE, RUN_NOT_ELIGIBLE_MESSAGE, 409)
         except CompanionReviewStaleMappingError:
             return _error(STALE_MAPPING_CODE, STALE_MAPPING_MESSAGE, 409)
+        except CompanionReviewTagLimitConflictError:
+            return _error(TAG_LIMIT_CONFLICT_CODE, TAG_LIMIT_CONFLICT_MESSAGE, 409)
         except CompanionReviewStoredResultError:
             return _error(RESULT_INVALID_CODE, RESULT_INVALID_MESSAGE, 500)
         except FrameNestCompanionReviewRepositoryError:
@@ -413,17 +421,10 @@ def _detail_dict(detail: CompanionReviewDetail) -> dict:
                 for tag in detail.tags
             ],
             "field_sources": {
-                name: None
-                if receipt is None
-                else {
-                    "analysis_run_id": receipt.analysis_run_id,
-                    "completed_at_ms": receipt.completed_at_ms,
-                    "provider_id": receipt.provider_id,
-                    "model_id": receipt.model_id,
-                    "applied_at_ms": receipt.applied_at_ms,
-                }
+                name: None if receipt is None else _receipt_dict(receipt)
                 for name, receipt in detail.field_sources.items()
             },
+            "tag_sources": _tag_sources_dict(detail.tag_sources),
         },
         "publication": {
             "state": "published" if publication is not None else "unpublished",
@@ -451,6 +452,22 @@ def _detail_dict(detail: CompanionReviewDetail) -> dict:
         ],
         "next_cursor": detail.next_cursor,
     }
+
+
+def _receipt_dict(receipt: CompanionReviewFieldSource) -> dict:
+    return {
+        "analysis_run_id": receipt.analysis_run_id,
+        "completed_at_ms": receipt.completed_at_ms,
+        "provider_id": receipt.provider_id,
+        "model_id": receipt.model_id,
+        "applied_at_ms": receipt.applied_at_ms,
+    }
+
+
+def _tag_sources_dict(
+    sources: dict[str, CompanionReviewFieldSource],
+) -> dict[str, dict]:
+    return {key: _receipt_dict(receipt) for key, receipt in sources.items()}
 
 
 def _tag_dict(tag: MappedSuggestedTag) -> dict:
@@ -488,17 +505,10 @@ def _apply_dict(result: CompanionReviewApplyResult) -> dict:
                 for tag in canonical.tags
             ],
             "field_sources": {
-                name: None
-                if receipt is None
-                else {
-                    "analysis_run_id": receipt.analysis_run_id,
-                    "completed_at_ms": receipt.completed_at_ms,
-                    "provider_id": receipt.provider_id,
-                    "model_id": receipt.model_id,
-                    "applied_at_ms": receipt.applied_at_ms,
-                }
+                name: None if receipt is None else _receipt_dict(receipt)
                 for name, receipt in canonical.field_sources.items()
             },
+            "tag_sources": _tag_sources_dict(canonical.tag_sources),
         },
         "publication": {
             "status": publication.status,

@@ -17,6 +17,7 @@ from framenest.application.ports.companion_review_repository import (
     CompanionReviewRunNotEligibleError,
     CompanionReviewStaleMappingError,
     CompanionReviewStoredResultError,
+    CompanionReviewTagLimitConflictError,
     FrameNestCompanionReviewRepositoryError,
 )
 from framenest.configuration import FrameNestSettings
@@ -54,6 +55,7 @@ WEBSITE_RUN = "dddddddd-dddd-4ddd-8ddd-000000000024"
 HISTORICAL = "eeeeeeee-eeee-4eee-8eee-000000000005"
 HISTORICAL_LOC = "eeeeeeee-eeee-4eee-8eee-000000000015"
 HISTORICAL_RUN = "eeeeeeee-eeee-4eee-8eee-000000000025"
+HISTORICAL_NEWER = "eeeeeeee-eeee-4eee-8eee-000000000045"
 
 NULL_PROFILE = "ffffffff-ffff-4fff-8fff-000000000006"
 NULL_PROFILE_LOC = "ffffffff-ffff-4fff-8fff-000000000016"
@@ -346,6 +348,35 @@ def _insert_analyzed_run(
     )
 
 
+def _seed_assigned_extra_tags(
+    connection, media_id: str, count: int, *, start_position: int = 0
+) -> list[str]:
+    keys: list[str] = []
+    for index in range(1, count + 1):
+        key = f"extra-{index:02d}"
+        keys.append(key)
+        connection.execute(
+            text(
+                "INSERT OR IGNORE INTO canonical_tags "
+                "(key, display_name, created_at_ms, updated_at_ms) "
+                "VALUES (:key, :name, 1, 1)"
+            ),
+            {"key": key, "name": f"Extra {index:02d}"},
+        )
+        connection.execute(
+            text(
+                "INSERT INTO media_canonical_tags (media_id, tag_key, position) "
+                "VALUES (:media, :key, :position)"
+            ),
+            {
+                "media": media_id,
+                "key": key,
+                "position": start_position + index - 1,
+            },
+        )
+    return keys
+
+
 def _insert_failed_run(
     connection, run_id: str, media_id: str, location_id: str, *, completed_at_ms: int
 ) -> None:
@@ -587,6 +618,7 @@ def test_history_maps_historical_tags_and_movie_detail_is_excluded(
         assert MappedTagStatus.UNKNOWN in statuses
         assert MappedTagStatus.AMBIGUOUS in statuses
         assert all(detail.field_sources[name] is None for name in detail.field_sources)
+        assert detail.tag_sources == {}
         with pytest.raises(CompanionReviewMovieExcludedError):
             repository.get_detail(
                 media_id=MediaId.from_string(MOVIE),
@@ -690,7 +722,7 @@ def test_mark_opened_is_actor_scoped_monotonic_and_idempotent(tmp_path: Path) ->
         dispose_engine(engine)
 
 
-def test_apply_review_preserves_unselected_fields_and_replaces_tags(
+def test_apply_review_preserves_unselected_fields_and_unions_tags(
     tmp_path: Path,
 ) -> None:
     repository, engine = _repository(tmp_path)
@@ -707,6 +739,7 @@ def test_apply_review_preserves_unselected_fields_and_replaces_tags(
         assert title_only.canonical.display_title == "Website Analyze-by-AI"
         assert title_only.canonical.description == "Desc"
         assert title_only.canonical.tags == ()
+        assert title_only.canonical.tag_sources == {}
         assert title_only.publication.status == "not_ready"
         inbox = repository.list_inbox(actor_login_key=ADMIN_KEY, limit=25, cursor=None)
         website = next(item for item in inbox.items if item.media_id == WEBSITE)
@@ -727,11 +760,16 @@ def test_apply_review_preserves_unselected_fields_and_replaces_tags(
             tag_keys=("cats",),
             now_ms=401,
         )
-        assert [tag.key for tag in replaced.canonical.tags] == ["cats"]
+        assert [tag.key for tag in replaced.canonical.tags] == ["dogs", "cats"]
         assert replaced.canonical.display_title == "Canonical generic"
         assert replaced.canonical.description == "Desc"
         assert replaced.publication.status == "published"
         assert replaced.publication.origin == ContentPublicationOrigin.COMPANION_REVIEW.value
+        assert replaced.canonical.field_sources["tags"] is not None
+        assert replaced.canonical.field_sources["display_title"] is None
+        assert set(replaced.canonical.tag_sources) == {"cats"}
+        assert "dogs" not in replaced.canonical.tag_sources
+        assert replaced.canonical.tag_sources["cats"].analysis_run_id == GENERIC_RUN
         with engine.connect() as connection:
             category = connection.execute(
                 text(
@@ -745,8 +783,6 @@ def test_apply_review_preserves_unselected_fields_and_replaces_tags(
         assert category[0] == "general"
         assert category[1] == "manual_upload"
         assert int(tag_count) == 8
-        assert replaced.canonical.field_sources["tags"] is not None
-        assert replaced.canonical.field_sources["display_title"] is None
         repeat = repository.apply_review(
             media_id=MediaId.from_string(GENERIC),
             actor_login_key=ADMIN_KEY,
@@ -758,6 +794,10 @@ def test_apply_review_preserves_unselected_fields_and_replaces_tags(
         assert repeat.publication.status == "already_published"
         assert repeat.publication.origin == ContentPublicationOrigin.COMPANION_REVIEW.value
         assert repeat.publication.published_at_ms == 401
+        assert [tag.key for tag in repeat.canonical.tags] == ["dogs", "cats"]
+        assert set(repeat.canonical.tag_sources) == {"cats"}
+        assert repeat.canonical.field_sources["tags"] is not None
+        assert repeat.canonical.field_sources["tags"].applied_at_ms == 402
     finally:
         dispose_engine(engine)
 
@@ -916,6 +956,194 @@ def test_apply_review_same_value_newer_receipt_and_atomic_rollback(
             ).scalar_one()
         assert title is None
         assert int(receipts) == 0
+        assert int(publications) == 0
+    finally:
+        dispose_engine(engine)
+
+
+def test_apply_review_unions_tags_and_records_new_tag_sources_only(
+    tmp_path: Path,
+) -> None:
+    repository, engine = _repository(tmp_path)
+    try:
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "INSERT INTO media_canonical_tags (media_id, tag_key, position) "
+                    "VALUES (:media, 'trees', 0)"
+                ),
+                {"media": HISTORICAL},
+            )
+        first = repository.apply_review(
+            media_id=MediaId.from_string(HISTORICAL),
+            actor_login_key=ADMIN_KEY,
+            analysis_run_id=MediaId.from_string(HISTORICAL_RUN),
+            fields=("tags",),
+            tag_keys=("cats", "dogs", "birds", "fish", "cars"),
+            now_ms=50,
+        )
+        assert [tag.key for tag in first.canonical.tags] == [
+            "trees",
+            "cats",
+            "dogs",
+            "birds",
+            "fish",
+            "cars",
+        ]
+        assert first.canonical.field_sources["tags"] is not None
+        assert set(first.canonical.tag_sources) == {
+            "cats",
+            "dogs",
+            "birds",
+            "fish",
+            "cars",
+        }
+        assert "trees" not in first.canonical.tag_sources
+        duplicate = repository.apply_review(
+            media_id=MediaId.from_string(HISTORICAL),
+            actor_login_key=ADMIN_KEY,
+            analysis_run_id=MediaId.from_string(HISTORICAL_RUN),
+            fields=("tags",),
+            tag_keys=("cats", "birds"),
+            now_ms=51,
+        )
+        assert [tag.key for tag in duplicate.canonical.tags] == [
+            "trees",
+            "cats",
+            "dogs",
+            "birds",
+            "fish",
+            "cars",
+        ]
+        assert duplicate.canonical.tag_sources["cats"].applied_at_ms == 50
+        assert duplicate.canonical.field_sources["tags"] is not None
+        assert duplicate.canonical.field_sources["tags"].applied_at_ms == 51
+        with engine.begin() as connection:
+            _insert_analyzed_run(
+                connection,
+                HISTORICAL_NEWER,
+                HISTORICAL,
+                HISTORICAL_LOC,
+                completed_at_ms=91,
+                title="Newer historical",
+                tags=["Cats", "Dogs", "Birds", "Fish", "Cars"],
+                prompt_version="framenest-media-suggestion-v4",
+            )
+        second = repository.apply_review(
+            media_id=MediaId.from_string(HISTORICAL),
+            actor_login_key=ADMIN_KEY,
+            analysis_run_id=MediaId.from_string(HISTORICAL_NEWER),
+            fields=("tags",),
+            tag_keys=("cats", "dogs"),
+            now_ms=52,
+        )
+        assert second.canonical.tag_sources["cats"].analysis_run_id == HISTORICAL_RUN
+        assert second.canonical.tag_sources["dogs"].analysis_run_id == HISTORICAL_RUN
+        detail = repository.get_detail(
+            media_id=MediaId.from_string(HISTORICAL),
+            actor_login_key=ADMIN_KEY,
+            limit=25,
+            cursor=None,
+        )
+        assert set(detail.tag_sources) == set(first.canonical.tag_sources)
+        assert detail.field_sources["tags"] is not None
+    finally:
+        dispose_engine(engine)
+
+
+def test_apply_review_tag_limit_success_and_atomic_overflow(
+    tmp_path: Path,
+) -> None:
+    repository, engine = _repository(tmp_path)
+    try:
+        with engine.begin() as connection:
+            _seed_assigned_extra_tags(connection, HISTORICAL, 27)
+        exact = repository.apply_review(
+            media_id=MediaId.from_string(HISTORICAL),
+            actor_login_key=ADMIN_KEY,
+            analysis_run_id=MediaId.from_string(HISTORICAL_RUN),
+            fields=("tags",),
+            tag_keys=("cats", "dogs", "birds", "fish", "cars"),
+            now_ms=60,
+        )
+        assert len(exact.canonical.tags) == 32
+        assert exact.canonical.field_sources["tags"] is not None
+        assert len(exact.canonical.tag_sources) == 5
+        with engine.begin() as connection:
+            _seed_assigned_extra_tags(connection, WEBSITE, 32)
+        with engine.connect() as connection:
+            before_tags = connection.execute(
+                text(
+                    "SELECT COUNT(*) FROM media_canonical_tags WHERE media_id = :media"
+                ),
+                {"media": WEBSITE},
+            ).scalar_one()
+            before_sources = connection.execute(
+                text(
+                    "SELECT COUNT(*) FROM companion_review_tag_sources "
+                    "WHERE media_id = :media"
+                ),
+                {"media": WEBSITE},
+            ).scalar_one()
+            before_receipts = connection.execute(
+                text(
+                    "SELECT COUNT(*) FROM companion_review_field_sources "
+                    "WHERE media_id = :media"
+                ),
+                {"media": WEBSITE},
+            ).scalar_one()
+            before_title = connection.execute(
+                text("SELECT display_title FROM media_metadata WHERE media_id = :media"),
+                {"media": WEBSITE},
+            ).scalar_one()
+        assert int(before_tags) == 32
+        assert int(before_sources) == 0
+        assert int(before_receipts) == 0
+        with pytest.raises(CompanionReviewTagLimitConflictError):
+            repository.apply_review(
+                media_id=MediaId.from_string(WEBSITE),
+                actor_login_key=ADMIN_KEY,
+                analysis_run_id=MediaId.from_string(WEBSITE_RUN),
+                fields=("tags",),
+                tag_keys=("dogs",),
+                now_ms=61,
+            )
+        with engine.connect() as connection:
+            after_tags = connection.execute(
+                text(
+                    "SELECT COUNT(*) FROM media_canonical_tags WHERE media_id = :media"
+                ),
+                {"media": WEBSITE},
+            ).scalar_one()
+            after_sources = connection.execute(
+                text(
+                    "SELECT COUNT(*) FROM companion_review_tag_sources "
+                    "WHERE media_id = :media"
+                ),
+                {"media": WEBSITE},
+            ).scalar_one()
+            after_receipts = connection.execute(
+                text(
+                    "SELECT COUNT(*) FROM companion_review_field_sources "
+                    "WHERE media_id = :media"
+                ),
+                {"media": WEBSITE},
+            ).scalar_one()
+            after_title = connection.execute(
+                text("SELECT display_title FROM media_metadata WHERE media_id = :media"),
+                {"media": WEBSITE},
+            ).scalar_one()
+            publications = connection.execute(
+                text(
+                    "SELECT COUNT(*) FROM media_content_publications "
+                    "WHERE media_id = :media"
+                ),
+                {"media": WEBSITE},
+            ).scalar_one()
+        assert int(after_tags) == 32
+        assert int(after_sources) == 0
+        assert int(after_receipts) == 0
+        assert after_title == before_title
         assert int(publications) == 0
     finally:
         dispose_engine(engine)

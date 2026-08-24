@@ -287,6 +287,7 @@ def test_admin_list_and_detail_are_no_store_and_ordinary_is_forbidden(
         body = detail.json()
         assert body["suggestions"][0]["title"] == "Inbox stored"
         assert body["canonical"]["field_sources"]["display_title"] is None
+        assert body["canonical"]["tag_sources"] == {}
         assert "collection" not in body["suggestions"][0]
         pending_detail = client.get(
             f"/api/companion/review-inbox/{PENDING}",
@@ -400,6 +401,10 @@ def test_opened_and_apply_contracts(tmp_path: Path) -> None:
         assert published.json()["publication"]["status"] == "published"
         assert published.json()["publication"]["origin"] == "companion_review"
         assert published.json()["canonical"]["field_sources"]["tags"] is not None
+        assert "cats" in published.json()["canonical"]["tag_sources"]
+        assert published.json()["canonical"]["tag_sources"]["cats"]["analysis_run_id"] == (
+            GENERIC_RUN
+        )
         gallery_after = client.get(
             "/api/media", headers=_serve_headers(USER_LOGIN, "Owner")
         )
@@ -475,5 +480,70 @@ def test_audit_failure_blocks_opened_and_apply(tmp_path: Path) -> None:
                 ).scalar_one()
             assert int(receipts) == 0
             assert int(publications) == 0
+        finally:
+            dispose_engine(engine)
+
+
+def test_apply_tag_limit_conflict_is_409_and_does_not_write(tmp_path: Path) -> None:
+    with _client(tmp_path, companion_origins=(COMPANION_ORIGIN,)) as client:
+        engine = create_sqlite_engine(tmp_path / "catalog.sqlite3")
+        try:
+            with engine.begin() as connection:
+                for index in range(1, 33):
+                    key = f"extra-{index:02d}"
+                    connection.execute(
+                        text(
+                            "INSERT INTO canonical_tags "
+                            "(key, display_name, created_at_ms, updated_at_ms) "
+                            "VALUES (:key, :name, 1, 1)"
+                        ),
+                        {"key": key, "name": f"Extra {index:02d}"},
+                    )
+                    connection.execute(
+                        text(
+                            "INSERT INTO media_canonical_tags "
+                            "(media_id, tag_key, position) VALUES (:media, :key, :position)"
+                        ),
+                        {"media": GENERIC, "key": key, "position": index - 1},
+                    )
+        finally:
+            dispose_engine(engine)
+        overflow = client.post(
+            f"/api/companion/review-inbox/{GENERIC}/apply",
+            headers=_mutation_headers(ADMIN_LOGIN, COMPANION_ORIGIN),
+            json={
+                "analysis_run_id": GENERIC_RUN,
+                "fields": ["tags"],
+                "tag_keys": ["cats"],
+            },
+        )
+        assert overflow.status_code == 409
+        assert overflow.json()["error"]["code"] == "COMPANION_REVIEW_TAG_LIMIT_CONFLICT"
+        engine = create_sqlite_engine(tmp_path / "catalog.sqlite3")
+        try:
+            with engine.connect() as connection:
+                tags = connection.execute(
+                    text(
+                        "SELECT COUNT(*) FROM media_canonical_tags WHERE media_id = :media"
+                    ),
+                    {"media": GENERIC},
+                ).scalar_one()
+                sources = connection.execute(
+                    text(
+                        "SELECT COUNT(*) FROM companion_review_tag_sources "
+                        "WHERE media_id = :media"
+                    ),
+                    {"media": GENERIC},
+                ).scalar_one()
+                receipts = connection.execute(
+                    text(
+                        "SELECT COUNT(*) FROM companion_review_field_sources "
+                        "WHERE media_id = :media"
+                    ),
+                    {"media": GENERIC},
+                ).scalar_one()
+            assert int(tags) == 32
+            assert int(sources) == 0
+            assert int(receipts) == 0
         finally:
             dispose_engine(engine)

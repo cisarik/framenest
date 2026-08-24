@@ -41,6 +41,10 @@ class CompanionReviewStaleMappingError(FrameNestCompanionReviewRepositoryError):
     """Raised when submitted tag keys are not an ordered subsequence of mapped keys."""
 
 
+class CompanionReviewTagLimitConflictError(FrameNestCompanionReviewRepositoryError):
+    """Raised when preserve-and-append would exceed the canonical tag maximum."""
+
+
 class CompanionReviewRepository(Protocol):
     """Persistence contract for companion review inbox, history, opened, and apply."""
 

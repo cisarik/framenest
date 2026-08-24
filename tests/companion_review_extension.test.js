@@ -355,6 +355,9 @@ function fakeListNode() {
       return node;
     },
     ownerDocument: {
+      createTextNode(value) {
+        return { textContent: value == null ? "" : String(value) };
+      },
       createElement(tag) {
         const childNodes = [];
         const attributes = {};
@@ -1557,4 +1560,36 @@ test("Review Save retries opened after failure and blocks Apply until opened suc
   );
   assert.equal(lastState.fields.display_title, false);
   assert.equal(lastState.canonical.display_title, "Applied");
+});
+
+test("review receipts render tag sources without replacing field receipts", () => {
+  const overlay = loadReviewOverlay();
+  const receipts = fakeListNode();
+  overlay.renderReceiptPanel(receipts, {
+    field_sources: {
+      tags: {
+        analysis_run_id: RUN_NEW,
+        model_id: "meta/llama-test",
+        applied_at_ms: 9,
+      },
+      display_title: null,
+    },
+    tag_sources: {
+      cats: {
+        analysis_run_id: RUN_OLD,
+        model_id: "meta/llama-old",
+        applied_at_ms: 8,
+      },
+    },
+  });
+  const texts = receipts.childNodes.map((node) => node.textContent);
+  assert.equal(texts.length, 2);
+  assert.match(texts[0], /tags:/);
+  assert.match(texts[0], new RegExp(RUN_NEW));
+  assert.match(texts[1], /tag cats:/);
+  assert.match(texts[1], new RegExp(RUN_OLD));
+  assert.equal(typeof overlay.renderReceiptPanel, "function");
+  assert.match(reviewSource, /getElementById\("receipts"\)/);
+  assert.match(reviewSource, /tag_sources/);
+  assert.doesNotMatch(reviewSource, /review-inbox-list/);
 });

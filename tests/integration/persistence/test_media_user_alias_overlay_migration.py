@@ -62,7 +62,7 @@ def test_head_is_0030() -> None:
         from alembic.script import ScriptDirectory
 
         scripts = ScriptDirectory.from_config(config)
-        assert scripts.get_current_head() == "0031"
+        assert scripts.get_current_head() == "0032"
 
 
 def test_upgrade_0028_to_0029_creates_overlay_tables_and_rollback_drops_them(

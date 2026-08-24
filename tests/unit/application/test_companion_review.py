@@ -203,6 +203,11 @@ def test_apply_request_validation_and_ordered_subsequence() -> None:
         validate_companion_review_apply_request(fields=("tags",), tag_keys=())
     with pytest.raises(CompanionReviewQueryError):
         validate_companion_review_apply_request(
+            fields=("tags",),
+            tag_keys=("a", "b", "c", "d", "e", "f"),
+        )
+    with pytest.raises(CompanionReviewQueryError):
+        validate_companion_review_apply_request(
             fields=("display_title",), tag_keys=("cats",)
         )
     eligible = ("cats", "dogs", "birds")

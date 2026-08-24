@@ -1034,6 +1034,143 @@ def test_website_save_drops_stale_companion_receipts_only(tmp_path: Path) -> Non
         engine.dispose()
 
 
+def test_website_save_drops_removed_tag_sources_only(tmp_path: Path) -> None:
+    repository, engine = _repository(tmp_path)
+    media_id = _insert_media(engine)
+    run_id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+    location_id = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+    device_id = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
+    library_id = "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+    try:
+        repository.create_canonical_tag(
+            CanonicalTagKey("mathematics"), CanonicalTagDisplayName("Math"), 1
+        )
+        repository.create_canonical_tag(
+            CanonicalTagKey("compression"), CanonicalTagDisplayName("Comp"), 1
+        )
+        repository.save_media_metadata(
+            media_id,
+            MediaDisplayTitle("Original title"),
+            MediaDescription("Original description"),
+            (CanonicalTagKey("mathematics"), CanonicalTagKey("compression")),
+            now_ms=10,
+        )
+        with engine.begin() as connection:
+            connection.execute(
+                text("INSERT INTO devices (id, display_name) VALUES (:id, 'Dev')"),
+                {"id": device_id},
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO libraries "
+                    "(id, device_id, display_name, path_flavor, root_path) "
+                    "VALUES (:id, :device, 'Lib', 'posix', '/tmp/synthetic')"
+                ),
+                {"id": library_id, "device": device_id},
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO physical_media_locations ("
+                    "id, media_id, library_id, relative_path, availability, "
+                    "observed_size_bytes, observed_mtime_ns, created_at_ms, updated_at_ms"
+                    ") VALUES (:id, :media, :library, 'clip.mp4', 'available', 8, NULL, 1, 1)"
+                ),
+                {
+                    "id": location_id,
+                    "media": media_id.to_string(),
+                    "library": library_id,
+                },
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO media_analysis_runs ("
+                    "id, media_id, media_location_id, analysis_definition, state, "
+                    "attempt_count, provider_id, model_id, prompt_version, "
+                    "result_schema_version, result_json, error_code, error_message, "
+                    "analysis_profile, created_at_ms, started_at_ms, completed_at_ms, version"
+                    ") VALUES ("
+                    ":id, :media, :location, 'automatic_post_catalog', 'analyzed', 1, "
+                    "'nvidia-nim', 'test-model', 'framenest-media-suggestion-v4', "
+                    "'framenest-media-suggestion-result-v1', '{}', NULL, NULL, "
+                    "'generic_media', 1, 1, 1, 2)"
+                ),
+                {
+                    "id": run_id,
+                    "media": media_id.to_string(),
+                    "location": location_id,
+                },
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO companion_review_tag_sources ("
+                    "media_id, tag_key, analysis_run_id, applied_by_login_key, applied_at_ms"
+                    ") VALUES "
+                    "(:media, 'mathematics', :run, 'admin@example.com', 5), "
+                    "(:media, 'compression', :run, 'admin@example.com', 5)"
+                ),
+                {"media": media_id.to_string(), "run": run_id},
+            )
+        repository.save_media_metadata(
+            media_id,
+            MediaDisplayTitle("Changed title"),
+            MediaDescription("Original description"),
+            (CanonicalTagKey("compression"), CanonicalTagKey("mathematics")),
+            now_ms=20,
+        )
+        with engine.connect() as connection:
+            reordered = {
+                str(row[0])
+                for row in connection.execute(
+                    text(
+                        "SELECT tag_key FROM companion_review_tag_sources "
+                        "WHERE media_id = :media"
+                    ),
+                    {"media": media_id.to_string()},
+                )
+            }
+        assert reordered == {"mathematics", "compression"}
+        repository.save_media_metadata(
+            media_id,
+            MediaDisplayTitle("Changed title"),
+            MediaDescription("Original description"),
+            (CanonicalTagKey("compression"),),
+            now_ms=30,
+        )
+        with engine.connect() as connection:
+            remaining = {
+                str(row[0])
+                for row in connection.execute(
+                    text(
+                        "SELECT tag_key FROM companion_review_tag_sources "
+                        "WHERE media_id = :media"
+                    ),
+                    {"media": media_id.to_string()},
+                )
+            }
+        assert remaining == {"compression"}
+        repository.save_media_metadata(
+            media_id,
+            MediaDisplayTitle("Changed title"),
+            MediaDescription("Original description"),
+            (CanonicalTagKey("compression"), CanonicalTagKey("mathematics")),
+            now_ms=40,
+        )
+        with engine.connect() as connection:
+            after_readd = {
+                str(row[0])
+                for row in connection.execute(
+                    text(
+                        "SELECT tag_key FROM companion_review_tag_sources "
+                        "WHERE media_id = :media"
+                    ),
+                    {"media": media_id.to_string()},
+                )
+            }
+        assert after_readd == {"compression"}
+    finally:
+        engine.dispose()
+
+
 def test_non_x_movie_metadata_edit_works(tmp_path: Path) -> None:
     repository, engine = _repository(tmp_path)
     media_id = _seed_movie_media(repository, engine)

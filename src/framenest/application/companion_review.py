@@ -157,6 +157,7 @@ class CompanionReviewDetail:
     description: str | None
     tags: tuple[CompanionReviewCanonicalTag, ...]
     field_sources: dict[str, CompanionReviewFieldSource | None]
+    tag_sources: dict[str, CompanionReviewFieldSource]
     publication: ContentPublication | None
     readiness: ContentPublicationReadiness
     suggestions: tuple[CompanionReviewSuggestion, ...]
@@ -502,6 +503,7 @@ class CompanionReviewApplyCanonical:
     description: str | None
     tags: tuple[CompanionReviewCanonicalTag, ...]
     field_sources: dict[str, CompanionReviewFieldSource | None]
+    tag_sources: dict[str, CompanionReviewFieldSource]
 
 
 @dataclass(frozen=True, slots=True)

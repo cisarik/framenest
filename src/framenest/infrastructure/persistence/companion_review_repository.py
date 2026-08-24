@@ -51,6 +51,7 @@ from framenest.application.ports.companion_review_repository import (
     CompanionReviewRunNotEligibleError,
     CompanionReviewStaleMappingError,
     CompanionReviewStoredResultError,
+    CompanionReviewTagLimitConflictError,
     FrameNestCompanionReviewRepositoryError,
 )
 from framenest.domain.content_publication import ContentPublication, ContentPublicationOrigin
@@ -66,11 +67,17 @@ from framenest.domain.media_classification import (
     DEFAULT_CONTENT_CATEGORY,
     MOVIE_IDENTIFICATION_ANALYSIS_DEFINITION,
 )
-from framenest.domain.media_metadata import CanonicalTagKey, MediaCollectionKey, derive_collection_state
+from framenest.domain.media_metadata import (
+    MAX_MEDIA_TAGS,
+    CanonicalTagKey,
+    MediaCollectionKey,
+    derive_collection_state,
+)
 from framenest.infrastructure.persistence.catalog_schema import (
     canonical_tags,
     companion_review_field_sources,
     companion_review_open_states,
+    companion_review_tag_sources,
     logical_media,
     media_analysis_runs,
     media_canonical_tags,
@@ -91,6 +98,7 @@ _STORED_RESULT_MESSAGE = "Stored analysis result is invalid."
 _RUN_NOT_FOUND_MESSAGE = "The requested analysis run was not found."
 _RUN_NOT_ELIGIBLE_MESSAGE = "The requested analysis run is not eligible."
 _STALE_MAPPING_MESSAGE = "Submitted tag keys are not an eligible mapping."
+_TAG_LIMIT_MESSAGE = "Applying the selected tags would exceed the canonical tag limit."
 _REVIEW_FIELDS = ("display_title", "tags", "description")
 _FIELD_DISPLAY_TITLE = "display_title"
 _FIELD_DESCRIPTION = "description"
@@ -236,12 +244,16 @@ class SqliteCompanionReviewRepository:
                 for row in tag_rows
             )
             publication = _load_publication(connection, media_id_text)
+            tag_keys = tuple(tag.key for tag in tags)
             field_sources = _load_field_sources(
                 connection,
                 media_id=media_id_text,
                 display_title=display_title if isinstance(display_title, str) else None,
                 description=description if isinstance(description, str) else None,
-                tag_keys=tuple(tag.key for tag in tags),
+                tag_keys=tag_keys,
+            )
+            tag_sources = _load_tag_sources(
+                connection, media_id=media_id_text, tag_keys=tag_keys
             )
             definition_catalog = _load_canonical_catalog(connection)
             runs = _load_history_page(
@@ -268,6 +280,7 @@ class SqliteCompanionReviewRepository:
                 description=description if isinstance(description, str) else None,
                 tags=tags,
                 field_sources=field_sources,
+                tag_sources=tag_sources,
                 publication=publication,
                 readiness=derive_review_readiness(
                     display_title=display_title if isinstance(display_title, str) else None,
@@ -393,7 +406,17 @@ class SqliteCompanionReviewRepository:
                 if _FIELD_DESCRIPTION in fields
                 else current["description"]
             )
-            new_tag_keys = tag_keys if _FIELD_TAGS in fields else current["tag_keys"]
+            if _FIELD_TAGS in fields:
+                current_keys = current["tag_keys"]
+                new_tag_keys = _preserve_append_tag_keys(current_keys, tag_keys)
+                if len(new_tag_keys) > MAX_MEDIA_TAGS:
+                    raise CompanionReviewTagLimitConflictError(_TAG_LIMIT_MESSAGE)
+                appended_keys = tuple(
+                    key for key in tag_keys if key not in set(current_keys)
+                )
+            else:
+                new_tag_keys = current["tag_keys"]
+                appended_keys = ()
             new_collection_key = current["collection_key"]
             new_processed_at_ms = current["processed_at_ms"]
             if _FIELD_TAGS in fields:
@@ -468,6 +491,14 @@ class SqliteCompanionReviewRepository:
                     applied_at_ms=now_ms,
                     value=selected_values[field_name],
                 )
+            _insert_new_tag_sources(
+                connection,
+                media_id=media_id_text,
+                tag_keys=appended_keys,
+                analysis_run_id=run_id_text,
+                actor_login_key=actor_login_key,
+                applied_at_ms=now_ms,
+            )
             tags = _load_canonical_tags(connection, media_id_text)
             readiness = derive_review_readiness(
                 display_title=new_title,
@@ -498,6 +529,11 @@ class SqliteCompanionReviewRepository:
                 ),
                 tag_keys=tuple(tag.key for tag in tags),
             )
+            tag_sources = _load_tag_sources(
+                connection,
+                media_id=media_id_text,
+                tag_keys=tuple(tag.key for tag in tags),
+            )
             return CompanionReviewApplyResult(
                 metadata_status=metadata_status,
                 canonical=CompanionReviewApplyCanonical(
@@ -507,6 +543,7 @@ class SqliteCompanionReviewRepository:
                     ),
                     tags=tags,
                     field_sources=field_sources,
+                    tag_sources=tag_sources,
                 ),
                 publication=CompanionReviewApplyPublication(
                     status=publication_status,
@@ -1049,6 +1086,14 @@ def _load_apply_canonical(connection: Connection, media_id: str) -> dict[str, ob
     }
 
 
+def _preserve_append_tag_keys(
+    current: tuple[str, ...], submitted: tuple[str, ...]
+) -> tuple[str, ...]:
+    present = set(current)
+    appended = tuple(key for key in submitted if key not in present)
+    return current + appended
+
+
 def _replace_tag_assignments(
     connection: Connection, media_id: str, tag_keys: tuple[str, ...]
 ) -> None:
@@ -1097,6 +1142,73 @@ def _upsert_field_source(
         },
     )
     connection.execute(statement)
+
+
+def _insert_new_tag_sources(
+    connection: Connection,
+    *,
+    media_id: str,
+    tag_keys: tuple[str, ...],
+    analysis_run_id: str,
+    actor_login_key: str,
+    applied_at_ms: int,
+) -> None:
+    for key in tag_keys:
+        statement = sqlite_insert(companion_review_tag_sources).values(
+            media_id=media_id,
+            tag_key=key,
+            analysis_run_id=analysis_run_id,
+            applied_by_login_key=actor_login_key,
+            applied_at_ms=applied_at_ms,
+        )
+        statement = statement.on_conflict_do_nothing(
+            index_elements=[
+                companion_review_tag_sources.c.media_id,
+                companion_review_tag_sources.c.tag_key,
+            ]
+        )
+        connection.execute(statement)
+
+
+def _load_tag_sources(
+    connection: Connection,
+    *,
+    media_id: str,
+    tag_keys: tuple[str, ...],
+) -> dict[str, CompanionReviewFieldSource]:
+    if not tag_keys:
+        return {}
+    rows = connection.execute(
+        select(
+            companion_review_tag_sources.c.tag_key,
+            companion_review_tag_sources.c.analysis_run_id,
+            companion_review_tag_sources.c.applied_at_ms,
+            media_analysis_runs.c.completed_at_ms,
+            media_analysis_runs.c.provider_id,
+            media_analysis_runs.c.model_id,
+        )
+        .select_from(
+            companion_review_tag_sources.join(
+                media_analysis_runs,
+                media_analysis_runs.c.id
+                == companion_review_tag_sources.c.analysis_run_id,
+            )
+        )
+        .where(
+            companion_review_tag_sources.c.media_id == media_id,
+            companion_review_tag_sources.c.tag_key.in_(tag_keys),
+        )
+    ).mappings().all()
+    sources: dict[str, CompanionReviewFieldSource] = {}
+    for row in rows:
+        sources[str(row["tag_key"])] = CompanionReviewFieldSource(
+            analysis_run_id=str(row["analysis_run_id"]),
+            completed_at_ms=int(row["completed_at_ms"]),
+            provider_id=str(row["provider_id"]),
+            model_id=str(row["model_id"]),
+            applied_at_ms=int(row["applied_at_ms"]),
+        )
+    return sources
 
 
 def _load_canonical_tags(

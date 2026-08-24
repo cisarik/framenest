@@ -505,6 +505,37 @@
     parent.appendChild(p);
   }
 
+  function receiptLine(receipt) {
+    return [receipt.analysis_run_id, receipt.model_id, receipt.applied_at_ms]
+      .filter(function keep(value) {
+        return value != null && value !== "";
+      })
+      .join(" · ");
+  }
+
+  function renderReceiptPanel(receipts, canonical) {
+    clearNode(receipts);
+    if (!canonical || typeof canonical !== "object") {
+      return;
+    }
+    const sources = canonical.field_sources || {};
+    Object.keys(sources).forEach(function renderReceipt(fieldName) {
+      const receipt = sources[fieldName];
+      if (!receipt || typeof receipt !== "object") {
+        return;
+      }
+      addLine(receipts, fieldName, receiptLine(receipt));
+    });
+    const tagSources = canonical.tag_sources || {};
+    Object.keys(tagSources).forEach(function renderTagSource(tagKey) {
+      const receipt = tagSources[tagKey];
+      if (!receipt || typeof receipt !== "object") {
+        return;
+      }
+      addLine(receipts, "tag " + tagKey, receiptLine(receipt));
+    });
+  }
+
   function bindReviewUi(doc) {
     const history = doc.getElementById("run-history");
     const canonical = doc.getElementById("canonical");
@@ -610,22 +641,7 @@
       const missing = Array.isArray(pub.missing_fields) ? pub.missing_fields.join(", ") : "";
       addLine(publication, "Missing fields", missing);
       clearNode(receipts);
-      const sources = current.field_sources || {};
-      Object.keys(sources).forEach(function renderReceipt(fieldName) {
-        const receipt = sources[fieldName];
-        if (!receipt || typeof receipt !== "object") {
-          return;
-        }
-        addLine(
-          receipts,
-          fieldName,
-          [receipt.analysis_run_id, receipt.model_id, receipt.applied_at_ms]
-            .filter(function keep(value) {
-              return value != null && value !== "";
-            })
-            .join(" · ")
-        );
-      });
+      renderReceiptPanel(receipts, current);
       clearNode(mappedChips);
       clearNode(droppedTags);
       (Array.isArray(suggestion.tags) ? suggestion.tags : []).forEach(function renderTag(tag) {
@@ -735,6 +751,7 @@
     createController: createReviewController,
     request: request,
     runtimeUrl: runtimeUrl,
+    renderReceiptPanel: renderReceiptPanel,
   };
 
   if (globalThis.document && globalThis.document.getElementById) {
