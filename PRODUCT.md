@@ -21,14 +21,13 @@ direction.
 FrameNest is currently in foundation-stage, pre-alpha development.
 
 A Poetry package, runnable loopback FastAPI server, packaged local web shell,
-explicit SQLite migration foundation through schema head `0031`, local device
+explicit SQLite migration foundation through schema head `0032`, local device
 and library registries, read-only library scan preview, explicit idempotent
 scan-candidate import into the minimum persistent media catalog, persistent
 display-title and canonical-tag core, local media-analysis preview,
 provider-neutral NVIDIA suggestion prototype, bounded JPEG VLM transport,
 explicit editable browser AI suggestion review, an administrator companion
-unread-analysis queue plus title-bar all-item history for successful generic
-analysis runs, ordinary-user private upload
+merged title-bar history of pending and analyzed generic items, ordinary-user private upload
 submission with administrator review, requester-private YouTube acquisition with
 administrator promotion, requester-private X meme acquisition (native X video,
 animated-GIF-like media delivered as video, and public JPEG/PNG photos), and
@@ -46,12 +45,13 @@ ordinary Gallery until persisted title, description, and canonical-tag metadata
 is ready and an authorized administrator publishes.
 
 Website on-demand AI suggestion review remains session-only and is not catalog
-truth. Companion review is a separate durable administrator surface over
-successful generic runs: unopened latest runs form a quiet attention queue,
-while the title bar expands fully paginated all-item history without replacing
-the hosted FrameNest iframe
+truth. Companion review is a separate durable administrator surface over a
+merged pending-and-analyzed history: pending rows stay visible and dark,
+analyzed rows are green, and the title bar expands that one list without
+replacing the hosted FrameNest iframe
 ([ADR-0067](docs/adr/0067-administrator-companion-review-inbox-and-mutation-trust.md),
-[ADR-0072](docs/adr/0072-native-side-panel-unread-inbox-and-title-bar-history-chrome.md)).
+[ADR-0072](docs/adr/0072-native-side-panel-unread-inbox-and-title-bar-history-chrome.md),
+[ADR-0073](docs/adr/0073-companion-merged-history-chrome-pending-visibility-x-seed-tag-and-preserving-apply.md)).
 Automatic post-catalog analysis stays default-off; administrator-owned X catalog
 events may enqueue generic analysis when
 `FRAMENEST_AUTOMATIC_MEDIA_ANALYSIS_ENABLED` is true

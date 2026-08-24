@@ -33,39 +33,48 @@ An authenticated FrameNest user can:
   catalog hit and shows no preview chrome; on-screen arrows appear only after
   two or more hits), see the selected meme as one JPEG preview, and attach it
   with Enter or Attach onto the composer file input;
-- open the toolbar side panel to use a heading-free unread-analysis queue above
-  the surviving hosted FrameNest iframe, expand all-item Analysis history from
-  the green title bar, and attach a Gallery item onto the bound X composer. In
-  that hosted Gallery, open-original stays bottom-right and Attach sits top-left
-  on the card image. Ordinary browser tabs keep open-original only. Gallery 📎
-  attaches after the reply composer is focused, and the shell reports Attached
-  only when that composer file input accepted the bytes.
+- open the toolbar side panel to use one merged title-bar companion history
+  (`#review-history-toggle`, `#review-history`, `#review-history-list`) above
+  the surviving hosted FrameNest iframe, with analyzed rows green and pending
+  rows dark, and attach a Gallery item onto the bound X composer. In that hosted
+  Gallery, open-original stays bottom-right and Attach sits top-left on the card
+  image. Ordinary browser tabs keep open-original only. Gallery 📎 attaches
+  after the reply composer is focused, and the shell reports Attached only when
+  that composer file input accepted the bytes.
 
-## Review inbox and history
+## Review history
 
-The side panel shows unopened successful generic analyses in
-`#review-inbox-list` above the surviving iframe. It has no visible heading,
-awaiting hint, or empty-state sentence; an empty unread list consumes no height.
-The whole green title bar opens `#review-history` except where Settings and
-Connect/Disconnect sit above that target. History starts collapsed on every
-panel load, is not persisted, and expands directly under the title bar. It
-contains every fully paginated latest successful generic result in server
-order. A title may appear in both history and unread.
+The side panel has one merged title-bar history (`#review-history-toggle`,
+`#review-history`, `#review-history-list`) above the surviving iframe. There is
+no `#review-inbox` list. History starts collapsed on every panel load, is not
+persisted, and expands directly under the title bar. Analyzed rows use
+`review-history-button--analyzed` (accent green). Pending rows use
+`review-history-button--pending` (dark). Clicking a row never removes it. A
+pending overlay shows `No successful analysis yet.` and does not send an opened
+mutation. An analyzed row still marks opened through the durable route; Review
+Save retries opened before Apply when an earlier opened request failed, retains
+selections and blocks Apply if that retry fails, and does not issue a second
+opened mutation after success. Hover and keyboard focus alone do not mark a
+row opened.
 
-Both lists have bounded scrolling and open the same local review overlay. A row
-leaves unread only after the durable opened mutation succeeds and the lists
-refresh; history retains it. Review Save retries opened before Apply when an
-earlier opened request failed, retains selections and blocks Apply if that retry
-fails, and does not issue a second opened mutation after success. Hover and
-keyboard focus alone do not mark a row opened.
+Save from X best-effort seeds `GET /api/canonical-tags?surface=x-companion-save`
+with the fixed `x` / `𝕏` pair and prepends that exact pair once when the list
+contains it. Bare tag GET does not seed. Apply preserves current canonical tags
+and appends newly submitted mapped AI keys, re-enumerating from 0; overflow at
+32 tags is HTTP 409 `COMPANION_REVIEW_TAG_LIMIT_CONFLICT`. Detail and Apply
+responses expose `canonical.tag_sources` and retain whole-field
+`field_sources.tags`.
 
 The successful connection status is blank. Configuration guidance, framing and
 request failures, `Cleared`, and `Attached` still use `#shell-status`. An
-ordinary 403 or a complete-list failure hides both lists; 403 also disables and
-collapses history. The toolbar badge remains the server `unopened_count` as
-`1`…`99` / `99+`, never a rendered length or title. Alarm
-`framenest.review-inbox` runs every 1 minute. There is no `notifications`
-permission or second counter.
+ordinary 403 or a complete-list failure hides history; 403 also disables and
+collapses it. The toolbar badge remains the server `unopened_count` as
+`1`…`99` / `99+`, never a rendered length or title; pending rows never increment
+it. Alarm `framenest.review-inbox` runs every 1 minute. There is no
+`notifications` permission or second counter. The hosted `#frame` stays mounted
+and Attach survives. Ingest Save remains Title→Tags→Description→Save with no
+radios or Analyze. Exactly four `companion_mutation` routes remain: X submit, X
+retry, review opened, and review apply.
 
 A second overlay opens local `ui/review.html` through
 `chrome.runtime.getURL` plus `#media=<uuid>`. It is not web-accessible and is

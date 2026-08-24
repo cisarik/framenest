@@ -25,7 +25,7 @@ multi-source downloader UI.
 The repository also contains the first persistence, registry, media catalog,
 local media-analysis, AI suggestion-review, and quarantine upload-transport
 foundations: a centralized SQLite database path setting, synchronous SQLAlchemy
-Core engine helpers, packaged Alembic resources through schema head `0031`,
+Core engine helpers, packaged Alembic resources through schema head `0032`,
 explicit database commands, local device and library registry tables, durable
 upload-session, canonical byte-identity, duplicate-disposition, and
 publication-provenance and upload-to-catalog linkage tables, persistent
@@ -44,7 +44,7 @@ Requester-private YouTube and X meme acquisition with explicit administrator
 promotion are implemented (X native video, animated-GIF-like media delivered as
 video, and public JPEG/PNG photos; WebP is rejected without transcoding). A
 loadable unpacked Manifest V3 X companion uses a frozen ingest Save (Edit-media
-subset, no category radios), an administrator review inbox in the side panel,
+subset, no category radios), an administrator merged title-bar review history in the side panel,
 and may publish after review Save when title, description, and at least one tag
 are present. Automatic analysis stays default-off; administrator-owned X may
 enqueue when that flag is later enabled. The companion still attaches catalog
@@ -58,6 +58,8 @@ extension-origin allowlist is configured
 [ADR-0069](docs/adr/0069-five-tag-generic-media-suggestion-contract.md),
 [ADR-0070](docs/adr/0070-companion-exclusion-of-movie-workflows.md),
 [ADR-0071](docs/adr/0071-native-side-panel-review-inbox-chrome.md),
+[ADR-0072](docs/adr/0072-native-side-panel-unread-inbox-and-title-bar-history-chrome.md),
+[ADR-0073](docs/adr/0073-companion-merged-history-chrome-pending-visibility-x-seed-tag-and-preserving-apply.md),
 [docs/X_COMPANION.md](docs/X_COMPANION.md)). The upload path receives untrusted bytes only into
 configured server quarantine, performs bounded server-side validation, and
 derives canonical identity from validated byte size and SHA-256 digest. The
@@ -672,6 +674,8 @@ Current foundation files:
 - [`docs/adr/0069-five-tag-generic-media-suggestion-contract.md`](docs/adr/0069-five-tag-generic-media-suggestion-contract.md) records the live generic v4 1–5 tag contract.
 - [`docs/adr/0070-companion-exclusion-of-movie-workflows.md`](docs/adr/0070-companion-exclusion-of-movie-workflows.md) records companion exclusion of movie workflows.
 - [`docs/adr/0071-native-side-panel-review-inbox-chrome.md`](docs/adr/0071-native-side-panel-review-inbox-chrome.md) records native side-panel review inbox chrome.
+- [`docs/adr/0072-native-side-panel-unread-inbox-and-title-bar-history-chrome.md`](docs/adr/0072-native-side-panel-unread-inbox-and-title-bar-history-chrome.md) records unread-inbox and title-bar history chrome; named two-list statements are succeeded by ADR-0073.
+- [`docs/adr/0073-companion-merged-history-chrome-pending-visibility-x-seed-tag-and-preserving-apply.md`](docs/adr/0073-companion-merged-history-chrome-pending-visibility-x-seed-tag-and-preserving-apply.md) records merged companion history, pending visibility, the `x`/`𝕏` seed tag, and preserving Apply.
 
 ## Non-Goals for the Current Stage
 
