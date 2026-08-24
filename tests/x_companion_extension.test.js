@@ -1362,6 +1362,34 @@ test("toolbar action opens the side-panel shell instead of a picker popup", () =
   assert.ok(sidebarHtml.indexOf('id="settings-dialog"') < sidebarHtml.indexOf('id="origin"'));
   assert.match(sidebarCss, /\.title-bar\s*\{/);
   assert.match(sidebarCss, /background: color-mix\(in srgb, var\(--accent\) 90%, transparent\)/);
+  const titleBarAction = sidebarCss.match(/\.title-bar__action\s*\{[\s\S]*?\n\}/);
+  assert.ok(titleBarAction, "title-bar action fill");
+  assert.match(titleBarAction[0], /background:\s*transparent/);
+  assert.doesNotMatch(titleBarAction[0], /--accent-strong/);
+  assert.doesNotMatch(titleBarAction[0], /opacity/);
+  const compactFillOne = sidebarCss.match(
+    /\.review-list--compact\s*>\s*li:nth-child\(1\)\s*>\s*button\s*\{[\s\S]*?\n\}/
+  );
+  const compactFillFive = sidebarCss.match(
+    /\.review-list--compact\s*>\s*li:nth-child\(5\)\s*>\s*button\s*\{[\s\S]*?\n\}/
+  );
+  const historyAll = sidebarCss.match(/\.review-history-all\s*\{[\s\S]*?\n\}/);
+  assert.ok(compactFillOne && compactFillFive && historyAll, "compact/All fill rules");
+  assert.match(
+    compactFillOne[0],
+    /background:\s*color-mix\(in srgb,\s*var\(--accent\) 100%,\s*transparent\)/
+  );
+  assert.match(
+    compactFillFive[0],
+    /background:\s*color-mix\(in srgb,\s*var\(--accent\) 60%,\s*transparent\)/
+  );
+  assert.match(
+    historyAll[0],
+    /background:\s*color-mix\(in srgb,\s*var\(--accent\) 90%,\s*transparent\)/
+  );
+  assert.doesNotMatch(compactFillOne[0], /opacity/);
+  assert.doesNotMatch(compactFillFive[0], /opacity/);
+  assert.doesNotMatch(historyAll[0], /opacity/);
   assert.doesNotMatch(sidebarHtml, /ui\/picker\.html/);
   assert.doesNotMatch(sidebarJs, /window\.open/);
   assert.doesNotMatch(sidebarJs, /ui\/picker\.html/);

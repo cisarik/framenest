@@ -139,9 +139,9 @@ body {
   flex: 0 0 auto;
   margin: 0;
   padding: 6px 12px;
-  border: 1px solid rgba(0, 0, 0, 0.35);
+  border: 1px solid #000000;
   border-radius: var(--radius-sm);
-  background: var(--accent-strong);
+  background: transparent;
   color: #000000;
   cursor: pointer;
   font-family: var(--font-mono);
@@ -151,7 +151,7 @@ body {
 
 .title-bar__action:hover,
 .title-bar__action:focus-visible {
-  background: #2ee00f;
+  background: rgba(0, 0, 0, 0.12);
   outline: 2px solid #000000;
   outline-offset: 1px;
 }
@@ -209,6 +209,8 @@ body {
   max-height: none;
   overflow: hidden;
   border-bottom: 0;
+  padding: 0;
+  background: transparent;
 }
 
 .review-list:empty {
@@ -245,39 +247,43 @@ body {
 }
 
 .review-list--compact > li:nth-child(1) > button {
-  opacity: 1;
+  background: color-mix(in srgb, var(--accent) 100%, transparent);
+  color: var(--background);
 }
 
 .review-list--compact > li:nth-child(2) > button {
-  opacity: 0.9;
+  background: color-mix(in srgb, var(--accent) 90%, transparent);
+  color: var(--background);
 }
 
 .review-list--compact > li:nth-child(3) > button {
-  opacity: 0.8;
+  background: color-mix(in srgb, var(--accent) 80%, transparent);
+  color: var(--background);
 }
 
 .review-list--compact > li:nth-child(4) > button {
-  opacity: 0.7;
+  background: color-mix(in srgb, var(--accent) 70%, transparent);
+  color: var(--background);
 }
 
 .review-list--compact > li:nth-child(5) > button {
-  opacity: 0.6;
+  background: color-mix(in srgb, var(--accent) 60%, transparent);
+  color: var(--background);
 }
 
 .review-history-all {
   display: block;
   width: 100%;
   margin: 0;
-  padding: 5px 19px 8px;
+  padding: 5px 7px;
   border: 0;
   border-bottom: 1px solid var(--line);
-  background: var(--surface-solid);
-  color: var(--text);
+  background: color-mix(in srgb, var(--accent) 90%, transparent);
+  color: var(--background);
   cursor: pointer;
   font-family: var(--font-mono);
   font-size: 0.82rem;
   text-align: left;
-  opacity: 0.9;
 }
 
 .review-history-all[hidden] {
@@ -288,7 +294,8 @@ body {
 .review-list--compact > li > button:focus-visible,
 .review-history-all:hover,
 .review-history-all:focus-visible {
-  opacity: 1;
+  background: color-mix(in srgb, var(--accent) 100%, transparent);
+  color: var(--background);
 }
 
 .review-list button:hover,

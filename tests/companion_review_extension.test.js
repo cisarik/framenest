@@ -960,16 +960,62 @@ test("title-bar merged history has the accepted DOM, ARIA, and status contract",
     sidebarCss,
     /\.title-bar\s*\{[\s\S]*?background:\s*color-mix\(in srgb,\s*var\(--accent\) 90%,\s*transparent\)/
   );
-  assert.match(sidebarCss, /\.review-list--compact\s*>\s*li:nth-child\(1\)\s*>\s*button\s*\{[\s\S]*?opacity:\s*1;/);
-  assert.match(sidebarCss, /\.review-list--compact\s*>\s*li:nth-child\(2\)\s*>\s*button\s*\{[\s\S]*?opacity:\s*0\.9;/);
-  assert.match(sidebarCss, /\.review-list--compact\s*>\s*li:nth-child\(3\)\s*>\s*button\s*\{[\s\S]*?opacity:\s*0\.8;/);
-  assert.match(sidebarCss, /\.review-list--compact\s*>\s*li:nth-child\(4\)\s*>\s*button\s*\{[\s\S]*?opacity:\s*0\.7;/);
-  assert.match(sidebarCss, /\.review-list--compact\s*>\s*li:nth-child\(5\)\s*>\s*button\s*\{[\s\S]*?opacity:\s*0\.6;/);
-  assert.match(sidebarCss, /\.review-history-all\s*\{[\s\S]*?opacity:\s*0\.9;/);
+  const titleBarChrome = sidebarCss.match(/\.title-bar\s*\{[\s\S]*?\n\}/);
+  assert.ok(titleBarChrome, "title-bar fill rule");
+  assert.doesNotMatch(titleBarChrome[0], /opacity/);
+  const titleBarAction = sidebarCss.match(/\.title-bar__action\s*\{[\s\S]*?\n\}/);
+  assert.ok(titleBarAction, "title-bar action rule");
+  assert.match(titleBarAction[0], /background:\s*transparent/);
+  assert.doesNotMatch(titleBarAction[0], /--accent-strong/);
+  assert.doesNotMatch(titleBarAction[0], /opacity/);
+  const compactFillStops = [
+    ["1", "100%"],
+    ["2", "90%"],
+    ["3", "80%"],
+    ["4", "70%"],
+    ["5", "60%"],
+  ];
+  compactFillStops.forEach(([nth, mix]) => {
+    const stop = sidebarCss.match(
+      new RegExp(
+        String.raw`\.review-list--compact\s*>\s*li:nth-child\(` +
+          nth +
+          String.raw`\)\s*>\s*button\s*\{[\s\S]*?\n\}`
+      )
+    );
+    assert.ok(stop, "compact fill stop " + nth);
+    assert.match(
+      stop[0],
+      new RegExp(
+        String.raw`background:\s*color-mix\(in srgb,\s*var\(--accent\) ` +
+          mix.replace("%", "\\%") +
+          String.raw`,\s*transparent\)`
+      )
+    );
+    assert.doesNotMatch(stop[0], /opacity/);
+  });
+  const historyAll = sidebarCss.match(/\.review-history-all\s*\{[\s\S]*?\n\}/);
+  assert.ok(historyAll, "All fill rule");
+  assert.match(
+    historyAll[0],
+    /background:\s*color-mix\(in srgb,\s*var\(--accent\) 90%,\s*transparent\)/
+  );
+  assert.match(historyAll[0], /padding:\s*5px 7px/);
+  assert.doesNotMatch(historyAll[0], /opacity/);
+  assert.doesNotMatch(historyAll[0], /--surface-solid/);
   assert.match(
     sidebarCss,
-    /\.review-list--compact\s*>\s*li\s*>\s*button:hover[\s\S]*?\.review-history-all:focus-visible\s*\{[\s\S]*?opacity:\s*1;/
+    /\.review-list--compact\s*\{[\s\S]*?background:\s*transparent/
   );
+  const compactHover = sidebarCss.match(
+    /\.review-list--compact\s*>\s*li\s*>\s*button:hover[\s\S]*?\.review-history-all:focus-visible\s*\{[\s\S]*?\n\}/
+  );
+  assert.ok(compactHover, "compact/All hover fill");
+  assert.match(
+    compactHover[0],
+    /background:\s*color-mix\(in srgb,\s*var\(--accent\) 100%,\s*transparent\)/
+  );
+  assert.doesNotMatch(compactHover[0], /opacity/);
   assert.match(sidebarCss, /max-height:\s*8\.5rem/);
   assert.match(sidebarCss, /overflow-y:\s*auto/);
   assert.match(
