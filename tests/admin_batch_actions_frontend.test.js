@@ -1295,7 +1295,7 @@ test("single-item publish stays available only outside an active batch", () => {
     extractFunction(APP_SOURCE, "renderAdminMediaItem"),
     /\|\| adminBatchDriverActive\(\)/,
   );
-  const singleItem = extractFunction(APP_SOURCE, "publishAdminMediaItem");
+  const singleItem = extractFunction(APP_SOURCE, "mutateAdminContentPublication");
   assert.match(singleItem, /claimPublicationRequest/);
   assert.doesNotMatch(singleItem, /adminBatchState/);
 });

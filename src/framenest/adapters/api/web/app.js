@@ -8186,6 +8186,24 @@ function renderAdminMediaItem(item) {
     }
     publishButton.addEventListener("click", () => publishAdminMediaItem(item, publishButton));
     actionsCell.appendChild(publishButton);
+  } else {
+    const unpublishButton = document.createElement("button");
+    unpublishButton.type = "button";
+    unpublishButton.className = "admin-media-action admin-media-action--unpublish";
+    unpublishButton.textContent = "Unpublish";
+    unpublishButton.dataset.mediaId = item.media_id;
+    unpublishButton.dataset.adminAction = "unpublish";
+    unpublishButton.disabled = adminCatalogState.publishOwners.has(item.media_id)
+      || Boolean(actionStatus)
+      || adminBatchDriverActive()
+      || Boolean(adminCatalogState.removalOwners.has(item.media_id));
+    if (actionStatus) unpublishButton.title = actionStatus.message;
+    if (adminCatalogState.publishOwners.has(item.media_id)) {
+      unpublishButton.setAttribute("aria-busy", "true");
+      unpublishButton.textContent = "Unpublishing…";
+    }
+    unpublishButton.addEventListener("click", () => unpublishAdminMediaItem(item, unpublishButton));
+    actionsCell.appendChild(unpublishButton);
   }
 
   if (identityHasCapability("media.catalog.remove")) {
@@ -8210,10 +8228,14 @@ function renderAdminMediaItem(item) {
     const retryButton = document.createElement("button");
     retryButton.type = "button";
     retryButton.className = "admin-media-action admin-media-action--retry";
-    retryButton.textContent = "Retry publish";
+    const retryUnpublish = actionStatus.mutation === "unpublish";
+    retryButton.textContent = retryUnpublish ? "Retry unpublish" : "Retry publish";
     retryButton.dataset.mediaId = item.media_id;
     retryButton.dataset.adminAction = "retry";
-    retryButton.addEventListener("click", () => publishAdminMediaItem(item, retryButton));
+    retryButton.addEventListener("click", () => {
+      if (retryUnpublish) unpublishAdminMediaItem(item, retryButton);
+      else publishAdminMediaItem(item, retryButton);
+    });
     actionsCell.appendChild(retryButton);
   }
 
@@ -8302,36 +8324,61 @@ async function loadAdminCatalog({ focusMediaId = null } = {}) {
   }
 }
 
-async function publishAdminMediaItem(item, opener) {
+function publishAdminMediaItem(item, opener) {
+  return mutateAdminContentPublication(item, opener, true);
+}
+
+function unpublishAdminMediaItem(item, opener) {
+  return mutateAdminContentPublication(item, opener, false);
+}
+
+async function mutateAdminContentPublication(item, opener, published) {
   const owner = claimPublicationRequest(item.media_id, opener);
   if (!owner) return;
+  const mutation = published ? "publish" : "unpublish";
   adminCatalogState.actionStatusByMediaId.delete(item.media_id);
   opener.disabled = true;
   opener.setAttribute("aria-busy", "true");
-  opener.textContent = "Publishing…";
-  setAdminActionStatus(`Publishing ${adminMediaTitle(item)}…`);
+  opener.textContent = published ? "Publishing…" : "Unpublishing…";
+  setAdminActionStatus(
+    published
+      ? `Publishing ${adminMediaTitle(item)}…`
+      : `Unpublishing ${adminMediaTitle(item)}…`,
+  );
   try {
+    const headers = published
+      ? framenestMutationHeaders({ Accept: "application/json" })
+      : framenestMutationHeaders({
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      });
     const response = await fetch(
       `${ADMIN_MEDIA_ENDPOINT}/${encodeURIComponent(item.media_id)}/content-publication`,
       {
         method: "PUT",
-        headers: framenestMutationHeaders({ Accept: "application/json" }),
+        headers,
         cache: "no-store",
+        body: published ? undefined : JSON.stringify({ published: false }),
       },
     );
     const payload = await response.json();
     if (!publicationOwnerIsCurrent(owner)) return;
     if (response.ok) {
-      const message = payload.status === "already_published"
-        ? `${adminMediaTitle(item)} was already published.`
-        : `${adminMediaTitle(item)} published.`;
+      let message = `${adminMediaTitle(item)} published.`;
+      if (payload.status === "already_published") {
+        message = `${adminMediaTitle(item)} was already published.`;
+      } else if (payload.status === "unpublished") {
+        message = `${adminMediaTitle(item)} unpublished.`;
+      } else if (payload.status === "already_unpublished") {
+        message = `${adminMediaTitle(item)} was already unpublished.`;
+      }
       setAdminActionStatus(message);
       releasePublicationRequest(owner);
       await loadAdminCatalog({ focusMediaId: item.media_id });
       return;
     }
     const error = payload && payload.error ? payload.error : {};
-    if (response.status === 409) {
+    if (published && response.status === 409) {
       const orderedMissingFields = Array.isArray(error.missing_fields)
         ? error.missing_fields
         : [];
@@ -8342,33 +8389,46 @@ async function publishAdminMediaItem(item, opener) {
       item.missing_fields = orderedMissingFields;
       adminCatalogState.actionStatusByMediaId.set(item.media_id, {
         kind: "readiness",
+        mutation,
         retryable: false,
         message: `Publication is blocked by incomplete metadata: ${missingFields}.`,
       });
       setAdminActionStatus(`Publication is blocked by incomplete metadata: ${missingFields}.`);
     } else if (response.status === 401 || response.status === 403) {
+      const message = published
+        ? "Your current identity is not authorized to publish this item."
+        : "Your current identity is not authorized to unpublish this item.";
       adminCatalogState.actionStatusByMediaId.set(item.media_id, {
         kind: "authorization",
+        mutation,
         retryable: false,
-        message: "Your current identity is not authorized to publish this item.",
+        message,
       });
-      setAdminActionStatus("Your current identity is not authorized to publish this item.");
+      setAdminActionStatus(message);
     } else {
+      const message = published
+        ? "Publication failed without changing the durable state."
+        : "Unpublication failed without changing the durable state.";
       adminCatalogState.actionStatusByMediaId.set(item.media_id, {
         kind: "transient",
+        mutation,
         retryable: response.status >= 500,
-        message: "Publication failed without changing the durable state.",
+        message,
       });
-      setAdminActionStatus("Publication failed without changing the durable state.");
+      setAdminActionStatus(message);
     }
   } catch {
     if (!publicationOwnerIsCurrent(owner)) return;
+    const message = published
+      ? "Publication could not reach the local server."
+      : "Unpublication could not reach the local server.";
     adminCatalogState.actionStatusByMediaId.set(item.media_id, {
       kind: "transient",
+      mutation,
       retryable: true,
-      message: "Publication could not reach the local server.",
+      message,
     });
-    setAdminActionStatus("Publication could not reach the local server. Retry is available.");
+    setAdminActionStatus(`${message} Retry is available.`);
   } finally {
     if (publicationOwnerIsCurrent(owner)) {
       releasePublicationRequest(owner);
@@ -8382,8 +8442,10 @@ async function publishAdminMediaItem(item, opener) {
       });
       const retry = findAdminItemAction(item.media_id, "retry");
       const publish = findAdminItemAction(item.media_id, "publish");
+      const unpublish = findAdminItemAction(item.media_id, "unpublish");
       if (retry) retry.focus();
       else if (publish && !publish.disabled) publish.focus();
+      else if (unpublish && !unpublish.disabled) unpublish.focus();
       else if (adminMediaHeading) adminMediaHeading.focus();
     }
   }

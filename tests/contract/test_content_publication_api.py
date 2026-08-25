@@ -113,10 +113,10 @@ class _FakeList:
 @dataclass
 class _FakePublish:
     result: PublishContentResult | Exception
-    calls: list[str]
+    calls: list[tuple[str, bool]]
 
-    def execute(self, media_id: str) -> PublishContentResult:
-        self.calls.append(media_id)
+    def execute(self, media_id: str, *, published: bool = True) -> PublishContentResult:
+        self.calls.append((media_id, published))
         if isinstance(self.result, Exception):
             raise self.result
         return self.result
@@ -200,7 +200,7 @@ def test_publication_requires_audit_before_mutation_and_is_idempotent() -> None:
     created = first.put(f"/api/admin/media/{MEDIA_ID}/content-publication")
     assert created.status_code == 201
     assert created.json()["status"] == "published"
-    assert first_service.calls == [MEDIA_ID]
+    assert first_service.calls == [(MEDIA_ID, True)]
 
     repeated_result = PublishContentResult(
         status="already_published",
@@ -264,3 +264,125 @@ def test_not_ready_unknown_and_failures_are_sanitized() -> None:
     assert missing.status_code == 404
     assert missing.json()["error"]["code"] == "MEDIA_NOT_FOUND"
     assert "private" not in missing.text
+
+
+def test_omitted_and_empty_bodies_remain_publish_preserving() -> None:
+    omitted, _, omitted_service = _client(
+        identity=_identity(ROLE_ADMIN),
+        audit_proof=True,
+    )
+    empty, _, empty_service = _client(
+        identity=_identity(ROLE_ADMIN),
+        audit_proof=True,
+    )
+    explicit, _, explicit_service = _client(
+        identity=_identity(ROLE_ADMIN),
+        audit_proof=True,
+    )
+
+    assert omitted.put(
+        f"/api/admin/media/{MEDIA_ID}/content-publication"
+    ).status_code == 201
+    assert empty.put(
+        f"/api/admin/media/{MEDIA_ID}/content-publication",
+        json={},
+    ).status_code == 201
+    assert explicit.put(
+        f"/api/admin/media/{MEDIA_ID}/content-publication",
+        json={"published": True},
+    ).status_code == 201
+    assert omitted_service.calls == [(MEDIA_ID, True)]
+    assert empty_service.calls == [(MEDIA_ID, True)]
+    assert explicit_service.calls == [(MEDIA_ID, True)]
+
+
+def test_unpublish_is_idempotent_and_keeps_the_security_envelope() -> None:
+    unpublished_result = PublishContentResult(
+        status="unpublished",
+        publication=None,
+        readiness=derive_content_publication_readiness(
+            display_title="Manual title",
+            description="Manual description",
+            canonical_tag_count=1,
+        ),
+    )
+    already_result = PublishContentResult(
+        status="already_unpublished",
+        publication=None,
+        readiness=derive_content_publication_readiness(
+            display_title="Manual title",
+            description="Manual description",
+            canonical_tag_count=1,
+        ),
+    )
+    no_identity, _, no_identity_service = _client(identity=None, audit_proof=True)
+    ordinary, _, ordinary_service = _client(
+        identity=_identity(ROLE_USER),
+        audit_proof=True,
+    )
+    no_audit, _, blocked_service = _client(identity=_identity(ROLE_ADMIN))
+    unpublished, _, unpublished_service = _client(
+        identity=_identity(ROLE_ADMIN),
+        audit_proof=True,
+        publication_result=unpublished_result,
+    )
+    already, _, already_service = _client(
+        identity=_identity(ROLE_ADMIN),
+        audit_proof=True,
+        publication_result=already_result,
+    )
+    invalid, _, invalid_service = _client(
+        identity=_identity(ROLE_ADMIN),
+        audit_proof=True,
+    )
+
+    missing = no_identity.put(
+        f"/api/admin/media/{MEDIA_ID}/content-publication",
+        json={"published": False},
+    )
+    denied = ordinary.put(
+        f"/api/admin/media/{MEDIA_ID}/content-publication",
+        json={"published": False},
+    )
+    blocked = no_audit.put(
+        f"/api/admin/media/{MEDIA_ID}/content-publication",
+        json={"published": False},
+    )
+    first = unpublished.put(
+        f"/api/admin/media/{MEDIA_ID}/content-publication",
+        json={"published": False},
+    )
+    repeat = already.put(
+        f"/api/admin/media/{MEDIA_ID}/content-publication",
+        json={"published": False},
+    )
+    malformed = invalid.put(
+        f"/api/admin/media/{MEDIA_ID}/content-publication",
+        json={"published": "no"},
+    )
+
+    assert missing.status_code == 401
+    assert missing.json()["error"]["code"] == "IDENTITY_REQUIRED"
+    assert no_identity_service.calls == []
+    assert denied.status_code == 403
+    assert denied.json()["error"]["code"] == "CAPABILITY_DENIED"
+    assert ordinary_service.calls == []
+    assert blocked.status_code == 500
+    assert blocked.json()["error"]["code"] == "AUDIT_UNAVAILABLE"
+    assert blocked.headers["cache-control"] == "no-store"
+    assert blocked_service.calls == []
+    assert first.status_code == 200
+    assert first.json()["status"] == "unpublished"
+    assert first.json()["publication"] is None
+    assert first.json()["publication_ready"] is True
+    assert first.headers["cache-control"] == "no-store"
+    assert unpublished_service.calls == [(MEDIA_ID, False)]
+    assert repeat.status_code == 200
+    assert repeat.json()["status"] == "already_unpublished"
+    assert repeat.json()["publication"] is None
+    assert already_service.calls == [(MEDIA_ID, False)]
+    assert malformed.status_code == 422
+    assert malformed.json()["error"]["code"] == "INVALID_CONTENT_PUBLICATION"
+    assert malformed.json()["error"]["message"] == "Invalid content publication request."
+    assert "no" not in malformed.json()["error"]["message"]
+    assert invalid_service.calls == []

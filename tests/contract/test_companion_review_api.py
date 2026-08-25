@@ -528,6 +528,94 @@ def test_historical_companion_review_origin_remains_readable(tmp_path: Path) -> 
         assert GENERIC in {item["media_id"] for item in gallery_after.json()["items"]}
 
 
+def test_historical_companion_review_origin_unpublishes_and_history_remains(
+    tmp_path: Path,
+) -> None:
+    with _client(tmp_path, companion_origins=(COMPANION_ORIGIN,)) as client:
+        engine = create_sqlite_engine(tmp_path / "catalog.sqlite3")
+        try:
+            with engine.begin() as connection:
+                connection.execute(
+                    text(
+                        "INSERT INTO media_content_publications "
+                        "(media_id, published_at_ms, publication_origin) "
+                        "VALUES (:media, 99, 'companion_review')"
+                    ),
+                    {"media": GENERIC},
+                )
+        finally:
+            dispose_engine(engine)
+        applied = client.post(
+            f"/api/companion/review-inbox/{GENERIC}/apply",
+            headers=_mutation_headers(ADMIN_LOGIN, COMPANION_ORIGIN),
+            json={
+                "analysis_run_id": GENERIC_RUN,
+                "fields": ["display_title"],
+                "tag_keys": [],
+            },
+        )
+        assert applied.status_code == 200
+        assert applied.json()["publication"]["origin"] == "companion_review"
+        before = client.get(
+            f"/api/companion/review-inbox/{GENERIC}",
+            headers=_serve_headers(ADMIN_LOGIN, "Admin"),
+        )
+        assert before.status_code == 200
+        unpublished = client.put(
+            f"/api/admin/media/{GENERIC}/content-publication",
+            headers=_mutation_headers(ADMIN_LOGIN),
+            json={"published": False},
+        )
+        assert unpublished.status_code == 200
+        assert unpublished.json()["status"] == "unpublished"
+        assert unpublished.json()["publication"] is None
+        gallery = client.get("/api/media", headers=_serve_headers(USER_LOGIN, "Owner"))
+        assert GENERIC not in {item["media_id"] for item in gallery.json()["items"]}
+        after = client.get(
+            f"/api/companion/review-inbox/{GENERIC}",
+            headers=_serve_headers(ADMIN_LOGIN, "Admin"),
+        )
+        assert after.status_code == 200
+        assert after.json()["publication"]["state"] == "unpublished"
+        assert after.json()["publication"]["origin"] is None
+        assert after.json()["canonical"]["display_title"] == before.json()["canonical"][
+            "display_title"
+        ]
+        assert after.json()["canonical"]["field_sources"] == before.json()["canonical"][
+            "field_sources"
+        ]
+        assert after.json()["suggestions"] == before.json()["suggestions"]
+        engine = create_sqlite_engine(tmp_path / "catalog.sqlite3")
+        try:
+            with engine.connect() as db:
+                publications = db.execute(
+                    text(
+                        "SELECT COUNT(*) FROM media_content_publications "
+                        "WHERE media_id = :media"
+                    ),
+                    {"media": GENERIC},
+                ).scalar_one()
+                receipts = db.execute(
+                    text(
+                        "SELECT COUNT(*) FROM companion_review_field_sources "
+                        "WHERE media_id = :media"
+                    ),
+                    {"media": GENERIC},
+                ).scalar_one()
+                runs = db.execute(
+                    text(
+                        "SELECT COUNT(*) FROM media_analysis_runs "
+                        "WHERE media_id = :media"
+                    ),
+                    {"media": GENERIC},
+                ).scalar_one()
+            assert int(publications) == 0
+            assert int(receipts) >= 1
+            assert int(runs) == 1
+        finally:
+            dispose_engine(engine)
+
+
 def test_audit_failure_blocks_opened_and_apply(tmp_path: Path) -> None:
     with _client(tmp_path) as client:
         connection = sqlite3.connect(tmp_path / "catalog.sqlite3")

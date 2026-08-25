@@ -4247,6 +4247,13 @@ h2 {
   font-weight: 800;
 }
 
+.admin-media-action--unpublish {
+  border-color: var(--accent-border);
+  background: transparent;
+  color: var(--accent-strong);
+  font-weight: 800;
+}
+
 .admin-media-action--retry {
   border-color: rgba(243, 189, 101, 0.5);
   color: var(--warning);

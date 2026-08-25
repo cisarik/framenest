@@ -118,6 +118,7 @@ function renderAdminPublicationState(item) {
     safeAdminDetailsItem: (candidate) => candidate,
     openDetailsDialog: (candidate, opener) => detailsCalls.push({ candidate, opener }),
     publishAdminMediaItem: () => {},
+    unpublishAdminMediaItem: () => {},
     removeAdminMediaFromCatalog: () => {},
     identityHasCapability: () => true,
     adminBatchDriverActive: () => false,
@@ -294,21 +295,24 @@ test("single-item publication ownership prevents duplicate activation", () => {
 });
 
 test("publication UI waits for server truth and supports bounded failure recovery", () => {
-  const publish = extractFunction(APP_SOURCE, "publishAdminMediaItem");
-  assert.match(publish, /method: "PUT"/);
-  assert.match(publish, /framenestMutationHeaders/);
-  assert.match(publish, /claimPublicationRequest/);
-  assert.match(publish, /aria-busy/);
-  assert.match(publish, /if \(response\.ok\)/);
-  assert.match(publish, /await loadAdminCatalog/);
-  assert.match(publish, /response\.status === 409/);
-  assert.match(publish, /item\.publication_ready = false/);
-  assert.match(publish, /kind: "readiness"/);
-  assert.match(publish, /response\.status === 401 \|\| response\.status === 403/);
-  assert.match(publish, /kind: "authorization"/);
-  assert.match(publish, /retryable: response\.status >= 500/);
-  assert.match(publish, /retryable: true/);
-  assert.doesNotMatch(publish.slice(0, publish.indexOf("if (response.ok)")), /published\./);
+  const mutate = extractFunction(APP_SOURCE, "mutateAdminContentPublication");
+  assert.match(extractFunction(APP_SOURCE, "publishAdminMediaItem"), /mutateAdminContentPublication\(item, opener, true\)/);
+  assert.match(extractFunction(APP_SOURCE, "unpublishAdminMediaItem"), /mutateAdminContentPublication\(item, opener, false\)/);
+  assert.match(mutate, /method: "PUT"/);
+  assert.match(mutate, /framenestMutationHeaders/);
+  assert.match(mutate, /claimPublicationRequest/);
+  assert.match(mutate, /aria-busy/);
+  assert.match(mutate, /if \(response\.ok\)/);
+  assert.match(mutate, /await loadAdminCatalog/);
+  assert.match(mutate, /published && response\.status === 409/);
+  assert.match(mutate, /item\.publication_ready = false/);
+  assert.match(mutate, /kind: "readiness"/);
+  assert.match(mutate, /response\.status === 401 \|\| response\.status === 403/);
+  assert.match(mutate, /kind: "authorization"/);
+  assert.match(mutate, /retryable: response\.status >= 500/);
+  assert.match(mutate, /retryable: true/);
+  assert.match(mutate, /JSON\.stringify\(\{ published: false \}\)/);
+  assert.doesNotMatch(mutate.slice(0, mutate.indexOf("if (response.ok)")), /published\./);
 });
 
 test("admin states use literal text and non-color icons without claiming AI application", () => {
@@ -419,6 +423,12 @@ test("ready published DOM keeps ready metadata independent from durable publicat
     icon: "✓",
   });
   assert.equal(actionFor(actions, "publish"), undefined);
+  assert.equal(actionFor(actions, "unpublish").disabled, false);
+  assert.equal(actionFor(actions, "unpublish").textContent, "Unpublish");
+  assert.equal(
+    actionFor(actions, "unpublish").className,
+    "admin-media-action admin-media-action--unpublish",
+  );
   assert.equal(actionFor(actions, "retry"), undefined);
   assert.equal(row.className, "admin-media-row admin-media-row--published");
 });
@@ -447,7 +457,7 @@ test("incomplete unpublished DOM presents missing metadata and disables publicat
   assert.equal(actionFor(actions, "retry"), undefined);
 });
 
-test("published metadata regression DOM preserves publication without an active action", () => {
+test("published metadata regression DOM preserves publication and offers unpublish", () => {
   const row = renderAdminPublicationState(adminPublicationFixture({
     publication_ready: false,
     missing_fields: ["description"],
@@ -469,6 +479,7 @@ test("published metadata regression DOM preserves publication without an active 
     icon: "✓",
   });
   assert.equal(actionFor(actions, "publish"), undefined);
+  assert.equal(actionFor(actions, "unpublish").disabled, false);
   assert.equal(actionFor(actions, "retry"), undefined);
   assert.equal(row.className, "admin-media-row admin-media-row--published");
 });
@@ -542,6 +553,7 @@ test("action and badge classes preserve hierarchy touch targets and publication 
   );
   assert.match(STYLES_SOURCE, /\.admin-media-back-button\s*\{[\s\S]*?width: 44px;[\s\S]*?height: 44px/);
   assert.match(STYLES_SOURCE, /\.admin-media-row--published\s*\{[\s\S]*?--admin-row-published/);
+  assert.match(STYLES_SOURCE, /\.admin-media-action--unpublish\s*\{/);
   assert.doesNotMatch(
     extractFunction(APP_SOURCE, "renderAdminMediaItem"),
     /published[\s\S]*?admin-media-row--analysis-\$\{analysisPresentation\.rowModifier\}/,

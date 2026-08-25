@@ -101,13 +101,15 @@ class ListAdminMedia:
 
 @dataclass(frozen=True, slots=True)
 class PublishContent:
-    """Execute one atomic, conditional, idempotent publication."""
+    """Execute one atomic, conditional, idempotent publication or unpublication."""
 
     repository: ContentPublicationRepository
     now_ms: Callable[[], int] = default_now_ms
 
-    def execute(self, media_id: str) -> PublishContentResult:
+    def execute(self, media_id: str, *, published: bool = True) -> PublishContentResult:
         parsed = MediaId.from_string(media_id)
+        if not published:
+            return self.repository.unpublish(parsed)
         timestamp = self.now_ms()
         if (
             isinstance(timestamp, bool)

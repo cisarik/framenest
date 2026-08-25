@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 
-from sqlalchemy import exists, func, insert, select
+from sqlalchemy import delete, exists, func, insert, select
 from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
@@ -258,6 +258,46 @@ class SqliteContentPublicationRepository:
             return PublishContentResult(
                 status="published",
                 publication=publication,
+                readiness=readiness,
+            )
+
+        try:
+            return run_in_immediate_transaction(self._engine, operation)
+        except ContentPublicationMediaNotFoundError:
+            raise
+        except FrameNestContentPublicationRepositoryError:
+            raise
+        except (IntegrityError, SQLAlchemyError) as exc:
+            raise FrameNestContentPublicationRepositoryError(
+                _REPOSITORY_FAILURE_MESSAGE
+            ) from exc
+
+    def unpublish(self, media_id: MediaId) -> PublishContentResult:
+        def operation(connection: Connection) -> PublishContentResult:
+            media_id_text = media_id.to_string()
+            media_exists = connection.execute(
+                select(logical_media.c.id).where(logical_media.c.id == media_id_text)
+            ).first()
+            if media_exists is None:
+                raise ContentPublicationMediaNotFoundError(
+                    _REPOSITORY_FAILURE_MESSAGE
+                )
+            existing = _get_publication(connection, media_id_text)
+            readiness = _load_readiness(connection, media_id_text)
+            if existing is None:
+                return PublishContentResult(
+                    status="already_unpublished",
+                    publication=None,
+                    readiness=readiness,
+                )
+            connection.execute(
+                delete(media_content_publications).where(
+                    media_content_publications.c.media_id == media_id_text
+                )
+            )
+            return PublishContentResult(
+                status="unpublished",
+                publication=None,
                 readiness=readiness,
             )
 

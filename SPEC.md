@@ -605,8 +605,12 @@ The workspace remote path MUST remain authenticated Tailscale Serve to
 Administrator `PUT /api/admin/media/{media_id}/content-publication`, guarded
 by `media.content.publish`, MUST become the sole future promotion and
 unpublication path for every media type, including movies
-(implemented-for-backend). Companion Apply MUST keep metadata writes and
-MUST NOT publish.
+(implemented-for-backend). The same PUT MUST treat an omitted body as
+publish-preserving and `{"published": false}` as unpublication, returning
+truthful `published`, `already_published`, `unpublished`, or
+`already_unpublished` without mutating media bytes, metadata, aliases,
+analysis state, or history rows (implemented-for-backend). Companion Apply
+MUST keep metadata writes and MUST NOT publish.
 
 Public callers MUST be identity-absent. Public capabilities MUST be exactly
 `gallery.read` and `media.original.read`.

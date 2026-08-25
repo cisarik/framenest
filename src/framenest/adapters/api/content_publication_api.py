@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+import json
 
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse
@@ -39,6 +40,9 @@ PUBLICATION_NOT_READY_CODE = "CONTENT_PUBLICATION_NOT_READY"
 PUBLICATION_NOT_READY_MESSAGE = "Content is not ready for publication."
 PUBLICATION_FAILED_CODE = "CONTENT_PUBLICATION_FAILED"
 PUBLICATION_FAILED_MESSAGE = "Content publication failed."
+INVALID_PUBLICATION_BODY_CODE = "INVALID_CONTENT_PUBLICATION"
+INVALID_PUBLICATION_BODY_MESSAGE = "Invalid content publication request."
+_UNPUBLISH_STATUSES = frozenset({"unpublished", "already_unpublished"})
 IDENTITY_REQUIRED_CODE = "IDENTITY_REQUIRED"
 IDENTITY_REQUIRED_MESSAGE = "A verified application identity is required."
 CAPABILITY_DENIED_CODE = "CAPABILITY_DENIED"
@@ -118,7 +122,7 @@ class PublicationRepresentationResponse(BaseModel):
 class PublishContentResponse(BaseModel):
     status: str
     media_id: str
-    publication: PublicationRepresentationResponse
+    publication: PublicationRepresentationResponse | None
     publication_ready: bool
     missing_fields: list[str]
 
@@ -197,11 +201,12 @@ def create_content_publication_api_router(
             403: {"model": ErrorResponse},
             404: {"model": ErrorResponse},
             409: {"model": ErrorResponse},
+            422: {"model": ErrorResponse},
             500: {"model": ErrorResponse},
             503: {"model": ErrorResponse},
         },
     )
-    def publish_content(
+    async def publish_content(
         media_id: str,
         request: Request,
     ) -> PublishContentResponse | JSONResponse:
@@ -224,7 +229,18 @@ def create_content_publication_api_router(
                 CATALOG_UNAVAILABLE_MESSAGE,
             )
         try:
-            result = dependencies.publish_content.execute(media_id)
+            published = await _published_from_body(request)
+        except ContentPublicationValidationError:
+            return _error(
+                422,
+                INVALID_PUBLICATION_BODY_CODE,
+                INVALID_PUBLICATION_BODY_MESSAGE,
+            )
+        try:
+            result = dependencies.publish_content.execute(
+                media_id,
+                published=published,
+            )
         except (ContentPublicationMediaNotFoundError, FrameNestIdentityError):
             return _error(404, MEDIA_NOT_FOUND_CODE, MEDIA_NOT_FOUND_MESSAGE)
         except FrameNestContentPublicationRepositoryError:
@@ -245,6 +261,19 @@ def create_content_publication_api_router(
                 PUBLICATION_NOT_READY_CODE,
                 PUBLICATION_NOT_READY_MESSAGE,
                 missing_fields=list(result.readiness.missing_fields),
+            )
+        if result.status in _UNPUBLISH_STATUSES:
+            response = PublishContentResponse(
+                status=result.status,
+                media_id=media_id,
+                publication=None,
+                publication_ready=result.readiness.ready,
+                missing_fields=list(result.readiness.missing_fields),
+            )
+            return JSONResponse(
+                status_code=200,
+                content=response.model_dump(),
+                headers=_NO_STORE_HEADERS,
             )
         publication = result.publication
         if publication is None:
@@ -271,6 +300,26 @@ def create_content_publication_api_router(
         )
 
     return router
+
+
+async def _published_from_body(request: Request) -> bool:
+    raw = await request.body()
+    if not raw or not raw.strip():
+        return True
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ContentPublicationValidationError() from exc
+    if not isinstance(payload, dict):
+        raise ContentPublicationValidationError()
+    if set(payload) - {"published"}:
+        raise ContentPublicationValidationError()
+    if "published" not in payload:
+        return True
+    published = payload["published"]
+    if not isinstance(published, bool):
+        raise ContentPublicationValidationError()
+    return published
 
 
 def _require_capability(

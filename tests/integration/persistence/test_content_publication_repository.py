@@ -187,6 +187,86 @@ def test_publication_is_conditional_repeated_and_survives_metadata_regression(
     assert remains_published is True
 
 
+def test_unpublish_removes_the_row_and_leaves_catalog_state(tmp_path: Path) -> None:
+    repository, engine = _repository(tmp_path)
+    _seed(engine)
+    try:
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "INSERT INTO media_user_aliases "
+                    "(media_id, login_key, display_title, description, "
+                    "created_at_ms, updated_at_ms) VALUES "
+                    "(:media, 'owner@example.com', 'Alias title', 'Alias desc', 4, 4)"
+                ),
+                {"media": MEDIA_READY},
+            )
+        first = repository.publish(MediaId.from_string(MEDIA_READY), 101)
+        unpublished = repository.unpublish(MediaId.from_string(MEDIA_READY))
+        already = repository.unpublish(MediaId.from_string(MEDIA_READY))
+        never_published = repository.unpublish(MediaId.from_string(MEDIA_INCOMPLETE))
+        with engine.begin() as connection:
+            publications = connection.execute(
+                text("SELECT COUNT(*) FROM media_content_publications")
+            ).scalar_one()
+            title = connection.execute(
+                text(
+                    "SELECT display_title FROM media_metadata WHERE media_id = :media"
+                ),
+                {"media": MEDIA_READY},
+            ).scalar_one()
+            tags = connection.execute(
+                text(
+                    "SELECT COUNT(*) FROM media_canonical_tags WHERE media_id = :media"
+                ),
+                {"media": MEDIA_READY},
+            ).scalar_one()
+            aliases = connection.execute(
+                text(
+                    "SELECT COUNT(*) FROM media_user_aliases WHERE media_id = :media"
+                ),
+                {"media": MEDIA_READY},
+            ).scalar_one()
+            analysis = connection.execute(
+                text(
+                    "SELECT COUNT(*) FROM media_analysis_runs WHERE media_id = :media"
+                ),
+                {"media": MEDIA_READY},
+            ).scalar_one()
+            logical = connection.execute(
+                text("SELECT COUNT(*) FROM logical_media WHERE id = :media"),
+                {"media": MEDIA_READY},
+            ).scalar_one()
+        republished = repository.publish(MediaId.from_string(MEDIA_READY), 202)
+        missing = False
+        try:
+            repository.unpublish(
+                MediaId.from_string("33333333-3333-4333-8333-333333333333")
+            )
+        except ContentPublicationMediaNotFoundError:
+            missing = True
+        readiness_after = unpublished.readiness
+    finally:
+        engine.dispose()
+
+    assert first.status == "published"
+    assert unpublished.status == "unpublished"
+    assert unpublished.publication is None
+    assert already.status == "already_unpublished"
+    assert never_published.status == "already_unpublished"
+    assert int(publications) == 0
+    assert title == "Manual title"
+    assert int(tags) == 1
+    assert int(aliases) == 1
+    assert int(analysis) == 0
+    assert int(logical) == 1
+    assert readiness_after.ready is True
+    assert republished.status == "published"
+    assert republished.publication is not None
+    assert republished.publication.published_at_ms == 202
+    assert missing is True
+
+
 def test_single_media_workflow_status_is_bounded_and_truthful(tmp_path: Path) -> None:
     repository, engine = _repository(tmp_path)
     _seed(engine)

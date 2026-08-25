@@ -90,9 +90,15 @@ class AdminMediaPage:
 
 @dataclass(frozen=True, slots=True)
 class PublishContentResult:
-    """Atomic publication decision and its current persisted representation."""
+    """Atomic publication or unpublication decision and current representation."""
 
-    status: Literal["published", "already_published", "not_ready"]
+    status: Literal[
+        "published",
+        "already_published",
+        "not_ready",
+        "unpublished",
+        "already_unpublished",
+    ]
     publication: ContentPublication | None
     readiness: ContentPublicationReadiness
 
@@ -123,3 +129,6 @@ class ContentPublicationRepository(Protocol):
 
     def publish(self, media_id: MediaId, published_at_ms: int) -> PublishContentResult:
         """Atomically publish a ready item or return the current decision."""
+
+    def unpublish(self, media_id: MediaId) -> PublishContentResult:
+        """Atomically remove the publication row or report already unpublished."""
