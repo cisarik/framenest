@@ -42,7 +42,12 @@ A remote server or public cloud service MUST NOT replace local ownership or
 make local desktop operation unusable when the needed local server process,
 local catalog/cache records, and local media are available.
 
-Remote FrameNest communication direction MUST remain Tailscale-only unless explicitly superseded by an approved decision.
+Workspace remote FrameNest communication MUST remain Tailscale-only.
+[ADR-0074](docs/adr/0074-dual-audience-public-published-and-tailscale-workspace-boundary.md)
+accepts a second, local-only `public_published_uds` published-reader
+composition as future work; it is not implemented or exposed. Funnel to the
+workspace socket MUST remain forbidden. FrameNest MUST NOT require router
+port forwarding.
 
 Backends MUST NOT be publicly exposed by default.
 
@@ -564,13 +569,18 @@ The synchronization protocol remains unresolved.
 
 Local-only functions need no Tailscale.
 
-Remote and cross-device functions MUST use Tailscale in the approved direction unless explicitly superseded by an approved decision.
+Workspace remote and cross-device functions MUST use Tailscale in the approved
+direction unless explicitly superseded by an approved decision.
+[ADR-0074](docs/adr/0074-dual-audience-public-published-and-tailscale-workspace-boundary.md)
+is that supersession only for a second, local-only `public_published_uds`
+published-reader composition. That composition is not implemented or exposed.
 
 An application backend SHOULD bind to loopback when exposed through Tailscale Serve.
 
 FrameNest MUST NOT require router port forwarding.
 
-FrameNest MUST NOT use Tailscale Funnel in the approved direction.
+FrameNest MUST NOT use Tailscale Funnel against the workspace socket
+`/run/framenest/framenest.sock`.
 
 The normal application process MUST NOT invoke privileged Tailscale provisioning on every startup.
 
@@ -579,6 +589,30 @@ Network identity alone is insufficient authorization.
 Application capabilities must later be defined.
 
 This document does not place current Tailscale command syntax in the specification.
+
+### Dual-audience public published and Tailscale workspace
+
+Accepted architecture direction in
+[ADR-0074](docs/adr/0074-dual-audience-public-published-and-tailscale-workspace-boundary.md).
+These requirements are pending implementation wholes and MUST NOT be read as
+shipped runtime, public bind, TLS, Funnel, or flag enablement.
+
+The workspace remote path MUST remain authenticated Tailscale Serve to
+`/run/framenest/framenest.sock` and `tailscale_uds`.
+
+Administrator `PUT /api/admin/media/{media_id}/content-publication`, guarded
+by `media.content.publish`, MUST become the sole future promotion and
+unpublication path for every media type, including movies. Companion Apply
+MUST keep metadata writes and MUST NOT publish.
+
+Public callers MUST be identity-absent. Public capabilities MUST be exactly
+`gallery.read` and `media.original.read`.
+
+Workspace capabilities MUST add `media.workspace.read` and
+`analysis.propose` for ordinary and administrator roles, and
+administrator-only `metadata.alias.team.read`. Workspace unpublished reads
+MUST use a contributor-scoped audience-extension model without ownership
+columns or personal libraries.
 
 ## 20. Transfers and Duplicate Removal
 
@@ -787,7 +821,10 @@ local media are available.
 
 Remote-only media cards SHOULD be visible from metadata and covers without requiring full media download.
 
-Future remote access MUST follow the Tailscale-only direction unless explicitly superseded.
+Workspace future remote access MUST follow the Tailscale-only direction unless
+explicitly superseded. [ADR-0074](docs/adr/0074-dual-audience-public-published-and-tailscale-workspace-boundary.md)
+accepts a second, local-only `public_published_uds` published-reader
+composition as future work; it is not implemented or exposed.
 
 ### Progress Requirements
 

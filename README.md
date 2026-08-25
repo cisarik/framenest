@@ -60,7 +60,15 @@ extension-origin allowlist is configured
 [ADR-0071](docs/adr/0071-native-side-panel-review-inbox-chrome.md),
 [ADR-0072](docs/adr/0072-native-side-panel-unread-inbox-and-title-bar-history-chrome.md),
 [ADR-0073](docs/adr/0073-companion-merged-history-chrome-pending-visibility-x-seed-tag-and-preserving-apply.md),
-[docs/X_COMPANION.md](docs/X_COMPANION.md)). The upload path receives untrusted bytes only into
+[docs/X_COMPANION.md](docs/X_COMPANION.md)).
+[ADR-0074](docs/adr/0074-dual-audience-public-published-and-tailscale-workspace-boundary.md)
+is accepted architecture direction for a dual-audience boundary: the Tailscale
+workspace writer remains the current remote path, and a local-only
+`public_published_uds` published reader is future work with phased rollout
+successors. None of those successors is shipped. This status does not claim a
+public bind, TLS, Funnel, or automatic-analysis flag enablement.
+
+The upload path receives untrusted bytes only into
 configured server quarantine, performs bounded server-side validation, and
 derives canonical identity from validated byte size and SHA-256 digest. The
 current foundation also includes a durable manual cover foundation: at most one
@@ -513,7 +521,11 @@ The current conceptual direction is:
 - An authoritative FrameNest server process with browser, desktop, and remote
   clients.
 - External VLC first for playback, with embedded libVLC considered later.
-- Remote access through Tailscale-only networking rather than public internet exposure.
+- Workspace remote access through Tailscale Serve to
+  `/run/framenest/framenest.sock` rather than router port-forwarding. A second
+  public published-reader composition is accepted direction in
+  [ADR-0074](docs/adr/0074-dual-audience-public-published-and-tailscale-workspace-boundary.md)
+  and is not shipped.
 
 The accepted desktop and distributed-media direction remains documentation-led
 for Tauri packaging. No Tauri scaffold or installer exists yet. Authoritative
@@ -552,7 +564,11 @@ Exact future frontend framework or compiled toolchain, desktop/Tauri packaging c
 
 FrameNest must keep secrets out of Git. Real environment files, API keys, tokens, cookies, private keys, and service credentials must not be committed.
 
-Local desktop operation must not require a server. Remote features are expected to use Tailscale as the network boundary, and backend services must not be exposed publicly by default.
+Local desktop operation must not require a server. Workspace remote features
+are expected to use Tailscale as the network boundary. A second public
+published-reader composition is accepted architecture direction in
+[ADR-0074](docs/adr/0074-dual-audience-public-published-and-tailscale-workspace-boundary.md)
+and is not shipped. Backend services must not be exposed publicly by default.
 
 Security decisions should favor least privilege, explicit confirmation for destructive actions, and clear separation between local user data, generated runtime state, and version-controlled source files.
 

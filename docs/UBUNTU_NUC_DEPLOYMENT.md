@@ -17,6 +17,12 @@ previously accepted at public/canonical commit
 Tailscale Serve only; that fact is dated history, not a current guarantee.
 Execute host mutations only under an authorized operator task.
 
+A second public listener or public TLS termination for a
+`public_published_uds` composition is a new operational object. It requires
+separate explicit grants and is not part of routine `framenest-release`
+updates today. This runbook's operational commands are unchanged; see
+[ADR-0074](adr/0074-dual-audience-public-published-and-tailscale-workspace-boundary.md).
+
 Classification: deployment operator runbook.
 
 Consumers: Cooperator, Orchestrator, Worker, Ubuntu operators, and security
@@ -830,7 +836,10 @@ authenticated tailnet browser
 Security properties:
 
 - The application stops listening on TCP entirely; Tailscale Serve is the
-  only remote application ingress.
+  only remote application ingress today. A second public listener is a new
+  operational object per
+  [ADR-0074](adr/0074-dual-audience-public-published-and-tailscale-workspace-boundary.md)
+  and is not part of this phase or of routine `framenest-release` updates.
 - Serve strips and reinjects `Tailscale-User-*` identity headers; the
   application trusts them only in this ingress mode, bound to the protected
   Unix socket, and never trusts same-named headers from any other channel.
@@ -908,7 +917,10 @@ Stop conditions:
 - Real deployment acceptance of the automated catalog-backup timer on a host.
 - Off-device copies, media-byte backup, and in-place production catalog overwrite.
 - Live production provider-secret deployment or provider testing.
-- Tailscale Funnel or any ingress beyond the authenticated tailnet.
+- Tailscale Funnel or any ingress beyond the authenticated tailnet. A second
+  public listener or public TLS termination is a new operational object per
+  [ADR-0074](adr/0074-dual-audience-public-published-and-tailscale-workspace-boundary.md)
+  and is not part of this runbook.
 - Live Mullvad exit-node assignment; see [OPERATOR_NETWORK.md](OPERATOR_NETWORK.md)
   and [ADR-0058](adr/0058-independent-mullvad-egress-and-operator-network-recovery.md).
 - Multi-user administration UI, invitations, or per-user personal metadata.

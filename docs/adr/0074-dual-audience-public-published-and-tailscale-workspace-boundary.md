@@ -2,10 +2,12 @@
 
 ## Status
 
-`Proposed`
+`Accepted`
 
-This record is not authoritative until explicitly accepted. It must not be
-cited as shipped runtime, deployment, or living-document truth.
+Accepted by the Cooperator on 2026-08-25 with clarifications recorded in the
+external analytic trace (Meta `08_orchestrator_notes.md`, section 5). This
+record is accepted architecture direction. It does not claim shipped runtime,
+public bind, TLS, Funnel, or NUC changes.
 
 ## Decision Date
 
@@ -226,7 +228,7 @@ and `media.content.publish` continue representing administrator authority.
 
 ## Relationship and supersession matrix
 
-Do not edit the bodies of the ADRs named below. This proposed record is the
+Do not edit the bodies of the ADRs named below. This accepted record is the
 sole carrier of the new boundary.
 
 | ADR | Relation | Statements this ADR changes | Statements that remain |
@@ -303,7 +305,12 @@ it does not ship runtime. Ordered successor wholes:
   downloaded.
 - Public hostname, TLS product, and deployment host are outside this
   ADR-only whole; the accepted boundary is a distinct origin and socket.
-- Automatic analysis remains disabled.
+- In-git default for automatic media analysis stays off per
+  [ADR-0066](0066-administrator-owned-x-automatic-generic-analysis.md).
+  `FRAMENEST_AUTOMATIC_MEDIA_ANALYSIS_ENABLED` enablement for
+  administrator-owned X events is a separate Cooperator operational
+  decision on deployed environments, never enabled in tracked unit files by
+  Workers, and is not part of this whole.
 - This whole does not introduce registration, billing, payments, SaaS
   tenancy, personal libraries, a second database, anonymous upload, public
   aliases, public analysis, router forwarding of the admin API, companion
@@ -311,8 +318,8 @@ it does not ship runtime. Ordered successor wholes:
 
 ## Consequences
 
-- A proposed, reviewable contract exists for two audiences on one catalog
-  before any public listener is bound.
+- An accepted contract exists for two audiences on one catalog before any
+  public listener is bound.
 - Future publication writes converge on the administrator PUT; companion
   history remains compatible with existing `companion_review` rows.
 - Public callers are identity-absent and receive two read capabilities
@@ -320,9 +327,9 @@ it does not ship runtime. Ordered successor wholes:
   contributor-scoped content-audience extensions.
 - Companion public-origin reconnect and Brave acceptance remain parked
   successor wholes.
-- `SPEC.md`, `SERVER.md`, `SECURITY.md`, `README.md`, `PRODUCT.md`,
-  `ROADMAP.md`, and the NUC runbook stay unchanged until this ADR is
-  accepted and implementation truth changes.
+- Living documents may record this ADR as accepted architecture direction.
+  Runtime, public bind, TLS, Funnel, and NUC listener changes remain
+  successor wholes.
 
 ## Deferred work
 
@@ -338,6 +345,7 @@ companion public-origin reconnect.
 - [ADR-0054](0054-requester-private-youtube-acquisition-and-promotion-boundary.md)
 - [ADR-0062](0062-per-user-media-alias-overlay.md)
 - [ADR-0063](0063-companion-side-panel-web-host.md)
+- [ADR-0066](0066-administrator-owned-x-automatic-generic-analysis.md)
 - [ADR-0068](0068-companion-review-save-and-readiness-triggered-publication.md)
 - [ADR-0070](0070-companion-exclusion-of-movie-workflows.md)
 - [ADR-0073](0073-companion-merged-history-chrome-pending-visibility-x-seed-tag-and-preserving-apply.md)

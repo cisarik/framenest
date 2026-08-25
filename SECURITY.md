@@ -182,11 +182,36 @@ FrameNest security work should follow these principles:
 - Do not require routine root or administrator execution.
 - Do not disable AppArmor, firewall protections, or platform security controls as a shortcut.
 - Keep local backend services bound to localhost where applicable.
-- Use Tailscale as the remote network boundary for cross-device features.
+- Use Tailscale as the workspace remote network boundary for cross-device
+  features. A second public published-reader composition is accepted
+  architecture direction in
+  [ADR-0074](docs/adr/0074-dual-audience-public-published-and-tailscale-workspace-boundary.md)
+  and is not shipped.
 - Treat Tailscale networking as necessary but not sufficient; application-level authorization is still required.
 - Keep public-internet egress distinct from Tailscale Serve ingress; operator Mullvad controls are documented in [docs/OPERATOR_NETWORK.md](docs/OPERATOR_NETWORK.md) and [ADR-0058](docs/adr/0058-independent-mullvad-egress-and-operator-network-recovery.md) and must not create inbound exposure.
 - Require explicit confirmation for destructive actions.
 - Do not distribute provider secrets to ordinary client installations.
+
+### Dual-audience public trust boundary (accepted direction)
+
+[ADR-0074](docs/adr/0074-dual-audience-public-published-and-tailscale-workspace-boundary.md)
+records accepted architecture direction for a future local-only
+`public_published_uds` published-reader composition. That composition is not
+implemented or exposed. It does not add a public bind, TLS listener, Funnel,
+or flag enablement.
+
+When that composition is implemented:
+
+- Public callers are identity-absent and receive only published reads.
+- Unknown and unpublished items, and every unlisted route or method, return
+  the same sanitized `404`.
+- `Tailscale-*` headers MUST NOT be trusted outside `tailscale_uds`.
+- No CORS.
+- No shared caching initially, so an unpublished item is not retained by a
+  reverse-proxy cache.
+- The application process remains loopback-first. Workspace remote access
+  remains Tailscale Serve to `/run/framenest/framenest.sock`. Funnel to that
+  workspace socket stays forbidden. Router port-forwarding is not accepted.
 
 The sanitized NUC baseline in [docs/NUC_HOST_BASELINE.md](docs/NUC_HOST_BASELINE.md)
 is evidence of accepted host preparation, not authority for future host

@@ -296,6 +296,10 @@ Implemented within this phase:
 Companion review Save may publish when ready
 ([ADR-0068](docs/adr/0068-companion-review-save-and-readiness-triggered-publication.md));
 analysis completion still never auto-publishes.
+[ADR-0074](docs/adr/0074-dual-audience-public-published-and-tailscale-workspace-boundary.md)
+is accepted architecture direction that will make the administrator publication
+PUT the sole future promotion and unpublication path, including for movies;
+that successor is not shipped.
 
 Still required for phase exit: broader adapter coverage, generalized downloader
 UI, and additional source adapters beyond the shipped YouTube/X foundations.
@@ -392,7 +396,13 @@ Entry conditions: server deployment boundary and authorization decisions accepte
 
 Exit evidence: verification that remote access is private, authorized, and not publicly exposed.
 
-Boundaries: no router port forwarding and no Tailscale Funnel in the approved direction.
+Boundaries: no router port forwarding and no Tailscale Funnel against the
+workspace socket in the approved direction.
+[ADR-0074](docs/adr/0074-dual-audience-public-published-and-tailscale-workspace-boundary.md)
+accepts a second, local-only `public_published_uds` published-reader
+composition as architecture direction with phased rollout successors. Those
+successors are not shipped and are not part of this phase's current
+implementation.
 
 ## Phase 13 — Authoritative Multi-Device Catalog
 

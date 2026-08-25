@@ -65,6 +65,10 @@ v4 with 1–5 most significant tags
 Companion maps onto existing catalog tags only and does not create tags. Movie
 and genre workflows stay out of companion
 ([ADR-0070](docs/adr/0070-companion-exclusion-of-movie-workflows.md)).
+[ADR-0074](docs/adr/0074-dual-audience-public-published-and-tailscale-workspace-boundary.md)
+is accepted architecture direction for a dual-audience boundary (Tailscale
+workspace writer plus a future local-only `public_published_uds` published
+reader) with phased rollout successors. None of those successors is shipped.
 
 There is still no completed desktop shell, GUI Settings, complete Cover Studio,
 arbitrary user-created collections, persistent AI Drafts, multi-model draft
@@ -418,7 +422,10 @@ FrameNest must keep secrets out of Git.
 
 Backend services must not be publicly exposed by default.
 
-Remote functions follow a Tailscale-only direction unless explicitly superseded by an approved decision.
+Workspace remote functions follow a Tailscale-only direction.
+[ADR-0074](docs/adr/0074-dual-audience-public-published-and-tailscale-workspace-boundary.md)
+accepts a future local-only public published-reader composition; it is not
+shipped.
 
 Application-level authorization remains necessary even when the network boundary is private.
 
@@ -441,7 +448,10 @@ The future desktop shell should provide single-instance behavior, a tray or macO
 Early product non-goals include:
 
 - Complete Android or iOS application.
-- Public internet hosting.
+- Public internet hosting of the workspace application. A future
+  published-reader origin is accepted architecture direction in
+  [ADR-0074](docs/adr/0074-dual-audience-public-published-and-tailscale-workspace-boundary.md)
+  and is not current hosting.
 - Cloud backup.
 - Server-side transcoding infrastructure.
 - Embedded libVLC.

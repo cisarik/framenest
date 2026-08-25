@@ -18,7 +18,8 @@ Inbound links: [README.md](README.md), [PRODUCT.md](PRODUCT.md),
 [SPEC.md](SPEC.md), [ROADMAP.md](ROADMAP.md),
 [ADR-0022](docs/adr/0022-selective-media-placement-and-server-aggregation.md),
 [ADR-0035](docs/adr/0035-authoritative-server-and-client-state-model.md),
-and [ADR-0021](docs/adr/0021-tauri-desktop-shell.md).
+[ADR-0021](docs/adr/0021-tauri-desktop-shell.md),
+and [ADR-0074](docs/adr/0074-dual-audience-public-published-and-tailscale-workspace-boundary.md).
 
 Cleanup/update owner: future explicitly authorized Worker under an Orchestrator
 task. Git history remains the archive.
@@ -251,12 +252,16 @@ transcode originals.
 
 ## Network And Deployment Direction
 
-Remote access remains Tailscale-only unless superseded by a later
-accepted decision. FrameNest must not require router port forwarding or public
-internet exposure. Tailscale networking is not sufficient authorization by
+Workspace remote access remains Tailscale-only: authenticated Tailscale Serve
+to `/run/framenest/framenest.sock` and `tailscale_uds`.
+[ADR-0074](docs/adr/0074-dual-audience-public-published-and-tailscale-workspace-boundary.md)
+accepts a second, local-only `public_published_uds` published-reader
+composition as future work. That composition is not implemented or exposed.
+Funnel to the workspace socket stays forbidden. FrameNest must not require
+router port forwarding. Tailscale networking is not sufficient authorization by
 itself; application-level authorization remains required. The accepted
-implementation of this direction is the Tailscale remote-access and identity
-foundation in
+implementation of the workspace remote path is the Tailscale remote-access and
+identity foundation in
 [ADR-0048](docs/adr/0048-tailscale-remote-access-and-identity-foundation.md):
 root-owned Tailscale HTTPS Serve proxies to a permission-restricted Unix
 socket, and the application maps the exact verified Serve login to explicit
