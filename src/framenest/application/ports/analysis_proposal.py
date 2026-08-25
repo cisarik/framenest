@@ -75,3 +75,11 @@ class AnalysisProposalRepository(Protocol):
         offset: int,
     ) -> AdminAnalysisProposalPage:
         """Return open proposals newest first."""
+
+    def count_created_since(
+        self,
+        *,
+        login_key: str,
+        since_ms: int,
+    ) -> int:
+        """Count proposals created by one user at or after the window start."""

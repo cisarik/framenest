@@ -11,10 +11,16 @@ from fastapi.testclient import TestClient
 from sqlalchemy import text
 
 from framenest.adapters.api.application import create_app
+from framenest.adapters.api.analysis_proposal_api import AnalysisProposalApiDependencies
 from framenest.adapters.api.tailscale_ingress import (
     SCOPE_AUDIT_EVENT_ID,
     SCOPE_IDENTITY,
     find_route_policy,
+)
+from framenest.application.analysis_proposal import (
+    MS_PER_HOUR,
+    ListAnalysisProposals,
+    ProposeAnalysis,
 )
 from framenest.configuration import FrameNestSettings
 from framenest.domain.identity_access import (
@@ -24,6 +30,9 @@ from framenest.domain.identity_access import (
     IdentityContext,
     ROLE_ADMIN,
     ROLE_USER,
+)
+from framenest.infrastructure.persistence.analysis_proposal_repository import (
+    SqliteAnalysisProposalRepository,
 )
 from framenest.infrastructure.persistence.engine import create_sqlite_engine, dispose_engine
 from framenest.infrastructure.persistence.migrations import upgrade_database_to_head
@@ -71,6 +80,39 @@ def _client(
 
 def _plain_client(settings: FrameNestSettings) -> TestClient:
     return TestClient(create_app(settings=settings))
+
+
+def _rate_limited_client(
+    settings: FrameNestSettings,
+    login: str,
+    role: str,
+    *,
+    max_submits_per_hour: int,
+    clock: list[int],
+) -> TestClient:
+    engine = create_sqlite_engine(settings.database_path)
+    repository = SqliteAnalysisProposalRepository(engine)
+    dependencies = AnalysisProposalApiDependencies(
+        propose_analysis=ProposeAnalysis(
+            repository,
+            now_ms=lambda: clock[0],
+            max_submits_per_hour=max_submits_per_hour,
+        ),
+        list_analysis_proposals=ListAnalysisProposals(repository),
+        catalog_available=lambda: True,
+    )
+    app = create_app(
+        settings=settings,
+        analysis_proposal_api_dependencies=dependencies,
+    )
+
+    @app.middleware("http")
+    async def inject_identity(request: Request, call_next):
+        request.scope[SCOPE_IDENTITY] = _identity(login, role)
+        request.scope[SCOPE_AUDIT_EVENT_ID] = "audit-event"
+        return await call_next(request)
+
+    return TestClient(app)
 
 
 def _prepare(tmp_path: Path) -> FrameNestSettings:
@@ -403,3 +445,69 @@ def test_trusted_ingress_records_propose_audit_event(tmp_path: Path) -> None:
     assert row["target_id"] == MEDIA_A
     assert row["outcome"] == "allowed"
     assert row["http_status"] == 201
+
+
+def test_per_user_submit_rate_limit_returns_sanitized_429(tmp_path: Path) -> None:
+    settings = _prepare(tmp_path)
+    client = _rate_limited_client(
+        settings, ALICE, ROLE_USER, max_submits_per_hour=2, clock=[1_000_000]
+    )
+    first = client.post(PROPOSE_PATH, headers=_propose_headers())
+    second = client.post(PROPOSE_PATH, headers=_propose_headers())
+    assert first.status_code == 201
+    assert second.status_code == 201
+    limited = client.post(PROPOSE_PATH, headers=_propose_headers())
+    assert limited.status_code == 429
+    payload = limited.json()
+    assert payload == {
+        "error": {
+            "code": "ANALYSIS_PROPOSAL_RATE_LIMIT",
+            "message": "Too many analysis proposals this hour.",
+        }
+    }
+    assert limited.headers.get("cache-control") == "no-store"
+
+
+def test_rate_limit_window_resets_after_one_hour(tmp_path: Path) -> None:
+    settings = _prepare(tmp_path)
+    clock = [2_000_000]
+    client = _rate_limited_client(
+        settings, ALICE, ROLE_USER, max_submits_per_hour=1, clock=clock
+    )
+    assert client.post(PROPOSE_PATH, headers=_propose_headers()).status_code == 201
+    blocked = client.post(PROPOSE_PATH, headers=_propose_headers())
+    assert blocked.status_code == 429
+    clock[0] += MS_PER_HOUR + 1
+    reset = client.post(PROPOSE_PATH, headers=_propose_headers())
+    assert reset.status_code == 201
+
+
+def test_rate_limit_is_isolated_per_user(tmp_path: Path) -> None:
+    settings = _prepare(tmp_path)
+    alice = _rate_limited_client(
+        settings, ALICE, ROLE_USER, max_submits_per_hour=1, clock=[3_000_000]
+    )
+    bob = _rate_limited_client(
+        settings, BOB, ROLE_USER, max_submits_per_hour=1, clock=[3_000_000]
+    )
+    alice_first = alice.post(PROPOSE_PATH, headers=_propose_headers())
+    assert alice_first.status_code == 201
+    alice_blocked = alice.post(PROPOSE_PATH, headers=_propose_headers())
+    assert alice_blocked.status_code == 429
+    bob_response = bob.post(PROPOSE_PATH, headers=_propose_headers())
+    assert bob_response.status_code == 201
+    assert bob_response.json()["proposal_id"] != alice_first.json()["proposal_id"]
+
+
+def test_admin_list_unaffected_while_user_rate_limited(tmp_path: Path) -> None:
+    settings = _prepare(tmp_path)
+    alice = _rate_limited_client(
+        settings, ALICE, ROLE_USER, max_submits_per_hour=1, clock=[4_000_000]
+    )
+    assert alice.post(PROPOSE_PATH, headers=_propose_headers()).status_code == 201
+    assert alice.post(PROPOSE_PATH, headers=_propose_headers()).status_code == 429
+    listed = _client(settings, ADMIN, ROLE_ADMIN).get(LIST_PATH)
+    assert listed.status_code == 200
+    page = listed.json()
+    assert page["total"] == 1
+    assert page["items"][0]["proposer_login"] == ALICE

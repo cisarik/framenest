@@ -16,6 +16,7 @@ from framenest.adapters.api.tailscale_ingress import (
 from framenest.application.analysis_proposal import (
     DEFAULT_ANALYSIS_PROPOSAL_LIMIT,
     MAX_ANALYSIS_PROPOSAL_LIMIT,
+    AnalysisProposalLimitError,
     AnalysisProposalValidationError,
 )
 from framenest.application.ports.analysis_proposal import (
@@ -106,6 +107,7 @@ def create_analysis_proposal_api_router(
             403: {"model": ErrorResponse},
             404: {"model": ErrorResponse},
             422: {"model": ErrorResponse},
+            429: {"model": ErrorResponse},
             500: {"model": ErrorResponse},
             503: {"model": ErrorResponse},
         },
@@ -136,6 +138,8 @@ def create_analysis_proposal_api_router(
             return _error(404, MEDIA_NOT_FOUND_CODE, MEDIA_NOT_FOUND_MESSAGE)
         except AnalysisProposalValidationError:
             return _error(422, INVALID_QUERY_CODE, INVALID_QUERY_MESSAGE)
+        except AnalysisProposalLimitError as exc:
+            return _error(429, exc.code, str(exc))
         except FrameNestAnalysisProposalRepositoryError:
             return _error(500, PROPOSAL_FAILED_CODE, PROPOSAL_FAILED_MESSAGE)
         except Exception:

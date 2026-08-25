@@ -167,6 +167,32 @@ class SqliteAnalysisProposalRepository:
                 _REPOSITORY_FAILURE_MESSAGE
             ) from exc
 
+    def count_created_since(
+        self,
+        *,
+        login_key: str,
+        since_ms: int,
+    ) -> int:
+        def operation(connection: Connection) -> int:
+            return int(
+                connection.execute(
+                    select(func.count())
+                    .select_from(media_analysis_proposals)
+                    .where(
+                        media_analysis_proposals.c.proposed_by_login_key
+                        == login_key,
+                        media_analysis_proposals.c.created_at_ms >= since_ms,
+                    )
+                ).scalar_one()
+            )
+
+        try:
+            return run_in_transaction(self._engine, operation)
+        except SQLAlchemyError as exc:
+            raise FrameNestAnalysisProposalRepositoryError(
+                _REPOSITORY_FAILURE_MESSAGE
+            ) from exc
+
 
 def _load_tag_counts(
     connection: Connection,
