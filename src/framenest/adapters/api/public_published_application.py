@@ -52,7 +52,7 @@ from framenest.infrastructure.persistence.media_metadata_repository import (
 )
 from framenest.infrastructure.persistence.media_repository import SqliteMediaRepository
 
-REQUIRED_PUBLIC_SCHEMA_REVISION = "0032"
+REQUIRED_PUBLIC_SCHEMA_REVISION = "0033"
 _SAFE_METHODS = frozenset({"GET", "HEAD"})
 
 

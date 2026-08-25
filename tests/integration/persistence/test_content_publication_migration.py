@@ -231,5 +231,5 @@ def test_packaged_head_is_0022(tmp_path: Path) -> None:
     )
     status = upgrade_database_to_head(settings)
 
-    assert status.current_revision == status.head_revision == "0032"
+    assert status.current_revision == status.head_revision == "0033"
     assert inspect_database_migration_status(settings) == status

@@ -30,6 +30,10 @@ from framenest.adapters.api.workspace_media_api import (
     WorkspaceMediaApiDependencies,
     create_workspace_media_api_router,
 )
+from framenest.adapters.api.analysis_proposal_api import (
+    AnalysisProposalApiDependencies,
+    create_analysis_proposal_api_router,
+)
 from framenest.adapters.api.cover_api import (
     CoverApiDependencies,
     create_cover_api_router,
@@ -102,6 +106,10 @@ from framenest.application.content_publication import (
     PublishContent,
 )
 from framenest.application.workspace_media import ListWorkspaceMedia
+from framenest.application.analysis_proposal import (
+    ListAnalysisProposals,
+    ProposeAnalysis,
+)
 from framenest.application.media_catalog import GetMediaCatalogItem, ListMediaCatalog
 from framenest.application.companion_picker import ListCompanionPickerMedia
 from framenest.application.companion_review import (
@@ -240,6 +248,9 @@ from framenest.infrastructure.persistence.content_publication_repository import 
 from framenest.infrastructure.persistence.media_attribution_repository import (
     SqliteMediaAttributionRepository,
 )
+from framenest.infrastructure.persistence.analysis_proposal_repository import (
+    SqliteAnalysisProposalRepository,
+)
 from framenest.infrastructure.persistence.library_repository import SqliteLibraryRepository
 from framenest.infrastructure.persistence.media_cover_repository import (
     SqliteMediaCoverRepository,
@@ -333,6 +344,7 @@ def create_app(
     content_publication_api_dependencies: ContentPublicationApiDependencies
     | None = None,
     workspace_media_api_dependencies: WorkspaceMediaApiDependencies | None = None,
+    analysis_proposal_api_dependencies: AnalysisProposalApiDependencies | None = None,
     catalog_removal_api_dependencies: CatalogRemovalApiDependencies | None = None,
     cover_api_dependencies: CoverApiDependencies | None = None,
     upload_api_dependencies: UploadApiDependencies | None = None,
@@ -377,6 +389,7 @@ def create_app(
     owned_media_analysis_run_repository = None
     owned_content_publication_repository = None
     owned_media_attribution_repository = None
+    owned_analysis_proposal_repository = None
     owned_content_audience_policy = None
     owned_cover_repository = None
     owned_cover_service = None
@@ -423,6 +436,9 @@ def create_app(
             SqliteContentPublicationRepository(owned_engine)
         )
         owned_media_attribution_repository = SqliteMediaAttributionRepository(
+            owned_engine
+        )
+        owned_analysis_proposal_repository = SqliteAnalysisProposalRepository(
             owned_engine
         )
         owned_cover_repository = SqliteMediaCoverRepository(owned_engine)
@@ -700,6 +716,17 @@ def create_app(
         workspace_media_api_dependencies = WorkspaceMediaApiDependencies(
             list_workspace_media=ListWorkspaceMedia(
                 owned_media_attribution_repository
+            ),
+            catalog_available=resolved_settings.database_path.exists,
+        )
+    if (
+        analysis_proposal_api_dependencies is None
+        and owned_analysis_proposal_repository is not None
+    ):
+        analysis_proposal_api_dependencies = AnalysisProposalApiDependencies(
+            propose_analysis=ProposeAnalysis(owned_analysis_proposal_repository),
+            list_analysis_proposals=ListAnalysisProposals(
+                owned_analysis_proposal_repository
             ),
             catalog_available=resolved_settings.database_path.exists,
         )
@@ -1205,6 +1232,10 @@ def create_app(
     if workspace_media_api_dependencies is not None:
         app.include_router(
             create_workspace_media_api_router(workspace_media_api_dependencies)
+        )
+    if analysis_proposal_api_dependencies is not None:
+        app.include_router(
+            create_analysis_proposal_api_router(analysis_proposal_api_dependencies)
         )
     if catalog_removal_api_dependencies is not None:
         app.include_router(

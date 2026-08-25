@@ -246,7 +246,7 @@ def test_sigterm_exits_within_injected_envelope_and_reaps_fake_child(
             row = connection.execute(
                 "SELECT version_num FROM alembic_version"
             ).fetchone()
-        assert row == ("0032",)
+        assert row == ("0033",)
         connection_retry = sqlite3.connect(tmp_path / "db" / "catalog.sqlite3")
         try:
             connection_retry.execute("SELECT COUNT(*) FROM alembic_version")

@@ -19,6 +19,7 @@ import uuid
 import anyio
 
 from framenest.domain.identity_access import (
+    CAPABILITY_ANALYSIS_PROPOSE,
     CAPABILITY_ANALYSIS_RUN,
     CAPABILITY_GALLERY_READ,
     CAPABILITY_LIBRARY_SCAN,
@@ -217,6 +218,14 @@ ROUTE_POLICIES: tuple[RoutePolicy, ...] = (
         capability=CAPABILITY_MEDIA_WORKSPACE_READ,
     ),
     RoutePolicy(
+        method="POST",
+        template="/api/workspace/media/{media_id}/analysis-proposals",
+        capability=CAPABILITY_ANALYSIS_PROPOSE,
+        audit_action="analysis.propose",
+        audit_target_type="media",
+        audit_target_group="media_id",
+    ),
+    RoutePolicy(
         method="GET",
         template="/api/media/{media_id}",
         capability=CAPABILITY_GALLERY_READ,
@@ -227,6 +236,13 @@ ROUTE_POLICIES: tuple[RoutePolicy, ...] = (
         capability=CAPABILITY_MEDIA_WORKFLOW_READ,
         audit_action="media.workflow.list",
         audit_target_type="media_workflow",
+    ),
+    RoutePolicy(
+        method="GET",
+        template="/api/admin/analysis-proposals",
+        capability=CAPABILITY_MEDIA_WORKFLOW_READ,
+        audit_action="analysis.proposals.list",
+        audit_target_type="analysis_proposal",
     ),
     RoutePolicy(
         method="PUT",

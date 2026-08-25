@@ -76,7 +76,7 @@ def test_living_docs_drop_two_list_and_replace_current_contract() -> None:
 
 def test_current_schema_head_is_0032() -> None:
     assert "schema head `0032`" in _text(REPOSITORY_ROOT / "README.md")
-    assert "schema head `0032`" in _text(REPOSITORY_ROOT / "SPEC.md")
+    assert "schema head `0033`" in _text(REPOSITORY_ROOT / "SPEC.md")
     assert "schema head `0032`" in _text(REPOSITORY_ROOT / "PRODUCT.md")
     roadmap = _text(REPOSITORY_ROOT / "ROADMAP.md")
     assert "revision `0032`" in roadmap

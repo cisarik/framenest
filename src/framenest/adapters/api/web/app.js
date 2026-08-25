@@ -5,6 +5,7 @@ const LIBRARIES_ENDPOINT = "/api/libraries";
 const MEDIA_CATALOG_ENDPOINT = "/api/media";
 const ADMIN_MEDIA_ENDPOINT = "/api/admin/media";
 const WORKSPACE_MEDIA_ENDPOINT = "/api/workspace/media";
+const ANALYSIS_PROPOSALS_ENDPOINT = "/api/admin/analysis-proposals";
 const MEDIA_METADATA_ENDPOINT_PREFIX = "/api/media";
 const CANONICAL_TAGS_ENDPOINT = "/api/canonical-tags";
 const AI_CAPABILITY_ENDPOINT = "/api/ai/media-suggestion-capability";
@@ -23,6 +24,7 @@ const UPLOAD_RECOVERY_STORAGE_KEY = "framenest.upload.recovery.v1";
 const CATALOG_PAGE_SIZE = 30;
 const ADMIN_MEDIA_PAGE_SIZE = 24;
 const WORKSPACE_MEDIA_PAGE_SIZE = 24;
+const ANALYSIS_PROPOSALS_PAGE_SIZE = 24;
 const ADMIN_ANALYSIS_BATCH_MAX_ITEMS = 10;
 const DEFAULT_UPLOAD_CHUNK_BYTES = 1024 * 1024;
 const UPLOAD_POLL_INTERVAL_MS = 1200;
@@ -142,6 +144,16 @@ let adminCatalogState = {
 let workspaceMediaRequestToken = 0;
 let workspaceMediaState = {
   limit: WORKSPACE_MEDIA_PAGE_SIZE,
+  offset: 0,
+  total: 0,
+  requestOwner: null,
+  items: [],
+  loading: false,
+  error: false,
+};
+let analysisProposalRequestToken = 0;
+let analysisProposalState = {
+  limit: ANALYSIS_PROPOSALS_PAGE_SIZE,
   offset: 0,
   total: 0,
   requestOwner: null,
@@ -332,6 +344,13 @@ function identityAllowsWorkspaceMedia() {
     && identityHasCapability("media.workspace.read");
 }
 
+function identityAllowsAnalysisPropose() {
+  return identityState.resolved
+    && identityState.available
+    && Boolean(identityState.login)
+    && identityHasCapability("analysis.propose");
+}
+
 function resetAudienceState() {
   identityState.resolved = true;
   identityState.available = false;
@@ -422,6 +441,10 @@ function applyIdentityCapabilities() {
   if (adminMediaOpenButton) {
     adminMediaOpenButton.hidden = !identityAllowsAdminWorkflow();
   }
+  const analysisProposalsAllowed = identityAllowsAdminWorkflow();
+  if (typeof analysisProposalsOpenButton !== "undefined" && analysisProposalsOpenButton) {
+    analysisProposalsOpenButton.hidden = !analysisProposalsAllowed;
+  }
   const workspaceAllowed = typeof identityAllowsWorkspaceMedia === "function"
     && identityAllowsWorkspaceMedia();
   if (typeof workspaceMediaOpenButton !== "undefined" && workspaceMediaOpenButton) {
@@ -461,6 +484,15 @@ function applyIdentityCapabilities() {
   }
   if (!identityAllowsAdminWorkflow() && adminMediaBrowser && !adminMediaBrowser.hidden) {
     closeAdminMediaBrowser();
+  }
+  if (
+    !analysisProposalsAllowed
+    && typeof analysisProposalsBrowser !== "undefined"
+    && analysisProposalsBrowser
+    && !analysisProposalsBrowser.hidden
+    && typeof closeAnalysisProposalsBrowser === "function"
+  ) {
+    closeAnalysisProposalsBrowser();
   }
   if (
     !workspaceAllowed
@@ -619,6 +651,19 @@ const workspaceMediaResults = document.querySelector("#workspace-media-results")
 const workspaceMediaPageSummary = document.querySelector("#workspace-media-page-summary");
 const workspaceMediaPrevButton = document.querySelector("#workspace-media-prev-button");
 const workspaceMediaNextButton = document.querySelector("#workspace-media-next-button");
+const analysisProposalsOpenButton = document.querySelector("#analysis-proposals-open-button");
+const analysisProposalsBrowser = document.querySelector("#analysis-proposals-browser");
+const analysisProposalsHeading = document.querySelector("#analysis-proposals-heading");
+const analysisProposalsCloseButton = document.querySelector("#analysis-proposals-close-button");
+const analysisProposalsActionStatus = document.querySelector("#analysis-proposals-action-status");
+const analysisProposalsLoading = document.querySelector("#analysis-proposals-loading");
+const analysisProposalsEmpty = document.querySelector("#analysis-proposals-empty");
+const analysisProposalsError = document.querySelector("#analysis-proposals-error");
+const analysisProposalsRetryButton = document.querySelector("#analysis-proposals-retry-button");
+const analysisProposalsResults = document.querySelector("#analysis-proposals-results");
+const analysisProposalsPageSummary = document.querySelector("#analysis-proposals-page-summary");
+const analysisProposalsPrevButton = document.querySelector("#analysis-proposals-prev-button");
+const analysisProposalsNextButton = document.querySelector("#analysis-proposals-next-button");
 const adminMediaBrowser = document.querySelector("#admin-media-browser");
 const adminMediaHeading = document.querySelector("#admin-media-heading");
 const adminMediaCloseButton = document.querySelector("#admin-media-close-button");
@@ -9372,6 +9417,9 @@ function openAdminMediaBrowser() {
   if (catalogBrowser) catalogBrowser.hidden = true;
   if (headerSearch) headerSearch.hidden = true;
   if (workspaceMediaBrowser) workspaceMediaBrowser.hidden = true;
+  if (typeof analysisProposalsBrowser !== "undefined" && analysisProposalsBrowser) {
+    analysisProposalsBrowser.hidden = true;
+  }
   adminMediaBrowser.hidden = false;
   adminCatalogState.offset = 0;
   resetAdminBatchForQueryChange();
@@ -9503,7 +9551,21 @@ function renderWorkspaceMediaItem(item) {
       published ? "✓" : "○",
     ),
   );
-  row.append(titleCell, readinessCell, publicationCell);
+  const actionsCell = document.createElement("div");
+  actionsCell.className = "admin-media-cell admin-media-cell--actions";
+  actionsCell.setAttribute("role", "cell");
+  if (typeof identityAllowsAnalysisPropose === "function" && identityAllowsAnalysisPropose()) {
+    const proposeButton = document.createElement("button");
+    proposeButton.type = "button";
+    proposeButton.className = "admin-media-action";
+    proposeButton.textContent = "Propose analysis";
+    proposeButton.dataset.mediaId = item.media_id;
+    proposeButton.addEventListener("click", () => {
+      proposeWorkspaceAnalysis(item, proposeButton);
+    });
+    actionsCell.appendChild(proposeButton);
+  }
+  row.append(titleCell, readinessCell, publicationCell, actionsCell);
   return row;
 }
 
@@ -9578,6 +9640,9 @@ function openWorkspaceMediaBrowser() {
   if (catalogBrowser) catalogBrowser.hidden = true;
   if (headerSearch) headerSearch.hidden = true;
   if (adminMediaBrowser) adminMediaBrowser.hidden = true;
+  if (typeof analysisProposalsBrowser !== "undefined" && analysisProposalsBrowser) {
+    analysisProposalsBrowser.hidden = true;
+  }
   workspaceMediaBrowser.hidden = false;
   workspaceMediaState.offset = 0;
   loadWorkspaceMedia();
@@ -9591,6 +9656,217 @@ function closeWorkspaceMediaBrowser() {
   if (headerSearch) headerSearch.hidden = false;
   if (workspaceMediaOpenButton && !workspaceMediaOpenButton.hidden) {
     workspaceMediaOpenButton.focus();
+  }
+}
+
+async function proposeWorkspaceAnalysis(item, opener) {
+  if (!identityAllowsAnalysisPropose() || !item || typeof item.media_id !== "string") return;
+  if (opener) opener.disabled = true;
+  if (workspaceMediaActionStatus) {
+    workspaceMediaActionStatus.textContent = "Recording analysis proposal…";
+  }
+  try {
+    const response = await fetch(
+      `${WORKSPACE_MEDIA_ENDPOINT}/${encodeURIComponent(item.media_id)}/analysis-proposals`,
+      {
+        method: "POST",
+        headers: framenestMutationHeaders({ Accept: "application/json" }),
+        cache: "no-store",
+      },
+    );
+    if (response.ok) {
+      if (workspaceMediaActionStatus) {
+        workspaceMediaActionStatus.textContent = "Proposal recorded. Analysis is not started.";
+      }
+      return;
+    }
+    if (workspaceMediaActionStatus) {
+      workspaceMediaActionStatus.textContent = response.status === 404
+        ? "That medium could not be found."
+        : "The analysis proposal could not be recorded.";
+    }
+  } catch {
+    if (workspaceMediaActionStatus) {
+      workspaceMediaActionStatus.textContent = "The analysis proposal could not reach the server.";
+    }
+  } finally {
+    if (opener) opener.disabled = false;
+  }
+}
+
+function snapshotAnalysisProposalQueryState() {
+  return Object.freeze({
+    limit: analysisProposalState.limit,
+    offset: analysisProposalState.offset,
+  });
+}
+
+function buildAnalysisProposalQueryParams(snapshot = snapshotAnalysisProposalQueryState()) {
+  const params = new URLSearchParams();
+  params.set("limit", String(snapshot.limit));
+  params.set("offset", String(snapshot.offset));
+  return params;
+}
+
+function beginAnalysisProposalRequest() {
+  const owner = {
+    token: analysisProposalRequestToken + 1,
+    ...snapshotAnalysisProposalQueryState(),
+  };
+  analysisProposalRequestToken = owner.token;
+  analysisProposalState.requestOwner = owner;
+  return owner;
+}
+
+function analysisProposalRequestOwnerIsCurrent(owner) {
+  return Boolean(owner)
+    && analysisProposalState.requestOwner === owner
+    && analysisProposalRequestToken === owner.token
+    && analysisProposalState.limit === owner.limit
+    && analysisProposalState.offset === owner.offset;
+}
+
+function setAnalysisProposalsViewState(state) {
+  analysisProposalState.loading = state === "loading";
+  analysisProposalState.error = state === "error";
+  if (analysisProposalsLoading) analysisProposalsLoading.hidden = state !== "loading";
+  if (analysisProposalsEmpty) analysisProposalsEmpty.hidden = state !== "empty";
+  if (analysisProposalsError) analysisProposalsError.hidden = state !== "error";
+  if (analysisProposalsResults) {
+    analysisProposalsResults.hidden = state === "loading" || state === "error" || state === "empty";
+    analysisProposalsResults.setAttribute("aria-busy", String(state === "loading"));
+  }
+}
+
+function renderAnalysisProposalItem(item) {
+  const row = document.createElement("article");
+  const published = item.content_publication_state === "published";
+  row.className = published
+    ? "admin-media-row admin-media-row--published"
+    : "admin-media-row admin-media-row--unpublished";
+  row.setAttribute("role", "row");
+  const titleCell = document.createElement("div");
+  titleCell.className = "admin-media-cell admin-media-cell--summary";
+  titleCell.setAttribute("role", "cell");
+  const title = document.createElement("p");
+  title.className = "admin-media-row__title";
+  title.textContent = typeof item.display_title === "string" && item.display_title.trim()
+    ? item.display_title.trim()
+    : "Untitled media";
+  const meta = document.createElement("p");
+  meta.className = "admin-media-row__metadata";
+  const proposer = typeof item.proposer_login === "string" ? item.proposer_login : "";
+  meta.textContent = proposer ? `Proposed by ${proposer}` : "Proposed by an unknown login";
+  titleCell.append(title, meta);
+  const readinessCell = document.createElement("div");
+  readinessCell.className = "admin-media-cell admin-media-cell--readiness";
+  readinessCell.setAttribute("role", "cell");
+  readinessCell.appendChild(
+    createAdminStateBadge(
+      item.publication_ready ? "Ready to publish" : "Incomplete metadata",
+      item.publication_ready ? "ready" : "incomplete",
+      item.publication_ready ? "✓" : "!",
+    ),
+  );
+  const publicationCell = document.createElement("div");
+  publicationCell.className = "admin-media-cell admin-media-cell--publication";
+  publicationCell.setAttribute("role", "cell");
+  publicationCell.appendChild(
+    createAdminStateBadge(
+      published ? "Published" : "Unpublished",
+      published ? "published" : "neutral",
+      published ? "✓" : "○",
+    ),
+  );
+  const statusCell = document.createElement("div");
+  statusCell.className = "admin-media-cell";
+  statusCell.setAttribute("role", "cell");
+  statusCell.appendChild(
+    createAdminStateBadge(
+      typeof item.status === "string" ? item.status : "open",
+      "neutral",
+      "○",
+    ),
+  );
+  row.append(titleCell, readinessCell, publicationCell, statusCell);
+  return row;
+}
+
+function renderAnalysisProposalsPage(page) {
+  analysisProposalState.items = Array.isArray(page.items) ? page.items : [];
+  analysisProposalState.total = Number.isInteger(page.total) ? page.total : 0;
+  analysisProposalState.limit = Number.isInteger(page.limit) ? page.limit : ANALYSIS_PROPOSALS_PAGE_SIZE;
+  analysisProposalState.offset = Number.isInteger(page.offset) ? page.offset : 0;
+  if (analysisProposalsResults) {
+    analysisProposalsResults.replaceChildren(
+      ...analysisProposalState.items.map((item) => renderAnalysisProposalItem(item)),
+    );
+  }
+  const start = analysisProposalState.total === 0 ? 0 : analysisProposalState.offset + 1;
+  const end = Math.min(
+    analysisProposalState.offset + analysisProposalState.items.length,
+    analysisProposalState.total,
+  );
+  if (analysisProposalsPageSummary) {
+    analysisProposalsPageSummary.textContent = analysisProposalState.total === 0
+      ? "No open proposals."
+      : `Showing ${start}–${end} of ${analysisProposalState.total}.`;
+  }
+  if (analysisProposalsPrevButton) analysisProposalsPrevButton.disabled = !page.has_previous;
+  if (analysisProposalsNextButton) analysisProposalsNextButton.disabled = !page.has_next;
+  setAnalysisProposalsViewState(analysisProposalState.items.length === 0 ? "empty" : "results");
+}
+
+async function loadAnalysisProposals() {
+  if (!identityAllowsAdminWorkflow() || !analysisProposalsBrowser) return false;
+  const owner = beginAnalysisProposalRequest();
+  setAnalysisProposalsViewState("loading");
+  try {
+    const response = await fetch(
+      `${ANALYSIS_PROPOSALS_ENDPOINT}?${buildAnalysisProposalQueryParams(owner).toString()}`,
+      {
+        headers: { Accept: "application/json" },
+        cache: "no-store",
+      },
+    );
+    if (!analysisProposalRequestOwnerIsCurrent(owner)) return false;
+    if (!response.ok) {
+      setAnalysisProposalsViewState("error");
+      return false;
+    }
+    const page = await response.json();
+    if (!analysisProposalRequestOwnerIsCurrent(owner)) return false;
+    renderAnalysisProposalsPage(page);
+    if (analysisProposalsHeading) analysisProposalsHeading.focus();
+    return true;
+  } catch {
+    if (analysisProposalRequestOwnerIsCurrent(owner)) {
+      setAnalysisProposalsViewState("error");
+    }
+    return false;
+  }
+}
+
+function openAnalysisProposalsBrowser() {
+  if (!identityAllowsAdminWorkflow() || !analysisProposalsBrowser) return;
+  if (catalogBrowser) catalogBrowser.hidden = true;
+  if (headerSearch) headerSearch.hidden = true;
+  if (adminMediaBrowser) adminMediaBrowser.hidden = true;
+  if (workspaceMediaBrowser) workspaceMediaBrowser.hidden = true;
+  analysisProposalsBrowser.hidden = false;
+  analysisProposalState.offset = 0;
+  if (analysisProposalsActionStatus) analysisProposalsActionStatus.textContent = "";
+  loadAnalysisProposals();
+}
+
+function closeAnalysisProposalsBrowser() {
+  analysisProposalRequestToken += 1;
+  analysisProposalState.requestOwner = null;
+  if (analysisProposalsBrowser) analysisProposalsBrowser.hidden = true;
+  if (catalogBrowser) catalogBrowser.hidden = false;
+  if (headerSearch) headerSearch.hidden = false;
+  if (analysisProposalsOpenButton && !analysisProposalsOpenButton.hidden) {
+    analysisProposalsOpenButton.focus();
   }
 }
 
@@ -11617,6 +11893,39 @@ if (workspaceMediaNextButton) {
     if (nextOffset >= workspaceMediaState.total) return;
     workspaceMediaState.offset = nextOffset;
     loadWorkspaceMedia();
+  });
+}
+
+if (analysisProposalsOpenButton) {
+  analysisProposalsOpenButton.addEventListener("click", openAnalysisProposalsBrowser);
+}
+
+if (analysisProposalsCloseButton) {
+  analysisProposalsCloseButton.addEventListener("click", closeAnalysisProposalsBrowser);
+}
+
+if (analysisProposalsRetryButton) {
+  analysisProposalsRetryButton.addEventListener("click", () => {
+    loadAnalysisProposals();
+  });
+}
+
+if (analysisProposalsPrevButton) {
+  analysisProposalsPrevButton.addEventListener("click", () => {
+    analysisProposalState.offset = Math.max(
+      0,
+      analysisProposalState.offset - analysisProposalState.limit,
+    );
+    loadAnalysisProposals();
+  });
+}
+
+if (analysisProposalsNextButton) {
+  analysisProposalsNextButton.addEventListener("click", () => {
+    const nextOffset = analysisProposalState.offset + analysisProposalState.limit;
+    if (nextOffset >= analysisProposalState.total) return;
+    analysisProposalState.offset = nextOffset;
+    loadAnalysisProposals();
   });
 }
 

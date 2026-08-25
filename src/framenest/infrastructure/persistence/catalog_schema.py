@@ -2104,3 +2104,53 @@ media_catalog_removal_receipts = Table(
         "occurred_at_ms",
     ),
 )
+
+media_analysis_proposals = Table(
+    "media_analysis_proposals",
+    metadata,
+    Column("id", Text(), primary_key=True, nullable=False),
+    Column(
+        "media_id",
+        Text(),
+        ForeignKey(
+            "logical_media.id",
+            ondelete="CASCADE",
+            name="fk_media_analysis_proposals_media_id",
+        ),
+        nullable=False,
+    ),
+    Column("proposed_by_login_key", Text(), nullable=False),
+    Column("created_at_ms", Integer(), nullable=False),
+    Column("status", Text(), nullable=False),
+    CheckConstraint(
+        "length(id) = 36",
+        name="ck_media_analysis_proposals_id_length",
+    ),
+    CheckConstraint(
+        "length(media_id) = 36",
+        name="ck_media_analysis_proposals_media_id_length",
+    ),
+    CheckConstraint(
+        _COMPANION_REVIEW_LOGIN_KEY_SQL.format(column="proposed_by_login_key"),
+        name="ck_media_analysis_proposals_proposed_by_login_key",
+    ),
+    CheckConstraint(
+        "created_at_ms >= 0",
+        name="ck_media_analysis_proposals_created_at_ms_non_negative",
+    ),
+    CheckConstraint(
+        "status IN ('open', 'dismissed', 'completed')",
+        name="ck_media_analysis_proposals_status",
+    ),
+    Index(
+        "ix_media_analysis_proposals_created_at",
+        "created_at_ms",
+        "id",
+    ),
+    Index(
+        "ix_media_analysis_proposals_status_created",
+        "status",
+        "created_at_ms",
+        "id",
+    ),
+)

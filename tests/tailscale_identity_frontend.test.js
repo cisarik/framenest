@@ -306,8 +306,8 @@ test("mutation helper always injects the FrameNest mutation header", () => {
 test("every unsafe fetch call site sends the mutation header", () => {
   const mutationSites = APP_SOURCE.match(/method: "(?:POST|PUT|PATCH|DELETE)"/g) || [];
   const wrappedSites = APP_SOURCE.match(/headers: framenestMutationHeaders\(/g) || [];
-  assert.equal(mutationSites.length, 29);
-  assert.equal(wrappedSites.length, 29);
+  assert.equal(mutationSites.length, 30);
+  assert.equal(wrappedSites.length, 30);
   assert.equal((APP_SOURCE.match(/"X-FrameNest-Request"/g) || []).length, 1);
 });
 
@@ -372,6 +372,7 @@ test("privileged controls are gated by capabilities in source", () => {
   assert.ok(APP_SOURCE.includes('identityHasCapability("metadata.canonical.write")'));
   assert.ok(APP_SOURCE.includes('identityHasCapability("analysis.run")'));
   assert.ok(APP_SOURCE.includes('identityHasCapability("media.workspace.read")'));
+  assert.ok(APP_SOURCE.includes('identityHasCapability("analysis.propose")'));
   assert.ok(APP_SOURCE.includes("awaits administrator review"));
   assert.ok(APP_SOURCE.includes("clearStaleUploadRecoveryState"));
   assert.ok(APP_SOURCE.includes("submission expired or is unavailable"));

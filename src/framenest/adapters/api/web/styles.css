@@ -4862,17 +4862,20 @@ h2 {
 
 body:not([data-audience]) #upload-open-button,
 body:not([data-audience]) #workspace-media-open-button,
+body:not([data-audience]) #analysis-proposals-open-button,
 body[data-audience="public_published"] #upload-open-button,
 body[data-audience="public_published"] #ai-status-button,
 body[data-audience="public_published"] #admin-media-open-button,
 body[data-audience="public_published"] #workspace-media-open-button,
+body[data-audience="public_published"] #analysis-proposals-open-button,
 body[data-audience="public_published"] #youtube-claim-open-button,
 body[data-audience="public_published"] #youtube-request-open-button,
 body[data-audience="public_published"] #x-request-open-button,
 body[data-audience="public_published"] #x-admin-open-button,
 body[data-audience="public_published"] #media-details-edit,
 body[data-audience="public_published"] #media-details-choose-cover,
-body[data-audience="public_published"] #workspace-media-browser {
+body[data-audience="public_published"] #workspace-media-browser,
+body[data-audience="public_published"] #analysis-proposals-browser {
   display: none !important;
 }
 
@@ -4883,5 +4886,9 @@ body[data-audience="public_published"] #workspace-media-browser {
 }
 
 .workspace-media-browser .admin-media-row {
-  grid-template-columns: minmax(0, 1.6fr) minmax(8rem, 0.7fr) minmax(8rem, 0.6fr);
+  grid-template-columns: minmax(0, 1.6fr) minmax(8rem, 0.7fr) minmax(8rem, 0.6fr) minmax(7rem, 0.55fr);
+}
+
+.analysis-proposals-browser .admin-media-row {
+  grid-template-columns: minmax(0, 1.4fr) minmax(8rem, 0.7fr) minmax(8rem, 0.6fr) minmax(8rem, 0.7fr);
 }

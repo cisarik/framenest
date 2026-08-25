@@ -86,3 +86,43 @@ test("workspace list uses the dedicated endpoint rather than gallery", () => {
     /MEDIA_CATALOG_ENDPOINT\?/,
   );
 });
+
+test("propose-analysis control is capability-gated and does not call analysis run routes", () => {
+  assert.match(
+    extractFunction(APP_SOURCE, "identityAllowsAnalysisPropose"),
+    /identityHasCapability\("analysis\.propose"\)/,
+  );
+  const render = extractFunction(APP_SOURCE, "renderWorkspaceMediaItem");
+  assert.match(render, /identityAllowsAnalysisPropose/);
+  assert.match(render, /Propose analysis/);
+  const propose = extractFunction(APP_SOURCE, "proposeWorkspaceAnalysis");
+  assert.match(propose, /WORKSPACE_MEDIA_ENDPOINT/);
+  assert.match(propose, /analysis-proposals/);
+  assert.match(propose, /framenestMutationHeaders/);
+  assert.doesNotMatch(propose, /durable-analysis/);
+  assert.doesNotMatch(propose, /automatic-analysis/);
+  assert.doesNotMatch(propose, /media-analysis-preview/);
+});
+
+test("administrator analysis-proposals view stays hidden from the public audience", () => {
+  assert.match(
+    INDEX_SOURCE,
+    /id="analysis-proposals-open-button"[\s\S]*?hidden[\s\S]*?>[\s\S]*?Analysis proposals/,
+  );
+  assert.match(INDEX_SOURCE, /id="analysis-proposals-browser"/);
+  assert.match(
+    extractFunction(APP_SOURCE, "applyIdentityCapabilities"),
+    /analysisProposalsOpenButton/,
+  );
+  assert.match(
+    STYLES_SOURCE,
+    /body\[data-audience="public_published"\] #analysis-proposals-open-button/,
+  );
+  assert.match(
+    STYLES_SOURCE,
+    /body\[data-audience="public_published"\] #analysis-proposals-browser/,
+  );
+  assert.match(APP_SOURCE, /const ANALYSIS_PROPOSALS_ENDPOINT = "\/api\/admin\/analysis-proposals"/);
+  assert.match(extractFunction(APP_SOURCE, "loadAnalysisProposals"), /ANALYSIS_PROPOSALS_ENDPOINT/);
+  assert.match(extractFunction(APP_SOURCE, "openAnalysisProposalsBrowser"), /identityAllowsAdminWorkflow/);
+});

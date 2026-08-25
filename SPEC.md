@@ -4,7 +4,7 @@
 
 FrameNest is in foundation-stage pre-alpha development. This document defines normative requirements for future implementation.
 
-A Poetry package foundation exists with centralized configuration, a FastAPI application factory, a typed health endpoint, a loopback-first Uvicorn runtime dependency and startup command, a minimal SQLAlchemy Core/Alembic SQLite migration foundation through schema head `0032`, pure domain identity primitives, local device and library registries, a minimum persistent logical-media and physical-location catalog foundation, persistent display-title and canonical-tag core, catalog retrieval with display-title search and canonical-tag AND filtering, a manual browser `Current` metadata workspace for display-title and ordered canonical-tag assignment, an automatic built-in `Processed` workflow collection derived from durable tag saves, read-only library scan preview, explicit idempotent scan-candidate import, local media-analysis preview, provider-neutral NVIDIA/Vercel suggestion preview, VLM JPEG derivative transport, a server-operated AI configuration and diagnostics CLI, a packaged local web shell, an explicit editable browser AI suggestion review, an administrator companion merged title-bar history of pending and analyzed generic items, a best-effort `x`/`𝕏` Save seed, and preserving review Apply, a trusted-loopback quarantine upload path with bounded validation, exact-duplicate disposition, and optional atomic publication to an explicitly selected server-owned library, ordinary-user private upload submission with administrator review, requester-private YouTube and X meme acquisition with administrator promotion, durable manual covers, automated catalog backup/retention/restore-verification foundations, mounted off-device catalog copy and operator-workstation pull-based catalog snapshot recovery foundations, Tailscale remote-access and identity foundations, a portable media sidecar v1 projection with `framenest-sidecar` export/validate/compare, and a repository-native systemd service foundation targeted at Ubuntu Server 24.04 on the Intel NUC6i5SYH personal production server. There is no completed desktop shell, arbitrary user-created collections, a general collection manager, suggested filenames, complete Cover Studio, imported/AI/series covers, cover candidates, persistent AI Drafts, or multi-model draft comparison/promotion yet. A durable manual cover foundation is implemented (migration `0022` per [ADR-0050](docs/adr/0050-durable-manual-cover-foundation.md)): one accepted manually selected cover per logical medium with durable artifacts and regenerable cover thumbnails. Unresolved architecture choices remain subject to future architecture decision records.
+A Poetry package foundation exists with centralized configuration, a FastAPI application factory, a typed health endpoint, a loopback-first Uvicorn runtime dependency and startup command, a minimal SQLAlchemy Core/Alembic SQLite migration foundation through schema head `0033`, pure domain identity primitives, local device and library registries, a minimum persistent logical-media and physical-location catalog foundation, persistent display-title and canonical-tag core, catalog retrieval with display-title search and canonical-tag AND filtering, a manual browser `Current` metadata workspace for display-title and ordered canonical-tag assignment, an automatic built-in `Processed` workflow collection derived from durable tag saves, read-only library scan preview, explicit idempotent scan-candidate import, local media-analysis preview, provider-neutral NVIDIA/Vercel suggestion preview, VLM JPEG derivative transport, a server-operated AI configuration and diagnostics CLI, a packaged local web shell, an explicit editable browser AI suggestion review, an administrator companion merged title-bar history of pending and analyzed generic items, a best-effort `x`/`𝕏` Save seed, and preserving review Apply, a trusted-loopback quarantine upload path with bounded validation, exact-duplicate disposition, and optional atomic publication to an explicitly selected server-owned library, ordinary-user private upload submission with administrator review, requester-private YouTube and X meme acquisition with administrator promotion, durable manual covers, automated catalog backup/retention/restore-verification foundations, mounted off-device catalog copy and operator-workstation pull-based catalog snapshot recovery foundations, Tailscale remote-access and identity foundations, a portable media sidecar v1 projection with `framenest-sidecar` export/validate/compare, and a repository-native systemd service foundation targeted at Ubuntu Server 24.04 on the Intel NUC6i5SYH personal production server. There is no completed desktop shell, arbitrary user-created collections, a general collection manager, suggested filenames, complete Cover Studio, imported/AI/series covers, cover candidates, persistent AI Drafts, or multi-model draft comparison/promotion yet. A durable manual cover foundation is implemented (migration `0022` per [ADR-0050](docs/adr/0050-durable-manual-cover-foundation.md)): one accepted manually selected cover per logical medium with durable artifacts and regenerable cover thumbnails. Unresolved architecture choices remain subject to future architecture decision records.
 
 The implemented persistence head also includes durable content-publication
 truth through migration `0021`, published-only ordinary catalog retrieval, a
@@ -618,12 +618,23 @@ Public callers MUST be identity-absent. Public capabilities MUST be exactly
 
 Workspace capabilities MUST add `media.workspace.read` for ordinary and
 administrator roles (implemented-for-backend). `analysis.propose` for
-ordinary and administrator roles and administrator-only
-`metadata.alias.team.read` remain successor workspace capabilities.
+ordinary and administrator roles (implemented-for-backend). Administrator-only
+`metadata.alias.team.read` remains a successor workspace capability.
 Workspace unpublished reads MUST use a contributor-scoped
 audience-extension model without ownership columns or personal libraries
 (implemented-for-backend for the workspace media list, upload-attributed
 content reads, and administrator contribution filter).
+`POST /api/workspace/media/{media_id}/analysis-proposals`, guarded by
+`analysis.propose`, MUST create a durable administrator-visible proposal and
+audit event without calling a provider, enqueueing analysis, or toggling
+automatic analysis (implemented-for-backend). Duplicate proposals for the
+same medium MUST each create their own row. Unknown media MUST return the
+same sanitized not-found as other catalog misses.
+`GET /api/admin/analysis-proposals` MUST list open proposals newest first
+under administrator `media.workflow.read`, including proposer login, media
+title snapshot, publication/readiness, and status
+(implemented-for-backend). Public callers MUST receive `404` for both
+routes.
 
 ## 20. Transfers and Duplicate Removal
 
@@ -971,6 +982,9 @@ Ubuntu NUC.
 
 Migration `0032` adds `companion_review_tag_sources` for per-tag companion
 review provenance without historical backfill.
+
+Migration `0033` adds `media_analysis_proposals` for durable ordinary-user
+analysis proposals without provider execution or enqueue.
 
 The companion review surface MUST expose `GET /api/companion/review-inbox`,
 `GET /api/companion/review-inbox/{media_id}`,

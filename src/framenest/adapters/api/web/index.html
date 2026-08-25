@@ -53,6 +53,14 @@
           Manage media
         </button>
         <button
+          id="analysis-proposals-open-button"
+          class="status-button admin-media-nav-button"
+          type="button"
+          hidden
+        >
+          Analysis proposals
+        </button>
+        <button
           id="youtube-claim-open-button"
           class="status-button youtube-claim-nav-button"
           type="button"
@@ -917,6 +925,68 @@
           <div class="catalog-pagination__nav">
             <button id="workspace-media-prev-button" type="button">Previous</button>
             <button id="workspace-media-next-button" type="button">Next</button>
+          </div>
+        </div>
+      </section>
+
+      <section
+        id="analysis-proposals-browser"
+        class="admin-media-browser analysis-proposals-browser"
+        aria-labelledby="analysis-proposals-heading"
+        hidden
+      >
+        <div class="admin-media-header">
+          <button
+            id="analysis-proposals-close-button"
+            class="admin-media-back-button"
+            type="button"
+            aria-label="Back to Gallery"
+            title="Back to Gallery"
+          >
+            <span aria-hidden="true">&larr;</span>
+          </button>
+          <div>
+            <p class="admin-media-eyebrow">Administrator</p>
+            <h1 id="analysis-proposals-heading" tabindex="-1">Analysis proposals</h1>
+            <p class="admin-media-intro">
+              Open requests from mapped users. Proposing does not run analysis.
+            </p>
+          </div>
+        </div>
+        <p
+          id="analysis-proposals-action-status"
+          class="admin-media-action-status"
+          role="status"
+          aria-live="polite"
+          aria-atomic="true"
+        ></p>
+        <div
+          id="analysis-proposals-loading"
+          class="library-state library-state--loading"
+          role="status"
+          hidden
+        >
+          <span class="library-state__spinner" aria-hidden="true"></span>
+          <span class="library-state__message">Loading proposals…</span>
+        </div>
+        <div id="analysis-proposals-empty" class="library-state library-state--empty" hidden role="status">
+          <p class="library-state__message">No open analysis proposals.</p>
+        </div>
+        <div id="analysis-proposals-error" class="library-state library-state--error" hidden role="alert">
+          <p class="library-state__message">Analysis proposals could not be loaded.</p>
+          <button id="analysis-proposals-retry-button" class="library-state__action" type="button">Retry</button>
+        </div>
+        <div
+          id="analysis-proposals-results"
+          class="admin-media-results"
+          role="table"
+          aria-label="Open analysis proposals"
+        ></div>
+        <div class="catalog-pagination admin-media-pagination" aria-label="Analysis proposal pagination">
+          <p id="analysis-proposals-page-summary" role="status">No proposal page loaded.</p>
+          <div class="catalog-pagination__nav">
+            <button id="analysis-proposals-prev-button" type="button">Previous</button>
+            <button id="analysis-proposals-next-button" type="button">Next</button>
           </div>
         </div>
       </section>
