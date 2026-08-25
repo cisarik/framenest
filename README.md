@@ -622,6 +622,7 @@ Current foundation files:
 - [`.editorconfig`](.editorconfig) defines baseline editor formatting.
 - [`SECURITY.md`](SECURITY.md) defines the initial pre-alpha security policy.
 - [`docs/INFOSEC.md`](docs/INFOSEC.md) records the repository-local infosec hardening manual, audit record, and read-only operator diagnostics; it claims no deployed state.
+- [`docs/ACCEPTANCE_DUAL_AUDIENCE.md`](docs/ACCEPTANCE_DUAL_AUDIENCE.md) is the step-by-step Cooperator acceptance guide for the dual-audience boundary, including the deployment-freeze annex.
 - [`PRODUCT.md`](PRODUCT.md) defines the approved product vision, users, outcomes, experience principles, capabilities, and non-goals.
 - [`SPEC.md`](SPEC.md) defines the initial normative product and system requirements.
 - [`ROADMAP.md`](ROADMAP.md) defines the staged evidence-based development roadmap.

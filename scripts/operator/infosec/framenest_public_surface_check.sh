@@ -51,7 +51,11 @@ USAGE
 }
 
 case "${1:-}" in
-    -h|--help|"") ;;
+    -h|--help)
+        usage
+        exit 0
+        ;;
+    "") ;;
     *) usage >&2; exit 64 ;;
 esac
 
