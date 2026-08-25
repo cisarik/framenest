@@ -621,6 +621,7 @@ Current foundation files:
 - [`.gitattributes`](.gitattributes) defines cross-platform text and binary handling.
 - [`.editorconfig`](.editorconfig) defines baseline editor formatting.
 - [`SECURITY.md`](SECURITY.md) defines the initial pre-alpha security policy.
+- [`docs/INFOSEC.md`](docs/INFOSEC.md) records the repository-local infosec hardening manual, audit record, and read-only operator diagnostics; it claims no deployed state.
 - [`PRODUCT.md`](PRODUCT.md) defines the approved product vision, users, outcomes, experience principles, capabilities, and non-goals.
 - [`SPEC.md`](SPEC.md) defines the initial normative product and system requirements.
 - [`ROADMAP.md`](ROADMAP.md) defines the staged evidence-based development roadmap.
