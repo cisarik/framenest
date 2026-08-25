@@ -30,6 +30,7 @@ from framenest.domain.identity_access import (
     CAPABILITY_MEDIA_ORIGINAL_READ,
     CAPABILITY_MEDIA_WORKFLOW_READ,
     CAPABILITY_MEDIA_WORKSPACE_READ,
+    CAPABILITY_METADATA_ALIAS_TEAM_READ,
     CAPABILITY_METADATA_ALIAS_WRITE,
     CAPABILITY_METADATA_CANONICAL_WRITE,
     CAPABILITY_PROVIDER_OPERATE,
@@ -243,6 +244,15 @@ ROUTE_POLICIES: tuple[RoutePolicy, ...] = (
         capability=CAPABILITY_MEDIA_WORKFLOW_READ,
         audit_action="analysis.proposals.list",
         audit_target_type="analysis_proposal",
+    ),
+    RoutePolicy(
+        method="GET",
+        template="/api/admin/media/{media_id}/aliases",
+        capability=CAPABILITY_MEDIA_WORKFLOW_READ,
+        additional_capabilities=(CAPABILITY_METADATA_ALIAS_TEAM_READ,),
+        audit_action="metadata.alias.team.list",
+        audit_target_type="media",
+        audit_target_group="media_id",
     ),
     RoutePolicy(
         method="PUT",

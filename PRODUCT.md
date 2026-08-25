@@ -21,7 +21,7 @@ direction.
 FrameNest is currently in foundation-stage, pre-alpha development.
 
 A Poetry package, runnable loopback FastAPI server, packaged local web shell,
-explicit SQLite migration foundation through schema head `0032`, local device
+explicit SQLite migration foundation through schema head `0033`, local device
 and library registries, read-only library scan preview, explicit idempotent
 scan-candidate import into the minimum persistent media catalog, persistent
 display-title and canonical-tag core, local media-analysis preview,

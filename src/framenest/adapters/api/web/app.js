@@ -6,6 +6,7 @@ const MEDIA_CATALOG_ENDPOINT = "/api/media";
 const ADMIN_MEDIA_ENDPOINT = "/api/admin/media";
 const WORKSPACE_MEDIA_ENDPOINT = "/api/workspace/media";
 const ANALYSIS_PROPOSALS_ENDPOINT = "/api/admin/analysis-proposals";
+const ADMIN_MEDIA_ALIASES_PATH = "/aliases";
 const MEDIA_METADATA_ENDPOINT_PREFIX = "/api/media";
 const CANONICAL_TAGS_ENDPOINT = "/api/canonical-tags";
 const AI_CAPABILITY_ENDPOINT = "/api/ai/media-suggestion-capability";
@@ -351,6 +352,13 @@ function identityAllowsAnalysisPropose() {
     && identityHasCapability("analysis.propose");
 }
 
+function identityAllowsTeamAliasRead() {
+  return identityState.resolved
+    && identityState.available
+    && identityHasCapability("media.workflow.read")
+    && identityHasCapability("metadata.alias.team.read");
+}
+
 function resetAudienceState() {
   identityState.resolved = true;
   identityState.available = false;
@@ -493,6 +501,19 @@ function applyIdentityCapabilities() {
     && typeof closeAnalysisProposalsBrowser === "function"
   ) {
     closeAnalysisProposalsBrowser();
+  }
+  if (
+    typeof adminMediaAliasesPanel !== "undefined"
+    && adminMediaAliasesPanel
+    && !identityAllowsTeamAliasRead()
+  ) {
+    adminMediaAliasesPanel.hidden = true;
+    if (typeof adminMediaAliasesResults !== "undefined" && adminMediaAliasesResults) {
+      adminMediaAliasesResults.replaceChildren();
+    }
+    if (typeof adminMediaAliasesStatus !== "undefined" && adminMediaAliasesStatus) {
+      adminMediaAliasesStatus.textContent = "";
+    }
   }
   if (
     !workspaceAllowed
@@ -683,6 +704,10 @@ const adminMediaEmpty = document.querySelector("#admin-media-empty");
 const adminMediaError = document.querySelector("#admin-media-error");
 const adminMediaRetryButton = document.querySelector("#admin-media-retry-button");
 const adminMediaResults = document.querySelector("#admin-media-results");
+const adminMediaAliasesPanel = document.querySelector("#admin-media-aliases-panel");
+const adminMediaAliasesHeading = document.querySelector("#admin-media-aliases-heading");
+const adminMediaAliasesStatus = document.querySelector("#admin-media-aliases-status");
+const adminMediaAliasesResults = document.querySelector("#admin-media-aliases-results");
 const adminMediaPageSummary = document.querySelector("#admin-media-page-summary");
 const adminMediaPrevButton = document.querySelector("#admin-media-prev-button");
 const adminMediaNextButton = document.querySelector("#admin-media-next-button");
@@ -8375,6 +8400,19 @@ function renderAdminMediaItem(item) {
     actionsCell.appendChild(removeButton);
   }
 
+  if (identityHasCapability("metadata.alias.team.read")) {
+    const aliasesButton = document.createElement("button");
+    aliasesButton.type = "button";
+    aliasesButton.className = "admin-media-action admin-media-action--team-aliases";
+    aliasesButton.textContent = "Team aliases";
+    aliasesButton.dataset.mediaId = item.media_id;
+    aliasesButton.dataset.adminAction = "team-aliases";
+    aliasesButton.addEventListener("click", () => {
+      loadAdminMediaTeamAliases(item, aliasesButton);
+    });
+    actionsCell.appendChild(aliasesButton);
+  }
+
   if (actionStatus && actionStatus.retryable) {
     const retryButton = document.createElement("button");
     retryButton.type = "button";
@@ -8392,6 +8430,86 @@ function renderAdminMediaItem(item) {
 
   row.append(visualCell, summaryCell, readinessCell, analysisCell, publicationCell, actionsCell);
   return row;
+}
+
+function adminMediaTeamAliasesUrl(mediaId) {
+  return `${ADMIN_MEDIA_ENDPOINT}/${encodeURIComponent(mediaId)}${ADMIN_MEDIA_ALIASES_PATH}`;
+}
+
+function renderAdminTeamAliasEntry(entry) {
+  const article = document.createElement("article");
+  article.className = "admin-media-aliases-entry";
+  const login = document.createElement("h3");
+  login.className = "admin-media-aliases-entry__login";
+  login.textContent = typeof entry.login_key === "string" ? entry.login_key : "";
+  const title = document.createElement("p");
+  title.className = "admin-media-aliases-entry__title";
+  title.textContent = entry.display_title
+    ? `Title: ${entry.display_title}`
+    : "Title: (none)";
+  const description = document.createElement("p");
+  description.className = "admin-media-aliases-entry__description";
+  description.textContent = entry.description
+    ? `Description: ${entry.description}`
+    : "Description: (none)";
+  const tags = document.createElement("p");
+  tags.className = "admin-media-aliases-entry__tags";
+  const tagKeys = Array.isArray(entry.tag_keys) ? entry.tag_keys.filter((key) => typeof key === "string") : [];
+  tags.textContent = tagKeys.length ? `Tags: ${tagKeys.join(", ")}` : "Tags: (none)";
+  const timestamps = document.createElement("p");
+  timestamps.className = "admin-media-aliases-entry__timestamps";
+  const created = Number.isInteger(entry.created_at_ms) ? String(entry.created_at_ms) : "unavailable";
+  const updated = Number.isInteger(entry.updated_at_ms) ? String(entry.updated_at_ms) : "unavailable";
+  timestamps.textContent = `Created ${created} ms · Updated ${updated} ms`;
+  article.append(login, title, description, tags, timestamps);
+  return article;
+}
+
+async function loadAdminMediaTeamAliases(item, opener) {
+  if (!identityAllowsTeamAliasRead() || !item || typeof item.media_id !== "string") return;
+  if (!adminMediaAliasesPanel) return;
+  if (opener) opener.disabled = true;
+  adminMediaAliasesPanel.hidden = false;
+  if (adminMediaAliasesHeading) {
+    adminMediaAliasesHeading.textContent = `Team aliases for ${adminMediaTitle(item)}`;
+  }
+  if (adminMediaAliasesStatus) {
+    adminMediaAliasesStatus.textContent = "Loading team aliases…";
+  }
+  if (adminMediaAliasesResults) adminMediaAliasesResults.replaceChildren();
+  try {
+    const response = await fetch(adminMediaTeamAliasesUrl(item.media_id), {
+      method: "GET",
+      headers: { Accept: "application/json" },
+      cache: "no-store",
+    });
+    if (!response.ok) {
+      if (adminMediaAliasesStatus) {
+        adminMediaAliasesStatus.textContent = response.status === 404
+          ? "That medium could not be found."
+          : "Team aliases could not be loaded.";
+      }
+      return;
+    }
+    const payload = await response.json();
+    const entries = Array.isArray(payload.items) ? payload.items : [];
+    if (adminMediaAliasesStatus) {
+      adminMediaAliasesStatus.textContent = entries.length
+        ? `${entries.length} team alias ${entries.length === 1 ? "row" : "rows"}.`
+        : "No team aliases for this item.";
+    }
+    if (adminMediaAliasesResults) {
+      adminMediaAliasesResults.replaceChildren(
+        ...entries.map((entry) => renderAdminTeamAliasEntry(entry)),
+      );
+    }
+  } catch {
+    if (adminMediaAliasesStatus) {
+      adminMediaAliasesStatus.textContent = "Team aliases could not be loaded.";
+    }
+  } finally {
+    if (opener) opener.disabled = false;
+  }
 }
 
 function renderAdminCatalogPage(page) {
@@ -9424,6 +9542,9 @@ function openAdminMediaBrowser() {
   adminCatalogState.offset = 0;
   resetAdminBatchForQueryChange();
   setAdminActionStatus("");
+  if (adminMediaAliasesPanel) adminMediaAliasesPanel.hidden = true;
+  if (adminMediaAliasesResults) adminMediaAliasesResults.replaceChildren();
+  if (adminMediaAliasesStatus) adminMediaAliasesStatus.textContent = "";
   loadAdminCatalog();
   if (adminMediaHeading) adminMediaHeading.focus();
 }
@@ -9432,6 +9553,9 @@ function closeAdminMediaBrowser() {
   adminCatalogRequestToken += 1;
   adminCatalogState.requestOwner = null;
   if (adminMediaBrowser) adminMediaBrowser.hidden = true;
+  if (adminMediaAliasesPanel) adminMediaAliasesPanel.hidden = true;
+  if (adminMediaAliasesResults) adminMediaAliasesResults.replaceChildren();
+  if (adminMediaAliasesStatus) adminMediaAliasesStatus.textContent = "";
   if (catalogBrowser) catalogBrowser.hidden = false;
   if (headerSearch) headerSearch.hidden = false;
   if (adminMediaOpenButton && !adminMediaOpenButton.hidden) adminMediaOpenButton.focus();

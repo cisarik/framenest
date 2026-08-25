@@ -28,6 +28,13 @@ class MediaUserAliasRepository(Protocol):
     def get_alias(self, media_id: MediaId, login_key: str) -> MediaUserAlias | None:
         """Return the caller's overlay row, or None when absent."""
 
+    def list_aliases_for_media(self, media_id: MediaId) -> tuple[MediaUserAlias, ...]:
+        """Return every overlay for one media item, ordered by login key.
+
+        Raises MediaUserAliasMediaNotFoundError when the logical media row is
+        absent. This method is read-only.
+        """
+
     def upsert_alias(
         self,
         media_id: MediaId,

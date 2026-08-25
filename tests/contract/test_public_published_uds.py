@@ -74,6 +74,7 @@ UNLISTED_PATHS = (
     "/api/workspace/media",
     "/api/workspace/media/11111111-1111-4111-8111-111111111111/analysis-proposals",
     "/api/admin/analysis-proposals",
+    "/api/admin/media/11111111-1111-4111-8111-111111111111/aliases",
     "/api/uploads",
     "/api/ai/media-suggestion-capability",
     "/assets/companion_host.js",
@@ -92,6 +93,8 @@ FORBIDDEN_FIELDS = {
     "collection_key",
     "creator_stable_id",
     "persisted",
+    "alias",
+    "aliases",
 }
 
 WORKSPACE_ROUTER_MARKERS = (
@@ -105,6 +108,7 @@ WORKSPACE_ROUTER_MARKERS = (
     "create_catalog_removal_api_router",
     "create_workspace_media_api_router",
     "create_analysis_proposal_api_router",
+    "create_team_alias_api_router",
 )
 
 
@@ -337,6 +341,7 @@ def test_spoofed_tailscale_and_mutation_headers_do_not_widen_access(
     }
     _not_found(client.get(f"/api/media/{UNPUBLISHED_ID}", headers=headers))
     _not_found(client.get("/api/admin/media", headers=headers))
+    _not_found(client.get(f"/api/admin/media/{GIF_ID}/aliases", headers=headers))
     _not_found(client.post("/api/canonical-tags", headers=headers, json={}))
     audience = client.get("/api/audience/me", headers=headers)
     assert audience.status_code == 200
@@ -481,6 +486,9 @@ def test_public_modules_do_not_import_workspace_routers() -> None:
     assert "@router.delete" not in combined
     assert "@router.patch" not in combined
     assert "docs_url=None" in combined
+    assert "alias.team" not in combined
+    assert "/aliases" not in combined
+    assert "create_team_alias_api_router" not in combined
 
 
 def test_workspace_tcp_audience_bootstrap_is_trusted_loopback() -> None:

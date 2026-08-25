@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+
 from sqlalchemy import delete, insert, select, update
 from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
@@ -41,6 +43,19 @@ class SqliteMediaUserAliasRepository:
 
         try:
             return run_in_transaction(self._engine, operation)
+        except (FrameNestMediaUserAliasError, FrameNestIdentityError) as exc:
+            raise FrameNestMediaUserAliasRepositoryError(_REPOSITORY_FAILURE_MESSAGE) from exc
+        except SQLAlchemyError as exc:
+            raise FrameNestMediaUserAliasRepositoryError(_REPOSITORY_FAILURE_MESSAGE) from exc
+
+    def list_aliases_for_media(self, media_id: MediaId) -> tuple[MediaUserAlias, ...]:
+        def operation(connection: Connection) -> tuple[MediaUserAlias, ...]:
+            return _list_aliases_for_media(connection, media_id)
+
+        try:
+            return run_in_transaction(self._engine, operation)
+        except MediaUserAliasMediaNotFoundError:
+            raise
         except (FrameNestMediaUserAliasError, FrameNestIdentityError) as exc:
             raise FrameNestMediaUserAliasRepositoryError(_REPOSITORY_FAILURE_MESSAGE) from exc
         except SQLAlchemyError as exc:
@@ -155,6 +170,24 @@ def _assert_tags_exist(
             raise AliasTagNotFoundError()
 
 
+def _list_aliases_for_media(
+    connection: Connection, media_id: MediaId
+) -> tuple[MediaUserAlias, ...]:
+    if not _media_exists(connection, media_id):
+        raise MediaUserAliasMediaNotFoundError()
+    media_id_text = media_id.to_string()
+    rows = (
+        connection.execute(
+            select(media_user_aliases)
+            .where(media_user_aliases.c.media_id == media_id_text)
+            .order_by(media_user_aliases.c.login_key)
+        )
+        .mappings()
+        .all()
+    )
+    return tuple(_alias_from_row(connection, media_id, row) for row in rows)
+
+
 def _load_alias(
     connection: Connection, media_id: MediaId, login_key: str
 ) -> MediaUserAlias | None:
@@ -171,6 +204,16 @@ def _load_alias(
     )
     if row is None:
         return None
+    return _alias_from_row(connection, media_id, row)
+
+
+def _alias_from_row(
+    connection: Connection,
+    media_id: MediaId,
+    row: Mapping[str, object],
+) -> MediaUserAlias:
+    media_id_text = media_id.to_string()
+    login_key = str(row["login_key"])
     tag_rows = connection.execute(
         select(media_user_alias_tags.c.tag_key)
         .where(

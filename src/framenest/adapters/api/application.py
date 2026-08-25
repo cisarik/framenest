@@ -62,6 +62,10 @@ from framenest.adapters.api.media_alias_api import (
     MediaAliasApiDependencies,
     create_media_alias_api_router,
 )
+from framenest.adapters.api.team_alias_api import (
+    TeamAliasApiDependencies,
+    create_team_alias_api_router,
+)
 from framenest.adapters.api.media_suggestion_api import (
     MediaSuggestionApiDependencies,
     MediaSuggestionStatusRead,
@@ -126,7 +130,11 @@ from framenest.application.media_metadata import (
     ListCanonicalTags,
     SaveMediaMetadata,
 )
-from framenest.application.media_user_alias import GetMediaUserAlias, SaveMediaUserAlias
+from framenest.application.media_user_alias import (
+    GetMediaUserAlias,
+    ListTeamMediaAliases,
+    SaveMediaUserAlias,
+)
 from framenest.application.media_analysis import PrepareLocalMediaAnalysis
 from framenest.application.media_content import ResolveMediaContent
 from framenest.application.gallery_preview import GalleryPreviewService
@@ -334,6 +342,7 @@ def create_app(
     media_catalog_api_dependencies: MediaCatalogApiDependencies | None = None,
     media_metadata_api_dependencies: MediaMetadataApiDependencies | None = None,
     media_alias_api_dependencies: MediaAliasApiDependencies | None = None,
+    team_alias_api_dependencies: TeamAliasApiDependencies | None = None,
     media_analysis_api_dependencies: MediaAnalysisApiDependencies | None = None,
     media_content_api_dependencies: MediaContentApiDependencies | None = None,
     gallery_preview_api_dependencies: GalleryPreviewApiDependencies | None = None,
@@ -537,6 +546,19 @@ def create_app(
             media_alias_api_dependencies = MediaAliasApiDependencies(
                 get_alias=None,
                 save_alias=None,
+                catalog_available=lambda: False,
+            )
+    if team_alias_api_dependencies is None:
+        if owned_media_user_alias_repository is not None:
+            team_alias_api_dependencies = TeamAliasApiDependencies(
+                list_team_aliases=ListTeamMediaAliases(
+                    owned_media_user_alias_repository
+                ),
+                catalog_available=resolved_settings.database_path.exists,
+            )
+        else:
+            team_alias_api_dependencies = TeamAliasApiDependencies(
+                list_team_aliases=None,
                 catalog_available=lambda: False,
             )
     if media_analysis_api_dependencies is None:
@@ -1215,6 +1237,7 @@ def create_app(
     app.include_router(create_media_catalog_api_router(media_catalog_api_dependencies))
     app.include_router(create_media_metadata_api_router(media_metadata_api_dependencies))
     app.include_router(create_media_alias_api_router(media_alias_api_dependencies))
+    app.include_router(create_team_alias_api_router(team_alias_api_dependencies))
     app.include_router(create_media_analysis_api_router(media_analysis_api_dependencies))
     app.include_router(create_media_content_api_router(media_content_api_dependencies))
     app.include_router(create_gallery_preview_api_router(gallery_preview_api_dependencies))

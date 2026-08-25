@@ -6,6 +6,7 @@ import pytest
 
 from framenest.application.media_user_alias import (
     GetMediaUserAlias,
+    ListTeamMediaAliases,
     SaveMediaUserAlias,
 )
 from framenest.application.ports.media_user_alias_repository import AliasTagNotFoundError
@@ -27,9 +28,24 @@ class _FakeRepository:
         self.aliases: dict[tuple[str, str], MediaUserAlias] = {}
         self.known_tags = {CanonicalTagKey("meme")}
         self.upserts: list[object] = []
+        self.media_exists = True
 
     def get_alias(self, media_id: MediaId, login_key: str) -> MediaUserAlias | None:
         return self.aliases.get((media_id.to_string(), login_key))
+
+    def list_aliases_for_media(self, media_id: MediaId) -> tuple[MediaUserAlias, ...]:
+        from framenest.application.ports.media_user_alias_repository import (
+            MediaUserAliasMediaNotFoundError,
+        )
+
+        if not self.media_exists:
+            raise MediaUserAliasMediaNotFoundError()
+        matches = [
+            alias
+            for (stored_id, _), alias in self.aliases.items()
+            if stored_id == media_id.to_string()
+        ]
+        return tuple(sorted(matches, key=lambda item: item.login_key))
 
     def upsert_alias(
         self,
@@ -95,3 +111,23 @@ def test_save_alias_rejects_invalid_content() -> None:
     with pytest.raises(FrameNestMediaUserAliasError):
         save.execute(MEDIA_ID.to_string(), LOGIN, " Title", None, None)
     assert parse_alias_content("ok", None, None).display_title is not None
+
+
+def test_list_team_aliases_aggregates_by_login_and_unknown_media_is_not_found() -> None:
+    from framenest.application.ports.media_user_alias_repository import (
+        MediaUserAliasMediaNotFoundError,
+    )
+
+    repository = _FakeRepository()
+    save = SaveMediaUserAlias(repository, clock_ms=lambda: 50)
+    save.execute(MEDIA_ID.to_string(), "bob@example.com", "Bob title", None, None)
+    save.execute(MEDIA_ID.to_string(), LOGIN, "Alice title", None, ["meme"])
+    listed = ListTeamMediaAliases(repository).execute(MEDIA_ID.to_string())
+    assert [entry.login_key for entry in listed] == [LOGIN, "bob@example.com"]
+    assert listed[0].display_title == "Alice title"
+    assert listed[1].display_title == "Bob title"
+    own = GetMediaUserAlias(repository).execute(MEDIA_ID.to_string(), LOGIN)
+    assert own.display_title == "Alice title"
+    repository.media_exists = False
+    with pytest.raises(MediaUserAliasMediaNotFoundError):
+        ListTeamMediaAliases(repository).execute(MEDIA_ID.to_string())

@@ -121,6 +121,8 @@ function renderAdminPublicationState(item) {
     unpublishAdminMediaItem: () => {},
     removeAdminMediaFromCatalog: () => {},
     identityHasCapability: () => true,
+    loadAdminMediaTeamAliases: () => {},
+    identityAllowsTeamAliasRead: () => true,
     adminBatchDriverActive: () => false,
     item,
   };
@@ -527,6 +529,10 @@ test("admin controls expose loading empty error retry search filters and determi
     "admin-media-retry-button",
     "admin-media-prev-button",
     "admin-media-next-button",
+    "admin-media-aliases-panel",
+    "admin-media-aliases-heading",
+    "admin-media-aliases-status",
+    "admin-media-aliases-results",
   ]) {
     assert.ok(INDEX_SOURCE.includes(`id="${id}"`), `missing ${id}`);
   }
@@ -569,4 +575,35 @@ test("accessibility contracts include semantic rows, live status, focus recovery
   assert.match(extractFunction(APP_SOURCE, "loadAdminCatalog"), /adminMediaHeading\.focus\(\)/);
   assert.match(STYLES_SOURCE, /\.admin-media-row:hover,\n\.admin-media-row:focus-within/);
   assert.match(STYLES_SOURCE, /@media \(prefers-reduced-motion: reduce\)/);
+});
+
+test("team aliases view is capability-gated, on-demand GET, and hidden from the public audience", () => {
+  assert.match(
+    extractFunction(APP_SOURCE, "identityAllowsTeamAliasRead"),
+    /identityHasCapability\("metadata\.alias\.team\.read"\)/,
+  );
+  assert.match(
+    extractFunction(APP_SOURCE, "identityAllowsTeamAliasRead"),
+    /identityHasCapability\("media\.workflow\.read"\)/,
+  );
+  const render = extractFunction(APP_SOURCE, "renderAdminMediaItem");
+  assert.match(render, /identityHasCapability\("metadata\.alias\.team\.read"\)/);
+  assert.match(render, /Team aliases/);
+  assert.match(render, /loadAdminMediaTeamAliases/);
+  const loader = extractFunction(APP_SOURCE, "loadAdminMediaTeamAliases");
+  assert.match(loader, /identityAllowsTeamAliasRead/);
+  assert.match(loader, /adminMediaTeamAliasesUrl/);
+  assert.match(loader, /method: "GET"/);
+  assert.doesNotMatch(loader, /framenestMutationHeaders/);
+  assert.match(INDEX_SOURCE, /id="admin-media-aliases-panel"/);
+  assert.match(
+    extractFunction(APP_SOURCE, "applyIdentityCapabilities"),
+    /identityAllowsTeamAliasRead/,
+  );
+  assert.match(
+    STYLES_SOURCE,
+    /body\[data-audience="public_published"\] #admin-media-aliases-panel/,
+  );
+  const row = renderAdminPublicationState(adminPublicationFixture());
+  assert.equal(actionFor(row.children[5], "team-aliases").textContent, "Team aliases");
 });

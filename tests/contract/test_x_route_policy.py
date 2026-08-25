@@ -7,6 +7,7 @@ import pytest
 from framenest.adapters.api.tailscale_ingress import RoutePolicy, find_route_policy
 from framenest.application.content_publication import ContentAudiencePolicy
 from framenest.domain.identity_access import (
+    CAPABILITY_METADATA_ALIAS_TEAM_READ,
     CAPABILITY_METADATA_ALIAS_WRITE,
     CAPABILITY_METADATA_CANONICAL_WRITE,
     CAPABILITY_MEDIA_CONTENT_PUBLISH,
@@ -114,10 +115,23 @@ def test_route_policy_additional_capabilities_default_empty() -> None:
     assert apply_policy.additional_capabilities == (
         CAPABILITY_METADATA_CANONICAL_WRITE,
     )
-    for policy in ROUTE_POLICIES:
-        if policy.audit_action == "companion.review.apply_publish":
-            continue
-        assert policy.additional_capabilities == ()
+    team_alias, team_alias_match = find_route_policy(
+        "GET",
+        "/api/admin/media/00000000-0000-4000-8000-000000000000/aliases",
+    )
+    assert team_alias_match is not None
+    assert team_alias.additional_capabilities == (
+        CAPABILITY_METADATA_ALIAS_TEAM_READ,
+    )
+    extras = {
+        policy.audit_action: policy.additional_capabilities
+        for policy in ROUTE_POLICIES
+        if policy.additional_capabilities
+    }
+    assert extras == {
+        "companion.review.apply_publish": (CAPABILITY_METADATA_CANONICAL_WRITE,),
+        "metadata.alias.team.list": (CAPABILITY_METADATA_ALIAS_TEAM_READ,),
+    }
 
 
 def test_route_policy_rejects_additional_capabilities_without_primary() -> None:

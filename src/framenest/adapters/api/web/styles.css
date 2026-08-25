@@ -4259,6 +4259,39 @@ h2 {
   color: var(--warning);
 }
 
+.admin-media-aliases-panel {
+  margin-top: 14px;
+  padding: 12px 14px;
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.12));
+  border-radius: 10px;
+}
+
+.admin-media-aliases-panel h2 {
+  margin: 0 0 8px;
+  font-size: 1rem;
+}
+
+.admin-media-aliases-entry {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border, rgba(255, 255, 255, 0.08));
+}
+
+.admin-media-aliases-entry__login {
+  margin: 0;
+  font-size: 0.9rem;
+}
+
+.admin-media-aliases-entry p {
+  margin: 0.2rem 0 0;
+  color: var(--muted, #9aa3ad);
+  font-size: 0.82rem;
+}
+
+.admin-media-action--team-aliases {
+  border-color: rgba(157, 178, 198, 0.45);
+}
+
 .admin-media-pagination {
   min-width: 0;
   margin-top: 14px;
@@ -4875,7 +4908,8 @@ body[data-audience="public_published"] #x-admin-open-button,
 body[data-audience="public_published"] #media-details-edit,
 body[data-audience="public_published"] #media-details-choose-cover,
 body[data-audience="public_published"] #workspace-media-browser,
-body[data-audience="public_published"] #analysis-proposals-browser {
+body[data-audience="public_published"] #analysis-proposals-browser,
+body[data-audience="public_published"] #admin-media-aliases-panel {
   display: none !important;
 }
 

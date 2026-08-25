@@ -8,6 +8,7 @@ from framenest.domain.identity_access import (
     CAPABILITIES_BY_ROLE,
     CAPABILITY_ANALYSIS_PROPOSE,
     CAPABILITY_MEDIA_WORKSPACE_READ,
+    CAPABILITY_METADATA_ALIAS_TEAM_READ,
     CAPABILITY_UPLOAD_MANAGE,
     CAPABILITY_UPLOAD_SUBMIT,
     CAPABILITY_YOUTUBE_ACQUIRE,
@@ -116,6 +117,7 @@ def test_resolve_identity_maps_admin_with_full_capabilities() -> None:
     assert identity.provenance == IDENTITY_PROVENANCE_TAILSCALE_SERVE
     assert identity.has_capability("metadata.canonical.write")
     assert identity.has_capability("metadata.alias.write")
+    assert identity.has_capability("metadata.alias.team.read")
     assert identity.has_capability("upload.manage")
     assert identity.has_capability("upload.submit")
     assert identity.has_capability(CAPABILITY_YOUTUBE_ACQUIRE)
@@ -140,6 +142,7 @@ def test_resolve_identity_maps_ordinary_user_with_read_capabilities() -> None:
     assert identity.has_capability("analysis.propose")
     assert not identity.has_capability("metadata.canonical.write")
     assert identity.has_capability("metadata.alias.write")
+    assert not identity.has_capability("metadata.alias.team.read")
     assert not identity.has_capability("upload.manage")
     assert not identity.has_capability("analysis.run")
     assert not identity.has_capability("media.workflow.read")
@@ -153,6 +156,8 @@ def test_resolve_identity_maps_ordinary_user_with_read_capabilities() -> None:
     assert CAPABILITY_MEDIA_WORKSPACE_READ in CAPABILITIES_BY_ROLE[ROLE_ADMIN]
     assert CAPABILITY_ANALYSIS_PROPOSE in CAPABILITIES_BY_ROLE[ROLE_USER]
     assert CAPABILITY_ANALYSIS_PROPOSE in CAPABILITIES_BY_ROLE[ROLE_ADMIN]
+    assert CAPABILITY_METADATA_ALIAS_TEAM_READ not in CAPABILITIES_BY_ROLE[ROLE_USER]
+    assert CAPABILITY_METADATA_ALIAS_TEAM_READ in CAPABILITIES_BY_ROLE[ROLE_ADMIN]
     assert CAPABILITY_YOUTUBE_ACQUIRE not in CAPABILITIES_BY_ROLE[ROLE_USER]
     assert CAPABILITY_UPLOAD_SUBMIT in CAPABILITIES_BY_ROLE[ROLE_ADMIN]
     assert CAPABILITY_UPLOAD_MANAGE in CAPABILITIES_BY_ROLE[ROLE_ADMIN]
@@ -209,8 +214,10 @@ def test_resolve_identity_fails_closed_on_malformed_login() -> None:
 def test_public_published_capabilities_are_exactly_the_two_read_capabilities() -> None:
     from framenest.domain.identity_access import (
         AUDIENCE_PUBLIC_PUBLISHED,
+        CAPABILITY_ANALYSIS_PROPOSE,
         CAPABILITY_GALLERY_READ,
         CAPABILITY_MEDIA_ORIGINAL_READ,
+        CAPABILITY_METADATA_ALIAS_TEAM_READ,
         PUBLIC_PUBLISHED_CAPABILITIES,
     )
 
@@ -219,6 +226,5 @@ def test_public_published_capabilities_are_exactly_the_two_read_capabilities() -
         CAPABILITY_GALLERY_READ,
         CAPABILITY_MEDIA_ORIGINAL_READ,
     }
-    from framenest.domain.identity_access import CAPABILITY_ANALYSIS_PROPOSE
-
     assert CAPABILITY_ANALYSIS_PROPOSE not in PUBLIC_PUBLISHED_CAPABILITIES
+    assert CAPABILITY_METADATA_ALIAS_TEAM_READ not in PUBLIC_PUBLISHED_CAPABILITIES

@@ -373,6 +373,7 @@ test("privileged controls are gated by capabilities in source", () => {
   assert.ok(APP_SOURCE.includes('identityHasCapability("analysis.run")'));
   assert.ok(APP_SOURCE.includes('identityHasCapability("media.workspace.read")'));
   assert.ok(APP_SOURCE.includes('identityHasCapability("analysis.propose")'));
+  assert.ok(APP_SOURCE.includes('identityHasCapability("metadata.alias.team.read")'));
   assert.ok(APP_SOURCE.includes("awaits administrator review"));
   assert.ok(APP_SOURCE.includes("clearStaleUploadRecoveryState"));
   assert.ok(APP_SOURCE.includes("submission expired or is unavailable"));

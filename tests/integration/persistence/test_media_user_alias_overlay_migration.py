@@ -141,6 +141,8 @@ def test_overlay_rows_are_isolated_by_login_key(tmp_path: Path) -> None:
     assert loaded_bob.content.display_title.value == "Bob title"
     assert loaded_alice.content.tag_keys[0].value == "meme"
     assert loaded_bob.content.tag_keys == ()
+    listed = repository.list_aliases_for_media(media_id)
+    assert [item.login_key for item in listed] == [ALICE, BOB]
     connection.close()
 
 

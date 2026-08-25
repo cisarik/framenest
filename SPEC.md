@@ -619,7 +619,7 @@ Public callers MUST be identity-absent. Public capabilities MUST be exactly
 Workspace capabilities MUST add `media.workspace.read` for ordinary and
 administrator roles (implemented-for-backend). `analysis.propose` for
 ordinary and administrator roles (implemented-for-backend). Administrator-only
-`metadata.alias.team.read` remains a successor workspace capability.
+`metadata.alias.team.read` (implemented-for-backend).
 Workspace unpublished reads MUST use a contributor-scoped
 audience-extension model without ownership columns or personal libraries
 (implemented-for-backend for the workspace media list, upload-attributed
@@ -635,6 +635,12 @@ under administrator `media.workflow.read`, including proposer login, media
 title snapshot, publication/readiness, and status
 (implemented-for-backend). Public callers MUST receive `404` for both
 routes.
+`GET /api/admin/media/{media_id}/aliases` MUST require both
+`media.workflow.read` and `metadata.alias.team.read`, return the aggregated
+caller-private overlays for that media without writing, and record a distinct
+audit action (implemented-for-backend). Ordinary users MUST retain only their
+own alias route. Public callers MUST receive `404`. Aliases MUST NOT appear
+in public or ordinary workspace catalog payloads.
 
 ## 20. Transfers and Duplicate Removal
 
