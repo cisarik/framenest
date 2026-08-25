@@ -186,6 +186,7 @@ ROUTE_POLICIES: tuple[RoutePolicy, ...] = (
     RoutePolicy(method="GET", template="/"),
     RoutePolicy(method="GET", template="/assets/{asset_name}"),
     RoutePolicy(method="GET", template="/api/identity/me"),
+    RoutePolicy(method="GET", template="/api/audience/me"),
     RoutePolicy(method="GET", template="/api/status/cloud"),
     RoutePolicy(
         method="GET", template="/api/libraries", capability=CAPABILITY_GALLERY_READ

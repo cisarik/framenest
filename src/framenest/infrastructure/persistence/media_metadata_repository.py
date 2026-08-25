@@ -47,6 +47,7 @@ from framenest.infrastructure.persistence.catalog_schema import (
     companion_review_tag_sources,
     logical_media,
     media_canonical_tags,
+    media_content_publications,
     media_genres,
     media_metadata,
 )
@@ -110,6 +111,37 @@ class SqliteMediaMetadataRepository:
                     canonical_tags.c.created_at_ms,
                     canonical_tags.c.updated_at_ms,
                 ).order_by(canonical_tags.c.display_name, canonical_tags.c.key)
+            ).mappings()
+            return tuple(_tag_from_row(row) for row in rows)
+
+        try:
+            return run_in_transaction(self._engine, operation)
+        except FrameNestMediaMetadataRepositoryError:
+            raise
+        except SQLAlchemyError as exc:
+            raise FrameNestMediaMetadataRepositoryError(_REPOSITORY_FAILURE_MESSAGE) from exc
+
+    def list_canonical_tags_for_published_media(self) -> tuple[CanonicalTag, ...]:
+        def operation(connection: Connection) -> tuple[CanonicalTag, ...]:
+            rows = connection.execute(
+                select(
+                    canonical_tags.c.key,
+                    canonical_tags.c.display_name,
+                    canonical_tags.c.created_at_ms,
+                    canonical_tags.c.updated_at_ms,
+                )
+                .select_from(
+                    canonical_tags.join(
+                        media_canonical_tags,
+                        media_canonical_tags.c.tag_key == canonical_tags.c.key,
+                    ).join(
+                        media_content_publications,
+                        media_content_publications.c.media_id
+                        == media_canonical_tags.c.media_id,
+                    )
+                )
+                .distinct()
+                .order_by(canonical_tags.c.display_name, canonical_tags.c.key)
             ).mappings()
             return tuple(_tag_from_row(row) for row in rows)
 

@@ -117,6 +117,38 @@ def test_unknown_ingress_mode_is_rejected() -> None:
         FrameNestSettings(ingress_mode="lan", _env_file=None)
 
 
+def test_public_published_uds_mode_defaults_distinct_socket(tmp_path: Path) -> None:
+    settings = FrameNestSettings(
+        ingress_mode="public_published_uds",
+        database_path=tmp_path / "catalog.sqlite3",
+        _env_file=None,
+    )
+    assert settings.ingress_mode == "public_published_uds"
+    assert settings.uds_path == Path("/run/framenest/framenest-public.sock")
+    assert settings.uds_path != Path("/run/framenest/framenest.sock")
+
+
+def test_public_published_uds_mode_rejects_workspace_socket(tmp_path: Path) -> None:
+    with pytest.raises(ValidationError):
+        FrameNestSettings(
+            ingress_mode="public_published_uds",
+            database_path=tmp_path / "catalog.sqlite3",
+            uds_path="/run/framenest/framenest.sock",
+            _env_file=None,
+        )
+
+
+def test_public_published_uds_mode_accepts_explicit_socket(tmp_path: Path) -> None:
+    socket_path = tmp_path / "public.sock"
+    settings = FrameNestSettings(
+        ingress_mode="public_published_uds",
+        database_path=tmp_path / "catalog.sqlite3",
+        uds_path=socket_path,
+        _env_file=None,
+    )
+    assert settings.uds_path == socket_path
+
+
 def test_tailscale_settings_load_from_environment(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

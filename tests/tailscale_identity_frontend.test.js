@@ -132,15 +132,23 @@ function createIdentityHarness(fetchImpl) {
     "let identityState = {",
     "  resolved: false,",
     "  available: false,",
+    '  audience: "",',
     '  login: "",',
     '  displayName: "",',
     '  role: "",',
     '  provenance: "",',
     "  capabilities: new Set(),",
     "};",
-    'const IDENTITY_ENDPOINT = "/api/identity/me";',
+    'const AUDIENCE_ENDPOINT = "/api/audience/me";',
     extractFunction(APP_SOURCE, "identityHasCapability"),
+    extractFunction(APP_SOURCE, "isPublicPublishedAudience"),
+    extractFunction(APP_SOURCE, "isWorkspaceAudience"),
     extractFunction(APP_SOURCE, "identityAllowsAdminWorkflow"),
+    extractFunction(APP_SOURCE, "identityAllowsYouTubeClaim"),
+    extractFunction(APP_SOURCE, "identityAllowsYouTubeRequest"),
+    extractFunction(APP_SOURCE, "identityAllowsCoverEditing"),
+    extractFunction(APP_SOURCE, "resetAudienceState"),
+    extractFunction(APP_SOURCE, "applyAudienceDocument"),
     extractFunction(APP_SOURCE, "framenestMutationHeaders"),
     extractFunction(APP_SOURCE, "applyIdentityCapabilities"),
     extractFunction(APP_SOURCE, "applyTailscalePanelDensity"),
@@ -297,9 +305,10 @@ test("every unsafe fetch call site sends the mutation header", () => {
 
 test("identity bootstrap runs first and gates the initial catalog load", () => {
   const bootstrap = APP_SOURCE.slice(APP_SOURCE.indexOf("const identityReady = loadIdentity();"));
-  assert.ok(bootstrap.startsWith("const identityReady = loadIdentity();\ncheckHealth();"));
-  assert.match(bootstrap, /identityReady\.then\(\(\) => \{\n {2}loadCatalog\(\);\n\}\);/);
-  assert.ok(bootstrap.indexOf("loadIdentity();") < bootstrap.indexOf("checkHealth();"));
+  assert.ok(bootstrap.startsWith("const identityReady = loadIdentity();\nidentityReady.then(() => {"));
+  assert.match(bootstrap, /identityReady\.then\(\(\) => \{/);
+  assert.ok(bootstrap.includes("loadCatalog();"));
+  assert.ok(bootstrap.includes("isPublicPublishedAudience()"));
 });
 
 test("identity fetch never sends the mutation header", () => {
@@ -383,11 +392,15 @@ test("gallery AI quick action fails closed for missing unresolved and ordinary i
 
 test("admin identity populates name-only badge and unlocks privileged controls", async () => {
   const context = createIdentityHarness(async (url) => {
-    assert.equal(url, "/api/identity/me");
+    assert.equal(url, "/api/audience/me");
     return response({
-      login: "admin@example.com",
-      display_name: "Admin User",
-      role: "admin",
+      audience: "tailscale_workspace",
+      identity: {
+        login: "admin@example.com",
+        display_name: "Admin User",
+        role: "admin",
+        provenance: "tailscale-serve",
+      },
       capabilities: [
         "analysis.run",
         "gallery.read",
@@ -396,7 +409,6 @@ test("admin identity populates name-only badge and unlocks privileged controls",
         "upload.manage",
         "upload.submit",
       ],
-      provenance: "tailscale-serve",
     });
   });
   await vm.runInContext("loadIdentity()", context);
@@ -420,11 +432,14 @@ test("admin identity populates name-only badge and unlocks privileged controls",
 test("ordinary user identity hides privileged controls and keeps admin Tailscale rows hidden", async () => {
   const context = createIdentityHarness(async () =>
     response({
-      login: "user@example.com",
-      display_name: "Reader",
-      role: "user",
+      audience: "tailscale_workspace",
+      identity: {
+        login: "user@example.com",
+        display_name: "Reader",
+        role: "user",
+        provenance: "tailscale-serve",
+      },
       capabilities: ["gallery.read", "media.download", "media.original.read", "upload.submit"],
-      provenance: "tailscale-serve",
     }),
   );
   await vm.runInContext("loadIdentity()", context);
@@ -445,11 +460,14 @@ test("ordinary user identity hides privileged controls and keeps admin Tailscale
 test("ordinary user without upload.submit hides upload control", async () => {
   const context = createIdentityHarness(async () =>
     response({
-      login: "user@example.com",
-      display_name: "Reader",
-      role: "user",
+      audience: "tailscale_workspace",
+      identity: {
+        login: "user@example.com",
+        display_name: "Reader",
+        role: "user",
+        provenance: "tailscale-serve",
+      },
       capabilities: ["gallery.read", "media.download", "media.original.read"],
-      provenance: "tailscale-serve",
     }),
   );
   await vm.runInContext("loadIdentity()", context);
@@ -461,7 +479,7 @@ test("denied identity fails closed and hides the badge", async () => {
   const context = createIdentityHarness(async () => response({}, 403));
   await vm.runInContext("loadIdentity()", context);
   const state = vm.runInContext("identityState", context);
-  assert.equal(state.available, true);
+  assert.equal(state.available, false);
   assert.equal(state.capabilities.size, 0);
   assert.equal(context.identityBadge.hidden, true);
   assert.equal(context.uploadOpenButton.hidden, true);
@@ -470,18 +488,20 @@ test("denied identity fails closed and hides the badge", async () => {
   assert.equal(context.statusTailscaleAdminOnlyRows.every((row) => row.hidden === true), true);
 });
 
-test("missing identity endpoint keeps legacy local behavior", async () => {
+test("missing audience bootstrap exposes no capabilities", async () => {
   const context = createIdentityHarness(async () => response({}, 404));
   await vm.runInContext("loadIdentity()", context);
   const state = vm.runInContext("identityState", context);
   assert.equal(state.available, false);
-  assert.equal(vm.runInContext('identityHasCapability("upload.manage")', context), true);
-  assert.equal(context.uploadOpenButton.hidden, false);
+  assert.equal(state.audience, "");
+  assert.equal(vm.runInContext('identityHasCapability("upload.manage")', context), false);
+  assert.equal(vm.runInContext('identityHasCapability("gallery.read")', context), false);
+  assert.equal(context.uploadOpenButton.hidden, true);
   assert.equal(context.adminMediaOpenButton.hidden, true);
   assert.equal(context.identityBadge.hidden, true);
 });
 
-test("identity network failure keeps legacy local behavior", async () => {
+test("identity network failure exposes no capabilities", async () => {
   const context = createIdentityHarness(async () => {
     throw new Error("network down");
   });
@@ -489,8 +509,31 @@ test("identity network failure keeps legacy local behavior", async () => {
   const state = vm.runInContext("identityState", context);
   assert.equal(state.resolved, true);
   assert.equal(state.available, false);
-  assert.equal(vm.runInContext('identityHasCapability("analysis.run")', context), true);
+  assert.equal(vm.runInContext('identityHasCapability("analysis.run")', context), false);
   assert.equal(context.adminMediaOpenButton.hidden, true);
+});
+
+test("public published audience exposes only public read capabilities", async () => {
+  const context = createIdentityHarness(async () =>
+    response({
+      audience: "public_published",
+      identity: null,
+      capabilities: ["gallery.read", "media.original.read"],
+    }),
+  );
+  await vm.runInContext("loadIdentity()", context);
+  const state = vm.runInContext("identityState", context);
+  assert.equal(state.audience, "public_published");
+  assert.equal(state.available, false);
+  assert.equal(state.login, "");
+  assert.equal(vm.runInContext('identityHasCapability("gallery.read")', context), true);
+  assert.equal(vm.runInContext('identityHasCapability("media.original.read")', context), true);
+  assert.equal(vm.runInContext('identityHasCapability("upload.submit")', context), false);
+  assert.equal(vm.runInContext('identityHasCapability("metadata.canonical.write")', context), false);
+  assert.equal(context.uploadOpenButton.hidden, true);
+  assert.equal(context.detailsEditButton.hidden, true);
+  assert.equal(context.adminMediaOpenButton.hidden, true);
+  assert.equal(context.identityBadge.hidden, true);
 });
 
 test("admin Tailscale panel shows diagnostic rows", async () => {

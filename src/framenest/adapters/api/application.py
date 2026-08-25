@@ -188,11 +188,16 @@ from framenest.adapters.api.library_api import (
 from framenest.domain import LibraryId, LibraryPathFlavor
 from framenest.domain.uploads import UploadSessionId
 from framenest.domain.identity_access import (
+    AUDIENCE_TAILSCALE_WORKSPACE,
+    AUDIENCE_TRUSTED_LOOPBACK,
+    CAPABILITIES_BY_ROLE,
     IdentityContext,
+    ROLE_ADMIN,
     build_identity_mapping,
 )
 import framenest.adapters.api.web as web_resources
 from framenest.configuration import (
+    INGRESS_MODE_PUBLIC_PUBLISHED_UDS,
     INGRESS_MODE_TAILSCALE_UDS,
     FrameNestSettings,
     load_settings,
@@ -337,6 +342,12 @@ def create_app(
     shutdown_clock: object | None = None,
 ) -> FastAPI:
     resolved_settings = settings if settings is not None else load_settings()
+    if resolved_settings.ingress_mode == INGRESS_MODE_PUBLIC_PUBLISHED_UDS:
+        from framenest.adapters.api.public_published_application import (
+            create_public_published_app,
+        )
+
+        return create_public_published_app(resolved_settings)
     tailscale_ingress_enabled = (
         resolved_settings.ingress_mode == INGRESS_MODE_TAILSCALE_UDS
     )
@@ -1248,6 +1259,28 @@ def create_app(
                 capabilities=sorted(identity.capabilities),
                 provenance=identity.provenance,
             )
+
+    @app.get("/api/audience/me")
+    def audience_me(request: Request) -> dict[str, object]:
+        if tailscale_ingress_enabled:
+            identity = request.scope.get(SCOPE_IDENTITY)
+            if not isinstance(identity, IdentityContext):
+                raise HTTPException(status_code=401, detail="Not authenticated")
+            return {
+                "audience": AUDIENCE_TAILSCALE_WORKSPACE,
+                "identity": {
+                    "login": identity.login,
+                    "display_name": identity.display_name,
+                    "role": identity.role,
+                    "provenance": identity.provenance,
+                },
+                "capabilities": sorted(identity.capabilities),
+            }
+        return {
+            "audience": AUDIENCE_TRUSTED_LOOPBACK,
+            "identity": None,
+            "capabilities": sorted(CAPABILITIES_BY_ROLE[ROLE_ADMIN]),
+        }
 
     return app
 

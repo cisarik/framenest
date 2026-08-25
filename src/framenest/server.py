@@ -8,6 +8,7 @@ import uvicorn
 
 from framenest.adapters.api.application import create_app
 from framenest.configuration import (
+    INGRESS_MODE_PUBLIC_PUBLISHED_UDS,
     INGRESS_MODE_TAILSCALE_UDS,
     FrameNestConfigurationError,
     FrameNestSettings,
@@ -21,7 +22,10 @@ def create_server(
 ) -> uvicorn.Server:
     resolved_settings = settings if settings is not None else load_settings()
     config_kwargs: dict[str, object] = {}
-    if resolved_settings.ingress_mode == INGRESS_MODE_TAILSCALE_UDS:
+    if resolved_settings.ingress_mode in {
+        INGRESS_MODE_TAILSCALE_UDS,
+        INGRESS_MODE_PUBLIC_PUBLISHED_UDS,
+    }:
         assert resolved_settings.uds_path is not None
         config_kwargs["uds"] = str(resolved_settings.uds_path)
     else:

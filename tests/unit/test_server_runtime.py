@@ -312,6 +312,29 @@ def test_create_server_binds_only_unix_socket_in_tailscale_mode(
     assert server.config.forwarded_allow_ips != "*"
 
 
+def test_create_server_binds_only_unix_socket_in_public_published_mode(
+    tmp_path: Path,
+) -> None:
+    from framenest.infrastructure.persistence.migrations import upgrade_database_to_head
+    from framenest.server import create_server
+
+    database_path = tmp_path / "catalog.sqlite3"
+    settings = FrameNestSettings(
+        database_path=database_path,
+        gallery_preview_cache_path=tmp_path / "previews",
+        cover_storage_root=tmp_path / "covers",
+        cover_thumbnail_cache_path=tmp_path / "thumbnails",
+        ingress_mode="public_published_uds",
+        uds_path=tmp_path / "public.sock",
+        _env_file=None,
+    )
+    upgrade_database_to_head(settings)
+    server = create_server(settings=settings)
+    assert server.config.uds == str(tmp_path / "public.sock")
+    assert server.config.host is None or server.config.uds is not None
+    assert getattr(server.config, "port", None) in {None, 8000}
+
+
 def test_create_server_binds_tcp_in_default_mode(
     settings_with_secret: FrameNestSettings,
 ) -> None:

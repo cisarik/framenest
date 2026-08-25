@@ -52,13 +52,25 @@ DEFAULT_X_REQUEST_MAX_FAILED_PER_24H = 10
 SUPPORTED_AI_PROVIDER_IDS = frozenset({"nvidia-nim", "vercel-ai-gateway"})
 INGRESS_MODE_TCP = "tcp"
 INGRESS_MODE_TAILSCALE_UDS = "tailscale_uds"
-SUPPORTED_INGRESS_MODES = frozenset({INGRESS_MODE_TCP, INGRESS_MODE_TAILSCALE_UDS})
+INGRESS_MODE_PUBLIC_PUBLISHED_UDS = "public_published_uds"
+SUPPORTED_INGRESS_MODES = frozenset(
+    {
+        INGRESS_MODE_TCP,
+        INGRESS_MODE_TAILSCALE_UDS,
+        INGRESS_MODE_PUBLIC_PUBLISHED_UDS,
+    }
+)
+WORKSPACE_UDS_PATH = Path("/run/framenest/framenest.sock")
+DEFAULT_PUBLIC_PUBLISHED_UDS_PATH = Path("/run/framenest/framenest-public.sock")
 MAX_EXTERNAL_ORIGIN_LENGTH = 255
 MAX_COMPANION_EXTENSION_ORIGINS = 4
 _CHROME_EXTENSION_ORIGIN_PATTERN = re.compile(r"^chrome-extension://[a-p]{32}$")
 _INGRESS_CONFIGURATION_MESSAGE = (
     "Tailscale UDS ingress requires an explicit UDS path, an exact https "
     "external origin, and at least one configured admin identity."
+)
+_PUBLIC_INGRESS_CONFIGURATION_MESSAGE = (
+    "Public published UDS ingress requires a distinct Unix socket path."
 )
 _COMPANION_EXTENSION_ORIGIN_MESSAGE = (
     "companion extension origins must be at most four unique exact "
@@ -422,6 +434,13 @@ class FrameNestSettings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_ingress_configuration(self) -> "FrameNestSettings":
+        if self.ingress_mode == INGRESS_MODE_PUBLIC_PUBLISHED_UDS:
+            resolved_uds = self.uds_path or DEFAULT_PUBLIC_PUBLISHED_UDS_PATH
+            if resolved_uds == WORKSPACE_UDS_PATH:
+                raise ValueError(_PUBLIC_INGRESS_CONFIGURATION_MESSAGE)
+            if self.uds_path is None:
+                self.uds_path = resolved_uds
+            return self
         if self.ingress_mode != INGRESS_MODE_TAILSCALE_UDS:
             return self
         if self.uds_path is None or self.external_origin is None:

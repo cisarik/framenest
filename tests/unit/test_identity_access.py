@@ -196,3 +196,18 @@ def test_resolve_identity_fails_closed_on_malformed_login() -> None:
         )
     with pytest.raises(FrameNestIdentityAccessError):
         resolve_identity(login=None, display_name="Bad", mapping=mapping)
+
+
+def test_public_published_capabilities_are_exactly_the_two_read_capabilities() -> None:
+    from framenest.domain.identity_access import (
+        AUDIENCE_PUBLIC_PUBLISHED,
+        CAPABILITY_GALLERY_READ,
+        CAPABILITY_MEDIA_ORIGINAL_READ,
+        PUBLIC_PUBLISHED_CAPABILITIES,
+    )
+
+    assert AUDIENCE_PUBLIC_PUBLISHED == "public_published"
+    assert PUBLIC_PUBLISHED_CAPABILITIES == {
+        CAPABILITY_GALLERY_READ,
+        CAPABILITY_MEDIA_ORIGINAL_READ,
+    }

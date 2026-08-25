@@ -9,7 +9,7 @@ const CANONICAL_TAGS_ENDPOINT = "/api/canonical-tags";
 const AI_CAPABILITY_ENDPOINT = "/api/ai/media-suggestion-capability";
 const AUTOMATIC_ANALYSIS_CAPABILITY_ENDPOINT = "/api/ai/automatic-analysis-capability";
 const CLOUD_STATUS_ENDPOINT = "/api/status/cloud";
-const IDENTITY_ENDPOINT = "/api/identity/me";
+const AUDIENCE_ENDPOINT = "/api/audience/me";
 const UPLOADS_ENDPOINT = "/api/uploads";
 const UPLOAD_CAPABILITY_ENDPOINT = "/api/uploads/capability";
 const YOUTUBE_CLAIMS_ENDPOINT = "/api/admin/youtube/claims";
@@ -246,6 +246,7 @@ let metadataDurableAnalysis = {
 let identityState = {
   resolved: false,
   available: false,
+  audience: "",
   login: "",
   displayName: "",
   role: "",
@@ -277,8 +278,16 @@ let adminBatchState = {
 let adminBatchTeardown = false;
 
 function identityHasCapability(capability) {
-  if (!identityState.available) return true;
   return identityState.capabilities.has(capability);
+}
+
+function isPublicPublishedAudience() {
+  return identityState.audience === "public_published";
+}
+
+function isWorkspaceAudience() {
+  return identityState.audience === "tailscale_workspace"
+    || identityState.audience === "trusted_loopback";
 }
 
 function identityAllowsAdminWorkflow() {
@@ -300,7 +309,27 @@ function identityAllowsYouTubeRequest() {
 }
 
 function identityAllowsCoverEditing() {
-  return identityHasCapability("metadata.canonical.write");
+  return isWorkspaceAudience() && identityHasCapability("metadata.canonical.write");
+}
+
+function resetAudienceState() {
+  identityState.resolved = true;
+  identityState.available = false;
+  identityState.audience = "";
+  identityState.login = "";
+  identityState.displayName = "";
+  identityState.role = "";
+  identityState.provenance = "";
+  identityState.capabilities = new Set();
+}
+
+function applyAudienceDocument(audience) {
+  if (typeof document === "undefined" || !document.body) return;
+  if (audience) {
+    document.body.setAttribute("data-audience", audience);
+  } else {
+    document.body.removeAttribute("data-audience");
+  }
 }
 
 function framenestMutationHeaders(headers) {
@@ -309,41 +338,50 @@ function framenestMutationHeaders(headers) {
 
 async function loadIdentity() {
   try {
-    const response = await fetch(IDENTITY_ENDPOINT, {
+    const response = await fetch(AUDIENCE_ENDPOINT, {
       headers: { Accept: "application/json" },
       cache: "no-store",
     });
-    if (response.status === 404) {
-      identityState.resolved = true;
-      identityState.available = false;
+    if (!response.ok) {
+      resetAudienceState();
       return;
     }
-    if (!response.ok) {
-      identityState.resolved = true;
-      identityState.available = true;
-      identityState.capabilities = new Set();
+    const payload = await response.json();
+    const audience = payload && payload.audience;
+    if (
+      audience !== "public_published"
+      && audience !== "tailscale_workspace"
+      && audience !== "trusted_loopback"
+    ) {
+      resetAudienceState();
+      return;
+    }
+    if (!Array.isArray(payload.capabilities)) {
+      resetAudienceState();
+      return;
+    }
+    identityState.resolved = true;
+    identityState.audience = audience;
+    identityState.available = audience === "tailscale_workspace";
+    identityState.capabilities = new Set(
+      payload.capabilities.filter((capability) => typeof capability === "string"),
+    );
+    const identity = payload.identity;
+    if (identity && typeof identity === "object") {
+      identityState.login = typeof identity.login === "string" ? identity.login : "";
+      identityState.displayName = typeof identity.display_name === "string" ? identity.display_name : "";
+      identityState.role = typeof identity.role === "string" ? identity.role : "";
+      identityState.provenance = typeof identity.provenance === "string" ? identity.provenance : "";
+    } else {
       identityState.login = "";
       identityState.displayName = "";
       identityState.role = "";
       identityState.provenance = "";
-      return;
     }
-    const payload = await response.json();
-    identityState.resolved = true;
-    identityState.available = true;
-    identityState.login = typeof payload.login === "string" ? payload.login : "";
-    identityState.displayName = typeof payload.display_name === "string" ? payload.display_name : "";
-    identityState.role = typeof payload.role === "string" ? payload.role : "";
-    identityState.provenance = typeof payload.provenance === "string" ? payload.provenance : "";
-    identityState.capabilities = new Set(
-      Array.isArray(payload.capabilities)
-        ? payload.capabilities.filter((capability) => typeof capability === "string")
-        : [],
-    );
   } catch {
-    identityState.resolved = true;
-    identityState.available = false;
+    resetAudienceState();
   } finally {
+    applyAudienceDocument(identityState.audience);
     applyIdentityCapabilities();
     renderIdentityBadge();
   }
@@ -7364,16 +7402,20 @@ async function populateDetailsDialog(item) {
     }
     addMetadataValue(detailsTechnicalList, "Media ID", hydratedItem.media_id);
     addMetadataValue(detailsTechnicalList, "Kind", formatCatalogKind(hydratedItem.media_kind));
-    if (hydratedItem.created_at_ms !== null && hydratedItem.created_at_ms !== undefined) {
-      addMetadataValue(detailsTechnicalList, "Created", new Date(hydratedItem.created_at_ms).toISOString());
-    }
-    addMetadataValue(detailsTechnicalList, "Collection", hydratedItem.collection_key || "none");
-    const processedAtMs = hydratedItem.processed_at_ms;
-    if (processedAtMs !== null && processedAtMs !== undefined) {
-      addMetadataValue(detailsTechnicalList, "Processed at", new Date(processedAtMs).toISOString());
+    if (!isPublicPublishedAudience()) {
+      if (hydratedItem.created_at_ms !== null && hydratedItem.created_at_ms !== undefined) {
+        addMetadataValue(detailsTechnicalList, "Created", new Date(hydratedItem.created_at_ms).toISOString());
+      }
+      addMetadataValue(detailsTechnicalList, "Collection", hydratedItem.collection_key || "none");
+      const processedAtMs = hydratedItem.processed_at_ms;
+      if (processedAtMs !== null && processedAtMs !== undefined) {
+        addMetadataValue(detailsTechnicalList, "Processed at", new Date(processedAtMs).toISOString());
+      }
     }
     locations.forEach((location, index) => {
-      addMetadataValue(detailsTechnicalList, `Location ${index + 1}`, location.relative_path);
+      if (!isPublicPublishedAudience() && location.relative_path) {
+        addMetadataValue(detailsTechnicalList, `Location ${index + 1}`, location.relative_path);
+      }
       addMetadataValue(detailsTechnicalList, `Availability ${index + 1}`, location.availability);
     });
   } catch {
@@ -8346,17 +8388,15 @@ async function mutateAdminContentPublication(item, opener, published) {
       : `Unpublishing ${adminMediaTitle(item)}…`,
   );
   try {
-    const headers = published
-      ? framenestMutationHeaders({ Accept: "application/json" })
-      : framenestMutationHeaders({
-        Accept: "application/json",
-        "Content-Type": "application/json",
-      });
     const response = await fetch(
       `${ADMIN_MEDIA_ENDPOINT}/${encodeURIComponent(item.media_id)}/content-publication`,
       {
         method: "PUT",
-        headers,
+        headers: framenestMutationHeaders(
+          published
+            ? { Accept: "application/json" }
+            : { Accept: "application/json", "Content-Type": "application/json" },
+        ),
         cache: "no-store",
         body: published ? undefined : JSON.stringify({ published: false }),
       },
@@ -11350,13 +11390,15 @@ if (adminBatchStopButton) {
 }
 
 const identityReady = loadIdentity();
-checkHealth();
-loadAiCapability();
-loadUploadCapability();
-restoreUploadRecovery();
-renderYouTubeClaimCockpit();
-loadCatalogTags();
 identityReady.then(() => {
+  if (!isPublicPublishedAudience()) {
+    checkHealth();
+    loadAiCapability();
+    loadUploadCapability();
+    restoreUploadRecovery();
+    renderYouTubeClaimCockpit();
+  }
+  loadCatalogTags();
   loadCatalog();
 });
 if (
@@ -11704,10 +11746,10 @@ const xAdminReview = document.querySelector("#x-admin-review");
 const xRequestState = { items: [], statusMessage: "", submitting: false, pollTimer: null };
 
 function identityAllowsXRequest() {
-  return identityHasCapability("x.request");
+  return isWorkspaceAudience() && identityHasCapability("x.request");
 }
 function identityAllowsXAdmin() {
-  return identityHasCapability("x.acquire");
+  return isWorkspaceAudience() && identityHasCapability("x.acquire");
 }
 
 function xPhaseLabel(phase) {

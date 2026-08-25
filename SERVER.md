@@ -255,8 +255,9 @@ transcode originals.
 Workspace remote access remains Tailscale-only: authenticated Tailscale Serve
 to `/run/framenest/framenest.sock` and `tailscale_uds`.
 [ADR-0074](docs/adr/0074-dual-audience-public-published-and-tailscale-workspace-boundary.md)
-accepts a second, local-only `public_published_uds` published-reader
-composition as future work. That composition is not implemented or exposed.
+ships a local-only `public_published_uds` published-reader composition.
+That composition is not exposed externally, has no TLS listener, Funnel, or
+NUC bind.
 Funnel to the workspace socket stays forbidden. FrameNest must not require
 router port forwarding. Tailscale networking is not sufficient authorization by
 itself; application-level authorization remains required. The accepted

@@ -4859,3 +4859,16 @@ h2 {
     grid-template-columns: 1fr;
   }
 }
+
+body:not([data-audience]) #upload-open-button,
+body[data-audience="public_published"] #upload-open-button,
+body[data-audience="public_published"] #ai-status-button,
+body[data-audience="public_published"] #admin-media-open-button,
+body[data-audience="public_published"] #youtube-claim-open-button,
+body[data-audience="public_published"] #youtube-request-open-button,
+body[data-audience="public_published"] #x-request-open-button,
+body[data-audience="public_published"] #x-admin-open-button,
+body[data-audience="public_published"] #media-details-edit,
+body[data-audience="public_published"] #media-details-choose-cover {
+  display: none !important;
+}

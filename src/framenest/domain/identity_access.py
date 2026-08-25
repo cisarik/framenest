@@ -37,6 +37,17 @@ CAPABILITY_X_REQUEST = "x.request"
 CAPABILITY_X_ACQUIRE = "x.acquire"
 CAPABILITY_MEDIA_CATALOG_REMOVE = "media.catalog.remove"
 
+AUDIENCE_PUBLIC_PUBLISHED = "public_published"
+AUDIENCE_TAILSCALE_WORKSPACE = "tailscale_workspace"
+AUDIENCE_TRUSTED_LOOPBACK = "trusted_loopback"
+
+PUBLIC_PUBLISHED_CAPABILITIES = frozenset(
+    {
+        CAPABILITY_GALLERY_READ,
+        CAPABILITY_MEDIA_ORIGINAL_READ,
+    }
+)
+
 _ORDINARY_CAPABILITIES = frozenset(
     {
         CAPABILITY_GALLERY_READ,

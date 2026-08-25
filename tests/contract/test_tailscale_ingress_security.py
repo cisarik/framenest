@@ -700,6 +700,7 @@ def test_find_route_policy_returns_fail_closed_fallback() -> None:
         ("GET", "/"),
         ("GET", "/assets/app.js"),
         ("GET", "/api/identity/me"),
+        ("GET", "/api/audience/me"),
         ("GET", "/api/status/cloud"),
         ("GET", "/api/media"),
         ("POST", "/api/canonical-tags"),

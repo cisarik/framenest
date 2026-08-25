@@ -183,10 +183,10 @@ FrameNest security work should follow these principles:
 - Do not disable AppArmor, firewall protections, or platform security controls as a shortcut.
 - Keep local backend services bound to localhost where applicable.
 - Use Tailscale as the workspace remote network boundary for cross-device
-  features. A second public published-reader composition is accepted
-  architecture direction in
+  features. A local-only public published-reader composition is implemented
+  per
   [ADR-0074](docs/adr/0074-dual-audience-public-published-and-tailscale-workspace-boundary.md)
-  and is not shipped.
+  and is not exposed externally.
 - Treat Tailscale networking as necessary but not sufficient; application-level authorization is still required.
 - Keep public-internet egress distinct from Tailscale Serve ingress; operator Mullvad controls are documented in [docs/OPERATOR_NETWORK.md](docs/OPERATOR_NETWORK.md) and [ADR-0058](docs/adr/0058-independent-mullvad-egress-and-operator-network-recovery.md) and must not create inbound exposure.
 - Require explicit confirmation for destructive actions.
@@ -195,12 +195,12 @@ FrameNest security work should follow these principles:
 ### Dual-audience public trust boundary (accepted direction)
 
 [ADR-0074](docs/adr/0074-dual-audience-public-published-and-tailscale-workspace-boundary.md)
-records accepted architecture direction for a future local-only
-`public_published_uds` published-reader composition. That composition is not
-implemented or exposed. It does not add a public bind, TLS listener, Funnel,
-or flag enablement.
+records the dual-audience boundary. The local-only
+`public_published_uds` published-reader composition is implemented and is not
+exposed. It does not add a public bind, TLS listener, Funnel, or NUC
+enablement.
 
-When that composition is implemented:
+For the local-only public composition:
 
 - Public callers are identity-absent and receive only published reads.
 - Unknown and unpublished items, and every unlisted route or method, return

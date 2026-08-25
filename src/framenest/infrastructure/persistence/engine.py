@@ -47,6 +47,81 @@ def create_sqlite_engine(
     return engine
 
 
+def create_sqlite_readonly_engine(
+    database_path: Path | str,
+    *,
+    busy_timeout_seconds: float = DEFAULT_BUSY_TIMEOUT_SECONDS,
+) -> Engine:
+    """Create a file-backed SQLite engine that cannot write or create the file."""
+    normalized_timeout = _validate_busy_timeout(busy_timeout_seconds)
+    normalized_path = _validate_database_path(database_path)
+    if not normalized_path.is_file():
+        raise FrameNestPersistenceError(
+            "Database path must exist for read-only access.",
+            error_code="DATABASE_NOT_FOUND",
+            retryable=False,
+        )
+    uri = f"file:{normalized_path.as_posix()}?mode=ro"
+    engine = create_engine(
+        URL.create("sqlite+pysqlite", database=uri, query={"uri": "true"}),
+        connect_args={"timeout": normalized_timeout, "uri": True},
+        echo=False,
+        hide_parameters=True,
+    )
+    busy_timeout_milliseconds = max(1, int(normalized_timeout * 1000))
+
+    @event.listens_for(engine, "connect")
+    def _configure_readonly_sqlite_connection(
+        dbapi_connection: object, _: object
+    ) -> None:
+        cursor = dbapi_connection.cursor()
+        try:
+            cursor.execute("PRAGMA foreign_keys=ON")
+            cursor.execute(f"PRAGMA busy_timeout={busy_timeout_milliseconds}")
+            cursor.execute("PRAGMA query_only=ON")
+        finally:
+            cursor.close()
+
+    try:
+        _require_readonly_engine(engine)
+    except FrameNestPersistenceError:
+        dispose_engine(engine)
+        raise
+    except Exception as exc:
+        dispose_engine(engine)
+        raise FrameNestPersistenceError(
+            "Read-only database configuration is not available.",
+            error_code="DATABASE_NOT_READONLY",
+            retryable=False,
+            cause=exc,
+        ) from exc
+    return engine
+
+
+def _require_readonly_engine(engine: Engine) -> None:
+    with engine.connect() as connection:
+        query_only = connection.exec_driver_sql("PRAGMA query_only").scalar()
+        if int(query_only or 0) != 1:
+            raise FrameNestPersistenceError(
+                "Read-only database configuration is writable.",
+                error_code="DATABASE_NOT_READONLY",
+                retryable=False,
+            )
+        try:
+            connection.exec_driver_sql(
+                "INSERT INTO alembic_version(version_num) VALUES ('writable-probe')"
+            )
+        except Exception:
+            connection.rollback()
+            return
+        connection.rollback()
+        raise FrameNestPersistenceError(
+            "Read-only database configuration is writable.",
+            error_code="DATABASE_NOT_READONLY",
+            retryable=False,
+        )
+
+
 def run_in_transaction(
     engine: Engine,
     operation: Callable[[Connection], T],
