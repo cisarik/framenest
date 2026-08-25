@@ -8,6 +8,7 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 import pytest
+from pydantic import ValidationError
 from sqlalchemy import insert
 
 from framenest.adapters.api.application import create_app
@@ -195,7 +196,7 @@ def test_youtube_staging_under_database_state_root_composes_operator_lifecycle(
     assert app.state.youtube_operator_api_dependencies.enabled is True
 
 
-def test_non_loopback_bind_does_not_compose_youtube_operator_lifecycle(
+def test_non_loopback_bind_fails_closed_before_composition(
     tmp_path: Path,
 ) -> None:
     base, quarantine, _published = _configured_settings(
@@ -204,21 +205,16 @@ def test_non_loopback_bind_does_not_compose_youtube_operator_lifecycle(
     )
     youtube_root = base.database_path.parent / "youtube-acquisition"
     youtube_root.mkdir(mode=0o700)
-    settings = FrameNestSettings(
-        host="0.0.0.0",
-        database_path=base.database_path,
-        gallery_preview_cache_path=base.gallery_preview_cache_path,
-        upload_quarantine_root=quarantine,
-        upload_publication_library_id=DESTINATION_ID,
-        youtube_acquisition_root=youtube_root,
-        _env_file=None,
-    )
-
-    app = create_app(settings=settings, youtube_downloader=object())
-
-    assert app.state.youtube_acquisition_service is None
-    assert app.state.youtube_acquisition_coordinator is None
-    assert app.state.youtube_operator_api_dependencies.enabled is False
+    with pytest.raises(ValidationError, match="loopback"):
+        FrameNestSettings(
+            host="0.0.0.0",
+            database_path=base.database_path,
+            gallery_preview_cache_path=base.gallery_preview_cache_path,
+            upload_quarantine_root=quarantine,
+            upload_publication_library_id=DESTINATION_ID,
+            youtube_acquisition_root=youtube_root,
+            _env_file=None,
+        )
 
 
 def test_invalid_explicit_destination_fails_closed_with_sanitized_diagnostic(

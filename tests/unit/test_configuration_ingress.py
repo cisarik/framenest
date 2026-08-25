@@ -112,6 +112,49 @@ def test_tcp_mode_tolerates_absent_remote_fields() -> None:
     assert settings.ingress_mode == "tcp"
 
 
+@pytest.mark.parametrize("host", ["127.0.0.1", "::1"])
+def test_tcp_mode_accepts_loopback_hosts(host: str) -> None:
+    settings = FrameNestSettings(ingress_mode="tcp", host=host, _env_file=None)
+    assert settings.host == host
+
+
+@pytest.mark.parametrize(
+    "host",
+    [
+        "0.0.0.0",
+        "192.168.1.50",
+        "8.8.8.8",
+        "::",
+        "2001:db8::1",
+        "fe80::1",
+    ],
+)
+def test_tcp_mode_rejects_non_loopback_hosts(host: str) -> None:
+    with pytest.raises(ValidationError, match="loopback"):
+        FrameNestSettings(ingress_mode="tcp", host=host, _env_file=None)
+
+
+def test_tcp_mode_rejects_non_loopback_host_from_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("FRAMENEST_INGRESS_MODE", "tcp")
+    monkeypatch.setenv("FRAMENEST_HOST", "0.0.0.0")
+    with pytest.raises(ValidationError, match="loopback"):
+        FrameNestSettings(_env_file=None)
+
+
+def test_uds_modes_do_not_constrain_tcp_host(tmp_path: Path) -> None:
+    tailscale = FrameNestSettings(**_tailscale_values(host="0.0.0.0"), _env_file=None)
+    assert tailscale.ingress_mode == "tailscale_uds"
+    public = FrameNestSettings(
+        ingress_mode="public_published_uds",
+        database_path=tmp_path / "catalog.sqlite3",
+        host="0.0.0.0",
+        _env_file=None,
+    )
+    assert public.ingress_mode == "public_published_uds"
+
+
 def test_unknown_ingress_mode_is_rejected() -> None:
     with pytest.raises(ValidationError):
         FrameNestSettings(ingress_mode="lan", _env_file=None)

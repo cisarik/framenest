@@ -225,7 +225,10 @@ def test_exit_code_matrix_for_invalid_not_configured_failure_and_status(
     invalid = youtube.main(["ingest", "https://evil.example/video", "--yes"])
     capsys.readouterr()
 
-    monkeypatch.setattr(youtube, "load_settings", lambda: _settings("192.0.2.1"))
+    # Settings validation now rejects non-loopback tcp hosts fail-closed;
+    # simulate unvalidated legacy state to exercise the CLI boundary check.
+    unvalidated = _settings().model_copy(update={"host": "192.0.2.1"})
+    monkeypatch.setattr(youtube, "load_settings", lambda: unvalidated)
     not_configured = youtube.main(
         ["ingest", f"https://youtu.be/{VIDEO_ID}", "--yes"]
     )

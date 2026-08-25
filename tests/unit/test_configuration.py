@@ -339,9 +339,9 @@ def test_temporary_env_file_overrides_default(
 ) -> None:
     monkeypatch.chdir(tmp_path)
     env_file = tmp_path / ".env"
-    env_file.write_text("FRAMENEST_HOST=192.168.1.1\n", encoding="utf-8")
+    env_file.write_text("FRAMENEST_HOST=127.0.0.2\n", encoding="utf-8")
     settings = load_settings(env_file=env_file)
-    assert settings.host == "192.168.1.1"
+    assert settings.host == "127.0.0.2"
 
 
 def test_process_environment_overrides_temporary_env_file(
@@ -350,10 +350,10 @@ def test_process_environment_overrides_temporary_env_file(
 ) -> None:
     monkeypatch.chdir(tmp_path)
     env_file = tmp_path / ".env"
-    env_file.write_text("FRAMENEST_HOST=192.168.1.1\n", encoding="utf-8")
-    monkeypatch.setenv("FRAMENEST_HOST", "10.0.0.1")
+    env_file.write_text("FRAMENEST_HOST=127.0.0.2\n", encoding="utf-8")
+    monkeypatch.setenv("FRAMENEST_HOST", "127.0.0.3")
     settings = load_settings(env_file=env_file)
-    assert settings.host == "10.0.0.1"
+    assert settings.host == "127.0.0.3"
 
 
 def test_secret_field_uses_secret_str(

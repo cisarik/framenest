@@ -143,10 +143,10 @@ def test_framenest_host_and_port_overrides_propagate(
 ) -> None:
     from framenest.server import create_server
 
-    monkeypatch.setenv("FRAMENEST_HOST", "10.0.0.5")
+    monkeypatch.setenv("FRAMENEST_HOST", "127.0.0.5")
     monkeypatch.setenv("FRAMENEST_PORT", "8765")
     server = create_server()
-    assert server.config.host == "10.0.0.5"
+    assert server.config.host == "127.0.0.5"
     assert server.config.port == 8765
 
 

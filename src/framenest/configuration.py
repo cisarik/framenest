@@ -72,6 +72,10 @@ _INGRESS_CONFIGURATION_MESSAGE = (
 _PUBLIC_INGRESS_CONFIGURATION_MESSAGE = (
     "Public published UDS ingress requires a distinct Unix socket path."
 )
+_TCP_INGRESS_CONFIGURATION_MESSAGE = (
+    "tcp ingress requires the host to be a loopback address; binding the "
+    "full workspace application to a non-loopback address is rejected"
+)
 _COMPANION_EXTENSION_ORIGIN_MESSAGE = (
     "companion extension origins must be at most four unique exact "
     "chrome-extension:// origins"
@@ -440,6 +444,10 @@ class FrameNestSettings(BaseSettings):
                 raise ValueError(_PUBLIC_INGRESS_CONFIGURATION_MESSAGE)
             if self.uds_path is None:
                 self.uds_path = resolved_uds
+            return self
+        if self.ingress_mode == INGRESS_MODE_TCP:
+            if not ip_address(self.host).is_loopback:
+                raise ValueError(_TCP_INGRESS_CONFIGURATION_MESSAGE)
             return self
         if self.ingress_mode != INGRESS_MODE_TAILSCALE_UDS:
             return self
