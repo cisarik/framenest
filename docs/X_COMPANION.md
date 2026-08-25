@@ -36,7 +36,7 @@ An authenticated FrameNest user can:
 - open the toolbar side panel to use one merged title-bar companion history
   (`#review-history-toggle`, `#review-history`, `#review-history-list`) above
   the surviving hosted FrameNest iframe. Compact analyzed titles sit newest
-  first; pending rows stay dark under **All**. Analyzed history opens hosted
+  first; pending rows stay muted under **All**. Analyzed history opens hosted
   media-details via `open_details`. In that hosted
   Gallery, open-original stays bottom-right and Attach sits top-left on the card
   image. Ordinary browser tabs keep open-original only. Gallery 📎 attaches
@@ -54,11 +54,15 @@ analyzed rows fade by position; **All** reveals pending rows and remaining
 analyzed items. Analyzed history opens hosted FrameNest media-details via the
 web-bridge type `open_details`; the extension review overlay is not that click
 path. History starts collapsed only when empty, is not persisted, and expands
-directly under the title bar. Analyzed rows use `review-history-button--analyzed`
-(accent green). Pending rows use `review-history-button--pending` (dark), stay
-out of the compact five, and remain visible when **All** is expanded. Pending
-history includes administrator-owned cataloged X Saves with omitted Save
-category; movie remains excluded. Clicking a row never removes it. A pending
+directly under the title bar. Title bar, compact rows, pending rows, and **All**
+use dark surface plus accent outline, not solid neon fills. Analyzed rows use
+`review-history-button--analyzed`; unopened analyzed rows also use
+`review-history-button--unopened`. Pending rows use `review-history-button--pending`
+(muted outline), stay out of the compact five, and remain visible when **All** is
+expanded. Pending history includes administrator-owned cataloged X Saves with
+omitted Save category; movie remains excluded. Suggestion-ready unpublished
+items appear in companion history and the toolbar badge; they do not appear in
+the ordinary gallery. Clicking a row never removes it. A pending
 overlay shows `No successful analysis yet.` and does not send an opened
 mutation. Review Save retries opened before Apply when
 an earlier opened request failed, retains selections and blocks Apply if that

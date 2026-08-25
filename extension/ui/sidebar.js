@@ -150,11 +150,16 @@
       const li = doc.createElement("li");
       const button = doc.createElement("button");
       button.type = "button";
-      button.className =
-        "review-history-button " +
-        (item.analyzed === true
-          ? "review-history-button--analyzed"
-          : "review-history-button--pending");
+      const classes = ["review-history-button"];
+      if (item.analyzed === true) {
+        classes.push("review-history-button--analyzed");
+        if (item.unopened === true) {
+          classes.push("review-history-button--unopened");
+        }
+      } else {
+        classes.push("review-history-button--pending");
+      }
+      button.className = classes.join(" ");
       if (typeof button.setAttribute === "function") {
         button.setAttribute("data-media-id", item.media_id);
       }

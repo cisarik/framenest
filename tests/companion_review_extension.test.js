@@ -956,61 +956,37 @@ test("title-bar merged history has the accepted DOM, ARIA, and status contract",
   assert.match(sidebarCss, /\.shell-status:empty\s*{[\s\S]*?display:\s*none/);
   assert.match(sidebarCss, /\.review-list:empty\s*{[\s\S]*?display:\s*none/);
   assert.match(sidebarCss, /list-style:\s*none/);
-  assert.match(sidebarCss, /--history-neon:\s*#00ff41;/);
-  assert.match(sidebarCss, /--history-green-1:\s*#00ff41;/);
-  assert.match(sidebarCss, /--history-green-2:\s*#00e03a;/);
-  assert.match(sidebarCss, /--history-green-3:\s*#00c233;/);
-  assert.match(sidebarCss, /--history-green-4:\s*#00a42c;/);
-  assert.match(sidebarCss, /--history-green-5:\s*#008625;/);
-  assert.match(sidebarCss, /--chrome-green:\s*#009928;/);
-  assert.doesNotMatch(sidebarCss, /--history-green-5:\s*#00330d;/);
   assert.match(sidebarCss, /--accent:\s*#00ff41;/);
-  assert.match(
-    sidebarCss,
-    /\.title-bar\s*\{[\s\S]*?background:\s*var\(--chrome-green\)/
-  );
+  assert.match(sidebarCss, /--accent-border:\s*rgba\(0,\s*255,\s*65,\s*0\.42\);/);
+  assert.match(sidebarCss, /--accent-soft:\s*rgba\(0,\s*255,\s*65,\s*0\.12\);/);
+  assert.doesNotMatch(sidebarCss, /--history-neon:/);
+  assert.doesNotMatch(sidebarCss, /--history-green-1:/);
+  assert.doesNotMatch(sidebarCss, /--chrome-green:/);
   const titleBarChrome = sidebarCss.match(/\.title-bar\s*\{[\s\S]*?\n\}/);
   assert.ok(titleBarChrome, "title-bar fill rule");
-  assert.doesNotMatch(titleBarChrome[0], /opacity/);
-  assert.doesNotMatch(titleBarChrome[0], /transparent/);
-  assert.doesNotMatch(titleBarChrome[0], /color-mix/);
+  assert.match(titleBarChrome[0], /background:\s*var\(--surface-input\)/);
+  assert.match(titleBarChrome[0], /border-bottom:\s*1px solid var\(--accent-border\)/);
+  assert.doesNotMatch(titleBarChrome[0], /background:\s*var\(--accent\s*\)/);
+  assert.doesNotMatch(titleBarChrome[0], /background:\s*#00ff41/);
+  assert.doesNotMatch(titleBarChrome[0], /--history-green/);
+  assert.doesNotMatch(titleBarChrome[0], /--chrome-green/);
   const titleBarAction = sidebarCss.match(/\.title-bar__action\s*\{[\s\S]*?\n\}/);
   assert.ok(titleBarAction, "title-bar action rule");
   assert.match(titleBarAction[0], /background:\s*transparent/);
+  assert.match(titleBarAction[0], /border:\s*1px solid var\(--accent-border\)/);
   assert.doesNotMatch(titleBarAction[0], /--accent-strong/);
-  assert.doesNotMatch(titleBarAction[0], /opacity/);
-  const compactFillStops = [
-    ["1", "--history-green-1"],
-    ["2", "--history-green-2"],
-    ["3", "--history-green-3"],
-    ["4", "--history-green-4"],
-    ["5", "--history-green-5"],
-  ];
-  compactFillStops.forEach(([nth, token]) => {
-    const stop = sidebarCss.match(
-      new RegExp(
-        String.raw`\.review-list--compact\s*>\s*li:nth-child\(` +
-          nth +
-          String.raw`\)\s*>\s*button\s*\{[\s\S]*?\n\}`
-      )
-    );
-    assert.ok(stop, "compact fill stop " + nth);
-    assert.match(
-      stop[0],
-      new RegExp(String.raw`background:\s*var\(` + token.replace(/-/g, "\\-") + String.raw`\)`)
-    );
-    assert.doesNotMatch(stop[0], /opacity/);
-    assert.doesNotMatch(stop[0], /transparent/);
-    assert.doesNotMatch(stop[0], /color-mix/);
-  });
+  assert.doesNotMatch(titleBarAction[0], /background:\s*#00ff41/);
+  assert.doesNotMatch(sidebarCss, /\.review-list--compact\s*>\s*li:nth-child\(/);
   const historyAll = sidebarCss.match(/\.review-history-all\s*\{[\s\S]*?\n\}/);
   assert.ok(historyAll, "All fill rule");
-  assert.match(historyAll[0], /background:\s*var\(--chrome-green\)/);
+  assert.match(historyAll[0], /background:\s*var\(--surface-input\)/);
+  assert.match(historyAll[0], /border:\s*1px solid var\(--accent-border\)/);
+  assert.match(historyAll[0], /color:\s*var\(--accent\)/);
   assert.match(historyAll[0], /padding:\s*5px 7px/);
-  assert.doesNotMatch(historyAll[0], /opacity/);
-  assert.doesNotMatch(historyAll[0], /transparent/);
-  assert.doesNotMatch(historyAll[0], /color-mix/);
-  assert.doesNotMatch(historyAll[0], /--surface-solid/);
+  assert.doesNotMatch(historyAll[0], /background:\s*#00ff41/);
+  assert.doesNotMatch(historyAll[0], /--history-green/);
+  assert.doesNotMatch(historyAll[0], /--chrome-green/);
+  assert.doesNotMatch(historyAll[0], /--history-neon/);
   assert.match(
     sidebarCss,
     /\.review-list--compact\s*\{[\s\S]*?background:\s*transparent/
@@ -1019,19 +995,24 @@ test("title-bar merged history has the accepted DOM, ARIA, and status contract",
     /\.review-list--compact\s*>\s*li\s*>\s*button:hover[\s\S]*?\.review-history-all:focus-visible\s*\{[\s\S]*?\n\}/
   );
   assert.ok(compactHover, "compact/All hover fill");
-  assert.match(compactHover[0], /background:\s*var\(--history-neon\)/);
-  assert.doesNotMatch(compactHover[0], /opacity/);
-  assert.doesNotMatch(compactHover[0], /transparent/);
-  assert.doesNotMatch(compactHover[0], /color-mix/);
+  assert.match(compactHover[0], /border-color:\s*var\(--accent\)/);
+  assert.match(compactHover[0], /background:\s*var\(--accent-soft\)/);
+  assert.doesNotMatch(compactHover[0], /background:\s*#00ff41/);
+  assert.doesNotMatch(compactHover[0], /--history-neon/);
+  assert.doesNotMatch(compactHover[0], /--history-green/);
   assert.match(sidebarCss, /max-height:\s*8\.5rem/);
   assert.match(sidebarCss, /overflow-y:\s*auto/);
   assert.match(
     sidebarCss,
-    /\.review-list \.review-history-button--analyzed\s*{[\s\S]*?background:\s*var\(--accent\);[\s\S]*?color:\s*var\(--background\);/
+    /\.review-list \.review-history-button--analyzed\s*{[\s\S]*?border-color:\s*var\(--accent-border\);[\s\S]*?background:\s*transparent;[\s\S]*?color:\s*var\(--accent\);/
   );
   assert.match(
     sidebarCss,
-    /\.review-list \.review-history-button--pending\s*{[\s\S]*?background:\s*var\(--surface-solid\);[\s\S]*?color:\s*var\(--text\);/
+    /\.review-list \.review-history-button--analyzed\.review-history-button--unopened\s*{[\s\S]*?border-color:\s*rgba\(0,\s*255,\s*65,\s*0\.82\);[\s\S]*?background:\s*var\(--accent-soft\);/
+  );
+  assert.match(
+    sidebarCss,
+    /\.review-list \.review-history-button--pending\s*{[\s\S]*?border-color:\s*var\(--line\);[\s\S]*?background:\s*transparent;[\s\S]*?color:\s*var\(--text-muted\);/
   );
   assert.doesNotMatch(extractNamedFunction(sidebarSource, "hideInboxSection"), /clearFrame/);
   assert.doesNotMatch(extractNamedFunction(sidebarSource, "hideInboxSection"), /frame/);
@@ -1091,7 +1072,7 @@ test("merged history renders analyzed and pending rows and never mutates the ifr
   assert.equal(nodes.historyList.childNodes[0].childNodes[0].tagName, "BUTTON");
   assert.equal(
     nodes.historyList.childNodes[0].childNodes[0].className,
-    "review-history-button review-history-button--analyzed"
+    "review-history-button review-history-button--analyzed review-history-button--unopened"
   );
   assert.equal(nodes.allButton.hidden, false);
   assert.equal(nodes.allButton.textContent, "All");
@@ -1115,6 +1096,10 @@ test("merged history renders analyzed and pending rows and never mutates the ifr
   const openedItems = items.map((item) => Object.assign({}, item, { unopened: false }));
   inbox.renderCollections(nodes, openedItems);
   assert.equal(nodes.historyList.childNodes.length, 1);
+  assert.equal(
+    nodes.historyList.childNodes[0].childNodes[0].className,
+    "review-history-button review-history-button--analyzed"
+  );
   assert.equal(nodes.expandedList.childNodes.length, 1);
   inbox.hideCollections(nodes, true);
   assert.equal(nodes.toggle.disabled, true);
@@ -1185,6 +1170,10 @@ test("compact analyzed history is newest-first, capped at five, then All", () =>
   assert.equal(nodes.historyList.childNodes[0].childNodes[0].textContent, "Synthetic analyzed G");
   Array.from(nodes.historyList.childNodes).forEach((li) => {
     assert.doesNotMatch(li.childNodes[0].textContent, /^\d+\.\s/);
+    assert.match(
+      li.childNodes[0].className,
+      /review-history-button--analyzed review-history-button--unopened/
+    );
   });
   assert.equal(nodes.allButton.hidden, false);
   assert.equal(nodes.allButton.disabled, false);

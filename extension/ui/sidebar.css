@@ -14,13 +14,6 @@
   --accent-soft: rgba(0, 255, 65, 0.12);
   --accent-border: rgba(0, 255, 65, 0.42);
   --accent-glow: rgba(0, 255, 65, 0.18);
-  --history-neon: #00ff41;
-  --history-green-1: #00ff41;
-  --history-green-2: #00e03a;
-  --history-green-3: #00c233;
-  --history-green-4: #00a42c;
-  --history-green-5: #008625;
-  --chrome-green: #009928;
   --danger: #ff4d4d;
   --focus: #00ff41;
   --shadow-deep: rgba(0, 0, 0, 0.65);
@@ -67,9 +60,11 @@ body {
   min-height: var(--title-bar-height);
   height: var(--title-bar-height);
   padding: 4px 8px;
-  background: var(--chrome-green);
-  color: #000000;
-  transition: background-color 150ms ease;
+  border-bottom: 1px solid var(--accent-border);
+  background: var(--surface-input);
+  color: var(--text);
+  box-shadow: 0 0 0 1px rgba(0, 255, 65, 0.04), 0 0 14px rgba(0, 255, 65, 0.06);
+  transition: border-color 150ms ease, box-shadow 150ms ease, background-color 150ms ease;
 }
 
 .title-bar__history-toggle {
@@ -86,11 +81,11 @@ body {
 }
 
 .title-bar__history-toggle:hover:not(:disabled) {
-  background: rgba(0, 0, 0, 0.08);
+  background: var(--accent-soft);
 }
 
 .title-bar__history-toggle:focus-visible {
-  outline: 2px solid #000000;
+  outline: 2px solid var(--accent);
   outline-offset: -3px;
 }
 
@@ -102,7 +97,7 @@ body {
   position: relative;
   z-index: 1;
   margin-right: auto;
-  color: #000000;
+  color: var(--accent);
   font-size: 0.92rem;
   font-weight: 800;
   letter-spacing: 0.02em;
@@ -119,10 +114,10 @@ body {
   height: 28px;
   margin: 0;
   padding: 0;
-  border: 1px solid rgba(0, 0, 0, 0.28);
+  border: 1px solid var(--accent-border);
   border-radius: var(--radius-sm);
   background: transparent;
-  color: #000000;
+  color: var(--accent);
   cursor: pointer;
   flex: 0 0 auto;
 }
@@ -136,8 +131,9 @@ body {
 
 .title-bar__settings:hover,
 .title-bar__settings:focus-visible {
-  background: rgba(0, 0, 0, 0.12);
-  outline: 2px solid #000000;
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  outline: 2px solid var(--focus);
   outline-offset: 1px;
 }
 
@@ -147,10 +143,10 @@ body {
   flex: 0 0 auto;
   margin: 0;
   padding: 6px 12px;
-  border: 1px solid #000000;
+  border: 1px solid var(--accent-border);
   border-radius: var(--radius-sm);
   background: transparent;
-  color: #000000;
+  color: var(--accent);
   cursor: pointer;
   font-family: var(--font-mono);
   font-size: 0.82rem;
@@ -159,8 +155,9 @@ body {
 
 .title-bar__action:hover,
 .title-bar__action:focus-visible {
-  background: rgba(0, 0, 0, 0.12);
-  outline: 2px solid #000000;
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  outline: 2px solid var(--focus);
   outline-offset: 1px;
 }
 
@@ -236,51 +233,37 @@ body {
   width: 100%;
   margin: 0;
   padding: 5px 7px;
-  border: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
   background: transparent;
   color: inherit;
   cursor: pointer;
   font: inherit;
   text-align: left;
+  transition: background-color 150ms ease, border-color 150ms ease, color 150ms ease;
 }
 
 .review-list .review-history-button--analyzed {
-  background: var(--accent);
-  color: var(--background);
+  border-color: var(--accent-border);
+  background: transparent;
+  color: var(--accent);
+}
+
+.review-list .review-history-button--analyzed.review-history-button--unopened {
+  border-color: rgba(0, 255, 65, 0.82);
+  background: var(--accent-soft);
+  box-shadow: 0 0 0 1px rgba(0, 255, 65, 0.08), 0 0 10px rgba(0, 255, 65, 0.1);
+  color: var(--accent);
 }
 
 .review-list .review-history-button--pending {
-  background: var(--surface-solid);
-  color: var(--text);
+  border-color: var(--line);
+  background: transparent;
+  color: var(--text-muted);
 }
 
 .review-list--compact > li > button {
-  transition: background-color 150ms ease;
-}
-
-.review-list--compact > li:nth-child(1) > button {
-  background: var(--history-green-1);
-  color: var(--background);
-}
-
-.review-list--compact > li:nth-child(2) > button {
-  background: var(--history-green-2);
-  color: var(--background);
-}
-
-.review-list--compact > li:nth-child(3) > button {
-  background: var(--history-green-3);
-  color: var(--background);
-}
-
-.review-list--compact > li:nth-child(4) > button {
-  background: var(--history-green-4);
-  color: var(--background);
-}
-
-.review-list--compact > li:nth-child(5) > button {
-  background: var(--history-green-5);
-  color: var(--background);
+  transition: background-color 150ms ease, border-color 150ms ease, color 150ms ease;
 }
 
 .review-history-all {
@@ -288,12 +271,12 @@ body {
   width: 100%;
   margin: 0;
   padding: 5px 7px;
-  border: 0;
-  border-bottom: 1px solid var(--line);
-  background: var(--chrome-green);
-  color: var(--background);
+  border: 1px solid var(--accent-border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-input);
+  color: var(--accent);
   cursor: pointer;
-  transition: background-color 150ms ease;
+  transition: background-color 150ms ease, border-color 150ms ease, color 150ms ease;
   font-family: var(--font-mono);
   font-size: 0.82rem;
   text-align: left;
@@ -307,12 +290,14 @@ body {
 .review-list--compact > li > button:focus-visible,
 .review-history-all:hover,
 .review-history-all:focus-visible {
-  background: var(--history-neon);
-  color: var(--background);
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 
 .review-list button:hover,
 .review-list button:focus-visible {
+  border-color: var(--accent);
   color: var(--accent);
   outline: 2px solid var(--focus);
   outline-offset: 2px;
@@ -320,7 +305,9 @@ body {
 
 .review-list .review-history-button--analyzed:hover,
 .review-list .review-history-button--analyzed:focus-visible {
-  color: var(--background);
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 
 .review-list--expanded .review-history-button {

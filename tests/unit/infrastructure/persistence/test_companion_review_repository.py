@@ -86,6 +86,16 @@ OTHER_OMITTED = "33333333-3333-4333-8333-333333333333"
 OTHER_OMITTED_LOC = "34343434-3434-4343-8343-343434343434"
 OTHER_OMITTED_CLAIM = "35353535-3535-4353-8353-353535353535"
 OTHER_OMITTED_ASSET = "36363636-3636-4363-8363-363636363636"
+SUGGESTION_READY = "37373737-3737-4373-8373-373737373737"
+SUGGESTION_READY_LOC = "38383838-3838-4383-8383-383838383838"
+SUGGESTION_READY_RUN = "39393939-3939-4393-8393-393939393939"
+SUGGESTION_READY_CLAIM = "40404040-4040-4404-8404-404040404040"
+SUGGESTION_READY_ASSET = "41414141-4141-4414-8414-414141414141"
+UNDECODABLE = "42424242-4242-4424-8424-424242424242"
+UNDECODABLE_LOC = "43434343-4343-4434-8434-434343434343"
+UNDECODABLE_RUN = "44444444-4444-4444-8444-444444444444"
+UNDECODABLE_CLAIM = "45454545-4545-4454-8454-454545454545"
+UNDECODABLE_ASSET = "46464646-4646-4464-8464-464646464646"
 
 
 def _result_json(*, title: str, tags: list[str]) -> str:
@@ -335,6 +345,8 @@ def _insert_analyzed_run(
     analysis_definition: str = "automatic_post_catalog",
     analysis_profile: str | None = "generic_media",
     prompt_version: str = "framenest-media-suggestion-v4",
+    result_schema_version: str = "framenest-media-suggestion-result-v1",
+    result_json: str | None = None,
 ) -> None:
     connection.execute(
         text(
@@ -346,7 +358,7 @@ def _insert_analyzed_run(
             ") VALUES ("
             ":id, :media, :location, :definition, 'analyzed', 1, "
             "'nvidia-nim', 'test-model', :prompt, "
-            "'framenest-media-suggestion-result-v1', :result, "
+            ":schema, :result, "
             "NULL, NULL, :profile, :completed, :completed, :completed, 2)"
         ),
         {
@@ -355,7 +367,12 @@ def _insert_analyzed_run(
             "location": location_id,
             "definition": analysis_definition,
             "prompt": prompt_version,
-            "result": _result_json(title=title, tags=tags),
+            "schema": result_schema_version,
+            "result": (
+                _result_json(title=title, tags=tags)
+                if result_json is None
+                else result_json
+            ),
             "profile": analysis_profile,
             "completed": completed_at_ms,
         },
@@ -768,7 +785,7 @@ def test_history_maps_historical_tags_and_movie_detail_is_excluded(
         dispose_engine(engine)
 
 
-def test_corrupt_result_json_is_not_silent(tmp_path: Path) -> None:
+def test_corrupt_result_json_does_not_drop_inbox_page(tmp_path: Path) -> None:
     repository, engine = _repository(tmp_path)
     try:
         with engine.begin() as connection:
@@ -779,8 +796,128 @@ def test_corrupt_result_json_is_not_silent(tmp_path: Path) -> None:
                 ),
                 {"id": WEBSITE_RUN},
             )
+        page = repository.list_inbox(actor_login_key=ADMIN_KEY, limit=25, cursor=None)
+        ids = [item.media_id for item in page.items]
+        assert WEBSITE in ids
+        assert GENERIC in ids
+        website = next(item for item in page.items if item.media_id == WEBSITE)
+        assert website.analyzed is True
+        assert website.unopened is True
+        assert website.title == "Untitled media"
+        assert website.analysis_run_id == WEBSITE_RUN
+        generic = next(item for item in page.items if item.media_id == GENERIC)
+        assert generic.title == "Canonical generic"
         with pytest.raises(CompanionReviewStoredResultError):
-            repository.list_inbox(actor_login_key=ADMIN_KEY, limit=25, cursor=None)
+            repository.get_detail(
+                media_id=MediaId.from_string(WEBSITE),
+                actor_login_key=ADMIN_KEY,
+                limit=25,
+                cursor=None,
+            )
+    finally:
+        dispose_engine(engine)
+
+
+def test_suggestion_ready_lists_without_v1_schema_and_survives_decode_failure(
+    tmp_path: Path,
+) -> None:
+    repository, engine = _repository(tmp_path)
+    try:
+        baseline = repository.list_inbox(
+            actor_login_key=ADMIN_KEY, limit=25, cursor=None
+        )
+        baseline_ids = {item.media_id for item in baseline.items}
+        baseline_unopened = baseline.unopened_count
+        with engine.begin() as connection:
+            _insert_media(
+                connection,
+                SUGGESTION_READY,
+                SUGGESTION_READY_LOC,
+                "general",
+                None,
+                created_at_ms=400,
+            )
+            _insert_x_save(
+                connection,
+                claim_id=SUGGESTION_READY_CLAIM,
+                asset_id=SUGGESTION_READY_ASSET,
+                media_id=SUGGESTION_READY,
+                location_id=SUGGESTION_READY_LOC,
+                owner=ADMIN_KEY,
+                post_id="555000111",
+                title="Owned X alias",
+                stage_key="c" * 32,
+                requested_content_category=None,
+            )
+            _insert_analyzed_run(
+                connection,
+                SUGGESTION_READY_RUN,
+                SUGGESTION_READY,
+                SUGGESTION_READY_LOC,
+                completed_at_ms=410,
+                title="Stored non-v1 title",
+                tags=["Cats"],
+                result_schema_version="not-v1",
+            )
+            _insert_media(
+                connection,
+                UNDECODABLE,
+                UNDECODABLE_LOC,
+                "meme",
+                "Canonical undecodable",
+                created_at_ms=420,
+            )
+            _insert_x_save(
+                connection,
+                claim_id=UNDECODABLE_CLAIM,
+                asset_id=UNDECODABLE_ASSET,
+                media_id=UNDECODABLE,
+                location_id=UNDECODABLE_LOC,
+                owner=ADMIN_KEY,
+                post_id="555000222",
+                title="Undecodable alias",
+                stage_key="d" * 32,
+            )
+            _insert_analyzed_run(
+                connection,
+                UNDECODABLE_RUN,
+                UNDECODABLE,
+                UNDECODABLE_LOC,
+                completed_at_ms=430,
+                title="Ignored corrupt title",
+                tags=["Dogs"],
+                result_json=json.dumps(
+                    {
+                        "title": "Would fail tags",
+                        "description": "A description.",
+                        "tags": {"no": "list"},
+                    }
+                ),
+            )
+        page = repository.list_inbox(actor_login_key=ADMIN_KEY, limit=25, cursor=None)
+        ids = [item.media_id for item in page.items]
+        assert SUGGESTION_READY in ids
+        assert UNDECODABLE in ids
+        assert MOVIE not in ids
+        assert MOVIE_ID_MEDIA not in ids
+        assert baseline_ids.issubset(set(ids))
+        ready = next(item for item in page.items if item.media_id == SUGGESTION_READY)
+        assert ready.analyzed is True
+        assert ready.unopened is True
+        assert ready.analysis_run_id == SUGGESTION_READY_RUN
+        assert ready.title == "Stored non-v1 title"
+        undecodable = next(item for item in page.items if item.media_id == UNDECODABLE)
+        assert undecodable.analyzed is True
+        assert undecodable.unopened is True
+        assert undecodable.analysis_run_id == UNDECODABLE_RUN
+        assert undecodable.title == "Canonical undecodable"
+        assert page.unopened_count == baseline_unopened + 2
+        other = repository.list_inbox(
+            actor_login_key=OTHER_KEY, limit=25, cursor=None
+        )
+        other_ids = [item.media_id for item in other.items]
+        assert SUGGESTION_READY in other_ids
+        assert UNDECODABLE in other_ids
     finally:
         dispose_engine(engine)
 

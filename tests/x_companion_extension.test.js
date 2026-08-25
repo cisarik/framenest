@@ -1361,46 +1361,39 @@ test("toolbar action opens the side-panel shell instead of a picker popup", () =
   assert.ok(sidebarHtml.indexOf('class="title-bar"') < sidebarHtml.indexOf('id="origin"'));
   assert.ok(sidebarHtml.indexOf('id="settings-dialog"') < sidebarHtml.indexOf('id="origin"'));
   assert.match(sidebarCss, /\.title-bar\s*\{/);
-  assert.match(sidebarCss, /--history-neon:\s*#00ff41;/);
-  assert.match(sidebarCss, /--history-green-1:\s*#00ff41;/);
-  assert.match(sidebarCss, /--history-green-2:\s*#00e03a;/);
-  assert.match(sidebarCss, /--history-green-3:\s*#00c233;/);
-  assert.match(sidebarCss, /--history-green-4:\s*#00a42c;/);
-  assert.match(sidebarCss, /--history-green-5:\s*#008625;/);
-  assert.match(sidebarCss, /--chrome-green:\s*#009928;/);
-  assert.doesNotMatch(sidebarCss, /--history-green-5:\s*#00330d;/);
+  assert.match(sidebarCss, /--accent:\s*#00ff41;/);
+  assert.match(sidebarCss, /--accent-border:\s*rgba\(0,\s*255,\s*65,\s*0\.42\);/);
+  assert.doesNotMatch(sidebarCss, /--history-neon:/);
+  assert.doesNotMatch(sidebarCss, /--history-green-1:/);
+  assert.doesNotMatch(sidebarCss, /--chrome-green:/);
   const titleBarChrome = sidebarCss.match(/\.title-bar\s*\{[\s\S]*?\n\}/);
   assert.ok(titleBarChrome, "title-bar fill");
-  assert.match(titleBarChrome[0], /background:\s*var\(--chrome-green\)/);
-  assert.match(sidebarCss, /--accent:\s*#00ff41;/);
-  assert.doesNotMatch(titleBarChrome[0], /transparent/);
-  assert.doesNotMatch(titleBarChrome[0], /opacity/);
-  assert.doesNotMatch(titleBarChrome[0], /color-mix/);
+  assert.match(titleBarChrome[0], /background:\s*var\(--surface-input\)/);
+  assert.match(titleBarChrome[0], /border-bottom:\s*1px solid var\(--accent-border\)/);
+  assert.doesNotMatch(titleBarChrome[0], /background:\s*#00ff41/);
+  assert.doesNotMatch(titleBarChrome[0], /--chrome-green/);
+  assert.doesNotMatch(titleBarChrome[0], /--history-green/);
   const titleBarAction = sidebarCss.match(/\.title-bar__action\s*\{[\s\S]*?\n\}/);
   assert.ok(titleBarAction, "title-bar action fill");
   assert.match(titleBarAction[0], /background:\s*transparent/);
+  assert.match(titleBarAction[0], /border:\s*1px solid var\(--accent-border\)/);
   assert.doesNotMatch(titleBarAction[0], /--accent-strong/);
-  assert.doesNotMatch(titleBarAction[0], /opacity/);
-  const compactFillOne = sidebarCss.match(
-    /\.review-list--compact\s*>\s*li:nth-child\(1\)\s*>\s*button\s*\{[\s\S]*?\n\}/
-  );
-  const compactFillFive = sidebarCss.match(
-    /\.review-list--compact\s*>\s*li:nth-child\(5\)\s*>\s*button\s*\{[\s\S]*?\n\}/
-  );
+  assert.doesNotMatch(sidebarCss, /\.review-list--compact\s*>\s*li:nth-child\(/);
   const historyAll = sidebarCss.match(/\.review-history-all\s*\{[\s\S]*?\n\}/);
-  assert.ok(compactFillOne && compactFillFive && historyAll, "compact/All fill rules");
-  assert.match(compactFillOne[0], /background:\s*var\(--history-green-1\)/);
-  assert.match(compactFillFive[0], /background:\s*var\(--history-green-5\)/);
-  assert.match(historyAll[0], /background:\s*var\(--chrome-green\)/);
-  assert.doesNotMatch(compactFillOne[0], /opacity|transparent|color-mix/);
-  assert.doesNotMatch(compactFillFive[0], /opacity|transparent|color-mix/);
-  assert.doesNotMatch(historyAll[0], /opacity|transparent|color-mix/);
+  assert.ok(historyAll, "compact/All fill rules");
+  assert.match(historyAll[0], /background:\s*var\(--surface-input\)/);
+  assert.match(historyAll[0], /border:\s*1px solid var\(--accent-border\)/);
+  assert.doesNotMatch(historyAll[0], /background:\s*#00ff41/);
+  assert.doesNotMatch(historyAll[0], /--chrome-green/);
+  assert.doesNotMatch(historyAll[0], /--history-green/);
   const compactHover = sidebarCss.match(
     /\.review-list--compact\s*>\s*li\s*>\s*button:hover[\s\S]*?\.review-history-all:focus-visible\s*\{[\s\S]*?\n\}/
   );
   assert.ok(compactHover, "compact/All hover fill");
-  assert.match(compactHover[0], /background:\s*var\(--history-neon\)/);
-  assert.doesNotMatch(compactHover[0], /opacity|transparent|color-mix/);
+  assert.match(compactHover[0], /background:\s*var\(--accent-soft\)/);
+  assert.match(compactHover[0], /border-color:\s*var\(--accent\)/);
+  assert.doesNotMatch(compactHover[0], /background:\s*#00ff41/);
+  assert.doesNotMatch(compactHover[0], /--history-neon/);
   assert.doesNotMatch(sidebarHtml, /ui\/picker\.html/);
   assert.doesNotMatch(sidebarJs, /window\.open/);
   assert.doesNotMatch(sidebarJs, /ui\/picker\.html/);

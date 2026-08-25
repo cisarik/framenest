@@ -411,11 +411,15 @@ def validate_companion_review_limit(value: int) -> int:
     return value
 
 
-def inbox_title(*, canonical_display_title: str | None, stored: StoredSuggestion) -> str:
-    """Prefer current non-blank canonical title, else the stored suggestion title."""
+def inbox_title(
+    *, canonical_display_title: str | None, stored: StoredSuggestion | None
+) -> str:
+    """Prefer canonical title, else stored suggestion title, else a generic label."""
     if isinstance(canonical_display_title, str) and canonical_display_title.strip():
         return canonical_display_title
-    return stored.title
+    if stored is not None:
+        return stored.title
+    return "Untitled media"
 
 
 def pending_inbox_title(

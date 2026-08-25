@@ -597,7 +597,7 @@ def _latest_successful_generic():
                 media_metadata.c.media_id == media_analysis_runs.c.media_id,
             )
         )
-        .where(*_successful_generic_predicates())
+        .where(*_analyzed_inbox_predicates())
     ).subquery("ranked_generic")
     return select(ranked).where(ranked.c.rn == 1)
 
@@ -680,14 +680,13 @@ def _mixed_inbox_rows(latest, actor_login_key: str) -> Select:
     return analyzed_rows.union_all(pending_rows)
 
 
-def _successful_generic_predicates() -> tuple[object, ...]:
+def _analyzed_inbox_predicates() -> tuple[object, ...]:
     return (
         media_analysis_runs.c.state == "analyzed",
         media_analysis_runs.c.analysis_definition
         == AUTOMATIC_POST_CATALOG_ANALYSIS_DEFINITION,
         media_analysis_runs.c.analysis_definition
         != MOVIE_IDENTIFICATION_ANALYSIS_DEFINITION,
-        media_analysis_runs.c.result_schema_version == RESULT_SCHEMA_VERSION,
         or_(
             media_analysis_runs.c.analysis_profile
             == AnalysisProfile.GENERIC_MEDIA.value,
@@ -698,6 +697,13 @@ def _successful_generic_predicates() -> tuple[object, ...]:
             media_metadata.c.content_category, DEFAULT_CONTENT_CATEGORY.value
         )
         != ContentCategory.MOVIE.value,
+    )
+
+
+def _successful_generic_predicates() -> tuple[object, ...]:
+    return (
+        *_analyzed_inbox_predicates(),
+        media_analysis_runs.c.result_schema_version == RESULT_SCHEMA_VERSION,
     )
 
 
@@ -759,10 +765,13 @@ def _inbox_item_from_row(row: object) -> CompanionReviewInboxItem:
     completed_at_ms: int | None = None
     unopened = False
     if analyzed:
-        try:
-            stored = decode_stored_suggestion_result(str(mapping["result_json"]))
-        except CompanionReviewCodecError as exc:
-            raise CompanionReviewStoredResultError(_STORED_RESULT_MESSAGE) from exc
+        stored = None
+        raw_result = mapping.get("result_json")
+        if isinstance(raw_result, str):
+            try:
+                stored = decode_stored_suggestion_result(raw_result)
+            except CompanionReviewCodecError:
+                stored = None
         title = inbox_title(
             canonical_display_title=canonical_display_title,
             stored=stored,
