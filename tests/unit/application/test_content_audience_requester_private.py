@@ -73,3 +73,15 @@ def test_decision_order_workflow_published_then_requester() -> None:
     policy = ContentAudiencePolicy(repo, youtube_requester_private_access=access)
     assert policy.may_read(MEDIA_ID, _identity(ROLE_USER, "owner@example.com")) is True
     assert policy.may_read(MEDIA_ID, _identity(ROLE_USER, "foreign@example.com")) is False
+
+
+def test_upload_attributed_caller_can_read_unpublished_media() -> None:
+    repo = _PublicationRepo(exists=True, published=False)
+    upload_access = _RequesterAccess({(MEDIA_ID.to_string(), "owner@example.com")})
+    policy = ContentAudiencePolicy(
+        repo,
+        upload_attributed_access=upload_access,
+    )
+    assert policy.may_read(MEDIA_ID, _identity(ROLE_USER, "owner@example.com")) is True
+    assert policy.may_read(MEDIA_ID, _identity(ROLE_USER, "foreign@example.com")) is False
+    assert repo.is_published_calls == 2

@@ -77,6 +77,11 @@ class AdminLocationResponse(BaseModel):
     observed_mtime_ns: int | None
 
 
+class AdminContributorResponse(BaseModel):
+    login_key: str
+    sources: list[str]
+
+
 class AdminMediaResponse(BaseModel):
     media_id: str
     media_kind: str
@@ -97,6 +102,7 @@ class AdminMediaResponse(BaseModel):
     publication_ready: bool
     missing_fields: list[str]
     analysis_state: str
+    contributors: list[AdminContributorResponse] = []
 
 
 class AdminMediaPageResponse(BaseModel):
@@ -109,6 +115,7 @@ class AdminMediaPageResponse(BaseModel):
     publication: str
     readiness: str
     analysis: str
+    contributor: str | None = None
     has_previous: bool
     has_next: bool
 
@@ -160,6 +167,7 @@ def create_content_publication_api_router(
         publication: str = "unpublished",
         readiness: str = "all",
         analysis: str = "all",
+        contributor: str | None = None,
         limit: int = Query(default=24, ge=1, le=100),
         offset: int = Query(default=0, ge=0),
     ) -> AdminMediaPageResponse | JSONResponse:
@@ -182,6 +190,7 @@ def create_content_publication_api_router(
                 publication=publication,
                 readiness=readiness,
                 analysis=analysis,
+                contributor=contributor,
                 limit=limit,
                 offset=offset,
             )
@@ -345,6 +354,7 @@ def _page_response(page: object) -> AdminMediaPageResponse:
         publication=page.publication,
         readiness=page.readiness,
         analysis=page.analysis,
+        contributor=getattr(page, "contributor", None),
         has_previous=page.offset > 0,
         has_next=page.offset + page.limit < page.total,
     )
@@ -394,6 +404,13 @@ def _item_response(item: object) -> AdminMediaResponse:
         publication_ready=item.readiness.ready,
         missing_fields=list(item.readiness.missing_fields),
         analysis_state=item.analysis_state,
+        contributors=[
+            AdminContributorResponse(
+                login_key=contribution.login_key,
+                sources=list(contribution.sources),
+            )
+            for contribution in getattr(item, "contributors", ())
+        ],
     )
 
 

@@ -37,6 +37,14 @@
       </div>
       <div class="header-status-group">
         <button
+          id="workspace-media-open-button"
+          class="status-button workspace-media-nav-button"
+          type="button"
+          hidden
+        >
+          My contributions
+        </button>
+        <button
           id="admin-media-open-button"
           class="status-button admin-media-nav-button"
           type="button"
@@ -766,6 +774,16 @@
               <option value="all">All</option>
             </select>
           </label>
+          <label class="admin-media-field admin-media-field--search" for="admin-media-contributor-filter">
+            <span>Contributor</span>
+            <input
+              id="admin-media-contributor-filter"
+              type="search"
+              maxlength="254"
+              autocomplete="off"
+              placeholder="Filter by contributor login"
+            >
+          </label>
           <button id="admin-media-refresh-button" class="admin-media-action-control" type="submit">Refresh</button>
         </form>
 
@@ -842,6 +860,63 @@
           <div class="catalog-pagination__nav">
             <button id="admin-media-prev-button" type="button">Previous</button>
             <button id="admin-media-next-button" type="button">Next</button>
+          </div>
+        </div>
+      </section>
+
+      <section
+        id="workspace-media-browser"
+        class="admin-media-browser workspace-media-browser"
+        aria-labelledby="workspace-media-heading"
+        hidden
+      >
+        <div class="admin-media-header">
+          <button
+            id="workspace-media-close-button"
+            class="admin-media-back-button"
+            type="button"
+            aria-label="Back to Gallery"
+            title="Back to Gallery"
+          >
+            <span aria-hidden="true">&larr;</span>
+          </button>
+          <div>
+            <p class="admin-media-eyebrow">Workspace</p>
+            <h1 id="workspace-media-heading" tabindex="-1">My contributions</h1>
+            <p class="admin-media-intro">
+              Media you uploaded or requested, published or unpublished, with honest readiness.
+            </p>
+          </div>
+        </div>
+        <p
+          id="workspace-media-action-status"
+          class="admin-media-action-status"
+          role="status"
+          aria-live="polite"
+          aria-atomic="true"
+        ></p>
+        <div
+          id="workspace-media-loading"
+          class="library-state library-state--loading"
+          role="status"
+          hidden
+        >
+          <span class="library-state__spinner" aria-hidden="true"></span>
+          <span class="library-state__message">Loading contributions…</span>
+        </div>
+        <div id="workspace-media-empty" class="library-state library-state--empty" hidden role="status">
+          <p class="library-state__message">No contributions yet.</p>
+        </div>
+        <div id="workspace-media-error" class="library-state library-state--error" hidden role="alert">
+          <p class="library-state__message">Contributions could not be loaded.</p>
+          <button id="workspace-media-retry-button" class="library-state__action" type="button">Retry</button>
+        </div>
+        <div id="workspace-media-results" class="admin-media-results" role="table" aria-label="My contributions"></div>
+        <div class="catalog-pagination admin-media-pagination" aria-label="Workspace media pagination">
+          <p id="workspace-media-page-summary" role="status">No contribution page loaded.</p>
+          <div class="catalog-pagination__nav">
+            <button id="workspace-media-prev-button" type="button">Previous</button>
+            <button id="workspace-media-next-button" type="button">Next</button>
           </div>
         </div>
       </section>

@@ -616,11 +616,14 @@ MUST keep metadata writes and MUST NOT publish.
 Public callers MUST be identity-absent. Public capabilities MUST be exactly
 `gallery.read` and `media.original.read`.
 
-Workspace capabilities MUST add `media.workspace.read` and
-`analysis.propose` for ordinary and administrator roles, and
-administrator-only `metadata.alias.team.read`. Workspace unpublished reads
-MUST use a contributor-scoped audience-extension model without ownership
-columns or personal libraries.
+Workspace capabilities MUST add `media.workspace.read` for ordinary and
+administrator roles (implemented-for-backend). `analysis.propose` for
+ordinary and administrator roles and administrator-only
+`metadata.alias.team.read` remain successor workspace capabilities.
+Workspace unpublished reads MUST use a contributor-scoped
+audience-extension model without ownership columns or personal libraries
+(implemented-for-backend for the workspace media list, upload-attributed
+content reads, and administrator contribution filter).
 
 ## 20. Transfers and Duplicate Removal
 

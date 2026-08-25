@@ -195,6 +195,7 @@ test("admin surface owns independent filters, requests, items, and per-item publ
     "publication",
     "readiness",
     "analysis",
+    "contributor",
     "limit",
     "offset",
     "requestOwner",
@@ -518,6 +519,7 @@ test("admin controls expose loading empty error retry search filters and determi
     "admin-media-publication-filter",
     "admin-media-readiness-filter",
     "admin-media-analysis-filter",
+    "admin-media-contributor-filter",
     "admin-media-refresh-button",
     "admin-media-loading",
     "admin-media-empty",
@@ -529,7 +531,7 @@ test("admin controls expose loading empty error retry search filters and determi
     assert.ok(INDEX_SOURCE.includes(`id="${id}"`), `missing ${id}`);
   }
   const params = extractFunction(APP_SOURCE, "buildAdminCatalogQueryParams");
-  for (const key of ["q", "publication", "readiness", "analysis", "limit", "offset"]) {
+  for (const key of ["q", "publication", "readiness", "analysis", "contributor", "limit", "offset"]) {
     assert.match(params, new RegExp(`"${key}"`));
   }
 });

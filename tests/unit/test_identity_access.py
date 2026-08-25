@@ -6,6 +6,7 @@ import pytest
 
 from framenest.domain.identity_access import (
     CAPABILITIES_BY_ROLE,
+    CAPABILITY_MEDIA_WORKSPACE_READ,
     CAPABILITY_UPLOAD_MANAGE,
     CAPABILITY_UPLOAD_SUBMIT,
     CAPABILITY_YOUTUBE_ACQUIRE,
@@ -134,6 +135,7 @@ def test_resolve_identity_maps_ordinary_user_with_read_capabilities() -> None:
     assert identity.has_capability("media.download")
     assert identity.has_capability("upload.submit")
     assert identity.has_capability(CAPABILITY_YOUTUBE_REQUEST)
+    assert identity.has_capability("media.workspace.read")
     assert not identity.has_capability("metadata.canonical.write")
     assert identity.has_capability("metadata.alias.write")
     assert not identity.has_capability("upload.manage")
@@ -145,6 +147,8 @@ def test_resolve_identity_maps_ordinary_user_with_read_capabilities() -> None:
     assert CAPABILITY_UPLOAD_MANAGE not in CAPABILITIES_BY_ROLE[ROLE_USER]
     assert CAPABILITY_YOUTUBE_REQUEST in CAPABILITIES_BY_ROLE[ROLE_USER]
     assert CAPABILITY_YOUTUBE_REQUEST in CAPABILITIES_BY_ROLE[ROLE_ADMIN]
+    assert CAPABILITY_MEDIA_WORKSPACE_READ in CAPABILITIES_BY_ROLE[ROLE_USER]
+    assert CAPABILITY_MEDIA_WORKSPACE_READ in CAPABILITIES_BY_ROLE[ROLE_ADMIN]
     assert CAPABILITY_YOUTUBE_ACQUIRE not in CAPABILITIES_BY_ROLE[ROLE_USER]
     assert CAPABILITY_UPLOAD_SUBMIT in CAPABILITIES_BY_ROLE[ROLE_ADMIN]
     assert CAPABILITY_UPLOAD_MANAGE in CAPABILITIES_BY_ROLE[ROLE_ADMIN]

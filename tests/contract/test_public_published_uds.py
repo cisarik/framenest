@@ -71,6 +71,7 @@ UNLISTED_PATHS = (
     "/api/identity/me",
     "/api/libraries",
     "/api/admin/media",
+    "/api/workspace/media",
     "/api/uploads",
     "/api/ai/media-suggestion-capability",
     "/assets/companion_host.js",
@@ -100,6 +101,7 @@ WORKSPACE_ROUTER_MARKERS = (
     "create_library_api_router",
     "create_content_publication_api_router",
     "create_catalog_removal_api_router",
+    "create_workspace_media_api_router",
 )
 
 

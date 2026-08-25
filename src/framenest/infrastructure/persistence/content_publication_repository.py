@@ -43,6 +43,10 @@ from framenest.infrastructure.persistence.engine import (
     run_in_immediate_transaction,
     run_in_transaction,
 )
+from framenest.infrastructure.persistence.media_attribution_repository import (
+    contributor_match_clause,
+    load_media_contributions,
+)
 
 _REPOSITORY_FAILURE_MESSAGE = "Content publication operation failed."
 _LIKE_ESCAPE = "\\"
@@ -143,6 +147,7 @@ class SqliteContentPublicationRepository:
             tags_by_media = _load_tags(connection, media_ids)
             locations_by_media = _load_locations(connection, media_ids)
             analysis_by_media = _load_latest_analysis_states(connection, media_ids)
+            contributions_by_media = load_media_contributions(connection, media_ids)
             items: list[AdminMediaItem] = []
             for row in page_rows:
                 media_id = str(row["media_id"])
@@ -196,6 +201,7 @@ class SqliteContentPublicationRepository:
                             media_id,
                             "not_requested",
                         ),
+                        contributors=contributions_by_media.get(media_id, ()),
                     )
                 )
             return AdminMediaPage(
@@ -208,6 +214,7 @@ class SqliteContentPublicationRepository:
                 publication=query.publication,
                 readiness=query.readiness,
                 analysis=query.analysis,
+                contributor=query.contributor,
             )
 
         try:
@@ -391,6 +398,8 @@ def _admin_filtered_select(query: AdminMediaQuery):
         statement = statement.where(latest_analysis_state.is_(None))
     elif query.analysis != "all":
         statement = statement.where(latest_analysis_state == query.analysis)
+    if query.contributor is not None:
+        statement = statement.where(contributor_match_clause(query.contributor))
     if query.tag_keys:
         statement = (
             statement.where(media_canonical_tags.c.tag_key.in_(query.tag_keys))

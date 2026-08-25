@@ -20,7 +20,9 @@ from framenest.application.upload_transport import default_now_ms
 from framenest.domain.identities import MediaId
 from framenest.domain.identity_access import (
     CAPABILITY_MEDIA_WORKFLOW_READ,
+    FrameNestIdentityAccessError,
     IdentityContext,
+    normalize_login,
 )
 from framenest.domain.media_metadata import CanonicalTagKey
 
@@ -40,6 +42,7 @@ class ContentAudiencePolicy:
     repository: ContentPublicationRepository
     youtube_requester_private_access: object | None = None
     x_requester_private_access: object | None = None
+    upload_attributed_access: object | None = None
 
     def may_read(self, media_id: MediaId, identity: object) -> bool:
         if (
@@ -65,6 +68,7 @@ class ContentAudiencePolicy:
         return (
             self.youtube_requester_private_access,
             self.x_requester_private_access,
+            self.upload_attributed_access,
         )
 
 
@@ -85,6 +89,7 @@ class ListAdminMedia:
         analysis: str,
         limit: int,
         offset: int,
+        contributor: str | None = None,
     ) -> AdminMediaPage:
         return self.repository.list_admin_media(
             AdminMediaQuery(
@@ -95,6 +100,7 @@ class ListAdminMedia:
                 analysis=_analysis_filter(analysis),
                 limit=_bounded_int(limit, minimum=1, maximum=MAX_ADMIN_MEDIA_LIMIT),
                 offset=_bounded_int(offset, minimum=0, maximum=None),
+                contributor=_normalize_contributor(contributor),
             )
         )
 
@@ -132,6 +138,20 @@ class GetMediaWorkflowStatus:
         except Exception as exc:
             raise ContentPublicationValidationError() from exc
         return self.repository.get_media_workflow_status(parsed)
+
+
+def _normalize_contributor(value: str | None) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise ContentPublicationValidationError()
+    stripped = value.strip()
+    if not stripped:
+        return None
+    try:
+        return normalize_login(stripped)
+    except FrameNestIdentityAccessError as exc:
+        raise ContentPublicationValidationError() from exc
 
 
 def _normalize_query(value: str | None) -> str | None:

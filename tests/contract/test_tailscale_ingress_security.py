@@ -53,6 +53,7 @@ USER_CAPABILITIES = {
     "gallery.read",
     "media.original.read",
     "media.download",
+    "media.workspace.read",
     "upload.submit",
     "youtube.request",
     "x.request",
@@ -703,6 +704,7 @@ def test_find_route_policy_returns_fail_closed_fallback() -> None:
         ("GET", "/api/audience/me"),
         ("GET", "/api/status/cloud"),
         ("GET", "/api/media"),
+        ("GET", "/api/workspace/media"),
         ("POST", "/api/canonical-tags"),
         ("GET", f"/api/operator/youtube/claims/{uuid.uuid4()}"),
     ):

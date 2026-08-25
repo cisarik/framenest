@@ -26,6 +26,10 @@ from framenest.adapters.api.content_publication_api import (
     ContentPublicationApiDependencies,
     create_content_publication_api_router,
 )
+from framenest.adapters.api.workspace_media_api import (
+    WorkspaceMediaApiDependencies,
+    create_workspace_media_api_router,
+)
 from framenest.adapters.api.cover_api import (
     CoverApiDependencies,
     create_cover_api_router,
@@ -97,6 +101,7 @@ from framenest.application.content_publication import (
     ListAdminMedia,
     PublishContent,
 )
+from framenest.application.workspace_media import ListWorkspaceMedia
 from framenest.application.media_catalog import GetMediaCatalogItem, ListMediaCatalog
 from framenest.application.companion_picker import ListCompanionPickerMedia
 from framenest.application.companion_review import (
@@ -232,6 +237,9 @@ from framenest.infrastructure.persistence.catalog_removal_repository import (
 from framenest.infrastructure.persistence.content_publication_repository import (
     SqliteContentPublicationRepository,
 )
+from framenest.infrastructure.persistence.media_attribution_repository import (
+    SqliteMediaAttributionRepository,
+)
 from framenest.infrastructure.persistence.library_repository import SqliteLibraryRepository
 from framenest.infrastructure.persistence.media_cover_repository import (
     SqliteMediaCoverRepository,
@@ -324,6 +332,7 @@ def create_app(
     ) = None,
     content_publication_api_dependencies: ContentPublicationApiDependencies
     | None = None,
+    workspace_media_api_dependencies: WorkspaceMediaApiDependencies | None = None,
     catalog_removal_api_dependencies: CatalogRemovalApiDependencies | None = None,
     cover_api_dependencies: CoverApiDependencies | None = None,
     upload_api_dependencies: UploadApiDependencies | None = None,
@@ -367,6 +376,7 @@ def create_app(
     owned_upload_catalog_coordinator = None
     owned_media_analysis_run_repository = None
     owned_content_publication_repository = None
+    owned_media_attribution_repository = None
     owned_content_audience_policy = None
     owned_cover_repository = None
     owned_cover_service = None
@@ -412,6 +422,9 @@ def create_app(
         owned_content_publication_repository = (
             SqliteContentPublicationRepository(owned_engine)
         )
+        owned_media_attribution_repository = SqliteMediaAttributionRepository(
+            owned_engine
+        )
         owned_cover_repository = SqliteMediaCoverRepository(owned_engine)
         owned_youtube_claim_repository = (
             SqliteYouTubeAcquisitionClaimRepository(owned_engine)
@@ -424,6 +437,7 @@ def create_app(
             owned_content_publication_repository,
             youtube_requester_private_access=owned_youtube_claim_repository,
             x_requester_private_access=owned_x_claim_repository,
+            upload_attributed_access=owned_media_attribution_repository,
         )
     if cover_api_dependencies is None:
         assert owned_media_repository is not None
@@ -679,6 +693,13 @@ def create_app(
             ),
             publish_content=PublishContent(
                 owned_content_publication_repository
+            ),
+            catalog_available=resolved_settings.database_path.exists,
+        )
+    if workspace_media_api_dependencies is None and owned_media_attribution_repository is not None:
+        workspace_media_api_dependencies = WorkspaceMediaApiDependencies(
+            list_workspace_media=ListWorkspaceMedia(
+                owned_media_attribution_repository
             ),
             catalog_available=resolved_settings.database_path.exists,
         )
@@ -1181,6 +1202,10 @@ def create_app(
             content_publication_api_dependencies
         )
     )
+    if workspace_media_api_dependencies is not None:
+        app.include_router(
+            create_workspace_media_api_router(workspace_media_api_dependencies)
+        )
     if catalog_removal_api_dependencies is not None:
         app.include_router(
             create_catalog_removal_api_router(catalog_removal_api_dependencies)

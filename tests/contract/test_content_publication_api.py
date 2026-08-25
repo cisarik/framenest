@@ -177,11 +177,25 @@ def test_admin_list_requires_verified_workflow_capability_and_defaults_unpublish
 
     assert response.status_code == 200
     assert service.calls[0]["publication"] == "unpublished"
+    assert service.calls[0]["contributor"] is None
+    assert response.json()["contributor"] is None
+    assert response.json()["items"][0]["contributors"] == []
     assert response.json()["items"][0]["publication_ready"] is True
     assert response.json()["items"][0]["analysis_state"] == "not_requested"
     assert "relative_path" not in response.json()["items"][0]["locations"][0]
     assert response.json()["has_previous"] is False
     assert response.json()["has_next"] is False
+
+
+def test_admin_list_forwards_contributor_filter_without_changing_defaults() -> None:
+    admin, service, _ = _client(identity=_identity(ROLE_ADMIN))
+    response = admin.get(
+        "/api/admin/media",
+        params={"contributor": "Alice@Example.COM"},
+    )
+    assert response.status_code == 200
+    assert service.calls[0]["contributor"] == "Alice@Example.COM"
+    assert service.calls[0]["publication"] == "unpublished"
 
 
 def test_publication_requires_audit_before_mutation_and_is_idempotent() -> None:

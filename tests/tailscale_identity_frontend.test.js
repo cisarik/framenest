@@ -101,6 +101,8 @@ function createIdentityHarness(fetchImpl) {
   const detailsEditButton = { hidden: false };
   const adminMediaOpenButton = { hidden: false };
   const adminMediaBrowser = { hidden: true };
+  const workspaceMediaOpenButton = { hidden: false };
+  const workspaceMediaBrowser = { hidden: true };
   const identityBadge = createIdentityControlMock();
   const identityStatusName = { textContent: "" };
   const statusTailscaleAdminOnlyRows = createAdminOnlyRows();
@@ -115,6 +117,8 @@ function createIdentityHarness(fetchImpl) {
     detailsEditButton,
     adminMediaOpenButton,
     adminMediaBrowser,
+    workspaceMediaOpenButton,
+    workspaceMediaBrowser,
     identityBadge,
     identityStatusName,
     statusTailscaleAdminOnlyRows,
@@ -125,6 +129,9 @@ function createIdentityHarness(fetchImpl) {
   };
   context.closeAdminMediaBrowser = () => {
     context.adminMediaBrowser.hidden = true;
+  };
+  context.closeWorkspaceMediaBrowser = () => {
+    context.workspaceMediaBrowser.hidden = true;
   };
   context.globalThis = context;
   vm.createContext(context);
@@ -147,6 +154,7 @@ function createIdentityHarness(fetchImpl) {
     extractFunction(APP_SOURCE, "identityAllowsYouTubeClaim"),
     extractFunction(APP_SOURCE, "identityAllowsYouTubeRequest"),
     extractFunction(APP_SOURCE, "identityAllowsCoverEditing"),
+    extractFunction(APP_SOURCE, "identityAllowsWorkspaceMedia"),
     extractFunction(APP_SOURCE, "resetAudienceState"),
     extractFunction(APP_SOURCE, "applyAudienceDocument"),
     extractFunction(APP_SOURCE, "framenestMutationHeaders"),
@@ -363,6 +371,7 @@ test("privileged controls are gated by capabilities in source", () => {
   assert.ok(APP_SOURCE.includes('identityHasCapability("upload.manage")'));
   assert.ok(APP_SOURCE.includes('identityHasCapability("metadata.canonical.write")'));
   assert.ok(APP_SOURCE.includes('identityHasCapability("analysis.run")'));
+  assert.ok(APP_SOURCE.includes('identityHasCapability("media.workspace.read")'));
   assert.ok(APP_SOURCE.includes("awaits administrator review"));
   assert.ok(APP_SOURCE.includes("clearStaleUploadRecoveryState"));
   assert.ok(APP_SOURCE.includes("submission expired or is unavailable"));
@@ -406,6 +415,7 @@ test("admin identity populates name-only badge and unlocks privileged controls",
         "gallery.read",
         "metadata.canonical.write",
         "media.workflow.read",
+        "media.workspace.read",
         "upload.manage",
         "upload.submit",
       ],
@@ -425,6 +435,7 @@ test("admin identity populates name-only badge and unlocks privileged controls",
   assert.equal(context.uploadOpenButton.hidden, false);
   assert.equal(context.detailsEditButton.hidden, false);
   assert.equal(context.adminMediaOpenButton.hidden, false);
+  assert.equal(context.workspaceMediaOpenButton.hidden, false);
   assert.equal(context.metadataControlCalls, 1);
   assert.equal(context.statusTailscaleAdminOnlyRows.every((row) => row.hidden === false), true);
 });
@@ -439,7 +450,13 @@ test("ordinary user identity hides privileged controls and keeps admin Tailscale
         role: "user",
         provenance: "tailscale-serve",
       },
-      capabilities: ["gallery.read", "media.download", "media.original.read", "upload.submit"],
+      capabilities: [
+        "gallery.read",
+        "media.download",
+        "media.original.read",
+        "media.workspace.read",
+        "upload.submit",
+      ],
     }),
   );
   await vm.runInContext("loadIdentity()", context);
@@ -450,6 +467,7 @@ test("ordinary user identity hides privileged controls and keeps admin Tailscale
   assert.equal(context.uploadOpenButton.hidden, false);
   assert.equal(context.detailsEditButton.hidden, true);
   assert.equal(context.adminMediaOpenButton.hidden, true);
+  assert.equal(context.workspaceMediaOpenButton.hidden, false);
   assert.equal(context.statusTailscaleAdminOnlyRows.every((row) => row.hidden === true), true);
   assert.equal(vm.runInContext('identityHasCapability("upload.submit")', context), true);
   assert.equal(vm.runInContext('identityHasCapability("upload.manage")', context), false);
@@ -485,6 +503,7 @@ test("denied identity fails closed and hides the badge", async () => {
   assert.equal(context.uploadOpenButton.hidden, true);
   assert.equal(context.detailsEditButton.hidden, true);
   assert.equal(context.adminMediaOpenButton.hidden, true);
+  assert.equal(context.workspaceMediaOpenButton.hidden, true);
   assert.equal(context.statusTailscaleAdminOnlyRows.every((row) => row.hidden === true), true);
 });
 
@@ -498,6 +517,7 @@ test("missing audience bootstrap exposes no capabilities", async () => {
   assert.equal(vm.runInContext('identityHasCapability("gallery.read")', context), false);
   assert.equal(context.uploadOpenButton.hidden, true);
   assert.equal(context.adminMediaOpenButton.hidden, true);
+  assert.equal(context.workspaceMediaOpenButton.hidden, true);
   assert.equal(context.identityBadge.hidden, true);
 });
 
@@ -511,6 +531,7 @@ test("identity network failure exposes no capabilities", async () => {
   assert.equal(state.available, false);
   assert.equal(vm.runInContext('identityHasCapability("analysis.run")', context), false);
   assert.equal(context.adminMediaOpenButton.hidden, true);
+  assert.equal(context.workspaceMediaOpenButton.hidden, true);
 });
 
 test("public published audience exposes only public read capabilities", async () => {
@@ -533,6 +554,7 @@ test("public published audience exposes only public read capabilities", async ()
   assert.equal(context.uploadOpenButton.hidden, true);
   assert.equal(context.detailsEditButton.hidden, true);
   assert.equal(context.adminMediaOpenButton.hidden, true);
+  assert.equal(context.workspaceMediaOpenButton.hidden, true);
   assert.equal(context.identityBadge.hidden, true);
 });
 

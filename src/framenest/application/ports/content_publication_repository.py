@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal, Protocol
 
+from framenest.application.ports.media_attribution import MediaContributionAttribution
 from framenest.application.ports.media_catalog_repository import (
     CatalogMediaLocation,
     CatalogMediaTag,
@@ -50,6 +51,7 @@ class AdminMediaQuery:
     analysis: AnalysisFilter
     limit: int
     offset: int
+    contributor: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -71,6 +73,7 @@ class AdminMediaItem:
     publication: ContentPublication | None
     readiness: ContentPublicationReadiness
     analysis_state: str
+    contributors: tuple[MediaContributionAttribution, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -86,6 +89,7 @@ class AdminMediaPage:
     publication: PublicationFilter
     readiness: ReadinessFilter
     analysis: AnalysisFilter
+    contributor: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

@@ -4,6 +4,7 @@ const HEALTH_ENDPOINT = "/health";
 const LIBRARIES_ENDPOINT = "/api/libraries";
 const MEDIA_CATALOG_ENDPOINT = "/api/media";
 const ADMIN_MEDIA_ENDPOINT = "/api/admin/media";
+const WORKSPACE_MEDIA_ENDPOINT = "/api/workspace/media";
 const MEDIA_METADATA_ENDPOINT_PREFIX = "/api/media";
 const CANONICAL_TAGS_ENDPOINT = "/api/canonical-tags";
 const AI_CAPABILITY_ENDPOINT = "/api/ai/media-suggestion-capability";
@@ -21,6 +22,7 @@ const CATALOG_PAGE_SIZE_STORAGE_KEY = "framenest.catalog.pageSize";
 const UPLOAD_RECOVERY_STORAGE_KEY = "framenest.upload.recovery.v1";
 const CATALOG_PAGE_SIZE = 30;
 const ADMIN_MEDIA_PAGE_SIZE = 24;
+const WORKSPACE_MEDIA_PAGE_SIZE = 24;
 const ADMIN_ANALYSIS_BATCH_MAX_ITEMS = 10;
 const DEFAULT_UPLOAD_CHUNK_BYTES = 1024 * 1024;
 const UPLOAD_POLL_INTERVAL_MS = 1200;
@@ -124,6 +126,7 @@ let adminCatalogState = {
   publication: "unpublished",
   readiness: "all",
   analysis: "all",
+  contributor: "",
   limit: ADMIN_MEDIA_PAGE_SIZE,
   offset: 0,
   total: 0,
@@ -133,6 +136,16 @@ let adminCatalogState = {
   removalOwners: new Map(),
   pendingCleanupReceiptId: null,
   actionStatusByMediaId: new Map(),
+  loading: false,
+  error: false,
+};
+let workspaceMediaRequestToken = 0;
+let workspaceMediaState = {
+  limit: WORKSPACE_MEDIA_PAGE_SIZE,
+  offset: 0,
+  total: 0,
+  requestOwner: null,
+  items: [],
   loading: false,
   error: false,
 };
@@ -312,6 +325,13 @@ function identityAllowsCoverEditing() {
   return isWorkspaceAudience() && identityHasCapability("metadata.canonical.write");
 }
 
+function identityAllowsWorkspaceMedia() {
+  return identityState.resolved
+    && identityState.available
+    && Boolean(identityState.login)
+    && identityHasCapability("media.workspace.read");
+}
+
 function resetAudienceState() {
   identityState.resolved = true;
   identityState.available = false;
@@ -402,6 +422,11 @@ function applyIdentityCapabilities() {
   if (adminMediaOpenButton) {
     adminMediaOpenButton.hidden = !identityAllowsAdminWorkflow();
   }
+  const workspaceAllowed = typeof identityAllowsWorkspaceMedia === "function"
+    && identityAllowsWorkspaceMedia();
+  if (typeof workspaceMediaOpenButton !== "undefined" && workspaceMediaOpenButton) {
+    workspaceMediaOpenButton.hidden = !workspaceAllowed;
+  }
   if (typeof youtubeClaimOpenButton !== "undefined" && youtubeClaimOpenButton) {
     youtubeClaimOpenButton.hidden = !youtubeClaimAllowed;
   }
@@ -436,6 +461,15 @@ function applyIdentityCapabilities() {
   }
   if (!identityAllowsAdminWorkflow() && adminMediaBrowser && !adminMediaBrowser.hidden) {
     closeAdminMediaBrowser();
+  }
+  if (
+    !workspaceAllowed
+    && typeof workspaceMediaBrowser !== "undefined"
+    && workspaceMediaBrowser
+    && !workspaceMediaBrowser.hidden
+    && typeof closeWorkspaceMediaBrowser === "function"
+  ) {
+    closeWorkspaceMediaBrowser();
   }
   updateMetadataControls();
 }
@@ -572,12 +606,26 @@ const catalogNextButton = document.querySelector("#catalog-next-button");
 const catalogPageSummary = document.querySelector("#catalog-page-summary");
 const catalogPageSizeSelect = document.querySelector("#catalog-page-size-select");
 const adminMediaOpenButton = document.querySelector("#admin-media-open-button");
+const workspaceMediaOpenButton = document.querySelector("#workspace-media-open-button");
+const workspaceMediaBrowser = document.querySelector("#workspace-media-browser");
+const workspaceMediaHeading = document.querySelector("#workspace-media-heading");
+const workspaceMediaCloseButton = document.querySelector("#workspace-media-close-button");
+const workspaceMediaActionStatus = document.querySelector("#workspace-media-action-status");
+const workspaceMediaLoading = document.querySelector("#workspace-media-loading");
+const workspaceMediaEmpty = document.querySelector("#workspace-media-empty");
+const workspaceMediaError = document.querySelector("#workspace-media-error");
+const workspaceMediaRetryButton = document.querySelector("#workspace-media-retry-button");
+const workspaceMediaResults = document.querySelector("#workspace-media-results");
+const workspaceMediaPageSummary = document.querySelector("#workspace-media-page-summary");
+const workspaceMediaPrevButton = document.querySelector("#workspace-media-prev-button");
+const workspaceMediaNextButton = document.querySelector("#workspace-media-next-button");
 const adminMediaBrowser = document.querySelector("#admin-media-browser");
 const adminMediaHeading = document.querySelector("#admin-media-heading");
 const adminMediaCloseButton = document.querySelector("#admin-media-close-button");
 const adminMediaFilters = document.querySelector("#admin-media-filters");
 const adminMediaSearch = document.querySelector("#admin-media-search");
 const adminMediaPublicationFilter = document.querySelector("#admin-media-publication-filter");
+const adminMediaContributorFilter = document.querySelector("#admin-media-contributor-filter");
 const adminMediaReadinessFilter = document.querySelector("#admin-media-readiness-filter");
 const adminMediaAnalysisFilter = document.querySelector("#admin-media-analysis-filter");
 const adminMediaRefreshButton = document.querySelector("#admin-media-refresh-button");
@@ -7884,6 +7932,7 @@ function snapshotAdminCatalogQueryState() {
     publication: adminCatalogState.publication,
     readiness: adminCatalogState.readiness,
     analysis: adminCatalogState.analysis,
+    contributor: adminCatalogState.contributor,
     limit: adminCatalogState.limit,
     offset: adminCatalogState.offset,
   });
@@ -7896,6 +7945,8 @@ function buildAdminCatalogQueryParams(snapshot = snapshotAdminCatalogQueryState(
   params.set("publication", snapshot.publication);
   params.set("readiness", snapshot.readiness);
   params.set("analysis", snapshot.analysis);
+  const contributor = typeof snapshot.contributor === "string" ? snapshot.contributor.trim() : "";
+  if (contributor) params.set("contributor", contributor);
   params.set("limit", String(snapshot.limit));
   params.set("offset", String(snapshot.offset));
   return params;
@@ -7919,6 +7970,7 @@ function adminCatalogRequestOwnerIsCurrent(owner) {
     && adminCatalogState.publication === owner.publication
     && adminCatalogState.readiness === owner.readiness
     && adminCatalogState.analysis === owner.analysis
+    && adminCatalogState.contributor === owner.contributor
     && adminCatalogState.limit === owner.limit
     && adminCatalogState.offset === owner.offset;
 }
@@ -8160,7 +8212,19 @@ function renderAdminMediaItem(item) {
   const processed = document.createElement("p");
   processed.className = "admin-media-processed";
   processed.textContent = item.processed ? "✓ Processed" : "Not processed";
-  summaryCell.append(title, metadata, processed);
+  const contributors = Array.isArray(item.contributors) ? item.contributors : [];
+  if (contributors.length) {
+    const contrib = document.createElement("p");
+    contrib.className = "admin-media-contributors";
+    contrib.textContent = contributors.map((entry) => {
+      const login = typeof entry.login_key === "string" ? entry.login_key : "";
+      const sources = Array.isArray(entry.sources) ? entry.sources.join(", ") : "";
+      return sources ? `${login} (${sources})` : login;
+    }).filter(Boolean).join(" · ");
+    summaryCell.append(title, metadata, processed, contrib);
+  } else {
+    summaryCell.append(title, metadata, processed);
+  }
 
   const readinessCell = document.createElement("div");
   readinessCell.className = "admin-media-cell admin-media-cell--readiness";
@@ -8941,6 +9005,7 @@ function setAdminBatchInteractionLock(locked) {
     adminMediaPublicationFilter,
     adminMediaReadinessFilter,
     adminMediaAnalysisFilter,
+    adminMediaContributorFilter,
     adminMediaRefreshButton,
     adminMediaPrevButton,
     adminMediaNextButton,
@@ -9306,6 +9371,7 @@ function openAdminMediaBrowser() {
   if (!identityAllowsAdminWorkflow() || !adminMediaBrowser) return;
   if (catalogBrowser) catalogBrowser.hidden = true;
   if (headerSearch) headerSearch.hidden = true;
+  if (workspaceMediaBrowser) workspaceMediaBrowser.hidden = true;
   adminMediaBrowser.hidden = false;
   adminCatalogState.offset = 0;
   resetAdminBatchForQueryChange();
@@ -9323,6 +9389,211 @@ function closeAdminMediaBrowser() {
   if (adminMediaOpenButton && !adminMediaOpenButton.hidden) adminMediaOpenButton.focus();
 }
 
+function identityAllowsWorkspaceSurface() {
+  return typeof identityAllowsWorkspaceMedia === "function" && identityAllowsWorkspaceMedia();
+}
+
+function snapshotWorkspaceMediaQueryState() {
+  return Object.freeze({
+    limit: workspaceMediaState.limit,
+    offset: workspaceMediaState.offset,
+  });
+}
+
+function buildWorkspaceMediaQueryParams(snapshot = snapshotWorkspaceMediaQueryState()) {
+  const params = new URLSearchParams();
+  params.set("limit", String(snapshot.limit));
+  params.set("offset", String(snapshot.offset));
+  return params;
+}
+
+function claimWorkspaceMediaRequest() {
+  const owner = Object.freeze({
+    ...snapshotWorkspaceMediaQueryState(),
+    token: workspaceMediaRequestToken + 1,
+  });
+  workspaceMediaRequestToken = owner.token;
+  workspaceMediaState.requestOwner = owner;
+  return owner;
+}
+
+function workspaceMediaRequestOwnerIsCurrent(owner) {
+  return Boolean(owner)
+    && workspaceMediaState.requestOwner === owner
+    && workspaceMediaRequestToken === owner.token
+    && workspaceMediaState.limit === owner.limit
+    && workspaceMediaState.offset === owner.offset;
+}
+
+function setWorkspaceMediaViewState(state) {
+  workspaceMediaState.loading = state === "loading";
+  workspaceMediaState.error = state === "error";
+  if (workspaceMediaLoading) workspaceMediaLoading.hidden = state !== "loading";
+  if (workspaceMediaEmpty) workspaceMediaEmpty.hidden = state !== "empty";
+  if (workspaceMediaError) workspaceMediaError.hidden = state !== "error";
+  if (workspaceMediaResults) {
+    workspaceMediaResults.hidden = state === "loading" || state === "error" || state === "empty";
+    workspaceMediaResults.setAttribute("aria-busy", String(state === "loading"));
+  }
+}
+
+function workspaceContributionLabel(sources) {
+  const labels = {
+    upload: "Upload",
+    youtube: "YouTube",
+    x: "X",
+  };
+  return (Array.isArray(sources) ? sources : [])
+    .map((source) => labels[source] || source)
+    .join(" · ");
+}
+
+function renderWorkspaceMediaItem(item) {
+  const row = document.createElement("article");
+  const published = item.content_publication_state === "published";
+  row.className = published
+    ? "admin-media-row admin-media-row--published"
+    : "admin-media-row admin-media-row--unpublished";
+  row.setAttribute("role", "row");
+  row.dataset.mediaId = item.media_id;
+  const titleCell = document.createElement("div");
+  titleCell.className = "admin-media-cell admin-media-cell--summary";
+  titleCell.setAttribute("role", "cell");
+  const titleButton = document.createElement("button");
+  titleButton.type = "button";
+  titleButton.className = "admin-media-row__title-button";
+  const title = typeof item.display_title === "string" && item.display_title.trim()
+    ? item.display_title.trim()
+    : "Untitled media";
+  titleButton.textContent = title;
+  titleButton.addEventListener("click", () => {
+    openWorkspaceMediaDetails(item, titleButton);
+  });
+  const meta = document.createElement("p");
+  meta.className = "admin-media-row__metadata";
+  const sources = workspaceContributionLabel(item.contribution_sources);
+  meta.textContent = sources
+    ? `${formatCatalogKind(item.media_kind)} · ${sources}`
+    : formatCatalogKind(item.media_kind);
+  titleCell.append(titleButton, meta);
+  const readinessCell = document.createElement("div");
+  readinessCell.className = "admin-media-cell admin-media-cell--readiness";
+  readinessCell.setAttribute("role", "cell");
+  readinessCell.appendChild(
+    createAdminStateBadge(
+      item.publication_ready ? "Ready to publish" : "Incomplete metadata",
+      item.publication_ready ? "ready" : "incomplete",
+      item.publication_ready ? "✓" : "!",
+    ),
+  );
+  const missing = Array.isArray(item.missing_fields) ? item.missing_fields.filter(Boolean) : [];
+  if (missing.length) {
+    const missingText = document.createElement("span");
+    missingText.className = "admin-media-cell__detail";
+    missingText.textContent = `Missing: ${missing.join(", ")}`;
+    readinessCell.appendChild(missingText);
+  }
+  const publicationCell = document.createElement("div");
+  publicationCell.className = "admin-media-cell admin-media-cell--publication";
+  publicationCell.setAttribute("role", "cell");
+  publicationCell.appendChild(
+    createAdminStateBadge(
+      published ? "Published" : "Unpublished",
+      published ? "published" : "neutral",
+      published ? "✓" : "○",
+    ),
+  );
+  row.append(titleCell, readinessCell, publicationCell);
+  return row;
+}
+
+async function openWorkspaceMediaDetails(item, opener) {
+  try {
+    const response = await fetch(`${MEDIA_CATALOG_ENDPOINT}/${encodeURIComponent(item.media_id)}`, {
+      headers: { Accept: "application/json" },
+      cache: "no-store",
+    });
+    if (!response.ok) return;
+    const payload = await response.json();
+    openDetailsDialog(payload, opener);
+  } catch {
+    return;
+  }
+}
+
+function renderWorkspaceMediaPage(page) {
+  workspaceMediaState.items = Array.isArray(page.items) ? page.items : [];
+  workspaceMediaState.total = Number.isInteger(page.total) ? page.total : 0;
+  workspaceMediaState.limit = Number.isInteger(page.limit) ? page.limit : WORKSPACE_MEDIA_PAGE_SIZE;
+  workspaceMediaState.offset = Number.isInteger(page.offset) ? page.offset : 0;
+  if (workspaceMediaResults) {
+    workspaceMediaResults.replaceChildren(
+      ...workspaceMediaState.items.map((item) => renderWorkspaceMediaItem(item)),
+    );
+  }
+  const start = workspaceMediaState.total === 0 ? 0 : workspaceMediaState.offset + 1;
+  const end = Math.min(
+    workspaceMediaState.offset + workspaceMediaState.items.length,
+    workspaceMediaState.total,
+  );
+  if (workspaceMediaPageSummary) {
+    workspaceMediaPageSummary.textContent = workspaceMediaState.total === 0
+      ? "No contributions."
+      : `Showing ${start}–${end} of ${workspaceMediaState.total}.`;
+  }
+  if (workspaceMediaPrevButton) workspaceMediaPrevButton.disabled = !page.has_previous;
+  if (workspaceMediaNextButton) workspaceMediaNextButton.disabled = !page.has_next;
+  setWorkspaceMediaViewState(workspaceMediaState.items.length === 0 ? "empty" : "results");
+}
+
+async function loadWorkspaceMedia() {
+  if (!identityAllowsWorkspaceSurface() || !workspaceMediaBrowser) return false;
+  const owner = claimWorkspaceMediaRequest();
+  setWorkspaceMediaViewState("loading");
+  try {
+    const params = buildWorkspaceMediaQueryParams(owner);
+    const response = await fetch(`${WORKSPACE_MEDIA_ENDPOINT}?${params.toString()}`, {
+      headers: { Accept: "application/json" },
+      cache: "no-store",
+    });
+    const payload = await response.json();
+    if (!workspaceMediaRequestOwnerIsCurrent(owner)) return false;
+    if (!response.ok) {
+      setWorkspaceMediaViewState("error");
+      return false;
+    }
+    renderWorkspaceMediaPage(payload);
+    if (workspaceMediaHeading) workspaceMediaHeading.focus();
+    return true;
+  } catch {
+    if (workspaceMediaRequestOwnerIsCurrent(owner)) {
+      setWorkspaceMediaViewState("error");
+    }
+    return false;
+  }
+}
+
+function openWorkspaceMediaBrowser() {
+  if (!identityAllowsWorkspaceSurface() || !workspaceMediaBrowser) return;
+  if (catalogBrowser) catalogBrowser.hidden = true;
+  if (headerSearch) headerSearch.hidden = true;
+  if (adminMediaBrowser) adminMediaBrowser.hidden = true;
+  workspaceMediaBrowser.hidden = false;
+  workspaceMediaState.offset = 0;
+  loadWorkspaceMedia();
+}
+
+function closeWorkspaceMediaBrowser() {
+  workspaceMediaRequestToken += 1;
+  workspaceMediaState.requestOwner = null;
+  if (workspaceMediaBrowser) workspaceMediaBrowser.hidden = true;
+  if (catalogBrowser) catalogBrowser.hidden = false;
+  if (headerSearch) headerSearch.hidden = false;
+  if (workspaceMediaOpenButton && !workspaceMediaOpenButton.hidden) {
+    workspaceMediaOpenButton.focus();
+  }
+}
+
 function applyAdminCatalogFilters() {
   adminCatalogState.q = adminMediaSearch ? adminMediaSearch.value : "";
   adminCatalogState.publication = adminMediaPublicationFilter
@@ -9334,6 +9605,9 @@ function applyAdminCatalogFilters() {
   adminCatalogState.analysis = adminMediaAnalysisFilter
     ? adminMediaAnalysisFilter.value
     : "all";
+  adminCatalogState.contributor = adminMediaContributorFilter
+    ? adminMediaContributorFilter.value
+    : "";
   adminCatalogState.offset = 0;
   resetAdminBatchForQueryChange();
   loadAdminCatalog();
@@ -11314,6 +11588,36 @@ if (catalogRetryButton) {
 
 if (adminMediaOpenButton) {
   adminMediaOpenButton.addEventListener("click", openAdminMediaBrowser);
+}
+
+if (workspaceMediaOpenButton) {
+  workspaceMediaOpenButton.addEventListener("click", openWorkspaceMediaBrowser);
+}
+
+if (workspaceMediaCloseButton) {
+  workspaceMediaCloseButton.addEventListener("click", closeWorkspaceMediaBrowser);
+}
+
+if (workspaceMediaRetryButton) {
+  workspaceMediaRetryButton.addEventListener("click", () => {
+    loadWorkspaceMedia();
+  });
+}
+
+if (workspaceMediaPrevButton) {
+  workspaceMediaPrevButton.addEventListener("click", () => {
+    workspaceMediaState.offset = Math.max(0, workspaceMediaState.offset - workspaceMediaState.limit);
+    loadWorkspaceMedia();
+  });
+}
+
+if (workspaceMediaNextButton) {
+  workspaceMediaNextButton.addEventListener("click", () => {
+    const nextOffset = workspaceMediaState.offset + workspaceMediaState.limit;
+    if (nextOffset >= workspaceMediaState.total) return;
+    workspaceMediaState.offset = nextOffset;
+    loadWorkspaceMedia();
+  });
 }
 
 if (adminMediaCloseButton) {

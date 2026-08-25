@@ -28,6 +28,7 @@ from framenest.domain.identity_access import (
     CAPABILITY_MEDIA_IMPORT,
     CAPABILITY_MEDIA_ORIGINAL_READ,
     CAPABILITY_MEDIA_WORKFLOW_READ,
+    CAPABILITY_MEDIA_WORKSPACE_READ,
     CAPABILITY_METADATA_ALIAS_WRITE,
     CAPABILITY_METADATA_CANONICAL_WRITE,
     CAPABILITY_PROVIDER_OPERATE,
@@ -209,6 +210,11 @@ ROUTE_POLICIES: tuple[RoutePolicy, ...] = (
     ),
     RoutePolicy(
         method="GET", template="/api/media", capability=CAPABILITY_GALLERY_READ
+    ),
+    RoutePolicy(
+        method="GET",
+        template="/api/workspace/media",
+        capability=CAPABILITY_MEDIA_WORKSPACE_READ,
     ),
     RoutePolicy(
         method="GET",
