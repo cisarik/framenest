@@ -509,15 +509,7 @@ class SqliteCompanionReviewRepository:
             if publication is not None:
                 publication_status = "already_published"
             elif readiness.ready:
-                connection.execute(
-                    insert(media_content_publications).values(
-                        media_id=media_id_text,
-                        published_at_ms=now_ms,
-                        publication_origin=ContentPublicationOrigin.COMPANION_REVIEW.value,
-                    )
-                )
-                publication = _load_publication(connection, media_id_text)
-                publication_status = "published"
+                publication_status = "requires_administrator_publish"
             else:
                 publication_status = "not_ready"
             field_sources = _load_field_sources(

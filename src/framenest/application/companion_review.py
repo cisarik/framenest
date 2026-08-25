@@ -512,7 +512,7 @@ class CompanionReviewApplyCanonical:
 
 @dataclass(frozen=True, slots=True)
 class CompanionReviewApplyPublication:
-    """Publication outcome of one companion apply transaction."""
+    """Durable publication state after one apply; Apply never publishes."""
 
     status: str
     state: str
@@ -638,7 +638,7 @@ class MarkCompanionReviewOpened:
 
 @dataclass(frozen=True, slots=True)
 class ApplyCompanionReview:
-    """Apply selected stored-run fields, upsert receipts, and publish when ready."""
+    """Apply selected stored-run fields and upsert receipts without publishing."""
 
     repository: CompanionReviewRepository
     now_ms: Callable[[], int] = default_now_ms

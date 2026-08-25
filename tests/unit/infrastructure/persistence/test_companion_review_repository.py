@@ -1016,6 +1016,17 @@ def test_apply_review_preserves_unselected_fields_and_unions_tags(
         assert title_only.canonical.tags == ()
         assert title_only.canonical.tag_sources == {}
         assert title_only.publication.status == "not_ready"
+        assert title_only.publication.state == "unpublished"
+        assert title_only.publication.ready is False
+        with engine.connect() as connection:
+            website_publications = connection.execute(
+                text(
+                    "SELECT COUNT(*) FROM media_content_publications "
+                    "WHERE media_id = :media"
+                ),
+                {"media": WEBSITE},
+            ).scalar_one()
+        assert int(website_publications) == 0
         inbox = repository.list_inbox(actor_login_key=ADMIN_KEY, limit=25, cursor=None)
         website = next(item for item in inbox.items if item.media_id == WEBSITE)
         assert website.unopened is True
@@ -1038,8 +1049,11 @@ def test_apply_review_preserves_unselected_fields_and_unions_tags(
         assert [tag.key for tag in replaced.canonical.tags] == ["dogs", "cats"]
         assert replaced.canonical.display_title == "Canonical generic"
         assert replaced.canonical.description == "Desc"
-        assert replaced.publication.status == "published"
-        assert replaced.publication.origin == ContentPublicationOrigin.COMPANION_REVIEW.value
+        assert replaced.publication.status == "requires_administrator_publish"
+        assert replaced.publication.state == "unpublished"
+        assert replaced.publication.origin is None
+        assert replaced.publication.published_at_ms is None
+        assert replaced.publication.ready is True
         assert replaced.canonical.field_sources["tags"] is not None
         assert replaced.canonical.field_sources["display_title"] is None
         assert set(replaced.canonical.tag_sources) == {"cats"}
@@ -1054,10 +1068,18 @@ def test_apply_review_preserves_unselected_fields_and_unions_tags(
                 {"media": GENERIC},
             ).first()
             tag_count = connection.execute(text("SELECT COUNT(*) FROM canonical_tags")).scalar_one()
+            publications = connection.execute(
+                text(
+                    "SELECT COUNT(*) FROM media_content_publications "
+                    "WHERE media_id = :media"
+                ),
+                {"media": GENERIC},
+            ).scalar_one()
         assert category is not None
         assert category[0] == "general"
         assert category[1] == "manual_upload"
         assert int(tag_count) == 8
+        assert int(publications) == 0
         repeat = repository.apply_review(
             media_id=MediaId.from_string(GENERIC),
             actor_login_key=ADMIN_KEY,
@@ -1066,13 +1088,90 @@ def test_apply_review_preserves_unselected_fields_and_unions_tags(
             tag_keys=("cats",),
             now_ms=402,
         )
-        assert repeat.publication.status == "already_published"
-        assert repeat.publication.origin == ContentPublicationOrigin.COMPANION_REVIEW.value
-        assert repeat.publication.published_at_ms == 401
+        assert repeat.publication.status == "requires_administrator_publish"
+        assert repeat.publication.state == "unpublished"
+        assert repeat.publication.origin is None
         assert [tag.key for tag in repeat.canonical.tags] == ["dogs", "cats"]
         assert set(repeat.canonical.tag_sources) == {"cats"}
         assert repeat.canonical.field_sources["tags"] is not None
         assert repeat.canonical.field_sources["tags"].applied_at_ms == 402
+    finally:
+        dispose_engine(engine)
+
+
+def test_apply_review_leaves_existing_publication_and_loads_historical_origin(
+    tmp_path: Path,
+) -> None:
+    repository, engine = _repository(tmp_path)
+    try:
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "INSERT INTO media_content_publications "
+                    "(media_id, published_at_ms, publication_origin) "
+                    "VALUES (:media, 77, 'admin_explicit')"
+                ),
+                {"media": GENERIC},
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO media_content_publications "
+                    "(media_id, published_at_ms, publication_origin) "
+                    "VALUES (:media, 88, 'companion_review')"
+                ),
+                {"media": HISTORICAL},
+            )
+        already = repository.apply_review(
+            media_id=MediaId.from_string(GENERIC),
+            actor_login_key=ADMIN_KEY,
+            analysis_run_id=MediaId.from_string(GENERIC_RUN),
+            fields=("display_title",),
+            tag_keys=(),
+            now_ms=500,
+        )
+        assert already.metadata_status == "updated"
+        assert already.canonical.display_title == "Older success"
+        assert already.publication.status == "already_published"
+        assert already.publication.state == "published"
+        assert already.publication.origin == ContentPublicationOrigin.ADMIN_EXPLICIT.value
+        assert already.publication.published_at_ms == 77
+        historical_detail = repository.get_detail(
+            media_id=MediaId.from_string(HISTORICAL),
+            actor_login_key=ADMIN_KEY,
+            limit=25,
+            cursor=None,
+        )
+        assert historical_detail.publication is not None
+        assert (
+            historical_detail.publication.publication_origin
+            is ContentPublicationOrigin.COMPANION_REVIEW
+        )
+        assert historical_detail.publication.published_at_ms == 88
+        historical_apply = repository.apply_review(
+            media_id=MediaId.from_string(HISTORICAL),
+            actor_login_key=ADMIN_KEY,
+            analysis_run_id=MediaId.from_string(HISTORICAL_RUN),
+            fields=("tags",),
+            tag_keys=("cats", "birds"),
+            now_ms=501,
+        )
+        assert historical_apply.publication.status == "already_published"
+        assert (
+            historical_apply.publication.origin
+            == ContentPublicationOrigin.COMPANION_REVIEW.value
+        )
+        assert historical_apply.publication.published_at_ms == 88
+        with engine.connect() as connection:
+            rows = connection.execute(
+                text(
+                    "SELECT media_id, published_at_ms, publication_origin "
+                    "FROM media_content_publications ORDER BY media_id"
+                )
+            ).all()
+        assert [(row[0], int(row[1]), row[2]) for row in rows] == [
+            (GENERIC, 77, "admin_explicit"),
+            (HISTORICAL, 88, "companion_review"),
+        ]
     finally:
         dispose_engine(engine)
 

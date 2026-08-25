@@ -595,15 +595,18 @@ This document does not place current Tailscale command syntax in the specificati
 Accepted architecture direction in
 [ADR-0074](docs/adr/0074-dual-audience-public-published-and-tailscale-workspace-boundary.md).
 These requirements are pending implementation wholes and MUST NOT be read as
-shipped runtime, public bind, TLS, Funnel, or flag enablement.
+shipped runtime, public bind, TLS, Funnel, or flag enablement, except the
+sole publication-gate requirement immediately below, which is
+implemented-for-backend.
 
 The workspace remote path MUST remain authenticated Tailscale Serve to
 `/run/framenest/framenest.sock` and `tailscale_uds`.
 
 Administrator `PUT /api/admin/media/{media_id}/content-publication`, guarded
 by `media.content.publish`, MUST become the sole future promotion and
-unpublication path for every media type, including movies. Companion Apply
-MUST keep metadata writes and MUST NOT publish.
+unpublication path for every media type, including movies
+(implemented-for-backend). Companion Apply MUST keep metadata writes and
+MUST NOT publish.
 
 Public callers MUST be identity-absent. Public capabilities MUST be exactly
 `gallery.read` and `media.original.read`.

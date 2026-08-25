@@ -388,7 +388,7 @@ def test_opened_and_apply_contracts(tmp_path: Path) -> None:
         assert not_ready.json()["publication"]["state"] == "unpublished"
         gallery = client.get("/api/media", headers=_serve_headers(USER_LOGIN, "Owner"))
         assert GENERIC not in {item["media_id"] for item in gallery.json()["items"]}
-        published = client.post(
+        applied = client.post(
             f"/api/companion/review-inbox/{GENERIC}/apply",
             headers=_mutation_headers(ADMIN_LOGIN, COMPANION_ORIGIN),
             json={
@@ -397,19 +397,68 @@ def test_opened_and_apply_contracts(tmp_path: Path) -> None:
                 "tag_keys": ["cats"],
             },
         )
-        assert published.status_code == 200
-        assert published.json()["publication"]["status"] == "published"
-        assert published.json()["publication"]["origin"] == "companion_review"
-        assert published.json()["canonical"]["field_sources"]["tags"] is not None
-        assert "cats" in published.json()["canonical"]["tag_sources"]
-        assert published.json()["canonical"]["tag_sources"]["cats"]["analysis_run_id"] == (
+        assert applied.status_code == 200
+        assert applied.json()["publication"]["status"] == "requires_administrator_publish"
+        assert applied.json()["publication"]["state"] == "unpublished"
+        assert applied.json()["publication"]["origin"] is None
+        assert applied.json()["publication"]["ready"] is True
+        assert applied.json()["canonical"]["field_sources"]["tags"] is not None
+        assert "cats" in applied.json()["canonical"]["tag_sources"]
+        assert applied.json()["canonical"]["tag_sources"]["cats"]["analysis_run_id"] == (
             GENERIC_RUN
         )
-        gallery_after = client.get(
+        engine = create_sqlite_engine(tmp_path / "catalog.sqlite3")
+        try:
+            with engine.connect() as db:
+                publications = db.execute(
+                    text("SELECT COUNT(*) FROM media_content_publications")
+                ).scalar_one()
+            assert int(publications) == 0
+        finally:
+            dispose_engine(engine)
+        gallery_after_apply = client.get(
+            "/api/media", headers=_serve_headers(USER_LOGIN, "Owner")
+        )
+        assert GENERIC not in {
+            item["media_id"] for item in gallery_after_apply.json()["items"]
+        }
+        published = client.put(
+            f"/api/admin/media/{GENERIC}/content-publication",
+            headers=_mutation_headers(ADMIN_LOGIN),
+        )
+        assert published.status_code == 201
+        assert published.json()["status"] == "published"
+        assert published.json()["publication"]["publication_origin"] == "admin_explicit"
+        gallery_after_publish = client.get(
             "/api/media", headers=_serve_headers(USER_LOGIN, "Owner")
         )
         assert GENERIC in {
-            item["media_id"] for item in gallery_after.json()["items"]
+            item["media_id"] for item in gallery_after_publish.json()["items"]
+        }
+        already = client.put(
+            f"/api/admin/media/{GENERIC}/content-publication",
+            headers=_mutation_headers(ADMIN_LOGIN),
+        )
+        assert already.status_code == 200
+        assert already.json()["status"] == "already_published"
+        apply_after_publish = client.post(
+            f"/api/companion/review-inbox/{GENERIC}/apply",
+            headers=_mutation_headers(ADMIN_LOGIN, COMPANION_ORIGIN),
+            json={
+                "analysis_run_id": GENERIC_RUN,
+                "fields": ["tags"],
+                "tag_keys": ["cats"],
+            },
+        )
+        assert apply_after_publish.status_code == 200
+        assert apply_after_publish.json()["publication"]["status"] == "already_published"
+        assert apply_after_publish.json()["publication"]["origin"] == "admin_explicit"
+        assert apply_after_publish.json()["publication"]["state"] == "published"
+        gallery_after_repeat_apply = client.get(
+            "/api/media", headers=_serve_headers(USER_LOGIN, "Owner")
+        )
+        assert GENERIC in {
+            item["media_id"] for item in gallery_after_repeat_apply.json()["items"]
         }
         website = client.put(
             f"/api/admin/media/{PUBLISH}/content-publication",
@@ -433,6 +482,50 @@ def test_opened_and_apply_contracts(tmp_path: Path) -> None:
             json={"analysis_run_id": GENERIC_RUN},
         )
         assert missing.status_code == 404
+
+
+def test_historical_companion_review_origin_remains_readable(tmp_path: Path) -> None:
+    with _client(tmp_path, companion_origins=(COMPANION_ORIGIN,)) as client:
+        engine = create_sqlite_engine(tmp_path / "catalog.sqlite3")
+        try:
+            with engine.begin() as connection:
+                connection.execute(
+                    text(
+                        "INSERT INTO media_content_publications "
+                        "(media_id, published_at_ms, publication_origin) "
+                        "VALUES (:media, 99, 'companion_review')"
+                    ),
+                    {"media": GENERIC},
+                )
+        finally:
+            dispose_engine(engine)
+        detail = client.get(
+            f"/api/companion/review-inbox/{GENERIC}",
+            headers=_serve_headers(ADMIN_LOGIN, "Admin"),
+        )
+        assert detail.status_code == 200
+        assert detail.json()["publication"]["state"] == "published"
+        assert detail.json()["publication"]["origin"] == "companion_review"
+        assert detail.json()["publication"]["published_at_ms"] == 99
+        gallery = client.get("/api/media", headers=_serve_headers(USER_LOGIN, "Owner"))
+        assert GENERIC in {item["media_id"] for item in gallery.json()["items"]}
+        applied = client.post(
+            f"/api/companion/review-inbox/{GENERIC}/apply",
+            headers=_mutation_headers(ADMIN_LOGIN, COMPANION_ORIGIN),
+            json={
+                "analysis_run_id": GENERIC_RUN,
+                "fields": ["display_title"],
+                "tag_keys": [],
+            },
+        )
+        assert applied.status_code == 200
+        assert applied.json()["publication"]["status"] == "already_published"
+        assert applied.json()["publication"]["origin"] == "companion_review"
+        assert applied.json()["publication"]["published_at_ms"] == 99
+        gallery_after = client.get(
+            "/api/media", headers=_serve_headers(USER_LOGIN, "Owner")
+        )
+        assert GENERIC in {item["media_id"] for item in gallery_after.json()["items"]}
 
 
 def test_audit_failure_blocks_opened_and_apply(tmp_path: Path) -> None:
