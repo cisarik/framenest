@@ -6,6 +6,7 @@ import math
 from collections.abc import Callable
 from pathlib import Path
 from typing import TypeVar
+from urllib.parse import quote
 
 from sqlalchemy import event
 from sqlalchemy.engine import Connection, Engine, URL, create_engine
@@ -61,7 +62,8 @@ def create_sqlite_readonly_engine(
             error_code="DATABASE_NOT_FOUND",
             retryable=False,
         )
-    uri = f"file:{normalized_path.as_posix()}?mode=ro"
+    encoded_path = quote(normalized_path.as_posix(), safe="/")
+    uri = f"file:{encoded_path}?mode=ro"
     engine = create_engine(
         URL.create("sqlite+pysqlite", database=uri, query={"uri": "true"}),
         connect_args={"timeout": normalized_timeout, "uri": True},
