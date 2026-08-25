@@ -6,12 +6,15 @@ from contextlib import asynccontextmanager
 from collections.abc import AsyncIterator
 
 from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from framenest.adapters.api.public_published_api import (
+    NOT_FOUND_CODE,
     PublicPublishedApiDependencies,
     create_public_published_api_router,
+    index_html_contains_companion_marker,
     public_not_found_response,
 )
 from framenest.application.gallery_preview import GalleryPreviewService
@@ -51,9 +54,11 @@ from framenest.infrastructure.persistence.media_metadata_repository import (
     SqliteMediaMetadataRepository,
 )
 from framenest.infrastructure.persistence.media_repository import SqliteMediaRepository
+from framenest.structured_logging import get_logger
 
 REQUIRED_PUBLIC_SCHEMA_REVISION = "0033"
 _SAFE_METHODS = frozenset({"GET", "HEAD"})
+LOGGER = get_logger("public_published_application")
 
 
 class PublicPublishedStartupError(ValueError):
@@ -85,6 +90,18 @@ def create_public_published_app(
     if resolved_settings.uds_path is None:
         raise PublicPublishedStartupError(
             "Public published composition requires a Unix socket path."
+        )
+    try:
+        marker_present = index_html_contains_companion_marker()
+    except OSError as exc:
+        raise PublicPublishedStartupError(
+            "Public published index asset is unavailable."
+        ) from exc
+    if not marker_present:
+        raise PublicPublishedStartupError(
+            "Public published index asset is missing the companion script "
+            "marker; serving it would reference a companion asset the public "
+            "allowlist can never answer."
         )
     try:
         engine = create_sqlite_readonly_engine(resolved_settings.database_path)
@@ -190,6 +207,19 @@ def create_public_published_app(
                 del response.headers[header_name]
         return response
 
+    @app.exception_handler(RequestValidationError)
+    async def request_validation_exception_handler(
+        request: Request, exc: RequestValidationError
+    ) -> JSONResponse:
+        del request, exc
+        LOGGER.emit(
+            level="WARNING",
+            event="public_request_validation_rejected",
+            operation="dispatch",
+            error_code=NOT_FOUND_CODE,
+        )
+        return public_not_found_response()
+
     @app.exception_handler(StarletteHTTPException)
     async def http_exception_handler(
         request: Request, exc: StarletteHTTPException
@@ -197,6 +227,12 @@ def create_public_published_app(
         del request
         if exc.status_code in {401, 403, 404, 405, 406, 415}:
             return public_not_found_response()
+        LOGGER.emit(
+            level="WARNING",
+            event="public_http_exception_rejected",
+            operation="dispatch",
+            error_code=f"HTTP_{exc.status_code}",
+        )
         return JSONResponse(
             status_code=exc.status_code,
             content={"error": {"code": "NOT_FOUND", "message": "Not found."}},
@@ -207,7 +243,14 @@ def create_public_published_app(
     async def unexpected_exception_handler(
         request: Request, exc: Exception
     ) -> JSONResponse:
-        del request, exc
+        del request
+        LOGGER.emit(
+            level="ERROR",
+            event="public_unexpected_failure",
+            operation="dispatch",
+            error_code=NOT_FOUND_CODE,
+            exception=exc,
+        )
         return JSONResponse(
             status_code=500,
             content={"error": {"code": "NOT_FOUND", "message": "Not found."}},

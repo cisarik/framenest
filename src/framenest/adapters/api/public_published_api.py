@@ -47,6 +47,7 @@ from framenest.domain.identity_access import (
     AUDIENCE_PUBLIC_PUBLISHED,
     PUBLIC_PUBLISHED_CAPABILITIES,
 )
+from framenest.structured_logging import get_logger
 import framenest.adapters.api.web as web_resources
 
 NOT_FOUND_CODE = "NOT_FOUND"
@@ -55,6 +56,7 @@ NO_STORE_HEADERS = {
     "Cache-Control": "no-store",
     "X-Content-Type-Options": "nosniff",
 }
+LOGGER = get_logger("public_published_api")
 
 _PUBLIC_ASSET_MEDIA_TYPES = {
     "app.js": "text/javascript; charset=utf-8",
@@ -163,6 +165,12 @@ def public_not_found_response() -> JSONResponse:
     )
 
 
+def index_html_contains_companion_marker() -> bool:
+    """Return whether the packaged index still carries the companion marker."""
+    html = _read_web_resource("index.html").decode("utf-8")
+    return _INDEX_COMPANION_SCRIPT in html
+
+
 def create_public_published_api_router(
     dependencies: PublicPublishedApiDependencies,
 ) -> APIRouter:
@@ -172,9 +180,12 @@ def create_public_published_api_router(
     @router.get("/", response_class=HTMLResponse)
     def root() -> HTMLResponse:
         html = _read_web_resource("index.html").decode("utf-8")
-        html = html.replace(_INDEX_COMPANION_SCRIPT, "")
+        if _INDEX_COMPANION_SCRIPT not in html:
+            raise RuntimeError(
+                "Companion script marker missing from public index asset."
+            )
         return HTMLResponse(
-            content=html,
+            content=html.replace(_INDEX_COMPANION_SCRIPT, ""),
             media_type="text/html; charset=utf-8",
             headers=dict(NO_STORE_HEADERS),
         )
@@ -229,10 +240,10 @@ def create_public_published_api_router(
             )
         except MediaCatalogValidationError:
             return public_not_found_response()
-        except FrameNestMediaCatalogRepositoryError:
-            return _failed_response()
-        except Exception:
-            return _failed_response()
+        except FrameNestMediaCatalogRepositoryError as exc:
+            return _failed_response(exc)
+        except Exception as exc:
+            return _failed_response(exc)
         return PublicCatalogResponse(
             items=[_redact_catalog_item(item) for item in result.items],
             total=result.total,
@@ -257,10 +268,10 @@ def create_public_published_api_router(
             item = dependencies.get_media.execute(str(media_id))
         except MediaCatalogValidationError:
             return public_not_found_response()
-        except FrameNestMediaCatalogRepositoryError:
-            return _failed_response()
-        except Exception:
-            return _failed_response()
+        except FrameNestMediaCatalogRepositoryError as exc:
+            return _failed_response(exc)
+        except Exception as exc:
+            return _failed_response(exc)
         if item is None or not _published(dependencies, parsed):
             return public_not_found_response()
         return _redact_catalog_item(item)
@@ -275,10 +286,10 @@ def create_public_published_api_router(
             return public_not_found_response()
         try:
             tags = dependencies.list_published_tags()
-        except FrameNestMediaMetadataRepositoryError:
-            return _failed_response()
-        except Exception:
-            return _failed_response()
+        except FrameNestMediaMetadataRepositoryError as exc:
+            return _failed_response(exc)
+        except Exception as exc:
+            return _failed_response(exc)
         return PublicCanonicalTagListResponse(
             tags=[
                 PublicCanonicalTagResponse(
@@ -304,8 +315,8 @@ def create_public_published_api_router(
             result = dependencies.get_metadata.execute(str(media_id))
         except MediaMetadataMediaNotFoundError:
             return public_not_found_response()
-        except Exception:
-            return _failed_response()
+        except Exception as exc:
+            return _failed_response(exc)
         if not _published(dependencies, parsed):
             return public_not_found_response()
         return PublicMetadataResponse(
@@ -350,10 +361,10 @@ def create_public_published_api_router(
             FrameNestLibraryRepositoryError,
             FrameNestMediaRepositoryError,
             MediaContentFailedError,
-        ):
-            return _failed_response()
-        except Exception:
-            return _failed_response()
+        ) as exc:
+            return _failed_response(exc)
+        except Exception as exc:
+            return _failed_response(exc)
         if not _published(dependencies, parsed):
             if isinstance(resolved, ResolvedMediaContent):
                 resolved.close()
@@ -389,10 +400,10 @@ def create_public_published_api_router(
             FrameNestLibraryRepositoryError,
             FrameNestMediaRepositoryError,
             GalleryPreviewFailedError,
-        ):
-            return _failed_response()
-        except Exception:
-            return _failed_response()
+        ) as exc:
+            return _failed_response(exc)
+        except Exception as exc:
+            return _failed_response(exc)
         if not _published(dependencies, parsed):
             opened.close()
             return public_not_found_response()
@@ -431,10 +442,10 @@ def create_public_published_api_router(
             FrameNestLibraryRepositoryError,
             FrameNestMediaRepositoryError,
             CoverFailedError,
-        ):
-            return _failed_response()
-        except Exception:
-            return _failed_response()
+        ) as exc:
+            return _failed_response(exc)
+        except Exception as exc:
+            return _failed_response(exc)
         if not _published(dependencies, parsed):
             opened.close()
             return public_not_found_response()
@@ -515,7 +526,15 @@ def _read_web_resource(resource_name: str) -> bytes:
     return resource.read_bytes()
 
 
-def _failed_response() -> JSONResponse:
+def _failed_response(exc: Exception | None = None) -> JSONResponse:
+    if exc is not None:
+        LOGGER.emit(
+            level="ERROR",
+            event="public_read_failed",
+            operation="serve",
+            error_code="PUBLIC_READ_FAILED",
+            exception=exc,
+        )
     return JSONResponse(
         status_code=500,
         content={"error": {"code": "PUBLIC_READ_FAILED", "message": "Not found."}},

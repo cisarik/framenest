@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from framenest.adapters.api import public_published_api as public_published_api_module
 from framenest.adapters.api.application import create_app
 from framenest.adapters.api.public_published_api import (
     PublicPublishedApiDependencies,
@@ -16,6 +20,7 @@ from framenest.adapters.api.public_published_api import (
 from framenest.adapters.api.public_published_application import (
     PublicPublishedStartupError,
     REQUIRED_PUBLIC_SCHEMA_REVISION,
+    create_public_published_app,
 )
 from framenest.configuration import FrameNestSettings
 from framenest.domain.identities import MediaId
@@ -29,6 +34,10 @@ from framenest.infrastructure.persistence.engine import (
 )
 from framenest.infrastructure.persistence.errors import FrameNestPersistenceError
 from framenest.infrastructure.persistence.migrations import upgrade_database_to_head
+from framenest.structured_logging import (
+    FrameNestJsonFormatter,
+    FrameNestRedactionFilter,
+)
 
 GIF_ID = "11111111-1111-4111-8111-111111111111"
 IMAGE_ID = "22222222-2222-4222-8222-222222222222"
@@ -504,3 +513,115 @@ def test_workspace_tcp_audience_bootstrap_is_trusted_loopback() -> None:
     assert payload["identity"] is None
     assert "gallery.read" in payload["capabilities"]
     assert "upload.submit" in payload["capabilities"]
+
+
+def test_malformed_and_out_of_range_requests_match_uniform_404(public_client) -> None:
+    client, _settings = public_client
+    reference = client.get("/uniform-404-probe")
+    assert reference.status_code == 404
+    probes = (
+        "/api/media/not-a-uuid",
+        "/api/media/11111111-1111-4111-8111-11111111111/metadata",
+        f"/api/media/{GIF_ID}/locations/not-a-uuid/content",
+        f"/api/media/{GIF_ID}/locations/not-a-uuid/gallery-preview",
+        "/api/media?limit=9999",
+        "/api/media?limit=0",
+        "/api/media?limit=abc",
+        "/api/media?offset=-1",
+        "/api/media?tag=%FF",
+    )
+    for path in probes:
+        response = client.get(path)
+        _not_found(response)
+        assert response.content == reference.content
+        assert response.headers.get("x-content-type-options") == "nosniff"
+
+
+def test_public_index_serves_without_companion_script_reference(public_client) -> None:
+    client, _settings = public_client
+    page = client.get("/")
+    assert page.status_code == 200
+    assert "companion_host.js" not in page.text
+
+
+def test_startup_fails_closed_when_companion_marker_missing(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(
+        public_published_api_module, "_read_web_resource", lambda name: b"<html></html>"
+    )
+    settings = FrameNestSettings(
+        database_path=tmp_path / "catalog.sqlite3",
+        gallery_preview_cache_path=tmp_path / "previews",
+        cover_storage_root=tmp_path / "covers",
+        cover_thumbnail_cache_path=tmp_path / "thumbnails",
+        ingress_mode="public_published_uds",
+        uds_path=tmp_path / "public.sock",
+        _env_file=None,
+    )
+    with pytest.raises(PublicPublishedStartupError):
+        create_public_published_app(settings)
+
+
+def test_public_root_fails_loud_when_marker_missing_at_serve_time(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        public_published_api_module, "_read_web_resource", lambda name: b"<html></html>"
+    )
+    app = FastAPI()
+    app.include_router(create_public_published_api_router(_dummy_public_dependencies()))
+    with TestClient(app, raise_server_exceptions=False) as client:
+        response = client.get("/")
+    assert response.status_code == 500
+
+
+class _ExplodingListMedia:
+    def execute(self, *args: object, **kwargs: object) -> object:
+        raise RuntimeError("leak attempt /srv/media/private clip.mp4")
+
+
+def test_public_read_failure_logs_only_sanitized_error_class(caplog) -> None:
+    dependencies = replace(
+        _dummy_public_dependencies(),
+        catalog_available=lambda: True,
+        list_media=_ExplodingListMedia(),
+    )
+    app = FastAPI()
+    app.include_router(create_public_published_api_router(dependencies))
+    with TestClient(app, raise_server_exceptions=False) as client:
+        response = client.get("/api/media")
+    assert response.status_code == 500
+    assert response.json()["error"]["code"] == "PUBLIC_READ_FAILED"
+    records = [
+        record for record in caplog.records if record.name == "framenest.public_published_api"
+    ]
+    assert len(records) == 1
+    record = records[0]
+    assert FrameNestRedactionFilter().filter(record) is True
+    rendered = FrameNestJsonFormatter().format(record)
+    payload = json.loads(rendered)
+    assert payload["event"] == "public_read_failed"
+    assert payload["exception"] == {"type": "RuntimeError"}
+    assert "clip.mp4" not in rendered
+    assert "/srv/media" not in rendered
+    assert "leak attempt" not in rendered
+
+
+def test_validation_rejection_logs_no_request_details(public_client, caplog) -> None:
+    client, _settings = public_client
+    with caplog.at_level("WARNING", logger="framenest.public_published_application"):
+        client.get("/api/media/not-a-uuid")
+    records = [
+        record
+        for record in caplog.records
+        if record.name == "framenest.public_published_application"
+    ]
+    assert len(records) == 1
+    assert FrameNestRedactionFilter().filter(records[0]) is True
+    rendered = FrameNestJsonFormatter().format(records[0])
+    payload = json.loads(rendered)
+    assert payload["event"] == "public_request_validation_rejected"
+    assert payload["level"] == "WARNING"
+    assert "not-a-uuid" not in rendered
+    assert "media_id" not in rendered
