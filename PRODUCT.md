@@ -44,8 +44,9 @@ rows are backfilled as published; newly cataloged media remains outside the
 ordinary Gallery until persisted title, description, and canonical-tag metadata
 is ready and an authorized administrator publishes.
 
-Website on-demand AI suggestion review remains session-only and is not catalog
-truth. Companion review is a separate durable surface: administrators see a
+Website Edit lists durable AI suggestions and copies individual fields into
+Current; copied values are not catalog truth until Save. Companion review is a
+separate durable surface: administrators see a
 global analyzed inbox with per-actor unopened accent; ordinary requesters see
 requester-private own X Saves, with unopened accent after analysis; every
 history row opens hosted Details without Analyze by AI in that popup
@@ -401,7 +402,7 @@ Ordinary clients should not configure provider credentials or call providers
 directly. Browser status and results must be sanitized. Production
 provider-secret integration remains unresolved.
 
-Suspicious filenames may be manually analyzed, but AI suggestions require confirmation. Current pre-alpha website AI suggestion review is editable, session-only, and not catalog truth. The companion review surface is a separate durable administrator attention queue plus all-item history over successful generic runs; it does not replace that website session review. Opening or Saving a companion review durably clears unread attention, while history retains the item.
+Suspicious filenames may be manually analyzed, but AI suggestions require confirmation. Current pre-alpha website AI suggestion review lists durable inbox runs, copies individual fields into Current, and is not catalog truth until Save. The companion review surface is a separate durable administrator attention queue plus all-item history over successful generic runs; it does not replace that website field-copy review. Opening or Saving a companion review durably clears unread attention, while history retains the item.
 
 FrameNest must not automatically rename media.
 
