@@ -64,6 +64,7 @@ class _FakeRepository:
         self.run: MediaAnalysisRun | None = None
         self.transactions: list[str] = []
         self._lock = threading.Lock()
+        self._manual_pending_serial = 0
 
     def get_by_media_definition(self, media_id, analysis_definition):
         del media_id, analysis_definition
@@ -106,8 +107,14 @@ class _FakeRepository:
             }:
                 return self.run
             superseded = self.run
+            self._manual_pending_serial += 1
+            pending_id = (
+                "22222222-2222-4222-8222-222222222222"
+                if self._manual_pending_serial == 1
+                else f"22222222-2222-4222-8222-{self._manual_pending_serial:012d}"
+            )
             self.run = MediaAnalysisRun(
-                id=MediaAnalysisRunId("22222222-2222-4222-8222-222222222222"),
+                id=MediaAnalysisRunId(pending_id),
                 media_id=media_id,
                 media_location_id=media_location_id,
                 analysis_definition=analysis_definition,

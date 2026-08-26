@@ -1101,7 +1101,7 @@ def test_imported_preview_joins_inbox_and_own_history(tmp_path: Path) -> None:
             before = _run_count(engine)
             first = client.post(
                 f"/api/media/{alice_media}/locations/{alice_loc}/ai-suggestion-preview",
-                headers=_serve_headers(ADMIN_LOGIN, "Admin"),
+                headers=_mutation_headers(ADMIN_LOGIN),
                 json={"confirm_cloud_upload": True},
             )
             assert first.status_code == 200
@@ -1110,7 +1110,7 @@ def test_imported_preview_joins_inbox_and_own_history(tmp_path: Path) -> None:
             assert after_first == before + 1
             second = client.post(
                 f"/api/media/{alice_media}/locations/{alice_loc}/ai-suggestion-preview",
-                headers=_serve_headers(ADMIN_LOGIN, "Admin"),
+                headers=_mutation_headers(ADMIN_LOGIN),
                 json={"confirm_cloud_upload": True},
             )
             assert second.status_code == 200
@@ -1119,7 +1119,7 @@ def test_imported_preview_joins_inbox_and_own_history(tmp_path: Path) -> None:
             assert after_second == after_first + 1
             movie_preview = client.post(
                 f"/api/media/{extra_movie}/locations/{extra_movie_loc}/ai-suggestion-preview",
-                headers=_serve_headers(ADMIN_LOGIN, "Admin"),
+                headers=_mutation_headers(ADMIN_LOGIN),
                 json={"confirm_cloud_upload": True},
             )
             assert movie_preview.status_code == 200
@@ -1127,7 +1127,7 @@ def test_imported_preview_joins_inbox_and_own_history(tmp_path: Path) -> None:
             assert _run_count(engine) == after_second
             library_response = client.post(
                 f"/api/libraries/{LIBRARY_ID}/media-suggestion-preview",
-                headers=_serve_headers(ADMIN_LOGIN, "Admin"),
+                headers=_mutation_headers(ADMIN_LOGIN),
                 json={
                     "relative_path": f"{GENERIC}.mp4",
                     "confirm_cloud_upload": True,
