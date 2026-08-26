@@ -154,6 +154,7 @@ function createIdentityHarness(fetchImpl) {
     extractFunction(APP_SOURCE, "identityAllowsYouTubeClaim"),
     extractFunction(APP_SOURCE, "identityAllowsYouTubeRequest"),
     extractFunction(APP_SOURCE, "identityAllowsCoverEditing"),
+    extractFunction(APP_SOURCE, "identityAllowsMetadataEdit"),
     extractFunction(APP_SOURCE, "identityAllowsWorkspaceMedia"),
     extractFunction(APP_SOURCE, "resetAudienceState"),
     extractFunction(APP_SOURCE, "applyAudienceDocument"),
@@ -377,10 +378,12 @@ test("privileged controls are gated by capabilities in source", () => {
   assert.ok(APP_SOURCE.includes("awaits administrator review"));
   assert.ok(APP_SOURCE.includes("clearStaleUploadRecoveryState"));
   assert.ok(APP_SOURCE.includes("submission expired or is unavailable"));
+  assert.ok(APP_SOURCE.includes('identityHasCapability("metadata.alias.write")'));
+  assert.ok(APP_SOURCE.includes("function identityAllowsMetadataEdit()"));
   const cardBody = extractFunction(APP_SOURCE, "renderCatalogCard");
   assert.ok(cardBody.includes("cardAiQuickActionEligible(item)"));
   assert.equal(cardBody.includes("cardNeedsMetadata(item)"), false);
-  assert.ok(cardBody.includes('if (identityHasCapability("metadata.canonical.write")) {'));
+  assert.ok(cardBody.includes("if (identityAllowsMetadataEdit()) {"));
   const eligibleBody = extractFunction(APP_SOURCE, "cardAiQuickActionEligible");
   const identityGateBody = extractFunction(APP_SOURCE, "identityAllowsCardAiQuickAction");
   assert.ok(eligibleBody.includes("identityAllowsCardAiQuickAction()"));
@@ -391,12 +394,15 @@ test("privileged controls are gated by capabilities in source", () => {
   assert.ok(identityGateBody.includes('capabilities.has("metadata.canonical.write")'));
 });
 
-test("hosted Details hide Analyze by AI and Load AI suggestion", () => {
+test("hosted Details hide Analyze by AI, Load, dropdown, and strips", () => {
   const controls = extractFunction(APP_SOURCE, "updateMetadataControls");
   assert.ok(controls.includes("companionWebHosted()"));
   assert.ok(controls.includes("showAnalyze = !hosted && analysisAvailable"));
-  assert.ok(controls.includes("loadAvailable = !hosted && durableAnalysisLoadAvailable"));
+  assert.ok(controls.includes("identityAllowsAiSuggestionsChrome()"));
   assert.equal(controls.includes("URLSearchParams"), false);
+  const chrome = extractFunction(APP_SOURCE, "identityAllowsAiSuggestionsChrome");
+  assert.ok(chrome.includes("companionWebHosted()"));
+  assert.ok(chrome.includes("metadataWorkspaceIsMovie()"));
 });
 
 test("gallery AI quick action fails closed for missing unresolved and ordinary identity", () => {
@@ -466,6 +472,7 @@ test("ordinary user identity hides privileged controls and keeps admin Tailscale
         "media.original.read",
         "media.workspace.read",
         "upload.submit",
+        "metadata.alias.write",
       ],
     }),
   );
@@ -475,13 +482,14 @@ test("ordinary user identity hides privileged controls and keeps admin Tailscale
   assert.match(context.identityBadge.getAttribute("aria-label"), /Signed in as Reader/);
   assert.ok(!context.identityBadge.getAttribute("aria-label").includes("Admin"));
   assert.equal(context.uploadOpenButton.hidden, false);
-  assert.equal(context.detailsEditButton.hidden, true);
+  assert.equal(context.detailsEditButton.hidden, false);
   assert.equal(context.adminMediaOpenButton.hidden, true);
   assert.equal(context.workspaceMediaOpenButton.hidden, false);
   assert.equal(context.statusTailscaleAdminOnlyRows.every((row) => row.hidden === true), true);
   assert.equal(vm.runInContext('identityHasCapability("upload.submit")', context), true);
   assert.equal(vm.runInContext('identityHasCapability("upload.manage")', context), false);
   assert.equal(vm.runInContext('identityHasCapability("metadata.canonical.write")', context), false);
+  assert.equal(vm.runInContext('identityHasCapability("metadata.alias.write")', context), true);
   assert.equal(vm.runInContext('identityHasCapability("gallery.read")', context), true);
 });
 

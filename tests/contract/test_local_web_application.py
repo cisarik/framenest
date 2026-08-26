@@ -672,7 +672,8 @@ def test_browser_analyze_is_explicit_confirmed_and_cloud_disclosed(client: TestC
     assert "Analyze" in combined
     assert "optimized preview frames" in combined
     assert "original file, local path, and API key are not uploaded" in combined
-    assert "will replace the current unsaved Title, Description, and Tags" in combined
+    assert "become proposal strips beside Title, Description, and Tags" in combined
+    assert "They do not replace the current unsaved values" in combined
     assert "will not be saved automatically" in combined
     assert "physical file will not be renamed" in combined
     assert "confirm_cloud_upload" in script
@@ -711,7 +712,7 @@ def test_browser_editor_uses_single_form_ai_assistance(client: TestClient) -> No
     assert "metadata-title-input" in dialog_section
     assert "metadata-description-input" in dialog_section
     assert "metadata-tag-search-input" in dialog_section
-    assert "metadata-durable-ai-filename" in dialog_section
+    assert "metadata-ai-filename-note" in dialog_section
     assert "metadata-ai-filename-input" not in dialog_section
     assert "metadata-ai-filename-display" not in dialog_section
     assert "review-title-input" not in dialog_section
@@ -747,7 +748,9 @@ def test_browser_editor_hides_provider_model_noise_in_ordinary_editor(client: Te
     assert "prompt_version" not in dialog_section
     assert "provider_id ||" not in ai_panel_body
     assert "model_id ||" not in ai_panel_body
-    assert "New AI analysis is available after confirmation." in ai_panel_body
+    assert "New AI analysis is available after confirmation." not in ai_panel_body
+    assert "AI suggestions" in ai_panel_body
+    assert "Suggested filename:" in ai_panel_body
 
 
 def test_browser_editor_idle_ai_button_is_exact_and_not_loading(client: TestClient) -> None:
@@ -774,7 +777,8 @@ def test_browser_editor_ai_button_active_state_replaces_entire_content(client: T
     assert "loading-spinner" not in render_button_body
     assert 'label.textContent = "Analyzing…"' in render_button_body
     assert "metadataAiAnalyzeButton.append(label)" in render_button_body
-    assert 'metadataAiStatus.textContent = "Analyzing…"' not in analyze_block
+    assert 'metadataAiStatus.textContent = "Analyzing…"' in analyze_block
+    assert 'metadataAiStatus.textContent = "Loaded"' in analyze_block
 
 
 def test_browser_editor_ai_button_active_state_is_prominent_without_idle_animation(client: TestClient) -> None:
@@ -808,8 +812,8 @@ def test_browser_ai_replacement_is_session_only_without_mutation_api(
     apply_body = _javascript_function(script, "applyResolvedAiSuggestionToMetadataWorkspace")
     controls_body = _javascript_function(script, "updateMetadataControls")
 
-    assert "metadataTagKeysFromSuggestion(suggestion.tags)" in analyze_block
-    assert "applyResolvedAiSuggestionToMetadataWorkspace(suggestion, tagKeys)" in analyze_block
+    assert "presentInSessionSuggestion(suggestion, payload)" in analyze_block
+    assert "applyResolvedAiSuggestionToMetadataWorkspace(suggestion, tagKeys)" not in analyze_block
     assert "metadataWorkspace.current.displayTitle = suggestion.title" in apply_body
     assert "metadataWorkspace.current.description = suggestion.description" in apply_body
     assert "metadataWorkspace.current.tagKeys = tagKeys" in apply_body
@@ -819,10 +823,9 @@ def test_browser_ai_replacement_is_session_only_without_mutation_api(
     assert "analysisAvailable" in controls_body
     assert "fetch(metadataEndpoint" not in analyze_block
     assert "confirm_cloud_upload: true" in analyze_block
-    assert "if (metadataWorkspace.analyzing || metadataWorkspace.aiSuggestionApplied) return;" in analyze_block
-    assert "metadataWorkspace.current = " not in analyze_block
-    assert "metadataWorkspace.suggestedFilename = beforeRequest.suggestedFilename" not in analyze_block
-    assert "commit" not in analyze_block.lower()
+    assert "if (metadataWorkspace.analyzing) return;" in analyze_block
+    assert "proposal strips" in analyze_block
+    assert "This editor changed before analysis could start." in analyze_block
 
 
 def test_browser_editor_ai_failure_restores_idle_action_and_preserves_values(client: TestClient) -> None:
@@ -2518,9 +2521,8 @@ def test_metadata_dialog_contains_single_form_ai_assistance(client: TestClient) 
     assert "AI Draft" not in dialog_section
     assert "Use draft" not in dialog_section
     assert "Discard draft" not in dialog_section
-    assert "Suggested filename" in dialog_section
-    assert "Informational only" in dialog_section
-    assert "metadata-durable-ai-filename" in dialog_section
+    assert "AI suggestions" in dialog_section
+    assert "metadata-ai-filename-note" in dialog_section
     assert "metadata-ai-filename-input" not in dialog_section
     assert "metadata-ai-filename-display" not in dialog_section
     assert dialog_section.index("metadata-save-button") < dialog_section.index("metadata-ai-analyze-button")
@@ -2537,39 +2539,40 @@ def test_browser_metadata_editor_exposes_durable_load_ai_suggestion(client: Test
     dialog_section = html[html.index('id="metadata-dialog"') : html.index('id="catalog-browser"')]
 
     assert 'id="metadata-load-ai-suggestion-button"' in dialog_section
-    assert "Load AI suggestion" in dialog_section
-    assert 'id="metadata-durable-ai-suggestion"' in dialog_section
+    assert ">Load<" in dialog_section
+    assert "Load AI suggestion" not in dialog_section
+    assert 'id="metadata-ai-suggestion-select"' in dialog_section
     assert 'id="metadata-ai-heading"' in dialog_section
-    assert ">AI suggestion<" in dialog_section
-    assert 'id="metadata-ai-details-toggle"' in dialog_section
+    assert ">AI suggestions<" in dialog_section
+    assert 'id="metadata-ai-title-strip"' in dialog_section
+    assert 'id="metadata-ai-details-toggle"' not in dialog_section
+    assert 'id="metadata-durable-ai-suggestion"' not in dialog_section
     assert "Saved AI suggestion" not in dialog_section
     assert "handleLoadDurableAiSuggestion" in script
-    assert "refreshMetadataDurableAnalysis" in script
-    assert "aiSuggestionFromAutomaticAnalysisResult" in script
-    assert "aiSuggestionOriginExplanation" in script
+    assert "companionReviewInboxDetailEndpoint" in script
+    assert "/apply" not in script
+    assert "aiSuggestionOriginExplanation" not in script
     load_body = _javascript_function(script, "handleLoadDurableAiSuggestion")
-    assert "automaticAnalysisEndpoint(mediaId)" in load_body
+    assert "automaticAnalysisEndpoint(mediaId)" not in load_body
     assert "ai-suggestion-preview" not in load_body
     assert "confirm_cloud_upload" not in load_body
-    assert "Replace current draft?" in load_body
-    assert 'dismissLabel: "No"' in load_body
-    assert 'confirmLabel: "Yes"' in load_body
-    assert "focusReturn: invokeElement" in load_body
-    assert "destructive: false" in load_body
-    assert "Keep editing" not in load_body
-    assert "Replace draft" not in load_body
-    assert "Load suggestion" not in load_body
+    assert "Replace current draft?" not in load_body
+    assert "applyResolvedAiSuggestionToMetadataWorkspace" not in load_body
     assert "handleSaveMetadata" not in load_body
     assert "window.confirm" not in load_body
+    assert "metadataSuggestionList.revealed = true" in load_body
     assert "Durable AI suggestion" not in dialog_section
-    assert 'id="metadata-durable-ai-filename"' in dialog_section
+    assert "metadata-ai-filename-note" in dialog_section
     assert "metadata-ai-filename-input" not in dialog_section
     assert "metadata-ai-filename-display" not in dialog_section
-    assert dialog_section.index("metadata-save-button") < dialog_section.index(
-        "metadata-load-ai-suggestion-button"
+    assert dialog_section.index("metadata-ai-suggestion-select") < dialog_section.index(
+        "metadata-title-input"
     )
-    assert dialog_section.index("metadata-load-ai-suggestion-button") < dialog_section.index(
+    assert dialog_section.index("metadata-save-button") < dialog_section.index(
         "metadata-ai-analyze-button"
+    )
+    assert dialog_section.index("metadata-ai-analyze-button") < dialog_section.index(
+        "metadata-discard-button"
     )
     assert ".metadata-dialog::backdrop" in css
     assert "rgba(0, 0, 0, 0.34)" in css
@@ -2608,7 +2611,9 @@ def test_javascript_metadata_ai_success_populates_single_form_without_autosave_o
     assert "metadataWorkspace.current.tagKeys = tagKeys" in apply_body
     assert "metadataWorkspace.suggestedFilename = suggestion.suggestedFilename" in apply_body
     assert "metadataWorkspace.aiSuggestionApplied = true" in apply_body
-    assert "metadataTagKeysFromSuggestion(suggestion.tags)" in analyze_body
+    assert "presentInSessionSuggestion(suggestion, payload)" in analyze_body
+    assert "metadataTagKeysFromSuggestion(suggestion.tags)" not in analyze_body
+    assert "applyResolvedAiSuggestionToMetadataWorkspace(suggestion, tagKeys)" not in analyze_body
     assert "metadataAiAnalyzeButton.hidden = !showAnalyze" in script
     assert "fetch(metadataEndpoint" not in analyze_body
     assert "AI suggestion loaded into draft." in apply_body

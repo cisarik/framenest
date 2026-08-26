@@ -8,6 +8,7 @@ const WORKSPACE_MEDIA_ENDPOINT = "/api/workspace/media";
 const ANALYSIS_PROPOSALS_ENDPOINT = "/api/admin/analysis-proposals";
 const ADMIN_MEDIA_ALIASES_PATH = "/aliases";
 const MEDIA_METADATA_ENDPOINT_PREFIX = "/api/media";
+const COMPANION_REVIEW_INBOX_ENDPOINT = "/api/companion/review-inbox";
 const CANONICAL_TAGS_ENDPOINT = "/api/canonical-tags";
 const AI_CAPABILITY_ENDPOINT = "/api/ai/media-suggestion-capability";
 const AUTOMATIC_ANALYSIS_CAPABILITY_ENDPOINT = "/api/ai/automatic-analysis-capability";
@@ -202,6 +203,7 @@ let metadataWorkspace = {
   statusOverride: null,
   analyzing: false,
   aiSuggestionApplied: false,
+  editMode: "canonical",
   suggestedFilename: "",
   baseline: {
     displayTitle: null,
@@ -269,6 +271,16 @@ let metadataDurableAnalysis = {
   errorMessage: "",
   detailsExpanded: false,
 };
+let metadataSuggestionList = {
+  mediaId: null,
+  fetching: false,
+  items: [],
+  selectedRunId: null,
+  revealed: false,
+  errorMessage: "",
+  movieExcluded: false,
+};
+let metadataSuggestionListToken = 0;
 let identityState = {
   resolved: false,
   available: false,
@@ -336,6 +348,33 @@ function identityAllowsYouTubeRequest() {
 
 function identityAllowsCoverEditing() {
   return isWorkspaceAudience() && identityHasCapability("metadata.canonical.write");
+}
+
+function identityAllowsMetadataEdit() {
+  return isWorkspaceAudience()
+    && (
+      identityHasCapability("metadata.canonical.write")
+      || identityHasCapability("metadata.alias.write")
+    );
+}
+
+function identityUsesCanonicalMetadataWrite() {
+  return identityHasCapability("metadata.canonical.write");
+}
+
+function metadataWorkspaceIsMovie() {
+  return (metadataWorkspace.current.contentCategory || "general") === "movie";
+}
+
+function metadataWorkspaceIsAliasMode() {
+  return metadataWorkspace.editMode === "alias";
+}
+
+function identityAllowsAiSuggestionsChrome() {
+  return identityHasCapability("media.workflow.read")
+    && !companionWebHosted()
+    && !metadataWorkspaceIsMovie()
+    && !metadataWorkspaceIsAliasMode();
 }
 
 function identityAllowsWorkspaceMedia() {
@@ -441,7 +480,7 @@ function applyIdentityCapabilities() {
     uploadOpenButton.hidden = !identityHasCapability("upload.submit");
   }
   if (detailsEditButton) {
-    detailsEditButton.hidden = !identityHasCapability("metadata.canonical.write");
+    detailsEditButton.hidden = !identityAllowsMetadataEdit();
   }
   if (typeof detailsChooseCoverButton !== "undefined" && detailsChooseCoverButton) {
     detailsChooseCoverButton.hidden = !identityAllowsCoverEditing();
@@ -766,22 +805,14 @@ const metadataSelectedTags = document.querySelector("#metadata-selected-tags");
 const metadataTagStatus = document.querySelector("#metadata-tag-status");
 const metadataAiPanel = document.querySelector("#metadata-ai-panel");
 const metadataAiHeading = document.querySelector("#metadata-ai-heading");
-const metadataAiOrigin = document.querySelector("#metadata-ai-origin");
-const metadataAiCapability = document.querySelector("#metadata-ai-capability");
 const metadataAiAnalyzeButton = document.querySelector("#metadata-ai-analyze-button");
 const metadataLoadAiSuggestionButton = document.querySelector("#metadata-load-ai-suggestion-button");
-const metadataAiDetailsToggle = document.querySelector("#metadata-ai-details-toggle");
+const metadataAiSuggestionSelect = document.querySelector("#metadata-ai-suggestion-select");
 const metadataAiStatus = document.querySelector("#metadata-ai-status");
 const metadataAiFilenameNote = document.querySelector("#metadata-ai-filename-note");
-const metadataDurableAiSuggestion = document.querySelector("#metadata-durable-ai-suggestion");
-const metadataDurableAiTitle = document.querySelector("#metadata-durable-ai-title");
-const metadataDurableAiDescription = document.querySelector("#metadata-durable-ai-description");
-const metadataDurableAiGenres = document.querySelector("#metadata-durable-ai-genres");
-const metadataDurableAiTags = document.querySelector("#metadata-durable-ai-tags");
-const metadataDurableAiCollectionRow = document.querySelector("#metadata-durable-ai-collection-row");
-const metadataDurableAiCollection = document.querySelector("#metadata-durable-ai-collection");
-const metadataDurableAiFilenameRow = document.querySelector("#metadata-durable-ai-filename-row");
-const metadataDurableAiFilename = document.querySelector("#metadata-durable-ai-filename");
+const metadataAiTitleStrip = document.querySelector("#metadata-ai-title-strip");
+const metadataAiDescriptionStrip = document.querySelector("#metadata-ai-description-strip");
+const metadataAiTagsStrip = document.querySelector("#metadata-ai-tags-strip");
 const metadataDialog = document.querySelector("#metadata-dialog");
 const detailsDialog = document.querySelector("#media-details-dialog");
 const detailsCloseButton = document.querySelector("#media-details-close");
@@ -2370,6 +2401,14 @@ function metadataEndpoint(mediaId) {
   return `${MEDIA_METADATA_ENDPOINT_PREFIX}/${mediaId}/metadata`;
 }
 
+function mediaAliasEndpoint(mediaId) {
+  return `${MEDIA_METADATA_ENDPOINT_PREFIX}/${mediaId}/alias`;
+}
+
+function companionReviewInboxDetailEndpoint(mediaId) {
+  return `${COMPANION_REVIEW_INBOX_ENDPOINT}/${mediaId}?limit=100`;
+}
+
 function mediaAiSuggestionEndpoint(mediaId, locationId) {
   return `${MEDIA_CATALOG_ENDPOINT}/${mediaId}/locations/${locationId}/ai-suggestion-preview`;
 }
@@ -2486,8 +2525,13 @@ function metadataIsDirty() {
   return normalized.displayTitle !== metadataWorkspace.baseline.displayTitle
     || normalized.description !== metadataWorkspace.baseline.description
     || !semanticArraysEqual(normalized.tagKeys, metadataWorkspace.baseline.tagKeys)
-    || normalized.contentCategory !== baselineCategory
-    || !semanticArraysEqual(normalized.genres, baselineGenres);
+    || (
+      !metadataWorkspaceIsAliasMode()
+      && (
+        normalized.contentCategory !== baselineCategory
+        || !semanticArraysEqual(normalized.genres, baselineGenres)
+      )
+    );
 }
 
 function selectedTagDefinition(key) {
@@ -6026,7 +6070,7 @@ function renderCatalogCard(item) {
     });
     actions.appendChild(analyzeButton);
   }
-  if (identityHasCapability("metadata.canonical.write")) {
+  if (identityAllowsMetadataEdit()) {
     const editButton = document.createElement("button");
     editButton.className = "catalog-card__action catalog-card__action--overlay catalog-card__action--edit catalog-card__action--bottom-left";
     editButton.type = "button";
@@ -6382,19 +6426,26 @@ function metadataSaveLocationId() {
 function claimMetadataSaveOwner(normalized, { closeAfterSave = true } = {}) {
   metadataWorkspace.saving = true;
   advanceMetadataWorkspaceRevision();
-  const requestPayload = {
-    display_title: normalized.displayTitle,
-    description: normalized.description,
-    tag_keys: normalized.tagKeys,
-    content_category: normalized.contentCategory || "general",
-    genres: normalized.genres || [],
-    creator_attribution_kind: normalized.creatorAttributionKind || null,
-    creator_stable_id: normalized.creatorStableId || null,
-    creator_handle: normalized.creatorHandle || null,
-    creator_display_name: normalized.creatorDisplayName || null,
-  };
+  const aliasMode = metadataWorkspaceIsAliasMode();
+  const requestPayload = aliasMode
+    ? {
+      display_title: normalized.displayTitle,
+      description: normalized.description,
+      tag_keys: normalized.tagKeys,
+    }
+    : {
+      display_title: normalized.displayTitle,
+      description: normalized.description,
+      tag_keys: normalized.tagKeys,
+      content_category: normalized.contentCategory || "general",
+      genres: normalized.genres || [],
+      creator_attribution_kind: normalized.creatorAttributionKind || null,
+      creator_stable_id: normalized.creatorStableId || null,
+      creator_handle: normalized.creatorHandle || null,
+      creator_display_name: normalized.creatorDisplayName || null,
+    };
   Object.freeze(requestPayload.tag_keys);
-  Object.freeze(requestPayload.genres);
+  if (!aliasMode) Object.freeze(requestPayload.genres);
   Object.freeze(requestPayload);
   const owner = Object.freeze({
     token: ++metadataSaveRequestToken,
@@ -6404,6 +6455,7 @@ function claimMetadataSaveOwner(normalized, { closeAfterSave = true } = {}) {
     catalogScope: catalogState.collection,
     workspaceRevision: metadataWorkspaceRevision,
     requestPayload,
+    editMode: aliasMode ? "alias" : "canonical",
     closeAfterSave: Boolean(closeAfterSave),
   });
   metadataSaveOwner = owner;
@@ -6506,33 +6558,43 @@ function updateMetadataControls() {
     const hosted = companionWebHosted();
     const location = metadataAiLocation();
     const analysisAvailable = Boolean(aiCapability.available && location)
-      && identityHasCapability("analysis.run");
-    const showAnalyze = !hosted && analysisAvailable
-      && (!metadataWorkspace.aiSuggestionApplied || metadataWorkspace.analyzing);
+      && identityHasCapability("analysis.run")
+      && !metadataWorkspaceIsMovie()
+      && !metadataWorkspaceIsAliasMode();
+    const showAnalyze = !hosted && analysisAvailable;
     metadataAiAnalyzeButton.hidden = !showAnalyze;
     metadataAiAnalyzeButton.disabled = !showAnalyze
       || metadataWorkspace.loading
       || metadataWorkspace.saving
-      || metadataWorkspace.analyzing
-      || metadataWorkspace.aiSuggestionApplied;
+      || metadataWorkspace.analyzing;
     renderMetadataAiAnalyzeButtonContent(metadataWorkspace.analyzing);
     metadataAiAnalyzeButton.setAttribute("aria-busy", metadataWorkspace.analyzing ? "true" : "false");
   }
   if (metadataLoadAiSuggestionButton) {
     const hosted = companionWebHosted();
-    const loadAvailable = !hosted && durableAnalysisLoadAvailable() && identityHasCapability("analysis.run");
-    const loadBusy = metadataDurableAnalysis.loadingIntoDraft;
+    const loadAvailable = !hosted
+      && identityAllowsAiSuggestionsChrome()
+      && metadataSuggestionList.items.length > 0
+      && Boolean(metadataSuggestionList.selectedRunId);
+    const loadBusy = metadataSuggestionList.fetching;
     metadataLoadAiSuggestionButton.hidden = !loadAvailable && !loadBusy;
     metadataLoadAiSuggestionButton.disabled = metadataWorkspace.loading
       || metadataWorkspace.saving
       || metadataWorkspace.analyzing
       || loadBusy
-      || metadataDurableAnalysis.fetching
       || !loadAvailable;
-    metadataLoadAiSuggestionButton.textContent = loadBusy
-      ? "Loading suggestion…"
-      : "Load AI suggestion";
+    metadataLoadAiSuggestionButton.textContent = "Load";
     metadataLoadAiSuggestionButton.setAttribute("aria-busy", loadBusy ? "true" : "false");
+  }
+  if (metadataAiSuggestionSelect) {
+    const showSelect = identityAllowsAiSuggestionsChrome()
+      && metadataSuggestionList.items.length > 0;
+    metadataAiSuggestionSelect.hidden = !showSelect;
+    metadataAiSuggestionSelect.disabled = !showSelect
+      || metadataWorkspace.loading
+      || metadataWorkspace.saving
+      || metadataWorkspace.analyzing
+      || metadataSuggestionList.fetching;
   }
 }
 
@@ -6588,7 +6650,7 @@ function renderMetadataTagSuggestions() {
   });
   const exactMatch = displayName ? findTagByDisplayName(displayName) : null;
   const items = matches.map((tag) => ({ type: "select", tag, label: tag.display_name }));
-  if (displayName && !exactMatch) {
+  if (displayName && !exactMatch && identityUsesCanonicalMetadataWrite()) {
     items.push({ type: "add", displayName, label: `Add “${displayName}”` });
   }
   metadataTagSuggestionState.items = items;
@@ -6651,6 +6713,11 @@ function renderMetadataWorkspace() {
 
   renderSelectedMetadataTags();
   renderMetadataTagSuggestions();
+  if (metadataTagSearchInput) {
+    metadataTagSearchInput.placeholder = metadataWorkspaceIsAliasMode()
+      ? "Search existing tags"
+      : "Search or add a tag";
+  }
   renderMetadataAiPanel();
   updateMetadataControls();
 }
@@ -6691,8 +6758,6 @@ function metadataAiConfirmationContextIsCurrent(context) {
     && aiCapability.available
     && !context.analyzing
     && !metadataWorkspace.analyzing
-    && !context.aiSuggestionApplied
-    && !metadataWorkspace.aiSuggestionApplied
     && !context.loading
     && !metadataWorkspace.loading
     && !context.saving
@@ -6726,67 +6791,28 @@ function releaseMetadataAiRequest(requestContext) {
   return true;
 }
 
-function aiSuggestionOriginExplanation(analysisDefinition) {
-  if (analysisDefinition === "automatic_post_catalog") {
-    return "Generated automatically after upload.";
-  }
-  if (analysisDefinition) {
-    return "Generated by a previous server-side AI analysis.";
-  }
-  return "";
-}
-
 function renderMetadataAiPanel() {
   if (!metadataAiPanel) return;
-  const location = metadataAiLocation();
-  const hasSavedSuggestion = durableAnalysisLoadAvailable();
+  const showChrome = identityAllowsAiSuggestionsChrome();
+  metadataAiPanel.hidden = !showChrome;
   if (metadataAiHeading) {
-    metadataAiHeading.textContent = "AI suggestion";
+    metadataAiHeading.textContent = "AI suggestions";
   }
-  if (metadataAiOrigin) {
-    const origin = hasSavedSuggestion
-      ? aiSuggestionOriginExplanation(metadataDurableAnalysis.analysisDefinition)
-      : "";
-    metadataAiOrigin.textContent = origin;
-    metadataAiOrigin.hidden = !origin;
-  }
-  if (aiCapability.available) {
-    metadataAiCapability.textContent = location
-      ? "New AI analysis is available after confirmation."
-      : "New AI analysis needs an available local GIF or MP4.";
-  } else if (hasSavedSuggestion) {
-    metadataAiCapability.textContent = "New AI analysis is currently unavailable.";
-  } else {
-    metadataAiCapability.textContent = "AI analysis is not configured.";
-  }
-  if (
-    !metadataWorkspace.analyzing
-    && !metadataDurableAnalysis.loadingIntoDraft
-    && !metadataWorkspace.aiSuggestionApplied
-  ) {
-    if (metadataDurableAnalysis.errorMessage) {
-      metadataAiStatus.textContent = metadataDurableAnalysis.errorMessage;
-    } else if (hasSavedSuggestion) {
-      metadataAiStatus.textContent = "";
-    } else if (
-      metadataDurableAnalysis.state === "pending"
-      || metadataDurableAnalysis.state === "analyzing"
-      || metadataDurableAnalysis.state === "failed"
-    ) {
-      metadataAiStatus.textContent = metadataDurableAnalysis.statusMessage || "";
-    }
-  }
+  renderMetadataSuggestionSelect();
+  renderMetadataSuggestionStrips();
   if (metadataAiFilenameNote) {
-    const showAnalyzeOnlyFilename = Boolean(
-      metadataWorkspace.suggestedFilename
-      && !hasSavedSuggestion,
+    const showFilename = Boolean(
+      showChrome
+      && identityUsesCanonicalMetadataWrite()
+      && metadataSuggestionList.revealed
+      && selectedMetadataSuggestion()
+      && selectedMetadataSuggestion().suggestedFilename,
     );
-    metadataAiFilenameNote.hidden = !showAnalyzeOnlyFilename;
-    metadataAiFilenameNote.textContent = showAnalyzeOnlyFilename
-      ? `Suggested filename: ${metadataWorkspace.suggestedFilename}`
+    metadataAiFilenameNote.hidden = !showFilename;
+    metadataAiFilenameNote.textContent = showFilename
+      ? `Suggested filename: ${selectedMetadataSuggestion().suggestedFilename}`
       : "";
   }
-  renderMetadataDurableAnalysis();
 }
 
 function aiSuggestionFromPayload(payload) {
@@ -6826,6 +6852,18 @@ function resetMetadataDurableAnalysisState() {
   };
 }
 
+function resetMetadataSuggestionListState() {
+  metadataSuggestionList = {
+    mediaId: null,
+    fetching: false,
+    items: [],
+    selectedRunId: null,
+    revealed: false,
+    errorMessage: "",
+    movieExcluded: false,
+  };
+}
+
 function durableAnalysisLoadAvailable() {
   if (
     metadataWorkspace.openMediaId === null
@@ -6840,76 +6878,260 @@ function durableAnalysisLoadAvailable() {
   return Boolean(aiSuggestionFromAutomaticAnalysisResult(metadataDurableAnalysis.result));
 }
 
-function renderMetadataDurableAnalysis() {
-  if (!metadataDurableAiSuggestion) return;
-  const open = metadataWorkspace.openMediaId !== null
-    && metadataDurableAnalysis.mediaId === metadataWorkspace.openMediaId;
-  const isMovie = metadataDurableAnalysis.analysisDefinition === "movie_identification";
-  const suggestion = open
-    ? (isMovie
-      ? movieSuggestionFromResult(metadataDurableAnalysis.movieResult)
-      : aiSuggestionFromAutomaticAnalysisResult(metadataDurableAnalysis.result))
-    : null;
-  const hasSuggestion = Boolean(open && suggestion && metadataDurableAnalysis.state === "analyzed");
-  const expanded = Boolean(hasSuggestion && metadataDurableAnalysis.detailsExpanded);
-  if (metadataAiDetailsToggle) {
-    metadataAiDetailsToggle.hidden = !hasSuggestion;
-    metadataAiDetailsToggle.disabled = !hasSuggestion;
-    metadataAiDetailsToggle.setAttribute("aria-expanded", expanded ? "true" : "false");
-    metadataAiDetailsToggle.textContent = expanded ? "Hide details" : "View details";
-  }
-  metadataDurableAiSuggestion.hidden = !expanded;
-  if (!hasSuggestion) {
-    metadataDurableAnalysis.detailsExpanded = false;
-  }
-  if (expanded && suggestion) {
-    metadataDurableAiTitle.textContent = suggestion.title || "(No title)";
-    metadataDurableAiDescription.textContent = suggestion.description || "(No description)";
-    const detailGenres = Array.isArray(suggestion.genres) ? suggestion.genres : [];
-    const detailTags = Array.isArray(suggestion.tags) ? suggestion.tags : [];
-    if (metadataDurableAiGenres) {
-      metadataDurableAiGenres.textContent = detailGenres.length > 0
-        ? detailGenres.join(", ")
-        : "(none)";
-    }
-    if (metadataDurableAiTags) {
-      metadataDurableAiTags.textContent = detailTags.length > 0
-        ? detailTags.join(", ")
-        : "(none)";
-    }
-    const collection = !isMovie
-      && metadataDurableAnalysis.result
-      && metadataDurableAnalysis.result.collection
-      ? String(metadataDurableAnalysis.result.collection)
-      : "";
-    if (metadataDurableAiCollectionRow) {
-      metadataDurableAiCollectionRow.hidden = !collection;
-    }
-    if (metadataDurableAiCollection) {
-      metadataDurableAiCollection.textContent = collection;
-    }
-    if (metadataDurableAiFilenameRow) {
-      metadataDurableAiFilenameRow.hidden = !suggestion.suggestedFilename;
-    }
-    if (metadataDurableAiFilename) {
-      metadataDurableAiFilename.textContent = suggestion.suggestedFilename || "";
-    }
+function selectedMetadataSuggestion() {
+  if (!metadataSuggestionList.selectedRunId) return null;
+  return metadataSuggestionList.items.find(
+    (item) => item.analysisRunId === metadataSuggestionList.selectedRunId,
+  ) || null;
+}
+
+function suggestionOptionLabel(item) {
+  const title = typeof item.title === "string" ? item.title.trim() : "";
+  const model = item.modelId || "AI";
+  if (title) return `${title} · ${model}`;
+  return model;
+}
+
+function inboxSuggestionFromDetail(raw) {
+  if (!raw || typeof raw !== "object") return null;
+  const analysisRunId = String(raw.analysis_run_id || "");
+  if (!analysisRunId) return null;
+  const tags = Array.isArray(raw.tags) ? raw.tags.map((tag) => ({
+    value: String(tag && tag.value != null ? tag.value : ""),
+    status: String(tag && tag.status ? tag.status : ""),
+    key: tag && tag.key ? String(tag.key) : null,
+    displayName: tag && tag.display_name ? String(tag.display_name) : null,
+  })) : [];
+  return {
+    analysisRunId,
+    completedAtMs: Number(raw.completed_at_ms) || 0,
+    providerId: String(raw.provider_id || ""),
+    modelId: String(raw.model_id || ""),
+    promptVersion: String(raw.prompt_version || ""),
+    title: String(raw.title || ""),
+    description: String(raw.description || ""),
+    tags,
+    suggestedFilename: "",
+  };
+}
+
+function inSessionSuggestionFromPreview(suggestion, payload) {
+  const analysisRunId = payload && payload.analysis_run_id
+    ? String(payload.analysis_run_id)
+    : `preview-${Date.now()}`;
+  const tags = Array.isArray(suggestion.tags)
+    ? suggestion.tags.map((tag) => {
+      const displayName = String(tag || "");
+      const existing = findTagByDisplayName(displayName);
+      return {
+        value: displayName,
+        status: existing ? "mapped" : "unknown",
+        key: existing ? existing.key : null,
+        displayName: existing ? existing.display_name : displayName,
+      };
+    })
+    : [];
+  return {
+    analysisRunId,
+    completedAtMs: Date.now(),
+    providerId: payload && payload.provider_id ? String(payload.provider_id) : "",
+    modelId: payload && payload.model_id ? String(payload.model_id) : (aiCapability.model_id || "AI"),
+    promptVersion: payload && payload.prompt_version ? String(payload.prompt_version) : "",
+    title: suggestion.title || "",
+    description: suggestion.description || "",
+    tags,
+    suggestedFilename: suggestion.suggestedFilename || "",
+  };
+}
+
+function renderMetadataSuggestionSelect() {
+  if (!metadataAiSuggestionSelect) return;
+  const previous = metadataSuggestionList.selectedRunId;
+  metadataAiSuggestionSelect.replaceChildren();
+  metadataSuggestionList.items.forEach((item) => {
+    const option = document.createElement("option");
+    option.value = item.analysisRunId;
+    option.textContent = suggestionOptionLabel(item);
+    metadataAiSuggestionSelect.appendChild(option);
+  });
+  if (
+    previous
+    && metadataSuggestionList.items.some((item) => item.analysisRunId === previous)
+  ) {
+    metadataAiSuggestionSelect.value = previous;
+    metadataSuggestionList.selectedRunId = previous;
+  } else if (metadataSuggestionList.items.length > 0) {
+    metadataSuggestionList.selectedRunId = metadataSuggestionList.items[0].analysisRunId;
+    metadataAiSuggestionSelect.value = metadataSuggestionList.selectedRunId;
   } else {
-    if (metadataDurableAiTitle) metadataDurableAiTitle.textContent = "";
-    if (metadataDurableAiDescription) metadataDurableAiDescription.textContent = "";
-    if (metadataDurableAiGenres) metadataDurableAiGenres.textContent = "";
-    if (metadataDurableAiTags) metadataDurableAiTags.textContent = "";
-    if (metadataDurableAiCollectionRow) metadataDurableAiCollectionRow.hidden = true;
-    if (metadataDurableAiCollection) metadataDurableAiCollection.textContent = "";
-    if (metadataDurableAiFilenameRow) metadataDurableAiFilenameRow.hidden = true;
-    if (metadataDurableAiFilename) metadataDurableAiFilename.textContent = "";
+    metadataSuggestionList.selectedRunId = null;
   }
 }
 
-function handleMetadataAiDetailsToggle() {
-  if (!durableAnalysisLoadAvailable()) return;
-  metadataDurableAnalysis.detailsExpanded = !metadataDurableAnalysis.detailsExpanded;
-  renderMetadataDurableAnalysis();
+function clearMetadataSuggestionStrip(container) {
+  if (!container) return;
+  container.replaceChildren();
+  container.hidden = true;
+}
+
+function appendSuggestionApplyButton(container, field, tagKey) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "metadata-suggestion-strip__apply";
+  button.textContent = "✅";
+  button.setAttribute("aria-label", tagKey ? `Copy suggested tag ${tagKey}` : `Copy suggested ${field}`);
+  button.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    copySuggestionFieldToCurrent(field, tagKey);
+  });
+  container.appendChild(button);
+}
+
+function renderMetadataSuggestionStrips() {
+  const show = identityAllowsAiSuggestionsChrome() && metadataSuggestionList.revealed;
+  const item = show ? selectedMetadataSuggestion() : null;
+  if (!item) {
+    clearMetadataSuggestionStrip(metadataAiTitleStrip);
+    clearMetadataSuggestionStrip(metadataAiDescriptionStrip);
+    clearMetadataSuggestionStrip(metadataAiTagsStrip);
+    return;
+  }
+  if (metadataAiTitleStrip) {
+    metadataAiTitleStrip.replaceChildren();
+    const text = document.createElement("span");
+    text.className = "metadata-suggestion-strip__text";
+    text.textContent = item.title || "(No title)";
+    metadataAiTitleStrip.appendChild(text);
+    if (item.title) appendSuggestionApplyButton(metadataAiTitleStrip, "title");
+    metadataAiTitleStrip.hidden = false;
+  }
+  if (metadataAiDescriptionStrip) {
+    metadataAiDescriptionStrip.replaceChildren();
+    const text = document.createElement("span");
+    text.className = "metadata-suggestion-strip__text";
+    text.textContent = item.description || "(No description)";
+    metadataAiDescriptionStrip.appendChild(text);
+    if (item.description) appendSuggestionApplyButton(metadataAiDescriptionStrip, "description");
+    metadataAiDescriptionStrip.hidden = false;
+  }
+  if (metadataAiTagsStrip) {
+    metadataAiTagsStrip.replaceChildren();
+    if (!Array.isArray(item.tags) || item.tags.length === 0) {
+      metadataAiTagsStrip.hidden = true;
+    } else {
+      item.tags.forEach((tag) => {
+        const chip = document.createElement("span");
+        const mapped = tag.status === "mapped" && tag.key;
+        chip.className = mapped
+          ? "metadata-suggestion-tag"
+          : "metadata-suggestion-tag metadata-suggestion-tag--unmapped";
+        chip.textContent = tag.displayName || tag.value || tag.key || "";
+        if (mapped) appendSuggestionApplyButton(chip, "tag", tag.key);
+        metadataAiTagsStrip.appendChild(chip);
+      });
+      metadataAiTagsStrip.hidden = false;
+    }
+  }
+}
+
+function copySuggestionFieldToCurrent(field, tagKey) {
+  const item = selectedMetadataSuggestion();
+  if (!item || !metadataSuggestionList.revealed) return;
+  if (field === "title") {
+    metadataWorkspace.current.displayTitle = item.title || "";
+  } else if (field === "description") {
+    metadataWorkspace.current.description = item.description || "";
+  } else if (field === "tag" && tagKey) {
+    if (metadataWorkspace.current.tagKeys.includes(tagKey)) return;
+    if (metadataWorkspace.current.tagKeys.length >= MAX_METADATA_TAGS) {
+      setMetadataStatus("validation", "Tag limit reached.");
+      updateMetadataControls();
+      return;
+    }
+    metadataWorkspace.current.tagKeys = [...metadataWorkspace.current.tagKeys, tagKey];
+  } else {
+    return;
+  }
+  metadataWorkspace.statusOverride = null;
+  advanceMetadataWorkspaceRevision();
+  renderMetadataWorkspace();
+}
+
+function handleMetadataSuggestionSelectChange() {
+  if (!metadataAiSuggestionSelect) return;
+  metadataSuggestionList.selectedRunId = metadataAiSuggestionSelect.value || null;
+  metadataSuggestionList.revealed = false;
+  renderMetadataSuggestionStrips();
+  updateMetadataControls();
+}
+
+function presentInSessionSuggestion(suggestion, payload) {
+  const item = inSessionSuggestionFromPreview(suggestion, payload);
+  const without = metadataSuggestionList.items.filter(
+    (existing) => existing.analysisRunId !== item.analysisRunId,
+  );
+  metadataSuggestionList.items = [item, ...without];
+  metadataSuggestionList.selectedRunId = item.analysisRunId;
+  metadataSuggestionList.revealed = true;
+  metadataWorkspace.suggestedFilename = item.suggestedFilename || "";
+}
+
+async function refreshMetadataSuggestionList(mediaId) {
+  if (!mediaId || !identityAllowsAiSuggestionsChrome()) return;
+  const token = ++metadataSuggestionListToken;
+  metadataSuggestionList.mediaId = mediaId;
+  metadataSuggestionList.fetching = true;
+  metadataSuggestionList.movieExcluded = false;
+  updateMetadataControls();
+  try {
+    const response = await fetch(companionReviewInboxDetailEndpoint(mediaId), {
+      headers: { Accept: "application/json" },
+      cache: "no-store",
+    });
+    if (token !== metadataSuggestionListToken) return;
+    if (metadataWorkspace.openMediaId !== mediaId) return;
+    metadataSuggestionList.fetching = false;
+    if (response.status === 409) {
+      metadataSuggestionList.items = [];
+      metadataSuggestionList.selectedRunId = null;
+      metadataSuggestionList.revealed = false;
+      metadataSuggestionList.movieExcluded = true;
+      renderMetadataWorkspace();
+      return;
+    }
+    if (!response.ok) {
+      metadataSuggestionList.errorMessage = "";
+      renderMetadataWorkspace();
+      return;
+    }
+    const payload = await response.json();
+    if (token !== metadataSuggestionListToken) return;
+    if (metadataWorkspace.openMediaId !== mediaId) return;
+    const selected = metadataSuggestionList.selectedRunId;
+    const revealed = metadataSuggestionList.revealed;
+    const selectedItem = selectedMetadataSuggestion();
+    let items = Array.isArray(payload.suggestions)
+      ? payload.suggestions.map(inboxSuggestionFromDetail).filter(Boolean)
+      : [];
+    if (selectedItem && !items.some((item) => item.analysisRunId === selectedItem.analysisRunId)) {
+      items = [selectedItem, ...items];
+    }
+    metadataSuggestionList.items = items;
+    if (selected && items.some((item) => item.analysisRunId === selected)) {
+      metadataSuggestionList.selectedRunId = selected;
+      metadataSuggestionList.revealed = revealed;
+    } else {
+      metadataSuggestionList.selectedRunId = items.length > 0 ? items[0].analysisRunId : null;
+      metadataSuggestionList.revealed = false;
+    }
+    renderMetadataWorkspace();
+  } catch {
+    if (token !== metadataSuggestionListToken) return;
+    if (metadataWorkspace.openMediaId !== mediaId) return;
+    metadataSuggestionList.fetching = false;
+    renderMetadataWorkspace();
+  }
 }
 
 async function refreshMetadataDurableAnalysis(mediaId, requestToken) {
@@ -7042,153 +7264,15 @@ async function handleLoadDurableAiSuggestion() {
     || metadataWorkspace.loading
     || metadataWorkspace.saving
     || metadataWorkspace.analyzing
-    || metadataDurableAnalysis.loadingIntoDraft
-    || metadataDurableAnalysis.fetching
+    || metadataSuggestionList.fetching
+    || !identityAllowsAiSuggestionsChrome()
   ) {
     return;
   }
-  const mediaId = metadataWorkspace.openMediaId;
-  const openItemMediaId = metadataOpenItemMediaId();
-  const invokeElement = metadataLoadAiSuggestionButton;
-  const preferMovie = (metadataWorkspace.current.contentCategory || "general") === "movie"
-    || metadataDurableAnalysis.analysisDefinition === "movie_identification";
-  const token = ++metadataDurableLoadToken;
-  metadataDurableAnalysis.loadingIntoDraft = true;
-  updateMetadataControls();
-  metadataAiStatus.textContent = preferMovie
-    ? "Loading movie identification…"
-    : "Loading AI suggestion…";
-  try {
-    const response = await fetch(
-      preferMovie ? movieIdentificationEndpoint(mediaId) : automaticAnalysisEndpoint(mediaId),
-      {
-        headers: { Accept: "application/json" },
-        cache: "no-store",
-      },
-    );
-    if (
-      token !== metadataDurableLoadToken
-      || metadataWorkspace.openMediaId !== mediaId
-      || metadataOpenItemMediaId() !== openItemMediaId
-    ) {
-      return;
-    }
-    if (!response.ok) {
-      metadataDurableAnalysis.loadingIntoDraft = false;
-      metadataAiStatus.textContent = preferMovie
-        ? "Movie identification status could not be loaded."
-        : "Automatic analysis status could not be loaded.";
-      updateMetadataControls();
-      return;
-    }
-    const payload = await response.json();
-    if (
-      token !== metadataDurableLoadToken
-      || metadataWorkspace.openMediaId !== mediaId
-      || metadataOpenItemMediaId() !== openItemMediaId
-    ) {
-      return;
-    }
-    const nextState = applyAnalysisStatusPayload(mediaId, payload, preferMovie);
-    metadataDurableAnalysis = {
-      ...nextState,
-      loadingIntoDraft: true,
-      detailsExpanded: metadataDurableAnalysis.detailsExpanded,
-    };
-    const isMovie = metadataDurableAnalysis.analysisDefinition === "movie_identification";
-    const movieResult = isMovie ? metadataDurableAnalysis.movieResult : null;
-    const suggestion = isMovie
-      ? movieSuggestionFromResult(movieResult)
-      : aiSuggestionFromAutomaticAnalysisResult(metadataDurableAnalysis.result);
-    if (!suggestion) {
-      metadataDurableAnalysis.loadingIntoDraft = false;
-      if (isMovie && movieIdentificationIsPureUnknown(movieResult)) {
-        metadataDurableAnalysis.statusMessage = movieIdentificationStatusMessage(payload);
-        metadataDurableAnalysis.errorMessage = "";
-        metadataAiStatus.textContent = metadataDurableAnalysis.statusMessage;
-      } else if (metadataDurableAnalysis.state === "pending") {
-        metadataAiStatus.textContent = isMovie
-          ? "Movie identification is still queued."
-          : "AI analysis is still queued.";
-      } else if (metadataDurableAnalysis.state === "analyzing") {
-        metadataAiStatus.textContent = isMovie
-          ? "Movie identification is still in progress."
-          : "AI analysis is still in progress.";
-      } else if (metadataDurableAnalysis.state === "failed") {
-        metadataAiStatus.textContent = payload.error_message
-          || (isMovie ? "Movie identification failed." : "AI analysis failed.");
-      } else {
-        metadataAiStatus.textContent = isMovie
-          ? "No loadable movie identification is available."
-          : "No automatic AI suggestion is available.";
-      }
-      renderMetadataWorkspace();
-      return;
-    }
-    if (metadataIsDirty()) {
-      metadataDurableAnalysis.loadingIntoDraft = false;
-      updateMetadataControls();
-      const accepted = await requestConfirmation({
-        title: "Replace current draft?",
-        message: isMovie
-          ? "Unsaved metadata edits will be updated by the movie identification suggestion. Empty suggestion fields will not clear existing draft values."
-          : "Unsaved metadata edits will be replaced by the AI suggestion.",
-        dismissLabel: "No",
-        confirmLabel: "Yes",
-        destructive: false,
-        focusReturn: invokeElement,
-      });
-      if (
-        token !== metadataDurableLoadToken
-        || metadataWorkspace.openMediaId !== mediaId
-        || metadataOpenItemMediaId() !== openItemMediaId
-      ) {
-        return;
-      }
-      if (!accepted) {
-        metadataAiStatus.textContent = "";
-        updateMetadataControls();
-        renderMetadataDurableAnalysis();
-        return;
-      }
-      metadataDurableAnalysis.loadingIntoDraft = true;
-      updateMetadataControls();
-    }
-    if (
-      token !== metadataDurableLoadToken
-      || metadataWorkspace.openMediaId !== mediaId
-      || metadataOpenItemMediaId() !== openItemMediaId
-    ) {
-      return;
-    }
-    const tagKeys = suggestion.tags.length > 0
-      ? await metadataTagKeysFromSuggestion(suggestion.tags)
-      : [];
-    if (
-      token !== metadataDurableLoadToken
-      || metadataWorkspace.openMediaId !== mediaId
-      || metadataOpenItemMediaId() !== openItemMediaId
-    ) {
-      return;
-    }
-    metadataDurableAnalysis.loadingIntoDraft = false;
-    metadataDurableAnalysis.detailsExpanded = false;
-    if (isMovie) {
-      applyMovieIdentificationToMetadataWorkspace(movieResult, tagKeys);
-    } else {
-      applyResolvedAiSuggestionToMetadataWorkspace(suggestion, tagKeys);
-    }
-    renderMetadataWorkspace();
-    metadataTitleInput.focus();
-  } catch {
-    if (token !== metadataDurableLoadToken) return;
-    if (metadataWorkspace.openMediaId !== mediaId) return;
-    metadataDurableAnalysis.loadingIntoDraft = false;
-    metadataAiStatus.textContent = preferMovie
-      ? "Movie identification status could not be loaded."
-      : "Automatic analysis status could not be loaded.";
-    updateMetadataControls();
-  }
+  if (!selectedMetadataSuggestion()) return;
+  metadataSuggestionList.revealed = true;
+  if (metadataAiStatus) metadataAiStatus.textContent = "Loaded";
+  renderMetadataWorkspace();
 }
 
 async function handleAnalyzeMetadataByAi() {
@@ -7201,7 +7285,9 @@ async function handleAnalyzeMetadataByAi() {
     || metadataWorkspace.loading
     || metadataWorkspace.saving
   ) return;
-  if (metadataWorkspace.analyzing || metadataWorkspace.aiSuggestionApplied) return;
+  if (metadataWorkspace.analyzing) return;
+  if (companionWebHosted() || metadataWorkspaceIsMovie() || metadataWorkspaceIsAliasMode()) return;
+  if (!identityHasCapability("analysis.run")) return;
   const location = metadataAiLocation();
   if (!location) {
     metadataAiStatus.textContent = "AI analysis needs an available local GIF or MP4.";
@@ -7210,7 +7296,7 @@ async function handleAnalyzeMetadataByAi() {
   const confirmationContext = captureMetadataAiConfirmationContext(location);
   const accepted = await requestConfirmation({
     title: "Use AI analysis?",
-    message: "FrameNest will send up to 3 optimized preview frames and bounded metadata to the configured server-side AI provider. The original file, local path, and API key are not uploaded. Returned values will replace the current unsaved Title, Description, and Tags in this editor. The result will not be saved automatically, and the physical file will not be renamed.",
+    message: "FrameNest will send up to 3 optimized preview frames and bounded metadata to the configured server-side AI provider. The original file, local path, and API key are not uploaded. Returned values become proposal strips beside Title, Description, and Tags. They do not replace the current unsaved values. The result will not be saved automatically, and the physical file will not be renamed.",
     dismissLabel: "Not now",
     confirmLabel: "Analyze by AI",
     destructive: false,
@@ -7219,7 +7305,10 @@ async function handleAnalyzeMetadataByAi() {
     metadataAiStatus.textContent = "";
     return;
   }
-  if (!metadataAiConfirmationContextIsCurrent(confirmationContext)) return;
+  if (!metadataAiConfirmationContextIsCurrent(confirmationContext)) {
+    metadataAiStatus.textContent = "This editor changed before analysis could start. Confirm again to analyze.";
+    return;
+  }
   const token = ++metadataAiRequestToken;
   metadataWorkspace.analyzing = true;
   advanceMetadataWorkspaceRevision();
@@ -7231,7 +7320,7 @@ async function handleAnalyzeMetadataByAi() {
     workspaceRevision: metadataWorkspaceRevision,
     capabilityRevision: aiCapabilityRevision,
   });
-  metadataAiStatus.textContent = "";
+  metadataAiStatus.textContent = "Analyzing…";
   updateMetadataControls();
   try {
     const response = await fetch(mediaAiSuggestionEndpoint(requestContext.mediaId, requestContext.locationId), {
@@ -7255,14 +7344,10 @@ async function handleAnalyzeMetadataByAi() {
       return;
     }
     const suggestion = aiSuggestionFromPayload(payload);
-    const tagKeys = await metadataTagKeysFromSuggestion(suggestion.tags);
-    if (!metadataAiRequestContextIsCurrent(requestContext)) {
-      releaseMetadataAiRequest(requestContext);
-      return;
-    }
     metadataWorkspace.analyzing = false;
     advanceMetadataWorkspaceRevision();
-    applyResolvedAiSuggestionToMetadataWorkspace(suggestion, tagKeys);
+    presentInSessionSuggestion(suggestion, payload);
+    metadataAiStatus.textContent = "Loaded";
     renderMetadataWorkspace();
   } catch {
     const requestIsCurrent = metadataAiRequestContextIsCurrent(requestContext);
@@ -7270,7 +7355,9 @@ async function handleAnalyzeMetadataByAi() {
       metadataAiStatus.textContent = "AI analysis failed.";
       renderMetadataWorkspace();
     }
+    return;
   }
+  await refreshMetadataSuggestionList(requestContext.mediaId);
 }
 
 function aiSuggestionErrorMessage(payload) {
@@ -7371,6 +7458,26 @@ function applyMetadataPayloadToWorkspace(payload) {
   };
   advanceMetadataWorkspaceRevision();
   syncClassificationControlsFromWorkspace();
+}
+
+function aliasOverlayIsNonEmpty(payload) {
+  if (!payload || typeof payload !== "object") return false;
+  if (payload.display_title != null && String(payload.display_title) !== "") return true;
+  if (payload.description != null && String(payload.description) !== "") return true;
+  return Array.isArray(payload.tag_keys) && payload.tag_keys.length > 0;
+}
+
+function applyAliasOverlayToWorkspace(payload) {
+  const displayTitle = payload.display_title == null ? null : payload.display_title;
+  const description = payload.description == null ? null : payload.description;
+  const tagKeys = Array.isArray(payload.tag_keys) ? [...payload.tag_keys] : [];
+  metadataWorkspace.baseline.displayTitle = displayTitle;
+  metadataWorkspace.baseline.description = description;
+  metadataWorkspace.baseline.tagKeys = [...tagKeys];
+  metadataWorkspace.current.displayTitle = displayTitle || "";
+  metadataWorkspace.current.description = description || "";
+  metadataWorkspace.current.tagKeys = [...tagKeys];
+  advanceMetadataWorkspaceRevision();
 }
 
 function detailsMediaItemLooksComplete(item) {
@@ -7601,6 +7708,7 @@ async function handleOpenMetadataWorkspace(item, openerElement, { aiSuggestion =
   metadataRequestToken = token;
   metadataDurableAnalysisToken += 1;
   metadataDurableLoadToken += 1;
+  metadataSuggestionListToken += 1;
   advanceMetadataWorkspaceRevision();
   metadataWorkspace = {
     openMediaId: item.media_id,
@@ -7612,11 +7720,13 @@ async function handleOpenMetadataWorkspace(item, openerElement, { aiSuggestion =
     statusOverride: null,
     analyzing: false,
     aiSuggestionApplied: false,
+    editMode: identityUsesCanonicalMetadataWrite() ? "canonical" : "alias",
     suggestedFilename: "",
     baseline: { displayTitle: null, description: null, tagKeys: [], collectionKey: null, processedAtMs: null },
     current: { displayTitle: "", description: "", tagKeys: [], collectionKey: null, processedAtMs: null },
   };
   resetMetadataDurableAnalysisState();
+  resetMetadataSuggestionListState();
   metadataStatus.textContent = "";
   metadataValidationMessage.textContent = "";
   metadataAiStatus.textContent = "";
@@ -7669,7 +7779,25 @@ async function handleOpenMetadataWorkspace(item, openerElement, { aiSuggestion =
       return;
     }
     applyMetadataPayloadToWorkspace(payload);
-    if (aiSuggestion) {
+    if (metadataWorkspace.editMode === "alias") {
+      const aliasResponse = await fetch(mediaAliasEndpoint(mediaId), {
+        headers: { Accept: "application/json" },
+        cache: "no-store",
+      });
+      if (token !== metadataRequestToken) {
+        return;
+      }
+      if (aliasResponse.ok) {
+        const aliasPayload = await aliasResponse.json();
+        if (token !== metadataRequestToken) {
+          return;
+        }
+        if (aliasOverlayIsNonEmpty(aliasPayload)) {
+          applyAliasOverlayToWorkspace(aliasPayload);
+        }
+      }
+    }
+    if (aiSuggestion && identityUsesCanonicalMetadataWrite()) {
       const tagKeys = await metadataTagKeysFromSuggestion(aiSuggestion.tags);
       if (token !== metadataRequestToken) {
         return;
@@ -7678,8 +7806,12 @@ async function handleOpenMetadataWorkspace(item, openerElement, { aiSuggestion =
     }
     renderMetadataWorkspace();
     metadataTitleInput.focus();
-    const durableToken = ++metadataDurableAnalysisToken;
-    await refreshMetadataDurableAnalysis(mediaId, durableToken);
+    if (metadataWorkspaceIsMovie()) {
+      const durableToken = ++metadataDurableAnalysisToken;
+      await refreshMetadataDurableAnalysis(mediaId, durableToken);
+    } else if (identityAllowsAiSuggestionsChrome()) {
+      await refreshMetadataSuggestionList(mediaId);
+    }
   } catch {
     if (token === metadataRequestToken) {
       metadataWorkspace.loading = false;
@@ -7739,6 +7871,7 @@ function closeMetadataWorkspaceWithContext(discardContext, { reloadCatalog = tru
   metadataAiRequestToken += 1;
   metadataDurableAnalysisToken += 1;
   metadataDurableLoadToken += 1;
+  metadataSuggestionListToken += 1;
   advanceMetadataWorkspaceRevision();
   metadataWorkspace = {
     openMediaId: null,
@@ -7750,11 +7883,13 @@ function closeMetadataWorkspaceWithContext(discardContext, { reloadCatalog = tru
     statusOverride: null,
     analyzing: false,
     aiSuggestionApplied: false,
+    editMode: "canonical",
     suggestedFilename: "",
     baseline: { displayTitle: null, description: null, tagKeys: [], collectionKey: null, processedAtMs: null },
     current: { displayTitle: "", description: "", tagKeys: [], collectionKey: null, processedAtMs: null },
   };
   resetMetadataDurableAnalysisState();
+  resetMetadataSuggestionListState();
   reconcileCatalogSelectedCard();
   metadataWorkspaceElement.hidden = true;
   metadataStatus.textContent = "";
@@ -7787,6 +7922,11 @@ async function closeMetadataWorkspace({ discardContext = null } = {}) {
 }
 
 async function createAndSelectMetadataTag(displayName) {
+  if (!identityUsesCanonicalMetadataWrite()) {
+    setMetadataStatus("validation", "Use an existing tag.");
+    updateMetadataControls();
+    return;
+  }
   const validation = tagDisplayNameError(displayName);
   if (validation) {
     setMetadataStatus("validation", validation);
@@ -7903,7 +8043,12 @@ function handleMetadataTagSearchKeydown(event) {
       return;
     }
     if (displayName) {
-      createAndSelectMetadataTag(displayName);
+      if (identityUsesCanonicalMetadataWrite()) {
+        createAndSelectMetadataTag(displayName);
+      } else {
+        setMetadataStatus("validation", "Use an existing tag.");
+        updateMetadataControls();
+      }
     }
   }
 }
@@ -7920,7 +8065,10 @@ async function handleSaveMetadata() {
   setMetadataStatus("saving", "Saving...");
   updateMetadataControls();
   try {
-    const response = await fetch(metadataEndpoint(saveOwner.mediaId), {
+    const endpoint = saveOwner.editMode === "alias"
+      ? mediaAliasEndpoint(saveOwner.mediaId)
+      : metadataEndpoint(saveOwner.mediaId);
+    const response = await fetch(endpoint, {
       method: "PUT",
       headers: framenestMutationHeaders({
         Accept: "application/json",
@@ -7932,7 +8080,11 @@ async function handleSaveMetadata() {
     const payload = await response.json();
     if (!metadataSaveOwnerIsCurrent(saveOwner)) return;
     if (response.ok) {
-      applyMetadataPayloadToWorkspace(payload.metadata);
+      if (saveOwner.editMode === "alias") {
+        applyAliasOverlayToWorkspace(payload);
+      } else {
+        applyMetadataPayloadToWorkspace(payload.metadata);
+      }
       metadataWorkspace.aiSuggestionApplied = false;
       metadataWorkspace.suggestedFilename = "";
       const responseRevision = metadataWorkspaceRevision;
@@ -7942,7 +8094,7 @@ async function handleSaveMetadata() {
       return;
     }
     const code = payload.error ? payload.error.code : "";
-    if (code === "CANONICAL_TAG_NOT_FOUND") {
+    if (code === "CANONICAL_TAG_NOT_FOUND" || code === "ALIAS_TAG_NOT_FOUND") {
       await loadCatalogTags();
       if (!metadataSaveOwnerIsCurrent(saveOwner)) return;
       setMetadataStatus("validation", "One selected tag is no longer available. Update the tags before retrying.");
@@ -10505,10 +10657,15 @@ function syncClassificationControlsFromWorkspace() {
   const genresFieldset = document.querySelector("#metadata-genres-fieldset");
   const genresContainer = document.querySelector("#metadata-genres");
   const identifyButton = document.querySelector("#metadata-movie-identify-button");
+  const classificationRow = document.querySelector(".metadata-classification-row");
+  const aliasMode = metadataWorkspaceIsAliasMode();
+  if (classificationRow) {
+    classificationRow.hidden = aliasMode;
+  }
   if (categorySelect) {
     categorySelect.value = metadataWorkspace.current.contentCategory || "general";
     const xAcquired = metadataWorkspace.current.acquisitionSource === "x_manual_claim";
-    categorySelect.disabled = xAcquired;
+    categorySelect.disabled = aliasMode || xAcquired;
   }
   if (sourceSelect) {
     sourceSelect.value = metadataWorkspace.current.acquisitionSource || "unknown";
@@ -10516,7 +10673,7 @@ function syncClassificationControlsFromWorkspace() {
   }
   const isMovie = (metadataWorkspace.current.contentCategory || "general") === "movie";
   if (genresFieldset) {
-    genresFieldset.hidden = !isMovie;
+    genresFieldset.hidden = aliasMode || !isMovie;
   }
   if (genresContainer) {
     const selected = new Set(metadataWorkspace.current.genres || []);
@@ -10541,8 +10698,8 @@ function syncClassificationControlsFromWorkspace() {
     });
   }
   if (identifyButton) {
-    identifyButton.hidden = !isMovie;
-    identifyButton.disabled = !isMovie || !aiCapability.configured;
+    identifyButton.hidden = aliasMode || !isMovie;
+    identifyButton.disabled = aliasMode || !isMovie || !aiCapability.configured;
   }
 }
 
@@ -11038,9 +11195,8 @@ metadataAiAnalyzeButton.addEventListener("click", handleAnalyzeMetadataByAi);
 if (metadataLoadAiSuggestionButton) {
   metadataLoadAiSuggestionButton.addEventListener("click", handleLoadDurableAiSuggestion);
 }
-
-if (metadataAiDetailsToggle) {
-  metadataAiDetailsToggle.addEventListener("click", handleMetadataAiDetailsToggle);
+if (metadataAiSuggestionSelect) {
+  metadataAiSuggestionSelect.addEventListener("change", handleMetadataSuggestionSelectChange);
 }
 
 function setActiveStatusTab(tabName, { focusTab = false, refreshAiStatus = false } = {}) {

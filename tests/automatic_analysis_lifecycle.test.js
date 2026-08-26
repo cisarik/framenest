@@ -92,17 +92,15 @@ test("cataloged upload copy mentions automatic analysis only when enabled", () =
   assert.match(catalogedBranch, /automaticAnalysisCapability\.automatic_analysis_enabled/);
 });
 
-test("metadata editor exposes durable Load AI suggestion without Apply endpoint", () => {
+test("metadata editor exposes Load without Apply endpoint", () => {
   assert.match(INDEX_SOURCE, /id="metadata-load-ai-suggestion-button"/);
-  assert.match(INDEX_SOURCE, />Load AI suggestion</);
-  assert.match(INDEX_SOURCE, /id="metadata-durable-ai-suggestion"/);
-  assert.match(INDEX_SOURCE, /id="metadata-ai-details-toggle"/);
-  assert.match(INDEX_SOURCE, />AI suggestion</);
+  assert.match(INDEX_SOURCE, />Load</);
+  assert.match(INDEX_SOURCE, /id="metadata-ai-suggestion-select"/);
+  assert.match(INDEX_SOURCE, />AI suggestions</);
+  assert.equal(INDEX_SOURCE.includes("View details"), false);
   assert.equal(INDEX_SOURCE.includes("Saved AI suggestion"), false);
   assert.match(APP_SOURCE, /async function handleLoadDurableAiSuggestion/);
-  assert.match(APP_SOURCE, /async function refreshMetadataDurableAnalysis/);
-  assert.match(APP_SOURCE, /function aiSuggestionFromAutomaticAnalysisResult/);
-  assert.match(APP_SOURCE, /automaticAnalysisEndpoint\(mediaId\)/);
+  assert.match(APP_SOURCE, /companionReviewInboxDetailEndpoint/);
   assert.equal(APP_SOURCE.includes("/apply"), false);
   assert.equal(APP_SOURCE.includes("handleApplyDurable"), false);
 });
@@ -129,32 +127,24 @@ test("durable suggestion mapping keeps only title description tags and display f
   assert.equal(context.aiSuggestionFromAutomaticAnalysisResult({ title: "x" }), null);
 });
 
-test("durable load path reads automatic-analysis and never calls interactive Analyze", () => {
+test("Load reveals strips without Analyze, Save, or draft replacement", () => {
   const loadBody = extractAsyncFunction("handleLoadDurableAiSuggestion");
-  assert.match(loadBody, /automaticAnalysisEndpoint\(mediaId\)/);
-  assert.match(loadBody, /headers: \{ Accept: "application\/json" \}/);
   assert.equal(loadBody.includes("method:"), false);
   assert.equal(loadBody.includes("ai-suggestion-preview"), false);
   assert.equal(loadBody.includes("confirm_cloud_upload"), false);
   assert.equal(loadBody.includes("mediaAiSuggestionEndpoint"), false);
   assert.equal(loadBody.includes("handleAnalyzeMetadataByAi"), false);
-  assert.match(loadBody, /applyResolvedAiSuggestionToMetadataWorkspace\(suggestion, tagKeys\)/);
+  assert.equal(loadBody.includes("applyResolvedAiSuggestionToMetadataWorkspace"), false);
   assert.equal(loadBody.includes("handleSaveMetadata"), false);
   assert.equal(loadBody.includes("metadataEndpoint("), false);
-  assert.match(loadBody, /Replace current draft\?/);
-  assert.match(loadBody, /dismissLabel: "No"/);
-  assert.match(loadBody, /confirmLabel: "Yes"/);
-  assert.match(loadBody, /destructive: false/);
-  assert.match(loadBody, /focusReturn: invokeElement/);
-  assert.match(loadBody, /requestConfirmation\(/);
+  assert.equal(loadBody.includes("Replace current draft?"), false);
+  assert.equal(loadBody.includes("requestConfirmation("), false);
   assert.equal(loadBody.includes("window.confirm"), false);
-  assert.equal(/confirmLabel:\s*"Load suggestion"/.test(loadBody), false);
-  assert.equal(/destructive:\s*true/.test(loadBody), false);
-  assert.equal(loadBody.includes("Keep editing"), false);
-  assert.equal(loadBody.includes("Replace draft"), false);
+  assert.match(loadBody, /metadataSuggestionList\.revealed = true/);
+  assert.match(loadBody, /Loaded/);
 });
 
-test("durable load reuses existing apply helper and excludes collection mutation", () => {
+test("brain apply helper still bulk-copies into Current and excludes collection mutation", () => {
   const applyBody = extractFunction("applyResolvedAiSuggestionToMetadataWorkspace");
   assert.match(applyBody, /metadataWorkspace\.current\.displayTitle = suggestion\.title/);
   assert.match(applyBody, /metadataWorkspace\.current\.description = suggestion\.description/);
@@ -165,58 +155,44 @@ test("durable load reuses existing apply helper and excludes collection mutation
   assert.match(applyBody, /AI suggestion loaded into draft\./);
 });
 
-test("AI suggestion origin explanations stay non-technical", () => {
-  const context = {};
-  vm.runInNewContext(extractFunction("aiSuggestionOriginExplanation"), context);
-  assert.equal(
-    context.aiSuggestionOriginExplanation("automatic_post_catalog"),
-    "Generated automatically after upload.",
-  );
-  assert.match(
-    context.aiSuggestionOriginExplanation("other_definition"),
-    /previous server-side AI analysis/i,
-  );
-  assert.equal(context.aiSuggestionOriginExplanation(null), "");
-  assert.equal(context.aiSuggestionOriginExplanation(""), "");
-  assert.equal(APP_SOURCE.includes("automatic_post_catalog"), true);
+test("generated-automatically essay and View details chrome are gone", () => {
+  assert.equal(APP_SOURCE.includes("function aiSuggestionOriginExplanation"), false);
+  assert.equal(INDEX_SOURCE.includes("Generated automatically after upload."), false);
+  assert.equal(INDEX_SOURCE.includes("View details"), false);
+  assert.equal(INDEX_SOURCE.includes("New AI analysis is available after confirmation."), false);
+  assert.equal(APP_SOURCE.includes("function aiSuggestionOriginExplanation"), false);
   assert.equal(INDEX_SOURCE.includes("automatic_post_catalog"), false);
 });
 
-test("compact AI panel uses progressive disclosure and omits Saved AI suggestion heading", () => {
+test("AI suggestions chrome sits above Title with Load and per-field strips", () => {
   assert.match(INDEX_SOURCE, /id="metadata-ai-heading"/);
-  assert.match(INDEX_SOURCE, />AI suggestion</);
+  assert.match(INDEX_SOURCE, />AI suggestions</);
   assert.equal(INDEX_SOURCE.includes("Saved AI suggestion"), false);
-  assert.match(INDEX_SOURCE, /id="metadata-ai-details-toggle"/);
-  assert.match(INDEX_SOURCE, /aria-controls="metadata-durable-ai-suggestion"/);
-  assert.match(INDEX_SOURCE, /Proposed values — not saved yet/);
-  assert.match(INDEX_SOURCE, /id="metadata-durable-ai-filename"/);
-  assert.match(INDEX_SOURCE, /id="metadata-durable-ai-genres"/);
-  assert.match(INDEX_SOURCE, /Suggested genres/);
+  assert.match(INDEX_SOURCE, /id="metadata-ai-suggestion-select"/);
+  assert.match(INDEX_SOURCE, /id="metadata-ai-title-strip"/);
+  assert.match(INDEX_SOURCE, /id="metadata-ai-description-strip"/);
+  assert.match(INDEX_SOURCE, /id="metadata-ai-tags-strip"/);
   assert.equal(INDEX_SOURCE.includes("metadata-ai-filename-input"), false);
-  assert.equal(INDEX_SOURCE.includes('id="metadata-ai-filename-display"'), false);
+  const headingAt = INDEX_SOURCE.indexOf('id="metadata-ai-heading"');
+  const titleAt = INDEX_SOURCE.indexOf('id="metadata-title-input"');
+  const loadAt = INDEX_SOURCE.indexOf('id="metadata-load-ai-suggestion-button"');
+  const saveAt = INDEX_SOURCE.indexOf('id="metadata-save-button"');
+  const analyzeAt = INDEX_SOURCE.indexOf('id="metadata-ai-analyze-button"');
+  assert.ok(headingAt < titleAt);
+  assert.ok(loadAt < titleAt);
+  assert.ok(saveAt < analyzeAt);
   const panelBody = extractFunction("renderMetadataAiPanel");
-  assert.match(panelBody, /New AI analysis is currently unavailable\./);
-  assert.match(panelBody, /durableAnalysisLoadAvailable\(\)/);
-  const durableBody = extractFunction("renderMetadataDurableAnalysis");
-  assert.match(durableBody, /detailsExpanded/);
-  assert.match(durableBody, /View details/);
-  assert.match(durableBody, /Hide details/);
-  assert.match(durableBody, /aria-expanded/);
+  assert.match(panelBody, /AI suggestions/);
+  assert.match(panelBody, /identityAllowsAiSuggestionsChrome\(\)/);
+  assert.equal(panelBody.includes("New AI analysis is currently unavailable."), false);
 });
 
-test("suggested filename is display-only and appears once in expanded details markup", () => {
-  assert.match(INDEX_SOURCE, /id="metadata-durable-ai-filename"/);
-  assert.match(INDEX_SOURCE, /id="metadata-durable-ai-filename-row"/);
+test("suggested filename remains an admin-only note without an input", () => {
+  assert.match(INDEX_SOURCE, /id="metadata-ai-filename-note"/);
   assert.equal(INDEX_SOURCE.includes("metadata-ai-filename-input"), false);
-  const detailsBlock = INDEX_SOURCE.slice(
-    INDEX_SOURCE.indexOf('id="metadata-durable-ai-suggestion"'),
-    INDEX_SOURCE.indexOf('id="metadata-save-button"'),
-  );
-  assert.equal(detailsBlock.includes("<input"), false);
-  assert.equal((detailsBlock.match(/Suggested filename/g) || []).length, 1);
-  assert.match(detailsBlock, /Informational only/);
   const panelBody = extractFunction("renderMetadataAiPanel");
   assert.match(panelBody, /metadataAiFilenameNote/);
+  assert.match(panelBody, /identityUsesCanonicalMetadataWrite\(\)/);
   assert.equal(panelBody.includes("metadataAiFilenameInput"), false);
   assert.equal(APP_SOURCE.includes("metadataAiFilenameInput.addEventListener"), false);
 });

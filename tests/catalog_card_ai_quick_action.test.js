@@ -377,6 +377,7 @@ function createFlowHarness({ confirmAccepted = true, reducedMotion = true } = {}
     identityState: {
       resolved: true,
       available: true,
+      audience: "tailscale_workspace",
       role: "admin",
       capabilities: new Set(["analysis.run", "metadata.canonical.write", "gallery.read"]),
     },
@@ -662,6 +663,8 @@ function renderCatalogCardForCapabilities(capabilities, overrides = {}, options 
     };
   }
   vm.runInContext(extractFunction(APP_SOURCE, "companionWebHosted"), context);
+  vm.runInContext(extractFunction(APP_SOURCE, "isWorkspaceAudience"), context);
+  vm.runInContext(extractFunction(APP_SOURCE, "identityAllowsMetadataEdit"), context);
   vm.runInContext(extractFunction(APP_SOURCE, "renderCatalogCard"), context);
   const item = sampleItem(overrides);
   return {
@@ -696,6 +699,14 @@ test("Gallery card actions reflect ordinary admin and removed capabilities witho
   assert.equal(ordinary.card.querySelector(".catalog-card__action--edit"), null);
   assert.equal(ordinary.card.querySelector(".catalog-card__action--analyze"), null);
   assert.equal(ordinaryActions.children.length, 1);
+
+  const ordinaryAlias = renderCatalogCardForCapabilities([
+    "gallery.read",
+    "media.original.read",
+    "metadata.alias.write",
+  ]);
+  assert.ok(ordinaryAlias.card.querySelector(".catalog-card__action--edit"));
+  assert.equal(ordinaryAlias.card.querySelector(".catalog-card__action--analyze"), null);
 
   const admin = renderCatalogCardForCapabilities([
     "gallery.read",
@@ -1049,7 +1060,8 @@ test("source wiring gates brain on metadata need and positively resolved identit
 
 test("Edit Analyze remains draft-only and does not auto-save", () => {
   const analyzeBody = extractFunction(APP_SOURCE, "handleAnalyzeMetadataByAi");
-  assert.ok(analyzeBody.includes("applyResolvedAiSuggestionToMetadataWorkspace(suggestion, tagKeys)"));
+  assert.ok(analyzeBody.includes("presentInSessionSuggestion(suggestion, payload)"));
+  assert.equal(analyzeBody.includes("applyResolvedAiSuggestionToMetadataWorkspace(suggestion, tagKeys)"), false);
   assert.equal(analyzeBody.includes('method: "PUT"'), false);
   assert.equal(analyzeBody.includes("applySavedAiMetadataToCatalogSurfaces"), false);
   assert.ok(analyzeBody.includes("await requestConfirmation({"));
@@ -1057,12 +1069,12 @@ test("Edit Analyze remains draft-only and does not auto-save", () => {
 
 test("Edit remains available in card source after brain eligibility disappears", () => {
   const cardBody = extractFunction(APP_SOURCE, "renderCatalogCard");
-  assert.ok(cardBody.includes('identityHasCapability("metadata.canonical.write")'));
+  assert.ok(cardBody.includes("identityAllowsMetadataEdit()"));
   assert.ok(cardBody.includes("handleOpenMetadataWorkspace(item, editButton)"));
   assert.ok(cardBody.includes("cardAiQuickActionEligible(item)"));
   const analyzeGate = cardBody.slice(
     cardBody.indexOf("if (cardAiQuickActionEligible(item))"),
-    cardBody.indexOf('identityHasCapability("metadata.canonical.write")'),
+    cardBody.indexOf("identityAllowsMetadataEdit()"),
   );
   assert.ok(analyzeGate.includes("analyzeButton"));
   assert.equal(analyzeGate.includes("editButton"), false);
