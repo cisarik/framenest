@@ -12,15 +12,15 @@ settings, a FastAPI application factory, a typed `GET /health` endpoint,
 in-process contract tests, a loopback-first Uvicorn development server, a
 packaged pre-alpha local web shell at `GET /`, pure-domain identity primitives,
 and a repository-native systemd service foundation targeted at Ubuntu Server
-24.04 on the Intel NUC6i5SYH personal production server. Public `main` and the
-production release may differ; the authoritative mutable production readback is
+24.04 on the Intel NUC6i5SYH development-and-testing machine. The NUC is
+routinely refreshed to the exact public `main` SHA through the immutable
+release-update contract; the authoritative runtime readback is
 `framenest-release status` (see the Ubuntu NUC runbook), never a committed SHA
 snapshot. A production release was previously accepted at public/canonical
 commit `aec2f0091c10aed2fc2033dac154a0d9651b2b6d` (schema head `0028`), served
 from `/opt/framenest/releases/aec2f0091c10aed2fc2033dac154a0d9651b2b6d` with
 Tailscale Serve only (Funnel not publicly exposed); that fact is dated history.
-The NUC now serves as the FrameNest development-and-testing machine, routinely
-refreshed toward public `main` through the immutable release-update contract
+The NUC serves as the FrameNest development-and-testing machine
 ([ADR-0075](docs/adr/0075-nuc-development-test-target-and-routine-release-refresh.md));
 rendered UI/UX and Brave-companion acceptance always happen against this
 freshly refreshed NUC.
@@ -49,9 +49,13 @@ Requester-private YouTube and X meme acquisition with explicit administrator
 promotion are implemented (X native video, animated-GIF-like media delivered as
 video, and public JPEG/PNG photos; WebP is rejected without transcoding). A
 loadable unpacked Manifest V3 X companion uses a frozen ingest Save (Edit-media
-subset, no category radios), an administrator merged title-bar review history in the side panel,
-and may publish after review Save when title, description, and at least one tag
-are present. Automatic analysis stays default-off; administrator-owned X may
+subset, no category radios) and an administrator merged title-bar review history
+in the side panel. Companion review Save does not publish. Apply writes metadata
+only. The administrator publication PUT
+(`PUT /api/admin/media/{media_id}/content-publication`), including unpublish on
+the same PUT, is the sole publication path
+([ADR-0074](docs/adr/0074-dual-audience-public-published-and-tailscale-workspace-boundary.md)).
+Automatic analysis stays default-off; administrator-owned X may
 enqueue when that flag is later enabled. The companion still attaches catalog
 JPEG, PNG, GIF-style, or short-video memes to the X composer after an exact
 extension-origin allowlist is configured
@@ -67,11 +71,12 @@ extension-origin allowlist is configured
 [ADR-0073](docs/adr/0073-companion-merged-history-chrome-pending-visibility-x-seed-tag-and-preserving-apply.md),
 [docs/X_COMPANION.md](docs/X_COMPANION.md)).
 [ADR-0074](docs/adr/0074-dual-audience-public-published-and-tailscale-workspace-boundary.md)
-is accepted architecture direction for a dual-audience boundary: the Tailscale
-workspace writer remains the current remote path, and a local-only
-`public_published_uds` published reader is future work with phased rollout
-successors. None of those successors is shipped. This status does not claim a
-public bind, TLS, Funnel, or automatic-analysis flag enablement.
+is accepted architecture for a dual-audience boundary: the Tailscale
+workspace writer remains the current remote path. The local-only
+`public_published_uds` composition and workspace rollout successors are
+implemented at this baseline. Public bind, TLS, and Funnel remain unshipped.
+This status does not claim a public bind, TLS, Funnel, or automatic-analysis
+flag enablement.
 
 The upload path receives untrusted bytes only into
 configured server quarantine, performs bounded server-side validation, and

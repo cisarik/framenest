@@ -7,7 +7,10 @@ from pathlib import Path
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 AGENTS_PATH = REPOSITORY_ROOT / "AGENTS.md"
 README_PATH = REPOSITORY_ROOT / "README.md"
+SERVER_PATH = REPOSITORY_ROOT / "SERVER.md"
 RUNBOOK_PATH = REPOSITORY_ROOT / "docs" / "UBUNTU_NUC_DEPLOYMENT.md"
+INFOSEC_PATH = REPOSITORY_ROOT / "docs" / "INFOSEC.md"
+ACCEPTANCE_PATH = REPOSITORY_ROOT / "docs" / "ACCEPTANCE_DUAL_AUDIENCE.md"
 DEPLOY_README_PATH = REPOSITORY_ROOT / "deploy" / "ubuntu" / "README.md"
 ADR_INDEX_PATH = REPOSITORY_ROOT / "docs" / "adr" / "README.md"
 ADR_PATH = (
@@ -80,6 +83,9 @@ def test_deploy_readme_no_longer_claims_untested_automation() -> None:
     assert "without adding\nuntested host-mutating automation" not in text
     assert "untested host-mutating automation" not in text
     assert "framenest-release" in text
+    assert "0075-nuc-development-test-target-and-routine-release-refresh.md" in text
+    assert "migration-required" in text
+    assert "section 5 annex" in text
 
 
 def test_nuc_host_baseline_keeps_history_and_adds_cross_ref() -> None:
@@ -94,6 +100,55 @@ def test_readme_reconciles_production_claim() -> None:
     assert "framenest-release status" in text
     assert "dated history" in text
     assert "aec2f0091c10aed2fc2033dac154a0d9651b2b6d" in text
+    assert "exact public `main` SHA" in text
+    assert "Companion review Save does not publish" in text
+    assert "Apply writes metadata\nonly" in text
+    assert "sole publication path" in text
+    assert "`public_published_uds` composition and workspace rollout successors are\nimplemented at this baseline" in text
+    assert "may publish after review Save" not in text
+    assert "None of those successors is shipped" not in text
+
+
+def test_server_records_dev_test_authoritative_serving() -> None:
+    text = _text(SERVER_PATH)
+    assert "disposable\ndevelopment-and-testing instance" in text
+    assert "exact public `main` SHA" in text
+    assert "framenest-release status" in text
+    assert "owner-authoritative production release" not in text
+    assert "aec2f0091c10aed2fc2033dac154a0d9651b2b6d" in text
+
+
+def test_infosec_present_tense_is_development_test_workspace() -> None:
+    text = _text(INFOSEC_PATH)
+    assert "development-test workspace access over Tailscale Serve" in text
+    assert "serves production over Tailscale" not in text
+    assert "3a21405e08ff30a840afe655e702d931e833acf2" in text
+
+
+def test_acceptance_part_b_gates_on_tested_sha() -> None:
+    text = _text(ACCEPTANCE_PATH)
+    assert "BLOCKED: NUC not at tested SHA" in text
+    assert "framenest-release status" in text
+    assert "No rendered Apply entry exists for analyzed rows" in text
+    assert "Apply acceptance is deterministic by owner decision\n  (2026-08-26)" in text
+
+
+def test_runbook_documents_exit_13_schema_jump_continuation() -> None:
+    text = _text(RUNBOOK_PATH)
+    assert "exits exactly 13" in text
+    assert "`migration-required`" in text
+    assert "/opt/framenest/releases/<T>" in text
+    assert ".framenest-release-sha" in text
+    assert "current_revision=0032" in text
+    assert "head_revision=0033" in text
+    assert "current_revision=head_revision=0033" in text
+    assert "/run/framenest-release-deploy/ap.tar" in text
+    assert "/run/framenest-release-deploy/framenest_release.py" in text
+    assert "/run/framenest-release-deploy/superproject.tar" in text
+    assert "rollback --release <T> --yes" in text
+    assert "sudo -K" in text
+    assert "/opt/framenest/current/.venv/bin/framenest-db migrate" not in text
+    assert "/opt/framenest/releases/<T>/.venv/bin/framenest-db migrate" in text
 
 
 def test_engine_and_entry_point_are_committed_together() -> None:

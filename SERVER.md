@@ -62,8 +62,8 @@ production server role ([ADR-0032](docs/adr/0032-ubuntu-nuc-deployment-foundatio
 dated production facts remain history. The NUC is not required for local
 ownership and must not make FrameNest a public-cloud or SaaS dependency.
 
-The NUC currently provides authoritative catalog serving for the
-owner-authoritative production release. Later or incomplete NUC capabilities
+The NUC currently provides authoritative catalog serving for the disposable
+development-and-testing instance. Later or incomplete NUC capabilities
 include:
 
 - archive or preferred storage for selected media bytes beyond current roots;
@@ -79,8 +79,8 @@ deployment target. A repository-native systemd service foundation and Ubuntu
 NUC deployment runbook exist, and a routine immutable release-update contract
 (`deploy/ubuntu/framenest-release`) is accepted through
 [ADR-0060](docs/adr/0060-repeatable-immutable-nuc-release-update-contract.md).
-Public `main` and the production release may differ; the authoritative mutable
-production readback is `framenest-release status`. A production release was
+The NUC is routinely refreshed to the exact public `main` SHA; the
+authoritative runtime readback is `framenest-release status`. A production release was
 previously accepted at commit `aec2f0091c10aed2fc2033dac154a0d9651b2b6d` from
 `/opt/framenest/releases/aec2f0091c10aed2fc2033dac154a0d9651b2b6d` with schema
 `0028`, healthy service, and Tailscale Serve only (Funnel not publicly

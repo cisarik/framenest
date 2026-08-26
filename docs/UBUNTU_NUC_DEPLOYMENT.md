@@ -4,28 +4,29 @@
 
 This is the current repository-native operator runbook for preparing and
 operating FrameNest on the Intel NUC6i5SYH running Ubuntu Server 24.04 LTS as a
-personal production server.
+development-and-testing machine.
 
 It is not a transcript of every historical host command and does not by itself
-grant mutation authority. Public `main` and the production release may differ;
-the authoritative mutable production readback is the authenticated runtime
-command `framenest-release status` (see the Routine Immutable Release Update
-section below), never a committed SHA snapshot. A production release was
+grant non-routine host-mutation authority. The NUC is routinely refreshed to
+the exact public `main` SHA; the authoritative runtime readback is the
+authenticated command `framenest-release status` (see the Routine Immutable
+Release Update section below), never a committed SHA snapshot. A production release was
 previously accepted at public/canonical commit
 `aec2f0091c10aed2fc2033dac154a0d9651b2b6d` (schema `0028`) served from
 `/opt/framenest/releases/aec2f0091c10aed2fc2033dac154a0d9651b2b6d` with
 Tailscale Serve only; that fact is dated history, not a current guarantee.
-Execute host mutations only under an authorized operator task.
+Execute non-routine host mutations only under an authorized operator task.
 
 Role note (2026-08-26): the Cooperator redefined the NUC as FrameNest's
 development-and-testing machine
 ([ADR-0075](adr/0075-nuc-development-test-target-and-routine-release-refresh.md)).
 Routinely refreshing it to the exact public `main` SHA — including schema jumps
-through the documented `migration-required` continuation — is normal operation
-through `deploy/ubuntu/framenest-release`; non-routine host work still requires
-its own explicit bounded task. Production-server phrasing throughout this
-runbook is legacy framing pending a dedicated editorial refactor; operational
-commands are unchanged.
+through the documented `migration-required` continuation in section 5 — is
+normal operation through `deploy/ubuntu/framenest-release` under standing
+refresh authority. Non-routine host work still requires its own explicit
+bounded task. Production-server phrasing elsewhere in this runbook is legacy
+framing pending a dedicated editorial refactor; operational commands other
+than the section 5 schema-jump annex are unchanged.
 
 A second public listener or public TLS termination for a
 `public_published_uds` composition is a new operational object. It requires
@@ -617,38 +618,144 @@ repository script, but this repository task does not install anything into
 
 Service-affecting mutation:
 
-- Run explicit migration against the configured production database before
-  service activation, using the operator command execution contract:
-
-```text
-sudo -u framenest --chdir=/opt/framenest/current \
-  env FRAMENEST_ENV_FILE=/etc/framenest/framenest.env \
-  /opt/framenest/current/.venv/bin/framenest-db migrate
-```
+Same-schema routine updates skip this phase: `framenest-release deploy --yes`
+continues through checkpoint and cutover. When the packaged Alembic head
+differs from the live catalog revision, `deploy --yes` stops with exit 13
+(`migration-required`) after atomically publishing
+`/opt/framenest/releases/<T>` and before checkpoint or cutover. Do not migrate
+from `/opt/framenest/current` for that continuation. Use the annex below.
 
 Security control: explicit migration.
 
 - Threat: surprise schema mutation during service startup or partial startup.
-- Benefit: the operator controls backup, timing, and rollback around schema
-  changes.
+- Benefit: the operator controls backup, timing, and the documented
+  schema-jump continuation around schema changes.
 - Limitation: migration success does not prove application health.
-- Rollback: restore the pre-migration database backup and previous release if
-  migration or readiness fails.
-- Verification: migration command reports packaged head; readiness command
-  reports ready.
+- Rollback: a post-migration cutover failure requires explicit triage. Never
+  improvise a downgrade or catalog restore.
+- Verification: the annex's target-tree status, cutover `status`, and
+  restore-readiness evidence.
 
 Stop conditions:
 
-- No fresh verified catalog backup exists.
+- No fresh verified catalog backup exists (`check` requires
+  `restore_readiness=ready`).
 - The database path is not `/var/lib/framenest/catalog.sqlite3` or another
   explicitly accepted absolute production path.
 - Migration reports failure or an unexpected revision.
+- Target-tree probes or lock contents do not match the annex.
 
 Evidence:
 
-- Catalog backup verification evidence.
-- Migration command result.
-- Database readiness result.
+- Catalog backup verification evidence from `check` / `status`.
+- Exit 13 (`migration-required`) from `deploy --yes`.
+- Target-tree migration command result and post-migration status.
+- Final `framenest-release status` after cutover.
+
+### Annex: Schema-jump continuation after `migration-required` (exit 13)
+
+This annex is the documented continuation when `deploy --yes` stops because
+the packaged Alembic head differs from the live catalog revision. It does not
+add a fifth public command. The helper remains migration-free. `<T>` is the
+exact public `main` SHA already accepted by
+`framenest-release check --release <T>`.
+
+Expected current transition, subject to a fresh `status` and `check` at
+execution: live catalog revision `0032` to packaged head `0033`.
+
+1. **Stop at exit 13.** `deploy --yes` exits exactly 13 (`migration-required`)
+   AFTER atomically publishing `/opt/framenest/releases/<T>` and BEFORE
+   checkpoint, cutover, restart, or cleanup. The running service remains on
+   the previous release. Exit 0 means the helper completed a same-schema
+   update; skip this annex and verify with `status`. Any other nonzero exit
+   stops the run.
+
+2. **Verify the published target before cleanup.** Confirm all of the
+   following; any mismatch stops the run:
+
+```text
+# [NUC / bash]
+sudo readlink -n /opt/framenest/current
+sudo systemctl is-active framenest.service
+sudo cat /opt/framenest/releases/<T>/.framenest-release-sha
+sudo test -x /opt/framenest/releases/<T>/.venv/bin/framenest-db && echo executable
+sudo ls -1 /run/framenest-release-deploy
+sudo -u framenest --chdir=/opt/framenest/releases/<T> \
+  env FRAMENEST_ENV_FILE=/etc/framenest/framenest.env \
+  /opt/framenest/releases/<T>/.venv/bin/framenest-db status
+#------------------------------------------------------
+```
+
+Required evidence:
+
+- `/opt/framenest/current` still names the previous release, not
+  `/opt/framenest/releases/<T>`; `framenest.service` remains active on that
+  old release.
+- Target `.framenest-release-sha` equals `<T>`.
+- Target `.venv/bin/framenest-db` is executable.
+- Target-tree `framenest-db status` shows `current_revision=0032` and
+  `head_revision=0033`.
+- `/run/framenest-release-deploy` contains only the known pre-schema-gate
+  artifacts `ap.tar`, `framenest_release.py`, and `superproject.tar`.
+  Unexpected names, extra files, or a missing expected file stop the run.
+
+3. **Remove only those lock artifacts, then the empty lock directory.** Do not
+   use recursive delete. Unexpected contents stop the run.
+
+```text
+# [NUC / bash]
+sudo rm -f /run/framenest-release-deploy/ap.tar
+sudo rm -f /run/framenest-release-deploy/framenest_release.py
+sudo rm -f /run/framenest-release-deploy/superproject.tar
+sudo rmdir /run/framenest-release-deploy
+#------------------------------------------------------
+```
+
+`rmdir` must succeed on an empty directory. If it fails, stop.
+
+4. **Migrate from the new release tree**, never from `/opt/framenest/current`,
+   under the operator command execution contract:
+
+```text
+# [NUC / bash]
+sudo -u framenest --chdir=/opt/framenest/releases/<T> \
+  env FRAMENEST_ENV_FILE=/etc/framenest/framenest.env \
+  /opt/framenest/releases/<T>/.venv/bin/framenest-db migrate
+sudo -u framenest --chdir=/opt/framenest/releases/<T> \
+  env FRAMENEST_ENV_FILE=/etc/framenest/framenest.env \
+  /opt/framenest/releases/<T>/.venv/bin/framenest-db status
+#------------------------------------------------------
+```
+
+Post-migration status must show `current_revision=head_revision=0033`. Any
+other revision stops the run.
+
+5. **Complete cutover** through the documented switch to an already-complete
+   target tree:
+
+```text
+framenest-release rollback --release <T> --yes
+```
+
+Here `rollback` is the supported cutover onto `/opt/framenest/releases/<T>`
+after the target tree is schema-complete. It is not an improvised downgrade.
+
+6. **Final `status`.** Require exact SHA `<T>`, active `framenest.service`,
+   catalog schema `0033`, and backup restore-readiness `ready`.
+
+7. **Terminal privilege release.** After final `status`, the Cooperator
+   invalidates the sudo timestamp:
+
+```text
+# [NUC / bash]
+sudo -K
+#------------------------------------------------------
+```
+
+If the session is lost first, privilege release is unknown, not assumed.
+
+A post-migration cutover failure requires explicit triage. Never improvise a
+downgrade or catalog restore.
 
 ## 6. Readiness Verification
 

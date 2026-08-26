@@ -2,8 +2,12 @@
 
 This directory holds the discoverable, tested, repository-native Ubuntu
 deployment support, including the routine immutable release-update contract
-(`framenest-release` / `framenest_release.py`). Nothing here grants host
-mutation authority; real deployment requires a separately authorized task.
+(`framenest-release` / `framenest_release.py`). Routine refresh of the
+development-and-testing NUC to the exact public `main` SHA uses that helper
+under standing
+[ADR-0075](../../docs/adr/0075-nuc-development-test-target-and-routine-release-refresh.md)
+authority. Non-routine host work still requires a separately authorized
+bounded task.
 
 The current authoritative runbook is
 [docs/UBUNTU_NUC_DEPLOYMENT.md](../../docs/UBUNTU_NUC_DEPLOYMENT.md). The
@@ -46,8 +50,11 @@ resolves the repository root and runs `deploy/ubuntu/framenest_release.py`
 through the repository `.venv/bin/python`. The engine is standard-library only
 and remains Ubuntu system Python 3.12 compatible for its private transferred
 remote mode. It never invokes `uv`, never runs migrations, and never accepts a
-user-supplied remote command. Full operating rules and the same-schema,
-checkpoint, cutover, rollback, and privilege-release boundaries are documented
+user-supplied remote command. Schema jumps stop `deploy --yes` at exit 13
+(`migration-required`) after the target tree is published; the documented
+continuation is the runbook section 5 annex, not a fifth helper command.
+Full operating rules and the same-schema, checkpoint, cutover, rollback,
+privilege-release, and schema-jump-continuation boundaries are documented
 in [docs/UBUNTU_NUC_DEPLOYMENT.md](../../docs/UBUNTU_NUC_DEPLOYMENT.md) and
 [ADR-0060](../../docs/adr/0060-repeatable-immutable-nuc-release-update-contract.md).
 

@@ -299,16 +299,12 @@ public-reader terminal first.) Report: cite **A10** only if something fails.
 
 ## Part B — NUC / Tailscale verification (CONDITIONAL — read the banner)
 
-> **Honesty banner:** production currently serves an older accepted release
-> (`aec2f009…`, schema `0028`, recorded in `README.md` Status and
-> `SECURITY.md`). Everything this whole ships reaches the NUC **only after a
-> separately authorized immutable release update** through
-> `deploy/ubuntu/framenest-release`. If no release containing this whole has
-> been deployed, skip Part B entirely — there is nothing there to test yet,
-> and attempting these flows against the old release proves nothing about
-> this whole.
+> **Honesty banner:** Part B is valid only when the tested public `main` SHA
+> equals the live `framenest-release status` active release. If they differ,
+> do not run Part B; report `BLOCKED: NUC not at tested SHA`.
 
-If, and only if, a later authorized deployment ships this whole:
+If, and only if, the tested public `main` SHA equals the live
+`framenest-release status` active release:
 
 - **B1 — ordinary mapped user flows over Tailscale Serve** (requires live
   identity mapping and real data — privacy reminder: use your own test items,
@@ -320,9 +316,12 @@ If, and only if, a later authorized deployment ships this whole:
 - **B2 — administrator review inbox**: confirm companion review inbox and
   Apply behave exactly as before (this whole touched none of it); publish one
   reviewed item via the administrator route only.
-- **B3 — companion extension regression**: Save/Apply from the side panel on
-  an X page; expect unchanged behavior and unchanged extension-origin rules
-  (`SECURITY.md`, companion paragraphs).
+- **B3 — companion extension regression**: Save from the side panel on an X
+  page; expect unchanged extension-origin rules (`SECURITY.md`, companion
+  paragraphs). Apply acceptance is deterministic by owner decision
+  (2026-08-26). No rendered Apply entry exists for analyzed rows; an analyzed
+  history click opens hosted Details rather than an Apply surface. Do not
+  treat the absence of a rendered Apply control as a Part B failure.
 - **B4 — log triage on the NUC** (read-only; counts only):
 
 ```text
@@ -405,11 +404,12 @@ journals/secrets never):
 Acceptance run — framenest-public-published-surface-and-tailscale-workspace
 Tested at HEAD: <full sha from git rev-parse HEAD>
 Part A: A0 [PASS/FAIL] … A10 [PASS/FAIL]   (A7 table pasted above/below)
-Part B: SKIPPED (release not deployed) | B1..B4 results
+Part B: BLOCKED: NUC not at tested SHA | B1..B4 results
 Part C: acknowledged as deferred
 Deviations / notes: <free text>
 Failed step ids + evidence: <e.g. A7 — BODY DIFFERS on /openapi.json, table attached>
 ```
 
-A single-line reply "Part A all PASS, Part B skipped" is a complete positive
-result.
+A single-line reply "Part A all PASS, Part B BLOCKED: NUC not at tested SHA"
+is a complete blocked-NUC result; Part A plus B1..B4 results is the complete
+positive result when the NUC is at the tested SHA.

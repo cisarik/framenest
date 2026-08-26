@@ -11,9 +11,9 @@ This document describes **repository truth only**. Every code claim below is
 anchored to a file and line in this checkout
 (`3a21405e08ff30a840afe655e702d931e833acf2`). Nothing here claims a deployed
 VPS, NUC state, DNS name, TLS certificate, firewall rule, or completed
-preflight. FrameNest today serves production over Tailscale Serve only; the
-public published composition exists in source and contract tests and is not
-exposed externally ([SECURITY.md](../SECURITY.md), "Dual-audience public trust
+preflight. FrameNest today serves development-test workspace access over Tailscale Serve
+only; the public published composition exists in source and contract tests and
+is not exposed externally ([SECURITY.md](../SECURITY.md), "Dual-audience public trust
 boundary").
 
 The final public-net go/no-go decision belongs to:

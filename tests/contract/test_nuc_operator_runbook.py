@@ -24,8 +24,10 @@ ADR_PATH = (
 )
 ADR_INDEX_PATH = REPOSITORY_ROOT / "docs" / "adr" / "README.md"
 
-RELEASE_ROOT = "/opt/framenest/current"
-CHDIR_FLAG = f"--chdir={RELEASE_ROOT}"
+ACTIVE_TREE_ROOT = "/opt/framenest/current"
+TARGET_RELEASE_ROOT = "/opt/framenest/releases/<T>"
+ACTIVE_CHDIR_FLAG = f"--chdir={ACTIVE_TREE_ROOT}"
+TARGET_CHDIR_FLAG = f"--chdir={TARGET_RELEASE_ROOT}"
 ENV_FILE_FLAG = "FRAMENEST_ENV_FILE=/etc/framenest/framenest.env"
 
 
@@ -48,17 +50,39 @@ def _service_account_commands() -> list[str]:
     return logical
 
 
-def test_runbook_service_account_commands_establish_explicit_safe_cwd() -> None:
-    commands = _service_account_commands()
+def _classified_service_account_commands() -> tuple[list[str], list[str]]:
+    active: list[str] = []
+    target: list[str] = []
+    for command in _service_account_commands():
+        if TARGET_CHDIR_FLAG in command:
+            target.append(command)
+        else:
+            active.append(command)
+    return active, target
 
-    assert commands, "runbook must document service-account operator commands"
-    for command in commands:
-        assert CHDIR_FLAG in command
+
+def test_runbook_service_account_commands_establish_explicit_safe_cwd() -> None:
+    active, target = _classified_service_account_commands()
+
+    assert active, "runbook must document active-tree service-account commands"
+    assert target, "runbook must document schema-jump target-tree commands"
+    for command in active:
+        assert ACTIVE_CHDIR_FLAG in command
+        assert TARGET_CHDIR_FLAG not in command
+    for command in target:
+        assert TARGET_CHDIR_FLAG in command
+        assert ACTIVE_CHDIR_FLAG not in command
 
 
 def test_runbook_service_account_commands_use_release_local_entry_points() -> None:
-    for command in _service_account_commands():
-        assert f"{RELEASE_ROOT}/.venv/bin/" in command
+    active, target = _classified_service_account_commands()
+
+    for command in active:
+        assert f"{ACTIVE_TREE_ROOT}/.venv/bin/" in command
+        assert f"{TARGET_RELEASE_ROOT}/.venv/bin/" not in command
+    for command in target:
+        assert f"{TARGET_RELEASE_ROOT}/.venv/bin/" in command
+        assert f"{ACTIVE_TREE_ROOT}/.venv/bin/" not in command
 
 
 def test_runbook_service_account_commands_supply_explicit_environment() -> None:
@@ -89,18 +113,18 @@ def test_runbook_does_not_present_fish_launcher_as_nuc_interface() -> None:
 def test_runbook_documents_youtube_release_local_entry_point() -> None:
     text = _ubuntu_text()
 
-    assert f"{RELEASE_ROOT}/.venv/bin/framenest-youtube ingest URL --yes" in text
-    assert f"{RELEASE_ROOT}/.venv/bin/framenest-youtube status CLAIM_ID" in text
-    assert f"{RELEASE_ROOT}/.venv/bin/framenest-youtube retry CLAIM_ID --yes" in text
+    assert f"{ACTIVE_TREE_ROOT}/.venv/bin/framenest-youtube ingest URL --yes" in text
+    assert f"{ACTIVE_TREE_ROOT}/.venv/bin/framenest-youtube status CLAIM_ID" in text
+    assert f"{ACTIVE_TREE_ROOT}/.venv/bin/framenest-youtube retry CLAIM_ID --yes" in text
 
 
 def test_runbook_documents_previews_release_local_entry_point() -> None:
     text = _ubuntu_text()
 
-    assert f"{RELEASE_ROOT}/.venv/bin/framenest-previews" in text
-    assert f"{RELEASE_ROOT}/.venv/bin/framenest-previews status" in text
+    assert f"{ACTIVE_TREE_ROOT}/.venv/bin/framenest-previews" in text
+    assert f"{ACTIVE_TREE_ROOT}/.venv/bin/framenest-previews status" in text
     assert (
-        f"{RELEASE_ROOT}/.venv/bin/framenest-previews generate --all --yes"
+        f"{ACTIVE_TREE_ROOT}/.venv/bin/framenest-previews generate --all --yes"
         in text
     )
 
@@ -108,13 +132,33 @@ def test_runbook_documents_previews_release_local_entry_point() -> None:
 def test_runbook_documents_migration_command_under_operator_contract() -> None:
     text = _ubuntu_text()
 
-    assert f"{RELEASE_ROOT}/.venv/bin/framenest-db migrate" in text
-    assert f"{RELEASE_ROOT}/.venv/bin/framenest-db status" in text
-    assert (
-        f"{RELEASE_ROOT}/.venv/bin/framenest-ai"
-        in text
-    )
+    assert f"{ACTIVE_TREE_ROOT}/.venv/bin/framenest-db migrate" not in text
+    assert f"{TARGET_RELEASE_ROOT}/.venv/bin/framenest-db migrate" in text
+    assert f"{ACTIVE_TREE_ROOT}/.venv/bin/framenest-db status" in text
+    assert f"{TARGET_RELEASE_ROOT}/.venv/bin/framenest-db status" in text
+    assert f"{ACTIVE_TREE_ROOT}/.venv/bin/framenest-ai" in text
     assert "--config-path /var/lib/framenest/ai/config.json status --no-write" in text
+
+
+def test_runbook_schema_jump_continuation_uses_target_release_tree() -> None:
+    text = _ubuntu_text()
+    active, target = _classified_service_account_commands()
+
+    assert "exits exactly 13" in text
+    assert "migration-required" in text
+    assert "current_revision=0032" in text
+    assert "head_revision=0033" in text
+    assert "current_revision=head_revision=0033" in text
+    assert "/run/framenest-release-deploy/ap.tar" in text
+    assert "/run/framenest-release-deploy/framenest_release.py" in text
+    assert "/run/framenest-release-deploy/superproject.tar" in text
+    assert "rollback --release <T> --yes" in text
+    assert "sudo -K" in text
+    flattened = " ".join(text.split())
+    assert "Never improvise a downgrade or catalog restore" in flattened
+    assert any("framenest-db migrate" in command for command in target)
+    assert any("framenest-db status" in command for command in target)
+    assert not any("framenest-db migrate" in command for command in active)
 
 
 def test_readme_youtube_section_points_nuc_to_release_entry_point() -> None:
