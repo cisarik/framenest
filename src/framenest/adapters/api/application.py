@@ -132,6 +132,7 @@ from framenest.application.media_metadata import (
 )
 from framenest.application.media_user_alias import (
     GetMediaUserAlias,
+    ListMediaUserAliasesForLogin,
     ListTeamMediaAliases,
     SaveMediaUserAlias,
 )
@@ -523,6 +524,11 @@ def create_app(
             ),
             catalog_available=resolved_settings.database_path.exists,
             audience_policy=owned_content_audience_policy,
+            list_aliases=(
+                None
+                if owned_media_user_alias_repository is None
+                else ListMediaUserAliasesForLogin(owned_media_user_alias_repository)
+            ),
         )
     if media_metadata_api_dependencies is None:
         assert owned_media_metadata_repository is not None
@@ -732,6 +738,11 @@ def create_app(
                 else None
             ),
             audience_policy=owned_content_audience_policy,
+            list_suggestions=(
+                None
+                if owned_companion_review_repository is None
+                else GetCompanionReviewDetail(owned_companion_review_repository)
+            ),
         )
     if content_publication_api_dependencies is None:
         assert owned_content_publication_repository is not None

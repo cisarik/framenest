@@ -2541,7 +2541,9 @@ def test_browser_metadata_editor_exposes_durable_load_ai_suggestion(client: Test
     assert 'id="metadata-load-ai-suggestion-button"' in dialog_section
     assert ">Load<" in dialog_section
     assert "Load AI suggestion" not in dialog_section
-    assert 'id="metadata-ai-suggestion-select"' in dialog_section
+    assert 'id="metadata-ai-suggestion-dropdown"' in dialog_section
+    assert 'id="metadata-ai-suggestion-toggle"' in dialog_section
+    assert 'id="metadata-ai-suggestion-select"' not in dialog_section
     assert 'id="metadata-ai-heading"' in dialog_section
     assert ">AI suggestions<" in dialog_section
     assert 'id="metadata-ai-title-strip"' in dialog_section
@@ -2549,7 +2551,8 @@ def test_browser_metadata_editor_exposes_durable_load_ai_suggestion(client: Test
     assert 'id="metadata-durable-ai-suggestion"' not in dialog_section
     assert "Saved AI suggestion" not in dialog_section
     assert "handleLoadDurableAiSuggestion" in script
-    assert "companionReviewInboxDetailEndpoint" in script
+    assert "mediaAiSuggestionsEndpoint" in script
+    assert "companionReviewInboxDetailEndpoint" not in script
     assert "/apply" not in script
     assert "aiSuggestionOriginExplanation" not in script
     load_body = _javascript_function(script, "handleLoadDurableAiSuggestion")
@@ -2565,7 +2568,7 @@ def test_browser_metadata_editor_exposes_durable_load_ai_suggestion(client: Test
     assert "metadata-ai-filename-note" in dialog_section
     assert "metadata-ai-filename-input" not in dialog_section
     assert "metadata-ai-filename-display" not in dialog_section
-    assert dialog_section.index("metadata-ai-suggestion-select") < dialog_section.index(
+    assert dialog_section.index("metadata-ai-suggestion-dropdown") < dialog_section.index(
         "metadata-title-input"
     )
     assert dialog_section.index("metadata-save-button") < dialog_section.index(

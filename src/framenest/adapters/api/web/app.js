@@ -370,8 +370,17 @@ function metadataWorkspaceIsAliasMode() {
   return metadataWorkspace.editMode === "alias";
 }
 
-function identityAllowsAiSuggestionsChrome() {
-  return identityHasCapability("media.workflow.read")
+function identityAllowsAiSuggestionLoadChrome() {
+  return isWorkspaceAudience()
+    && (
+      identityHasCapability("metadata.alias.write")
+      || identityHasCapability("metadata.canonical.write")
+    )
+    && !metadataWorkspaceIsMovie();
+}
+
+function identityAllowsAiAnalyze() {
+  return identityHasCapability("analysis.run")
     && !companionWebHosted()
     && !metadataWorkspaceIsMovie()
     && !metadataWorkspaceIsAliasMode();
@@ -807,7 +816,10 @@ const metadataAiPanel = document.querySelector("#metadata-ai-panel");
 const metadataAiHeading = document.querySelector("#metadata-ai-heading");
 const metadataAiAnalyzeButton = document.querySelector("#metadata-ai-analyze-button");
 const metadataLoadAiSuggestionButton = document.querySelector("#metadata-load-ai-suggestion-button");
-const metadataAiSuggestionSelect = document.querySelector("#metadata-ai-suggestion-select");
+const metadataAiSuggestionDropdown = document.querySelector("#metadata-ai-suggestion-dropdown");
+const metadataAiSuggestionToggle = document.querySelector("#metadata-ai-suggestion-toggle");
+const metadataAiSuggestionToggleLabel = document.querySelector("#metadata-ai-suggestion-toggle-label");
+const metadataAiSuggestionList = document.querySelector("#metadata-ai-suggestion-list");
 const metadataAiStatus = document.querySelector("#metadata-ai-status");
 const metadataAiFilenameNote = document.querySelector("#metadata-ai-filename-note");
 const metadataAiTitleStrip = document.querySelector("#metadata-ai-title-strip");
@@ -2405,8 +2417,8 @@ function mediaAliasEndpoint(mediaId) {
   return `${MEDIA_METADATA_ENDPOINT_PREFIX}/${mediaId}/alias`;
 }
 
-function companionReviewInboxDetailEndpoint(mediaId) {
-  return `${COMPANION_REVIEW_INBOX_ENDPOINT}/${mediaId}?limit=100`;
+function mediaAiSuggestionsEndpoint(mediaId) {
+  return `${MEDIA_CATALOG_ENDPOINT}/${mediaId}/ai-suggestions?limit=100`;
 }
 
 function mediaAiSuggestionEndpoint(mediaId, locationId) {
@@ -6555,13 +6567,9 @@ function updateMetadataControls() {
     metadataStatus.textContent = "";
   }
   if (metadataAiAnalyzeButton) {
-    const hosted = companionWebHosted();
-    const location = metadataAiLocation();
-    const analysisAvailable = Boolean(aiCapability.available && location)
-      && identityHasCapability("analysis.run")
-      && !metadataWorkspaceIsMovie()
-      && !metadataWorkspaceIsAliasMode();
-    const showAnalyze = !hosted && analysisAvailable;
+    const analysisAvailable = Boolean(aiCapability.available && metadataAiLocation())
+      && identityAllowsAiAnalyze();
+    const showAnalyze = analysisAvailable;
     metadataAiAnalyzeButton.hidden = !showAnalyze;
     metadataAiAnalyzeButton.disabled = !showAnalyze
       || metadataWorkspace.loading
@@ -6571,9 +6579,7 @@ function updateMetadataControls() {
     metadataAiAnalyzeButton.setAttribute("aria-busy", metadataWorkspace.analyzing ? "true" : "false");
   }
   if (metadataLoadAiSuggestionButton) {
-    const hosted = companionWebHosted();
-    const loadAvailable = !hosted
-      && identityAllowsAiSuggestionsChrome()
+    const loadAvailable = identityAllowsAiSuggestionLoadChrome()
       && metadataSuggestionList.items.length > 0
       && Boolean(metadataSuggestionList.selectedRunId);
     const loadBusy = metadataSuggestionList.fetching;
@@ -6586,15 +6592,18 @@ function updateMetadataControls() {
     metadataLoadAiSuggestionButton.textContent = "Load";
     metadataLoadAiSuggestionButton.setAttribute("aria-busy", loadBusy ? "true" : "false");
   }
-  if (metadataAiSuggestionSelect) {
-    const showSelect = identityAllowsAiSuggestionsChrome()
+  if (metadataAiSuggestionDropdown) {
+    const showSelect = identityAllowsAiSuggestionLoadChrome()
       && metadataSuggestionList.items.length > 0;
-    metadataAiSuggestionSelect.hidden = !showSelect;
-    metadataAiSuggestionSelect.disabled = !showSelect
-      || metadataWorkspace.loading
+    metadataAiSuggestionDropdown.hidden = !showSelect;
+    const dropdownBusy = metadataWorkspace.loading
       || metadataWorkspace.saving
       || metadataWorkspace.analyzing
       || metadataSuggestionList.fetching;
+    if (metadataAiSuggestionToggle) {
+      metadataAiSuggestionToggle.disabled = !showSelect || dropdownBusy;
+    }
+    if (!showSelect) closeMetadataSuggestionDropdown();
   }
 }
 
@@ -6793,7 +6802,7 @@ function releaseMetadataAiRequest(requestContext) {
 
 function renderMetadataAiPanel() {
   if (!metadataAiPanel) return;
-  const showChrome = identityAllowsAiSuggestionsChrome();
+  const showChrome = identityAllowsAiSuggestionLoadChrome();
   metadataAiPanel.hidden = !showChrome;
   if (metadataAiHeading) {
     metadataAiHeading.textContent = "AI suggestions";
@@ -6801,17 +6810,29 @@ function renderMetadataAiPanel() {
   renderMetadataSuggestionSelect();
   renderMetadataSuggestionStrips();
   if (metadataAiFilenameNote) {
+    const selected = selectedMetadataSuggestion();
     const showFilename = Boolean(
       showChrome
-      && identityUsesCanonicalMetadataWrite()
       && metadataSuggestionList.revealed
-      && selectedMetadataSuggestion()
-      && selectedMetadataSuggestion().suggestedFilename,
+      && selected
+      && selected.suggestedFilename,
     );
     metadataAiFilenameNote.hidden = !showFilename;
-    metadataAiFilenameNote.textContent = showFilename
-      ? `Suggested filename: ${selectedMetadataSuggestion().suggestedFilename}`
-      : "";
+    metadataAiFilenameNote.replaceChildren();
+    if (showFilename) {
+      const text = document.createElement("span");
+      text.textContent = `Suggested filename: ${selected.suggestedFilename}`;
+      metadataAiFilenameNote.appendChild(text);
+      const copy = document.createElement("button");
+      copy.type = "button";
+      copy.className = "metadata-ai-filename-copy";
+      copy.textContent = "Copy";
+      copy.setAttribute("aria-label", "Copy suggested filename");
+      copy.addEventListener("click", () => {
+        copySuggestedFilename(selected.suggestedFilename);
+      });
+      metadataAiFilenameNote.appendChild(copy);
+    }
   }
 }
 
@@ -6911,7 +6932,7 @@ function inboxSuggestionFromDetail(raw) {
     title: String(raw.title || ""),
     description: String(raw.description || ""),
     tags,
-    suggestedFilename: "",
+    suggestedFilename: String(raw.suggested_filename || ""),
   };
 }
 
@@ -6945,26 +6966,71 @@ function inSessionSuggestionFromPreview(suggestion, payload) {
 }
 
 function renderMetadataSuggestionSelect() {
-  if (!metadataAiSuggestionSelect) return;
-  const previous = metadataSuggestionList.selectedRunId;
-  metadataAiSuggestionSelect.replaceChildren();
+  const selected = selectedMetadataSuggestion();
+  if (metadataAiSuggestionToggleLabel) {
+    metadataAiSuggestionToggleLabel.textContent = selected
+      ? suggestionOptionLabel(selected)
+      : "";
+  }
+  if (!metadataAiSuggestionList) return;
+  metadataAiSuggestionList.replaceChildren();
   metadataSuggestionList.items.forEach((item) => {
-    const option = document.createElement("option");
-    option.value = item.analysisRunId;
+    const option = document.createElement("button");
+    option.type = "button";
+    option.className = "metadata-ai-suggestion-option";
+    option.setAttribute("role", "option");
+    option.dataset.runId = item.analysisRunId;
+    option.id = `metadata-ai-suggestion-option-${item.analysisRunId}`;
     option.textContent = suggestionOptionLabel(item);
-    metadataAiSuggestionSelect.appendChild(option);
+    option.setAttribute(
+      "aria-selected",
+      String(item.analysisRunId === metadataSuggestionList.selectedRunId),
+    );
+    option.addEventListener("click", () => {
+      selectMetadataSuggestion(item.analysisRunId);
+    });
+    metadataAiSuggestionList.appendChild(option);
   });
+  if (metadataAiSuggestionToggle && selected) {
+    metadataAiSuggestionToggle.setAttribute(
+      "aria-activedescendant",
+      `metadata-ai-suggestion-option-${selected.analysisRunId}`,
+    );
+  }
   if (
-    previous
-    && metadataSuggestionList.items.some((item) => item.analysisRunId === previous)
+    metadataSuggestionList.selectedRunId
+    && !metadataSuggestionList.items.some((item) => item.analysisRunId === metadataSuggestionList.selectedRunId)
   ) {
-    metadataAiSuggestionSelect.value = previous;
-    metadataSuggestionList.selectedRunId = previous;
-  } else if (metadataSuggestionList.items.length > 0) {
+    metadataSuggestionList.selectedRunId = metadataSuggestionList.items.length > 0
+      ? metadataSuggestionList.items[0].analysisRunId
+      : null;
+  } else if (!metadataSuggestionList.selectedRunId && metadataSuggestionList.items.length > 0) {
     metadataSuggestionList.selectedRunId = metadataSuggestionList.items[0].analysisRunId;
-    metadataAiSuggestionSelect.value = metadataSuggestionList.selectedRunId;
-  } else {
-    metadataSuggestionList.selectedRunId = null;
+  }
+}
+
+function closeMetadataSuggestionDropdown() {
+  if (!metadataAiSuggestionList || !metadataAiSuggestionToggle) return;
+  metadataAiSuggestionList.hidden = true;
+  metadataAiSuggestionToggle.setAttribute("aria-expanded", "false");
+}
+
+function toggleMetadataSuggestionDropdown() {
+  if (!metadataAiSuggestionList || !metadataAiSuggestionToggle) return;
+  if (metadataAiSuggestionToggle.disabled) return;
+  const open = metadataAiSuggestionList.hidden;
+  metadataAiSuggestionList.hidden = !open;
+  metadataAiSuggestionToggle.setAttribute("aria-expanded", open ? "true" : "false");
+  if (open) {
+    const selected = metadataAiSuggestionList.querySelector('[aria-selected="true"]');
+    (selected || metadataAiSuggestionList.querySelector(".metadata-ai-suggestion-option"))?.focus();
+  }
+}
+
+function copySuggestedFilename(filename) {
+  if (!filename) return;
+  if (navigator.clipboard && typeof navigator.clipboard.writeText === "function") {
+    void navigator.clipboard.writeText(filename);
   }
 }
 
@@ -6989,7 +7055,7 @@ function appendSuggestionApplyButton(container, field, tagKey) {
 }
 
 function renderMetadataSuggestionStrips() {
-  const show = identityAllowsAiSuggestionsChrome() && metadataSuggestionList.revealed;
+  const show = identityAllowsAiSuggestionLoadChrome() && metadataSuggestionList.revealed;
   const item = show ? selectedMetadataSuggestion() : null;
   if (!item) {
     clearMetadataSuggestionStrip(metadataAiTitleStrip);
@@ -7021,14 +7087,24 @@ function renderMetadataSuggestionStrips() {
       metadataAiTagsStrip.hidden = true;
     } else {
       item.tags.forEach((tag) => {
-        const chip = document.createElement("span");
         const mapped = tag.status === "mapped" && tag.key;
-        chip.className = mapped
-          ? "metadata-suggestion-tag"
-          : "metadata-suggestion-tag metadata-suggestion-tag--unmapped";
-        chip.textContent = tag.displayName || tag.value || tag.key || "";
-        if (mapped) appendSuggestionApplyButton(chip, "tag", tag.key);
-        metadataAiTagsStrip.appendChild(chip);
+        if (mapped) {
+          const button = document.createElement("button");
+          button.type = "button";
+          button.className = "metadata-suggestion-tag metadata-suggestion-tag--mapped";
+          button.textContent = tag.displayName || tag.value || tag.key || "";
+          button.addEventListener("click", (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            copySuggestionFieldToCurrent("tag", tag.key);
+          });
+          metadataAiTagsStrip.appendChild(button);
+        } else {
+          const chip = document.createElement("span");
+          chip.className = "metadata-suggestion-tag metadata-suggestion-tag--unmapped";
+          chip.textContent = tag.displayName || tag.value || tag.key || "";
+          metadataAiTagsStrip.appendChild(chip);
+        }
       });
       metadataAiTagsStrip.hidden = false;
     }
@@ -7059,9 +7135,16 @@ function copySuggestionFieldToCurrent(field, tagKey) {
 }
 
 function handleMetadataSuggestionSelectChange() {
-  if (!metadataAiSuggestionSelect) return;
-  metadataSuggestionList.selectedRunId = metadataAiSuggestionSelect.value || null;
+  selectMetadataSuggestion(
+    metadataSuggestionList.selectedRunId,
+  );
+}
+
+function selectMetadataSuggestion(runId) {
+  metadataSuggestionList.selectedRunId = runId || null;
   metadataSuggestionList.revealed = false;
+  closeMetadataSuggestionDropdown();
+  renderMetadataSuggestionSelect();
   renderMetadataSuggestionStrips();
   updateMetadataControls();
 }
@@ -7078,14 +7161,14 @@ function presentInSessionSuggestion(suggestion, payload) {
 }
 
 async function refreshMetadataSuggestionList(mediaId) {
-  if (!mediaId || !identityAllowsAiSuggestionsChrome()) return;
+  if (!mediaId || !identityAllowsAiSuggestionLoadChrome()) return;
   const token = ++metadataSuggestionListToken;
   metadataSuggestionList.mediaId = mediaId;
   metadataSuggestionList.fetching = true;
   metadataSuggestionList.movieExcluded = false;
   updateMetadataControls();
   try {
-    const response = await fetch(companionReviewInboxDetailEndpoint(mediaId), {
+    const response = await fetch(mediaAiSuggestionsEndpoint(mediaId), {
       headers: { Accept: "application/json" },
       cache: "no-store",
     });
@@ -7108,19 +7191,33 @@ async function refreshMetadataSuggestionList(mediaId) {
     const payload = await response.json();
     if (token !== metadataSuggestionListToken) return;
     if (metadataWorkspace.openMediaId !== mediaId) return;
-    const selected = metadataSuggestionList.selectedRunId;
+    const previousId = metadataSuggestionList.selectedRunId;
     const revealed = metadataSuggestionList.revealed;
     const selectedItem = selectedMetadataSuggestion();
     let items = Array.isArray(payload.suggestions)
       ? payload.suggestions.map(inboxSuggestionFromDetail).filter(Boolean)
       : [];
-    if (selectedItem && !items.some((item) => item.analysisRunId === selectedItem.analysisRunId)) {
-      items = [selectedItem, ...items];
+    const seen = new Set();
+    items = items.filter((item) => {
+      if (seen.has(item.analysisRunId)) return false;
+      seen.add(item.analysisRunId);
+      return true;
+    });
+    if (selectedItem && selectedItem.suggestedFilename) {
+      items = items.map((item) => {
+        if (item.analysisRunId === selectedItem.analysisRunId && !item.suggestedFilename) {
+          return { ...item, suggestedFilename: selectedItem.suggestedFilename };
+        }
+        return item;
+      });
     }
     metadataSuggestionList.items = items;
-    if (selected && items.some((item) => item.analysisRunId === selected)) {
-      metadataSuggestionList.selectedRunId = selected;
+    if (previousId && items.some((item) => item.analysisRunId === previousId)) {
+      metadataSuggestionList.selectedRunId = previousId;
       metadataSuggestionList.revealed = revealed;
+    } else if (revealed && items.length > 0) {
+      metadataSuggestionList.selectedRunId = items[0].analysisRunId;
+      metadataSuggestionList.revealed = true;
     } else {
       metadataSuggestionList.selectedRunId = items.length > 0 ? items[0].analysisRunId : null;
       metadataSuggestionList.revealed = false;
@@ -7265,7 +7362,7 @@ async function handleLoadDurableAiSuggestion() {
     || metadataWorkspace.saving
     || metadataWorkspace.analyzing
     || metadataSuggestionList.fetching
-    || !identityAllowsAiSuggestionsChrome()
+    || !identityAllowsAiSuggestionLoadChrome()
   ) {
     return;
   }
@@ -7580,10 +7677,10 @@ async function populateDetailsDialog(item) {
     const displayTitle = item.display_title
       || payload.display_title
       || deriveCatalogFallbackTitle(item);
-    const tags = (item.tags && item.tags.length)
-      ? item.tags
-      : (payload.tags || []);
-    const description = payload.description || item.description || "";
+    const tags = Array.isArray(item.tags) ? item.tags : (payload.tags || []);
+    const description = (typeof item.description === "string" && item.description)
+      ? item.description
+      : (payload.description || "");
     const locations = Array.isArray(item.locations) ? item.locations : [];
     const hydratedItem = {
       ...item,
@@ -7809,7 +7906,7 @@ async function handleOpenMetadataWorkspace(item, openerElement, { aiSuggestion =
     if (metadataWorkspaceIsMovie()) {
       const durableToken = ++metadataDurableAnalysisToken;
       await refreshMetadataDurableAnalysis(mediaId, durableToken);
-    } else if (identityAllowsAiSuggestionsChrome()) {
+    } else if (identityAllowsAiSuggestionLoadChrome()) {
       await refreshMetadataSuggestionList(mediaId);
     }
   } catch {
@@ -10652,15 +10749,15 @@ const MOVIE_GENRE_OPTIONS = [
 ];
 
 function syncClassificationControlsFromWorkspace() {
+  const aliasMode = metadataWorkspaceIsAliasMode();
   const categorySelect = document.querySelector("#metadata-content-category");
   const sourceSelect = document.querySelector("#metadata-acquisition-source");
   const genresFieldset = document.querySelector("#metadata-genres-fieldset");
   const genresContainer = document.querySelector("#metadata-genres");
   const identifyButton = document.querySelector("#metadata-movie-identify-button");
   const classificationRow = document.querySelector(".metadata-classification-row");
-  const aliasMode = metadataWorkspaceIsAliasMode();
   if (classificationRow) {
-    classificationRow.hidden = aliasMode;
+    classificationRow.hidden = true;
   }
   if (categorySelect) {
     categorySelect.value = metadataWorkspace.current.contentCategory || "general";
@@ -11195,9 +11292,56 @@ metadataAiAnalyzeButton.addEventListener("click", handleAnalyzeMetadataByAi);
 if (metadataLoadAiSuggestionButton) {
   metadataLoadAiSuggestionButton.addEventListener("click", handleLoadDurableAiSuggestion);
 }
-if (metadataAiSuggestionSelect) {
-  metadataAiSuggestionSelect.addEventListener("change", handleMetadataSuggestionSelectChange);
+if (metadataAiSuggestionToggle) {
+  metadataAiSuggestionToggle.addEventListener("click", (event) => {
+    event.preventDefault();
+    toggleMetadataSuggestionDropdown();
+  });
+  metadataAiSuggestionToggle.addEventListener("keydown", (event) => {
+    if (event.key === "ArrowDown" || event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      toggleMetadataSuggestionDropdown();
+    }
+  });
 }
+if (metadataAiSuggestionList) {
+  metadataAiSuggestionList.addEventListener("keydown", (event) => {
+    const options = [...metadataAiSuggestionList.querySelectorAll(".metadata-ai-suggestion-option")];
+    const current = options.indexOf(document.activeElement);
+    if (event.key === "Escape") {
+      event.preventDefault();
+      closeMetadataSuggestionDropdown();
+      metadataAiSuggestionToggle?.focus();
+      return;
+    }
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      const next = options[Math.min(options.length - 1, current + 1)] || options[0];
+      next?.focus();
+      return;
+    }
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      const previous = options[Math.max(0, current - 1)] || options[0];
+      previous?.focus();
+      return;
+    }
+    if (event.key === "Home") {
+      event.preventDefault();
+      options[0]?.focus();
+      return;
+    }
+    if (event.key === "End") {
+      event.preventDefault();
+      options[options.length - 1]?.focus();
+    }
+  });
+}
+document.addEventListener("click", (event) => {
+  if (!metadataAiSuggestionDropdown) return;
+  if (metadataAiSuggestionDropdown.contains(event.target)) return;
+  closeMetadataSuggestionDropdown();
+});
 
 function setActiveStatusTab(tabName, { focusTab = false, refreshAiStatus = false } = {}) {
   const normalized =

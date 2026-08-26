@@ -6,6 +6,7 @@ import pytest
 
 from framenest.application.media_user_alias import (
     GetMediaUserAlias,
+    ListMediaUserAliasesForLogin,
     ListTeamMediaAliases,
     SaveMediaUserAlias,
 )
@@ -74,6 +75,19 @@ class _FakeRepository:
     def delete_alias(self, media_id: MediaId, login_key: str) -> None:
         self.aliases.pop((media_id.to_string(), login_key), None)
 
+    def list_aliases_for_login(
+        self, login_key: str, media_ids: tuple[MediaId, ...]
+    ) -> dict[str, MediaUserAlias]:
+        result: dict[str, MediaUserAlias] = {}
+        for media_id in media_ids:
+            alias = self.aliases.get((media_id.to_string(), login_key))
+            if alias is not None:
+                result[media_id.to_string()] = alias
+        return result
+
+    def canonical_tag_display_names(self, tag_keys: tuple[str, ...]) -> dict[str, str]:
+        return {key: key for key in tag_keys}
+
     def canonical_tag_keys_exist(self, tag_keys: tuple[CanonicalTagKey, ...]) -> bool:
         return all(key in self.known_tags for key in tag_keys)
 
@@ -131,3 +145,19 @@ def test_list_team_aliases_aggregates_by_login_and_unknown_media_is_not_found() 
     repository.media_exists = False
     with pytest.raises(MediaUserAliasMediaNotFoundError):
         ListTeamMediaAliases(repository).execute(MEDIA_ID.to_string())
+
+
+def test_list_aliases_for_login_does_not_leak_another_caller_overlay() -> None:
+    repository = _FakeRepository()
+    save = SaveMediaUserAlias(repository, clock_ms=lambda: 50)
+    save.execute(MEDIA_ID.to_string(), LOGIN, "Alice title", None, ["meme"])
+    save.execute(MEDIA_ID.to_string(), "bob@example.com", "Bob title", None, None)
+    listed = ListMediaUserAliasesForLogin(repository)
+    alice = listed.execute(LOGIN, [MEDIA_ID.to_string()])
+    bob = listed.execute("bob@example.com", [MEDIA_ID.to_string()])
+    assert alice.overlays[MEDIA_ID.to_string()].display_title == "Alice title"
+    assert bob.overlays[MEDIA_ID.to_string()].display_title == "Bob title"
+    assert "Bob title" not in {
+        view.display_title for view in alice.overlays.values()
+    }
+    assert alice.tag_display_names["meme"] == "meme"

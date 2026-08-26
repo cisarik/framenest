@@ -5,11 +5,20 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 
 from framenest.adapters.api.application import create_app
-from framenest.adapters.api.media_catalog_api import MediaCatalogApiDependencies
+from framenest.adapters.api.media_catalog_api import (
+    MediaCatalogApiDependencies,
+    create_media_catalog_api_router,
+)
+from framenest.adapters.api.tailscale_ingress import SCOPE_IDENTITY
 from framenest.application.media_catalog import ListMediaCatalog
+from framenest.application.media_user_alias import (
+    CallerAliasOverlayPage,
+    MediaUserAliasView,
+)
 from framenest.application.ports.media_catalog_repository import (
     CatalogMediaItem,
     CatalogMediaLocation,
@@ -19,6 +28,11 @@ from framenest.application.ports.media_catalog_repository import (
     MediaCatalogQuery,
 )
 from framenest.configuration import FrameNestSettings
+from framenest.domain.identity_access import (
+    CAPABILITY_GALLERY_READ,
+    CAPABILITY_METADATA_ALIAS_WRITE,
+    IdentityContext,
+)
 from framenest.domain.media_metadata import MediaCollectionKey
 
 MEDIA_ID = "12345678-1234-4234-9234-123456789abc"
@@ -243,3 +257,126 @@ def test_repository_failures_are_sanitized() -> None:
     assert response.json()["error"]["code"] == "MEDIA_CATALOG_QUERY_FAILED"
     assert UNDERLYING_EXCEPTION_TEXT not in response.text
     assert PRIVATE_ROOT_MARKER not in response.text
+
+
+def _identity(login: str) -> IdentityContext:
+    return IdentityContext(
+        login=login,
+        login_key=login,
+        display_name=login,
+        role="user",
+        capabilities=frozenset({CAPABILITY_GALLERY_READ, CAPABILITY_METADATA_ALIAS_WRITE}),
+        provenance="tailscale-serve",
+    )
+
+
+class _FakeGetMedia:
+    def execute(self, media_id: str) -> CatalogMediaItem | None:
+        del media_id
+        return _FakeCatalogRepository().list_media(
+            MediaCatalogQuery(q=None, tag_keys=(), limit=1, offset=0, collection_key=None)
+        ).items[0]
+
+
+class _FakeListAliases:
+    def __init__(self, overlays_by_login: dict[str, dict[str, MediaUserAliasView]]) -> None:
+        self.overlays_by_login = overlays_by_login
+        self.calls: list[tuple[str, tuple[str, ...]]] = []
+
+    def execute(self, login_key: str, media_ids: list[str]) -> CallerAliasOverlayPage:
+        self.calls.append((login_key, tuple(media_ids)))
+        overlays = {
+            media_id: overlay
+            for media_id, overlay in self.overlays_by_login.get(login_key, {}).items()
+            if media_id in media_ids
+        }
+        names: dict[str, str] = {}
+        for overlay in overlays.values():
+            for key in overlay.tag_keys:
+                names[key] = "Meme" if key == "meme" else key
+        return CallerAliasOverlayPage(overlays=overlays, tag_display_names=names)
+
+
+def _overlay_client(
+    *,
+    identity: IdentityContext | None,
+    list_aliases: _FakeListAliases | None,
+) -> TestClient:
+    app = FastAPI()
+    app.include_router(
+        create_media_catalog_api_router(
+            MediaCatalogApiDependencies(
+                list_media=_FakeListMediaCatalog(),
+                catalog_available=lambda: True,
+                get_media=_FakeGetMedia(),
+                list_aliases=list_aliases,
+            )
+        )
+    )
+
+    @app.middleware("http")
+    async def inject_identity(request: Request, call_next):
+        if identity is not None:
+            request.scope[SCOPE_IDENTITY] = identity
+        return await call_next(request)
+
+    return TestClient(app)
+
+
+def test_catalog_merge_applies_caller_overlay_and_isolates_logins() -> None:
+    alice_overlay = MediaUserAliasView(
+        display_title="Alice title",
+        description=None,
+        tag_keys=("meme",),
+        persisted=True,
+        created_at_ms=1,
+        updated_at_ms=1,
+    )
+    bob_overlay = MediaUserAliasView(
+        display_title="Bob title",
+        description="Bob description",
+        tag_keys=(),
+        persisted=True,
+        created_at_ms=1,
+        updated_at_ms=1,
+    )
+    aliases = _FakeListAliases(
+        {
+            "alice@example.com": {MEDIA_ID: alice_overlay},
+            "bob@example.com": {MEDIA_ID: bob_overlay},
+        }
+    )
+    alice = _overlay_client(identity=_identity("alice@example.com"), list_aliases=aliases)
+    bob = _overlay_client(identity=_identity("bob@example.com"), list_aliases=aliases)
+    anonymous = _overlay_client(identity=None, list_aliases=aliases)
+
+    alice_list = alice.get("/api/media")
+    alice_get = alice.get(f"/api/media/{MEDIA_ID}")
+    bob_list = bob.get("/api/media")
+    bob_get = bob.get(f"/api/media/{MEDIA_ID}")
+    public_list = anonymous.get("/api/media")
+    public_get = anonymous.get(f"/api/media/{MEDIA_ID}")
+
+    assert alice_list.status_code == 200
+    assert alice_list.json()["items"][0]["display_title"] == "Alice title"
+    assert alice_list.json()["items"][0]["description"] == "A treatise on entropy"
+    assert alice_list.json()["items"][0]["tags"] == [
+        {"key": "meme", "display_name": "Meme", "position": 0}
+    ]
+    assert alice_get.json()["display_title"] == "Alice title"
+    assert "Alice title" not in bob_list.text
+    assert bob_list.json()["items"][0]["display_title"] == "Bob title"
+    assert bob_list.json()["items"][0]["description"] == "Bob description"
+    assert bob_list.json()["items"][0]["tags"] == [
+        {"key": "mathematics", "display_name": "Math", "position": 0}
+    ]
+    assert bob_get.json()["display_title"] == "Bob title"
+    assert public_list.json()["items"][0]["display_title"] == "Reinventing Entropy"
+    assert public_get.json()["display_title"] == "Reinventing Entropy"
+    assert public_list.json()["items"][0]["tags"][0]["key"] == "mathematics"
+    assert aliases.calls == [
+        ("alice@example.com", (MEDIA_ID,)),
+        ("alice@example.com", (MEDIA_ID,)),
+        ("bob@example.com", (MEDIA_ID,)),
+        ("bob@example.com", (MEDIA_ID,)),
+    ]

@@ -74,6 +74,37 @@ class GetMediaUserAlias:
         return _view_from_alias(alias)
 
 
+@dataclass(frozen=True, slots=True)
+class CallerAliasOverlayPage:
+    """Caller-private overlays plus display names for overlay tag keys."""
+
+    overlays: dict[str, MediaUserAliasView]
+    tag_display_names: dict[str, str]
+
+
+class ListMediaUserAliasesForLogin:
+    """Load the caller's overlays for one catalog page without N+1 reads."""
+
+    def __init__(self, repository: MediaUserAliasRepository) -> None:
+        self._repository = repository
+
+    def execute(self, login_key: str, media_ids: list[str]) -> CallerAliasOverlayPage:
+        if not login_key or not media_ids:
+            return CallerAliasOverlayPage(overlays={}, tag_display_names={})
+        parsed: list[MediaId] = []
+        for media_id in media_ids:
+            parsed.append(MediaId.from_string(media_id))
+        aliases = self._repository.list_aliases_for_login(login_key, tuple(parsed))
+        overlays = {
+            media_id: _view_from_alias(alias) for media_id, alias in aliases.items()
+        }
+        tag_keys: list[str] = []
+        for view in overlays.values():
+            tag_keys.extend(view.tag_keys)
+        names = self._repository.canonical_tag_display_names(tuple(tag_keys))
+        return CallerAliasOverlayPage(overlays=overlays, tag_display_names=names)
+
+
 class ListTeamMediaAliases:
     """Read-only aggregation of every overlay for one media item."""
 
@@ -179,10 +210,12 @@ def _call_clock_ms(clock_ms: ClockMs) -> int:
 __all__ = [
     "EMPTY_ALIAS_VIEW",
     "AliasTagNotFoundError",
+    "CallerAliasOverlayPage",
     "ClockMs",
     "FrameNestMediaUserAliasError",
     "FrameNestMediaUserAliasRepositoryError",
     "GetMediaUserAlias",
+    "ListMediaUserAliasesForLogin",
     "ListTeamMediaAliases",
     "MediaUserAliasMediaNotFoundError",
     "MediaUserAliasView",

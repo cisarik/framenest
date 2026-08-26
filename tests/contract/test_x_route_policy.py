@@ -75,6 +75,12 @@ def test_only_companion_mutations_are_companion_flagged() -> None:
     assert alias_get_match is not None and alias_get.companion_mutation is False
     assert alias_put_match is not None and alias_put.companion_mutation is False
     assert alias_put.capability == CAPABILITY_METADATA_ALIAS_WRITE
+    suggestions, suggestions_match = find_route_policy(
+        "GET",
+        "/api/media/00000000-0000-4000-8000-000000000000/ai-suggestions",
+    )
+    assert suggestions_match is not None and suggestions.companion_mutation is False
+    assert suggestions.capability == CAPABILITY_METADATA_ALIAS_WRITE
     inbox, inbox_match = find_route_policy("GET", "/api/companion/review-inbox")
     detail, detail_match = find_route_policy(
         "GET",

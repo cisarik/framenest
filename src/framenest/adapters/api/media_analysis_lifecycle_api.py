@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -19,8 +19,24 @@ from framenest.adapters.api.content_audience_api import (
     ContentAudienceUnavailableError,
     content_audience_allows,
 )
+from framenest.adapters.api.tailscale_ingress import SCOPE_IDENTITY
+from framenest.application.companion_review import (
+    COMPANION_REVIEW_QUERY_INVALID_MESSAGE,
+    DEFAULT_COMPANION_REVIEW_LIMIT,
+    MAX_COMPANION_REVIEW_LIMIT,
+    CompanionReviewQueryError,
+    GetCompanionReviewDetail,
+    MappedSuggestedTag,
+)
 from framenest.application.content_publication import ContentAudiencePolicy
+from framenest.application.ports.companion_review_repository import (
+    CompanionReviewMediaNotFoundError,
+    CompanionReviewMovieExcludedError,
+    CompanionReviewStoredResultError,
+    FrameNestCompanionReviewRepositoryError,
+)
 from framenest.domain.identities import FrameNestIdentityError, MediaId, MediaLocationId
+from framenest.domain.identity_access import IdentityContext
 from framenest.domain.media_analysis_runs import (
     AUTOMATIC_POST_CATALOG_ANALYSIS_DEFINITION,
     MediaAnalysisRun,
@@ -101,6 +117,39 @@ class ManualMovieIdentificationRequest(BaseModel):
     confirm_cloud_upload: bool
 
 
+class MediaAiSuggestionTagResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    value: str
+    status: str
+    key: str | None
+    display_name: str | None
+
+
+class MediaAiSuggestionItemResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    analysis_run_id: str
+    completed_at_ms: int
+    provider_id: str
+    model_id: str
+    prompt_version: str
+    title: str
+    description: str
+    tags: list[MediaAiSuggestionTagResponse]
+    suggested_filename: str
+
+
+class MediaAiSuggestionListResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    suggestions: list[MediaAiSuggestionItemResponse]
+    next_cursor: str | None
+
+
+_NO_STORE_HEADERS = {"Cache-Control": "no-store"}
+
+
 @dataclass(frozen=True, slots=True)
 class MediaAnalysisLifecycleApiDependencies:
     """Injected dependencies for automatic analysis status routes."""
@@ -121,6 +170,7 @@ class MediaAnalysisLifecycleApiDependencies:
     ) = None
     execute_movie_identification: Callable[[MediaAnalysisRun], MediaAnalysisRun] | None = None
     audience_policy: ContentAudiencePolicy | None = None
+    list_suggestions: GetCompanionReviewDetail | None = None
 
 
 def create_media_analysis_lifecycle_api_router(
@@ -139,6 +189,95 @@ def create_media_analysis_lifecycle_api_router(
             provider_configured=dependencies.provider_configured,
             provider_id=dependencies.provider_id,
             model_id=dependencies.model_id,
+        )
+
+    @router.get(
+        "/api/media/{media_id}/ai-suggestions",
+        response_model=MediaAiSuggestionListResponse,
+        responses={
+            404: {"model": ErrorResponse},
+            409: {"model": ErrorResponse},
+            422: {"model": ErrorResponse},
+            500: {"model": ErrorResponse},
+            503: {"model": ErrorResponse},
+        },
+    )
+    def list_media_ai_suggestions(
+        media_id: str,
+        request: Request,
+        limit: int = Query(default=DEFAULT_COMPANION_REVIEW_LIMIT),
+        cursor: str | None = None,
+    ) -> MediaAiSuggestionListResponse | JSONResponse:
+        identity = request.scope.get(SCOPE_IDENTITY)
+        if not isinstance(identity, IdentityContext) or not identity.login_key:
+            return _error("IDENTITY_REQUIRED", "A verified identity is required.", 401)
+        try:
+            parsed_media_id = MediaId.from_string(media_id)
+        except FrameNestIdentityError:
+            return _error("MEDIA_NOT_FOUND", "Media not found.", 404)
+        audience_error = _audience_error(
+            request,
+            parsed_media_id,
+            dependencies.audience_policy,
+        )
+        if audience_error is not None:
+            if audience_error.status_code == 404:
+                return _error("MEDIA_NOT_FOUND", "Media not found.", 404)
+            return audience_error
+        if dependencies.list_suggestions is None:
+            return _error(
+                "CATALOG_UNAVAILABLE",
+                "The local catalog is not available.",
+                503,
+            )
+        if limit < 1 or limit > MAX_COMPANION_REVIEW_LIMIT:
+            return _error(
+                "INVALID_MEDIA_AI_SUGGESTION_QUERY",
+                COMPANION_REVIEW_QUERY_INVALID_MESSAGE,
+                422,
+            )
+        try:
+            detail = dependencies.list_suggestions.execute(
+                media_id=media_id,
+                actor_login_key=identity.login_key,
+                limit=limit,
+                cursor=cursor,
+            )
+        except CompanionReviewQueryError:
+            return _error(
+                "INVALID_MEDIA_AI_SUGGESTION_QUERY",
+                COMPANION_REVIEW_QUERY_INVALID_MESSAGE,
+                422,
+            )
+        except CompanionReviewMediaNotFoundError:
+            return _error("MEDIA_NOT_FOUND", "Media not found.", 404)
+        except CompanionReviewMovieExcludedError:
+            return _error(
+                "COMPANION_REVIEW_MOVIE_EXCLUDED",
+                "Movie workflows are excluded from companion review.",
+                409,
+            )
+        except CompanionReviewStoredResultError:
+            return _error(
+                "COMPANION_REVIEW_RESULT_INVALID",
+                "Stored analysis result is invalid.",
+                500,
+            )
+        except FrameNestCompanionReviewRepositoryError:
+            return _error(
+                "MEDIA_AI_SUGGESTION_QUERY_FAILED",
+                "AI suggestion list failed.",
+                500,
+            )
+        return JSONResponse(
+            status_code=200,
+            content=MediaAiSuggestionListResponse(
+                suggestions=[
+                    _suggestion_item(suggestion) for suggestion in detail.suggestions
+                ],
+                next_cursor=detail.next_cursor,
+            ).model_dump(),
+            headers=_NO_STORE_HEADERS,
         )
 
     @router.get(
@@ -410,6 +549,29 @@ def _status_response(
         created_at_ms=view.created_at_ms,
         started_at_ms=view.started_at_ms,
         completed_at_ms=view.completed_at_ms,
+    )
+
+
+def _suggestion_item(suggestion: object) -> MediaAiSuggestionItemResponse:
+    tags = [
+        MediaAiSuggestionTagResponse(
+            value=tag.value,
+            status=tag.status.value if hasattr(tag.status, "value") else str(tag.status),
+            key=tag.key,
+            display_name=tag.display_name,
+        )
+        for tag in suggestion.tags
+    ]
+    return MediaAiSuggestionItemResponse(
+        analysis_run_id=suggestion.analysis_run_id,
+        completed_at_ms=suggestion.completed_at_ms,
+        provider_id=suggestion.provider_id,
+        model_id=suggestion.model_id,
+        prompt_version=suggestion.prompt_version,
+        title=suggestion.title,
+        description=suggestion.description,
+        tags=tags,
+        suggested_filename=getattr(suggestion, "suggested_filename", "") or "",
     )
 
 

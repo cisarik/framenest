@@ -82,13 +82,20 @@ test("ordinary Save uses alias PUT only and never companion apply", () => {
 });
 
 test("ordinary alias Edit hides classification chrome and canonical tag create", () => {
-  const controls = extractFunction("updateMetadataControls");
-  assert.match(controls, /metadataWorkspaceIsAliasMode\(\)/);
   const createBody = extractFunction("createAndSelectMetadataTag");
   assert.match(createBody, /identityUsesCanonicalMetadataWrite\(\)/);
-  const chrome = extractFunction("identityAllowsAiSuggestionsChrome");
-  assert.match(chrome, /metadataWorkspaceIsAliasMode\(\)/);
-  assert.match(chrome, /companionWebHosted\(\)/);
+  const classification = extractFunction("syncClassificationControlsFromWorkspace");
+  assert.match(classification, /classificationRow\.hidden = true/);
+  assert.doesNotMatch(classification, /classificationRow\.hidden = aliasMode/);
+  const loadChrome = extractFunction("identityAllowsAiSuggestionLoadChrome");
+  assert.match(loadChrome, /metadata\.alias\.write/);
+  assert.match(loadChrome, /metadata\.canonical\.write/);
+  assert.doesNotMatch(loadChrome, /companionWebHosted\(\)/);
+  assert.doesNotMatch(loadChrome, /media\.workflow\.read/);
+  const analyze = extractFunction("identityAllowsAiAnalyze");
+  assert.match(analyze, /analysis\.run/);
+  assert.match(analyze, /companionWebHosted\(\)/);
+  assert.match(analyze, /metadataWorkspaceIsAliasMode\(\)/);
 });
 
 test("per-field copy does not persist and Load does not bulk-apply", () => {
@@ -101,4 +108,24 @@ test("per-field copy does not persist and Load does not bulk-apply", () => {
   assert.equal(loadBody.includes("requestConfirmation("), false);
   assert.match(INDEX_SOURCE, /id="metadata-ai-title-strip"/);
   assert.match(INDEX_SOURCE, />Load</);
+});
+
+test("Load chrome is available in alias mode and hosted companion web", () => {
+  const loadChrome = extractFunction("identityAllowsAiSuggestionLoadChrome");
+  assert.match(loadChrome, /isWorkspaceAudience\(\)/);
+  assert.doesNotMatch(loadChrome, /metadataWorkspaceIsAliasMode\(\)/);
+  assert.doesNotMatch(loadChrome, /companionWebHosted\(\)/);
+  const panel = extractFunction("renderMetadataAiPanel");
+  assert.match(panel, /identityAllowsAiSuggestionLoadChrome\(\)/);
+  const controls = extractFunction("updateMetadataControls");
+  assert.match(controls, /identityAllowsAiSuggestionLoadChrome\(\)/);
+  assert.match(controls, /identityAllowsAiAnalyze\(\)/);
+});
+
+test("mapped suggested tags are buttons and unmapped tags are not", () => {
+  const strips = extractFunction("renderMetadataSuggestionStrips");
+  assert.match(strips, /metadata-suggestion-tag--mapped/);
+  assert.match(strips, /copySuggestionFieldToCurrent\("tag", tag\.key\)/);
+  assert.match(strips, /metadata-suggestion-tag--unmapped/);
+  assert.match(strips, /document\.createElement\("button"\)/);
 });

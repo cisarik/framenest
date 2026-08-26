@@ -559,10 +559,21 @@
             <h3 id="metadata-ai-heading" class="metadata-ai-heading">AI suggestions</h3>
           </div>
           <div id="metadata-ai-suggestions-toolbar" class="metadata-ai-suggestions-toolbar">
-            <label class="metadata-ai-suggestion-select-label" for="metadata-ai-suggestion-select">
-              <span class="visually-hidden">AI suggestion</span>
-              <select id="metadata-ai-suggestion-select" hidden disabled></select>
-            </label>
+            <div class="metadata-ai-suggestion-dropdown" id="metadata-ai-suggestion-dropdown" hidden>
+              <button
+                type="button"
+                id="metadata-ai-suggestion-toggle"
+                class="metadata-ai-suggestion-toggle"
+                aria-haspopup="listbox"
+                aria-expanded="false"
+                aria-controls="metadata-ai-suggestion-list"
+                aria-label="AI suggestion"
+                disabled
+              >
+                <span id="metadata-ai-suggestion-toggle-label"></span>
+              </button>
+              <ul id="metadata-ai-suggestion-list" class="metadata-ai-suggestion-list" role="listbox" hidden></ul>
+            </div>
             <button id="metadata-load-ai-suggestion-button" type="button" hidden disabled>Load</button>
           </div>
           <p id="metadata-ai-status" class="metadata-note" aria-live="polite"></p>

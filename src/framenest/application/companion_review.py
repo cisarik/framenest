@@ -72,6 +72,7 @@ class StoredSuggestion:
     title: str
     description: str
     tags: tuple[str, ...]
+    suggested_filename: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -146,6 +147,7 @@ class CompanionReviewSuggestion:
     title: str
     description: str
     tags: tuple[MappedSuggestedTag, ...]
+    suggested_filename: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -187,7 +189,13 @@ def decode_stored_suggestion_result(result_json: str) -> StoredSuggestion:
         maximum=DESCRIPTION_MAX_LENGTH,
     )
     tags = _validate_stored_tags(payload.get("tags"))
-    return StoredSuggestion(title=title, description=description, tags=tags)
+    suggested_filename = _optional_stored_filename(payload.get("suggested_filename"))
+    return StoredSuggestion(
+        title=title,
+        description=description,
+        tags=tags,
+        suggested_filename=suggested_filename,
+    )
 
 
 def map_suggested_tags(
@@ -715,6 +723,19 @@ def _validate_stored_text(value: object, *, minimum: int, maximum: int) -> str:
     if _CONTROL_CHAR_PATTERN.search(value):
         raise CompanionReviewCodecError(COMPANION_REVIEW_RESULT_INVALID_MESSAGE)
     return value
+
+
+def _optional_stored_filename(value: object) -> str:
+    if not isinstance(value, str):
+        return ""
+    text = value.strip()
+    if not text or len(text) > 255:
+        return ""
+    if "/" in text or "\\" in text or ".." in text:
+        return ""
+    if _CONTROL_CHAR_PATTERN.search(text):
+        return ""
+    return text
 
 
 def _validate_stored_tags(value: object) -> tuple[str, ...]:

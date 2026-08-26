@@ -328,7 +328,7 @@ test("handshake timeout copy does not claim framing failed when the iframe loade
   assert.match(sidebarSource, /handshakeTimeoutCopy\(loaded\)/);
 });
 
-test("hosted Details hide Analyze by AI, Load, dropdown, and strips; standalone keeps them", () => {
+test("hosted Details hide Analyze by AI and keep Load chrome; standalone Analyze stays gated", () => {
   const start = appSource.indexOf("function updateMetadataControls(");
   assert.ok(start >= 0);
   const bodyStart = appSource.indexOf("{", start);
@@ -347,9 +347,12 @@ test("hosted Details hide Analyze by AI, Load, dropdown, and strips; standalone 
     }
   }
   const controls = appSource.slice(start, end);
-  assert.match(controls, /companionWebHosted\(\)/);
-  assert.match(controls, /const hosted = companionWebHosted\(\)/);
-  assert.match(controls, /showAnalyze = !hosted && analysisAvailable/);
-  assert.match(controls, /identityAllowsAiSuggestionsChrome\(\)/);
+  assert.match(controls, /identityAllowsAiAnalyze\(\)/);
+  assert.match(controls, /identityAllowsAiSuggestionLoadChrome\(\)/);
+  assert.doesNotMatch(controls, /identityAllowsAiSuggestionsChrome\(\)/);
   assert.doesNotMatch(controls, /searchParams|URLSearchParams|hosted=/);
+  const analyzeStart = appSource.indexOf("function identityAllowsAiAnalyze(");
+  assert.ok(analyzeStart >= 0);
+  const analyze = appSource.slice(analyzeStart, analyzeStart + 400);
+  assert.match(analyze, /companionWebHosted\(\)/);
 });

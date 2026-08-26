@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse
@@ -13,12 +13,20 @@ from framenest.adapters.api.content_audience_api import (
     ContentAudienceUnavailableError,
     content_audience_allows,
 )
+from framenest.adapters.api.tailscale_ingress import SCOPE_IDENTITY
 from framenest.application.content_publication import ContentAudiencePolicy
 from framenest.application.media_catalog import MediaCatalogValidationError
+from framenest.application.media_user_alias import (
+    EMPTY_ALIAS_VIEW,
+    CallerAliasOverlayPage,
+)
 from framenest.application.ports.media_catalog_repository import (
+    CatalogMediaItem,
+    CatalogMediaTag,
     FrameNestMediaCatalogRepositoryError,
 )
 from framenest.domain.identities import MediaId
+from framenest.domain.identity_access import IdentityContext
 from framenest.domain.media_metadata import MediaCollectionKey
 
 CATALOG_UNAVAILABLE_CODE = "CATALOG_UNAVAILABLE"
@@ -97,6 +105,7 @@ class MediaCatalogApiDependencies:
     catalog_available: Callable[[], bool]
     get_media: object | None = None
     audience_policy: ContentAudiencePolicy | None = None
+    list_aliases: object | None = None
 
 
 def create_media_catalog_api_router(dependencies: MediaCatalogApiDependencies) -> APIRouter:
@@ -113,6 +122,7 @@ def create_media_catalog_api_router(dependencies: MediaCatalogApiDependencies) -
         },
     )
     def list_media(
+        request: Request,
         q: str | None = None,
         tag: list[str] = Query(default=[]),
         limit: int = Query(default=24, ge=1, le=100),
@@ -167,7 +177,14 @@ def create_media_catalog_api_router(dependencies: MediaCatalogApiDependencies) -
                 MEDIA_CATALOG_QUERY_FAILED_CODE,
                 MEDIA_CATALOG_QUERY_FAILED_MESSAGE,
             )
-        return _catalog_response(result)
+        return _catalog_response(
+            result,
+            overlay_page=_caller_overlay_page(
+                request,
+                dependencies.list_aliases,
+                [item.media_id for item in result.items],
+            ),
+        )
 
     @router.get(
         "/api/media/{media_id}",
@@ -228,7 +245,12 @@ def create_media_catalog_api_router(dependencies: MediaCatalogApiDependencies) -
                 MEDIA_NOT_FOUND_CODE,
                 MEDIA_NOT_FOUND_MESSAGE,
             )
-        return _media_response(item)
+        overlay_page = _caller_overlay_page(
+            request,
+            dependencies.list_aliases,
+            [item.media_id],
+        )
+        return _media_response(item, overlay_page=overlay_page)
 
     return router
 
@@ -241,9 +263,15 @@ def _error_response(status_code: int, code: str, message: str) -> JSONResponse:
     return JSONResponse(status_code=status_code, content={"error": {"code": code, "message": message}})
 
 
-def _catalog_response(result: object) -> MediaCatalogResponse:
+def _catalog_response(
+    result: object,
+    *,
+    overlay_page: CallerAliasOverlayPage | None = None,
+) -> MediaCatalogResponse:
     return MediaCatalogResponse(
-        items=[_media_response(item) for item in result.items],
+        items=[
+            _media_response(item, overlay_page=overlay_page) for item in result.items
+        ],
         total=result.total,
         limit=result.limit,
         offset=result.offset,
@@ -257,30 +285,35 @@ def _catalog_response(result: object) -> MediaCatalogResponse:
     )
 
 
-def _media_response(item: object) -> CatalogMediaResponse:
+def _media_response(
+    item: object,
+    *,
+    overlay_page: CallerAliasOverlayPage | None = None,
+) -> CatalogMediaResponse:
+    merged = _merge_overlay_into_catalog_item(item, overlay_page)
     return CatalogMediaResponse(
-        media_id=item.media_id,
-        media_kind=item.media_kind,
-        created_at_ms=item.created_at_ms,
-        updated_at_ms=item.updated_at_ms,
-        display_title=item.display_title,
-        collection_key=item.collection_key,
-        processed_at_ms=item.processed_at_ms,
-        content_category=getattr(item, "content_category", "general"),
-        acquisition_source=getattr(item, "acquisition_source", "unknown"),
-        description=getattr(item, "description", None),
-        cover_ready=getattr(item, "cover_ready", False),
-        creator_attribution_kind=getattr(item, "creator_attribution_kind", None),
-        creator_stable_id=getattr(item, "creator_stable_id", None),
-        creator_handle=getattr(item, "creator_handle", None),
-        creator_display_name=getattr(item, "creator_display_name", None),
+        media_id=merged.media_id,
+        media_kind=merged.media_kind,
+        created_at_ms=merged.created_at_ms,
+        updated_at_ms=merged.updated_at_ms,
+        display_title=merged.display_title,
+        collection_key=merged.collection_key,
+        processed_at_ms=merged.processed_at_ms,
+        content_category=getattr(merged, "content_category", "general"),
+        acquisition_source=getattr(merged, "acquisition_source", "unknown"),
+        description=getattr(merged, "description", None),
+        cover_ready=getattr(merged, "cover_ready", False),
+        creator_attribution_kind=getattr(merged, "creator_attribution_kind", None),
+        creator_stable_id=getattr(merged, "creator_stable_id", None),
+        creator_handle=getattr(merged, "creator_handle", None),
+        creator_display_name=getattr(merged, "creator_display_name", None),
         tags=[
             CatalogTagResponse(
                 key=tag.key,
                 display_name=tag.display_name,
                 position=tag.position,
             )
-            for tag in item.tags
+            for tag in merged.tags
         ],
         locations=[
             CatalogLocationResponse(
@@ -291,6 +324,55 @@ def _media_response(item: object) -> CatalogMediaResponse:
                 observed_size_bytes=location.observed_size_bytes,
                 observed_mtime_ns=location.observed_mtime_ns,
             )
-            for location in item.locations
+            for location in merged.locations
         ],
+    )
+
+
+def _caller_overlay_page(
+    request: Request,
+    list_aliases: object | None,
+    media_ids: list[str],
+) -> CallerAliasOverlayPage | None:
+    if list_aliases is None or not media_ids:
+        return None
+    identity = request.scope.get(SCOPE_IDENTITY)
+    if not isinstance(identity, IdentityContext) or not identity.login_key:
+        return None
+    page = list_aliases.execute(identity.login_key, media_ids)
+    if not isinstance(page, CallerAliasOverlayPage):
+        return None
+    return page
+
+
+def _merge_overlay_into_catalog_item(
+    item: object,
+    overlay_page: CallerAliasOverlayPage | None,
+) -> object:
+    if overlay_page is None or not isinstance(item, CatalogMediaItem):
+        return item
+    overlay = overlay_page.overlays.get(item.media_id)
+    if overlay is None or overlay is EMPTY_ALIAS_VIEW or not overlay.persisted:
+        return item
+    display_title = (
+        overlay.display_title if overlay.display_title is not None else item.display_title
+    )
+    description = (
+        overlay.description if overlay.description is not None else item.description
+    )
+    tags = item.tags
+    if overlay.tag_keys:
+        tags = tuple(
+            CatalogMediaTag(
+                key=key,
+                display_name=overlay_page.tag_display_names.get(key, key),
+                position=index,
+            )
+            for index, key in enumerate(overlay.tag_keys)
+        )
+    return replace(
+        item,
+        display_title=display_title,
+        description=description,
+        tags=tags,
     )

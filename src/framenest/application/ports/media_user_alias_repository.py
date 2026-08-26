@@ -28,6 +28,17 @@ class MediaUserAliasRepository(Protocol):
     def get_alias(self, media_id: MediaId, login_key: str) -> MediaUserAlias | None:
         """Return the caller's overlay row, or None when absent."""
 
+    def list_aliases_for_login(
+        self, login_key: str, media_ids: tuple[MediaId, ...]
+    ) -> dict[str, MediaUserAlias]:
+        """Return the caller's overlays for the named media ids.
+
+        Missing ids are omitted. This method is read-only.
+        """
+
+    def canonical_tag_display_names(self, tag_keys: tuple[str, ...]) -> dict[str, str]:
+        """Return display names for existing canonical tag keys."""
+
     def list_aliases_for_media(self, media_id: MediaId) -> tuple[MediaUserAlias, ...]:
         """Return every overlay for one media item, ordered by login key.
 

@@ -1029,6 +1029,7 @@ def _suggestion_from_run(
         title=stored.title,
         description=stored.description,
         tags=map_suggested_tags(stored.tags, catalog),
+        suggested_filename=stored.suggested_filename,
     )
 
 

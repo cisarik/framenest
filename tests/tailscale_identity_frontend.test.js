@@ -394,15 +394,18 @@ test("privileged controls are gated by capabilities in source", () => {
   assert.ok(identityGateBody.includes('capabilities.has("metadata.canonical.write")'));
 });
 
-test("hosted Details hide Analyze by AI, Load, dropdown, and strips", () => {
+test("hosted Details hide Analyze by AI and keep Load chrome", () => {
   const controls = extractFunction(APP_SOURCE, "updateMetadataControls");
-  assert.ok(controls.includes("companionWebHosted()"));
-  assert.ok(controls.includes("showAnalyze = !hosted && analysisAvailable"));
-  assert.ok(controls.includes("identityAllowsAiSuggestionsChrome()"));
+  assert.ok(controls.includes("identityAllowsAiAnalyze()"));
+  assert.ok(controls.includes("identityAllowsAiSuggestionLoadChrome()"));
+  assert.equal(controls.includes("identityAllowsAiSuggestionsChrome()"), false);
   assert.equal(controls.includes("URLSearchParams"), false);
-  const chrome = extractFunction(APP_SOURCE, "identityAllowsAiSuggestionsChrome");
-  assert.ok(chrome.includes("companionWebHosted()"));
-  assert.ok(chrome.includes("metadataWorkspaceIsMovie()"));
+  const analyze = extractFunction(APP_SOURCE, "identityAllowsAiAnalyze");
+  assert.ok(analyze.includes("companionWebHosted()"));
+  assert.ok(analyze.includes("analysis.run"));
+  const loadChrome = extractFunction(APP_SOURCE, "identityAllowsAiSuggestionLoadChrome");
+  assert.equal(loadChrome.includes("companionWebHosted()"), false);
+  assert.ok(loadChrome.includes("metadata.alias.write"));
 });
 
 test("gallery AI quick action fails closed for missing unresolved and ordinary identity", () => {

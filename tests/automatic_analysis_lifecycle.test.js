@@ -95,12 +95,16 @@ test("cataloged upload copy mentions automatic analysis only when enabled", () =
 test("metadata editor exposes Load without Apply endpoint", () => {
   assert.match(INDEX_SOURCE, /id="metadata-load-ai-suggestion-button"/);
   assert.match(INDEX_SOURCE, />Load</);
-  assert.match(INDEX_SOURCE, /id="metadata-ai-suggestion-select"/);
+  assert.match(INDEX_SOURCE, /id="metadata-ai-suggestion-dropdown"/);
+  assert.match(INDEX_SOURCE, /id="metadata-ai-suggestion-toggle"/);
+  assert.equal(INDEX_SOURCE.includes('id="metadata-ai-suggestion-select"'), false);
   assert.match(INDEX_SOURCE, />AI suggestions</);
   assert.equal(INDEX_SOURCE.includes("View details"), false);
   assert.equal(INDEX_SOURCE.includes("Saved AI suggestion"), false);
   assert.match(APP_SOURCE, /async function handleLoadDurableAiSuggestion/);
-  assert.match(APP_SOURCE, /companionReviewInboxDetailEndpoint/);
+  assert.match(APP_SOURCE, /function mediaAiSuggestionsEndpoint/);
+  assert.match(APP_SOURCE, /\/ai-suggestions\?limit=100/);
+  assert.equal(APP_SOURCE.includes("companionReviewInboxDetailEndpoint"), false);
   assert.equal(APP_SOURCE.includes("/apply"), false);
   assert.equal(APP_SOURCE.includes("handleApplyDurable"), false);
 });
@@ -168,7 +172,7 @@ test("AI suggestions chrome sits above Title with Load and per-field strips", ()
   assert.match(INDEX_SOURCE, /id="metadata-ai-heading"/);
   assert.match(INDEX_SOURCE, />AI suggestions</);
   assert.equal(INDEX_SOURCE.includes("Saved AI suggestion"), false);
-  assert.match(INDEX_SOURCE, /id="metadata-ai-suggestion-select"/);
+  assert.match(INDEX_SOURCE, /id="metadata-ai-suggestion-dropdown"/);
   assert.match(INDEX_SOURCE, /id="metadata-ai-title-strip"/);
   assert.match(INDEX_SOURCE, /id="metadata-ai-description-strip"/);
   assert.match(INDEX_SOURCE, /id="metadata-ai-tags-strip"/);
@@ -183,18 +187,28 @@ test("AI suggestions chrome sits above Title with Load and per-field strips", ()
   assert.ok(saveAt < analyzeAt);
   const panelBody = extractFunction("renderMetadataAiPanel");
   assert.match(panelBody, /AI suggestions/);
-  assert.match(panelBody, /identityAllowsAiSuggestionsChrome\(\)/);
+  assert.match(panelBody, /identityAllowsAiSuggestionLoadChrome\(\)/);
   assert.equal(panelBody.includes("New AI analysis is currently unavailable."), false);
 });
 
-test("suggested filename remains an admin-only note without an input", () => {
+test("suggested filename is an informational note after Load without an input", () => {
   assert.match(INDEX_SOURCE, /id="metadata-ai-filename-note"/);
   assert.equal(INDEX_SOURCE.includes("metadata-ai-filename-input"), false);
   const panelBody = extractFunction("renderMetadataAiPanel");
   assert.match(panelBody, /metadataAiFilenameNote/);
-  assert.match(panelBody, /identityUsesCanonicalMetadataWrite\(\)/);
+  assert.match(panelBody, /Suggested filename/);
+  assert.doesNotMatch(panelBody, /identityUsesCanonicalMetadataWrite\(\)/);
   assert.equal(panelBody.includes("metadataAiFilenameInput"), false);
   assert.equal(APP_SOURCE.includes("metadataAiFilenameInput.addEventListener"), false);
+  const refreshBody = extractAsyncFunction("refreshMetadataSuggestionList");
+  assert.match(refreshBody, /mediaAiSuggestionsEndpoint\(mediaId\)/);
+  assert.doesNotMatch(refreshBody, /selectedItem, \.\.\.items/);
+  assert.match(refreshBody, /analysisRunId/);
+});
+
+test("suggestion strips enable pointer events and mapped tags are clickable", () => {
+  assert.match(STYLES_SOURCE, /\.metadata-suggestion-strip[^{]*\{[^}]*pointer-events:\s*auto/);
+  assert.match(STYLES_SOURCE, /\.metadata-suggestion-tag--mapped[^{]*\{[^}]*pointer-events:\s*auto/);
 });
 
 test("modal backdrop hierarchy keeps blur and lightens the parent overlay", () => {

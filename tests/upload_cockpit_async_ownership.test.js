@@ -196,9 +196,31 @@ function createElement(document, tagName = "div") {
     dataset: {},
     style: {},
     classList: createClassList(),
+    contains(node) {
+      let current = node;
+      while (current) {
+        if (current === this) return true;
+        current = current.parentNode;
+      }
+      return false;
+    },
     hidden: false,
     disabled: false,
-    textContent: "",
+    _textContent: "",
+    get textContent() {
+      if (this.children.length > 0) {
+        return this.children.map((child) => {
+          if (child == null) return "";
+          if (typeof child === "string") return child;
+          return child.textContent || "";
+        }).join("");
+      }
+      return this._textContent;
+    },
+    set textContent(value) {
+      this._textContent = String(value);
+      this.children = [];
+    },
     value: "",
     checked: false,
     files: [],
@@ -368,7 +390,10 @@ function createDocument() {
     ["#metadata-save-button", "#metadata-dialog"],
     ["#metadata-ai-analyze-button", "#metadata-dialog"],
     ["#metadata-load-ai-suggestion-button", "#metadata-dialog"],
-    ["#metadata-ai-suggestion-select", "#metadata-dialog"],
+    ["#metadata-ai-suggestion-dropdown", "#metadata-dialog"],
+    ["#metadata-ai-suggestion-toggle", "#metadata-ai-suggestion-dropdown"],
+    ["#metadata-ai-suggestion-list", "#metadata-ai-suggestion-dropdown"],
+    ["#metadata-ai-suggestion-toggle-label", "#metadata-ai-suggestion-toggle"],
     ["#metadata-ai-title-strip", "#metadata-dialog"],
     ["#metadata-ai-description-strip", "#metadata-dialog"],
     ["#metadata-ai-tags-strip", "#metadata-dialog"],
@@ -735,7 +760,7 @@ function metadataStateOf(harness) {
     analyzeButtonHidden: document.querySelector("#metadata-ai-analyze-button").hidden,
     titleStripHidden: document.querySelector("#metadata-ai-title-strip").hidden,
     filenameNoteHidden: document.querySelector("#metadata-ai-filename-note").hidden,
-    selectHidden: document.querySelector("#metadata-ai-suggestion-select").hidden,
+    selectHidden: document.querySelector("#metadata-ai-suggestion-dropdown").hidden,
     suggestionRevealed: metadataSuggestionList.revealed,
     suggestionCount: metadataSuggestionList.items.length,
     selectedRunId: metadataSuggestionList.selectedRunId,
@@ -3064,8 +3089,7 @@ test("Dropdown change hides strips until Load and issues zero provider calls", a
   assert.equal(metadataStateOf(h).suggestionRevealed, true);
   assert.equal(metadataStateOf(h).titleStripHidden, false);
 
-  h.document.querySelector("#metadata-ai-suggestion-select").value = "run-2";
-  h.run("handleMetadataSuggestionSelectChange()");
+  h.run('selectMetadataSuggestion("run-2")');
   await h.flush();
 
   const after = metadataStateOf(h);
@@ -3148,7 +3172,7 @@ test("Available Analyze remains distinct while stored suggestion stays loadable"
   assert.equal(h.document.querySelector("#metadata-ai-analyze-button").disabled, false);
 });
 
-test("Suggested filename is an admin note after Load and is excluded from metadata Save", async () => {
+test("Suggested filename is an informational note after Load and is excluded from metadata Save", async () => {
   const h = await createHarness();
   setMetadataWorkspace(h, {
     currentTitle: "Persisted title",

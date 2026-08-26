@@ -305,6 +305,11 @@ ROUTE_POLICIES: tuple[RoutePolicy, ...] = (
         capability=CAPABILITY_GALLERY_READ,
     ),
     RoutePolicy(
+        method="GET",
+        template="/api/media/{media_id}/ai-suggestions",
+        capability=CAPABILITY_METADATA_ALIAS_WRITE,
+    ),
+    RoutePolicy(
         method="PUT",
         template="/api/media/{media_id}/alias",
         capability=CAPABILITY_METADATA_ALIAS_WRITE,

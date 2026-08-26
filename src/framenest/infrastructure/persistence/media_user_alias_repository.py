@@ -48,6 +48,28 @@ class SqliteMediaUserAliasRepository:
         except SQLAlchemyError as exc:
             raise FrameNestMediaUserAliasRepositoryError(_REPOSITORY_FAILURE_MESSAGE) from exc
 
+    def list_aliases_for_login(
+        self, login_key: str, media_ids: tuple[MediaId, ...]
+    ) -> dict[str, MediaUserAlias]:
+        def operation(connection: Connection) -> dict[str, MediaUserAlias]:
+            return _list_aliases_for_login(connection, login_key, media_ids)
+
+        try:
+            return run_in_transaction(self._engine, operation)
+        except (FrameNestMediaUserAliasError, FrameNestIdentityError) as exc:
+            raise FrameNestMediaUserAliasRepositoryError(_REPOSITORY_FAILURE_MESSAGE) from exc
+        except SQLAlchemyError as exc:
+            raise FrameNestMediaUserAliasRepositoryError(_REPOSITORY_FAILURE_MESSAGE) from exc
+
+    def canonical_tag_display_names(self, tag_keys: tuple[str, ...]) -> dict[str, str]:
+        def operation(connection: Connection) -> dict[str, str]:
+            return _canonical_tag_display_names(connection, tag_keys)
+
+        try:
+            return run_in_transaction(self._engine, operation)
+        except SQLAlchemyError as exc:
+            raise FrameNestMediaUserAliasRepositoryError(_REPOSITORY_FAILURE_MESSAGE) from exc
+
     def list_aliases_for_media(self, media_id: MediaId) -> tuple[MediaUserAlias, ...]:
         def operation(connection: Connection) -> tuple[MediaUserAlias, ...]:
             return _list_aliases_for_media(connection, media_id)
@@ -168,6 +190,43 @@ def _assert_tags_exist(
         ).first()
         if row is None:
             raise AliasTagNotFoundError()
+
+
+def _list_aliases_for_login(
+    connection: Connection, login_key: str, media_ids: tuple[MediaId, ...]
+) -> dict[str, MediaUserAlias]:
+    if not media_ids:
+        return {}
+    media_id_texts = [media_id.to_string() for media_id in media_ids]
+    rows = (
+        connection.execute(
+            select(media_user_aliases).where(
+                media_user_aliases.c.login_key == login_key,
+                media_user_aliases.c.media_id.in_(media_id_texts),
+            )
+        )
+        .mappings()
+        .all()
+    )
+    aliases: dict[str, MediaUserAlias] = {}
+    for row in rows:
+        media_id = MediaId.from_string(str(row["media_id"]))
+        aliases[media_id.to_string()] = _alias_from_row(connection, media_id, row)
+    return aliases
+
+
+def _canonical_tag_display_names(
+    connection: Connection, tag_keys: tuple[str, ...]
+) -> dict[str, str]:
+    unique_keys = tuple(dict.fromkeys(tag_keys))
+    if not unique_keys:
+        return {}
+    rows = connection.execute(
+        select(canonical_tags.c.key, canonical_tags.c.display_name).where(
+            canonical_tags.c.key.in_(unique_keys)
+        )
+    ).fetchall()
+    return {str(row[0]): str(row[1]) for row in rows}
 
 
 def _list_aliases_for_media(
