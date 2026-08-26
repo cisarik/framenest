@@ -435,7 +435,7 @@ def pending_inbox_title(
 
 @dataclass(frozen=True, slots=True)
 class ListCompanionReviewInbox:
-    """List merged successful analyses and the actor's pending X Saves."""
+    """List administrator analyzed inbox pages or requester-private own-history."""
 
     repository: CompanionReviewRepository
 
@@ -445,13 +445,27 @@ class ListCompanionReviewInbox:
         actor_login_key: str,
         limit: int = DEFAULT_COMPANION_REVIEW_LIMIT,
         cursor: str | None = None,
+        own_history: bool = False,
     ) -> CompanionReviewInboxPage:
         if not isinstance(actor_login_key, str) or not actor_login_key:
             raise CompanionReviewQueryError(COMPANION_REVIEW_QUERY_INVALID_MESSAGE)
+        parsed_limit = validate_companion_review_limit(limit)
+        parsed_cursor = decode_companion_review_inbox_cursor(cursor)
+        if own_history:
+            list_own_history = getattr(self.repository, "list_own_history", None)
+            if not callable(list_own_history):
+                raise CompanionReviewQueryError(
+                    COMPANION_REVIEW_QUERY_INVALID_MESSAGE
+                )
+            return list_own_history(
+                actor_login_key=actor_login_key,
+                limit=parsed_limit,
+                cursor=parsed_cursor,
+            )
         return self.repository.list_inbox(
             actor_login_key=actor_login_key,
-            limit=validate_companion_review_limit(limit),
-            cursor=decode_companion_review_inbox_cursor(cursor),
+            limit=parsed_limit,
+            cursor=parsed_cursor,
         )
 
 
@@ -627,12 +641,26 @@ class MarkCompanionReviewOpened:
         media_id: str,
         actor_login_key: str,
         analysis_run_id: str,
+        require_owner: bool = False,
     ) -> CompanionReviewOpenedResult:
-        return self.repository.mark_opened(
-            media_id=_parse_media_id(media_id),
-            actor_login_key=_require_actor_login_key(actor_login_key),
-            analysis_run_id=_parse_analysis_run_id(analysis_run_id),
-            now_ms=self.now_ms(),
+        opened = self.repository.mark_opened
+        parsed_media_id = _parse_media_id(media_id)
+        parsed_actor = _require_actor_login_key(actor_login_key)
+        parsed_run_id = _parse_analysis_run_id(analysis_run_id)
+        now_ms = self.now_ms()
+        if require_owner:
+            return opened(
+                media_id=parsed_media_id,
+                actor_login_key=parsed_actor,
+                analysis_run_id=parsed_run_id,
+                now_ms=now_ms,
+                require_owner=True,
+            )
+        return opened(
+            media_id=parsed_media_id,
+            actor_login_key=parsed_actor,
+            analysis_run_id=parsed_run_id,
+            now_ms=now_ms,
         )
 
 

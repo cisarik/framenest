@@ -327,3 +327,29 @@ test("handshake timeout copy does not claim framing failed when the iframe loade
   assert.match(sidebarSource, /frameLoaded = true/);
   assert.match(sidebarSource, /handshakeTimeoutCopy\(loaded\)/);
 });
+
+test("hosted Details hide Analyze by AI and Load AI suggestion; standalone keeps them", () => {
+  const start = appSource.indexOf("function updateMetadataControls(");
+  assert.ok(start >= 0);
+  const bodyStart = appSource.indexOf("{", start);
+  let depth = 0;
+  let end = bodyStart;
+  for (let index = bodyStart; index < appSource.length; index += 1) {
+    if (appSource[index] === "{") {
+      depth += 1;
+    }
+    if (appSource[index] === "}") {
+      depth -= 1;
+      if (depth === 0) {
+        end = index + 1;
+        break;
+      }
+    }
+  }
+  const controls = appSource.slice(start, end);
+  assert.match(controls, /companionWebHosted\(\)/);
+  assert.match(controls, /const hosted = companionWebHosted\(\)/);
+  assert.match(controls, /showAnalyze = !hosted && analysisAvailable/);
+  assert.match(controls, /loadAvailable = !hosted && durableAnalysisLoadAvailable/);
+  assert.doesNotMatch(controls, /searchParams|URLSearchParams|hosted=/);
+});

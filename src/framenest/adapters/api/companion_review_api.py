@@ -41,6 +41,7 @@ from framenest.domain.identity_access import (
     CAPABILITY_MEDIA_CONTENT_PUBLISH,
     CAPABILITY_MEDIA_WORKFLOW_READ,
     CAPABILITY_METADATA_CANONICAL_WRITE,
+    CAPABILITY_X_REQUEST,
     IdentityContext,
 )
 
@@ -182,6 +183,53 @@ def create_companion_review_api_router(
         )
 
     @router.get(
+        "/api/companion/own-history",
+        response_model=CompanionReviewInboxListResponse,
+        responses={
+            422: {"model": CompanionErrorResponse},
+            500: {"model": CompanionErrorResponse},
+            503: {"model": CompanionErrorResponse},
+        },
+    )
+    def list_own_history(
+        request: Request,
+        limit: int = Query(default=DEFAULT_COMPANION_REVIEW_LIMIT),
+        cursor: str | None = None,
+    ) -> JSONResponse:
+        identity = _require_x_request_identity(request)
+        if (
+            not dependencies.catalog_available()
+            or dependencies.list_inbox is None
+        ):
+            return _error(
+                CATALOG_UNAVAILABLE_CODE, CATALOG_UNAVAILABLE_MESSAGE, 503
+            )
+        if limit < 1 or limit > MAX_COMPANION_REVIEW_LIMIT:
+            return _error(
+                QUERY_INVALID_CODE, COMPANION_REVIEW_QUERY_INVALID_MESSAGE, 422
+            )
+        try:
+            page = dependencies.list_inbox.execute(
+                actor_login_key=identity.login_key,
+                limit=limit,
+                cursor=cursor,
+                own_history=True,
+            )
+        except CompanionReviewQueryError:
+            return _error(
+                QUERY_INVALID_CODE, COMPANION_REVIEW_QUERY_INVALID_MESSAGE, 422
+            )
+        except CompanionReviewStoredResultError:
+            return _error(RESULT_INVALID_CODE, RESULT_INVALID_MESSAGE, 500)
+        except FrameNestCompanionReviewRepositoryError:
+            return _error(QUERY_FAILED_CODE, QUERY_FAILED_MESSAGE, 500)
+        return JSONResponse(
+            status_code=200,
+            content=_inbox_page_dict(page),
+            headers=_NO_STORE_HEADERS,
+        )
+
+    @router.get(
         "/api/companion/review-inbox/{media_id}",
         responses={
             404: {"model": CompanionErrorResponse},
@@ -265,6 +313,9 @@ def create_companion_review_api_router(
                 media_id=media_id,
                 actor_login_key=identity.login_key,
                 analysis_run_id=payload.analysis_run_id,
+                require_owner=not identity.has_capability(
+                    CAPABILITY_MEDIA_WORKFLOW_READ
+                ),
             )
         except CompanionReviewQueryError:
             return _error(
@@ -365,7 +416,16 @@ def _require_identity(request: Request) -> IdentityContext:
 
 
 def _require_opened_identity(request: Request) -> IdentityContext:
-    return _require_identity(request)
+    return _require_x_request_identity(request)
+
+
+def _require_x_request_identity(request: Request) -> IdentityContext:
+    identity = request.scope.get(SCOPE_IDENTITY)
+    if not isinstance(identity, IdentityContext):
+        raise HTTPException(status_code=401, detail={"code": "IDENTITY_REQUIRED"})
+    if not identity.has_capability(CAPABILITY_X_REQUEST):
+        raise HTTPException(status_code=403, detail={"code": CAPABILITY_DENIED_CODE})
+    return identity
 
 
 def _require_apply_identity(request: Request) -> IdentityContext:

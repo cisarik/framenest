@@ -1,4 +1,4 @@
-"""SQLite adapter for administrator companion review inbox reads."""
+"""SQLite adapter for companion review inbox and requester-private own-history."""
 
 from __future__ import annotations
 
@@ -118,15 +118,50 @@ class SqliteCompanionReviewRepository:
         limit: int,
         cursor: tuple[int, bool, str] | None,
     ) -> CompanionReviewInboxPage:
+        return self._list_history_page(
+            actor_login_key=actor_login_key,
+            limit=limit,
+            cursor=cursor,
+            own_history=False,
+        )
+
+    def list_own_history(
+        self,
+        *,
+        actor_login_key: str,
+        limit: int,
+        cursor: tuple[int, bool, str] | None,
+    ) -> CompanionReviewInboxPage:
+        return self._list_history_page(
+            actor_login_key=actor_login_key,
+            limit=limit,
+            cursor=cursor,
+            own_history=True,
+        )
+
+    def _list_history_page(
+        self,
+        *,
+        actor_login_key: str,
+        limit: int,
+        cursor: tuple[int, bool, str] | None,
+        own_history: bool,
+    ) -> CompanionReviewInboxPage:
         def operation(connection: Connection) -> CompanionReviewInboxPage:
             latest = _latest_successful_generic().subquery("latest_generic")
             opened = companion_review_open_states
+            if own_history:
+                unopened_latest = _own_analyzed_latest(
+                    latest, actor_login_key
+                ).subquery("own_analyzed_latest")
+                history_rows = _own_history_rows(latest, actor_login_key)
+            else:
+                unopened_latest = latest
+                history_rows = _analyzed_inbox_rows(latest)
             unopened_count = connection.execute(
-                _unopened_count_statement(latest, actor_login_key)
+                _unopened_count_statement(unopened_latest, actor_login_key)
             ).scalar_one()
-            mixed = _mixed_inbox_rows(latest, actor_login_key).subquery(
-                "mixed_review_inbox"
-            )
+            mixed = history_rows.subquery("review_history_rows")
             statement = select(
                 mixed,
                 opened.c.opened_run_id,
@@ -309,10 +344,17 @@ class SqliteCompanionReviewRepository:
         actor_login_key: str,
         analysis_run_id: MediaId,
         now_ms: int,
+        require_owner: bool = False,
     ) -> CompanionReviewOpenedResult:
         def operation(connection: Connection) -> CompanionReviewOpenedResult:
             media_id_text = media_id.to_string()
             requested_run_id = analysis_run_id.to_string()
+            if require_owner and not _actor_owns_cataloged_x(
+                connection,
+                media_id=media_id_text,
+                actor_login_key=actor_login_key,
+            ):
+                raise CompanionReviewMediaNotFoundError(_MEDIA_NOT_FOUND_MESSAGE)
             _require_non_movie_media(connection, media_id_text)
             requested = _require_eligible_run(
                 connection, media_id=media_id_text, analysis_run_id=requested_run_id
@@ -594,7 +636,21 @@ def _latest_successful_generic():
     return select(ranked).where(ranked.c.rn == 1)
 
 
-def _mixed_inbox_rows(latest, actor_login_key: str) -> Select:
+def _analyzed_inbox_rows(latest) -> Select:
+    return _analyzed_row_select(latest).select_from(
+        latest.join(logical_media, logical_media.c.id == latest.c.media_id)
+    )
+
+
+def _own_history_rows(latest, actor_login_key: str) -> Select:
+    owned = _owned_cataloged_x_media_ids(actor_login_key).subquery(
+        "owned_x_for_analyzed"
+    )
+    analyzed_rows = _analyzed_row_select(latest).select_from(
+        latest.join(logical_media, logical_media.c.id == latest.c.media_id).join(
+            owned, owned.c.media_id == latest.c.media_id
+        )
+    )
     pending_ranked = (
         select(
             x_assets.c.media_id,
@@ -623,38 +679,12 @@ def _mixed_inbox_rows(latest, actor_login_key: str) -> Select:
             .outerjoin(latest, latest.c.media_id == x_assets.c.media_id)
         )
         .where(
-            x_assets.c.state == "cataloged",
-            x_assets.c.media_id.is_not(None),
-            x_post_claims.c.created_by_login_key == actor_login_key,
-            or_(
-                x_post_claims.c.requested_content_category.is_(None),
-                x_post_claims.c.requested_content_category
-                != ContentCategory.MOVIE.value,
-            ),
-            func.coalesce(
-                media_metadata.c.content_category, DEFAULT_CONTENT_CATEGORY.value
-            )
-            != ContentCategory.MOVIE.value,
+            *_owned_cataloged_x_predicates(actor_login_key),
             latest.c.media_id.is_(None),
         )
     ).subquery("ranked_pending_x")
     pending = select(pending_ranked).where(pending_ranked.c.rn == 1).subquery(
         "pending_x"
-    )
-    analyzed_rows = select(
-        latest.c.media_id.label("media_id"),
-        logical_media.c.created_at_ms.label("created_at_ms"),
-        literal(True).label("analyzed"),
-        latest.c.id.label("analysis_run_id"),
-        latest.c.completed_at_ms.label("completed_at_ms"),
-        latest.c.result_json.label("result_json"),
-        latest.c.display_title.label("display_title"),
-        cast(literal(None), Text).label("claim_title"),
-        cast(literal(None), Text).label("x_post_id"),
-        latest.c.completed_at_ms.label("activity_at_ms"),
-        latest.c.id.label("sort_id"),
-    ).select_from(
-        latest.join(logical_media, logical_media.c.id == latest.c.media_id)
     )
     pending_rows = select(
         pending.c.media_id.label("media_id"),
@@ -670,6 +700,63 @@ def _mixed_inbox_rows(latest, actor_login_key: str) -> Select:
         pending.c.media_id.label("sort_id"),
     )
     return analyzed_rows.union_all(pending_rows)
+
+
+def _analyzed_row_select(latest) -> Select:
+    return select(
+        latest.c.media_id.label("media_id"),
+        logical_media.c.created_at_ms.label("created_at_ms"),
+        literal(True).label("analyzed"),
+        latest.c.id.label("analysis_run_id"),
+        latest.c.completed_at_ms.label("completed_at_ms"),
+        latest.c.result_json.label("result_json"),
+        latest.c.display_title.label("display_title"),
+        cast(literal(None), Text).label("claim_title"),
+        cast(literal(None), Text).label("x_post_id"),
+        latest.c.completed_at_ms.label("activity_at_ms"),
+        latest.c.id.label("sort_id"),
+    )
+
+
+def _owned_cataloged_x_predicates(actor_login_key: str) -> tuple[object, ...]:
+    return (
+        x_assets.c.state == "cataloged",
+        x_assets.c.media_id.is_not(None),
+        x_post_claims.c.created_by_login_key == actor_login_key,
+        or_(
+            x_post_claims.c.requested_content_category.is_(None),
+            x_post_claims.c.requested_content_category
+            != ContentCategory.MOVIE.value,
+        ),
+        func.coalesce(
+            media_metadata.c.content_category, DEFAULT_CONTENT_CATEGORY.value
+        )
+        != ContentCategory.MOVIE.value,
+    )
+
+
+def _owned_cataloged_x_media_ids(actor_login_key: str) -> Select:
+    return (
+        select(x_assets.c.media_id)
+        .select_from(
+            x_assets.join(
+                x_post_claims, x_post_claims.c.id == x_assets.c.claim_id
+            ).outerjoin(
+                media_metadata, media_metadata.c.media_id == x_assets.c.media_id
+            )
+        )
+        .where(*_owned_cataloged_x_predicates(actor_login_key))
+        .distinct()
+    )
+
+
+def _own_analyzed_latest(latest, actor_login_key: str) -> Select:
+    owned = _owned_cataloged_x_media_ids(actor_login_key).subquery(
+        "owned_cataloged_x"
+    )
+    return select(latest).select_from(
+        latest.join(owned, owned.c.media_id == latest.c.media_id)
+    )
 
 
 def _analyzed_inbox_predicates() -> tuple[object, ...]:
@@ -943,6 +1030,25 @@ def _suggestion_from_run(
         description=stored.description,
         tags=map_suggested_tags(stored.tags, catalog),
     )
+
+
+def _actor_owns_cataloged_x(
+    connection: Connection, *, media_id: str, actor_login_key: str
+) -> bool:
+    count = connection.execute(
+        select(func.count())
+        .select_from(
+            x_assets.join(
+                x_post_claims, x_post_claims.c.id == x_assets.c.claim_id
+            )
+        )
+        .where(
+            x_assets.c.media_id == media_id,
+            x_assets.c.state == "cataloged",
+            x_post_claims.c.created_by_login_key == actor_login_key,
+        )
+    ).scalar_one()
+    return int(count) > 0
 
 
 def _require_non_movie_media(connection: Connection, media_id: str) -> None:

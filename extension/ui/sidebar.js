@@ -94,21 +94,28 @@
     return 0;
   }
 
-  function partitionHistoryItems(rawItems) {
+  function partitionHistoryItems(rawItems, compactMode) {
     const items = companion.sanitizeReviewInboxItems(rawItems);
     const analyzed = items.filter((item) => item.analyzed === true).slice().sort(compareHistoryNewestFirst);
     const pending = items.filter((item) => item.analyzed !== true).slice().sort(compareHistoryNewestFirst);
+    if (compactMode === "own_activity") {
+      const ordered = items.slice().sort(compareHistoryNewestFirst);
+      return {
+        items: ordered,
+        analyzed: analyzed,
+        pending: pending,
+        compact: ordered.slice(0, COMPACT_ANALYZED_LIMIT),
+        expanded: ordered.slice(COMPACT_ANALYZED_LIMIT),
+      };
+    }
     const compact = analyzed.slice(0, COMPACT_ANALYZED_LIMIT);
     const remainderAnalyzed = analyzed.slice(COMPACT_ANALYZED_LIMIT);
     const expanded = pending.concat(remainderAnalyzed).sort(compareHistoryNewestFirst);
     return { items, analyzed, pending, compact, expanded };
   }
 
-  function historyClickKind(item) {
-    if (item && item.analyzed === true) {
-      return "open_details";
-    }
-    return "pending_overlay";
+  function historyClickKind(_item) {
+    return "open_details";
   }
 
   function openDetailsMessage(mediaId) {
@@ -123,16 +130,11 @@
   }
 
   function activateHistoryItem(item, openDetails, openPending) {
-    if (historyClickKind(item) === "open_details") {
-      if (typeof openDetails === "function") {
-        openDetails(item.media_id);
-      }
-      return "open_details";
+    void openPending;
+    if (typeof openDetails === "function") {
+      openDetails(item && item.media_id);
     }
-    if (typeof openPending === "function") {
-      openPending(item && item.media_id);
-    }
-    return "pending_overlay";
+    return "open_details";
   }
 
   function renderReviewInboxList(listNode, items) {
@@ -200,8 +202,8 @@
     return next;
   }
 
-  function renderReviewCollections(nodes, rawItems) {
-    const partitioned = partitionHistoryItems(rawItems);
+  function renderReviewCollections(nodes, rawItems, compactMode) {
+    const partitioned = partitionHistoryItems(rawItems, compactMode);
     renderReviewInboxList(nodes.historyList, partitioned.compact);
     if (nodes.expandedList) {
       renderReviewInboxList(nodes.expandedList, partitioned.expanded);
@@ -518,7 +520,8 @@
       return;
     }
     const allWasExpanded = reviewHistoryAll.getAttribute("aria-expanded") === "true";
-    const rendered = renderReviewCollections(reviewChromeNodes, result.items);
+    const compactMode = result.history_source === "own-history" ? "own_activity" : "analyzed";
+    const rendered = renderReviewCollections(reviewChromeNodes, result.items, compactMode);
     lastHistoryItems = rendered.historyItems;
     setAllExpanded(reviewChromeNodes, allWasExpanded && rendered.expanded.length > 0);
   }
@@ -775,10 +778,21 @@
       item,
       function openAnalyzedDetails(id) {
         openHostedDetails(id);
+        if (item.analyzed === true && companion.isUuid(item.analysis_run_id)) {
+          void request(companion.TYPES.REVIEW_INBOX_OPENED, {
+            mediaId: id,
+            analysis_run_id: item.analysis_run_id,
+          }).then(
+            function refreshAfterOpened() {
+              void refreshInbox();
+            },
+            function refreshAfterOpenedFailure() {
+              void refreshInbox();
+            }
+          );
+        }
       },
-      function openPendingOverlay(id) {
-        openReviewOverlay(id, reviewDialog, reviewFrame);
-      }
+      function unusedPendingOverlay() {}
     );
   }
 

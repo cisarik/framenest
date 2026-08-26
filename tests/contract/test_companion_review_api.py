@@ -19,6 +19,7 @@ EXTERNAL_ORIGIN = "https://nuc-1.example.ts.net"
 EXTERNAL_HOST = "nuc-1.example.ts.net"
 ADMIN_LOGIN = "admin@example.com"
 USER_LOGIN = "owner@example.com"
+BOB_LOGIN = "bob@example.com"
 
 DEVICE_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
 LIBRARY_ID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
@@ -84,6 +85,7 @@ def _client(
         identity_map={
             ADMIN_LOGIN: "admin",
             USER_LOGIN: "user",
+            BOB_LOGIN: "user",
         },
         companion_extension_origins=list(companion_origins),
         _env_file=None,
@@ -252,18 +254,8 @@ def test_admin_list_and_detail_are_no_store_and_ordinary_is_forbidden(
         assert admin.headers.get("cache-control") == "no-store"
         payload = admin.json()
         assert payload["unopened_count"] == 1
-        assert [item["media_id"] for item in payload["items"]] == [PENDING, GENERIC]
-        pending = payload["items"][0]
-        assert pending == {
-            "media_id": PENDING,
-            "title": "Pending canonical",
-            "created_at_ms": 30,
-            "analyzed": False,
-            "analysis_run_id": None,
-            "completed_at_ms": None,
-            "unopened": False,
-        }
-        analyzed = payload["items"][1]
+        assert [item["media_id"] for item in payload["items"]] == [GENERIC]
+        analyzed = payload["items"][0]
         assert analyzed["created_at_ms"] == 10
         assert analyzed["analyzed"] is True
         assert analyzed["analysis_run_id"] == GENERIC_RUN
@@ -278,6 +270,28 @@ def test_admin_list_and_detail_are_no_store_and_ordinary_is_forbidden(
         assert ordinary.status_code == 403
         assert "Inbox title" not in ordinary.text
         assert ordinary.json()["error"]["code"] == "CAPABILITY_DENIED"
+        ordinary_detail = client.get(
+            f"/api/companion/review-inbox/{GENERIC}",
+            headers=_serve_headers(USER_LOGIN, "Owner"),
+        )
+        assert ordinary_detail.status_code == 403
+        own_history = client.get(
+            "/api/companion/own-history",
+            headers=_serve_headers(USER_LOGIN, "Owner"),
+        )
+        assert own_history.status_code == 200
+        assert own_history.headers.get("cache-control") == "no-store"
+        assert own_history.json()["items"] == []
+        assert own_history.json()["unopened_count"] == 0
+        admin_own = client.get(
+            "/api/companion/own-history",
+            headers=_serve_headers(ADMIN_LOGIN, "Admin"),
+        )
+        assert admin_own.status_code == 200
+        assert [item["media_id"] for item in admin_own.json()["items"]] == [PENDING]
+        assert admin_own.json()["items"][0]["analyzed"] is False
+        assert admin_own.json()["items"][0]["unopened"] is False
+        assert admin_own.json()["unopened_count"] == 0
         detail = client.get(
             f"/api/companion/review-inbox/{GENERIC}",
             headers=_serve_headers(ADMIN_LOGIN, "Admin"),
@@ -337,8 +351,19 @@ def test_opened_and_apply_contracts(tmp_path: Path) -> None:
             headers=_mutation_headers(USER_LOGIN, COMPANION_ORIGIN),
             json={"analysis_run_id": GENERIC_RUN},
         )
-        assert ordinary_opened.status_code == 403
-        assert ordinary_opened.json()["error"]["code"] == "CAPABILITY_DENIED"
+        assert ordinary_opened.status_code == 404
+        assert ordinary_opened.json()["error"]["code"] == "MEDIA_NOT_FOUND"
+        ordinary_apply = client.post(
+            f"/api/companion/review-inbox/{GENERIC}/apply",
+            headers=_mutation_headers(USER_LOGIN, COMPANION_ORIGIN),
+            json={
+                "analysis_run_id": GENERIC_RUN,
+                "fields": ["display_title"],
+                "tag_keys": [],
+            },
+        )
+        assert ordinary_apply.status_code == 403
+        assert ordinary_apply.json()["error"]["code"] == "CAPABILITY_DENIED"
         extra_apply = client.post(
             f"/api/companion/review-inbox/{GENERIC}/apply",
             headers=_mutation_headers(ADMIN_LOGIN, COMPANION_ORIGIN),
@@ -728,3 +753,192 @@ def test_apply_tag_limit_conflict_is_409_and_does_not_write(tmp_path: Path) -> N
             assert int(receipts) == 0
         finally:
             dispose_engine(engine)
+
+
+def test_own_history_opened_alice_bob_admin_isolation(tmp_path: Path) -> None:
+    alice_media = "a1111111-1111-4111-8111-111111111111"
+    alice_loc = "a2111111-1111-4111-8111-111111111111"
+    alice_run = "a3111111-1111-4111-8111-111111111111"
+    alice_claim = "a4111111-1111-4111-8111-111111111111"
+    alice_asset = "a5111111-1111-4111-8111-111111111111"
+    bob_media = "b1111111-1111-4111-8111-111111111111"
+    bob_loc = "b2111111-1111-4111-8111-111111111111"
+    bob_run = "b3111111-1111-4111-8111-111111111111"
+    bob_claim = "b4111111-1111-4111-8111-111111111111"
+    bob_asset = "b5111111-1111-4111-8111-111111111111"
+    with _client(tmp_path, companion_origins=(COMPANION_ORIGIN,)) as client:
+        engine = create_sqlite_engine(tmp_path / "catalog.sqlite3")
+        try:
+            with engine.begin() as connection:
+                _insert_media(connection, alice_media, alice_loc, "meme", "Alice title")
+                _insert_run(connection, alice_run, alice_media, alice_loc, "Alice stored")
+                _insert_owned_x(
+                    connection,
+                    claim_id=alice_claim,
+                    asset_id=alice_asset,
+                    media_id=alice_media,
+                    location_id=alice_loc,
+                    owner=USER_LOGIN,
+                    post_id="111000111",
+                    stage_key="a" * 32,
+                )
+                _insert_media(connection, bob_media, bob_loc, "meme", "Bob title")
+                _insert_run(connection, bob_run, bob_media, bob_loc, "Bob stored")
+                _insert_owned_x(
+                    connection,
+                    claim_id=bob_claim,
+                    asset_id=bob_asset,
+                    media_id=bob_media,
+                    location_id=bob_loc,
+                    owner=BOB_LOGIN,
+                    post_id="111000222",
+                    stage_key="b" * 32,
+                )
+        finally:
+            dispose_engine(engine)
+        alice_history = client.get(
+            "/api/companion/own-history",
+            headers=_serve_headers(USER_LOGIN, "Alice"),
+        )
+        bob_history = client.get(
+            "/api/companion/own-history",
+            headers=_serve_headers(BOB_LOGIN, "Bob"),
+        )
+        admin_inbox = client.get(
+            "/api/companion/review-inbox",
+            headers=_serve_headers(ADMIN_LOGIN, "Admin"),
+        )
+        assert alice_history.status_code == 200
+        assert [item["media_id"] for item in alice_history.json()["items"]] == [
+            alice_media
+        ]
+        assert alice_history.json()["items"][0]["unopened"] is True
+        assert alice_history.json()["unopened_count"] == 1
+        assert bob_media not in {
+            item["media_id"] for item in alice_history.json()["items"]
+        }
+        assert bob_history.json()["unopened_count"] == 1
+        assert bob_history.json()["items"][0]["unopened"] is True
+        admin_ids = {item["media_id"] for item in admin_inbox.json()["items"]}
+        assert alice_media in admin_ids
+        assert bob_media in admin_ids
+        alice_open = client.post(
+            f"/api/companion/review-inbox/{alice_media}/opened",
+            headers=_mutation_headers(USER_LOGIN, COMPANION_ORIGIN),
+            json={"analysis_run_id": alice_run},
+        )
+        assert alice_open.status_code == 200
+        assert alice_open.json()["unopened"] is False
+        alice_after = client.get(
+            "/api/companion/own-history",
+            headers=_serve_headers(USER_LOGIN, "Alice"),
+        )
+        bob_after = client.get(
+            "/api/companion/own-history",
+            headers=_serve_headers(BOB_LOGIN, "Bob"),
+        )
+        admin_after = client.get(
+            "/api/companion/review-inbox",
+            headers=_serve_headers(ADMIN_LOGIN, "Admin"),
+        )
+        assert alice_after.json()["items"][0]["unopened"] is False
+        assert alice_after.json()["unopened_count"] == 0
+        assert bob_after.json()["items"][0]["unopened"] is True
+        assert bob_after.json()["unopened_count"] == 1
+        admin_alice = next(
+            item
+            for item in admin_after.json()["items"]
+            if item["media_id"] == alice_media
+        )
+        assert admin_alice["unopened"] is True
+        admin_open = client.post(
+            f"/api/companion/review-inbox/{alice_media}/opened",
+            headers=_mutation_headers(ADMIN_LOGIN, COMPANION_ORIGIN),
+            json={"analysis_run_id": alice_run},
+        )
+        assert admin_open.status_code == 200
+        alice_after_admin = client.get(
+            "/api/companion/own-history",
+            headers=_serve_headers(USER_LOGIN, "Alice"),
+        )
+        assert alice_after_admin.json()["items"][0]["unopened"] is False
+        bob_id = client.post(
+            f"/api/companion/review-inbox/{bob_media}/opened",
+            headers=_mutation_headers(USER_LOGIN, COMPANION_ORIGIN),
+            json={"analysis_run_id": bob_run},
+        )
+        assert bob_id.status_code == 404
+        assert bob_id.json()["error"]["code"] == "MEDIA_NOT_FOUND"
+        unknown = client.post(
+            f"/api/companion/review-inbox/{MISSING}/opened",
+            headers=_mutation_headers(USER_LOGIN, COMPANION_ORIGIN),
+            json={"analysis_run_id": alice_run},
+        )
+        assert unknown.status_code == 404
+        apply_denied = client.post(
+            f"/api/companion/review-inbox/{alice_media}/apply",
+            headers=_mutation_headers(USER_LOGIN, COMPANION_ORIGIN),
+            json={
+                "analysis_run_id": alice_run,
+                "fields": ["display_title"],
+                "tag_keys": [],
+            },
+        )
+        assert apply_denied.status_code == 403
+        assert apply_denied.json()["error"]["code"] == "CAPABILITY_DENIED"
+        bob_inbox = client.get(
+            "/api/companion/review-inbox",
+            headers=_serve_headers(BOB_LOGIN, "Bob"),
+        )
+        assert bob_inbox.status_code == 403
+
+
+def _insert_owned_x(
+    connection,
+    *,
+    claim_id: str,
+    asset_id: str,
+    media_id: str,
+    location_id: str,
+    owner: str,
+    post_id: str,
+    stage_key: str,
+) -> None:
+    connection.execute(
+        text(
+            "INSERT INTO x_post_claims ("
+            "id, state, acquisition_source, submitted_url, canonical_url, "
+            "x_post_id, extractor_key, created_by_login_key, title, "
+            "discovered_asset_count, success_count, failure_count, "
+            "created_at_ms, updated_at_ms, completed_at_ms, cleanup_state, "
+            "cleanup_completed_at_ms, requested_content_category, version"
+            ") VALUES ("
+            ":id, 'completed', 'x_manual_claim', :url, :url, :post_id, 'X', "
+            ":owner, 'Owned claim', 1, 1, 0, 10, 20, 20, 'complete', 20, "
+            "'meme', 1)"
+        ),
+        {
+            "id": claim_id,
+            "url": f"https://x.com/a/status/{post_id}",
+            "post_id": post_id,
+            "owner": owner,
+        },
+    )
+    connection.execute(
+        text(
+            "INSERT INTO x_assets ("
+            "id, claim_id, ordinal, media_type, expected_mime, state, stage_key, "
+            "media_id, media_location_id, created_at_ms, updated_at_ms, "
+            "completed_at_ms, cleanup_state, cleanup_completed_at_ms, version"
+            ") VALUES ("
+            ":id, :claim, 0, 'video', 'video/mp4', 'cataloged', :stage, "
+            ":media, :location, 10, 20, 20, 'complete', 20, 1)"
+        ),
+        {
+            "id": asset_id,
+            "claim": claim_id,
+            "stage": stage_key,
+            "media": media_id,
+            "location": location_id,
+        },
+    )

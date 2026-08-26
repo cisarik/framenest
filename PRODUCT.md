@@ -45,13 +45,14 @@ ordinary Gallery until persisted title, description, and canonical-tag metadata
 is ready and an authorized administrator publishes.
 
 Website on-demand AI suggestion review remains session-only and is not catalog
-truth. Companion review is a separate durable administrator surface over a
-merged pending-and-analyzed history: pending rows stay visible and dark,
-analyzed rows are green, and the title bar expands that one list without
-replacing the hosted FrameNest iframe
+truth. Companion review is a separate durable surface: administrators see a
+global analyzed inbox with per-actor unopened accent; ordinary requesters see
+requester-private own X Saves, with unopened accent after analysis; every
+history row opens hosted Details without Analyze by AI in that popup
 ([ADR-0067](docs/adr/0067-administrator-companion-review-inbox-and-mutation-trust.md),
 [ADR-0072](docs/adr/0072-native-side-panel-unread-inbox-and-title-bar-history-chrome.md),
-[ADR-0073](docs/adr/0073-companion-merged-history-chrome-pending-visibility-x-seed-tag-and-preserving-apply.md)).
+[ADR-0073](docs/adr/0073-companion-merged-history-chrome-pending-visibility-x-seed-tag-and-preserving-apply.md),
+[ADR-0076](docs/adr/0076-companion-history-hosted-click-admin-analyzed-inbox-and-ordinary-own-history.md)).
 Automatic post-catalog analysis stays default-off; administrator-owned X catalog
 events may enqueue generic analysis when
 `FRAMENEST_AUTOMATIC_MEDIA_ANALYSIS_ENABLED` is true

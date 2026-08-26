@@ -522,13 +522,18 @@ ROUTE_POLICIES: tuple[RoutePolicy, ...] = (
     ),
     RoutePolicy(
         method="GET",
+        template="/api/companion/own-history",
+        capability=CAPABILITY_X_REQUEST,
+    ),
+    RoutePolicy(
+        method="GET",
         template="/api/companion/review-inbox/{media_id}",
         capability=CAPABILITY_MEDIA_WORKFLOW_READ,
     ),
     RoutePolicy(
         method="POST",
         template="/api/companion/review-inbox/{media_id}/opened",
-        capability=CAPABILITY_MEDIA_WORKFLOW_READ,
+        capability=CAPABILITY_X_REQUEST,
         audit_action="companion.review.open",
         audit_target_type="media",
         audit_target_group="media_id",

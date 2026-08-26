@@ -6503,10 +6503,11 @@ function updateMetadataControls() {
     metadataStatus.textContent = "";
   }
   if (metadataAiAnalyzeButton) {
+    const hosted = companionWebHosted();
     const location = metadataAiLocation();
     const analysisAvailable = Boolean(aiCapability.available && location)
       && identityHasCapability("analysis.run");
-    const showAnalyze = analysisAvailable
+    const showAnalyze = !hosted && analysisAvailable
       && (!metadataWorkspace.aiSuggestionApplied || metadataWorkspace.analyzing);
     metadataAiAnalyzeButton.hidden = !showAnalyze;
     metadataAiAnalyzeButton.disabled = !showAnalyze
@@ -6518,7 +6519,8 @@ function updateMetadataControls() {
     metadataAiAnalyzeButton.setAttribute("aria-busy", metadataWorkspace.analyzing ? "true" : "false");
   }
   if (metadataLoadAiSuggestionButton) {
-    const loadAvailable = durableAnalysisLoadAvailable() && identityHasCapability("analysis.run");
+    const hosted = companionWebHosted();
+    const loadAvailable = !hosted && durableAnalysisLoadAvailable() && identityHasCapability("analysis.run");
     const loadBusy = metadataDurableAnalysis.loadingIntoDraft;
     metadataLoadAiSuggestionButton.hidden = !loadAvailable && !loadBusy;
     metadataLoadAiSuggestionButton.disabled = metadataWorkspace.loading

@@ -33,10 +33,11 @@ An authenticated FrameNest user can:
   catalog hit and shows no preview chrome; on-screen arrows appear only after
   two or more hits), see the selected meme as one JPEG preview, and attach it
   with Enter or Attach onto the composer file input;
-- open the toolbar side panel to use one merged title-bar companion history
+- open the toolbar side panel to use one title-bar companion history
   (`#review-history-toggle`, `#review-history`, `#review-history-list`) above
-  the surviving hosted FrameNest iframe. Compact analyzed titles sit newest
-  first; pending rows stay muted under **All**. Analyzed history opens hosted
+  the surviving hosted FrameNest iframe. Administrators see newest analyzed
+  titles first; ordinary requesters see their newest own Saves of any state.
+  Every history row opens hosted
   media-details via `open_details`. In that hosted
   Gallery, open-original stays bottom-right and Attach sits top-left on the card
   image. Ordinary browser tabs keep open-original only. Gallery 📎 attaches
@@ -45,29 +46,39 @@ An authenticated FrameNest user can:
 
 ## Review history
 
-The side panel has one merged title-bar history (`#review-history-toggle`,
+The side panel has one title-bar history (`#review-history-toggle`,
 `#review-history`, `#review-history-list`, `#review-history-all`) above the
-surviving iframe. There is no `#review-inbox` list. When connected history
-exists, a compact analyzed strip is visible directly under the title bar
-(newest `completed_at_ms` first; titles only, no ordinal markers). At most five
-analyzed rows fade by position; **All** reveals pending rows and remaining
-analyzed items. Analyzed history opens hosted FrameNest media-details via the
-web-bridge type `open_details`; the extension review overlay is not that click
-path. History starts collapsed only when empty, is not persisted, and expands
-directly under the title bar. Title bar, compact rows, pending rows, and **All**
-use dark surface plus accent outline, not solid neon fills. Analyzed rows use
-`review-history-button--analyzed`; unopened analyzed rows also use
-`review-history-button--unopened`. Pending rows use `review-history-button--pending`
-(muted outline), stay out of the compact five, and remain visible when **All** is
-expanded. Pending history includes administrator-owned cataloged X Saves with
-omitted Save category; movie remains excluded. Suggestion-ready unpublished
-items appear in companion history and the toolbar badge; they do not appear in
-the ordinary gallery. Clicking a row never removes it. A pending
-overlay shows `No successful analysis yet.` and does not send an opened
-mutation. Review Save retries opened before Apply when
-an earlier opened request failed, retains selections and blocks Apply if that
-retry fails, and does not issue a second opened mutation after success. Hover
-and keyboard focus alone do not mark a row opened.
+surviving iframe. There is no `#review-inbox` list. Routing uses
+`GET /api/identity/me`: administrators (`media.workflow.read`) load
+`GET /api/companion/review-inbox`; ordinary `x.request` identities load
+`GET /api/companion/own-history`; otherwise history chrome hides. When connected
+history exists, a compact strip of at most five titles sits directly under the
+title bar. Administrator compact rows are newest analyzed items
+(`completed_at_ms`); **All** reveals remaining analyzed items. Ordinary compact
+rows are newest own cataloged X Saves of any state (analyzed `completed_at_ms`,
+pending `created_at_ms`) so a fresh Save sits immediately under the title bar;
+**All** reveals the remainder. History starts collapsed only when empty, is not
+persisted, and expands directly under the title bar. Title bar, compact rows,
+pending rows, and **All** use dark surface plus accent outline, not solid neon
+fills. Analyzed rows use `review-history-button--analyzed`; unopened analyzed
+rows also use `review-history-button--unopened`. Pending rows use
+`review-history-button--pending` (muted outline) and stay plain: they never
+carry `--unopened` and never increment the badge.
+
+Administrator inbox is the global analyzed pool (website Analyze-by-AI
+successes join; movies stay excluded). Ordinary own-history is requester-private
+cataloged X Saves, all analysis states, movies excluded; Alice never sees Bob’s
+saves. Suggestion-ready unpublished items can appear in administrator history
+and the toolbar badge; they do not appear in the ordinary gallery. Clicking a
+row never removes it. Every history row posts hosted FrameNest media-details via
+the web-bridge type `open_details` (`storedOrigin`, never `*`). Analyzed clicks
+also POST opened for that actor with the row’s `analysis_run_id` without gating
+the iframe; pending clicks never POST opened. Hosted Details hide Analyze by AI
+and Load AI suggestion; standalone Details/Edit keep them. Edit stays
+capability-gated. Review Save retries opened before Apply when an earlier opened
+request failed, retains selections and blocks Apply if that retry fails, and
+does not issue a second opened mutation after success. Hover and keyboard focus
+alone do not mark a row opened.
 
 Save from X best-effort seeds `GET /api/canonical-tags?surface=x-companion-save`
 with the fixed `x` / `𝕏` pair and prepends that exact pair once when the list
@@ -78,24 +89,27 @@ responses expose `canonical.tag_sources` and retain whole-field
 `field_sources.tags`.
 
 The successful connection status is blank. Configuration guidance, framing and
-request failures, `Cleared`, and `Attached` still use `#shell-status`. An
-ordinary 403 or a complete-list failure hides history; 403 also disables and
-collapses it. The toolbar badge remains the server `unopened_count` as
-`1`…`99` / `99+`, never a rendered length or title; pending rows never increment
-it. Alarm `framenest.review-inbox` runs every 1 minute. There is no
-`notifications` permission or second counter. The hosted `#frame` stays mounted
-and Attach survives. Ingest Save remains Title→Tags→Description→Save with no
-radios or Analyze. Exactly four `companion_mutation` routes remain: X submit, X
-retry, review opened, and review apply.
+request failures, `Cleared`, and `Attached` still use `#shell-status`. A
+complete-list failure hides history. Missing `x.request` (and missing
+`media.workflow.read`) also hides and disables the toggle. The toolbar badge
+remains the server `unopened_count` as `1`…`99` / `99+`, never a rendered length
+or title; pending rows never increment it. Administrators refresh the badge from
+inbox `limit=1`; ordinary identities refresh it from own-history `limit=1`.
+Alarm `framenest.review-inbox` runs every 1 minute. There is no `notifications`
+permission or second counter. The hosted `#frame` stays mounted and Attach
+survives. Ingest Save remains Title→Tags→Description→Save with no radios or
+Analyze. Exactly four `companion_mutation` routes remain: X submit, X retry,
+review opened, and review apply. Opened stays the same of those four; ordinary
+callers may mark opened only on an owned cataloged X item (uniform 404
+otherwise). Inbox list, detail, and apply stay administrator-only.
 
-A second overlay opens local `ui/review.html` through
-`chrome.runtime.getURL` plus `#media=<uuid>` for pending history. It is not the
-analyzed-history click path, is not web-accessible, and is not inside `#frame`.
-Ingest Save remains the frozen capture form (no category radios).
+`ui/review.html` remains in the extension tree and is unused for history clicks.
+It is not web-accessible and is not inside `#frame`. Ingest Save remains the
+frozen capture form (no category radios).
 
-GET inbox routes work with an empty origin allowlist. Mutations that carry the
-extension Origin fail closed when the allowlist is empty. This document does
-not authorize NUC deployment or enabling automatic analysis.
+GET inbox and GET own-history work with an empty origin allowlist. Mutations
+that carry the extension Origin fail closed when the allowlist is empty. This
+document does not authorize NUC deployment or enabling automatic analysis.
 
 Save is a hover/focus overlay at the bottom-right of own media tiles, not an
 action-row control. Click opens the Save popup instead of silently posting

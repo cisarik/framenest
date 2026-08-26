@@ -13,6 +13,7 @@ from framenest.application.companion_review import (
     decode_companion_review_inbox_cursor,
 )
 from framenest.application.ports.companion_review_repository import (
+    CompanionReviewMediaNotFoundError,
     CompanionReviewMovieExcludedError,
     CompanionReviewRunNotEligibleError,
     CompanionReviewStaleMappingError,
@@ -537,29 +538,52 @@ def test_mixed_inbox_includes_only_owned_pending_and_analyzed_wins(
         )
         ids = [item.media_id for item in page.items]
         assert ids.count(GENERIC) == 1
-        assert PENDING in ids
+        assert PENDING not in ids
         assert OTHER_PENDING not in ids
         assert MOVIE not in ids
-        pending = next(item for item in page.items if item.media_id == PENDING)
+        generic = next(item for item in page.items if item.media_id == GENERIC)
+        assert generic.analyzed is True
+        assert generic.analysis_run_id == GENERIC_RUN
+        assert WEBSITE in ids
+        assert GENERIC in ids
+        assert page.unopened_count == sum(item.analyzed for item in page.items)
+
+        own = repository.list_own_history(
+            actor_login_key=ADMIN_KEY, limit=25, cursor=None
+        )
+        own_ids = [item.media_id for item in own.items]
+        assert PENDING in own_ids
+        assert OTHER_PENDING not in own_ids
+        assert MOVIE not in own_ids
+        assert WEBSITE not in own_ids
+        pending = next(item for item in own.items if item.media_id == PENDING)
         assert pending.title == "Pending claim title"
         assert pending.created_at_ms == 180
         assert pending.analyzed is False
         assert pending.analysis_run_id is None
         assert pending.completed_at_ms is None
         assert pending.unopened is False
-        generic = next(item for item in page.items if item.media_id == GENERIC)
-        assert generic.analyzed is True
-        assert generic.analysis_run_id == GENERIC_RUN
-        assert ids.index(WEBSITE) < ids.index(PENDING)
-        assert page.unopened_count == sum(item.analyzed for item in page.items)
+        assert own.unopened_count == sum(
+            item.analyzed and item.unopened for item in own.items
+        )
 
-        other_page = repository.list_inbox(
+        other_inbox = repository.list_inbox(
             actor_login_key=OTHER_KEY, limit=25, cursor=None
         )
-        other_ids = [item.media_id for item in other_page.items]
-        assert OTHER_PENDING in other_ids
-        assert PENDING not in other_ids
-        assert other_page.unopened_count == page.unopened_count
+        other_inbox_ids = [item.media_id for item in other_inbox.items]
+        assert GENERIC in other_inbox_ids
+        assert PENDING not in other_inbox_ids
+        assert OTHER_PENDING not in other_inbox_ids
+        assert other_inbox.unopened_count == page.unopened_count
+
+        other_own = repository.list_own_history(
+            actor_login_key=OTHER_KEY, limit=25, cursor=None
+        )
+        other_own_ids = [item.media_id for item in other_own.items]
+        assert OTHER_PENDING in other_own_ids
+        assert PENDING not in other_own_ids
+        assert GENERIC not in other_own_ids
+        assert WEBSITE not in other_own_ids
     finally:
         dispose_engine(engine)
 
@@ -659,31 +683,40 @@ def test_mixed_inbox_includes_omitted_category_owned_general_saves(
             actor_login_key=ADMIN_KEY, limit=25, cursor=None
         )
         ids = [item.media_id for item in page.items]
-        assert OMITTED in ids
+        assert OMITTED not in ids
         assert CLAIM_MOVIE not in ids
         assert OTHER_OMITTED not in ids
         assert MOVIE not in ids
         assert ids.count(GENERIC) == 1
-        omitted = next(item for item in page.items if item.media_id == OMITTED)
+        generic = next(item for item in page.items if item.media_id == GENERIC)
+        assert generic.analyzed is True
+        assert generic.analysis_run_id == GENERIC_RUN
+        assert page.unopened_count == sum(item.analyzed for item in page.items)
+
+        own = repository.list_own_history(
+            actor_login_key=ADMIN_KEY, limit=25, cursor=None
+        )
+        own_ids = [item.media_id for item in own.items]
+        assert OMITTED in own_ids
+        assert CLAIM_MOVIE not in own_ids
+        assert OTHER_OMITTED not in own_ids
+        assert MOVIE not in own_ids
+        assert own_ids.count(GENERIC) == 1
+        omitted = next(item for item in own.items if item.media_id == OMITTED)
         assert omitted.title == "Omitted category title"
         assert omitted.created_at_ms == 210
         assert omitted.analyzed is False
         assert omitted.analysis_run_id is None
         assert omitted.completed_at_ms is None
         assert omitted.unopened is False
-        generic = next(item for item in page.items if item.media_id == GENERIC)
-        assert generic.analyzed is True
-        assert generic.analysis_run_id == GENERIC_RUN
-        assert page.unopened_count == sum(item.analyzed for item in page.items)
 
-        other_page = repository.list_inbox(
+        other_own = repository.list_own_history(
             actor_login_key=OTHER_KEY, limit=25, cursor=None
         )
-        other_ids = [item.media_id for item in other_page.items]
+        other_ids = [item.media_id for item in other_own.items]
         assert OTHER_OMITTED in other_ids
         assert OMITTED not in other_ids
         assert CLAIM_MOVIE not in other_ids
-        assert other_page.unopened_count == page.unopened_count
     finally:
         dispose_engine(engine)
 
@@ -715,6 +748,147 @@ def test_actor_opened_rows_are_isolated(tmp_path: Path) -> None:
         assert admin_generic.unopened is False
         assert other_generic.unopened is True
         assert admin_page.unopened_count == other_page.unopened_count - 1
+    finally:
+        dispose_engine(engine)
+
+
+def test_own_history_opened_isolation_does_not_use_global_unopened_count(
+    tmp_path: Path,
+) -> None:
+    alice = "alice@example.com"
+    bob = "bob@example.com"
+    alice_media = "51515151-5151-4515-8515-515151515151"
+    alice_loc = "52525252-5252-4525-8525-525252525252"
+    alice_run = "53535353-5353-4535-8535-535353535353"
+    alice_claim = "54545454-5454-4545-8545-545454545454"
+    alice_asset = "55555555-5555-4555-8555-555555555555"
+    bob_media = "56565656-5656-4565-8565-565656565656"
+    bob_loc = "57575757-5757-4575-8575-575757575757"
+    bob_run = "58585858-5858-4585-8585-585858585858"
+    bob_claim = "59595959-5959-4595-8595-595959595959"
+    bob_asset = "60606060-6060-4606-8606-606060606060"
+    repository, engine = _repository(tmp_path)
+    try:
+        with engine.begin() as connection:
+            _insert_media(connection, alice_media, alice_loc, "meme", "Alice title")
+            _insert_x_save(
+                connection,
+                claim_id=alice_claim,
+                asset_id=alice_asset,
+                media_id=alice_media,
+                location_id=alice_loc,
+                owner=alice,
+                post_id="111000111",
+                title="Alice claim",
+                stage_key="a" * 32,
+            )
+            _insert_analyzed_run(
+                connection,
+                alice_run,
+                alice_media,
+                alice_loc,
+                completed_at_ms=500,
+                title="Alice analyzed",
+                tags=["Cats"],
+            )
+            _insert_media(connection, bob_media, bob_loc, "meme", "Bob title")
+            _insert_x_save(
+                connection,
+                claim_id=bob_claim,
+                asset_id=bob_asset,
+                media_id=bob_media,
+                location_id=bob_loc,
+                owner=bob,
+                post_id="111000222",
+                title="Bob claim",
+                stage_key="b" * 32,
+            )
+            _insert_analyzed_run(
+                connection,
+                bob_run,
+                bob_media,
+                bob_loc,
+                completed_at_ms=510,
+                title="Bob analyzed",
+                tags=["Dogs"],
+            )
+        alice_before = repository.list_own_history(
+            actor_login_key=alice, limit=25, cursor=None
+        )
+        bob_before = repository.list_own_history(
+            actor_login_key=bob, limit=25, cursor=None
+        )
+        admin_before = repository.list_inbox(
+            actor_login_key=ADMIN_KEY, limit=25, cursor=None
+        )
+        assert {item.media_id for item in alice_before.items} == {alice_media}
+        assert {item.media_id for item in bob_before.items} == {bob_media}
+        alice_item = alice_before.items[0]
+        assert alice_item.analyzed is True
+        assert alice_item.unopened is True
+        assert alice_before.unopened_count == 1
+        assert bob_before.unopened_count == 1
+        admin_alice = next(
+            item for item in admin_before.items if item.media_id == alice_media
+        )
+        assert admin_alice.unopened is True
+
+        opened = repository.mark_opened(
+            media_id=MediaId.from_string(alice_media),
+            actor_login_key=alice,
+            analysis_run_id=MediaId.from_string(alice_run),
+            now_ms=600,
+            require_owner=True,
+        )
+        assert opened.unopened is False
+        alice_after = repository.list_own_history(
+            actor_login_key=alice, limit=25, cursor=None
+        )
+        bob_after = repository.list_own_history(
+            actor_login_key=bob, limit=25, cursor=None
+        )
+        admin_after = repository.list_inbox(
+            actor_login_key=ADMIN_KEY, limit=25, cursor=None
+        )
+        assert alice_after.items[0].unopened is False
+        assert alice_after.unopened_count == 0
+        assert bob_after.items[0].unopened is True
+        assert bob_after.unopened_count == 1
+        admin_alice_after = next(
+            item for item in admin_after.items if item.media_id == alice_media
+        )
+        assert admin_alice_after.unopened is True
+
+        admin_opened = repository.mark_opened(
+            media_id=MediaId.from_string(alice_media),
+            actor_login_key=ADMIN_KEY,
+            analysis_run_id=MediaId.from_string(alice_run),
+            now_ms=700,
+        )
+        alice_after_admin = repository.list_own_history(
+            actor_login_key=alice, limit=25, cursor=None
+        )
+        assert alice_after_admin.items[0].unopened is False
+        assert alice_after_admin.unopened_count == 0
+
+        with pytest.raises(CompanionReviewMediaNotFoundError):
+            repository.mark_opened(
+                media_id=MediaId.from_string(bob_media),
+                actor_login_key=alice,
+                analysis_run_id=MediaId.from_string(bob_run),
+                now_ms=800,
+                require_owner=True,
+            )
+        with pytest.raises(CompanionReviewMediaNotFoundError):
+            repository.mark_opened(
+                media_id=MediaId.from_string(
+                    "99999999-9999-4999-8999-999999999999"
+                ),
+                actor_login_key=alice,
+                analysis_run_id=MediaId.from_string(alice_run),
+                now_ms=800,
+                require_owner=True,
+            )
     finally:
         dispose_engine(engine)
 

@@ -1553,6 +1553,11 @@ def test_empty_companion_allowlist_rejects_extension_origin(
         headers=_serve_headers(ADMIN_LOGIN),
     )
     assert inbox.status_code == 200
+    own = client.get(
+        "/api/companion/own-history",
+        headers=_serve_headers(USER_LOGIN, "User"),
+    )
+    assert own.status_code == 200
 
 
 def test_spoofed_or_absent_companion_origin_is_rejected(companion_client) -> None:

@@ -86,11 +86,16 @@ def test_only_companion_mutations_are_companion_flagged() -> None:
     assert detail.capability == CAPABILITY_MEDIA_WORKFLOW_READ
     assert inbox.additional_capabilities == ()
     assert detail.additional_capabilities == ()
-    assert opened.capability == CAPABILITY_MEDIA_WORKFLOW_READ
+    assert opened.capability == CAPABILITY_X_REQUEST
     assert opened.additional_capabilities == ()
     assert apply.capability == CAPABILITY_MEDIA_CONTENT_PUBLISH
     assert apply.additional_capabilities == (CAPABILITY_METADATA_CANONICAL_WRITE,)
     from framenest.adapters.api.tailscale_ingress import ROUTE_POLICIES
+
+    own, own_match = find_route_policy("GET", "/api/companion/own-history")
+    assert own_match is not None and own.companion_mutation is False
+    assert own.capability == CAPABILITY_X_REQUEST
+    assert own.additional_capabilities == ()
 
     flagged = [policy for policy in ROUTE_POLICIES if policy.companion_mutation]
     assert {(policy.method, policy.pattern.pattern) for policy in flagged} == {

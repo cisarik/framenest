@@ -391,6 +391,14 @@ test("privileged controls are gated by capabilities in source", () => {
   assert.ok(identityGateBody.includes('capabilities.has("metadata.canonical.write")'));
 });
 
+test("hosted Details hide Analyze by AI and Load AI suggestion", () => {
+  const controls = extractFunction(APP_SOURCE, "updateMetadataControls");
+  assert.ok(controls.includes("companionWebHosted()"));
+  assert.ok(controls.includes("showAnalyze = !hosted && analysisAvailable"));
+  assert.ok(controls.includes("loadAvailable = !hosted && durableAnalysisLoadAvailable"));
+  assert.equal(controls.includes("URLSearchParams"), false);
+});
+
 test("gallery AI quick action fails closed for missing unresolved and ordinary identity", () => {
   const identityGateBody = extractFunction(APP_SOURCE, "identityAllowsCardAiQuickAction");
   assert.ok(identityGateBody.includes("identityState.resolved"));

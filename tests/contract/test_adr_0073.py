@@ -74,6 +74,23 @@ def test_living_docs_drop_two_list_and_replace_current_contract() -> None:
             assert phrase not in text, f"{path} still contains {phrase!r}"
 
 
+def test_adr_0076_is_accepted_and_indexed() -> None:
+    adr_path = (
+        REPOSITORY_ROOT
+        / "docs"
+        / "adr"
+        / "0076-companion-history-hosted-click-admin-analyzed-inbox-and-ordinary-own-history.md"
+    )
+    adr = _text(adr_path)
+    index = _text(ADR_INDEX_PATH)
+    assert "# ADR-0076: Companion History Hosted Click, Administrator Analyzed Inbox, and Ordinary Own-History" in adr
+    assert "`Accepted`" in adr
+    assert "GET /api/companion/own-history" in adr
+    assert "no 0034" in adr.lower() or "No 0034" in adr
+    assert "0076-companion-history-hosted-click-admin-analyzed-inbox-and-ordinary-own-history.md" in index
+    assert "succeeded by [ADR-0076]" in index
+
+
 def test_current_schema_head_is_0033() -> None:
     assert "schema head `0033`" in _text(REPOSITORY_ROOT / "README.md")
     assert "schema head `0033`" in _text(REPOSITORY_ROOT / "SPEC.md")

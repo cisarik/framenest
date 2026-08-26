@@ -513,7 +513,13 @@ async function applyBadgeFromResponse(response) {
 }
 
 async function refreshReviewInboxBadge() {
-  const response = await fetchJson("reviewInbox", {
+  const route = await historyListRoute();
+  if (!route.ok) {
+    await clearBadgeText();
+    return { ok: false, error: route.error || "identity_unavailable" };
+  }
+  const response = await fetchJson(route.pathName, {
+    path: route.path,
     suffix: companion.reviewInboxQuerySuffix(companion.REVIEW_INBOX.badgeLimit),
   });
   await applyBadgeFromResponse(response);
@@ -603,14 +609,51 @@ async function failedReviewInbox(response, error) {
     ok: false,
     error: error || (response && response.error) || "request_failed",
     status: (response && response.status) || 0,
-    forbidden: inboxForbidden(response),
+    forbidden: inboxForbidden(response) || Boolean(response && response.forbidden),
     items: [],
     unopened_count: 0,
     awaiting: [],
+    history_source: "",
   };
 }
 
+function capabilitiesFromBody(body) {
+  const caps = body && Array.isArray(body.capabilities) ? body.capabilities : [];
+  return {
+    workflowRead: caps.indexOf("media.workflow.read") !== -1,
+    xRequest: caps.indexOf("x.request") !== -1,
+  };
+}
+
+async function historyListRoute() {
+  const identity = await fetchJson("identity");
+  if (!identity || !identity.ok) {
+    return {
+      ok: false,
+      error: (identity && identity.error) || "identity_unavailable",
+      forbidden: Boolean(identity && (identity.status === 403 || identity.error === "http_403")),
+    };
+  }
+  const caps = capabilitiesFromBody(identity.body);
+  if (caps.workflowRead) {
+    return { ok: true, pathName: "reviewInbox", history_source: "review-inbox" };
+  }
+  if (caps.xRequest) {
+    return {
+      ok: true,
+      pathName: "ownHistory",
+      path: "/api/companion/own-history",
+      history_source: "own-history",
+    };
+  }
+  return { ok: false, error: "http_403", forbidden: true };
+}
+
 async function reviewInbox() {
+  const route = await historyListRoute();
+  if (!route.ok) {
+    return failedReviewInbox(route, route.error);
+  }
   const items = [];
   const itemIndexes = {};
   const seenCursors = {};
@@ -618,7 +661,8 @@ async function reviewInbox() {
   let unopenedCount = 0;
   let firstPage = true;
   while (true) {
-    const response = await fetchJson("reviewInbox", {
+    const response = await fetchJson(route.pathName, {
+      path: route.path,
       suffix: reviewInboxPageSuffix(cursor),
     });
     if (!response.ok) {
@@ -665,6 +709,7 @@ async function reviewInbox() {
     items: items,
     unopened_count: unopenedCount,
     awaiting: awaiting,
+    history_source: route.history_source,
   };
 }
 
@@ -716,7 +761,11 @@ async function fetchJson(pathName, options) {
   if (!origin) {
     return { ok: false, error: "not_configured" };
   }
-  const path = companion.pathFor(pathName, options && options.ids);
+  const override = options && options.path;
+  const path =
+    typeof override === "string" && override
+      ? override
+      : companion.pathFor(pathName, options && options.ids);
   if (!path) {
     return { ok: false, error: "invalid_path" };
   }

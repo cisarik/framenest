@@ -79,6 +79,11 @@ function createChromeFake(options) {
       },
     inboxResponses: (options && options.inboxResponses) || null,
     inboxResponseIndex: 0,
+    identityStatus: (options && options.identityStatus) || 200,
+    identityBody:
+      (options && options.identityBody) || {
+        capabilities: ["media.workflow.read", "x.request"],
+      },
     claimBody: (options && options.claimBody) || { state: "completed", assets: [] },
     detailStatus: (options && options.detailStatus) || 200,
     detailBody: (options && options.detailBody) || {},
@@ -199,6 +204,9 @@ function createChromeFake(options) {
   async function fetchImpl(url, init) {
     state.fetchCalls.push({ url: String(url), init: init || {} });
     const href = String(url);
+    if (href.indexOf("/api/identity/me") !== -1) {
+      return jsonResponse(state.identityStatus, state.identityBody);
+    }
     if (href.indexOf("/api/x/requests/") !== -1) {
       return jsonResponse(200, state.claimBody);
     }
@@ -210,6 +218,14 @@ function createChromeFake(options) {
     }
     if (/\/api\/companion\/review-inbox\/[^/?]+(?:\?|$)/.test(href)) {
       return jsonResponse(state.detailStatus, state.detailBody);
+    }
+    if (href.indexOf("/api/companion/own-history") !== -1) {
+      if (Array.isArray(state.inboxResponses)) {
+        const response = state.inboxResponses[state.inboxResponseIndex];
+        state.inboxResponseIndex += 1;
+        return jsonResponse(response.status, response.body);
+      }
+      return jsonResponse(state.inboxStatus, state.inboxBody);
     }
     if (href.indexOf("/api/companion/review-inbox") !== -1) {
       if (Array.isArray(state.inboxResponses)) {
@@ -525,7 +541,8 @@ test("review overlay protocol uses UUID pathFor and dropUnknown rejects unknown 
   assert.equal(companion.reviewInboxQuerySuffix(1), "?limit=1");
   assert.doesNotMatch(workerSource, /fetch\(payload\.url\)/);
   assert.doesNotMatch(workerSource, /fetch\(message\.url\)/);
-  assert.match(workerSource, /fetchJson\("reviewInbox"/);
+  assert.match(workerSource, /fetchJson\("identity"/);
+  assert.match(workerSource, /\/api\/companion\/own-history/);
   assert.match(workerSource, /fetchJson\("reviewInboxDetail"/);
   assert.match(workerSource, /fetchJson\("reviewInboxOpened"/);
   assert.match(workerSource, /fetchJson\("reviewInboxApply"/);
@@ -678,6 +695,28 @@ test("badge refresh uses unopened_count, limit=1, and clears on 0, 403, and fail
   assert.equal(worker.state.badgeText, "");
 });
 
+test("ordinary badge refresh uses own-history limit=1 and does not call inbox", async () => {
+  const worker = loadWorker({
+    storage: { frameNestOrigin: ORIGIN },
+    identityBody: { capabilities: ["x.request"] },
+  });
+  worker.state.inboxBody = { items: [], unopened_count: 3, next_cursor: null };
+  await worker.context.refreshReviewInboxBadge();
+  const ownCall = worker.state.fetchCalls.find((call) =>
+    call.url.indexOf("/api/companion/own-history") !== -1
+  );
+  assert.ok(ownCall);
+  assert.equal(ownCall.url, ORIGIN + "/api/companion/own-history?limit=1");
+  assert.equal(ownCall.init.method || "GET", "GET");
+  assert.equal(worker.state.badgeText, "3");
+  assert.equal(
+    worker.state.fetchCalls.some((call) =>
+      /\/api\/companion\/review-inbox(?:\?|$)/.test(call.url)
+    ),
+    false
+  );
+});
+
 test("alarm handler refreshes the badge and ignores other alarm names", async () => {
   const worker = loadWorker({ storage: { frameNestOrigin: ORIGIN } });
   assert.equal(worker.state.alarmListeners.length, 1);
@@ -792,13 +831,17 @@ test("REVIEW_INBOX aggregates encoded cursor pages in server order", async () =>
   const result = await worker.context.reviewInbox();
   assert.equal(result.ok, true);
   assert.equal(result.unopened_count, 1);
+  assert.equal(result.history_source, "review-inbox");
   assert.deepEqual(
     Array.from(result.items, (item) => item.title),
     ["Analyzed replacement", "Older"]
   );
-  assert.equal(worker.state.fetchCalls.length, 2);
-  const first = new URL(worker.state.fetchCalls[0].url);
-  const second = new URL(worker.state.fetchCalls[1].url);
+  const listCalls = worker.state.fetchCalls.filter((call) =>
+    call.url.indexOf("/api/companion/review-inbox") !== -1
+  );
+  assert.equal(listCalls.length, 2);
+  const first = new URL(listCalls[0].url);
+  const second = new URL(listCalls[1].url);
   assert.equal(first.searchParams.get("limit"), "100");
   assert.equal(first.searchParams.has("cursor"), false);
   assert.equal(second.searchParams.get("limit"), "100");
@@ -838,7 +881,10 @@ test("REVIEW_INBOX rejects cursor cycles and later-page failures without partial
   assert.equal(cycle.error, "cursor_cycle");
   assert.deepEqual(Array.from(cycle.items), []);
   assert.equal(JSON.stringify(cycle).includes("Must not escape"), false);
-  assert.equal(cycleWorker.state.fetchCalls.length, 2);
+  const cycleListCalls = cycleWorker.state.fetchCalls.filter((call) =>
+    call.url.indexOf("/api/companion/review-inbox") !== -1
+  );
+  assert.equal(cycleListCalls.length, 2);
   assert.equal(cycleWorker.state.badgeText, "");
 
   const failedWorker = loadWorker({
@@ -1193,11 +1239,55 @@ test("compact analyzed history is newest-first, capped at five, then All", () =>
   );
 });
 
-test("analyzed history click posts open_details and pending keeps the overlay", () => {
+test("ordinary own-history compact is newest five of any state", () => {
+  const inbox = loadReviewInbox();
+  const items = [
+    {
+      media_id: MEDIA_A,
+      title: "Old analyzed",
+      created_at_ms: 1,
+      analyzed: true,
+      analysis_run_id: RUN_NEW,
+      completed_at_ms: 10,
+      unopened: true,
+    },
+    {
+      media_id: MEDIA_B,
+      title: "Fresh pending",
+      created_at_ms: 99,
+      analyzed: false,
+      analysis_run_id: null,
+      completed_at_ms: null,
+      unopened: false,
+    },
+  ];
+  const partitioned = inbox.partitionHistoryItems(items, "own_activity");
+  assert.equal(partitioned.compact[0].title, "Fresh pending");
+  assert.equal(partitioned.compact[0].analyzed, false);
+  assert.equal(partitioned.compact[1].title, "Old analyzed");
+  const nodes = fakeReviewChromeNodes();
+  inbox.renderCollections(nodes, items, "own_activity");
+  assert.equal(nodes.historyList.childNodes[0].childNodes[0].textContent, "Fresh pending");
+  assert.match(
+    nodes.historyList.childNodes[0].childNodes[0].className,
+    /review-history-button--pending/
+  );
+  assert.doesNotMatch(
+    nodes.historyList.childNodes[0].childNodes[0].className,
+    /unopened/
+  );
+});
+
+test("analyzed history click posts opened then open_details; pending is hosted without opened", () => {
   const inbox = loadReviewInbox();
   const details = [];
   const pending = [];
-  const analyzed = { media_id: MEDIA_A, title: "Synthetic analyzed", analyzed: true };
+  const analyzed = {
+    media_id: MEDIA_A,
+    title: "Synthetic analyzed",
+    analyzed: true,
+    analysis_run_id: RUN_NEW,
+  };
   assert.equal(inbox.historyClickKind(analyzed), "open_details");
   assert.equal(
     inbox.activateHistoryItem(
@@ -1214,7 +1304,7 @@ test("analyzed history click posts open_details and pending keeps the overlay", 
   assert.deepEqual(details, [MEDIA_A]);
   assert.deepEqual(pending, []);
   const waiting = { media_id: MEDIA_B, title: "Synthetic pending", analyzed: false };
-  assert.equal(inbox.historyClickKind(waiting), "pending_overlay");
+  assert.equal(inbox.historyClickKind(waiting), "open_details");
   assert.equal(
     inbox.activateHistoryItem(
       waiting,
@@ -1225,10 +1315,10 @@ test("analyzed history click posts open_details and pending keeps the overlay", 
         pending.push(id);
       }
     ),
-    "pending_overlay"
+    "open_details"
   );
-  assert.deepEqual(details, [MEDIA_A]);
-  assert.deepEqual(pending, [MEDIA_B]);
+  assert.deepEqual(details, [MEDIA_A, MEDIA_B]);
+  assert.deepEqual(pending, []);
   const message = inbox.openDetailsMessage(MEDIA_A);
   assert.equal(message.v, "framenest.companion.web.v1");
   assert.equal(message.type, "open_details");
@@ -1239,8 +1329,13 @@ test("analyzed history click posts open_details and pending keeps the overlay", 
   assert.match(extractNamedFunction(sidebarSource, "openHostedDetails"), /postToFrame\(message, storedOrigin\)/);
   assert.match(extractNamedFunction(sidebarSource, "openHostedDetails"), /handshakeTimeoutCopy/);
   assert.doesNotMatch(extractNamedFunction(sidebarSource, "openHostedDetails"), /openReviewOverlay/);
-  assert.doesNotMatch(extractNamedFunction(sidebarSource, "activateHistoryItem"), /REVIEW_INBOX_OPENED/);
-  assert.doesNotMatch(extractNamedFunction(sidebarSource, "onReviewListClick"), /REVIEW_INBOX_OPENED/);
+  const clickSource = extractNamedFunction(sidebarSource, "onReviewListClick");
+  assert.match(clickSource, /openHostedDetails/);
+  assert.match(clickSource, /REVIEW_INBOX_OPENED/);
+  const hostedIndex = clickSource.indexOf("openHostedDetails");
+  const openedIndex = clickSource.indexOf("REVIEW_INBOX_OPENED");
+  assert.ok(hostedIndex >= 0 && openedIndex > hostedIndex);
+  assert.match(clickSource, /item\.analyzed === true/);
   assert.match(reviewSource, /No successful analysis yet\./);
 });
 

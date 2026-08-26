@@ -994,25 +994,31 @@ analysis proposals without provider execution or enqueue.
 
 The companion review surface MUST expose `GET /api/companion/review-inbox`,
 `GET /api/companion/review-inbox/{media_id}`,
+`GET /api/companion/own-history`,
 `POST /api/companion/review-inbox/{media_id}/opened`, and
 `POST /api/companion/review-inbox/{media_id}/apply`. The side panel MUST render
-one merged title-bar history of pending and analyzed items (`#review-history-toggle`,
+one title-bar history (`#review-history-toggle`,
 `#review-history`, `#review-history-list`) per
-[ADR-0073](docs/adr/0073-companion-merged-history-chrome-pending-visibility-x-seed-tag-and-preserving-apply.md).
-Inbox items MUST include `created_at_ms` and `analyzed`; `analysis_run_id` and
+[ADR-0076](docs/adr/0076-companion-history-hosted-click-admin-analyzed-inbox-and-ordinary-own-history.md).
+Administrator inbox items MUST be analyzed-only. Ordinary own-history MUST list
+only that actor’s cataloged X Saves. Inbox items MUST include `created_at_ms` and
+`analyzed`; `analysis_run_id` and
 `completed_at_ms` MUST be null only when `analyzed` is false. History MUST start
 collapsed without a persisted preference, preserve server order across every
 cursor page, and fail the complete list rather than expose partial titles on a
 later-page error or repeated cursor. Empty history MUST consume no height.
-Clicking a row MUST NOT remove it. A pending overlay MUST show `No successful analysis yet.` and MUST NOT send an opened mutation. The hosted iframe MUST
+Clicking a row MUST NOT remove it. Every history row MUST post hosted
+`open_details` without gating the iframe on opened HTTP. Pending rows MUST NOT
+send an opened mutation. The hosted iframe MUST
 remain mounted. A row MUST mark opened only after durable opened success and
 refresh; Review Save MUST ensure opened before Apply and MUST retain selections
 and block Apply when that opened retry fails. Successful connection MUST render
 no status line; failure guidance, `Cleared`, and `Attached` remain visible. The
 toolbar badge MUST derive only from server `unopened_count`; pending rows MUST
-NOT increment it. An ordinary-identity 403 MUST hide history and clear the
-badge. Exactly four `companion_mutation` routes exist: X submit, X retry, review
-opened, and review apply. GET inbox routes MUST work with an empty
+NOT increment it. Ordinary identities MUST receive own-history rather than inbox
+list/detail/apply. Exactly four `companion_mutation` routes exist: X submit, X
+retry, review opened, and review apply. GET inbox and GET own-history routes MUST
+work with an empty
 `companion_extension_origins` allowlist. Mutations that carry the extension
 Origin MUST fail closed when that allowlist is empty. `GET /api/canonical-tags`
 with `surface=x-companion-save` MUST best-effort seed the fixed `x` / `𝕏` pair

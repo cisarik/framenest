@@ -69,6 +69,7 @@ extension-origin allowlist is configured
 [ADR-0071](docs/adr/0071-native-side-panel-review-inbox-chrome.md),
 [ADR-0072](docs/adr/0072-native-side-panel-unread-inbox-and-title-bar-history-chrome.md),
 [ADR-0073](docs/adr/0073-companion-merged-history-chrome-pending-visibility-x-seed-tag-and-preserving-apply.md),
+[ADR-0076](docs/adr/0076-companion-history-hosted-click-admin-analyzed-inbox-and-ordinary-own-history.md),
 [docs/X_COMPANION.md](docs/X_COMPANION.md)).
 [ADR-0074](docs/adr/0074-dual-audience-public-published-and-tailscale-workspace-boundary.md)
 is accepted architecture for a dual-audience boundary: the Tailscale
@@ -703,7 +704,8 @@ Current foundation files:
 - [`docs/adr/0070-companion-exclusion-of-movie-workflows.md`](docs/adr/0070-companion-exclusion-of-movie-workflows.md) records companion exclusion of movie workflows.
 - [`docs/adr/0071-native-side-panel-review-inbox-chrome.md`](docs/adr/0071-native-side-panel-review-inbox-chrome.md) records native side-panel review inbox chrome.
 - [`docs/adr/0072-native-side-panel-unread-inbox-and-title-bar-history-chrome.md`](docs/adr/0072-native-side-panel-unread-inbox-and-title-bar-history-chrome.md) records unread-inbox and title-bar history chrome; named two-list statements are succeeded by ADR-0073.
-- [`docs/adr/0073-companion-merged-history-chrome-pending-visibility-x-seed-tag-and-preserving-apply.md`](docs/adr/0073-companion-merged-history-chrome-pending-visibility-x-seed-tag-and-preserving-apply.md) records merged companion history, pending visibility, the `x`/`𝕏` seed tag, and preserving Apply.
+- [`docs/adr/0073-companion-merged-history-chrome-pending-visibility-x-seed-tag-and-preserving-apply.md`](docs/adr/0073-companion-merged-history-chrome-pending-visibility-x-seed-tag-and-preserving-apply.md) records merged companion history, pending visibility, the `x`/`𝕏` seed tag, and preserving Apply; mixed-inbox and pending-overlay statements are succeeded by ADR-0076.
+- [`docs/adr/0076-companion-history-hosted-click-admin-analyzed-inbox-and-ordinary-own-history.md`](docs/adr/0076-companion-history-hosted-click-admin-analyzed-inbox-and-ordinary-own-history.md) records hosted history clicks, the administrator analyzed-only inbox, ordinary own-history, and own-item opened.
 
 ## Non-Goals for the Current Stage
 
