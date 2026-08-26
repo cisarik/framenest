@@ -6,7 +6,7 @@ import math
 import re
 from dataclasses import dataclass
 from pathlib import PurePosixPath
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 from framenest.application.library_scan import LibraryScanCandidateKind
 from framenest.application.media_analysis import (
@@ -372,7 +372,11 @@ class MediaSuggestionPreviewResult:
 
 @dataclass(frozen=True, slots=True)
 class ImportedMediaSuggestionPreviewResult:
-    """Complete non-persistent suggestion preview for one imported media location."""
+    """Suggestion preview for one imported catalog location.
+
+    Canonical metadata is not written by this preview. Companion-visible
+    generic analysis persistence is an optional injected join.
+    """
 
     media_id: MediaId
     location_id: MediaLocationId
@@ -442,6 +446,18 @@ class PreviewMediaSuggestion:
         )
 
 
+class ImportedPreviewAnalysisJoin(Protocol):
+    """Persist a companion-visible generic run from an already obtained suggestion."""
+
+    def execute(
+        self,
+        media_id: MediaId,
+        location_id: MediaLocationId,
+        suggestion: MediaSuggestion,
+    ) -> object | None:
+        """Record one analyzed run without calling the provider again."""
+
+
 class PreviewImportedMediaSuggestion:
     """Compose local preparation and provider suggestion for one imported media location."""
 
@@ -451,11 +467,13 @@ class PreviewImportedMediaSuggestion:
         library_repository: LibraryRepository,
         preparer: LocalMediaAnalysisPreparer,
         provider: MediaSuggestionProvider,
+        analysis_join: ImportedPreviewAnalysisJoin | None = None,
     ) -> None:
         self._media_repository = media_repository
         self._library_repository = library_repository
         self._preparer = preparer
         self._provider = provider
+        self._analysis_join = analysis_join
 
     def execute(
         self,
@@ -501,6 +519,8 @@ class PreviewImportedMediaSuggestion:
             ) from None
         request = build_suggestion_request(prepared)
         suggestion = self._provider.suggest(request)
+        if self._analysis_join is not None:
+            self._analysis_join.execute(media_id, location_id, suggestion)
         return ImportedMediaSuggestionPreviewResult(
             media_id=media_id,
             location_id=location_id,

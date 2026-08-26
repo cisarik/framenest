@@ -15,6 +15,7 @@ from framenest.application.media_analysis import (
     MediaRelativePath,
     candidate_kind_for_relative_path,
 )
+from framenest.application.media_analysis_lifecycle import MediaAnalysisLifecycleError
 from framenest.application.media_suggestion import (
     FrameNestMediaSuggestionError,
     ImportedMediaSuggestionPreviewResult,
@@ -67,6 +68,8 @@ AI_PROVIDER_INVALID_RESPONSE_CODE = "AI_PROVIDER_INVALID_RESPONSE"
 AI_PROVIDER_INVALID_RESPONSE_MESSAGE = "The AI suggestion provider response was invalid."
 AI_PROVIDER_FAILED_CODE = "AI_PROVIDER_FAILED"
 AI_PROVIDER_FAILED_MESSAGE = "The AI suggestion provider request failed."
+ANALYSIS_JOIN_FAILED_CODE = "ANALYSIS_JOIN_FAILED"
+ANALYSIS_JOIN_FAILED_MESSAGE = "Durable analysis persistence failed."
 
 AiProviderStatus = Literal[
     "not_configured",
@@ -383,6 +386,8 @@ def create_media_suggestion_api_router(dependencies: MediaSuggestionApiDependenc
             )
         except MediaSuggestionProviderFailedError:
             return _error_response(502, AI_PROVIDER_FAILED_CODE, AI_PROVIDER_FAILED_MESSAGE)
+        except MediaAnalysisLifecycleError:
+            return _error_response(500, ANALYSIS_JOIN_FAILED_CODE, ANALYSIS_JOIN_FAILED_MESSAGE)
         except Exception:
             return _error_response(502, AI_PROVIDER_FAILED_CODE, AI_PROVIDER_FAILED_MESSAGE)
         return _json_response(_imported_preview_response(result))

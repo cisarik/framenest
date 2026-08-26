@@ -37,6 +37,10 @@ from framenest.application.ports.media_analysis_runs import (
     MediaAnalysisRunConflictError,
     MediaAnalysisRunRepository,
 )
+from framenest.application.ports.media_metadata_repository import (
+    MediaMetadataMediaNotFoundError,
+    MediaMetadataRepository,
+)
 from framenest.application.ports.media_repository import MediaRepository
 from framenest.application.ports.media_suggestion import MediaSuggestionProvider
 from framenest.application.upload_transport import default_now_ms
@@ -58,6 +62,7 @@ from framenest.domain.media_classification import (
     GENERIC_DERIVATIVE_STRATEGY,
     GENERIC_MEDIA_ANALYSIS_DEFINITION,
     MOVIE_IDENTIFICATION_ANALYSIS_DEFINITION,
+    ContentCategory,
 )
 
 
@@ -260,6 +265,83 @@ class RequestManualMediaAnalysis:
         except FrameNestMediaAnalysisRunRepositoryError as exc:
             raise MediaAnalysisLifecycleError(
                 "manual analysis request failed"
+            ) from exc
+
+
+class PersistImportedPreviewAnalysis:
+    """Record one companion-visible generic run from an already obtained suggestion.
+
+    Does not invoke the provider and does not write canonical metadata. Movies
+    are skipped using the same content-category exclusion companion uses.
+    """
+
+    def __init__(
+        self,
+        repository: MediaAnalysisRunRepository,
+        metadata_repository: MediaMetadataRepository,
+        *,
+        now_ms: Callable[[], int] = default_now_ms,
+        max_attempts: int = DEFAULT_MAX_ANALYSIS_ATTEMPTS,
+        analysis_definition: str = AUTOMATIC_POST_CATALOG_ANALYSIS_DEFINITION,
+    ) -> None:
+        if (
+            isinstance(max_attempts, bool)
+            or max_attempts < 1
+            or max_attempts > MAX_CONFIGURED_ANALYSIS_ATTEMPTS
+        ):
+            raise ValueError("max analysis attempts must be a positive bounded integer")
+        self._repository = repository
+        self._metadata_repository = metadata_repository
+        self._now_ms = now_ms
+        self._max_attempts = max_attempts
+        self._manual = RequestManualMediaAnalysis(
+            repository,
+            now_ms=now_ms,
+            analysis_definition=analysis_definition,
+        )
+
+    def execute(
+        self,
+        media_id: MediaId,
+        location_id: MediaLocationId,
+        suggestion: MediaSuggestion,
+    ) -> MediaAnalysisRun | None:
+        try:
+            snapshot = self._metadata_repository.get_media_metadata(media_id)
+        except MediaMetadataMediaNotFoundError:
+            snapshot = None
+        if snapshot is not None and snapshot.content_category is ContentCategory.MOVIE:
+            return None
+        pending = self._manual.execute(
+            CatalogedAnalysisTarget(media_id=media_id, media_location_id=location_id)
+        )
+        if pending.state is not MediaAnalysisRunState.PENDING:
+            return None
+        try:
+            claimed = self._repository.claim_pending(
+                run_id=pending.id.to_string(),
+                expected_version=pending.version,
+                started_at_ms=self._now_ms(),
+                max_attempts=self._max_attempts,
+            )
+            return self._repository.record_analyzed(
+                run_id=claimed.id.to_string(),
+                expected_version=claimed.version,
+                provider_id=suggestion.provider_id,
+                model_id=suggestion.model_id,
+                prompt_version=suggestion.prompt_version,
+                result_schema_version=RESULT_SCHEMA_VERSION,
+                result_json=serialize_suggestion_result(suggestion),
+                completed_at_ms=self._now_ms(),
+                analysis_profile=AnalysisProfile.GENERIC_MEDIA.value,
+                reasoning_enabled=False,
+                derivative_strategy=GENERIC_DERIVATIVE_STRATEGY,
+                derivative_count=None,
+                provider_submission_occurred=True,
+            )
+        except FrameNestMediaAnalysisRunRepositoryError as exc:
+            raise MediaAnalysisLifecycleError(
+                "imported preview analysis persistence failed"
             ) from exc
 
 

@@ -11,10 +11,14 @@ from framenest.application.media_analysis_lifecycle import (
     AutomaticAnalysisPublicView,
     CatalogedAnalysisTarget,
     ExecuteAutomaticMediaAnalysisRun,
+    PersistImportedPreviewAnalysis,
     RequestManualMediaAnalysis,
     ScheduleAutomaticMediaAnalysis,
     public_view_from_run,
     serialize_suggestion_result,
+)
+from framenest.application.ports.media_metadata_repository import (
+    MediaMetadataSnapshot,
 )
 from framenest.application.media_suggestion import (
     MediaSuggestion,
@@ -30,7 +34,9 @@ from framenest.domain.media_analysis_runs import (
     MediaAnalysisRun,
     MediaAnalysisRunId,
     MediaAnalysisRunState,
+    RESULT_SCHEMA_VERSION,
 )
+from framenest.domain.media_classification import AnalysisProfile, ContentCategory
 
 
 MEDIA_ID = MediaId.from_string("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
@@ -176,9 +182,7 @@ class _FakeRepository:
         derivative_count=None,
         provider_submission_occurred=None,
     ):
-        del run_id
-        del analysis_profile, reasoning_enabled, derivative_strategy
-        del derivative_count, provider_submission_occurred
+        del run_id, derivative_count
         with self._lock:
             self.transactions.append("record_analyzed")
             assert self.run is not None
@@ -193,6 +197,10 @@ class _FakeRepository:
                 result_json=result_json,
                 completed_at_ms=completed_at_ms,
                 version=self.run.version + 1,
+                analysis_profile=analysis_profile,
+                reasoning_enabled=reasoning_enabled,
+                derivative_strategy=derivative_strategy,
+                provider_submission_occurred=provider_submission_occurred,
             )
             return self.run
 
@@ -277,6 +285,37 @@ class _FakeExecutor:
         if self.error is not None:
             raise self.error
         return _suggestion()
+
+
+class _FakeMetadataRepository:
+    def __init__(
+        self,
+        *,
+        category: ContentCategory = ContentCategory.GENERAL,
+    ) -> None:
+        self.category = category
+        self.get_calls = 0
+        self.save_calls = 0
+
+    def get_media_metadata(self, media_id):
+        self.get_calls += 1
+        return MediaMetadataSnapshot(
+            media_id=media_id,
+            persisted=True,
+            display_title=None,
+            description=None,
+            tag_keys=(),
+            collection_key=None,
+            processed_at_ms=None,
+            created_at_ms=1,
+            updated_at_ms=1,
+            content_category=self.category,
+        )
+
+    def save_media_metadata(self, *args, **kwargs):
+        del args, kwargs
+        self.save_calls += 1
+        raise AssertionError("preview join must not write canonical metadata")
 
 
 def test_schedule_disabled_creates_no_run() -> None:
@@ -760,3 +799,112 @@ def test_no_fallback_provider_is_selected_on_retryable_exhaustion() -> None:
     assert failed.provider_id is None
     assert failed.model_id is None
     assert len(executor.calls) == 1
+
+
+def test_imported_preview_join_records_generic_analyzed_run_without_executor() -> None:
+    repository = _FakeRepository()
+    metadata = _FakeMetadataRepository()
+    clock = iter((10, 20, 30))
+    service = PersistImportedPreviewAnalysis(
+        repository,
+        metadata,
+        now_ms=lambda: next(clock),
+    )
+    suggestion = _suggestion()
+
+    run = service.execute(MEDIA_ID, LOCATION_ID, suggestion)
+
+    assert run is not None
+    assert run.state is MediaAnalysisRunState.ANALYZED
+    assert run.analysis_definition == AUTOMATIC_POST_CATALOG_ANALYSIS_DEFINITION
+    assert run.analysis_profile == AnalysisProfile.GENERIC_MEDIA.value
+    assert run.provider_id == suggestion.provider_id
+    assert run.model_id == suggestion.model_id
+    assert run.prompt_version == suggestion.prompt_version
+    assert run.result_schema_version == RESULT_SCHEMA_VERSION
+    assert run.result_json == serialize_suggestion_result(suggestion)
+    assert run.reasoning_enabled is False
+    assert run.provider_submission_occurred is True
+    assert repository.transactions == [
+        "create_manual_pending",
+        "claim_pending",
+        "record_analyzed",
+    ]
+    assert metadata.get_calls == 1
+    assert metadata.save_calls == 0
+
+
+def test_imported_preview_join_skips_movie_media() -> None:
+    repository = _FakeRepository()
+    metadata = _FakeMetadataRepository(category=ContentCategory.MOVIE)
+    service = PersistImportedPreviewAnalysis(repository, metadata, now_ms=lambda: 1)
+
+    run = service.execute(MEDIA_ID, LOCATION_ID, _suggestion())
+
+    assert run is None
+    assert repository.run is None
+    assert repository.transactions == []
+    assert metadata.get_calls == 1
+    assert metadata.save_calls == 0
+
+
+def test_imported_preview_join_skips_when_latest_active_run_is_analyzing() -> None:
+    repository = _FakeRepository()
+    repository.run = MediaAnalysisRun(
+        id=MediaAnalysisRunId("11111111-1111-4111-8111-111111111111"),
+        media_id=MEDIA_ID,
+        media_location_id=LOCATION_ID,
+        analysis_definition=AUTOMATIC_POST_CATALOG_ANALYSIS_DEFINITION,
+        state=MediaAnalysisRunState.ANALYZING,
+        attempt_count=1,
+        provider_id=None,
+        model_id=None,
+        prompt_version=None,
+        result_schema_version=None,
+        result_json=None,
+        error_code=None,
+        error_message=None,
+        created_at_ms=1,
+        started_at_ms=2,
+        completed_at_ms=None,
+        version=2,
+    )
+    service = PersistImportedPreviewAnalysis(
+        repository,
+        _FakeMetadataRepository(),
+        now_ms=lambda: 3,
+    )
+
+    run = service.execute(MEDIA_ID, LOCATION_ID, _suggestion())
+
+    assert run is None
+    assert repository.run.state is MediaAnalysisRunState.ANALYZING
+    assert repository.transactions == ["create_manual_pending"]
+
+
+def test_imported_preview_join_supersedes_prior_terminal_success() -> None:
+    repository = _FakeRepository()
+    metadata = _FakeMetadataRepository()
+    clock = iter((10, 20, 30, 40, 50, 60))
+    service = PersistImportedPreviewAnalysis(
+        repository,
+        metadata,
+        now_ms=lambda: next(clock),
+    )
+    first = service.execute(MEDIA_ID, LOCATION_ID, _suggestion())
+    second = service.execute(MEDIA_ID, LOCATION_ID, _suggestion())
+
+    assert first is not None
+    assert second is not None
+    assert first.id != second.id
+    assert second.supersedes_run_id == first.id
+    assert second.state is MediaAnalysisRunState.ANALYZED
+    assert repository.transactions == [
+        "create_manual_pending",
+        "claim_pending",
+        "record_analyzed",
+        "create_manual_pending",
+        "claim_pending",
+        "record_analyzed",
+    ]
+    assert metadata.save_calls == 0

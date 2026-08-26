@@ -28,6 +28,7 @@ from framenest.application.media_analysis import (
     build_representative_frame,
     PNG_SIGNATURE,
 )
+from framenest.application.media_analysis_lifecycle import MediaAnalysisLifecycleError
 from framenest.application.media_suggestion import (
     ImportedMediaSuggestionPreviewResult,
     MediaSuggestion,
@@ -575,6 +576,32 @@ def test_imported_media_identity_preview_never_accepts_browser_path() -> None:
         )
     ]
     assert "/Users/example" not in response.text
+
+
+def test_imported_preview_join_failure_is_sanitized_server_error() -> None:
+    client, preview, imported_preview = _client(
+        imported_preview=_FakeImportedSuggestionPreview(
+            error=MediaAnalysisLifecycleError("imported preview analysis persistence failed")
+        )
+    )
+
+    response = _post_imported_preview(client)
+
+    assert response.status_code == 500
+    assert response.headers["cache-control"] == "no-store"
+    assert response.json() == {
+        "error": {
+            "code": "ANALYSIS_JOIN_FAILED",
+            "message": "Durable analysis persistence failed.",
+        }
+    }
+    assert preview.calls == []
+    assert imported_preview.calls == [
+        (
+            MediaId.from_string(CANONICAL_MEDIA_ID),
+            MediaLocationId.from_string(CANONICAL_LOCATION_ID),
+        )
+    ]
 
 
 @pytest.mark.parametrize(

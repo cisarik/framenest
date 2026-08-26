@@ -159,6 +159,7 @@ from framenest.application.media_analysis_coordinator import (
 from framenest.application.media_analysis_lifecycle import (
     AutomaticImportedMediaSuggestionExecutor,
     CatalogedAnalysisTarget,
+    PersistImportedPreviewAnalysis,
     ReadAutomaticMediaAnalysis,
     RequestManualMediaAnalysis,
     ScheduleAutomaticMediaAnalysis,
@@ -617,6 +618,15 @@ def create_app(
                 owned_library_repository,
                 LocalMediaAnalysisAdapter(),
                 provider,
+                PersistImportedPreviewAnalysis(
+                    owned_media_analysis_run_repository,
+                    owned_media_metadata_repository,
+                )
+                if (
+                    owned_media_analysis_run_repository is not None
+                    and owned_media_metadata_repository is not None
+                )
+                else None,
             )
         media_suggestion_api_dependencies = MediaSuggestionApiDependencies(
             preview_suggestion=suggestion_preview,

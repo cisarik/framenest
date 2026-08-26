@@ -10,9 +10,34 @@ from fastapi.testclient import TestClient
 from sqlalchemy import text
 
 from framenest.adapters.api.application import create_app
+from framenest.adapters.api.media_suggestion_api import MediaSuggestionApiDependencies
 from framenest.application.companion_review import encode_companion_review_cursor
+from framenest.application.library_scan import LibraryScanCandidateKind
+from framenest.application.media_analysis import (
+    MediaRelativePath,
+    PreparedAnalysisResult,
+    REQUESTED_FRAME_COUNT,
+    TechnicalMetadata,
+    build_representative_frame,
+    PNG_SIGNATURE,
+)
+from framenest.application.media_analysis_lifecycle import PersistImportedPreviewAnalysis
+from framenest.application.media_suggestion import (
+    MediaSuggestion,
+    PreviewImportedMediaSuggestion,
+    PreviewMediaSuggestion,
+    PROMPT_VERSION,
+)
 from framenest.configuration import FrameNestSettings
 from framenest.infrastructure.persistence.engine import create_sqlite_engine, dispose_engine
+from framenest.infrastructure.persistence.library_repository import SqliteLibraryRepository
+from framenest.infrastructure.persistence.media_analysis_run_repository import (
+    SqliteMediaAnalysisRunRepository,
+)
+from framenest.infrastructure.persistence.media_metadata_repository import (
+    SqliteMediaMetadataRepository,
+)
+from framenest.infrastructure.persistence.media_repository import SqliteMediaRepository
 from framenest.infrastructure.persistence.migrations import upgrade_database_to_head
 
 EXTERNAL_ORIGIN = "https://nuc-1.example.ts.net"
@@ -942,3 +967,221 @@ def _insert_owned_x(
             "location": location_id,
         },
     )
+
+
+def _run_count(engine) -> int:
+    with engine.begin() as connection:
+        return int(
+            connection.execute(text("SELECT COUNT(*) FROM media_analysis_runs")).scalar_one()
+        )
+
+
+class _JoinTestPreparer:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def prepare(self, root, relative_path):
+        del root, relative_path
+        self.calls += 1
+        frame = build_representative_frame(
+            timestamp_ms=100, payload=PNG_SIGNATURE + b"frame"
+        )
+        return PreparedAnalysisResult(
+            relative_path=MediaRelativePath("clip.mp4"),
+            candidate_kind=LibraryScanCandidateKind.VIDEO,
+            technical_metadata=TechnicalMetadata(
+                duration_ms=1000,
+                width=64,
+                height=48,
+                video_codec="h264",
+                container_formats=("mp4",),
+                has_audio=False,
+            ),
+            representative_frames=(frame,),
+            requested_frame_count=REQUESTED_FRAME_COUNT,
+            warnings=(),
+            ffprobe_version="ffprobe version hidden",
+            ffmpeg_version="ffmpeg version hidden",
+        )
+
+
+class _JoinTestProvider:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def suggest(self, request) -> MediaSuggestion:
+        del request
+        self.calls += 1
+        return MediaSuggestion(
+            title="Preview join title",
+            description="Preview join description for companion history.",
+            collection="Meme",
+            tags=("Cats",),
+            suggested_filename="preview-join.mp4",
+            confidence=0.9,
+            evidence=("Visible subject",),
+            uncertainties=(),
+            provider_id="nvidia-nim",
+            model_id="test-model",
+            prompt_version=PROMPT_VERSION,
+        )
+
+
+def test_imported_preview_joins_inbox_and_own_history(tmp_path: Path) -> None:
+    alice_media = "c1111111-1111-4111-8111-111111111111"
+    alice_loc = "c2111111-1111-4111-8111-111111111111"
+    alice_claim = "c4111111-1111-4111-8111-111111111111"
+    alice_asset = "c5111111-1111-4111-8111-111111111111"
+    extra_movie = "c2222222-2222-4222-8222-222222222222"
+    extra_movie_loc = "c3222222-2222-4222-8222-222222222222"
+    settings = FrameNestSettings(
+        database_path=tmp_path / "catalog.sqlite3",
+        gallery_preview_cache_path=tmp_path / "previews",
+        ingress_mode="tailscale_uds",
+        uds_path=tmp_path / "framenest.sock",
+        external_origin=EXTERNAL_ORIGIN,
+        identity_map={
+            ADMIN_LOGIN: "admin",
+            USER_LOGIN: "user",
+            BOB_LOGIN: "user",
+        },
+        companion_extension_origins=[COMPANION_ORIGIN],
+        _env_file=None,
+    )
+    upgrade_database_to_head(settings)
+    _seed(settings.database_path)
+    engine = create_sqlite_engine(settings.database_path)
+    try:
+        with engine.begin() as connection:
+            _insert_media(connection, alice_media, alice_loc, "meme", "Alice preview")
+            _insert_owned_x(
+                connection,
+                claim_id=alice_claim,
+                asset_id=alice_asset,
+                media_id=alice_media,
+                location_id=alice_loc,
+                owner=USER_LOGIN,
+                post_id="111000333",
+                stage_key="c" * 32,
+            )
+            _insert_media(
+                connection, extra_movie, extra_movie_loc, "movie", "Movie preview"
+            )
+        media_repository = SqliteMediaRepository(engine)
+        library_repository = SqliteLibraryRepository(engine)
+        preparer = _JoinTestPreparer()
+        provider = _JoinTestProvider()
+        imported = PreviewImportedMediaSuggestion(
+            media_repository,
+            library_repository,
+            preparer,
+            provider,
+            PersistImportedPreviewAnalysis(
+                SqliteMediaAnalysisRunRepository(engine),
+                SqliteMediaMetadataRepository(engine),
+            ),
+        )
+        library_preview = PreviewMediaSuggestion(
+            library_repository,
+            preparer,
+            provider,
+        )
+        with TestClient(
+            create_app(
+                settings=settings,
+                media_suggestion_api_dependencies=MediaSuggestionApiDependencies(
+                    preview_suggestion=library_preview,
+                    preview_imported_suggestion=imported,
+                    provider_configured=True,
+                    credential_available=True,
+                    status="available",
+                ),
+            )
+        ) as client:
+            before = _run_count(engine)
+            first = client.post(
+                f"/api/media/{alice_media}/locations/{alice_loc}/ai-suggestion-preview",
+                headers=_serve_headers(ADMIN_LOGIN, "Admin"),
+                json={"confirm_cloud_upload": True},
+            )
+            assert first.status_code == 200
+            assert provider.calls == 1
+            after_first = _run_count(engine)
+            assert after_first == before + 1
+            second = client.post(
+                f"/api/media/{alice_media}/locations/{alice_loc}/ai-suggestion-preview",
+                headers=_serve_headers(ADMIN_LOGIN, "Admin"),
+                json={"confirm_cloud_upload": True},
+            )
+            assert second.status_code == 200
+            assert provider.calls == 2
+            after_second = _run_count(engine)
+            assert after_second == after_first + 1
+            movie_preview = client.post(
+                f"/api/media/{extra_movie}/locations/{extra_movie_loc}/ai-suggestion-preview",
+                headers=_serve_headers(ADMIN_LOGIN, "Admin"),
+                json={"confirm_cloud_upload": True},
+            )
+            assert movie_preview.status_code == 200
+            assert provider.calls == 3
+            assert _run_count(engine) == after_second
+            library_response = client.post(
+                f"/api/libraries/{LIBRARY_ID}/media-suggestion-preview",
+                headers=_serve_headers(ADMIN_LOGIN, "Admin"),
+                json={
+                    "relative_path": f"{GENERIC}.mp4",
+                    "confirm_cloud_upload": True,
+                },
+            )
+            assert library_response.status_code == 200
+            assert provider.calls == 4
+            assert _run_count(engine) == after_second
+            inbox = client.get(
+                "/api/companion/review-inbox",
+                headers=_serve_headers(ADMIN_LOGIN, "Admin"),
+            )
+            assert inbox.status_code == 200
+            inbox_items = inbox.json()["items"]
+            inbox_ids = {item["media_id"] for item in inbox_items}
+            assert alice_media in inbox_ids
+            assert extra_movie not in inbox_ids
+            alice_inbox = next(
+                item for item in inbox_items if item["media_id"] == alice_media
+            )
+            assert alice_inbox["analyzed"] is True
+            assert alice_inbox["unopened"] is True
+            alice_history = client.get(
+                "/api/companion/own-history",
+                headers=_serve_headers(USER_LOGIN, "Alice"),
+            )
+            assert alice_history.status_code == 200
+            assert [item["media_id"] for item in alice_history.json()["items"]] == [
+                alice_media
+            ]
+            assert alice_history.json()["items"][0]["analyzed"] is True
+            assert alice_history.json()["items"][0]["unopened"] is True
+            assert alice_history.json()["unopened_count"] == 1
+            bob_history = client.get(
+                "/api/companion/own-history",
+                headers=_serve_headers(BOB_LOGIN, "Bob"),
+            )
+            assert bob_history.status_code == 200
+            assert alice_media not in {
+                item["media_id"] for item in bob_history.json()["items"]
+            }
+            assert bob_history.json()["unopened_count"] == 0
+            with engine.begin() as connection:
+                latest = connection.execute(
+                    text(
+                        "SELECT analysis_definition, analysis_profile, state "
+                        "FROM media_analysis_runs WHERE media_id = :media "
+                        "ORDER BY completed_at_ms DESC, id DESC LIMIT 1"
+                    ),
+                    {"media": alice_media},
+                ).mappings().one()
+            assert latest["analysis_definition"] == "automatic_post_catalog"
+            assert latest["analysis_profile"] == "generic_media"
+            assert latest["state"] == "analyzed"
+    finally:
+        dispose_engine(engine)
+

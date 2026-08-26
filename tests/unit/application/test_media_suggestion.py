@@ -167,6 +167,19 @@ class _FakeProvider:
         return self.suggestion
 
 
+class _FakeJoin:
+    def __init__(self) -> None:
+        self.calls: list[tuple[MediaId, MediaLocationId, MediaSuggestion]] = []
+
+    def execute(
+        self,
+        media_id: MediaId,
+        location_id: MediaLocationId,
+        suggestion: MediaSuggestion,
+    ) -> None:
+        self.calls.append((media_id, location_id, suggestion))
+
+
 def _sample_library() -> Library:
     return Library(
         id=LibraryId.from_string("12345678-1234-4234-9234-123456789abc"),
@@ -345,6 +358,49 @@ def test_imported_preview_service_uses_media_location_identity_without_paths() -
     assert "/" not in provider.last_request.basename
     assert media_repository.write_calls == 0
     assert library_repository.write_calls == 0
+
+
+def test_imported_preview_invokes_join_once_without_second_provider_call() -> None:
+    join = _FakeJoin()
+    provider = _FakeProvider(_sample_suggestion())
+    service = PreviewImportedMediaSuggestion(
+        _FakeMediaRepository(_sample_media(), _sample_location()),
+        _FakeLibraryRepository(_sample_library()),
+        _FakePreparer(_sample_prepared()),
+        provider,
+        join,
+    )
+
+    result = service.execute(MEDIA_ID, LOCATION_ID)
+
+    assert provider.calls == 1
+    assert join.calls == [(MEDIA_ID, LOCATION_ID, result.suggestion)]
+
+
+def test_imported_preview_does_not_join_when_provider_fails() -> None:
+    join = _FakeJoin()
+
+    class _FailingProvider:
+        calls = 0
+
+        def suggest(self, request: MediaSuggestionRequest) -> MediaSuggestion:
+            del request
+            self.calls += 1
+            raise MediaSuggestionProviderFailedError("provider failed")
+
+    provider = _FailingProvider()
+    service = PreviewImportedMediaSuggestion(
+        _FakeMediaRepository(_sample_media(), _sample_location()),
+        _FakeLibraryRepository(_sample_library()),
+        _FakePreparer(_sample_prepared()),
+        provider,
+        join,
+    )
+
+    with pytest.raises(MediaSuggestionProviderFailedError):
+        service.execute(MEDIA_ID, LOCATION_ID)
+    assert provider.calls == 1
+    assert join.calls == []
 
 
 def test_imported_preview_service_rejects_mismatched_location() -> None:
