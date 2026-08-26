@@ -17,6 +17,16 @@ previously accepted at public/canonical commit
 Tailscale Serve only; that fact is dated history, not a current guarantee.
 Execute host mutations only under an authorized operator task.
 
+Role note (2026-08-26): the Cooperator redefined the NUC as FrameNest's
+development-and-testing machine
+([ADR-0075](adr/0075-nuc-development-test-target-and-routine-release-refresh.md)).
+Routinely refreshing it to the exact public `main` SHA — including schema jumps
+through the documented `migration-required` continuation — is normal operation
+through `deploy/ubuntu/framenest-release`; non-routine host work still requires
+its own explicit bounded task. Production-server phrasing throughout this
+runbook is legacy framing pending a dedicated editorial refactor; operational
+commands are unchanged.
+
 A second public listener or public TLS termination for a
 `public_published_uds` composition is a new operational object. It requires
 separate explicit grants and is not part of routine `framenest-release`

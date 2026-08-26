@@ -52,9 +52,15 @@ membership, cookies, or same-machine execution.
 
 ## NUC Role
 
-The Intel NUC is the current concrete personal production server and
-archive-node role for FrameNest. It is not required for local ownership and must
-not make FrameNest a public-cloud or SaaS dependency.
+The Intel NUC currently serves as the FrameNest development-and-testing
+machine
+([ADR-0075](docs/adr/0075-nuc-development-test-target-and-routine-release-refresh.md)):
+it runs only FrameNest, its catalog and media state is disposable and
+reinitializable, and it is routinely refreshed toward public `main` through the
+immutable release-update contract. It was previously framed as the personal
+production server role ([ADR-0032](docs/adr/0032-ubuntu-nuc-deployment-foundation.md));
+dated production facts remain history. The NUC is not required for local
+ownership and must not make FrameNest a public-cloud or SaaS dependency.
 
 The NUC currently provides authoritative catalog serving for the
 owner-authoritative production release. Later or incomplete NUC capabilities

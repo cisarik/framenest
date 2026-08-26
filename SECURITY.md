@@ -5,12 +5,18 @@
 FrameNest is in foundation-stage, pre-alpha development.
 
 There is no stable or supported public release and no security response service
-level yet. Owner-authoritative current production on the Ubuntu NUC serves
-commit `aec2f0091c10aed2fc2033dac154a0d9651b2b6d` (schema `0028`) over
-Tailscale Serve only; Funnel is not publicly exposed. NUC security hardening
-remains open before future VPS deployment. Security-sensitive decisions are
-still being documented as the repository foundation and architecture are
-established.
+level yet. The Ubuntu NUC operates as the FrameNest development-and-testing
+machine
+([ADR-0075](docs/adr/0075-nuc-development-test-target-and-routine-release-refresh.md)):
+it runs only FrameNest, its state is disposable and reinitializable, and it is
+routinely refreshed toward public `main` through the immutable release-update
+contract ([ADR-0060](docs/adr/0060-repeatable-immutable-nuc-release-update-contract.md)).
+An older release (`aec2f0091c10aed2fc2033dac154a0d9651b2b6d`, schema `0028`)
+was previously accepted as owner-authoritative production served over Tailscale
+Serve only; that fact is dated history. Tailscale-only remote access remains in
+force and Funnel is not publicly exposed. NUC security hardening remains open
+before any future VPS deployment. Security-sensitive decisions are still being
+documented as the repository foundation and architecture are established.
 
 ## Reporting Security Issues
 

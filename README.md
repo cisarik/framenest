@@ -19,6 +19,9 @@ snapshot. A production release was previously accepted at public/canonical
 commit `aec2f0091c10aed2fc2033dac154a0d9651b2b6d` (schema head `0028`), served
 from `/opt/framenest/releases/aec2f0091c10aed2fc2033dac154a0d9651b2b6d` with
 Tailscale Serve only (Funnel not publicly exposed); that fact is dated history.
+The NUC now serves as the FrameNest development-and-testing machine, routinely
+refreshed toward public `main` through the immutable release-update contract
+([ADR-0075](docs/adr/0075-nuc-development-test-target-and-routine-release-refresh.md)).
 There is still no completed desktop shell, installer, or generalized
 multi-source downloader UI.
 

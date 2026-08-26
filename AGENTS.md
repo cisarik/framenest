@@ -49,6 +49,12 @@ duplicate universal AP protocol here.
 
 ## NUC Routine Release Update
 
+Per [ADR-0075](docs/adr/0075-nuc-development-test-target-and-routine-release-refresh.md)
+the NUC is FrameNest's development-and-testing machine: routinely refreshing it
+to the exact public `main` SHA — including schema jumps through the documented
+`migration-required` continuation — is normal operation through the sole entry
+point below. Non-routine host work still requires its own explicit bounded task.
+
 The sole routine immutable NUC release-update entry point is:
 
 ```text
