@@ -73,9 +73,10 @@ and the toolbar badge; they do not appear in the ordinary gallery. Clicking a
 row never removes it. Every history row posts hosted FrameNest media-details via
 the web-bridge type `open_details` (`storedOrigin`, never `*`). Analyzed clicks
 also POST opened for that actor with the row’s `analysis_run_id` without gating
-the iframe; pending clicks never POST opened. Hosted Details hide Analyze by AI,
-Load, the suggestions dropdown, and strips; standalone Details/Edit keep them
-for administrators with `media.workflow.read`. Edit is shown for workspace
+the iframe; pending clicks never POST opened. Hosted Details hide Analyze by AI
+and keep Load, the suggestions dropdown, and strips for workspace actors with
+`metadata.alias.write` or `metadata.canonical.write`. Standalone Analyze remains
+administrator `analysis.run` and not hosted. Edit is shown for workspace
 actors with `metadata.canonical.write` or `metadata.alias.write`
 ([ADR-0077](adr/0077-ordinary-alias-edit-affordance-and-per-field-ai-suggestions.md)).
 Review Save retries opened before Apply when an earlier opened

@@ -964,8 +964,10 @@ There is no separate X content category. `x_author` remains schema-compatible cr
 
 Migration `0029` adds a caller-private per-user media alias overlay and pending
 alias rows on X claims per
-[ADR-0062](docs/adr/0062-per-user-media-alias-overlay.md). Gallery and Details
-remain canonical `media_metadata`. First catalog may seed canonical title,
+[ADR-0062](docs/adr/0062-per-user-media-alias-overlay.md). Authenticated Gallery
+and Details display the caller's overlay when a non-empty row exists; missing
+overlay fields and anonymous/public callers remain canonical `media_metadata`.
+First catalog may seed canonical title,
 description, and selected existing tags from that pending alias per
 [ADR-0065](docs/adr/0065-x-save-edit-subset-and-acquisition-time-canonical-metadata-seed.md);
 later Save updates the caller-private overlay only.

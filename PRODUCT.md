@@ -214,7 +214,8 @@ selected tags from the pending alias per
 [ADR-0065](docs/adr/0065-x-save-edit-subset-and-acquisition-time-canonical-metadata-seed.md).
 Later Save updates the caller-private alias only. WebP still photographs are
 rejected without transcoding. A caller-private per-user alias overlay may be
-named on X Save; Gallery and Details remain canonical `media_metadata`. Movie
+named on X Save; authenticated Gallery and Details display the caller's overlay
+when present and otherwise remain canonical `media_metadata`. Movie
 language metadata should
 prefer container or audio metadata and user editing before expensive AI
 analysis, and FrameNest must not automatically upload audio to a cloud provider.
