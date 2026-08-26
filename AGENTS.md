@@ -85,6 +85,19 @@ CPython: /opt/framenest/tooling/python/cpython-3.13.14-linux-x86_64-gnu/bin/pyth
   [docs/UBUNTU_NUC_DEPLOYMENT.md](docs/UBUNTU_NUC_DEPLOYMENT.md) and
   [ADR-0060](docs/adr/0060-repeatable-immutable-nuc-release-update-contract.md).
 
+## UI/UX Acceptance And Companion Testing Require A Current NUC
+
+Rendered UI/UX acceptance belongs to the Cooperator. Whenever the Cooperator is
+asked to test rendered UI/UX, perform any visual acceptance, or exercise the
+Brave companion (whose side panel and review flows call the NUC API), the code
+under test must already be published on GitHub `main` and refreshed onto the
+NUC through the routine release update above, so he always sees the actual
+current version. Never request rendered acceptance against code the NUC cannot
+serve. Testing over the Tailscale tailnet is normal operation
+([ADR-0075](docs/adr/0075-nuc-development-test-target-and-routine-release-refresh.md)),
+not production exposure; treating the NUC as a guarded production server is
+retired framing.
+
 ## AP Upgrade Ledger
 
 AP upgrade ledger declaration:
