@@ -97,7 +97,7 @@ future work.
 
 Available supported GIF and MP4 cards also expose compact overlay actions on
 the media surface: a brain `Analyze by AI` control in the top-right corner when
-metadata is needed, Edit in the bottom-left corner, and Open original media in
+an administrator needs metadata, Edit in the bottom-left corner, and Open original media in
 the bottom-right corner. Cards do not display canonical tag chips, a hidden-tag
 counter, or reserved tag space; the card body contains only the media title.
 Open original media targets the identity-only
@@ -108,14 +108,17 @@ does not mutate the catalog, does not claim client-local availability, and does
 not replace the separate explicit attachment-download API.
 
 Untagged supported GIF and MP4 cards may show a direct `Analyze` action. It is
-a needs-metadata shortcut, not durable proof that analysis has or
-has not happened. When server AI is available, the shortcut uses the existing
-identity-only suggestion endpoint and opens the existing metadata editor with
-unsaved editable suggestions; persistence still requires `Save`, and the
-physical file is not renamed. When server AI is unavailable, the shortcut opens
-the read-only AI Status panel with a sanitized reason and does not send an
-analysis request. Tagged cards continue to show meaningful tag information and
-omit the card-level shortcut.
+a needs-metadata shortcut for administrators with `analysis.run` and
+`metadata.canonical.write`, not durable proof that analysis has or has not
+happened. Hosted companion Gallery and ordinary identities hide the card
+shortcut. When server AI is available, the shortcut confirms cloud upload,
+runs the existing identity-only suggestion preview, and opens the existing
+metadata editor with proposal strips beside Title, Description, and Tags.
+Current canonical values are not replaced. Persistence still requires `Save`,
+and the physical file is not renamed. Dismissing the editor leaves canonical
+metadata unchanged. When server AI is unavailable, the shortcut is natively
+disabled and does not open the AI Status panel or send an analysis request.
+Cards with complete canonical metadata omit the card-level shortcut.
 
 Gallery cards do not display the internal built-in `Processed` workflow label
 or timestamp. The `Processed` catalog scope and automatic persistence semantics
