@@ -137,12 +137,13 @@ leaves the durable published file untouched under the trusted-loopback
 single-tenant boundary; Tailscale multi-user ownership follows ADR-0053.
 Browser mutation requests with an `Origin` header must match the effective same
 origin; this is a bounded loopback protection and not authentication or
-authorization. In Tailscale UDS mode, four `companion_mutation` routes may also accept an
+authorization. In Tailscale UDS mode, five `companion_mutation` routes may also accept an
 exact allowlisted `chrome-extension://` origin after
 `FRAMENEST_COMPANION_EXTENSION_ORIGINS` is set: `POST /api/x/requests`,
 `POST /api/x/requests/{claim_id}/retry`,
-`POST /api/companion/review-inbox/{media_id}/opened`, and
-`POST /api/companion/review-inbox/{media_id}/apply`. That allowlist defaults to
+`POST /api/companion/review-inbox/{media_id}/opened`,
+`POST /api/companion/review-inbox/{media_id}/apply`, and
+`PUT /api/admin/settings/automatic-analysis`. That allowlist defaults to
 empty, still requires `X-FrameNest-Request: 1`, and adds no CORS headers. GET
 inbox routes do not require the allowlist the same way; mutations that carry
 the extension Origin fail closed when the allowlist is empty. See
@@ -150,7 +151,9 @@ the extension Origin fail closed when the allowlist is empty. See
 [ADR-0064](docs/adr/0064-x-save-category-and-public-photo-acquisition.md),
 [ADR-0067](docs/adr/0067-administrator-companion-review-inbox-and-mutation-trust.md),
 and
-[docs/X_COMPANION.md](docs/X_COMPANION.md). Public JPEG/PNG X photographs are
+[docs/X_COMPANION.md](docs/X_COMPANION.md). The fifth mutation is
+[ADR-0079](docs/adr/0079-administrator-automatic-analysis-runtime-setting.md).
+Public JPEG/PNG X photographs are
 acquired through an isolated status bridge and a strict `pbs.twimg.com`
 transport; WebP is rejected; content scripts never fetch FrameNest or the CDN.
 The companion still adds no CORS headers.

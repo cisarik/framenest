@@ -102,10 +102,14 @@ inbox `limit=1`; ordinary identities refresh it from own-history `limit=1`.
 Alarm `framenest.review-inbox` runs every 1 minute. There is no `notifications`
 permission or second counter. The hosted `#frame` stays mounted and Attach
 survives. Ingest Save remains Title→Tags→Description→Save with no radios or
-Analyze. Exactly four `companion_mutation` routes remain: X submit, X retry,
-review opened, and review apply. Opened stays the same of those four; ordinary
+Analyze. Exactly five `companion_mutation` routes remain: X submit, X retry,
+review opened, review apply, and
+`PUT /api/admin/settings/automatic-analysis`. Opened remains one of those
+mutations; ordinary
 callers may mark opened only on an owned cataloged X item (uniform 404
-otherwise). Inbox list, detail, and apply stay administrator-only.
+otherwise). Inbox list, detail, and apply stay administrator-only. Companion
+Settings shows Administration and **Automatic media analysis** only for
+`provider.operate`.
 
 `ui/review.html` remains in the extension tree and is unused for history clicks.
 It is not web-accessible and is not inside `#frame`. Ingest Save remains the
@@ -124,7 +128,8 @@ Empty search shows no preview chrome; arrows appear after two or more hits;
 typing `++` in the reply composer opens the picker and consumes the token.
 After connect, the in-page picker has no Settings sheet; an empty origin tells
 the user to connect FrameNest in the side panel. Settings persists the origin
-with Save under the origin field. The title-bar control is Connect when
+with Save under the origin field. Connected administrators also see
+Administration with **Automatic media analysis**. The title-bar control is Connect when
 disconnected and Disconnect (existing Reset) when connected. Empty title-bar
 Connect opens Settings. Save writes settings; Connect and Disconnect in the
 title bar attach or clear the session. The toolbar opens
@@ -159,9 +164,10 @@ requires an allowlist update.
 
 ## Server allowlist (inert until set)
 
-Default `FRAMENEST_COMPANION_EXTENSION_ORIGINS` is empty. Four
+Default `FRAMENEST_COMPANION_EXTENSION_ORIGINS` is empty. Five
 `companion_mutation` routes may accept that exact `chrome-extension://` origin:
-X submit, X retry, review opened, and review apply. GET inbox routes do not
+X submit, X retry, review opened, review apply, and automatic-analysis
+settings PUT. GET inbox routes do not
 require the allowlist in the same way; mutations that carry the extension Origin
 fail closed when it is empty. Other browser mutations stay on the exact
 Tailscale web origin. To enable the companion:

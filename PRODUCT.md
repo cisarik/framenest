@@ -56,8 +56,10 @@ history row opens hosted Details without Analyze by AI in that popup
 [ADR-0076](docs/adr/0076-companion-history-hosted-click-admin-analyzed-inbox-and-ordinary-own-history.md)).
 Automatic post-catalog analysis stays default-off; administrator-owned X catalog
 events may enqueue generic analysis when
-`FRAMENEST_AUTOMATIC_MEDIA_ANALYSIS_ENABLED` is true
-([ADR-0066](docs/adr/0066-administrator-owned-x-automatic-generic-analysis.md)).
+`FRAMENEST_AUTOMATIC_MEDIA_ANALYSIS_ENABLED` is true or when an administrator
+enables the companion Settings overlay
+([ADR-0066](docs/adr/0066-administrator-owned-x-automatic-generic-analysis.md),
+[ADR-0079](docs/adr/0079-administrator-automatic-analysis-runtime-setting.md)).
 YouTube remains suppressed. Companion review Save may publish when title,
 description, and at least one tag are present
 ([ADR-0068](docs/adr/0068-companion-review-save-and-readiness-triggered-publication.md));
@@ -72,9 +74,12 @@ is accepted architecture direction for a dual-audience boundary (Tailscale
 workspace writer plus a future local-only `public_published_uds` published
 reader) with phased rollout successors. None of those successors is shipped.
 
-There is still no completed desktop shell, GUI Settings, complete Cover Studio,
+There is still no completed desktop shell, desktop Settings, complete Cover Studio,
 arbitrary user-created collections, persistent AI Drafts, multi-model draft
-comparison/promotion, media second-copy backup, or installer. Public `main` and
+comparison/promotion, media second-copy backup, or installer. Companion Settings
+already has an administrator-only **Automatic media analysis** toggle
+([ADR-0079](docs/adr/0079-administrator-automatic-analysis-runtime-setting.md));
+that does not ship desktop Settings. Public `main` and
 the production release may differ; the authoritative mutable production readback
 is `framenest-release status`, never a committed SHA snapshot. A production
 release was previously accepted at public/canonical commit
@@ -410,7 +415,9 @@ FrameNest must not automatically rename media.
 FrameNest must not automatically upload media or prepared frames to a cloud
 provider merely because media was cataloged: automatic cloud analysis stays
 off by default and is permitted only after the explicit server-owner or
-administrator opt-in `FRAMENEST_AUTOMATIC_MEDIA_ANALYSIS_ENABLED=true`, which
+administrator opt-in `FRAMENEST_AUTOMATIC_MEDIA_ANALYSIS_ENABLED=true`, or after
+an administrator confirms the companion Settings overlay recorded in
+[ADR-0079](docs/adr/0079-administrator-automatic-analysis-runtime-setting.md), which
 represents standing consent only for eligible automatic post-catalog analysis
 on that server. That enablement does not authorize historical bulk analysis,
 arbitrary external URL retrieval, user-provided provider keys, hidden provider

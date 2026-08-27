@@ -698,7 +698,8 @@ Current foundation files:
 - [`docs/adr/0046-youtube-manual-ingestion-and-provenance.md`](docs/adr/0046-youtube-manual-ingestion-and-provenance.md) records the accepted YouTube manual-ingestion provenance lifecycle.
 - [`docs/adr/0064-x-save-category-and-public-photo-acquisition.md`](docs/adr/0064-x-save-category-and-public-photo-acquisition.md) records X Save category, public JPEG/PNG photo acquisition, and honest companion Save outcomes.
 - [`docs/adr/0066-administrator-owned-x-automatic-generic-analysis.md`](docs/adr/0066-administrator-owned-x-automatic-generic-analysis.md) records administrator-owned X automatic generic analysis (default-off).
-- [`docs/adr/0067-administrator-companion-review-inbox-and-mutation-trust.md`](docs/adr/0067-administrator-companion-review-inbox-and-mutation-trust.md) records the companion review inbox and four `companion_mutation` routes.
+- [`docs/adr/0067-administrator-companion-review-inbox-and-mutation-trust.md`](docs/adr/0067-administrator-companion-review-inbox-and-mutation-trust.md) records the companion review inbox and the first four `companion_mutation` routes.
+- [`docs/adr/0079-administrator-automatic-analysis-runtime-setting.md`](docs/adr/0079-administrator-automatic-analysis-runtime-setting.md) records the administrator companion Settings overlay and the fifth `companion_mutation` route.
 - [`docs/adr/0068-companion-review-save-and-readiness-triggered-publication.md`](docs/adr/0068-companion-review-save-and-readiness-triggered-publication.md) records companion review Save publication when ready.
 - [`docs/adr/0069-five-tag-generic-media-suggestion-contract.md`](docs/adr/0069-five-tag-generic-media-suggestion-contract.md) records the live generic v4 1–5 tag contract.
 - [`docs/adr/0070-companion-exclusion-of-movie-workflows.md`](docs/adr/0070-companion-exclusion-of-movie-workflows.md) records companion exclusion of movie workflows.

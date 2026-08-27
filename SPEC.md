@@ -430,7 +430,10 @@ Heuristic classification MAY be used, but users MUST be able to override it.
 
 FrameNest MUST NOT automatically upload short media or frames to an LLM provider
 unless server-owned automatic post-catalog analysis is explicitly enabled
-(`FRAMENEST_AUTOMATIC_MEDIA_ANALYSIS_ENABLED`). That enablement is the consent
+(`FRAMENEST_AUTOMATIC_MEDIA_ANALYSIS_ENABLED` or the administrator companion
+Settings overlay in
+[ADR-0079](docs/adr/0079-administrator-automatic-analysis-runtime-setting.md)).
+That enablement is the consent
 boundary for non-interactive cloud frame upload of newly cataloged media only.
 Interactive suggestion preview continues to require explicit per-request
 confirmation. Automatic analysis MUST NOT invent paid work for historical
@@ -947,8 +950,11 @@ X acquisition is requester-private with
 explicit administrator promotion/publication. Ordinary and unmapped X, and
 YouTube, MUST remain fail-closed for automatic analysis. Administrator-owned X
 MAY enqueue generic analysis when
-`FRAMENEST_AUTOMATIC_MEDIA_ANALYSIS_ENABLED` is true per
-[ADR-0066](docs/adr/0066-administrator-owned-x-automatic-generic-analysis.md).
+`FRAMENEST_AUTOMATIC_MEDIA_ANALYSIS_ENABLED` is true or the administrator
+runtime overlay is enabled per
+[ADR-0066](docs/adr/0066-administrator-owned-x-automatic-generic-analysis.md)
+and
+[ADR-0079](docs/adr/0079-administrator-automatic-analysis-runtime-setting.md).
 Companion review apply MAY publish with origin `companion_review` when
 readiness holds per
 [ADR-0068](docs/adr/0068-companion-review-save-and-readiness-triggered-publication.md).
@@ -1018,8 +1024,9 @@ and block Apply when that opened retry fails. Successful connection MUST render
 no status line; failure guidance, `Cleared`, and `Attached` remain visible. The
 toolbar badge MUST derive only from server `unopened_count`; pending rows MUST
 NOT increment it. Ordinary identities MUST receive own-history rather than inbox
-list/detail/apply. Exactly four `companion_mutation` routes exist: X submit, X
-retry, review opened, and review apply. GET inbox and GET own-history routes MUST
+list/detail/apply. Exactly five `companion_mutation` routes exist: X submit, X
+retry, review opened, review apply, and
+`PUT /api/admin/settings/automatic-analysis`. GET inbox and GET own-history routes MUST
 work with an empty
 `companion_extension_origins` allowlist. Mutations that carry the extension
 Origin MUST fail closed when that allowlist is empty. `GET /api/canonical-tags`

@@ -31,8 +31,8 @@ Benefit: one systemd timer runs a full create → verify → disposable restore 
 semantic readback → retention pipeline every day.
 
 Limitation: this protects the catalog database only. It does not back up
-`/srv/media`, published originals, cover bytes, caches, secrets, or AI
-configuration. Successful catalog restore does not restore lost original media.
+`/srv/media`, published originals, cover bytes, caches, secrets, AI
+configuration, or `runtime-settings.json`. Successful catalog restore does not restore lost original media.
 Same-host verified recovery points remain on the live catalog host filesystem;
 mounted-filesystem off-device copy is a separate ADR-0056 capability and does
 not by itself prove a distinct physical/off-host failure domain.
@@ -279,6 +279,7 @@ Do not claim real off-host recovery before stages 10–11 pass.
 | Durable cover artifacts | `/var/lib/framenest/covers` | Excluded; regenerable while source is available |
 | Cover thumbnails | `/var/cache/framenest/cover-thumbnails` | Excluded; regenerate |
 | Non-secret AI configuration | `/var/lib/framenest/ai/config.json` | Manual recovery for now |
+| Administrator runtime settings overlay | `/var/lib/framenest/runtime-settings.json` | Excluded; loss returns to env/default |
 | Gallery preview cache | `/var/cache/framenest/gallery-previews` | Excluded; regenerate |
 | Original media | `/srv/media` | Excluded; needs separate second copy |
 | Published upload originals | configured registered publication library | Excluded; needs separate media second copy |
