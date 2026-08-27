@@ -155,7 +155,7 @@ class MediaAnalysisLifecycleApiDependencies:
     """Injected dependencies for automatic analysis status routes."""
 
     read_analysis: ReadAutomaticMediaAnalysis | None
-    automatic_analysis_enabled: bool
+    automatic_analysis_enabled: bool | Callable[[], bool]
     provider_configured: bool
     provider_id: str | None = None
     model_id: str | None = None
@@ -185,7 +185,9 @@ def create_media_analysis_lifecycle_api_router(
     )
     def automatic_analysis_capability() -> AutomaticAnalysisCapabilityResponse:
         return AutomaticAnalysisCapabilityResponse(
-            automatic_analysis_enabled=dependencies.automatic_analysis_enabled,
+            automatic_analysis_enabled=_resolve_automatic_analysis_enabled(
+                dependencies.automatic_analysis_enabled
+            ),
             provider_configured=dependencies.provider_configured,
             provider_id=dependencies.provider_id,
             model_id=dependencies.model_id,
@@ -326,7 +328,9 @@ def create_media_analysis_lifecycle_api_router(
         return _status_response(
             media_id=parsed_media_id.to_string(),
             view=view,
-            automatic_analysis_enabled=dependencies.automatic_analysis_enabled,
+            automatic_analysis_enabled=_resolve_automatic_analysis_enabled(
+                dependencies.automatic_analysis_enabled
+            ),
         )
 
     @router.post(
@@ -388,7 +392,9 @@ def create_media_analysis_lifecycle_api_router(
         return _status_response(
             media_id=parsed_media_id.to_string(),
             view=public_view_from_run(run),
-            automatic_analysis_enabled=dependencies.automatic_analysis_enabled,
+            automatic_analysis_enabled=_resolve_automatic_analysis_enabled(
+                dependencies.automatic_analysis_enabled
+            ),
         )
 
     @router.get(
@@ -424,7 +430,9 @@ def create_media_analysis_lifecycle_api_router(
         return _status_response(
             media_id=parsed_media_id.to_string(),
             view=view,
-            automatic_analysis_enabled=dependencies.automatic_analysis_enabled,
+            automatic_analysis_enabled=_resolve_automatic_analysis_enabled(
+                dependencies.automatic_analysis_enabled
+            ),
         )
 
     @router.post(
@@ -491,10 +499,20 @@ def create_media_analysis_lifecycle_api_router(
         return _status_response(
             media_id=parsed_media_id.to_string(),
             view=public_view_from_run(run),
-            automatic_analysis_enabled=dependencies.automatic_analysis_enabled,
+            automatic_analysis_enabled=_resolve_automatic_analysis_enabled(
+                dependencies.automatic_analysis_enabled
+            ),
         )
 
     return router
+
+
+def _resolve_automatic_analysis_enabled(
+    value: bool | Callable[[], bool],
+) -> bool:
+    if callable(value) and not isinstance(value, bool):
+        return bool(value())
+    return bool(value)
 
 
 def _status_response(

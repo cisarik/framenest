@@ -407,6 +407,14 @@ ROUTE_POLICIES: tuple[RoutePolicy, ...] = (
         capability=CAPABILITY_PROVIDER_OPERATE,
     ),
     RoutePolicy(
+        method="PUT",
+        template="/api/admin/settings/automatic-analysis",
+        capability=CAPABILITY_PROVIDER_OPERATE,
+        audit_action="settings.automatic_analysis.put",
+        audit_target_type="settings",
+        companion_mutation=True,
+    ),
+    RoutePolicy(
         method="GET",
         template="/api/media/{media_id}/automatic-analysis",
         capability=CAPABILITY_GALLERY_READ,

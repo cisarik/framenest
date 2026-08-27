@@ -1500,6 +1500,11 @@ def test_companion_origin_is_accepted_only_on_flagged_companion_routes(
             "tag_keys": [],
         },
     )
+    settings_put = client.put(
+        "/api/admin/settings/automatic-analysis",
+        headers=_companion_mutation_headers(ADMIN_LOGIN),
+        json={"automatic_media_analysis_enabled": False},
+    )
     unflagged = client.post(
         "/api/canonical-tags",
         headers=_companion_mutation_headers(ADMIN_LOGIN),
@@ -1512,6 +1517,8 @@ def test_companion_origin_is_accepted_only_on_flagged_companion_routes(
     assert _error_code(retry) != "MUTATION_ORIGIN_FORBIDDEN"
     assert _error_code(opened) != "MUTATION_ORIGIN_FORBIDDEN"
     assert _error_code(apply) != "MUTATION_ORIGIN_FORBIDDEN"
+    assert settings_put.status_code == 200
+    assert settings_put.json() == {"automatic_media_analysis_enabled": False}
     assert unflagged.status_code == 403
     assert _error_code(unflagged) == "MUTATION_ORIGIN_FORBIDDEN"
     assert "access-control-allow-origin" not in submit.headers
@@ -1548,6 +1555,13 @@ def test_empty_companion_allowlist_rejects_extension_origin(
     assert _error_code(opened) == "MUTATION_ORIGIN_FORBIDDEN"
     assert apply.status_code == 403
     assert _error_code(apply) == "MUTATION_ORIGIN_FORBIDDEN"
+    settings_put = client.put(
+        "/api/admin/settings/automatic-analysis",
+        headers=_companion_mutation_headers(ADMIN_LOGIN),
+        json={"automatic_media_analysis_enabled": False},
+    )
+    assert settings_put.status_code == 403
+    assert _error_code(settings_put) == "MUTATION_ORIGIN_FORBIDDEN"
     inbox = client.get(
         "/api/companion/review-inbox",
         headers=_serve_headers(ADMIN_LOGIN),

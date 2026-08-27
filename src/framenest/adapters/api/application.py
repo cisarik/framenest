@@ -75,6 +75,10 @@ from framenest.adapters.api.media_analysis_lifecycle_api import (
     MediaAnalysisLifecycleApiDependencies,
     create_media_analysis_lifecycle_api_router,
 )
+from framenest.adapters.api.runtime_settings_api import (
+    RuntimeSettingsApiDependencies,
+    create_runtime_settings_api_router,
+)
 from framenest.adapters.api.upload_api import (
     UploadApiDependencies,
     create_upload_api_router,
@@ -225,6 +229,7 @@ from framenest.configuration import (
     FrameNestSettings,
     load_settings,
 )
+from framenest.infrastructure.runtime_settings import RuntimeSettingsStore
 from framenest.infrastructure.ai.registry import ai_provider_persisted_status_reader, resolve_ai_provider
 from framenest.infrastructure.filesystem.library_scanner import LocalLibraryScanner
 from framenest.infrastructure.filesystem.media_content import LocalMediaContentReader
@@ -380,6 +385,7 @@ def create_app(
         )
 
         return create_public_published_app(resolved_settings)
+    runtime_settings_store = RuntimeSettingsStore.from_settings(resolved_settings)
     tailscale_ingress_enabled = (
         resolved_settings.ingress_mode == INGRESS_MODE_TAILSCALE_UDS
     )
@@ -660,7 +666,7 @@ def create_app(
         analysis_provider = resolved_analysis_ai.provider
         analysis_scheduler = ScheduleAutomaticMediaAnalysis(
             owned_media_analysis_run_repository,
-            enabled=resolved_settings.automatic_media_analysis_enabled,
+            enabled=runtime_settings_store.is_enabled,
         )
         analysis_manual_requester = RequestManualMediaAnalysis(
             owned_media_analysis_run_repository,
@@ -720,9 +726,7 @@ def create_app(
             read_analysis=ReadAutomaticMediaAnalysis(
                 owned_media_analysis_run_repository
             ),
-            automatic_analysis_enabled=(
-                resolved_settings.automatic_media_analysis_enabled
-            ),
+            automatic_analysis_enabled=runtime_settings_store.is_enabled,
             provider_configured=analysis_provider is not None,
             provider_id=resolved_analysis_ai.provider_id,
             model_id=resolved_analysis_ai.model_id,
@@ -1266,6 +1270,11 @@ def create_app(
     app.include_router(
         create_media_analysis_lifecycle_api_router(
             media_analysis_lifecycle_api_dependencies
+        )
+    )
+    app.include_router(
+        create_runtime_settings_api_router(
+            RuntimeSettingsApiDependencies(store=runtime_settings_store)
         )
     )
     app.include_router(

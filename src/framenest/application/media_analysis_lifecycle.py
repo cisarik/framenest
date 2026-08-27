@@ -202,7 +202,7 @@ class ScheduleAutomaticMediaAnalysis:
         self,
         repository: MediaAnalysisRunRepository,
         *,
-        enabled: bool,
+        enabled: bool | Callable[[], bool],
         now_ms: Callable[[], int] = default_now_ms,
         analysis_definition: str = AUTOMATIC_POST_CATALOG_ANALYSIS_DEFINITION,
     ) -> None:
@@ -213,10 +213,13 @@ class ScheduleAutomaticMediaAnalysis:
 
     @property
     def enabled(self) -> bool:
-        return self._enabled
+        flag = self._enabled
+        if callable(flag) and not isinstance(flag, bool):
+            return bool(flag())
+        return bool(flag)
 
     def execute(self, target: CatalogedAnalysisTarget) -> MediaAnalysisRun | None:
-        if not self._enabled:
+        if not self.enabled:
             return None
         try:
             return self._repository.create_pending(

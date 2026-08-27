@@ -12,6 +12,7 @@ from framenest.domain.identity_access import (
     CAPABILITY_METADATA_CANONICAL_WRITE,
     CAPABILITY_MEDIA_CONTENT_PUBLISH,
     CAPABILITY_MEDIA_WORKFLOW_READ,
+    CAPABILITY_PROVIDER_OPERATE,
     CAPABILITY_X_ACQUIRE,
     CAPABILITY_X_REQUEST,
     IdentityContext,
@@ -58,6 +59,10 @@ def test_only_companion_mutations_are_companion_flagged() -> None:
         "POST",
         "/api/companion/review-inbox/00000000-0000-4000-8000-000000000000/apply",
     )
+    settings_put, settings_put_match = find_route_policy(
+        "PUT",
+        "/api/admin/settings/automatic-analysis",
+    )
     picker, picker_match = find_route_policy("GET", "/api/x/companion/media")
     tags, tags_match = find_route_policy("POST", "/api/canonical-tags")
     alias_get, alias_get_match = find_route_policy(
@@ -70,6 +75,9 @@ def test_only_companion_mutations_are_companion_flagged() -> None:
     assert retry_match is not None and retry.companion_mutation is True
     assert opened_match is not None and opened.companion_mutation is True
     assert apply_match is not None and apply.companion_mutation is True
+    assert settings_put_match is not None and settings_put.companion_mutation is True
+    assert settings_put.capability == CAPABILITY_PROVIDER_OPERATE
+    assert settings_put.audit_action == "settings.automatic_analysis.put"
     assert picker_match is not None and picker.companion_mutation is False
     assert tags_match is not None and tags.companion_mutation is False
     assert alias_get_match is not None and alias_get.companion_mutation is False
@@ -109,6 +117,7 @@ def test_only_companion_mutations_are_companion_flagged() -> None:
         (retry.method, retry.pattern.pattern),
         (opened.method, opened.pattern.pattern),
         (apply.method, apply.pattern.pattern),
+        (settings_put.method, settings_put.pattern.pattern),
     }
 
 

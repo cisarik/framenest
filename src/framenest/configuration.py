@@ -29,6 +29,7 @@ EXPLICIT_ENV_FILE_MESSAGE = (
 )
 DEVELOPMENT_DATABASE_DIRECTORY = "framenest-development"
 DEVELOPMENT_DATABASE_FILENAME = "catalog.sqlite3"
+RUNTIME_SETTINGS_FILENAME = "runtime-settings.json"
 DEVELOPMENT_GALLERY_PREVIEW_DIRECTORY = "gallery-previews"
 DEVELOPMENT_COVER_STORAGE_DIRECTORY = "covers"
 DEVELOPMENT_COVER_THUMBNAILS_DIRECTORY = "cover-thumbnails"
@@ -235,6 +236,7 @@ class FrameNestSettings(BaseSettings):
         ge=1,
         le=MAX_CONFIGURED_ANALYSIS_ATTEMPTS,
     )
+    runtime_settings_path: Path | None = Field(default=None, repr=False)
 
     @field_validator("host")
     @classmethod
@@ -275,6 +277,16 @@ class FrameNestSettings(BaseSettings):
             raise ValueError(
                 "cover thumbnail cache path must be an absolute path"
             ) from exc
+
+    @field_validator("runtime_settings_path", mode="before")
+    @classmethod
+    def validate_runtime_settings_path(cls, value: Any) -> Path | None:
+        if value is None or value == "":
+            return None
+        try:
+            return _normalize_absolute_path(value)
+        except ValueError as exc:
+            raise ValueError("runtime settings path must be an absolute path") from exc
 
     @field_validator("upload_quarantine_root", mode="before")
     @classmethod
@@ -471,6 +483,17 @@ class _EnvFileNotSpecified:
 
 
 _ENV_FILE_NOT_SPECIFIED = _EnvFileNotSpecified()
+
+
+def resolved_runtime_settings_path(settings: FrameNestSettings) -> Path:
+    """Return the JSON sidecar path for administrator runtime settings.
+
+    Defaults to ``{database_path.parent}/runtime-settings.json``. An explicit
+    ``runtime_settings_path`` (env ``FRAMENEST_RUNTIME_SETTINGS_PATH``) wins.
+    """
+    if settings.runtime_settings_path is not None:
+        return settings.runtime_settings_path
+    return settings.database_path.parent / RUNTIME_SETTINGS_FILENAME
 
 
 def load_settings(

@@ -7,6 +7,7 @@ from pathlib import Path
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 PRODUCT = REPOSITORY_ROOT / "PRODUCT.md"
+CONFIGURATION = REPOSITORY_ROOT / "src" / "framenest" / "configuration.py"
 ADR_0044 = (
     REPOSITORY_ROOT
     / "docs"
@@ -67,3 +68,10 @@ def test_product_and_adr_0044_share_server_enablement_consent_boundary() -> None
     assert "upload frames without user intent and confirmation" not in product
     assert "server-owned enablement" in adr.lower() or "server-owned" in adr.lower()
     assert "ANALYSIS_OUTCOME_UNKNOWN" in adr or "ambiguous" in adr.lower()
+
+
+def test_git_tracked_default_remains_false() -> None:
+    configuration = CONFIGURATION.read_text(encoding="utf-8")
+    assert (
+        "automatic_media_analysis_enabled: bool = Field(default=False)" in configuration
+    )
