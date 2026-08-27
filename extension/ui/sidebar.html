@@ -60,6 +60,23 @@
               Save accepts a pasted tailnet HTTPS origin and canonicalizes a trailing slash or host case.
               Save writes settings. Connect and Disconnect in the title bar attach or clear the session.
             </p>
+            <section id="admin-settings" class="settings-dialog__admin" hidden>
+              <h3 class="settings-dialog__admin-title">Administration</h3>
+              <label class="settings-dialog__check" for="automatic-analysis-enabled">
+                <input id="automatic-analysis-enabled" type="checkbox" disabled />
+                Automatic media analysis
+              </label>
+              <p id="automatic-analysis-error" class="settings-dialog__error" hidden></p>
+              <div id="automatic-analysis-confirm" class="settings-dialog__confirm" hidden>
+                <p class="settings-dialog__confirm-copy">
+                  Turn on automatic media analysis? Newly captured administrator-owned X media will automatically send preview frames to the configured server-side AI provider and incur usage cost. YouTube and ordinary identities stay excluded.
+                </p>
+                <div class="settings-dialog__confirm-actions">
+                  <button id="automatic-analysis-confirm-ok" type="button">Turn on</button>
+                  <button id="automatic-analysis-confirm-cancel" type="button">Cancel</button>
+                </div>
+              </div>
+            </section>
           </div>
         </div>
       </dialog>

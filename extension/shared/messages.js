@@ -40,6 +40,8 @@
     REVIEW_INBOX_DETAIL: "review_inbox_detail",
     REVIEW_INBOX_OPENED: "review_inbox_opened",
     REVIEW_INBOX_APPLY: "review_inbox_apply",
+    AUTOMATIC_ANALYSIS_CAPABILITY: "automatic_analysis_capability",
+    AUTOMATIC_ANALYSIS_SETTINGS: "automatic_analysis_settings",
   });
   const REVIEW_APPLY_FIELDS = Object.freeze(["display_title", "tags", "description"]);
   const TAG_KEY_PATTERN = /^[a-z][a-z0-9-]{0,63}$/;
@@ -260,6 +262,10 @@
           safe.locationId +
           "/gallery-preview"
         );
+      case "automaticAnalysisCapability":
+        return "/api/ai/automatic-analysis-capability";
+      case "automaticAnalysisSettings":
+        return "/api/admin/settings/automatic-analysis";
       default:
         return null;
     }
@@ -513,6 +519,11 @@
     return { type: data.type };
   }
 
+  function hasProviderOperateCapability(body) {
+    const caps = body && Array.isArray(body.capabilities) ? body.capabilities : [];
+    return caps.indexOf("provider.operate") !== -1;
+  }
+
   function concatChunks(chunks, total) {
     const out = new Uint8Array(total);
     let offset = 0;
@@ -665,6 +676,7 @@
     parseReviewMediaHash,
     formatReviewRunLabel,
     acceptReviewOverlayMessage,
+    hasProviderOperateCapability,
     bytesFromBase64,
     concatChunks,
   };

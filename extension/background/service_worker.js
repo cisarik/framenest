@@ -141,6 +141,10 @@ async function handle(message) {
       return reviewInboxOpened(message.payload || {});
     case companion.TYPES.REVIEW_INBOX_APPLY:
       return reviewInboxApply(message.payload || {});
+    case companion.TYPES.AUTOMATIC_ANALYSIS_CAPABILITY:
+      return fetchJson("automaticAnalysisCapability");
+    case companion.TYPES.AUTOMATIC_ANALYSIS_SETTINGS:
+      return putAutomaticAnalysisSettings(message.payload || {});
     default:
       return { ok: false, error: "unknown_type" };
   }
@@ -622,7 +626,33 @@ function capabilitiesFromBody(body) {
   return {
     workflowRead: caps.indexOf("media.workflow.read") !== -1,
     xRequest: caps.indexOf("x.request") !== -1,
+    providerOperate: caps.indexOf("provider.operate") !== -1,
   };
+}
+
+async function putAutomaticAnalysisSettings(payload) {
+  if (!payload || typeof payload !== "object") {
+    return { ok: false, error: "invalid_settings", status: 0 };
+  }
+  if (payload.automatic_media_analysis_enabled === true) {
+    if (payload.confirm_cloud_upload !== true) {
+      return { ok: false, error: "confirm_required", status: 0 };
+    }
+    return fetchJson("automaticAnalysisSettings", {
+      method: "PUT",
+      body: {
+        automatic_media_analysis_enabled: true,
+        confirm_cloud_upload: true,
+      },
+    });
+  }
+  if (payload.automatic_media_analysis_enabled === false) {
+    return fetchJson("automaticAnalysisSettings", {
+      method: "PUT",
+      body: { automatic_media_analysis_enabled: false },
+    });
+  }
+  return { ok: false, error: "invalid_settings", status: 0 };
 }
 
 async function historyListRoute() {

@@ -371,6 +371,12 @@
   const settingsOpen = document.getElementById("settings-open");
   const settingsClose = document.getElementById("settings-close");
   const settingsSave = document.getElementById("settings-save");
+  const adminSettings = document.getElementById("admin-settings");
+  const automaticAnalysisEnabled = document.getElementById("automatic-analysis-enabled");
+  const automaticAnalysisError = document.getElementById("automatic-analysis-error");
+  const automaticAnalysisConfirm = document.getElementById("automatic-analysis-confirm");
+  const automaticAnalysisConfirmOk = document.getElementById("automatic-analysis-confirm-ok");
+  const automaticAnalysisConfirmCancel = document.getElementById("automatic-analysis-confirm-cancel");
   const reviewHistoryToggle = document.getElementById("review-history-toggle");
   const reviewHistory = document.getElementById("review-history");
   const reviewHistoryList = document.getElementById("review-history-list");
@@ -387,6 +393,12 @@
     !settingsOpen ||
     !settingsClose ||
     !settingsSave ||
+    !adminSettings ||
+    !automaticAnalysisEnabled ||
+    !automaticAnalysisError ||
+    !automaticAnalysisConfirm ||
+    !automaticAnalysisConfirmOk ||
+    !automaticAnalysisConfirmCancel ||
     !reviewHistoryToggle ||
     !reviewHistory ||
     !reviewHistoryList ||
@@ -404,6 +416,8 @@
   let frameLoaded = false;
   let inboxPollTimer = 0;
   let lastHistoryItems = [];
+  let serverAutomaticAnalysisEnabled = false;
+  let automaticAnalysisBusy = false;
   const reviewChromeNodes = {
     toggle: reviewHistoryToggle,
     history: reviewHistory,
@@ -425,6 +439,8 @@
     setText(shellStatus, RELOAD_RECOVERY, "error");
     chromeAction.disabled = true;
     settingsSave.disabled = true;
+    automaticAnalysisEnabled.disabled = true;
+    hideAdminSettings();
     reviewHistoryToggle.disabled = true;
     reviewHistoryAll.disabled = true;
     setReviewHistoryExpanded(reviewHistoryToggle, reviewHistory, false);
@@ -602,6 +618,128 @@
     settingsSave.disabled = runtimeStale || !origin || !dirty;
   }
 
+  function hideAutomaticAnalysisConfirm() {
+    automaticAnalysisConfirm.hidden = true;
+  }
+
+  function hideAdminSettings() {
+    adminSettings.hidden = true;
+    automaticAnalysisEnabled.checked = false;
+    automaticAnalysisEnabled.disabled = true;
+    automaticAnalysisError.hidden = true;
+    automaticAnalysisError.textContent = "";
+    hideAutomaticAnalysisConfirm();
+    serverAutomaticAnalysisEnabled = false;
+    automaticAnalysisBusy = false;
+  }
+
+  function showAutomaticAnalysisError(message) {
+    automaticAnalysisError.textContent = message;
+    automaticAnalysisError.hidden = !message;
+  }
+
+  function automaticAnalysisErrorCopy(result) {
+    const error = result && result.error;
+    const status = result && result.status;
+    if (error === "network_failed") {
+      return "Could not reach FrameNest.";
+    }
+    if (error === "CAPABILITY_DENIED" || error === "http_403" || status === 403) {
+      return "Automatic media analysis is administrator-only.";
+    }
+    if (error === "CLOUD_CONFIRMATION_REQUIRED" || error === "confirm_required" || status === 422) {
+      return "Confirmation is required to turn on automatic media analysis.";
+    }
+    return "Could not update automatic media analysis.";
+  }
+
+  function applyServerAutomaticAnalysis(enabled) {
+    serverAutomaticAnalysisEnabled = enabled === true;
+    automaticAnalysisEnabled.checked = serverAutomaticAnalysisEnabled;
+    automaticAnalysisEnabled.disabled = runtimeStale || automaticAnalysisBusy;
+  }
+
+  async function refreshAdministration() {
+    hideAutomaticAnalysisConfirm();
+    if (!storedOrigin || runtimeStale) {
+      hideAdminSettings();
+      return;
+    }
+    const identity = await request(companion.TYPES.IDENTITY, {});
+    if (runtimeStale || (identity && identity.stale === true)) {
+      return;
+    }
+    if (!identity || identity.ok !== true || !companion.hasProviderOperateCapability(identity.body)) {
+      hideAdminSettings();
+      return;
+    }
+    adminSettings.hidden = false;
+    automaticAnalysisEnabled.disabled = true;
+    showAutomaticAnalysisError("");
+    const capability = await request(companion.TYPES.AUTOMATIC_ANALYSIS_CAPABILITY, {});
+    if (runtimeStale || (capability && capability.stale === true)) {
+      return;
+    }
+    if (!capability || capability.ok !== true) {
+      applyServerAutomaticAnalysis(false);
+      automaticAnalysisEnabled.disabled = true;
+      showAutomaticAnalysisError(automaticAnalysisErrorCopy(capability));
+      return;
+    }
+    applyServerAutomaticAnalysis(
+      capability.body && capability.body.automatic_analysis_enabled === true
+    );
+  }
+
+  async function putAutomaticAnalysis(enabled) {
+    automaticAnalysisBusy = true;
+    automaticAnalysisEnabled.disabled = true;
+    const payload = enabled
+      ? {
+          automatic_media_analysis_enabled: true,
+          confirm_cloud_upload: true,
+        }
+      : { automatic_media_analysis_enabled: false };
+    const result = await request(companion.TYPES.AUTOMATIC_ANALYSIS_SETTINGS, payload);
+    automaticAnalysisBusy = false;
+    if (runtimeStale || (result && result.stale === true)) {
+      return;
+    }
+    if (!result || result.ok !== true) {
+      applyServerAutomaticAnalysis(serverAutomaticAnalysisEnabled);
+      showAutomaticAnalysisError(automaticAnalysisErrorCopy(result));
+      return;
+    }
+    const next =
+      result.body && result.body.automatic_media_analysis_enabled === true;
+    showAutomaticAnalysisError("");
+    applyServerAutomaticAnalysis(next);
+  }
+
+  function onAutomaticAnalysisChange() {
+    if (automaticAnalysisBusy || automaticAnalysisEnabled.disabled) {
+      automaticAnalysisEnabled.checked = serverAutomaticAnalysisEnabled;
+      return;
+    }
+    showAutomaticAnalysisError("");
+    if (automaticAnalysisEnabled.checked) {
+      automaticAnalysisConfirm.hidden = false;
+      return;
+    }
+    hideAutomaticAnalysisConfirm();
+    void putAutomaticAnalysis(false);
+  }
+
+  function onAutomaticAnalysisConfirmOk() {
+    hideAutomaticAnalysisConfirm();
+    void putAutomaticAnalysis(true);
+  }
+
+  function onAutomaticAnalysisConfirmCancel() {
+    hideAutomaticAnalysisConfirm();
+    automaticAnalysisEnabled.checked = false;
+  }
+
   function openSettings() {
     if (!settingsDialog.open) {
       if (typeof settingsDialog.show === "function") {
@@ -613,6 +751,7 @@
     }
     syncSettingsSave();
     originInput.focus();
+    void refreshAdministration();
   }
 
   function promptConnectInSettings() {
@@ -621,6 +760,7 @@
   }
 
   function closeSettings() {
+    hideAutomaticAnalysisConfirm();
     settingsOpen.setAttribute("aria-expanded", "false");
     if (typeof settingsDialog.close === "function" && settingsDialog.open) {
       settingsDialog.close();
@@ -694,6 +834,7 @@
     originInput.value = "";
     syncChromeAction();
     syncSettingsSave();
+    hideAdminSettings();
     clearFrame();
     setText(shellStatus, "Cleared");
     openSettings();
@@ -886,6 +1027,9 @@
   originInput.addEventListener("change", syncSettingsSave);
   settingsOpen.addEventListener("click", openSettings);
   settingsClose.addEventListener("click", closeSettings);
+  automaticAnalysisEnabled.addEventListener("change", onAutomaticAnalysisChange);
+  automaticAnalysisConfirmOk.addEventListener("click", onAutomaticAnalysisConfirmOk);
+  automaticAnalysisConfirmCancel.addEventListener("click", onAutomaticAnalysisConfirmCancel);
   settingsDialog.addEventListener("click", (event) => {
     if (event.target === settingsDialog) {
       closeSettings();
@@ -926,6 +1070,7 @@
       originInput.value = "";
       syncChromeAction();
       syncSettingsSave();
+      hideAdminSettings();
       hideInboxSection();
       clearFrame();
       setText(shellStatus, "Connect FrameNest in Settings");
