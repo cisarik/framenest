@@ -27,13 +27,15 @@ from framenest.infrastructure.runtime_settings import (
 
 MEDIA_ID = MediaId.from_string("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
 LOCATION_ID = MediaLocationId.from_string("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")
-WORKTREE_MARKER = "framenest-companion-r4-automatic-analysis-settings-mvp-w2"
 
 
 def test_candidate_source_provenance() -> None:
     import framenest
 
-    assert WORKTREE_MARKER in Path(framenest.__file__).resolve().parts
+    expected = (
+        Path(__file__).resolve().parents[2] / "src" / "framenest" / "__init__.py"
+    )
+    assert Path(framenest.__file__).resolve() == expected
 
 
 class _CountingRepository:
