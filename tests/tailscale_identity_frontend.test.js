@@ -307,8 +307,8 @@ test("mutation helper always injects the FrameNest mutation header", () => {
 test("every unsafe fetch call site sends the mutation header", () => {
   const mutationSites = APP_SOURCE.match(/method: "(?:POST|PUT|PATCH|DELETE)"/g) || [];
   const wrappedSites = APP_SOURCE.match(/headers: framenestMutationHeaders\(/g) || [];
-  assert.equal(mutationSites.length, 30);
-  assert.equal(wrappedSites.length, 30);
+  assert.equal(mutationSites.length, 29);
+  assert.equal(wrappedSites.length, 29);
   assert.equal((APP_SOURCE.match(/"X-FrameNest-Request"/g) || []).length, 1);
 });
 
@@ -392,6 +392,7 @@ test("privileged controls are gated by capabilities in source", () => {
   assert.ok(identityGateBody.includes("identityState.available"));
   assert.ok(identityGateBody.includes('capabilities.has("analysis.run")'));
   assert.ok(identityGateBody.includes('capabilities.has("metadata.canonical.write")'));
+  assert.ok(identityGateBody.includes("companionWebHosted()"));
 });
 
 test("hosted Details hide Analyze by AI and keep Load chrome", () => {
@@ -414,6 +415,7 @@ test("gallery AI quick action fails closed for missing unresolved and ordinary i
   assert.ok(identityGateBody.includes("identityState.available"));
   assert.ok(identityGateBody.includes('capabilities.has("analysis.run")'));
   assert.ok(identityGateBody.includes('capabilities.has("metadata.canonical.write")'));
+  assert.ok(identityGateBody.includes("companionWebHosted()"));
   assert.equal(identityGateBody.includes("identityHasCapability("), false);
   assert.ok(APP_SOURCE.includes("function identityAllowsCardAiQuickAction()"));
 });

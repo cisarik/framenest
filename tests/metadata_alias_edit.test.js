@@ -63,6 +63,9 @@ test("ordinary load seeds Current from a non-empty alias overlay", () => {
   assert.match(openBody, /aliasOverlayIsNonEmpty\(aliasPayload\)/);
   assert.match(openBody, /applyAliasOverlayToWorkspace\(aliasPayload\)/);
   assert.match(openBody, /editMode: identityUsesCanonicalMetadataWrite\(\) \? "canonical" : "alias"/);
+  assert.match(openBody, /previewSuggestion/);
+  assert.match(openBody, /presentPreviewSuggestionInMetadataWorkspace/);
+  assert.equal(openBody.includes("applyResolvedAiSuggestionToMetadataWorkspace"), false);
   const overlayBody = extractFunction("aliasOverlayIsNonEmpty");
   assert.match(overlayBody, /display_title/);
   assert.match(overlayBody, /description/);

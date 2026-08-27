@@ -1719,9 +1719,10 @@ def test_catalog_card_analyze_shortcut_for_metadata_needed_admin_media(client: T
     assert '(item.content_category || "general") !== "movie"' in eligible_body
     assert "actions.appendChild(analyzeButton)" in card_body
     assert "renderCatalogCardTags(item)" in card_body
-    assert "dismissCardAiQuickActionButton" in script
-    assert "announceCardAiQuickActionSuccess" in script
-    assert "animateCatalogCardMetadataReflow" in script
+    assert "dismissCardAiQuickActionButton" not in script
+    assert "announceCardAiQuickActionSuccess" not in script
+    assert "animateCatalogCardMetadataReflow" not in script
+    assert "companionWebHosted()" in identity_gate_body
 
 
 def test_catalog_card_has_overlay_original_media_action_in_bottom_right(
@@ -1894,7 +1895,7 @@ def test_catalog_card_analyze_request_busy_success_and_failure_flow(client: Test
     script = client.get("/assets/app.js").text
     analyze_body = _javascript_function(script, "handleAnalyzeCatalogCard")
     state_body = _javascript_function(script, "setCardAnalyzeButtonState")
-    apply_body = _javascript_function(script, "applySavedAiMetadataToCatalogSurfaces")
+    open_body = _javascript_function(script, "handleOpenMetadataWorkspace")
 
     assert '"Analyzing…"' not in state_body
     assert 'button.textContent = "🧠"' in state_body
@@ -1902,23 +1903,24 @@ def test_catalog_card_analyze_request_busy_success_and_failure_flow(client: Test
     assert 'button.setAttribute("aria-busy", busy ? "true" : "false")' in state_body
     assert "cardAiQuickActionIsLocked(mediaId)" in analyze_body
     assert 'state: "analyzing"' in analyze_body
-    assert 'state: "applying"' in analyze_body
+    assert 'state: "applying"' not in analyze_body
     assert 'state: "idle"' in analyze_body
     assert 'state: "saved"' not in analyze_body
     assert 'state: "failed_analysis"' in analyze_body
-    assert 'state: "failed_save"' in analyze_body
+    assert 'state: "failed_save"' not in analyze_body
     assert "mediaAiSuggestionEndpoint(mediaId, location.location_id)" in analyze_body
     assert "confirm_cloud_upload: true" in analyze_body
     assert "await requestConfirmation({" in analyze_body
-    assert "metadataTagKeysFromSuggestion(suggestion.tags)" in analyze_body
-    assert 'method: "PUT"' in analyze_body
-    assert "applySavedAiMetadataToCatalogSurfaces(item, savePayload.metadata)" in analyze_body
-    assert "dismissCardAiQuickActionButton" in apply_body
-    assert "announceCardAiQuickActionSuccess" in apply_body
-    assert "captureCatalogCardLayoutSnapshot" in apply_body
-    assert "handleOpenMetadataWorkspace" not in analyze_body
-    assert "fetch(metadataEndpoint(mediaId)" in analyze_body
-    assert "loadCatalog(" not in apply_body
+    assert 'title: "Analyze with AI?"' in analyze_body
+    assert 'confirmLabel: "Analyze by AI"' in analyze_body
+    assert "metadataTagKeysFromSuggestion(suggestion.tags)" not in analyze_body
+    assert 'method: "PUT"' not in analyze_body
+    assert "applySavedAiMetadataToCatalogSurfaces" not in analyze_body
+    assert "handleOpenMetadataWorkspace(item, button" in analyze_body
+    assert "previewSuggestion: suggestion" in analyze_body
+    assert "presentPreviewSuggestionInMetadataWorkspace(previewSuggestion, previewPayload)" in open_body
+    assert "applyResolvedAiSuggestionToMetadataWorkspace" not in open_body
+    assert "fetch(metadataEndpoint(mediaId)" not in analyze_body
     assert "loadCatalog(" not in analyze_body
 
 
@@ -1926,7 +1928,7 @@ def test_catalog_card_analyze_busy_keeps_fixed_size_and_reduced_motion(client: T
     styles = client.get("/assets/styles.css").text
     busy_css = styles[
         styles.index('.catalog-card__action--analyze[data-analysis-state="analyzing"]')
-        : styles.index(".catalog-card__action--analyze-dismissing")
+        : styles.index(".catalog-card__title--fade-in")
     ]
 
     assert "width: 36px;" in busy_css
@@ -1938,14 +1940,8 @@ def test_catalog_card_analyze_busy_keeps_fixed_size_and_reduced_motion(client: T
     assert "catalog-card__analyze-busy" not in styles
     assert "@media (prefers-reduced-motion: reduce)" in styles
     assert "animation: none !important;" in styles
-    assert (
-        '.catalog-card__action--analyze[data-analysis-state="analyzing"],\n'
-        '.catalog-card__action--analyze[data-analysis-state="applying"] {\n'
-        "    animation: none !important;\n"
-        "    opacity: 0.72;"
-    ) in styles or (
-        "animation: none !important;" in styles and "opacity: 0.72;" in styles
-    )
+    assert 'data-analysis-state="applying"' not in styles
+    assert "catalog-card__action--analyze-dismissing" not in styles
 
 
 def test_no_automatic_analysis_on_page_load(client: TestClient) -> None:

@@ -107,9 +107,7 @@ let metadataSaveOwner = null;
 let metadataWorkspaceRevision = 0;
 let aiCapabilityRevision = 0;
 const cardAiQuickActionByMediaId = new Map();
-const CARD_AI_QUICK_ACTION_LOCKED = new Set(["confirming", "analyzing", "applying"]);
-const CATALOG_CARD_REFLOW_MS = 220;
-let catalogCardReflowGeneration = 0;
+const CARD_AI_QUICK_ACTION_LOCKED = new Set(["confirming", "analyzing"]);
 let catalogState = {
   q: "",
   tagKeys: [],
@@ -5267,24 +5265,14 @@ function identityAllowsCardAiQuickAction() {
   return identityState.resolved
     && identityState.available
     && identityState.capabilities.has("analysis.run")
-    && identityState.capabilities.has("metadata.canonical.write");
+    && identityState.capabilities.has("metadata.canonical.write")
+    && !companionWebHosted();
 }
 
 function cardAiQuickActionEligible(item) {
   return identityAllowsCardAiQuickAction()
     && cardNeedsMetadata(item)
     && (item.content_category || "general") !== "movie";
-}
-
-function galleryMotionPreferred() {
-  try {
-    if (window.matchMedia) {
-      return !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    }
-  } catch (_error) {
-    // MatchMedia may be unavailable in constrained test harnesses.
-  }
-  return !prefersReducedMotion;
 }
 
 function cardAiQuickActionProviderBlocked() {
@@ -5318,9 +5306,6 @@ function cardAiQuickActionIsLocked(mediaId) {
 
 function cardAiQuickActionStatusMessage(state, detail = "") {
   if (state === "failed_analysis") return detail || "AI analysis failed.";
-  if (state === "failed_save") {
-    return detail || "AI metadata could not be saved. Existing media metadata was not replaced.";
-  }
   if (state === "unavailable") return detail || "AI analysis is not configured.";
   return detail || "";
 }
@@ -5342,129 +5327,10 @@ function setCardAnalysisStatus(status, options) {
   }
 }
 
-function announceCardAiQuickActionSuccess(card) {
-  const status = card?.querySelector(".catalog-card__analysis-status");
-  setCardAnalysisStatus(status, {
-    text: "AI metadata saved",
-    success: true,
-    visuallyHidden: true,
-  });
-}
-
-function dismissCardAiQuickActionButton(button) {
-  if (!button || !button.isConnected) return;
-  const finish = () => {
-    if (button.parentNode) button.remove();
-  };
-  if (!galleryMotionPreferred()) {
-    finish();
-    return;
-  }
-  button.classList.add("catalog-card__action--analyze-dismissing");
-  button.disabled = true;
-  button.setAttribute("aria-hidden", "true");
-  let settled = false;
-  const settle = () => {
-    if (settled) return;
-    settled = true;
-    button.removeEventListener("transitionend", onEnd);
-    finish();
-  };
-  const onEnd = (event) => {
-    if (event && event.propertyName && event.propertyName !== "opacity") return;
-    settle();
-  };
-  button.addEventListener("transitionend", onEnd);
-  window.setTimeout(settle, CATALOG_CARD_REFLOW_MS + 60);
-}
-
-function clearCatalogCardReflowInlineStyles(card) {
-  if (!card || !card.style) return;
-  card.style.transform = "";
-  card.style.transition = "";
-  card.style.height = "";
-  card.style.overflow = "";
-  card.classList.remove("catalog-card--reflowing");
-}
-
-function captureCatalogCardLayoutSnapshot() {
-  return new Map(
-    [...catalogResults.querySelectorAll(".catalog-card")].map((card) => {
-      const rect = card.getBoundingClientRect();
-      return [card, {
-        left: rect.left,
-        top: rect.top,
-        height: rect.height,
-        width: rect.width,
-      }];
-    }),
-  );
-}
-
-function animateCatalogCardMetadataReflow(patchedCard, firstRects) {
-  if (!galleryMotionPreferred() || !firstRects || !catalogResults) return;
-  const generation = catalogCardReflowGeneration + 1;
-  catalogCardReflowGeneration = generation;
-  const cards = [...catalogResults.querySelectorAll(".catalog-card")];
-  const lastRects = new Map(
-    cards.map((card) => {
-      const rect = card.getBoundingClientRect();
-      return [card, {
-        left: rect.left,
-        top: rect.top,
-        height: rect.height,
-        width: rect.width,
-      }];
-    }),
-  );
-  cards.forEach((card) => {
-    clearCatalogCardReflowInlineStyles(card);
-    const first = firstRects.get(card);
-    const last = lastRects.get(card);
-    if (!first || !last) return;
-    const dx = first.left - last.left;
-    const dy = first.top - last.top;
-    const heightChanged = Math.abs(first.height - last.height) > 0.5;
-    if (card === patchedCard && heightChanged) {
-      card.style.height = `${first.height}px`;
-      card.style.overflow = "hidden";
-    }
-    if (dx !== 0 || dy !== 0) {
-      card.style.transform = `translate(${dx}px, ${dy}px)`;
-      card.style.transition = "none";
-      card.classList.add("catalog-card--reflowing");
-    } else if (card === patchedCard && heightChanged) {
-      card.style.transition = "none";
-      card.classList.add("catalog-card--reflowing");
-    }
-  });
-  const play = () => {
-    if (generation !== catalogCardReflowGeneration) return;
-    cards.forEach((card) => {
-      if (!card.classList.contains("catalog-card--reflowing")) return;
-      const last = lastRects.get(card);
-      card.style.transition = `transform ${CATALOG_CARD_REFLOW_MS}ms ease, height ${CATALOG_CARD_REFLOW_MS}ms ease`;
-      card.style.transform = "";
-      if (card === patchedCard && last) {
-        card.style.height = `${last.height}px`;
-      }
-    });
-    window.setTimeout(() => {
-      if (generation !== catalogCardReflowGeneration) return;
-      cards.forEach((card) => clearCatalogCardReflowInlineStyles(card));
-    }, CATALOG_CARD_REFLOW_MS + 40);
-  };
-  if (typeof window.requestAnimationFrame === "function") {
-    window.requestAnimationFrame(() => window.requestAnimationFrame(play));
-  } else {
-    window.setTimeout(play, 0);
-  }
-}
-
 function setCardAnalyzeButtonState(button, state, message = "") {
   if (!button || !button.isConnected) return;
   const title = button.dataset.mediaTitle || "media";
-  const busy = state === "analyzing" || state === "applying";
+  const busy = state === "analyzing";
   const locked = CARD_AI_QUICK_ACTION_LOCKED.has(state);
   const providerBlocked = cardAiQuickActionProviderBlocked() && !locked;
   button.dataset.analysisState = state;
@@ -5478,15 +5344,9 @@ function setCardAnalyzeButtonState(button, state, message = "") {
   if (state === "analyzing") {
     button.setAttribute("aria-label", `Analyzing ${title}`);
     button.title = "Analyzing with AI";
-  } else if (state === "applying") {
-    button.setAttribute("aria-label", `Saving AI metadata for ${title}`);
-    button.title = "Saving AI metadata";
   } else if (state === "failed_analysis") {
     button.setAttribute("aria-label", `AI analysis failed for ${title}. Retry Analyze by AI`);
     button.title = "AI analysis failed — retry";
-  } else if (state === "failed_save") {
-    button.setAttribute("aria-label", `AI metadata save failed for ${title}. Retry Analyze by AI`);
-    button.title = "AI metadata save failed — retry";
   } else if (providerBlocked || state === "unavailable") {
     if (aiCapabilityDiscoveryPending) {
       button.setAttribute("aria-label", `Checking AI availability for ${title}`);
@@ -5506,7 +5366,7 @@ function setCardAnalyzeButtonState(button, state, message = "") {
   const status = button.closest(".catalog-card")?.querySelector(".catalog-card__analysis-status");
   if (status) {
     const failureText = message || cardAiQuickActionStatusMessage(state);
-    const showFailure = state === "failed_analysis" || state === "failed_save" || state === "unavailable";
+    const showFailure = state === "failed_analysis" || state === "unavailable";
     setCardAnalysisStatus(status, {
       text: showFailure ? failureText : "",
       success: false,
@@ -5635,112 +5495,6 @@ function movieSuggestionFromResult(result) {
   };
 }
 
-function suggestionIsUsableForCanonicalSave(suggestion) {
-  return Boolean(
-    suggestion
-    && typeof suggestion.title === "string"
-    && suggestion.title.trim()
-    && Array.isArray(suggestion.tags)
-    && suggestion.tags.length > 0,
-  );
-}
-
-function applySavedAiMetadataToCatalogSurfaces(item, metadata) {
-  const tags = Array.isArray(metadata.tags)
-    ? metadata.tags.map((tag) => ({ key: tag.key, display_name: tag.display_name }))
-    : [];
-  item.display_title = metadata.display_title === undefined ? item.display_title : metadata.display_title;
-  item.description = metadata.description === undefined ? item.description : metadata.description;
-  item.tags = tags;
-  if (metadata.content_category) item.content_category = metadata.content_category;
-  if (metadata.acquisition_source) item.acquisition_source = metadata.acquisition_source;
-  if (Object.prototype.hasOwnProperty.call(metadata, "creator_attribution_kind")) {
-    item.creator_attribution_kind = metadata.creator_attribution_kind;
-  }
-  if (Object.prototype.hasOwnProperty.call(metadata, "creator_stable_id")) {
-    item.creator_stable_id = metadata.creator_stable_id;
-  }
-  if (Object.prototype.hasOwnProperty.call(metadata, "creator_handle")) {
-    item.creator_handle = metadata.creator_handle;
-  }
-  if (Object.prototype.hasOwnProperty.call(metadata, "creator_display_name")) {
-    item.creator_display_name = metadata.creator_display_name;
-  }
-  if (Object.prototype.hasOwnProperty.call(metadata, "collection_key")) {
-    item.collection_key = metadata.collection_key;
-  }
-  if (Object.prototype.hasOwnProperty.call(metadata, "processed_at_ms")) {
-    item.processed_at_ms = metadata.processed_at_ms;
-  }
-  const displayTitle = item.display_title || deriveCatalogFallbackTitle(item);
-  const cards = [...catalogResults.querySelectorAll(".catalog-card")];
-  const card = cards.find((node) => node.dataset.mediaId === String(item.media_id));
-  const motion = galleryMotionPreferred();
-  const firstRects = motion && card ? captureCatalogCardLayoutSnapshot() : null;
-  if (card) {
-    const titleButton = card.querySelector(".catalog-card__title-button");
-    if (titleButton) {
-      titleButton.textContent = displayTitle;
-      titleButton.setAttribute("aria-label", `Open details for ${displayTitle}`);
-      if (motion) {
-        titleButton.classList.remove("catalog-card__title--fade-in");
-        titleButton.classList.add("catalog-card__title--fade-in");
-      }
-    }
-    const analyzeButton = card.querySelector(".catalog-card__action--analyze");
-    if (analyzeButton) {
-      analyzeButton.dataset.mediaTitle = displayTitle;
-      analyzeButton.dataset.analysisState = "idle";
-      analyzeButton.setAttribute("aria-busy", "false");
-    }
-    const tagsContainer = card.querySelector(".catalog-card__tags");
-    if (tagsContainer) {
-      const nextTags = renderCatalogCardTags(item);
-      if (motion) nextTags.classList.add("catalog-card__tags--fade-in");
-      tagsContainer.replaceWith(nextTags);
-    }
-    announceCardAiQuickActionSuccess(card);
-    if (analyzeButton) {
-      dismissCardAiQuickActionButton(analyzeButton);
-    }
-    if (firstRects) {
-      animateCatalogCardMetadataReflow(card, firstRects);
-    }
-  }
-  if (detailsCurrentItem && detailsCurrentItem.media_id === item.media_id) {
-    detailsCurrentItem.display_title = item.display_title;
-    detailsCurrentItem.tags = tags.map((tag) => ({ ...tag }));
-    detailsCurrentItem.content_category = item.content_category;
-    detailsCurrentItem.acquisition_source = item.acquisition_source;
-    detailsCurrentItem.creator_attribution_kind = item.creator_attribution_kind;
-    detailsCurrentItem.creator_stable_id = item.creator_stable_id;
-    detailsCurrentItem.creator_handle = item.creator_handle;
-    detailsCurrentItem.creator_display_name = item.creator_display_name;
-    detailsCurrentItem.collection_key = item.collection_key;
-    detailsCurrentItem.processed_at_ms = item.processed_at_ms;
-    if (detailsDialogTitle) {
-      detailsDialogTitle.textContent = displayTitle;
-    }
-    if (detailsTagsContainer) {
-      detailsTagsContainer.replaceChildren();
-      appendDetailsCreatorChip(detailsTagsContainer, detailsCurrentItem);
-      tags.forEach((tag) => {
-        const pill = document.createElement("button");
-        pill.type = "button";
-        pill.className = "media-details-dialog__tag";
-        pill.textContent = tag.display_name;
-        pill.setAttribute("aria-label", `Filter Gallery by ${tag.display_name}`);
-        pill.addEventListener("click", () => activateDetailsTagFilter(tag.key));
-        detailsTagsContainer.appendChild(pill);
-      });
-    }
-    if (detailsDescription) {
-      detailsDescription.textContent = metadata.description || "";
-      detailsDescription.hidden = !metadata.description;
-    }
-  }
-}
-
 async function handleAnalyzeCatalogCard(item, button) {
   const mediaId = item.media_id;
   if (cardAiQuickActionIsLocked(mediaId)) return;
@@ -5751,10 +5505,10 @@ async function handleAnalyzeCatalogCard(item, button) {
   setCardAiQuickActionController(mediaId, { state: "confirming" });
   setCardAnalyzeButtonState(button, "confirming");
   const accepted = await requestConfirmation({
-    title: "Analyze and save with AI?",
-    message: "FrameNest will send up to 3 optimized preview frames and bounded metadata to the configured server-side AI provider. The original file, local path, and API key are not uploaded. The returned AI title, description, and tags will replace the current canonical values for this media item. Content category, acquisition source, creator attribution, and genres are preserved. This uses last-write-wins and does not detect concurrent edits in another tab.",
+    title: "Analyze with AI?",
+    message: "FrameNest will send up to 3 optimized preview frames and bounded metadata to the configured server-side AI provider. The original file, local path, and API key are not uploaded. The editor will open with proposal strips beside Title, Description, and Tags. Current canonical values are not replaced. Nothing is saved until you click Save, and the physical file is not renamed.",
     dismissLabel: "Not now",
-    confirmLabel: "Analyze and save",
+    confirmLabel: "Analyze by AI",
     destructive: false,
     focusReturn: button,
   });
@@ -5795,80 +5549,24 @@ async function handleAnalyzeCatalogCard(item, button) {
       return;
     }
     const suggestion = aiSuggestionFromPayload(payload);
-    if (!suggestionIsUsableForCanonicalSave(suggestion)) {
-      setCardAiQuickActionController(mediaId, { state: "failed_analysis" });
-      setCardAnalyzeButtonState(button, "failed_analysis", "AI response was invalid.");
-      return;
-    }
-    setCardAiQuickActionController(mediaId, { state: "applying" });
-    setCardAnalyzeButtonState(button, "applying");
-    const tagsReady = await ensureCanonicalTags();
-    if (getCardAiQuickAction(mediaId).requestToken !== requestToken) return;
-    if (!tagsReady) {
-      setCardAiQuickActionController(mediaId, { state: "failed_save" });
-      setCardAnalyzeButtonState(button, "failed_save");
-      return;
-    }
-    let tagKeys;
-    try {
-      tagKeys = await metadataTagKeysFromSuggestion(suggestion.tags);
-    } catch {
-      if (getCardAiQuickAction(mediaId).requestToken !== requestToken) return;
-      setCardAiQuickActionController(mediaId, { state: "failed_save" });
-      setCardAnalyzeButtonState(button, "failed_save");
-      return;
-    }
-    if (getCardAiQuickAction(mediaId).requestToken !== requestToken) return;
-    const metadataResponse = await fetch(metadataEndpoint(mediaId), {
-      headers: { Accept: "application/json" },
-      cache: "no-store",
+    const opened = await handleOpenMetadataWorkspace(item, button, {
+      previewSuggestion: suggestion,
+      previewPayload: payload,
     });
-    const metadataPayload = await metadataResponse.json();
     if (getCardAiQuickAction(mediaId).requestToken !== requestToken) return;
-    if (!metadataResponse.ok) {
-      setCardAiQuickActionController(mediaId, { state: "failed_save" });
-      setCardAnalyzeButtonState(button, "failed_save");
-      return;
-    }
-    const saveBody = {
-      display_title: suggestion.title,
-      description: suggestion.description || null,
-      tag_keys: tagKeys,
-      content_category: metadataPayload.content_category || "general",
-      genres: Array.isArray(metadataPayload.genres) ? [...metadataPayload.genres] : [],
-      creator_attribution_kind: metadataPayload.creator_attribution_kind || null,
-      creator_stable_id: metadataPayload.creator_stable_id || null,
-      creator_handle: metadataPayload.creator_handle || null,
-      creator_display_name: metadataPayload.creator_display_name || null,
-    };
-    const saveResponse = await fetch(metadataEndpoint(mediaId), {
-      method: "PUT",
-      headers: framenestMutationHeaders({
-        Accept: "application/json",
-        "Content-Type": "application/json",
-      }),
-      body: JSON.stringify(saveBody),
-      cache: "no-store",
-    });
-    const savePayload = await saveResponse.json();
-    if (getCardAiQuickAction(mediaId).requestToken !== requestToken) return;
-    if (!saveResponse.ok || !savePayload.metadata) {
-      setCardAiQuickActionController(mediaId, { state: "failed_save" });
-      setCardAnalyzeButtonState(button, "failed_save");
-      return;
-    }
-    applySavedAiMetadataToCatalogSurfaces(item, savePayload.metadata);
     setCardAiQuickActionController(mediaId, { state: "idle" });
+    setCardAnalyzeButtonState(button, "idle");
+    if (!opened) {
+      const status = button.closest(".catalog-card")?.querySelector(".catalog-card__analysis-status");
+      setCardAnalysisStatus(status, {
+        text: "AI suggestion is ready. Open Edit to review.",
+      });
+    }
   } catch {
     const controller = getCardAiQuickAction(mediaId);
     if (controller.requestToken !== requestToken) return;
-    if (controller.state === "analyzing") {
-      setCardAiQuickActionController(mediaId, { state: "failed_analysis" });
-      setCardAnalyzeButtonState(button, "failed_analysis", "AI analysis failed.");
-      return;
-    }
-    setCardAiQuickActionController(mediaId, { state: "failed_save" });
-    setCardAnalyzeButtonState(button, "failed_save");
+    setCardAiQuickActionController(mediaId, { state: "failed_analysis" });
+    setCardAnalyzeButtonState(button, "failed_analysis", "AI analysis failed.");
   }
 }
 
@@ -7767,7 +7465,13 @@ function closeDetailsDialog({ restoreFocus = true } = {}) {
   detailsOpenerElement = null;
 }
 
-async function handleOpenMetadataWorkspace(item, openerElement, { aiSuggestion = null } = {}) {
+function presentPreviewSuggestionInMetadataWorkspace(previewSuggestion, previewPayload) {
+  if (!previewSuggestion) return;
+  presentInSessionSuggestion(previewSuggestion, previewPayload);
+  if (metadataAiStatus) metadataAiStatus.textContent = "Loaded";
+}
+
+async function handleOpenMetadataWorkspace(item, openerElement, { previewSuggestion = null, previewPayload = null } = {}) {
   const targetMediaId = item.media_id;
   const reopensCurrentWorkspace = metadataWorkspace.openMediaId === targetMediaId
     && metadataOpenItemMediaId() === targetMediaId;
@@ -7783,19 +7487,23 @@ async function handleOpenMetadataWorkspace(item, openerElement, { aiSuggestion =
         metadataDialog.setAttribute("open", "");
       }
     }
+    presentPreviewSuggestionInMetadataWorkspace(previewSuggestion, previewPayload);
+    if (previewSuggestion && identityAllowsAiSuggestionLoadChrome()) {
+      await refreshMetadataSuggestionList(targetMediaId);
+    }
     renderMetadataWorkspace();
     (metadataWorkspace.loading ? metadataWorkspaceTitle : metadataTitleInput).focus();
-    return;
+    return true;
   }
   const switchContext = captureMetadataDiscardContext({ action: "open-metadata", targetMediaId });
   const discardContext = await confirmDiscardDirtyMetadata({ action: "open-metadata", targetMediaId });
   if (!discardContext) {
     reopenMetadataWorkspaceAfterRejectedSwitch(switchContext);
-    return;
+    return false;
   }
-  if (!metadataDiscardContextIsCurrent(discardContext) || item.media_id !== targetMediaId) return;
+  if (!metadataDiscardContextIsCurrent(discardContext) || item.media_id !== targetMediaId) return false;
   if (metadataWorkspace.openMediaId !== null) {
-    if (!closeMetadataWorkspaceWithContext(discardContext)) return;
+    if (!closeMetadataWorkspaceWithContext(discardContext)) return false;
   }
   if (detailsDialog && detailsDialog.hasAttribute("open")) {
     closeDetailsDialog();
@@ -7840,14 +7548,14 @@ async function handleOpenMetadataWorkspace(item, openerElement, { aiSuggestion =
   metadataWorkspaceTitle.focus();
   const tagsReady = await ensureCanonicalTags();
   if (token !== metadataRequestToken) {
-    return;
+    return false;
   }
   if (!tagsReady) {
     metadataWorkspace.loading = false;
     metadataWorkspace.unavailable = true;
     setMetadataStatus("unavailable", "Canonical tag definitions are unavailable.");
     updateMetadataControls();
-    return;
+    return true;
   }
   try {
     const mediaId = item.media_id;
@@ -7857,7 +7565,7 @@ async function handleOpenMetadataWorkspace(item, openerElement, { aiSuggestion =
     });
     const payload = await response.json();
     if (token !== metadataRequestToken) {
-      return;
+      return false;
     }
     metadataWorkspace.loading = false;
     if (!response.ok) {
@@ -7873,7 +7581,7 @@ async function handleOpenMetadataWorkspace(item, openerElement, { aiSuggestion =
         setMetadataStatus("error", "Metadata could not be loaded from the local catalog.");
       }
       updateMetadataControls();
-      return;
+      return true;
     }
     applyMetadataPayloadToWorkspace(payload);
     if (metadataWorkspace.editMode === "alias") {
@@ -7882,25 +7590,19 @@ async function handleOpenMetadataWorkspace(item, openerElement, { aiSuggestion =
         cache: "no-store",
       });
       if (token !== metadataRequestToken) {
-        return;
+        return false;
       }
       if (aliasResponse.ok) {
         const aliasPayload = await aliasResponse.json();
         if (token !== metadataRequestToken) {
-          return;
+          return false;
         }
         if (aliasOverlayIsNonEmpty(aliasPayload)) {
           applyAliasOverlayToWorkspace(aliasPayload);
         }
       }
     }
-    if (aiSuggestion && identityUsesCanonicalMetadataWrite()) {
-      const tagKeys = await metadataTagKeysFromSuggestion(aiSuggestion.tags);
-      if (token !== metadataRequestToken) {
-        return;
-      }
-      applyResolvedAiSuggestionToMetadataWorkspace(aiSuggestion, tagKeys);
-    }
+    presentPreviewSuggestionInMetadataWorkspace(previewSuggestion, previewPayload);
     renderMetadataWorkspace();
     metadataTitleInput.focus();
     if (metadataWorkspaceIsMovie()) {
@@ -7909,12 +7611,15 @@ async function handleOpenMetadataWorkspace(item, openerElement, { aiSuggestion =
     } else if (identityAllowsAiSuggestionLoadChrome()) {
       await refreshMetadataSuggestionList(mediaId);
     }
+    return true;
   } catch {
     if (token === metadataRequestToken) {
       metadataWorkspace.loading = false;
       setMetadataStatus("error", "Metadata could not be loaded from the local catalog.");
       updateMetadataControls();
+      return true;
     }
+    return false;
   }
 }
 

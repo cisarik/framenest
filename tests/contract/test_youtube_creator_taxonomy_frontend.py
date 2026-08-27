@@ -37,11 +37,12 @@ def test_creator_chip_helpers_precede_semantic_tags() -> None:
     assert "media-details-dialog__tag--creator" in styles
 
 
-def test_ai_quick_action_omits_acquisition_source_and_preserves_creator() -> None:
+def test_ai_quick_action_does_not_read_or_preserve_taxonomy_on_the_card() -> None:
     app = (WEB_ROOT / "app.js").read_text(encoding="utf-8")
     start = app.index("async function handleAnalyzeCatalogCard")
-    end = app.index("\nasync function ", start + 1)
+    end = app.index("\nfunction setCatalogPagination", start + 1)
     body = app[start:end]
-    assert "acquisition_source: metadataPayload.acquisition_source" not in body
-    assert "creator_attribution_kind: metadataPayload.creator_attribution_kind" in body
-    assert "Content category, acquisition source, creator attribution, and genres are preserved" in body
+    assert "acquisition_source:" not in body
+    assert "creator_attribution_kind:" not in body
+    assert "last-write-wins" not in body
+    assert "will replace the current canonical values" not in body
