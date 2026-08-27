@@ -52,9 +52,12 @@ Schema head remains Alembic `0033`. Preview persist-join into
    returns to idle with a review-ready status and does not repeat analysis.
 
 4. **Audience.** Card 🧠 remains `analysis.run` ∧ `metadata.canonical.write` ∧
-   resolved ∧ available ∧ incomplete metadata ∧ not movie, and is hidden when
-   `companionWebHosted()`. Ordinary, unauthenticated, and hosted companion
-   Gallery hide 🧠. Hosted Load chrome in Edit is unchanged.
+   resolved ∧ available ∧ not movie, plus a supported available location, and
+   is hidden when `companionWebHosted()`. It is available on all such
+   administrator-visible supported non-movie items so the administrator can
+   re-run analysis after changing AI provider or model, not only when
+   canonical metadata is incomplete. Ordinary, unauthenticated, and hosted
+   companion Gallery hide 🧠. Hosted Load chrome in Edit is unchanged.
 
 5. **This is not publication.** Card 🧠 does not publish. The four
    `companion_mutation` routes stay unchanged. Schema head stays `0033`.
@@ -73,9 +76,10 @@ identification on the card, and persist-join redesign.
 ## Consequences
 
 Administrators review AI title, description, and tags in the same Edit
-chrome used by the pencil control. Incomplete cards keep 🧠 until canonical
-Save completes metadata. Hosted companion cannot reach Analyze through the
-card shortcut.
+chrome used by the pencil control. Card 🧠 stays available for
+administrators on all supported non-movie items so they can re-run analysis
+and experiment with models; completeness no longer hides the control.
+Hosted companion cannot reach Analyze through the card shortcut.
 
 ## References
 
