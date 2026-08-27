@@ -1709,7 +1709,8 @@ def test_catalog_card_analyze_shortcut_for_metadata_needed_admin_media(client: T
     assert 'analyzeButton.title = "Analyze by AI"' in card_body
     assert "Generate first-pass AI metadata for" in card_body
     assert "cardAiQuickActionEligible(item)" in card_body
-    assert "cardNeedsMetadata(item)" in eligible_body
+    assert "cardNeedsMetadata(item)" not in eligible_body
+    assert "selectSupportedAvailableLocation(item) !== null" in eligible_body
     assert "identityAllowsCardAiQuickAction()" in eligible_body
     assert "identityHasCapability(" not in eligible_body
     assert "identityState.resolved" in identity_gate_body

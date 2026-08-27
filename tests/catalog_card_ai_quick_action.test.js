@@ -551,7 +551,6 @@ function createFlowHarness({ confirmAccepted = true, reducedMotion = true } = {}
   const source = [
     extractFunction(APP_SOURCE, "identityAllowsCardAiQuickAction"),
     extractFunction(APP_SOURCE, "catalogItemHasCompleteMetadata"),
-    extractFunction(APP_SOURCE, "cardNeedsMetadata"),
     extractFunction(APP_SOURCE, "cardAiQuickActionEligible"),
     extractFunction(APP_SOURCE, "catalogItemsForCurrentScope"),
     extractFunction(APP_SOURCE, "cardAiQuickActionProviderBlocked"),
@@ -726,6 +725,33 @@ test("Gallery card actions reflect ordinary admin and removed capabilities witho
   assert.ok(admin.card.querySelector(".catalog-card__action--analyze"));
   assert.ok(admin.card.querySelector(".catalog-card__action--open-original"));
 
+  const completeAdmin = renderCatalogCardForCapabilities(
+    [
+      "gallery.read",
+      "media.original.read",
+      "media.download",
+      "metadata.canonical.write",
+      "analysis.run",
+    ],
+    {
+      description: "Complete description",
+      tags: [{ key: "nature", display_name: "Nature" }],
+    },
+  );
+  assert.ok(completeAdmin.card.querySelector(".catalog-card__action--analyze"));
+
+  const movieAdmin = renderCatalogCardForCapabilities(
+    [
+      "gallery.read",
+      "media.original.read",
+      "media.download",
+      "metadata.canonical.write",
+      "analysis.run",
+    ],
+    { content_category: "movie" },
+  );
+  assert.equal(movieAdmin.card.querySelector(".catalog-card__action--analyze"), null);
+
   const noMetadata = renderCatalogCardForCapabilities([
     "gallery.read",
     "media.download",
@@ -869,7 +895,7 @@ test("companion-hosted Gallery keeps open-original and adds top-left Attach", ()
   );
 });
 
-test("brain eligibility requires metadata need, both capabilities, supported location, and excludes movies", () => {
+test("brain eligibility requires both capabilities, supported location, and excludes movies", () => {
   const { context } = createFlowHarness();
   const item = sampleItem();
   assert.equal(context.cardAiQuickActionEligible(item), true);
@@ -886,7 +912,7 @@ test("brain eligibility requires metadata need, both capabilities, supported loc
     media_kind: "animated_image",
     description: "Complete description",
     tags: [{ key: "funny", display_name: "Funny" }],
-  })), false);
+  })), true);
   assert.equal(context.cardAiQuickActionEligible(sampleItem({
     media_kind: "video",
     content_category: "meme",
@@ -899,8 +925,7 @@ test("brain eligibility requires metadata need, both capabilities, supported loc
       { key: "alpha", display_name: "Alpha" },
       { key: "beta", display_name: "Beta" },
     ],
-  })), false);
-  assert.equal(context.cardNeedsMetadata(sampleItem({ tags: [{ key: "nature", display_name: "Nature" }] })), true);
+  })), true);
   assert.equal(context.cardAiQuickActionEligible(sampleItem({ tags: [{ key: "nature", display_name: "Nature" }] })), true);
   const fixtureOnly = sampleItem({
     display_title: null,
@@ -908,7 +933,6 @@ test("brain eligibility requires metadata need, both capabilities, supported loc
     tags: [{ key: "acceptance", display_name: "Acceptance" }],
   });
   assert.equal(context.catalogItemHasCompleteMetadata(fixtureOnly), false);
-  assert.equal(context.cardNeedsMetadata(fixtureOnly), true);
   assert.equal(context.cardAiQuickActionEligible(fixtureOnly), true);
   assert.equal(context.catalogItemHasCompleteMetadata(sampleItem({ tags: [] })), false);
   assert.equal(
@@ -918,6 +942,8 @@ test("brain eligibility requires metadata need, both capabilities, supported loc
     })),
     true,
   );
+  assert.equal(context.cardAiQuickActionEligible(sampleItem({ locations: [] })), false);
+  assert.equal(context.cardAiQuickActionEligible(sampleItem({ media_kind: "audio" })), false);
 });
 
 test("metadata completeness requires persisted trimmed title, description, and a canonical tag", () => {
@@ -950,10 +976,10 @@ test("metadata completeness requires persisted trimmed title, description, and a
   );
   assert.equal(context.catalogItemHasCompleteMetadata(complete), true);
   assert.equal(context.cardAiQuickActionEligible(emptyDescription), true);
-  assert.equal(context.cardAiQuickActionEligible(complete), false);
+  assert.equal(context.cardAiQuickActionEligible(complete), true);
 });
 
-test("Processed presentation uses the same metadata-completeness predicate as brain eligibility", () => {
+test("Processed presentation uses the metadata-completeness predicate independently of brain eligibility", () => {
   const { context } = createFlowHarness();
   const fixtureOnly = sampleItem({
     display_title: "Acceptance JPEG meme",
@@ -1027,13 +1053,15 @@ test("ordinary missing-capability role-only and missing identity fail closed for
   assert.equal(context.cardAiQuickActionEligible(item), false);
 });
 
-test("source wiring gates brain on metadata need and positively resolved identity capabilities", () => {
+test("source wiring gates brain on identity, supported location, and movie exclusion", () => {
   const cardBody = extractFunction(APP_SOURCE, "renderCatalogCard");
   const handleBody = extractFunction(APP_SOURCE, "handleAnalyzeCatalogCard");
   const eligibleBody = extractFunction(APP_SOURCE, "cardAiQuickActionEligible");
   const identityGateBody = extractFunction(APP_SOURCE, "identityAllowsCardAiQuickAction");
   assert.ok(cardBody.includes("cardAiQuickActionEligible(item)"));
-  assert.ok(eligibleBody.includes("cardNeedsMetadata(item)"));
+  assert.equal(eligibleBody.includes("cardNeedsMetadata(item)"), false);
+  assert.equal(eligibleBody.includes("catalogItemHasCompleteMetadata("), false);
+  assert.ok(eligibleBody.includes("selectSupportedAvailableLocation(item) !== null"));
   assert.ok(identityGateBody.includes("identityState.resolved"));
   assert.ok(identityGateBody.includes("identityState.available"));
   assert.ok(identityGateBody.includes('capabilities.has("analysis.run")'));

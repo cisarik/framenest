@@ -5257,10 +5257,6 @@ function catalogItemHasCompleteMetadata(item) {
   );
 }
 
-function cardNeedsMetadata(item) {
-  return selectSupportedAvailableLocation(item) !== null && !catalogItemHasCompleteMetadata(item);
-}
-
 function identityAllowsCardAiQuickAction() {
   return identityState.resolved
     && identityState.available
@@ -5271,7 +5267,7 @@ function identityAllowsCardAiQuickAction() {
 
 function cardAiQuickActionEligible(item) {
   return identityAllowsCardAiQuickAction()
-    && cardNeedsMetadata(item)
+    && selectSupportedAvailableLocation(item) !== null
     && (item.content_category || "general") !== "movie";
 }
 
