@@ -79,6 +79,19 @@ implemented at this baseline. Public bind, TLS, and Funnel remain unshipped.
 This status does not claim a public bind, TLS, Funnel, or automatic-analysis
 flag enablement.
 
+Workspace identities with only `metadata.alias.write` can edit the
+caller-private alias overlay through the existing Edit dialog, with per-field
+AI suggestion strips and dropdown-plus-Load chrome backed by
+`GET /api/media/{media_id}/ai-suggestions`
+([ADR-0077](docs/adr/0077-ordinary-alias-edit-affordance-and-per-field-ai-suggestions.md)).
+The Gallery card brain-symbol Analyze control is analyze-then-edit through that
+same Edit dialog instead of a bulk last-write-wins save
+([ADR-0078](docs/adr/0078-gallery-card-ai-per-field-review.md)), and the
+administrator companion Settings **Automatic media analysis** toggle is backed
+by the fifth `companion_mutation` route,
+`PUT /api/admin/settings/automatic-analysis`
+([ADR-0079](docs/adr/0079-administrator-automatic-analysis-runtime-setting.md)).
+
 The upload path receives untrusted bytes only into
 configured server quarantine, performs bounded server-side validation, and
 derives canonical identity from validated byte size and SHA-256 digest. The
@@ -120,7 +133,8 @@ environment, and lockfile manager (`pyproject.toml` + committed `poetry.lock`).
 Local development may use `uv` only to locate or install a CPython 3.13
 interpreter for Poetry ([ADR-0006](docs/adr/0006-macos-python-interpreter-provider.md));
 `uv` is not the project dependency manager and an untracked `uv.lock` is not
-project authority. The initial `poetry.lock` was generated with Poetry 2.1.4.
+project authority. The committed `poetry.lock` was generated with Poetry 2.3.2;
+NUC deployment tooling (`deploy/ubuntu/framenest_release.py`) pins Poetry 2.4.1.
 The local virtual environment lives in `.venv/` and is not committed. Worker
 runtime and exact-source rules:
 [docs/WORKER_EXECUTION_CONTRACT.md](docs/WORKER_EXECUTION_CONTRACT.md).
@@ -271,7 +285,12 @@ FrameNest-owned runtime logs are compact JSON lines written to `stderr` by the d
 
 `poetry run framenest-server` remains the normal development command, but Poetry or other launchers may additionally emit their own diagnostics outside the FrameNest logging graph. Those launcher-owned lines are not FrameNest structured log records and are not covered by the application JSON contract.
 
-Override bind address with `FRAMENEST_HOST` and `FRAMENEST_PORT` for the raw server command. Default binding is loopback-only (`127.0.0.1`). Setting `FRAMENEST_HOST=0.0.0.0` is an explicit exposure override and is not the recommended default. The browser-development launcher enforces loopback and accepts only `FRAMENEST_PORT` for port selection.
+Override bind address with `FRAMENEST_HOST` and `FRAMENEST_PORT` for the raw
+server command. Default binding is loopback-only (`127.0.0.1`), and
+loopback-only TCP binding is enforced in code: a non-loopback TCP host is
+rejected at configuration time and no exposure override exists. UDS/Tailscale
+ingress remains the remote path. The browser-development launcher enforces
+loopback and accepts only `FRAMENEST_PORT` for port selection.
 
 Reload, AppArmor/UFW hardening completion, and broader multi-device
 synchronization remain open work. A catalog backup create/verify/restore
@@ -295,11 +314,12 @@ and the current Ubuntu NUC deployment workflow is documented in
 immutable release-update contract (`deploy/ubuntu/framenest-release`) is
 accepted through
 [ADR-0060](docs/adr/0060-repeatable-immutable-nuc-release-update-contract.md);
-it is repository capability until a later live deployment proves it. A
-production release was previously accepted at commit
+refreshing the NUC to the exact public `main` SHA is normal routine operation
+([ADR-0075](docs/adr/0075-nuc-development-test-target-and-routine-release-refresh.md)).
+A production release was previously accepted at commit
 `aec2f0091c10aed2fc2033dac154a0d9651b2b6d` from
 `/opt/framenest/releases/aec2f0091c10aed2fc2033dac154a0d9651b2b6d` over
-Tailscale Serve only; that fact is dated history, and current production state
+Tailscale Serve only; that fact is dated history, and the deployed NUC state
 is read back through `framenest-release status`.
 
 ## Local Database Foundation
@@ -518,8 +538,10 @@ The current approved product direction includes:
   may run locally or on the Ubuntu NUC.
 - Privacy-aware AI assistance later, after core library behavior and safety boundaries are established.
 - Multiple libraries, multiple devices, and one logical media item that may exist in multiple physical locations.
-- An Intel NUC personal production server for authoritative hosting, with
-  further remote-access, transfer, and archive workflows remaining future work.
+- An Intel NUC development-and-testing machine
+  ([ADR-0075](docs/adr/0075-nuc-development-test-target-and-routine-release-refresh.md))
+  for authoritative catalog serving, with further remote-access, transfer, and
+  archive workflows remaining future work.
 
 ## Architectural Direction
 
@@ -622,7 +644,11 @@ Core working principles remain:
 
 Initial development and testing targets Apple Silicon macOS.
 
-Current server deployment preparation targets Ubuntu Server 24.04 on the Intel NUC6i5SYH personal production server. Broader cross-platform support remains an architectural requirement, and a future Ubuntu VPS remains a portability target.
+The Ubuntu NUC is the current FrameNest development-and-testing machine on
+Ubuntu Server 24.04 on the Intel NUC6i5SYH
+([ADR-0075](docs/adr/0075-nuc-development-test-target-and-routine-release-refresh.md)):
+it runs only FrameNest, its state is disposable and reinitializable, and it is
+routinely refreshed toward public `main`. Broader cross-platform support remains an architectural requirement, and a future Ubuntu VPS remains a portability target.
 
 ## Documentation Map
 
@@ -700,6 +726,8 @@ Current foundation files:
 - [`docs/adr/0066-administrator-owned-x-automatic-generic-analysis.md`](docs/adr/0066-administrator-owned-x-automatic-generic-analysis.md) records administrator-owned X automatic generic analysis (default-off).
 - [`docs/adr/0067-administrator-companion-review-inbox-and-mutation-trust.md`](docs/adr/0067-administrator-companion-review-inbox-and-mutation-trust.md) records the companion review inbox and the first four `companion_mutation` routes.
 - [`docs/adr/0079-administrator-automatic-analysis-runtime-setting.md`](docs/adr/0079-administrator-automatic-analysis-runtime-setting.md) records the administrator companion Settings overlay and the fifth `companion_mutation` route.
+- [`docs/adr/0077-ordinary-alias-edit-affordance-and-per-field-ai-suggestions.md`](docs/adr/0077-ordinary-alias-edit-affordance-and-per-field-ai-suggestions.md) records the ordinary alias-edit affordance, per-field AI suggestion strips, and the workspace `GET /api/media/{media_id}/ai-suggestions` read route.
+- [`docs/adr/0078-gallery-card-ai-per-field-review.md`](docs/adr/0078-gallery-card-ai-per-field-review.md) records the Gallery card Analyze (brain-symbol) control as analyze-then-edit through the existing Edit dialog.
 - [`docs/adr/0068-companion-review-save-and-readiness-triggered-publication.md`](docs/adr/0068-companion-review-save-and-readiness-triggered-publication.md) records companion review Save publication when ready.
 - [`docs/adr/0069-five-tag-generic-media-suggestion-contract.md`](docs/adr/0069-five-tag-generic-media-suggestion-contract.md) records the live generic v4 1–5 tag contract.
 - [`docs/adr/0070-companion-exclusion-of-movie-workflows.md`](docs/adr/0070-companion-exclusion-of-movie-workflows.md) records companion exclusion of movie workflows.

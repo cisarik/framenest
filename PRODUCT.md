@@ -54,6 +54,15 @@ history row opens hosted Details without Analyze by AI in that popup
 [ADR-0072](docs/adr/0072-native-side-panel-unread-inbox-and-title-bar-history-chrome.md),
 [ADR-0073](docs/adr/0073-companion-merged-history-chrome-pending-visibility-x-seed-tag-and-preserving-apply.md),
 [ADR-0076](docs/adr/0076-companion-history-hosted-click-admin-analyzed-inbox-and-ordinary-own-history.md)).
+Workspace identities with only `metadata.alias.write` can edit the caller-private
+alias overlay through the existing Edit dialog, with per-field AI suggestion
+strips and dropdown-plus-Load chrome backed by
+`GET /api/media/{media_id}/ai-suggestions`
+([ADR-0077](docs/adr/0077-ordinary-alias-edit-affordance-and-per-field-ai-suggestions.md)).
+The Gallery card brain-symbol Analyze control is analyze-then-edit: it opens
+the existing Edit dialog with proposal strips and performs no bulk
+last-write-wins save
+([ADR-0078](docs/adr/0078-gallery-card-ai-per-field-review.md)).
 Automatic post-catalog analysis stays default-off; administrator-owned X catalog
 events may enqueue generic analysis when
 `FRAMENEST_AUTOMATIC_MEDIA_ANALYSIS_ENABLED` is true or when an administrator
@@ -70,9 +79,10 @@ Companion maps onto existing catalog tags only and does not create tags. Movie
 and genre workflows stay out of companion
 ([ADR-0070](docs/adr/0070-companion-exclusion-of-movie-workflows.md)).
 [ADR-0074](docs/adr/0074-dual-audience-public-published-and-tailscale-workspace-boundary.md)
-is accepted architecture direction for a dual-audience boundary (Tailscale
-workspace writer plus a future local-only `public_published_uds` published
-reader) with phased rollout successors. None of those successors is shipped.
+is accepted architecture for a dual-audience boundary. The local-only
+`public_published_uds` published-reader is implemented-for-backend and is not
+exposed externally: there is no public bind, TLS listener, Funnel, or NUC
+enablement. The remaining public-origin rollout successors are not shipped.
 
 There is still no completed desktop shell, desktop Settings, complete Cover Studio,
 arbitrary user-created collections, persistent AI Drafts, multi-model draft
@@ -88,7 +98,10 @@ release was previously accepted at public/canonical commit
 `0028`; that fact is dated history. Tauri v2 is accepted as the future desktop
 shell, but no Tauri scaffold
 exists yet. Development remains MacBook-first; Ubuntu Server 24.04 on the Intel
-NUC6i5SYH is the current personal production server. This document defines
+NUC6i5SYH is the current development-and-testing machine
+([ADR-0075](docs/adr/0075-nuc-development-test-target-and-routine-release-refresh.md)):
+it runs only FrameNest, its state is disposable and reinitializable, and it is
+routinely refreshed toward public `main`. This document defines
 approved product direction; it does not claim full product implementation.
 
 ## 3. Product Vision
@@ -141,10 +154,11 @@ FrameNest uses a server/client architecture. The FrameNest server process is
 authoritative for catalog records and server-owned state. Browser, desktop, and
 remote interfaces are clients of that server API.
 
-The server may run locally for a desktop installation or later on the Intel NUC
-personal production server. It may coordinate catalog state, transfers, remote
-streaming, remote downloads, centralized AI provider access, and future backup
-functionality.
+The server may run locally for a desktop installation or on the Intel NUC
+development-and-testing machine
+([ADR-0075](docs/adr/0075-nuc-development-test-target-and-routine-release-refresh.md)).
+It may coordinate catalog state, transfers, remote streaming, remote downloads,
+centralized AI provider access, and future backup functionality.
 
 The server may support global gallery visibility for remote-only media through
 metadata, covers, availability summaries, and derived thumbnails without
@@ -255,11 +269,13 @@ Browser, desktop, and remote interfaces are clients. They must not infer
 administrator authority from loopback, source IP, hostname, Tailscale
 membership, cookies, or same-machine execution.
 
-The Intel NUC currently hosts the owner-authoritative production server, but it
-is not required for local ownership. Current production remains
-tailnet-oriented. NUC security hardening remains open and is required before
-future VPS deployment; present NUC operation does not imply VPS deployment or
-public Internet exposure.
+The Intel NUC is the FrameNest development-and-testing machine
+([ADR-0075](docs/adr/0075-nuc-development-test-target-and-routine-release-refresh.md)):
+it runs only FrameNest, its state is disposable and reinitializable, and it is
+routinely refreshed toward public `main`; it is not required for local
+ownership. Workspace access remains Tailscale-only. NUC security hardening
+remains open and is required before future VPS deployment; present NUC
+operation does not imply VPS deployment or public Internet exposure.
 
 The server may later support:
 
@@ -406,7 +422,10 @@ Provider keys should remain on the server where possible. Ordinary clients shoul
 
 Ordinary clients should not configure provider credentials or call providers
 directly. Browser status and results must be sanitized. Production
-provider-secret integration remains unresolved.
+provider-secret support is repository source material and may be deployed
+under explicit operator authority per
+[ADR-0036](docs/adr/0036-production-ai-credentials-via-systemd.md); it has not
+yet been deployed by a tracked task.
 
 Suspicious filenames may be manually analyzed, but AI suggestions require confirmation. Current pre-alpha website AI suggestion review lists durable inbox runs, copies individual fields into Current, and is not catalog truth until Save. The companion review surface is a separate durable administrator attention queue plus all-item history over successful generic runs; it does not replace that website field-copy review. Opening or Saving a companion review durably clears unread attention, while history retains the item.
 

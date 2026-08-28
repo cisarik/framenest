@@ -145,8 +145,12 @@ exact allowlisted `chrome-extension://` origin after
 `POST /api/companion/review-inbox/{media_id}/apply`, and
 `PUT /api/admin/settings/automatic-analysis`. That allowlist defaults to
 empty, still requires `X-FrameNest-Request: 1`, and adds no CORS headers. GET
-inbox routes do not require the allowlist the same way; mutations that carry
-the extension Origin fail closed when the allowlist is empty. See
+inbox and own-history routes do not require the allowlist the same way;
+mutations that carry the extension Origin fail closed when the allowlist is
+empty with sanitized `403 MUTATION_ORIGIN_FORBIDDEN`, so with
+`FRAMENEST_COMPANION_EXTENSION_ORIGINS` unset authenticated GET routes still
+work while every extension-Origin mutation is rejected. Rollback is removing
+the key or setting it to `[]` and restarting. See
 [ADR-0061](docs/adr/0061-x-meme-browser-companion.md),
 [ADR-0064](docs/adr/0064-x-save-category-and-public-photo-acquisition.md),
 [ADR-0067](docs/adr/0067-administrator-companion-review-inbox-and-mutation-trust.md),
@@ -157,6 +161,29 @@ Public JPEG/PNG X photographs are
 acquired through an isolated status bridge and a strict `pbs.twimg.com`
 transport; WebP is rejected; content scripts never fetch FrameNest or the CDN.
 The companion still adds no CORS headers.
+
+Three companion/workspace positions are accepted residuals documented here,
+not new rules. Workspace embeddability: workspace HTML responses set no
+`frame-ancestors` or `X-Frame-Options` header
+(`src/framenest/adapters/api/application.py`), deliberately, because the
+companion side panel hosts the workspace origin
+([ADR-0063](docs/adr/0063-companion-side-panel-web-host.md)). The residual is
+bounded by design: every unsafe mutation still requires the exact external
+`Origin` plus the non-simple `X-FrameNest-Request: 1` header, and workspace
+identity is injected per request from trusted UDS provenance with no cookies,
+so a hostile embedder cannot ride an ambient session. Companion packaging:
+the companion ships as an unpacked Manifest V3 extension with a pinned
+development public key and no auto-update path
+([docs/X_COMPANION.md](docs/X_COMPANION.md)); rotating that key changes the
+derived extension ID and requires an allowlist update, and if the extension is
+ever packed, store signing, a controlled update channel, and extension-ID
+continuity would have to be re-established — no packing work is promised.
+Companion storage: per-user connection state (the stored origin plus bounded
+inflight-claim and awaiting-analysis traces, with no secrets) lives in
+`chrome.storage.local` (`extension/background/service_worker.js`) and is
+readable by anything executing in the same browser profile on a shared
+machine; there is no cross-profile exposure. The accepted position is the
+single-operator workstation assumption with bounded, non-secret contents.
 
 YouTube manual ingestion is a separate operator-only loopback boundary. It is
 disabled unless its private staging root and the existing upload/publication

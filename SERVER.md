@@ -91,9 +91,11 @@ Tailscale remote-access and identity foundation (root-owned HTTPS Serve to a
 permission-restricted Unix socket, verified-identity mapping, capability
 authorization, and privileged-action audit) is recorded in
 [ADR-0048](docs/adr/0048-tailscale-remote-access-and-identity-foundation.md)
-and the current runbook. An unpacked Manifest V3 X companion may submit four
+and the current runbook. An unpacked Manifest V3 X companion may submit five
 `companion_mutation` routes from an exact allowlisted `chrome-extension://`
-origin: X submit, X retry, review opened, and review apply. It may also list
+origin: X submit, X retry, review opened, review apply, and
+`PUT /api/admin/settings/automatic-analysis`
+([ADR-0079](docs/adr/0079-administrator-automatic-analysis-runtime-setting.md)). It may also list
 requester-visible memes through `GET /api/x/companion/media` and read the
 administrator review inbox through `GET /api/companion/review-inbox` and
 `GET /api/companion/review-inbox/{media_id}`. GET inbox routes work with an

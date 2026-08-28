@@ -104,7 +104,7 @@ Accepted so far:
 - Persistent display-title and canonical-tag core through [ADR-0027](docs/adr/0027-persistent-display-title-and-canonical-tags.md); implementation complete for API-level title/tag persistence.
 - Catalog read model and search semantics through [ADR-0028](docs/adr/0028-catalog-read-model-and-search-semantics.md); implementation complete for read-only imported-media listing, display-title search, canonical-tag AND filters, deterministic ordering, and bounded offset pagination.
 - Automatic built-in `Processed` workflow collection from durable tag saves through [ADR-0030](docs/adr/0030-automatic-processed-collection.md); accepted and implemented through migration `0007`, with one zero-or-one collection membership per medium, and no arbitrary collection CRUD or general collection manager.
-- Fedora systemd service foundation through [ADR-0031](docs/adr/0031-fedora-systemd-service-foundation.md), superseded for the active deployment target by the Ubuntu NUC deployment foundation through [ADR-0032](docs/adr/0032-ubuntu-nuc-deployment-foundation.md); accepted and implemented as repository-local service source material, a non-secret environment template, a read-only database-readiness gate, and an Ubuntu operator runbook. The catalog backup and restore-to-new-destination foundation is accepted through [ADR-0033](docs/adr/0033-catalog-backup-and-recovery-foundation.md). Automated catalog backup/retention/restore-verification is accepted through [ADR-0052](docs/adr/0052-automated-catalog-backup-retention-and-restore-verification.md), and a routine immutable NUC release-update contract (`deploy/ubuntu/framenest-release`) is accepted through [ADR-0060](docs/adr/0060-repeatable-immutable-nuc-release-update-contract.md) as repository capability until a later live deployment proves it. Public `main` and the production release may differ; the authoritative mutable production readback is `framenest-release status`. Further NUC security hardening, AppArmor/UFW completion, production database replacement automation, media second-copy backup, and secret-recovery drills remain open.
+- Fedora systemd service foundation through [ADR-0031](docs/adr/0031-fedora-systemd-service-foundation.md), superseded for the active deployment target by the Ubuntu NUC deployment foundation through [ADR-0032](docs/adr/0032-ubuntu-nuc-deployment-foundation.md); accepted and implemented as repository-local service source material, a non-secret environment template, a read-only database-readiness gate, and an Ubuntu operator runbook. The catalog backup and restore-to-new-destination foundation is accepted through [ADR-0033](docs/adr/0033-catalog-backup-and-recovery-foundation.md). Automated catalog backup/retention/restore-verification is accepted through [ADR-0052](docs/adr/0052-automated-catalog-backup-retention-and-restore-verification.md), and a routine immutable NUC release-update contract (`deploy/ubuntu/framenest-release`) is accepted through [ADR-0060](docs/adr/0060-repeatable-immutable-nuc-release-update-contract.md); refreshing the NUC to the exact public `main` SHA is normal routine operation ([ADR-0075](docs/adr/0075-nuc-development-test-target-and-routine-release-refresh.md)). Public `main` and the deployed NUC release may differ; the authoritative mutable readback is `framenest-release status`. Further NUC security hardening, AppArmor/UFW completion, production database replacement automation, media second-copy backup, and secret-recovery drills remain open.
 - Canonical Analytic Programming integration through a pinned `.ap/` Git submodule and managed `AGENTS.md` block through [ADR-0034](docs/adr/0034-canonical-analytic-programming-integration.md); accepted and implemented. Universal AP protocol files live under `.ap/`, FrameNest-specific rules live in `AGENTS.md`, and permanent BOOT/NEXT files are no longer live repository artifacts.
 - Authoritative server and client state model through [ADR-0035](docs/adr/0035-authoritative-server-and-client-state-model.md); accepted as product architecture direction. The server process is authoritative for catalog and server-owned state and may run locally or later on the NUC; browser, desktop, and remote interfaces are clients. Broader authenticated upload, synchronization, client cache/download, per-user Trash, categories, language metadata, and playback extensions remain unimplemented beyond the current trusted-loopback upload foundation.
 - Durable upload sessions, bounded validation, lifecycle-owned validation, canonical byte identity, exact-duplicate disposition, atomic single-process storage-publication recovery, specialized `published -> cataloged` catalog creation, optional durable automatic post-catalog AI analysis, first-class still-image (`jpg`/`png`) media kinds, first-class content classification plus bounded movie identification, owner-operated YouTube manual ingestion, and a separate durable content-publication boundary with a responsive single-item administrator workflow through [ADR-0037](docs/adr/0037-durable-upload-session-and-safe-ingest-foundation.md), [ADR-0038](docs/adr/0038-bounded-upload-media-validation.md), [ADR-0039](docs/adr/0039-lifecycle-owned-upload-validation-orchestration.md), [ADR-0040](docs/adr/0040-canonical-upload-byte-identity-foundation.md), [ADR-0041](docs/adr/0041-exact-byte-upload-duplicate-disposition.md), [ADR-0042](docs/adr/0042-atomic-upload-publication.md), [ADR-0043](docs/adr/0043-upload-to-catalog-transaction.md), [ADR-0044](docs/adr/0044-durable-automatic-post-catalog-analysis.md), [ADR-0045](docs/adr/0045-content-classification-and-movie-identification.md), [ADR-0046](docs/adr/0046-youtube-manual-ingestion-and-provenance.md), and [ADR-0049](docs/adr/0049-durable-content-publication-boundary.md); implemented through migration `0021`.
@@ -222,6 +222,9 @@ Implemented within this phase:
 - Gallery high-level filters for Memes, Movies, and YouTube as content-category query dimensions, plus creator-chip filtering by structured attribution identity, per [ADR-0045](docs/adr/0045-content-classification-and-movie-identification.md) and [ADR-0055](docs/adr/0055-youtube-creator-taxonomy-and-immutable-provenance.md).
 - bounded movie-identification analysis profile with reasoning ON, contact-sheet derivative transport, and durable run separation from generic analysis.
 - automatic built-in `Processed` workflow collection entered by the first durable tag save, cleared when all tags are removed, with a virtual `All media` Catalog scope and an optional `Processed` Catalog scope in the packaged browser.
+- ordinary alias-edit affordance with per-field AI suggestion strips and
+  dropdown-plus-Load chrome reading `GET /api/media/{media_id}/ai-suggestions`
+  ([ADR-0077](docs/adr/0077-ordinary-alias-edit-affordance-and-per-field-ai-suggestions.md)).
 
 Still unimplemented within this phase:
 
@@ -292,6 +295,10 @@ Implemented within this phase:
   [ADR-0073](docs/adr/0073-companion-merged-history-chrome-pending-visibility-x-seed-tag-and-preserving-apply.md));
 - administrator-owned X automatic generic analysis policy, still default-off
   ([ADR-0066](docs/adr/0066-administrator-owned-x-automatic-generic-analysis.md)).
+- administrator automatic-analysis runtime setting as the fifth
+  `companion_mutation` route (`PUT /api/admin/settings/automatic-analysis`),
+  toggleable from the companion Settings overlay without restart
+  ([ADR-0079](docs/adr/0079-administrator-automatic-analysis-runtime-setting.md)).
 
 Companion review Save may publish when ready
 ([ADR-0068](docs/adr/0068-companion-review-save-and-readiness-triggered-publication.md));
@@ -348,6 +355,11 @@ Status: partially implemented.
 
 Goal: build the first real scalable local gallery.
 
+The Gallery card brain-symbol Analyze control is analyze-then-edit: it opens
+the existing Edit dialog with proposal strips and performs no bulk
+last-write-wins save
+([ADR-0078](docs/adr/0078-gallery-card-ai-per-field-review.md)).
+
 Key deliverables: cover-driven gallery, logical-item cards, local and remote-only card states, title search, multi-tag AND filtering, removable active filters, series views, storage/device state, short-media preview, accessibility support, reduced motion, reduced transparency, and lower-resource modes.
 
 Entry conditions: domain, metadata, covers, and local catalog are testable.
@@ -372,9 +384,9 @@ Boundaries: embedded libVLC remains deferred.
 
 ## Phase 11 — Intel NUC Ubuntu Deployment
 
-Status: partially implemented; owner-authoritative production release is active, while NUC security hardening remains open.
+Status: partially implemented; the NUC is the disposable development-and-testing machine routinely refreshed toward public `main` ([ADR-0075](docs/adr/0075-nuc-development-test-target-and-routine-release-refresh.md)), while NUC security hardening remains open.
 
-Goal: deploy and harden the server foundation on Ubuntu Server 24.04 on the Intel NUC6i5SYH personal production server.
+Goal: deploy and harden the server foundation on Ubuntu Server 24.04 on the Intel NUC6i5SYH development-and-testing machine.
 
 Key deliverables: Ubuntu NUC deployment runbook, exact-release workflow, secure CPython 3.13 provisioning, hardware/storage inspection, hardening, AppArmor/UFW context, service user, systemd hardening, explicit migration and readiness, and catalog backup/recovery documentation.
 
@@ -400,9 +412,10 @@ Boundaries: no router port forwarding and no Tailscale Funnel against the
 workspace socket in the approved direction.
 [ADR-0074](docs/adr/0074-dual-audience-public-published-and-tailscale-workspace-boundary.md)
 accepts a second, local-only `public_published_uds` published-reader
-composition as architecture direction with phased rollout successors. Those
-successors are not shipped and are not part of this phase's current
-implementation.
+composition; that reader is implemented-for-backend and is not exposed
+externally (no public bind, TLS listener, Funnel, or NUC enablement). The
+remaining public-origin rollout successors are not shipped and are not part of
+this phase's current implementation.
 
 ## Phase 13 — Authoritative Multi-Device Catalog
 
