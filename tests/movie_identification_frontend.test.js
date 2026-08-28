@@ -41,60 +41,84 @@ function extractConstArray(name) {
   return `const ${name} = [${match[1]}];`;
 }
 
-function createToggleStub() {
+function createStripElement() {
   return {
     hidden: true,
-    disabled: true,
+    className: "",
     textContent: "",
     attrs: {},
+    children: [],
     setAttribute(name, value) {
       this.attrs[name] = String(value);
     },
     getAttribute(name) {
       return Object.prototype.hasOwnProperty.call(this.attrs, name) ? this.attrs[name] : null;
     },
+    addEventListener() {},
+    replaceChildren(...nodes) {
+      this.children = [...nodes];
+    },
+    appendChild(node) {
+      this.children.push(node);
+      return node;
+    },
   };
 }
 
-function createDurableRenderContext(overrides = {}) {
+function stripValueText(strip) {
+  return strip.children
+    .filter((child) => child.className !== "metadata-suggestion-strip__apply")
+    .map((child) => child.textContent)
+    .join("");
+}
+
+function stripChipValues(strip) {
+  return strip.children.map((child) => child.textContent);
+}
+
+function collectStripRenderText(context) {
+  return [
+    context.metadataAiTitleStrip,
+    context.metadataAiDescriptionStrip,
+    context.metadataAiTagsStrip,
+  ]
+    .flatMap((strip) => [strip.textContent, ...strip.children.map((child) => child.textContent)])
+    .join("\n");
+}
+
+function createStripRenderContext() {
   const context = {
-    metadataWorkspace: { openMediaId: "media-1" },
-    metadataDurableAnalysis: {
+    metadataSuggestionList: {
       mediaId: "media-1",
-      state: "analyzed",
-      analysisDefinition: "movie_identification",
-      detailsExpanded: true,
-      movieResult: null,
-      result: null,
+      fetching: false,
+      items: [],
+      selectedRunId: null,
+      revealed: true,
+      errorMessage: "",
+      movieExcluded: false,
     },
-    metadataAiDetailsToggle: createToggleStub(),
-    metadataDurableAiSuggestion: { hidden: true },
-    metadataDurableAiTitle: { textContent: "stale-title" },
-    metadataDurableAiDescription: { textContent: "stale-description" },
-    metadataDurableAiGenres: { textContent: "stale-genres" },
-    metadataDurableAiTags: { textContent: "stale-tags" },
-    metadataDurableAiCollectionRow: { hidden: true },
-    metadataDurableAiCollection: { textContent: "" },
-    metadataDurableAiFilenameRow: { hidden: true },
-    metadataDurableAiFilename: { textContent: "" },
-    movieSuggestionFromResult(result) {
-      if (!result) return null;
-      return {
-        title: result.title || "",
-        description: result.description || "",
-        genres: Array.isArray(result.genres) ? result.genres : [],
-        tags: Array.isArray(result.tags) ? result.tags : [],
-        confidence: result.confidence || "",
-        suggestedFilename: result.suggestedFilename || "",
-      };
+    metadataAiTitleStrip: createStripElement(),
+    metadataAiDescriptionStrip: createStripElement(),
+    metadataAiTagsStrip: createStripElement(),
+    identityAllowsAiSuggestionLoadChrome() {
+      return true;
     },
-    aiSuggestionFromAutomaticAnalysisResult() {
-      return null;
+    copySuggestionFieldToCurrent() {},
+    document: {
+      createElement() {
+        return createStripElement();
+      },
     },
-    ...overrides,
   };
   vm.createContext(context);
-  vm.runInContext(extractFunction("renderMetadataDurableAnalysis"), context);
+  vm.runInContext(extractConstArray("MOVIE_GENRE_OPTIONS"), context);
+  vm.runInContext(extractFunction("movieIdentificationIsPureUnknown"), context);
+  vm.runInContext(extractFunction("movieIdentificationHasLoadableFields"), context);
+  vm.runInContext(extractFunction("movieSuggestionFromResult"), context);
+  vm.runInContext(extractFunction("selectedMetadataSuggestion"), context);
+  vm.runInContext(extractFunction("clearMetadataSuggestionStrip"), context);
+  vm.runInContext(extractFunction("appendSuggestionApplyButton"), context);
+  vm.runInContext(extractFunction("renderMetadataSuggestionStrips"), context);
   return context;
 }
 
@@ -181,8 +205,13 @@ test("movie identification helpers preserve Load boundary and taxonomy mapping",
 
 test("movie Identify and Load stay non-canonical in source", () => {
   assert.match(APP_SOURCE, /Running movie identification/);
-  assert.match(APP_SOURCE, /Loading movie identification/);
-  assert.match(APP_SOURCE, /Empty suggestion fields will not clear existing draft values/);
+  assert.match(APP_SOURCE, /Movie identification in progress\./);
+  // Empty suggestion fields must not clear existing draft values.
+  const applyBody = extractFunction("applyMovieIdentificationToMetadataWorkspace");
+  assert.match(applyBody, /if \(title\) \{/);
+  assert.match(applyBody, /if \(description\) \{/);
+  assert.match(applyBody, /if \(genres\.length > 0\) \{/);
+  assert.match(applyBody, /if \(Array\.isArray\(tagKeys\) && tagKeys\.length > 0\) \{/);
   const start = APP_SOURCE.indexOf('document.querySelector("#metadata-movie-identify-button")');
   assert.ok(start >= 0);
   const identifyBlock = APP_SOURCE.slice(start, APP_SOURCE.indexOf("let commandSearchDebounceTimer"));
@@ -191,137 +220,189 @@ test("movie Identify and Load stay non-canonical in source", () => {
   assert.doesNotMatch(identifyBlock, /method:\s*"PUT"/);
   const loadStart = APP_SOURCE.indexOf("async function handleLoadDurableAiSuggestion");
   const loadEnd = APP_SOURCE.indexOf("async function handleAnalyzeMetadataByAi");
+  assert.ok(loadStart >= 0 && loadEnd > loadStart);
   const loadBlock = APP_SOURCE.slice(loadStart, loadEnd);
-  assert.match(loadBlock, /movieIdentificationEndpoint/);
+  assert.match(loadBlock, /selectedMetadataSuggestion/);
   assert.doesNotMatch(loadBlock, /handleSaveMetadata/);
   assert.doesNotMatch(loadBlock, /method:\s*"PUT"/);
+  // Movie identification status fetch stays on the read-only status surface.
+  const statusStart = APP_SOURCE.indexOf("async function refreshMetadataDurableAnalysis");
+  const statusEnd = APP_SOURCE.indexOf("function applyAnalysisStatusPayload");
+  assert.ok(statusStart >= 0 && statusEnd > statusStart);
+  const statusBlock = APP_SOURCE.slice(statusStart, statusEnd);
+  assert.match(statusBlock, /movieIdentificationEndpoint/);
+  assert.doesNotMatch(statusBlock, /handleSaveMetadata/);
+  assert.doesNotMatch(statusBlock, /method:\s*"PUT"/);
 });
 
 test("durable movie suggestion markup separates Suggested genres and Suggested tags", () => {
-  const detailsBlock = INDEX_SOURCE.slice(
-    INDEX_SOURCE.indexOf('id="metadata-durable-ai-suggestion"'),
+  const workspaceBlock = INDEX_SOURCE.slice(
+    INDEX_SOURCE.indexOf('id="metadata-ai-title-strip"'),
     INDEX_SOURCE.indexOf('id="metadata-save-button"'),
   );
-  assert.match(detailsBlock, /<dt>Suggested genres<\/dt>/);
-  assert.match(detailsBlock, /id="metadata-durable-ai-genres"/);
-  assert.match(detailsBlock, /<dt>Suggested tags<\/dt>/);
-  assert.match(detailsBlock, /id="metadata-durable-ai-tags"/);
-  assert.equal((detailsBlock.match(/Suggested tags/g) || []).length, 1);
-  assert.equal((detailsBlock.match(/Suggested genres/g) || []).length, 1);
-  assert.equal((detailsBlock.match(/id="metadata-durable-ai-genres"/g) || []).length, 1);
-  assert.equal((detailsBlock.match(/id="metadata-durable-ai-tags"/g) || []).length, 1);
-  assert.doesNotMatch(detailsBlock, /Confidence/i);
-  const genresAt = detailsBlock.indexOf('id="metadata-durable-ai-genres"');
-  const tagsAt = detailsBlock.indexOf('id="metadata-durable-ai-tags"');
+  assert.match(workspaceBlock, /id="metadata-ai-title-strip"/);
+  assert.match(workspaceBlock, /id="metadata-ai-description-strip"/);
+  assert.match(workspaceBlock, /id="metadata-ai-tags-strip"/);
+  assert.equal((workspaceBlock.match(/id="metadata-ai-title-strip"/g) || []).length, 1);
+  assert.equal((workspaceBlock.match(/id="metadata-ai-description-strip"/g) || []).length, 1);
+  assert.equal((workspaceBlock.match(/id="metadata-ai-tags-strip"/g) || []).length, 1);
+  // Genres stay a separate draft-side facet surface (the movie genre fieldset),
+  // never merged into the suggestion tag strip.
+  assert.match(workspaceBlock, /id="metadata-genres-fieldset"/);
+  assert.equal((workspaceBlock.match(/id="metadata-genres-fieldset"/g) || []).length, 1);
+  assert.equal((workspaceBlock.match(/metadata-suggestion-strip--tags/g) || []).length, 1);
+  assert.doesNotMatch(workspaceBlock, /Confidence/i);
+  const genresAt = workspaceBlock.indexOf('id="metadata-genres-fieldset"');
+  const tagsAt = workspaceBlock.indexOf('id="metadata-ai-tags-strip"');
   assert.ok(genresAt >= 0 && tagsAt > genresAt);
 });
 
 test("durable renderer does not concatenate genres into tags", () => {
-  const durableBody = extractFunction("renderMetadataDurableAnalysis");
-  assert.match(durableBody, /metadataDurableAiGenres/);
-  assert.match(durableBody, /detailGenres/);
-  assert.match(durableBody, /detailTags/);
-  assert.doesNotMatch(durableBody, /\.\.\.suggestion\.genres,\s*\.\.\.suggestion\.tags/);
-  assert.doesNotMatch(durableBody, /\[\.\.\.suggestion\.genres/);
-  assert.match(APP_SOURCE, /#metadata-durable-ai-genres/);
+  const stripsBody = extractFunction("renderMetadataSuggestionStrips");
+  assert.match(stripsBody, /metadataAiTagsStrip/);
+  assert.match(stripsBody, /item\.tags/);
+  assert.doesNotMatch(stripsBody, /\.\.\.suggestion\.genres,\s*\.\.\.suggestion\.tags/);
+  assert.doesNotMatch(stripsBody, /\[\.\.\.suggestion\.genres/);
+  // The suggestion tag renderer never touches the genre facet at all.
+  assert.doesNotMatch(stripsBody, /genres/);
+  assert.match(APP_SOURCE, /#metadata-ai-tags-strip/);
 });
 
 test("durable movie suggestion renders overlapping genres and tags as distinct facets", () => {
-  const context = createDurableRenderContext();
-  context.metadataDurableAnalysis.movieResult = {
+  const context = createStripRenderContext();
+  context.metadataSuggestionList.items = [{
+    analysisRunId: "run-1",
     title: "The Tinder Swindler",
     description: "The Tinder Swindler",
-    genres: ["Documentary", "Crime"],
-    tags: ["Documentary", "Crime"],
-    confidence: "high",
-  };
-  context.renderMetadataDurableAnalysis();
+    tags: [
+      { value: "Documentary", status: "mapped", key: "documentary", displayName: "Documentary" },
+      { value: "Crime", status: "mapped", key: "crime", displayName: "Crime" },
+    ],
+  }];
+  context.metadataSuggestionList.selectedRunId = "run-1";
+  context.metadataSuggestionList.revealed = true;
+  context.renderMetadataSuggestionStrips();
 
-  assert.equal(context.metadataDurableAiSuggestion.hidden, false);
-  assert.equal(context.metadataDurableAiTitle.textContent, "The Tinder Swindler");
-  assert.equal(context.metadataDurableAiDescription.textContent, "The Tinder Swindler");
-  assert.equal(context.metadataDurableAiGenres.textContent, "Documentary, Crime");
-  assert.equal(context.metadataDurableAiTags.textContent, "Documentary, Crime");
+  assert.equal(context.metadataAiTitleStrip.hidden, false);
+  assert.equal(context.metadataAiDescriptionStrip.hidden, false);
+  assert.equal(context.metadataAiTagsStrip.hidden, false);
+  assert.equal(stripValueText(context.metadataAiTitleStrip), "The Tinder Swindler");
+  assert.equal(stripValueText(context.metadataAiDescriptionStrip), "The Tinder Swindler");
+  assert.deepEqual(stripChipValues(context.metadataAiTagsStrip), ["Documentary", "Crime"]);
   assert.notEqual(
-    context.metadataDurableAiTags.textContent,
+    stripChipValues(context.metadataAiTagsStrip).join(", "),
     "Documentary, Crime, Documentary, Crime",
   );
-  assert.doesNotMatch(context.metadataDurableAiGenres.textContent, /Documentary, Crime, Documentary/);
-  assert.doesNotMatch(context.metadataDurableAiTags.textContent, /Documentary, Crime, Documentary/);
-  assert.equal(context.metadataAiDetailsToggle.getAttribute("aria-expanded"), "true");
-  assert.equal(
-    Object.values(context).some((value) => (
-      value
-      && typeof value === "object"
-      && value.textContent
-      && /confidence/i.test(String(value.textContent))
-    )),
-    false,
-  );
+  assert.doesNotMatch(collectStripRenderText(context), /Documentary, Crime, Documentary/);
+
+  // The movie mapping keeps overlapping genre and tag values as separate facet arrays.
+  const mapped = context.movieSuggestionFromResult({
+    identified_title: "The Tinder Swindler",
+    identification_status: "identified",
+    confidence: "high",
+    genres: ["Documentary", "Crime"],
+    tags: ["Documentary", "Crime"],
+    description: "The Tinder Swindler",
+  });
+  assert.deepEqual(mapped.genres, ["Documentary", "Crime"]);
+  assert.deepEqual(mapped.tags, ["Documentary", "Crime"]);
+  assert.doesNotMatch(collectStripRenderText(context), /confidence/i);
 });
 
 test("durable movie suggestion keeps distinct genre and tag facet values", () => {
-  const context = createDurableRenderContext();
-  context.metadataDurableAnalysis.movieResult = {
-    title: "Distinct Facets",
-    description: "Distinct description",
+  const context = createStripRenderContext();
+  // The mapping keeps the genre facet and the tag facet values separate.
+  const mapped = context.movieSuggestionFromResult({
+    identified_title: "Distinct Facets",
+    identification_status: "identified",
+    confidence: "high",
     genres: ["Documentary"],
     tags: ["Romance scam", "True crime"],
-  };
-  context.renderMetadataDurableAnalysis();
-  assert.equal(context.metadataDurableAiGenres.textContent, "Documentary");
-  assert.equal(context.metadataDurableAiTags.textContent, "Romance scam, True crime");
+    description: "Distinct description",
+  });
+  assert.deepEqual(mapped.genres, ["Documentary"]);
+  assert.deepEqual(mapped.tags, ["Romance scam", "True crime"]);
+
+  // The tag facet renders each suggested tag value once, as its own chip.
+  context.metadataSuggestionList.items = [{
+    analysisRunId: "run-1",
+    title: "Distinct Facets",
+    description: "Distinct description",
+    tags: [
+      { value: "Romance scam", status: "mapped", key: "romance-scam", displayName: "Romance scam" },
+      { value: "True crime", status: "mapped", key: "true-crime", displayName: "True crime" },
+    ],
+  }];
+  context.metadataSuggestionList.selectedRunId = "run-1";
+  context.renderMetadataSuggestionStrips();
+  assert.deepEqual(stripChipValues(context.metadataAiTagsStrip), ["Romance scam", "True crime"]);
+  assert.equal(stripValueText(context.metadataAiTitleStrip), "Distinct Facets");
+  assert.equal(stripValueText(context.metadataAiDescriptionStrip), "Distinct description");
 });
 
 test("durable movie suggestion empty and reset semantics clear stale facet values", () => {
-  const context = createDurableRenderContext();
-  context.metadataDurableAnalysis.movieResult = {
+  const context = createStripRenderContext();
+  context.metadataSuggestionList.items = [{
+    analysisRunId: "run-1",
     title: "First",
     description: "First description",
-    genres: ["Documentary", "Crime"],
-    tags: ["Documentary", "Crime"],
-  };
-  context.renderMetadataDurableAnalysis();
-  assert.equal(context.metadataDurableAiGenres.textContent, "Documentary, Crime");
-  assert.equal(context.metadataDurableAiTags.textContent, "Documentary, Crime");
+    tags: [
+      { value: "Documentary", status: "mapped", key: "documentary", displayName: "Documentary" },
+      { value: "Crime", status: "mapped", key: "crime", displayName: "Crime" },
+    ],
+  }];
+  context.metadataSuggestionList.selectedRunId = "run-1";
+  context.renderMetadataSuggestionStrips();
+  assert.equal(stripValueText(context.metadataAiTitleStrip), "First");
+  assert.deepEqual(stripChipValues(context.metadataAiTagsStrip), ["Documentary", "Crime"]);
 
-  context.metadataDurableAnalysis.movieResult = {
-    title: "Empty genres",
+  // A replacement suggestion with fewer tag values clears the stale chips.
+  context.metadataSuggestionList.items = [{
+    analysisRunId: "run-1",
+    title: "Has tags",
     description: "Has tags",
-    genres: [],
-    tags: ["Romance scam"],
-  };
-  context.renderMetadataDurableAnalysis();
-  assert.equal(context.metadataDurableAiGenres.textContent, "(none)");
-  assert.equal(context.metadataDurableAiTags.textContent, "Romance scam");
+    tags: [
+      { value: "Romance scam", status: "mapped", key: "romance-scam", displayName: "Romance scam" },
+    ],
+  }];
+  context.renderMetadataSuggestionStrips();
+  assert.deepEqual(stripChipValues(context.metadataAiTagsStrip), ["Romance scam"]);
 
-  context.metadataDurableAnalysis.movieResult = {
+  // An empty tag facet hides the strip and leaves no stale chip values.
+  context.metadataSuggestionList.items = [{
+    analysisRunId: "run-1",
     title: "Empty tags",
     description: "Has genres",
-    genres: ["Crime"],
     tags: [],
-  };
-  context.renderMetadataDurableAnalysis();
-  assert.equal(context.metadataDurableAiGenres.textContent, "Crime");
-  assert.equal(context.metadataDurableAiTags.textContent, "(none)");
+  }];
+  context.renderMetadataSuggestionStrips();
+  assert.equal(context.metadataAiTagsStrip.hidden, true);
+  assert.equal(context.metadataAiTagsStrip.children.length, 0);
 
-  context.metadataDurableAnalysis.movieResult = {
-    title: "Both empty",
-    description: "Both empty",
-    genres: [],
+  // Empty text values render deterministic placeholders instead of stale text.
+  context.metadataSuggestionList.items = [{
+    analysisRunId: "run-1",
+    title: "",
+    description: "",
     tags: [],
-  };
-  context.renderMetadataDurableAnalysis();
-  assert.equal(context.metadataDurableAiGenres.textContent, "(none)");
-  assert.equal(context.metadataDurableAiTags.textContent, "(none)");
+  }];
+  context.renderMetadataSuggestionStrips();
+  assert.equal(stripValueText(context.metadataAiTitleStrip), "(No title)");
+  assert.equal(stripValueText(context.metadataAiDescriptionStrip), "(No description)");
+  assert.equal(context.metadataAiTagsStrip.hidden, true);
+  assert.equal(context.metadataAiTagsStrip.children.length, 0);
 
-  context.metadataDurableAnalysis.detailsExpanded = false;
-  context.renderMetadataDurableAnalysis();
-  assert.equal(context.metadataDurableAiSuggestion.hidden, true);
-  assert.equal(context.metadataDurableAiTitle.textContent, "");
-  assert.equal(context.metadataDurableAiDescription.textContent, "");
-  assert.equal(context.metadataDurableAiGenres.textContent, "");
-  assert.equal(context.metadataDurableAiTags.textContent, "");
+  // Reset (unrevealed) hides every strip and clears all stale values.
+  context.metadataSuggestionList.revealed = false;
+  context.renderMetadataSuggestionStrips();
+  for (const strip of [
+    context.metadataAiTitleStrip,
+    context.metadataAiDescriptionStrip,
+    context.metadataAiTagsStrip,
+  ]) {
+    assert.equal(strip.hidden, true);
+    assert.equal(strip.children.length, 0);
+  }
 });
 
 test("movie suggestion mapping preserves separate genres tags and confidence without Save", () => {
@@ -352,6 +433,7 @@ test("movie suggestion mapping preserves separate genres tags and confidence wit
   assert.match(applyBody, /metadataWorkspace\.current\.genres = genres/);
   assert.match(applyBody, /metadataWorkspace\.current\.tagKeys = tagKeys/);
   assert.doesNotMatch(applyBody, /handleSaveMetadata/);
-  assert.doesNotMatch(extractFunction("renderMetadataDurableAnalysis"), /handleSaveMetadata/);
-  assert.doesNotMatch(extractFunction("renderMetadataDurableAnalysis"), /method:\s*"PUT"/);
+  assert.doesNotMatch(applyBody, /method:\s*"PUT"/);
+  assert.doesNotMatch(extractFunction("renderMetadataSuggestionStrips"), /handleSaveMetadata/);
+  assert.doesNotMatch(extractFunction("renderMetadataSuggestionStrips"), /method:\s*"PUT"/);
 });
