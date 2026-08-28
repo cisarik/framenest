@@ -67,7 +67,7 @@ def test_contract_owns_encodings_ssh_and_sudo_classification() -> None:
     assert GATE_SCRIPT.is_file()
 
 
-def test_ledger_records_untriaged_route_binding_observation() -> None:
+def test_ledger_records_accepted_route_binding_observation() -> None:
     text = _text(LEDGER_PATH)
     assert text.startswith(
         "Ledger storage version: 1\n"
@@ -76,14 +76,14 @@ def test_ledger_records_untriaged_route_binding_observation() -> None:
         "17b7e085139e9bcbb0e4953d26aef9b6687d541c\n"
     )
     assert f"Entry: {LEDGER_ENTRY}\n" in text
-    assert "Entry state: untriaged\n" in text
+    assert "Entry state: accepted\n" in text
     assert "Entry authority: non-authorizing\n" in text
     assert "Evidence class: worker-observed\n" in text
     assert f"Observed against: {AUTHORIZED_BASELINE}\n" in text
-    assert f"Last revalidated against: {AUTHORIZED_BASELINE}\n" in text
+    assert "Last revalidated against: 7ef45da756ed3cc14808e89bf25d0a9f9aba5d26\n" in text
     assert "Implementation task grant: none\n" in text
     assert "Implementation status: not-started\n" in text
-    assert "Disposition evidence: none\n" in text
+    assert "Disposition evidence: 7ef45da756ed3cc14808e89bf25d0a9f9aba5d26 (" in text
     assert "Promotion target: none\n" in text
     assert "Closure action: retain-active\n" in text
     assert "Historical evidence: none\n" in text

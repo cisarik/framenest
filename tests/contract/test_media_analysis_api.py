@@ -319,14 +319,22 @@ def test_invalid_relative_path_returns_sanitized_422(relative_path: str) -> None
     }
 
 
-def test_malformed_uuid_remains_fastapi_validation() -> None:
+def test_malformed_uuid_uses_uniform_validation_contract() -> None:
     response = _client().post(
         "/api/libraries/not-a-uuid/media-analysis-preview",
         json={"relative_path": "clip.mp4"},
     )
 
     assert response.status_code == 422
-    assert "error" not in response.json()
+    assert response.json() == {
+        "error": {
+            "code": "VALIDATION_FAILED",
+            "message": "Request validation failed.",
+        }
+    }
+    assert "detail" not in response.json()
+    assert "not-a-uuid" not in response.text
+    assert response.headers.get("cache-control") == "no-store"
 
 
 def test_repository_failure_returns_catalog_unavailable() -> None:

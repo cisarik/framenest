@@ -218,11 +218,19 @@ def test_import_returns_existing_catalog_location_idempotently() -> None:
     assert response.json()["status"] == "already_imported"
 
 
-def test_import_rejects_invalid_relative_path_with_validation_error() -> None:
+def test_import_rejects_invalid_relative_path_with_uniform_validation_contract() -> None:
     response = _post_import(_client(), "../private.mp4")
 
     assert response.status_code == 422
-    assert "error" not in response.json()
+    assert response.json() == {
+        "error": {
+            "code": "VALIDATION_FAILED",
+            "message": "Request validation failed.",
+        }
+    }
+    assert "detail" not in response.json()
+    assert "../private.mp4" not in response.text
+    assert response.headers.get("cache-control") == "no-store"
 
 
 def test_missing_catalog_returns_sanitized_503_and_does_not_create_database(tmp_path: Path) -> None:
