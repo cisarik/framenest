@@ -8,10 +8,10 @@ Entry authority: non-authorizing
 Summary: Consumer-declared AP exec and project SSH/sudo gates were bypassed by ambient raw Cursor Worker routes.
 Evidence class: worker-observed
 Observed against: 5abb2adfcd1d5f3391df9c3044b4b81ac1aac923
-Last revalidated against: 86ae6e8c27d2b919d776021bee915b7292908b0e
+Last revalidated against: 7ef45da756ed3cc14808e89bf25d0a9f9aba5d26
 Implementation task grant: none
 Implementation status: not-started
-Disposition evidence: 86ae6e8c27d2b919d776021bee915b7292908b0e (.ap/ap; .ap/docs/adr/0012-baseline-bound-project-execution.md; .ap/docs/adr/0018-consumer-declared-execution-route-binding.md)
+Disposition evidence: 7ef45da756ed3cc14808e89bf25d0a9f9aba5d26 (.ap/ap; .ap/docs/adr/0012-baseline-bound-project-execution.md; .ap/docs/adr/0018-consumer-declared-execution-route-binding.md)
 Promotion target: none
 Closure action: retain-active
 Historical evidence: none

@@ -172,6 +172,37 @@ Every human-facing command block for either environment ends with:
 
 Do not mix MacBook and NUC commands in one unlabeled block.
 
+## Cooperator Presentation Profile
+
+Project-owned presentation for FrameNest AP work. This is not AP semantics and
+not Worker authority; the copyable, structurally English Worker prompt remains
+the sole authority grant.
+
+Orchestrator chat updates to Michal open with a one-glance status block of at
+most five lines (FrameNest HEAD SHA, AP pin SHA, whole/phase, open risk),
+followed by exactly one status mark:
+
+- 🟢 healthy / proceed / PASS
+- 🟡 wait / exactly one open decision
+- 🔴 stop / BLOCKED / catastrophe
+
+One decision per message. Chat language follows the Communication section;
+Worker prompts and repository artifacts remain professional English.
+
+Delivery route: an Agent Orchestrator defaults to direct session dispatch of
+one complete authoritative Worker prompt into one concrete Worker session. An
+explicit Cooperator opt-out (P14 model rotation or manual messenger mode)
+selects copy-paste delivery as the lawful selected route.
+
+Delivery capsule emitted after the copyable, structurally English Worker
+prompt:
+
+- Route: Agent Orchestrator default dispatch, or copy-paste under explicit P14 opt-out
+- Reasoning: lowest sufficient profile for the task
+- Downloadable prompt filename: <trace-grammar prompt filename for the exchange>
+- Activated-trace destination: the era trace directory designated by the current restoration handout (outside this repository, local-only)
+- Archival: wait-for-report; the Orchestrator archives the prompt and its terminal report together after the report exists
+
 ## Security Boundaries
 
 Private media access requires explicit task authority. Real provider calls
