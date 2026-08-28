@@ -1208,7 +1208,6 @@ x_post_claims = Table(
         "requested_content_category IN ('general', 'meme', 'movie', 'youtube')",
         name="ck_x_post_claims_requested_content_category",
     ),
-    UniqueConstraint("id", name="uq_x_post_claims_id"),
     Index(
         "uq_x_post_claims_active_requester",
         "x_post_id",

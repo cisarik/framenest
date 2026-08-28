@@ -6,7 +6,9 @@ import sqlite3
 from pathlib import Path
 
 import pytest
+import sqlalchemy as sa
 
+from framenest.infrastructure.persistence.catalog_schema import x_post_claims
 from framenest.infrastructure.persistence.engine import (
     create_sqlite_engine,
     dispose_engine,
@@ -177,6 +179,38 @@ def test_0028_x_post_claim_constraints(tmp_path: Path) -> None:
             connection.commit()
     finally:
         connection.close()
+
+
+def test_x_post_claims_runtime_metadata_converges_with_migrated_schema(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "x-claim-metadata-convergence.sqlite3"
+    _migrate(database_path, "head")
+
+    engine = create_sqlite_engine(database_path)
+    try:
+        reflected_metadata = sa.MetaData()
+        reflected_metadata.reflect(bind=engine, only=["x_post_claims"])
+        reflected_table = reflected_metadata.tables["x_post_claims"]
+    finally:
+        dispose_engine(engine)
+
+    def _named_non_fk_constraint_names(table: sa.Table) -> set[str]:
+        return {
+            constraint.name
+            for constraint in table.constraints
+            if constraint.name is not None
+            and not isinstance(constraint, sa.ForeignKeyConstraint)
+        }
+
+    runtime_names = _named_non_fk_constraint_names(x_post_claims)
+    migrated_names = _named_non_fk_constraint_names(reflected_table)
+
+    assert "uq_x_post_claims_id" not in runtime_names
+    assert "uq_x_post_claims_id" not in migrated_names
+    assert runtime_names == migrated_names
+    assert {column.name for column in x_post_claims.primary_key} == {"id"}
+    assert {column.name for column in reflected_table.primary_key} == {"id"}
 
 
 def test_0028_downgrade_preserves_and_removes_x_tables(tmp_path: Path) -> None:
