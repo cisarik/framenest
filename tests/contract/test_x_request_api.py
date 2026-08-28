@@ -13,6 +13,12 @@ from framenest.adapters.api.x_request_api import (
     XRequestApiDependencies,
     create_x_request_api_router,
 )
+from framenest.application.x_acquisition import (
+    XAcquisitionInvalidCursorError,
+    XAcquisitionInvalidRequesterIdentityError,
+    XAcquisitionNoRetryableAssetsError,
+    XAcquisitionNotRetryableError,
+)
 from framenest.domain.identity_access import (
     CAPABILITY_X_REQUEST,
     IdentityContext,
@@ -296,3 +302,57 @@ def test_extra_fields_remain_forbidden() -> None:
         },
     )
     assert response.status_code == 422
+
+
+def test_list_route_invalid_request_discriminators_return_static_literals() -> None:
+    class _CursorService:
+        @staticmethod
+        def list_owned(login_key: str, limit: int, cursor: str | None):
+            raise XAcquisitionInvalidCursorError("Invalid X request cursor.")
+
+    class _IdentityService:
+        @staticmethod
+        def list_owned(login_key: str, limit: int, cursor: str | None):
+            raise XAcquisitionInvalidRequesterIdentityError(
+                "Invalid requester identity."
+            )
+
+    hostile_cursor = "!!!not-a-cursor"
+    for service, message in (
+        (_CursorService, "Invalid X request cursor."),
+        (_IdentityService, "Invalid requester identity."),
+    ):
+        client = TestClient(_app(service()))
+        response = client.get("/api/x/requests", params={"cursor": hostile_cursor})
+        assert response.status_code == 422
+        assert response.json() == {
+            "error": {"code": "X_REQUEST_INVALID_URL", "message": message}
+        }
+        assert hostile_cursor not in response.text
+
+
+def test_retry_route_state_conflict_discriminators_return_static_literals() -> None:
+    class _NotRetryableService:
+        @staticmethod
+        def retry(claim_id: str, login_key: str):
+            raise XAcquisitionNotRetryableError(
+                "X claim is not retryable in its current state."
+            )
+
+    class _NoRetryableAssetsService:
+        @staticmethod
+        def retry(claim_id: str, login_key: str):
+            raise XAcquisitionNoRetryableAssetsError(
+                "X claim has no retryable assets."
+            )
+
+    for service, message in (
+        (_NotRetryableService, "X claim is not retryable in its current state."),
+        (_NoRetryableAssetsService, "X claim has no retryable assets."),
+    ):
+        client = TestClient(_app(service()))
+        response = client.post(f"/api/x/requests/{_VALID_ID}/retry")
+        assert response.status_code == 409
+        assert response.json() == {
+            "error": {"code": "X_REQUEST_STATE_CONFLICT", "message": message}
+        }

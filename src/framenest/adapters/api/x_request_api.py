@@ -18,9 +18,12 @@ from framenest.application.ports.media_user_alias_repository import (
 from framenest.application.x_acquisition import (
     XAcquisitionCategoryConflictError,
     XAcquisitionInfrastructureError,
+    XAcquisitionInvalidCursorError,
     XAcquisitionInvalidRequestError,
+    XAcquisitionInvalidRequesterIdentityError,
+    XAcquisitionNoRetryableAssetsError,
+    XAcquisitionNotRetryableError,
     XAcquisitionNotFoundError,
-    XAcquisitionStateConflictError,
     XRequestInsufficientStorageError,
     XRequestLimitError,
 )
@@ -235,8 +238,10 @@ def create_x_request_api_router(
             page = dependencies.service.list_owned(
                 login_key=identity.login_key, limit=limit, cursor=cursor
             )
-        except XAcquisitionInvalidRequestError as exc:
-            return _error(X_REQUEST_INVALID_URL, str(exc), 422)
+        except XAcquisitionInvalidCursorError:
+            return _error(X_REQUEST_INVALID_URL, "Invalid X request cursor.", 422)
+        except XAcquisitionInvalidRequesterIdentityError:
+            return _error(X_REQUEST_INVALID_URL, "Invalid requester identity.", 422)
         except XAcquisitionInfrastructureError:
             return _error(X_REQUEST_UNAVAILABLE, "X acquisition is unavailable.", 503)
         return JSONResponse(
@@ -280,8 +285,18 @@ def create_x_request_api_router(
             claim = dependencies.service.retry(parsed, login_key=identity.login_key)
         except XAcquisitionNotFoundError:
             return _error(X_REQUEST_NOT_FOUND, "X request not found.", 404)
-        except XAcquisitionStateConflictError as exc:
-            return _error(X_REQUEST_STATE_CONFLICT, str(exc), 409)
+        except XAcquisitionNotRetryableError:
+            return _error(
+                X_REQUEST_STATE_CONFLICT,
+                "X claim is not retryable in its current state.",
+                409,
+            )
+        except XAcquisitionNoRetryableAssetsError:
+            return _error(
+                X_REQUEST_STATE_CONFLICT,
+                "X claim has no retryable assets.",
+                409,
+            )
         except XAcquisitionInfrastructureError:
             return _error(X_REQUEST_UNAVAILABLE, "X acquisition is unavailable.", 503)
         _record_result_classification(

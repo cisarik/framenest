@@ -350,11 +350,19 @@ def test_repository_failure_returns_catalog_unavailable_without_exception_text(m
     assert UNDERLYING_EXCEPTION_TEXT not in response.text
 
 
-def test_malformed_library_id_uses_fastapi_validation() -> None:
+def test_malformed_library_id_uses_uniform_validation_contract() -> None:
     response = _client().post("/api/libraries/not-a-uuid/scan-preview")
 
     assert response.status_code == 422
-    assert "error" not in response.json()
+    assert response.json() == {
+        "error": {
+            "code": "VALIDATION_FAILED",
+            "message": "Request validation failed.",
+        }
+    }
+    assert "detail" not in response.json()
+    assert "not-a-uuid" not in response.text
+    assert response.headers.get("cache-control") == "no-store"
 
 
 def test_production_missing_catalog_read_does_not_create_database(tmp_path: Path) -> None:

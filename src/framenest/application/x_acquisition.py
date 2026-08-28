@@ -126,12 +126,28 @@ class XAcquisitionStateConflictError(XAcquisitionError):
     """Requested operation is incompatible with current durable state."""
 
 
+class XAcquisitionNotRetryableError(XAcquisitionStateConflictError):
+    """Claim state does not permit a retry."""
+
+
+class XAcquisitionNoRetryableAssetsError(XAcquisitionStateConflictError):
+    """Claim has no assets eligible for retry."""
+
+
 class XAcquisitionInfrastructureError(XAcquisitionError):
     """Required durable or filesystem infrastructure is unavailable."""
 
 
 class XAcquisitionInvalidRequestError(XAcquisitionError):
     """Submitted URL is outside the accepted X post policy."""
+
+
+class XAcquisitionInvalidCursorError(XAcquisitionInvalidRequestError):
+    """Owned-request list cursor is malformed or outside the accepted policy."""
+
+
+class XAcquisitionInvalidRequesterIdentityError(XAcquisitionInvalidRequestError):
+    """Requester login identity cannot be normalized."""
 
 
 class XAcquisitionCategoryConflictError(XAcquisitionError):
@@ -400,7 +416,7 @@ class XAcquisitionRequestService:
                 after_created_at_ms = int(encoded)
                 after_id = raw
             except (ValueError, AttributeError):
-                raise XAcquisitionInvalidRequestError(
+                raise XAcquisitionInvalidCursorError(
                     "Invalid X request cursor."
                 ) from None
         claims = self._repository.list_owned(
@@ -437,7 +453,7 @@ class XAcquisitionRequestService:
             claim.state is XAcquisitionState.COMPLETED_PARTIAL
             and claim.failure_count > 0
         ):
-            raise XAcquisitionStateConflictError(
+            raise XAcquisitionNotRetryableError(
                 "X claim is not retryable in its current state."
             )
         assets = self._repository.list_assets_for_post(claim.id)
@@ -451,7 +467,7 @@ class XAcquisitionRequestService:
             self._save_claim(claim, queued)
             return _requester_snapshot(queued, self._repository)
         if not retryable:
-            raise XAcquisitionStateConflictError(
+            raise XAcquisitionNoRetryableAssetsError(
                 "X claim has no retryable assets."
             )
         # Reset retryable assets to pending for re-acquisition. Successful
@@ -1432,7 +1448,9 @@ def _normalize_requester(login_key: str) -> str:
     try:
         return normalize_login(login_key)
     except Exception as exc:
-        raise XAcquisitionInvalidRequestError("Invalid requester identity.") from exc
+        raise XAcquisitionInvalidRequesterIdentityError(
+            "Invalid requester identity."
+        ) from exc
 
 
 def _asset_retryable(asset: XAsset) -> bool:
