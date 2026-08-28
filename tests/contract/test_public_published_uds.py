@@ -10,6 +10,8 @@ from pathlib import Path
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from starlette.exceptions import HTTPException as StarletteHTTPException
+from starlette.routing import Route
 
 from framenest.adapters.api import public_published_api as public_published_api_module
 from framenest.adapters.api.application import create_app
@@ -513,6 +515,27 @@ def test_workspace_tcp_audience_bootstrap_is_trusted_loopback() -> None:
     assert payload["identity"] is None
     assert "gallery.read" in payload["capabilities"]
     assert "upload.submit" in payload["capabilities"]
+
+
+def test_non_enumerated_http_exception_catch_all_returns_uniform_404(
+    tmp_path: Path,
+) -> None:
+    settings = _settings(tmp_path)
+    upgrade_database_to_head(settings)
+    _seed(settings, tmp_path / "library")
+    app = create_app(settings=settings)
+
+    def _raise_non_enumerated_status(request: object) -> object:
+        del request
+        raise StarletteHTTPException(status_code=418)
+
+    app.router.routes.insert(
+        len(app.router.routes) - 1,
+        Route("/internal-fault-probe", _raise_non_enumerated_status, methods=["GET"]),
+    )
+    with TestClient(app) as client:
+        response = client.get("/internal-fault-probe")
+    _not_found(response)
 
 
 def test_malformed_and_out_of_range_requests_match_uniform_404(public_client) -> None:

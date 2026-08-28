@@ -11,7 +11,8 @@ import time
 from typing import Literal
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse, Response
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import HTMLResponse, JSONResponse, Response
 from pydantic import BaseModel
 
 from framenest.adapters.api.media_analysis_api import (
@@ -1257,6 +1258,29 @@ def create_app(
     app.state.x_admin_api_dependencies = x_admin_api_dependencies
     app.state.x_acquisition_coordinator = owned_x_acquisition_coordinator
     app.state.x_acquisition_staging = owned_x_staging
+
+    @app.exception_handler(RequestValidationError)
+    async def request_validation_exception_handler(
+        request: Request, exc: RequestValidationError
+    ) -> JSONResponse:
+        del request, exc
+        LOGGER.emit(
+            level="WARNING",
+            event="workspace_request_validation_rejected",
+            operation="dispatch",
+            error_code="VALIDATION_FAILED",
+        )
+        return JSONResponse(
+            status_code=422,
+            content={
+                "error": {
+                    "code": "VALIDATION_FAILED",
+                    "message": "Request validation failed.",
+                }
+            },
+            headers={"Cache-Control": "no-store"},
+        )
+
     app.include_router(create_library_api_router(library_api_dependencies))
     app.include_router(create_media_import_api_router(media_import_api_dependencies))
     app.include_router(create_media_catalog_api_router(media_catalog_api_dependencies))

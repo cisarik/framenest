@@ -233,11 +233,7 @@ def create_public_published_app(
             operation="dispatch",
             error_code=f"HTTP_{exc.status_code}",
         )
-        return JSONResponse(
-            status_code=exc.status_code,
-            content={"error": {"code": "NOT_FOUND", "message": "Not found."}},
-            headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"},
-        )
+        return public_not_found_response()
 
     @app.exception_handler(Exception)
     async def unexpected_exception_handler(

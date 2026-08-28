@@ -260,7 +260,7 @@ by itself.
 
 In `tailscale_uds` and `public_published_uds` ingress modes, header trust is
 bound to the provenance of a single Unix domain socket. At startup, immediately
-after uvicorn binds that socket and before the server accepts or serves any
+after uvicorn binds that socket and before the server reads or processes any
 request, the application tightens the bound socket to owner-only `0600` in both
 UDS ingress modes. It then asserts that the path is a socket, that its mode has
 no group or other permission bits, and that it is owned by the effective user

@@ -192,6 +192,59 @@ def test_health_contract_remains_unchanged_with_web_application(client: TestClie
     assert response.headers["content-type"].startswith("application/json")
 
 
+_UNIFORM_VALIDATION_BODY = {
+    "error": {
+        "code": "VALIDATION_FAILED",
+        "message": "Request validation failed.",
+    }
+}
+
+
+def test_malformed_requests_return_uniform_sanitized_422(client: TestClient) -> None:
+    marker = "zz-hostile-caller-input-zz"
+    malformed_requests = (
+        ("post", "/api/x/requests", {"url": {"nested": marker}}),
+        (
+            "post",
+            "/api/companion/review-inbox/22222222-2222-4222-8222-222222222222/apply",
+            {"analysis_run_id": {"nested": marker}, "fields": []},
+        ),
+        ("post", f"/api/uploads/{marker}/complete", {"resolution": marker}),
+        (
+            "put",
+            "/api/media/12345678-1234-4234-9234-123456789abc/alias",
+            {"tag_keys": "not-a-list", "extra_field": marker},
+        ),
+        (
+            "put",
+            "/api/admin/settings/automatic-analysis",
+            {"automatic_media_analysis_enabled": marker},
+        ),
+    )
+    for method, path, body in malformed_requests:
+        response = getattr(client, method)(path, json=body)
+        assert response.status_code == 422, path
+        assert response.json() == _UNIFORM_VALIDATION_BODY, path
+        assert "detail" not in response.json(), path
+        assert marker not in response.text, path
+        assert response.headers.get("cache-control") == "no-store", path
+
+
+def test_malformed_analysis_proposal_query_returns_uniform_sanitized_422(
+    client: TestClient,
+) -> None:
+    marker = "zz-hostile-caller-input-zz"
+    response = client.get(
+        "/api/admin/analysis-proposals",
+        params={"limit": marker},
+    )
+    assert response.status_code == 422
+    assert response.json() == _UNIFORM_VALIDATION_BODY
+    assert "detail" not in response.json()
+    assert marker not in response.text
+    assert response.headers.get("cache-control") == "no-store"
+
+
 @pytest.mark.parametrize(
     "path",
     ["/", "/assets/styles.css", "/assets/app.js", "/assets/companion_host.js", "/health"],
