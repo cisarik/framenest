@@ -256,6 +256,31 @@ mutation. The pinned AP integration in [AGENTS.md](AGENTS.md) and
 task-authority boundaries; tool or credential availability is never permission
 by itself.
 
+### UDS socket provenance tightening and fail-closed startup verification
+
+In `tailscale_uds` and `public_published_uds` ingress modes, header trust is
+bound to the provenance of a single Unix domain socket. At startup, immediately
+after uvicorn binds that socket and before the server accepts or serves any
+request, the application tightens the bound socket to owner-only `0600` in both
+UDS ingress modes. It then asserts that the path is a socket, that its mode has
+no group or other permission bits, and that it is owned by the effective user
+ID. Any tightening or assertion failure emits a sanitized CRITICAL structured
+record (event `uds_socket_provenance_failure`, error code
+`UDS_SOCKET_PROVENANCE_FAILURE`, with a machine reason token and no socket
+paths or environment values), closes the listening sockets, and exits
+fail-closed before any request is served.
+
+Recorded residuals, stated honestly: between the kernel bind and the
+owner-only tightening there is a microsecond-scale window spanning one
+event-loop iteration (uvicorn's UDS bind path yields once before its own
+post-bind chmod), during which a connection may be accepted at the transport
+level; no request data is read or processed before the tightening and
+provenance checks complete. The previously documented posture left the bound
+socket at `0666` permanently, so the tightened state is strictly stronger.
+Directory-level protection remains the systemd `RuntimeDirectory`/`UMask`
+contract: an attacker with write access inside that runtime directory is
+outside this invariant.
+
 ## Secure Media Content Endpoint
 
 The `GET /api/media/{media_id}/locations/{location_id}/content` endpoint serves registered local media content securely:

@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import ast
 import importlib
+import os
 import socket
+import stat
 import sys
 from pathlib import Path
 from typing import Any
@@ -67,22 +69,28 @@ def test_importing_server_module_has_no_runtime_side_effects(
     load_settings_mock = MagicMock(side_effect=AssertionError("load_settings must not run on import"))
     create_app_mock = MagicMock(side_effect=AssertionError("create_app must not run on import"))
     config_mock = MagicMock(side_effect=AssertionError("uvicorn.Config must not run on import"))
-    server_mock = MagicMock(side_effect=AssertionError("uvicorn.Server must not run on import"))
+    server_init_attempts: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
+
+    class RaisingUvicornServerStub:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            server_init_attempts.append((args, kwargs))
+            raise AssertionError("uvicorn.Server must not run on import")
 
     monkeypatch.setattr("framenest.server.load_settings", load_settings_mock)
     monkeypatch.setattr("framenest.server.create_app", create_app_mock)
     monkeypatch.setattr("uvicorn.Config", config_mock)
-    monkeypatch.setattr("uvicorn.Server", server_mock)
+    monkeypatch.setattr("uvicorn.Server", RaisingUvicornServerStub)
 
     module_name = "framenest.server"
     sys.modules.pop(module_name, None)
     importlib.import_module(module_name)
 
     assert bind_attempts == []
+    assert server_init_attempts == []
     load_settings_mock.assert_not_called()
     create_app_mock.assert_not_called()
     config_mock.assert_not_called()
-    server_mock.assert_not_called()
+    sys.modules.pop(module_name, None)
 
 
 def test_create_server_returns_uvicorn_server(
@@ -92,6 +100,7 @@ def test_create_server_returns_uvicorn_server(
 
     server = create_server(settings=settings_with_secret)
     assert isinstance(server, uvicorn.Server)
+    assert type(server) is uvicorn.Server
 
 
 def test_supplied_settings_bypass_load_settings(
@@ -294,7 +303,7 @@ def test_production_uvicorn_imports_are_confined_to_server_module() -> None:
 def test_create_server_binds_only_unix_socket_in_tailscale_mode(
     tmp_path: Path,
 ) -> None:
-    from framenest.server import create_server
+    from framenest.server import UdsProvenanceVerifyingServer, create_server
 
     uds_path = tmp_path / "framenest.sock"
     settings = FrameNestSettings(
@@ -307,6 +316,7 @@ def test_create_server_binds_only_unix_socket_in_tailscale_mode(
         _env_file=None,
     )
     server = create_server(settings=settings)
+    assert isinstance(server, UdsProvenanceVerifyingServer)
     assert server.config.uds == str(uds_path)
     assert server.config.proxy_headers is False
     assert server.config.forwarded_allow_ips != "*"
@@ -316,7 +326,7 @@ def test_create_server_binds_only_unix_socket_in_public_published_mode(
     tmp_path: Path,
 ) -> None:
     from framenest.infrastructure.persistence.migrations import upgrade_database_to_head
-    from framenest.server import create_server
+    from framenest.server import UdsProvenanceVerifyingServer, create_server
 
     database_path = tmp_path / "catalog.sqlite3"
     settings = FrameNestSettings(
@@ -330,6 +340,7 @@ def test_create_server_binds_only_unix_socket_in_public_published_mode(
     )
     upgrade_database_to_head(settings)
     server = create_server(settings=settings)
+    assert isinstance(server, UdsProvenanceVerifyingServer)
     assert server.config.uds == str(tmp_path / "public.sock")
     assert server.config.host is None or server.config.uds is not None
     assert getattr(server.config, "port", None) in {None, 8000}
@@ -366,3 +377,82 @@ def test_fastapi_imports_remain_confined_to_adapters_api() -> None:
         if forbidden_roots:
             violations.append(f"{relative_path}: {sorted(set(forbidden_roots))}")
     assert violations == []
+
+
+def _create_bound_unix_socket(path: Path) -> None:
+    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    try:
+        sock.bind(str(path))
+    finally:
+        sock.close()
+
+
+def test_tighten_uds_socket_permissions_sets_owner_only_mode(tmp_path: Path) -> None:
+    from framenest.server import _tighten_uds_socket_permissions
+
+    socket_path = tmp_path / "seam-tighten.sock"
+    _create_bound_unix_socket(socket_path)
+    try:
+        os.chmod(str(socket_path), 0o666)
+        _tighten_uds_socket_permissions(socket_path)
+        assert stat.S_IMODE(os.stat(socket_path).st_mode) == 0o600
+    finally:
+        socket_path.unlink(missing_ok=True)
+
+
+def test_verify_uds_socket_provenance_accepts_owner_only_socket(tmp_path: Path) -> None:
+    from framenest.server import _verify_uds_socket_provenance
+
+    socket_path = tmp_path / "seam-accept.sock"
+    _create_bound_unix_socket(socket_path)
+    try:
+        os.chmod(str(socket_path), 0o600)
+        _verify_uds_socket_provenance(socket_path)
+    finally:
+        socket_path.unlink(missing_ok=True)
+
+
+def test_verify_uds_socket_provenance_rejects_non_socket(tmp_path: Path) -> None:
+    from framenest.server import UdsSocketProvenanceError, _verify_uds_socket_provenance
+
+    plain_path = tmp_path / "seam-plain.sock"
+    plain_path.write_bytes(b"")
+    try:
+        with pytest.raises(UdsSocketProvenanceError) as exc_info:
+            _verify_uds_socket_provenance(plain_path)
+        assert exc_info.value.reason == "not_a_socket"
+    finally:
+        plain_path.unlink(missing_ok=True)
+
+
+def test_verify_uds_socket_provenance_rejects_group_or_other_bits(tmp_path: Path) -> None:
+    from framenest.server import UdsSocketProvenanceError, _verify_uds_socket_provenance
+
+    socket_path = tmp_path / "seam-bits.sock"
+    _create_bound_unix_socket(socket_path)
+    try:
+        os.chmod(str(socket_path), 0o640)
+        with pytest.raises(UdsSocketProvenanceError) as exc_info:
+            _verify_uds_socket_provenance(socket_path)
+        assert exc_info.value.reason == "permission_bits_not_owner_only"
+    finally:
+        socket_path.unlink(missing_ok=True)
+
+
+def test_verify_uds_socket_provenance_rejects_foreign_owner(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from framenest.server import UdsSocketProvenanceError, _verify_uds_socket_provenance
+
+    socket_path = tmp_path / "seam-owner.sock"
+    _create_bound_unix_socket(socket_path)
+    try:
+        os.chmod(str(socket_path), 0o600)
+        real_euid = os.geteuid()
+        monkeypatch.setattr(os, "geteuid", lambda: real_euid + 1)
+        with pytest.raises(UdsSocketProvenanceError) as exc_info:
+            _verify_uds_socket_provenance(socket_path)
+        assert exc_info.value.reason == "foreign_owner"
+    finally:
+        socket_path.unlink(missing_ok=True)
