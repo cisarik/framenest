@@ -237,24 +237,63 @@ def test_ordinary_user_sees_only_own_alias_and_cannot_call_admin_route(
     assert denied.status_code == 403
 
 
-def test_gallery_and_workspace_payloads_omit_alias_values(tmp_path: Path) -> None:
+def test_gallery_and_workspace_payloads_follow_alias_display_contract(
+    tmp_path: Path,
+) -> None:
     settings = _prepare(tmp_path)
-    client = _client(settings, ALICE, ROLE_USER)
-    gallery = client.get("/api/media")
-    detail = client.get(f"/api/media/{MEDIA_A}")
-    workspace = client.get("/api/workspace/media")
-    assert gallery.status_code == 200
-    assert detail.status_code == 200
-    assert workspace.status_code == 200
-    for payload in (gallery.json(), detail.json(), workspace.json()):
-        blob = str(payload)
-        assert "Alice overlay" not in blob
-        assert "Bob overlay" not in blob
+    alice_gallery = _client(settings, ALICE, ROLE_USER).get("/api/media")
+    alice_detail = _client(settings, ALICE, ROLE_USER).get(f"/api/media/{MEDIA_A}")
+    alice_workspace = _client(settings, ALICE, ROLE_USER).get("/api/workspace/media")
+    bob_gallery = _client(settings, BOB, ROLE_USER).get("/api/media")
+    bob_detail = _client(settings, BOB, ROLE_USER).get(f"/api/media/{MEDIA_A}")
+    bob_workspace = _client(settings, BOB, ROLE_USER).get("/api/workspace/media")
+    anonymous_gallery = _plain_client(settings).get("/api/media")
+    anonymous_detail = _plain_client(settings).get(f"/api/media/{MEDIA_A}")
+    assert alice_gallery.status_code == 200
+    assert alice_detail.status_code == 200
+    assert alice_workspace.status_code == 200
+    assert bob_gallery.status_code == 200
+    assert bob_detail.status_code == 200
+    assert bob_workspace.status_code == 200
+    assert anonymous_gallery.status_code == 200
+    assert anonymous_detail.status_code == 200
+    for payload in (
+        alice_gallery.json(),
+        alice_detail.json(),
+        alice_workspace.json(),
+        bob_gallery.json(),
+        bob_detail.json(),
+        bob_workspace.json(),
+        anonymous_gallery.json(),
+        anonymous_detail.json(),
+    ):
         assert "alias" not in payload if isinstance(payload, dict) else True
         if isinstance(payload, dict) and "items" in payload:
             for item in payload["items"]:
                 assert "alias" not in item
                 assert "aliases" not in item
+    for blob in (str(alice_gallery.json()), str(alice_detail.json())):
+        assert "Alice overlay" in blob
+        assert "Alice note" in blob
+        assert "meme" in blob
+        assert "Alice Clip" not in blob
+        assert "Bob overlay" not in blob
+    for blob in (str(bob_gallery.json()), str(bob_detail.json())):
+        assert "Alice overlay" not in blob
+        assert "Alice note" not in blob
+        assert "meme" not in blob
+        assert "Canonical" in blob
+    for blob in (str(anonymous_gallery.json()), str(anonymous_detail.json())):
+        assert "Alice Clip" in blob
+        assert "Canonical" in blob
+        assert "Alice overlay" not in blob
+        assert "Alice note" not in blob
+        assert "Bob overlay" not in blob
+        assert "meme" not in blob
+    bob_workspace_blob = str(bob_workspace.json())
+    assert "Alice overlay" not in bob_workspace_blob
+    assert "Alice note" not in bob_workspace_blob
+    assert "meme" not in bob_workspace_blob
 
 
 def test_unknown_media_is_sanitized_not_found(tmp_path: Path) -> None:

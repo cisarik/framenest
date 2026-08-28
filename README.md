@@ -561,9 +561,11 @@ The current conceptual direction is:
   and is not shipped.
 
 The accepted desktop and distributed-media direction remains documentation-led
-for Tauri packaging. No Tauri scaffold or installer exists yet. Authoritative
-server deployment on the Ubuntu NUC is present for the owner-authoritative
-current release noted above; multi-device synchronization and transfer remain
+for Tauri packaging. No Tauri scaffold or installer exists yet. The Ubuntu NUC
+is the development-and-testing machine routinely refreshed toward public `main`
+([ADR-0075](docs/adr/0075-nuc-development-test-target-and-routine-release-refresh.md));
+the previously accepted release `aec2f0091c10aed2fc2033dac154a0d9651b2b6d`
+noted above is dated history. Multi-device synchronization and transfer remain
 later scope.
 
 Accepted implementation foundations so far:
@@ -611,7 +613,7 @@ FrameNest development follows Analytic Programming through the pinned `.ap/`
 Git submodule. The current AP gitlink is:
 
 ```text
-9c5cc44f8b6c92dd56ad2427d13223d7d59c5656
+7ef45da756ed3cc14808e89bf25d0a9f9aba5d26
 ```
 
 Universal AP protocol files live under `.ap/`. FrameNest-specific operating

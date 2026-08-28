@@ -90,7 +90,7 @@ comparison/promotion, media second-copy backup, or installer. Companion Settings
 already has an administrator-only **Automatic media analysis** toggle
 ([ADR-0079](docs/adr/0079-administrator-automatic-analysis-runtime-setting.md));
 that does not ship desktop Settings. Public `main` and
-the production release may differ; the authoritative mutable production readback
+the deployed NUC release may differ; the authoritative mutable readback
 is `framenest-release status`, never a committed SHA snapshot. A production
 release was previously accepted at public/canonical commit
 `aec2f0091c10aed2fc2033dac154a0d9651b2b6d` on the Ubuntu NUC release path
