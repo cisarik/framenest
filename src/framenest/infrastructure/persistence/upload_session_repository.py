@@ -64,11 +64,6 @@ from framenest.infrastructure.persistence.engine import (
 
 _REPOSITORY_FAILURE_MESSAGE = "Upload session operation failed."
 _FAILURE_STATES = frozenset({UploadSessionState.FAILED, UploadSessionState.REJECTED})
-_QUALIFYING_DUPLICATE_CANONICAL_STATES = (
-    UploadSessionState.PUBLISH_PENDING,
-    UploadSessionState.PUBLISHED,
-    UploadSessionState.CATALOGED,
-)
 
 
 class SqliteUploadSessionRepository:

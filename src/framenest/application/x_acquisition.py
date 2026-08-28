@@ -1012,6 +1012,13 @@ class XAcquisitionCoordinator:
         upload_id = UploadSessionId.from_string(asset.id.to_string())
         upload_storage_key = UploadStorageKey(asset.stage_key)
         requester = claim.created_by_login_key
+        # Every X claim has a requester: identity is required at claim creation
+        # (submit normalizes login_key and fails closed on missing identity), so
+        # this selection never produces EXPLICIT for a real X handoff. Under
+        # SILENT_KEEP_SEPARATE, ordinary byte duplicates keep-separate atomically
+        # during validation success and DUPLICATE_PENDING is never observed
+        # downstream, which is why the YouTube-style duplicate auto-resolve is
+        # not mirrored in the X projection.
         duplicate_mode = (
             UploadDuplicateResolutionMode.SILENT_KEEP_SEPARATE
             if requester is not None
@@ -1097,6 +1104,14 @@ class XAcquisitionCoordinator:
             upload.state is UploadSessionState.CANCELLED
             or upload.state is UploadSessionState.DUPLICATE_PENDING
         ):
+            # The DUPLICATE_PENDING arm is currently unreachable for X assets:
+            # X handoff always creates sessions as SILENT_KEEP_SEPARATE because
+            # every X claim has a requester (identity is required at claim
+            # creation), while EXPLICIT mode requires requester is None.
+            # Ordinary duplicates keep-separate atomically, so
+            # DUPLICATE_PENDING is never an observed X state; this arm remains
+            # a fail-closed guard in case the duplicate-resolution mode policy
+            # ever changes.
             await self._fail_asset(
                 claim, asset, stage=XFailureStage.DOWNSTREAM,
                 code="X_CATALOG_HANDOFF_FAILED",

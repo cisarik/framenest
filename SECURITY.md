@@ -295,6 +295,19 @@ The `GET /api/media/{media_id}/locations/{location_id}/content` endpoint serves 
 - **Read-only behavior**: The endpoint performs no database or filesystem mutation. Repository calls are read-only.
 - **Streaming safety**: Successful responses send `X-Content-Type-Options: nosniff`, `Cache-Control: private, no-store`, and `Accept-Ranges: bytes`. File handles are closed reliably including interrupted streaming.
 
+Recorded residual, stated honestly: the media content reader resolves the
+catalog relative path against the resolved registered root
+(`src/framenest/infrastructure/filesystem/media_content.py`: path-flavor check,
+traversal and absolute-component rejection, `resolve(strict=True)` on both the
+root and the candidate, and `relative_to` containment) and then opens the
+previously resolved path with `O_NOFOLLOW` on the final component. A narrow
+race window exists for intermediate path components between resolution and
+open, exploitable only by an actor with local filesystem write access to a
+registered library root — an actor already inside the media storage boundary.
+The accepted position is documenting this residual assumption rather than
+`openat`-style dirfd hardening; symlink and traversal protections for the
+final component remain enforced.
+
 ### Durable Cover Endpoints
 
 The first durable manual cover workflow ([ADR-0050](docs/adr/0050-durable-manual-cover-foundation.md))
