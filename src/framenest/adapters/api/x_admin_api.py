@@ -103,8 +103,8 @@ def create_x_admin_api_router(
             claim = dependencies.service.get(parsed)
         except XAcquisitionNotFoundError:
             return _error(X_ADMIN_NOT_FOUND, "X claim not found.", 404)
-        except XAcquisitionInfrastructureError as exc:
-            return _error(X_ADMIN_UNAVAILABLE, str(exc), 503)
+        except XAcquisitionInfrastructureError:
+            return _error(X_ADMIN_UNAVAILABLE, "X review is unavailable.", 503)
         return JSONResponse(
             status_code=200, content=_claim_dict(claim), headers=_NO_STORE_HEADERS
         )

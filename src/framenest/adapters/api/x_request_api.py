@@ -185,17 +185,27 @@ def create_x_request_api_router(
         except (XAcquisitionInvalidRequestError, FrameNestXUrlError):
             return _error(X_REQUEST_INVALID_URL, "Invalid X post URL.", 422)
         except XRequestLimitError as exc:
-            return _error(_code_for_limit(exc.code), str(exc), 429)
-        except XRequestInsufficientStorageError as exc:
-            return _error(X_REQUEST_INSUFFICIENT_STORAGE, str(exc), 507)
+            return _error(
+                _code_for_limit(exc.code),
+                _X_REQUEST_LIMIT_MESSAGES.get(
+                    exc.code, _X_REQUEST_LIMIT_DEFAULT_MESSAGE
+                ),
+                429,
+            )
+        except XRequestInsufficientStorageError:
+            return _error(
+                X_REQUEST_INSUFFICIENT_STORAGE,
+                "X staging has insufficient free space.",
+                507,
+            )
         except XAcquisitionCategoryConflictError:
             return _error(
                 X_REQUEST_CATEGORY_CONFLICT,
                 "Requested category conflicts with the existing FrameNest save.",
                 409,
             )
-        except XAcquisitionInfrastructureError as exc:
-            return _error(X_REQUEST_UNAVAILABLE, str(exc), 503)
+        except XAcquisitionInfrastructureError:
+            return _error(X_REQUEST_UNAVAILABLE, "X alias overlay is unavailable.", 503)
         _record_result_classification(
             dependencies, request, "x.request.submit", "allowed", result.submission_result
         )
@@ -227,8 +237,8 @@ def create_x_request_api_router(
             )
         except XAcquisitionInvalidRequestError as exc:
             return _error(X_REQUEST_INVALID_URL, str(exc), 422)
-        except XAcquisitionInfrastructureError as exc:
-            return _error(X_REQUEST_UNAVAILABLE, str(exc), 503)
+        except XAcquisitionInfrastructureError:
+            return _error(X_REQUEST_UNAVAILABLE, "X acquisition is unavailable.", 503)
         return JSONResponse(
             status_code=200,
             content={
@@ -251,8 +261,8 @@ def create_x_request_api_router(
             claim = dependencies.service.get_owned(parsed, login_key=identity.login_key)
         except XAcquisitionNotFoundError:
             return _error(X_REQUEST_NOT_FOUND, "X request not found.", 404)
-        except XAcquisitionInfrastructureError as exc:
-            return _error(X_REQUEST_UNAVAILABLE, str(exc), 503)
+        except XAcquisitionInfrastructureError:
+            return _error(X_REQUEST_UNAVAILABLE, "X acquisition is unavailable.", 503)
         return JSONResponse(
             status_code=200, content=_item_dict(claim), headers=_NO_STORE_HEADERS
         )
@@ -272,8 +282,8 @@ def create_x_request_api_router(
             return _error(X_REQUEST_NOT_FOUND, "X request not found.", 404)
         except XAcquisitionStateConflictError as exc:
             return _error(X_REQUEST_STATE_CONFLICT, str(exc), 409)
-        except XAcquisitionInfrastructureError as exc:
-            return _error(X_REQUEST_UNAVAILABLE, str(exc), 503)
+        except XAcquisitionInfrastructureError:
+            return _error(X_REQUEST_UNAVAILABLE, "X acquisition is unavailable.", 503)
         _record_result_classification(
             dependencies, request, "x.request.retry", "allowed", claim.state
         )
@@ -324,6 +334,15 @@ def _require_identity(request: Request) -> IdentityContext:
     if not identity.has_capability(CAPABILITY_X_REQUEST):
         raise HTTPException(status_code=403, detail={"code": "CAPABILITY_DENIED"})
     return identity
+
+
+_X_REQUEST_LIMIT_MESSAGES = {
+    "X_REQUEST_ACTIVE_LIMIT": "You already have an active X request.",
+    "X_REQUEST_GLOBAL_QUEUE_FULL": "X request queue is full.",
+    "X_REQUEST_RATE_LIMIT": "Too many X requests this hour.",
+    "X_REQUEST_FAILED_24H_LIMIT": "Too many failed X requests.",
+}
+_X_REQUEST_LIMIT_DEFAULT_MESSAGE = "X request limit reached."
 
 
 def _code_for_limit(code: str) -> str:

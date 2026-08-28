@@ -17,6 +17,7 @@ from framenest.adapters.api.tailscale_ingress import (
 )
 from framenest.application.youtube_acquisition import (
     YouTubeAcquisitionInfrastructureError,
+    YouTubeAcquisitionInvalidCursorError,
     YouTubeAcquisitionInvalidRequestError,
     YouTubeAcquisitionNotFoundError,
     YouTubeAcquisitionStateConflictError,
@@ -403,15 +404,30 @@ def _item(snapshot: object) -> YouTubeRequestItemResponse:
     )
 
 
+_YOUTUBE_REQUEST_LIMIT_MESSAGES = {
+    "YOUTUBE_REQUEST_ACTIVE_LIMIT": "Active YouTube request limit reached.",
+    "YOUTUBE_REQUEST_GLOBAL_QUEUE_FULL": "The YouTube request queue is full.",
+    "YOUTUBE_REQUEST_RATE_LIMIT": "YouTube request rate limit reached.",
+    "YOUTUBE_REQUEST_FAILED_24H_LIMIT": (
+        "YouTube failed-request limit reached for the previous 24 hours."
+    ),
+    "YOUTUBE_REQUEST_PRIVATE_QUOTA": "Private YouTube download quota reached.",
+}
+_YOUTUBE_REQUEST_LIMIT_DEFAULT_MESSAGE = "YouTube request limit reached."
+
+
 def _map_service_error(
     exc: Exception,
     *,
     request: Request | None = None,
 ) -> JSONResponse:
+    if isinstance(exc, YouTubeAcquisitionInvalidCursorError):
+        return _error(
+            400,
+            YOUTUBE_REQUEST_INVALID_REQUEST,
+            "Invalid YouTube request cursor.",
+        )
     if isinstance(exc, YouTubeAcquisitionInvalidRequestError):
-        message = str(exc)
-        if "cursor" in message.lower():
-            return _error(400, YOUTUBE_REQUEST_INVALID_REQUEST, message)
         return _error(
             400,
             YOUTUBE_REQUEST_INVALID_URL,
@@ -430,7 +446,13 @@ def _map_service_error(
             "YouTube request state conflict.",
         )
     if isinstance(exc, YouTubeRequestLimitError):
-        return _error(429, exc.code, str(exc))
+        return _error(
+            429,
+            exc.code,
+            _YOUTUBE_REQUEST_LIMIT_MESSAGES.get(
+                exc.code, _YOUTUBE_REQUEST_LIMIT_DEFAULT_MESSAGE
+            ),
+        )
     if isinstance(exc, YouTubeRequestInsufficientStorageError):
         return _error(
             507,

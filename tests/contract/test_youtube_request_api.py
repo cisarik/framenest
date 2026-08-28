@@ -6,6 +6,7 @@ from dataclasses import replace
 from pathlib import Path
 import sqlite3
 
+import pytest
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 
@@ -20,6 +21,7 @@ from framenest.adapters.api.youtube_request_api import (
 )
 from framenest.application.youtube_acquisition import (
     YouTubeAcquisitionInfrastructureError,
+    YouTubeAcquisitionInvalidCursorError,
     YouTubeAcquisitionInvalidRequestError,
     YouTubeAcquisitionNotFoundError,
     YouTubeAcquisitionStateConflictError,
@@ -30,6 +32,7 @@ from framenest.application.youtube_acquisition import (
     YouTubeRequestService,
     YouTubeRequestSnapshot,
     YouTubeRequestSubmission,
+    _decode_owned_cursor,
 )
 from framenest.configuration import FrameNestSettings
 from framenest.domain.identity_access import (
@@ -240,6 +243,33 @@ def test_invalid_url_is_redacted() -> None:
     assert response.status_code == 400
     assert "evil.example" not in response.text
     assert response.json()["error"]["code"] == "YOUTUBE_REQUEST_INVALID_URL"
+
+
+def test_malformed_cursor_maps_to_invalid_request_without_raiser_text() -> None:
+    service = _Service()
+    hostile_cursor = "!!!not-a-cursor"
+    service.failure = YouTubeAcquisitionInvalidCursorError(
+        "Invalid YouTube request cursor."
+    )
+    client = _client(service, identity=_identity())
+    response = client.get("/api/youtube/requests", params={"cursor": hostile_cursor})
+
+    assert response.status_code == 400
+    assert response.json() == {
+        "error": {
+            "code": "YOUTUBE_REQUEST_INVALID_REQUEST",
+            "message": "Invalid YouTube request cursor.",
+        }
+    }
+    assert hostile_cursor not in response.text
+
+
+def test_decode_owned_cursor_raises_typed_invalid_cursor_error() -> None:
+    with pytest.raises(YouTubeAcquisitionInvalidCursorError) as excinfo:
+        _decode_owned_cursor("!!!not-a-cursor")
+
+    assert str(excinfo.value) == "Invalid YouTube request cursor."
+    assert isinstance(excinfo.value, YouTubeAcquisitionInvalidRequestError)
 
 
 def test_retry_state_conflict() -> None:

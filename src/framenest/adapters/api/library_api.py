@@ -30,7 +30,9 @@ CATALOG_UNAVAILABLE_MESSAGE = "The local catalog is not available."
 LIBRARY_NOT_FOUND_CODE = "LIBRARY_NOT_FOUND"
 LIBRARY_NOT_FOUND_MESSAGE = "Library not found."
 LIBRARY_UNAVAILABLE_CODE = "LIBRARY_UNAVAILABLE"
+LIBRARY_UNAVAILABLE_MESSAGE = "Library scan preview is not available."
 SCAN_FAILED_CODE = "SCAN_FAILED"
+SCAN_FAILED_MESSAGE = "Library scan failed."
 
 
 class ErrorBody(BaseModel):
@@ -140,10 +142,12 @@ def create_library_api_router(dependencies: LibraryApiDependencies) -> APIRouter
             return _catalog_unavailable_response()
         except LibraryScanNotFoundError:
             return _error_response(404, LIBRARY_NOT_FOUND_CODE, LIBRARY_NOT_FOUND_MESSAGE)
-        except LibraryScanUnavailableError as exc:
-            return _error_response(409, LIBRARY_UNAVAILABLE_CODE, str(exc))
-        except LibraryScanFailedError as exc:
-            return _error_response(500, SCAN_FAILED_CODE, str(exc))
+        except LibraryScanUnavailableError:
+            return _error_response(
+                409, LIBRARY_UNAVAILABLE_CODE, LIBRARY_UNAVAILABLE_MESSAGE
+            )
+        except LibraryScanFailedError:
+            return _error_response(500, SCAN_FAILED_CODE, SCAN_FAILED_MESSAGE)
         except Exception:
             return _error_response(500, SCAN_FAILED_CODE, "Library scan failed.")
         return _scan_preview_response(result)

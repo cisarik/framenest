@@ -59,6 +59,7 @@ from framenest.domain.identities import MediaId
 from framenest.domain.media_analysis_runs import (
     AUTOMATIC_POST_CATALOG_ANALYSIS_DEFINITION,
     RESULT_SCHEMA_VERSION,
+    MediaAnalysisRunId,
 )
 from framenest.domain.media_classification import (
     AnalysisProfile,
@@ -342,7 +343,7 @@ class SqliteCompanionReviewRepository:
         *,
         media_id: MediaId,
         actor_login_key: str,
-        analysis_run_id: MediaId,
+        analysis_run_id: MediaAnalysisRunId,
         now_ms: int,
         require_owner: bool = False,
     ) -> CompanionReviewOpenedResult:
@@ -417,7 +418,7 @@ class SqliteCompanionReviewRepository:
         *,
         media_id: MediaId,
         actor_login_key: str,
-        analysis_run_id: MediaId,
+        analysis_run_id: MediaAnalysisRunId,
         fields: tuple[str, ...],
         tag_keys: tuple[str, ...],
         now_ms: int,

@@ -139,7 +139,7 @@ def create_analysis_proposal_api_router(
         except AnalysisProposalValidationError:
             return _error(422, INVALID_QUERY_CODE, INVALID_QUERY_MESSAGE)
         except AnalysisProposalLimitError as exc:
-            return _error(429, exc.code, str(exc))
+            return _error(429, exc.code, "Too many analysis proposals this hour.")
         except FrameNestAnalysisProposalRepositoryError:
             return _error(500, PROPOSAL_FAILED_CODE, PROPOSAL_FAILED_MESSAGE)
         except Exception:

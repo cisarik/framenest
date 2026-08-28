@@ -110,6 +110,10 @@ class YouTubeAcquisitionInvalidRequestError(YouTubeAcquisitionError):
     """Submitted URL or confirmation data is outside the accepted policy."""
 
 
+class YouTubeAcquisitionInvalidCursorError(YouTubeAcquisitionInvalidRequestError):
+    """Owned-request list cursor is malformed or outside the accepted policy."""
+
+
 class YouTubeRequestLimitError(YouTubeAcquisitionError):
     """Ordinary requester admission limit was reached."""
 
@@ -1508,7 +1512,7 @@ def _decode_owned_cursor(cursor: str) -> tuple[int, str]:
             raise ValueError("invalid cursor")
         return created_at_ms, claim_id
     except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
-        raise YouTubeAcquisitionInvalidRequestError(
+        raise YouTubeAcquisitionInvalidCursorError(
             "Invalid YouTube request cursor."
         ) from exc
 
