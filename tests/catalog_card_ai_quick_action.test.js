@@ -371,6 +371,7 @@ function createFlowHarness({ confirmAccepted = true, reducedMotion = true } = {}
     reducedMotion,
     prefersReducedMotion: reducedMotion,
     aiCapability: { available: true },
+    aiCapabilityRevision: 0,
     aiCapabilityDiscoveryPending: false,
     identityState: {
       resolved: true,
@@ -397,8 +398,65 @@ function createFlowHarness({ confirmAccepted = true, reducedMotion = true } = {}
     openStatusDialogCalls: [],
     confirmationCalls: 0,
     openMetadataWorkspaceCalls: [],
+    analysisRunCalls: [],
+    metadataAiStatus: { textContent: "" },
+    metadataWorkspace: {
+      openMediaId: null,
+      openItem: null,
+      loading: false,
+      unavailable: false,
+      notFound: false,
+      analyzing: false,
+      analysisFailureCode: "",
+    },
     async handleOpenMetadataWorkspace(item, opener, options) {
       context.openMetadataWorkspaceCalls.push({ item, opener, options: options || {} });
+      context.metadataWorkspace.openMediaId = item.media_id;
+      context.metadataWorkspace.openItem = item;
+      return true;
+    },
+    metadataAiLocation() {
+      return context.selectSupportedAvailableLocation(context.metadataWorkspace.openItem);
+    },
+    captureMetadataAiConfirmationContext(location) {
+      return {
+        mediaId: context.metadataWorkspace.openMediaId,
+        locationId: location.location_id,
+      };
+    },
+    async runMetadataAiAnalysis(confirmationContext, { requestGuard = null } = {}) {
+      context.analysisRunCalls.push(confirmationContext);
+      context.metadataWorkspace.analyzing = true;
+      const result = await context.fetch(
+        context.mediaAiSuggestionEndpoint(confirmationContext.mediaId, confirmationContext.locationId),
+        {
+          method: "POST",
+          headers: context.framenestMutationHeaders({
+            Accept: "application/json",
+            "Content-Type": "application/json",
+          }),
+          body: JSON.stringify({ confirm_cloud_upload: true }),
+        },
+      );
+      const payload = await result.json();
+      if (typeof requestGuard === "function" && !requestGuard()) return false;
+      context.metadataWorkspace.analyzing = false;
+      if (!result.ok) {
+        context.metadataWorkspace.analysisFailureCode = payload.error ? payload.error.code : "AI_ANALYSIS_FAILED";
+        context.metadataAiStatus.textContent = context.aiSuggestionErrorMessage(payload);
+        return false;
+      }
+      if (!context.cardAiPreviewResponseMatchesRequest(
+        payload,
+        confirmationContext.mediaId,
+        confirmationContext.locationId,
+      )) {
+        context.metadataWorkspace.analysisFailureCode = "AI_RESPONSE_CONTEXT_MISMATCH";
+        context.metadataAiStatus.textContent = "The AI result did not match this media. Try analysis again.";
+        return false;
+      }
+      context.metadataWorkspace.analysisFailureCode = "";
+      context.metadataAiStatus.textContent = "Suggestion ready. Review and copy only the fields you want.";
       return true;
     },
     loadCatalog() {},
@@ -1078,17 +1136,21 @@ test("source wiring gates brain on identity, supported location, and movie exclu
   assert.equal(handleBody.includes("Analyze and save with AI?"), false);
   assert.equal(handleBody.includes("will replace the current canonical values"), false);
   assert.equal(handleBody.includes("last-write-wins"), false);
-  assert.ok(handleBody.includes("framenestMutationHeaders("));
+  assert.ok(handleBody.includes("runMetadataAiAnalysis("));
   assert.equal(handleBody.includes("metadataTagKeysFromSuggestion(suggestion.tags)"), false);
   assert.equal(handleBody.includes("fetch(metadataEndpoint(mediaId)"), false);
   assert.equal(handleBody.includes('method: "PUT"'), false);
   assert.ok(handleBody.includes("handleOpenMetadataWorkspace(item, button"));
-  assert.ok(handleBody.includes("previewSuggestion: suggestion"));
+  assert.ok(
+    handleBody.indexOf("handleOpenMetadataWorkspace(item, button)")
+      < handleBody.indexOf("runMetadataAiAnalysis(metadataConfirmationContext"),
+  );
   assert.equal(handleBody.includes("applySavedAiMetadataToCatalogSurfaces"), false);
   assert.equal(handleBody.includes('state: "failed_save"'), false);
-  assert.ok(handleBody.includes('state: "failed_analysis"'));
+  assert.equal(handleBody.includes('state: "failed_analysis"'), false);
   assert.equal(handleBody.includes("suggestionIsUsableForCanonicalSave"), false);
-  assert.ok(handleBody.includes("cardAiPreviewResponseMatchesRequest(payload, mediaId, location.location_id)"));
+  const runBody = extractFunction(APP_SOURCE, "runMetadataAiAnalysis");
+  assert.ok(runBody.includes("cardAiPreviewResponseMatchesRequest(payload, requestContext.mediaId, requestContext.locationId)"));
   assert.ok(handleBody.includes("cardAiQuickActionIsLocked(mediaId)"));
   assert.equal(handleBody.includes("content_category: metadataPayload.content_category"), false);
   assert.equal(handleBody.includes("acquisition_source: metadataPayload.acquisition_source"), false);
@@ -1104,12 +1166,13 @@ test("source wiring gates brain on identity, supported location, and movie exclu
   assert.equal(handleBody.includes("loadCatalog("), false);
 });
 
-test("Edit Analyze remains draft-only and does not auto-save", () => {
+test("Edit Analyze remains confirmed, draft-only, and does not auto-save", () => {
   const analyzeBody = extractFunction(APP_SOURCE, "handleAnalyzeMetadataByAi");
-  assert.ok(analyzeBody.includes("presentInSessionSuggestion(suggestion, payload)"));
+  const runBody = extractFunction(APP_SOURCE, "runMetadataAiAnalysis");
+  assert.ok(runBody.includes("presentInSessionSuggestion(suggestion, payload)"));
   assert.equal(analyzeBody.includes("applyResolvedAiSuggestionToMetadataWorkspace(suggestion, tagKeys)"), false);
-  assert.equal(analyzeBody.includes('method: "PUT"'), false);
-  assert.equal(analyzeBody.includes("applySavedAiMetadataToCatalogSurfaces"), false);
+  assert.equal(runBody.includes('method: "PUT"'), false);
+  assert.equal(runBody.includes("applySavedAiMetadataToCatalogSurfaces"), false);
   assert.ok(analyzeBody.includes("await requestConfirmation({"));
 });
 
@@ -1210,7 +1273,7 @@ test("capability reconciliation enables operable brain without remounting or res
   assert.equal(harness.fetchCalls.length, 0);
 });
 
-test("successful preview opens Edit with the suggestion and does not PUT metadata", async () => {
+test("successful preview opens Edit before analysis and resolves in that modal without PUT", async () => {
   const harness = createFlowHarness();
   const item = sampleItem();
   const mediaId = item.media_id;
@@ -1235,8 +1298,9 @@ test("successful preview opens Edit with the suggestion and does not PUT metadat
   const opened = harness.context.openMetadataWorkspaceCalls[0];
   assert.equal(opened.item, item);
   assert.equal(opened.opener, button);
-  assert.equal(opened.options.previewSuggestion.title, "AI Sunset");
-  assert.equal(opened.options.previewPayload.media_id, mediaId);
+  assert.deepEqual(opened.options, {});
+  assert.equal(harness.context.analysisRunCalls.length, 1);
+  assert.match(harness.context.metadataAiStatus.textContent, /Suggestion ready/);
   assert.equal(button.isConnected, true);
   assert.equal(button.dataset.analysisState, "idle");
   assert.equal(titleButton.textContent, "Sunset Still");
@@ -1244,6 +1308,36 @@ test("successful preview opens Edit with the suggestion and does not PUT metadat
   assert.equal(status.textContent, "");
   assert.equal(harness.context.getCardAiQuickAction(mediaId).state, "idle");
   assert.equal(harness.context.cardAiQuickActionEligible(item), true);
+});
+
+test("card confirmation opens Edit and enters modal analysis before provider response settles", async () => {
+  const harness = createFlowHarness();
+  const item = sampleItem();
+  const mediaId = item.media_id;
+  const locationId = item.locations[0].location_id;
+  let resolvePreview;
+  harness.enqueue(
+    "POST",
+    `/api/media/${mediaId}/locations/${locationId}/ai-suggestion-preview`,
+    () => new Promise((resolve) => {
+      resolvePreview = () => resolve(response(previewPayload(item)));
+    }),
+  );
+  const { button } = attachAnalyzeCard(harness, item);
+
+  const pending = harness.context.handleAnalyzeCatalogCard(item, button);
+  await flushAll();
+
+  assert.equal(harness.context.openMetadataWorkspaceCalls.length, 1);
+  assert.equal(harness.context.metadataWorkspace.analyzing, true);
+  assert.equal(button.dataset.analysisState, "analyzing");
+  assert.equal(harness.fetchCalls.length, 1);
+
+  resolvePreview();
+  await pending;
+  await flushAll();
+  assert.equal(harness.context.metadataWorkspace.analyzing, false);
+  assert.match(harness.context.metadataAiStatus.textContent, /Suggestion ready/);
 });
 
 test("busy analyzing keeps brain glyph with pulse contract and no visible progress text", () => {
@@ -1307,7 +1401,7 @@ test("busy analyzing keeps brain glyph with pulse contract and no visible progre
   assert.equal(other.textContent, "🧠");
 });
 
-test("failed analysis keeps the brain available for confirmed retry and does not open Edit", async () => {
+test("failed analysis stays inside the opened Edit modal with manual retry copy", async () => {
   const analysisHarness = createFlowHarness();
   const item = sampleItem();
   const mediaId = item.media_id;
@@ -1320,16 +1414,17 @@ test("failed analysis keeps the brain available for confirmed retry and does not
   const { button, status } = attachAnalyzeCard(analysisHarness, item);
   await analysisHarness.context.handleAnalyzeCatalogCard(item, button);
   await flushAll();
-  assert.equal(button.dataset.analysisState, "failed_analysis");
+  assert.equal(button.dataset.analysisState, "idle");
   assert.equal(button.isConnected, true);
-  assert.equal(status.textContent, "AI provider is not available.");
-  assert.equal(status.classList.contains("visually-hidden"), false);
+  assert.equal(status.textContent, "");
   assert.equal(analysisHarness.context.cardAiQuickActionEligible(item), true);
-  assert.equal(analysisHarness.context.openMetadataWorkspaceCalls.length, 0);
+  assert.equal(analysisHarness.context.openMetadataWorkspaceCalls.length, 1);
+  assert.match(analysisHarness.context.metadataAiStatus.textContent, /AI provider is not available/);
+  assert.equal(analysisHarness.context.metadataWorkspace.analysisFailureCode, "AI_PROVIDER_UNAVAILABLE");
   assert.equal(analysisHarness.fetchCalls.some((call) => call.method === "PUT"), false);
 });
 
-test("failed_analysis pending then available restores retry analysis label", async () => {
+test("manual card retry reconfirms and invokes the provider exactly once per acceptance", async () => {
   const harness = createFlowHarness();
   const item = sampleItem();
   const mediaId = item.media_id;
@@ -1339,48 +1434,25 @@ test("failed_analysis pending then available restores retry analysis label", asy
     `/api/media/${mediaId}/locations/${locationId}/ai-suggestion-preview`,
     response({ error: { code: "AI_PROVIDER_UNAVAILABLE", message: "down" } }, 503),
   );
-  const { button, card, status } = attachAnalyzeCard(harness, item);
+  harness.enqueue(
+    "POST",
+    `/api/media/${mediaId}/locations/${locationId}/ai-suggestion-preview`,
+    response(previewPayload(item)),
+  );
+  const { button } = attachAnalyzeCard(harness, item);
 
   await harness.context.handleAnalyzeCatalogCard(item, button);
   await flushAll();
-  assert.equal(button.dataset.analysisState, "failed_analysis");
-  assert.equal(status.textContent, "AI provider is not available.");
-  const requestsBeforeReconcile = harness.fetchCalls.length;
+  assert.equal(harness.context.confirmationCalls, 1);
+  assert.equal(harness.fetchCalls.length, 1);
+  assert.equal(harness.context.metadataWorkspace.analysisFailureCode, "AI_PROVIDER_UNAVAILABLE");
 
-  harness.context.aiCapability.available = false;
-  harness.context.aiCapabilityDiscoveryPending = false;
-  harness.context.reconcileCatalogCardAiQuickActions();
-  assert.equal(button.disabled, true);
-  assert.equal(button.getAttribute("aria-label"), "AI analysis unavailable for Sunset Still");
-  assert.equal(button.dataset.analysisState, "failed_analysis");
-  assert.equal(status.textContent, "AI provider is not available.");
-
-  harness.context.aiCapability.available = true;
-  harness.context.reconcileCatalogCardAiQuickActions();
-  assert.equal(harness.catalogResults.children[0], card);
-  assert.equal(button.disabled, false);
-  assert.equal(button.getAttribute("aria-disabled"), null);
-  assert.equal(button.dataset.analysisState, "failed_analysis");
-  assert.equal(status.textContent, "AI provider is not available.");
-  assert.equal(
-    button.getAttribute("aria-label"),
-    "AI analysis failed for Sunset Still. Retry Analyze by AI",
-  );
-  assert.equal(button.title, "AI analysis failed — retry");
-  assert.equal(harness.fetchCalls.length, requestsBeforeReconcile);
-  assert.deepEqual(harness.context.openStatusDialogCalls, []);
-
-  const retryHarness = createFlowHarness({ confirmAccepted: false });
-  retryHarness.context.setCardAiQuickActionController(mediaId, { state: "failed_analysis" });
-  retryHarness.context.setCardAnalyzeButtonState(
-    button,
-    "failed_analysis",
-    "AI provider is not available.",
-  );
-  await retryHarness.context.handleAnalyzeCatalogCard(item, button);
+  await harness.context.handleAnalyzeCatalogCard(item, button);
   await flushAll();
-  assert.equal(retryHarness.context.confirmationCalls, 1);
-  assert.equal(retryHarness.fetchCalls.length, 0);
+  assert.equal(harness.context.confirmationCalls, 2);
+  assert.equal(harness.fetchCalls.length, 2);
+  assert.equal(harness.context.metadataWorkspace.analysisFailureCode, "");
+  assert.match(harness.context.metadataAiStatus.textContent, /Suggestion ready/);
 });
 
 test("confirmation cancel performs no mutation", async () => {
@@ -1422,7 +1494,7 @@ test("one acceptance creates one preview, locks through analyzing, and never PUT
   assert.equal(titleButton.textContent, "Sunset Still");
 });
 
-test("preview failure creates no tags, saves no metadata, and does not open Edit", async () => {
+test("preview failure creates no tags, saves no metadata, and remains in Edit", async () => {
   const harness = createFlowHarness();
   const item = sampleItem();
   const mediaId = item.media_id;
@@ -1436,11 +1508,12 @@ test("preview failure creates no tags, saves no metadata, and does not open Edit
   await harness.context.handleAnalyzeCatalogCard(item, button);
   await flushAll();
   assert.equal(harness.fetchCalls.length, 1);
-  assert.equal(button.dataset.analysisState, "failed_analysis");
-  assert.equal(harness.context.openMetadataWorkspaceCalls.length, 0);
+  assert.equal(button.dataset.analysisState, "idle");
+  assert.equal(harness.context.openMetadataWorkspaceCalls.length, 1);
+  assert.match(harness.context.metadataAiStatus.textContent, /failed|not available/i);
 });
 
-test("mismatched or missing preview identity fails before Edit open", async () => {
+test("mismatched or missing preview identity fails safely inside Edit", async () => {
   async function runMismatch(payload) {
     const harness = createFlowHarness();
     const item = sampleItem();
@@ -1454,12 +1527,10 @@ test("mismatched or missing preview identity fails before Edit open", async () =
     const { button, status } = attachAnalyzeCard(harness, item);
     await harness.context.handleAnalyzeCatalogCard(item, button);
     await flushAll();
-    assert.equal(button.dataset.analysisState, "failed_analysis");
-    assert.equal(
-      status.textContent,
-      "AI response did not match the selected media. No metadata was changed.",
-    );
-    assert.equal(harness.context.openMetadataWorkspaceCalls.length, 0);
+    assert.equal(button.dataset.analysisState, "idle");
+    assert.equal(status.textContent, "");
+    assert.equal(harness.context.openMetadataWorkspaceCalls.length, 1);
+    assert.match(harness.context.metadataAiStatus.textContent, /did not match this media/);
     assert.equal(harness.fetchCalls.some((call) => call.method === "POST" && call.url === "/api/canonical-tags"), false);
     assert.equal(harness.fetchCalls.some((call) => call.method === "GET" && call.url.includes("/metadata")), false);
     assert.equal(harness.fetchCalls.some((call) => call.method === "PUT"), false);
@@ -1483,7 +1554,7 @@ test("mismatched or missing preview identity fails before Edit open", async () =
   });
 });
 
-test("stale request token does not open Edit for another media response", async () => {
+test("stale request token cannot resolve analysis into the opened workspace", async () => {
   const harness = createFlowHarness();
   const item = sampleItem();
   const mediaId = item.media_id;
@@ -1507,7 +1578,7 @@ test("stale request token does not open Edit for another media response", async 
   await pending;
   await flushAll();
   assert.equal(harness.fetchCalls.some((call) => call.method === "PUT"), false);
-  assert.equal(harness.context.openMetadataWorkspaceCalls.length, 0);
+  assert.equal(harness.context.openMetadataWorkspaceCalls.length, 1);
   assert.equal(button.dataset.analysisState, "analyzing");
 });
 
@@ -1551,11 +1622,11 @@ test("empty suggestion still opens Edit and never PUTs", async () => {
   await flushAll();
   assert.equal(harness.fetchCalls.some((call) => call.method === "PUT"), false);
   assert.equal(harness.context.openMetadataWorkspaceCalls.length, 1);
-  assert.equal(harness.context.openMetadataWorkspaceCalls[0].options.previewSuggestion.title, "");
+  assert.deepEqual(harness.context.openMetadataWorkspaceCalls[0].options, {});
   assert.equal(button.dataset.analysisState, "idle");
 });
 
-test("rejected dirty-switch leaves the card idle with a review status", async () => {
+test("rejected dirty-switch leaves the card idle and issues no provider request", async () => {
   const harness = createFlowHarness();
   const item = sampleItem();
   const mediaId = item.media_id;
@@ -1571,7 +1642,8 @@ test("rejected dirty-switch leaves the card idle with a review status", async ()
   await flushAll();
   assert.equal(button.dataset.analysisState, "idle");
   assert.equal(button.isConnected, true);
-  assert.equal(status.textContent, "AI suggestion is ready. Open Edit to review.");
+  assert.equal(status.textContent, "Analysis was not started. Keep editing or try again.");
+  assert.equal(harness.fetchCalls.length, 0);
   assert.equal(harness.fetchCalls.some((call) => call.method === "PUT"), false);
 });
 
@@ -1611,9 +1683,11 @@ test("native metadata selects are styled and classification row stacks responsiv
 
 test("quick-action mutations use the sole framenestMutationHeaders helper", () => {
   const handleBody = extractFunction(APP_SOURCE, "handleAnalyzeCatalogCard");
-  const mutationSites = handleBody.match(/framenestMutationHeaders\(/g) || [];
+  const runBody = extractFunction(APP_SOURCE, "runMetadataAiAnalysis");
+  const mutationSites = runBody.match(/framenestMutationHeaders\(/g) || [];
   assert.equal(mutationSites.length, 1);
   assert.equal(handleBody.includes('"X-FrameNest-Request": "1"'), false);
+  assert.equal(runBody.includes('"X-FrameNest-Request": "1"'), false);
   assert.ok(APP_SOURCE.includes('function framenestMutationHeaders(headers)'));
   assert.ok(APP_SOURCE.includes('Object.assign({ "X-FrameNest-Request": "1" }, headers)'));
   assert.equal((APP_SOURCE.match(/function framenestMutationHeaders/g) || []).length, 1);

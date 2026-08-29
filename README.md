@@ -81,12 +81,16 @@ flag enablement.
 
 Workspace identities with only `metadata.alias.write` can edit the
 caller-private alias overlay through the existing Edit dialog, with per-field
-AI suggestion strips and dropdown-plus-Load chrome backed by
+AI suggestion strips revealed immediately from the newest stored run and a
+dropdown that switches suggestions without a Load step, backed by
 `GET /api/media/{media_id}/ai-suggestions`
-([ADR-0077](docs/adr/0077-ordinary-alias-edit-affordance-and-per-field-ai-suggestions.md)).
-The Gallery card brain-symbol Analyze control is analyze-then-edit through that
-same Edit dialog instead of a bulk last-write-wins save
-([ADR-0078](docs/adr/0078-gallery-card-ai-per-field-review.md)), and the
+([ADR-0077](docs/adr/0077-ordinary-alias-edit-affordance-and-per-field-ai-suggestions.md),
+[ADR-0080](docs/adr/0080-immediate-editor-suggestion-reveal-and-in-modal-analysis.md)).
+The Gallery card brain-symbol Analyze control opens that same Edit dialog
+immediately after confirmation and resolves analysis in place instead of a
+bulk last-write-wins save
+([ADR-0078](docs/adr/0078-gallery-card-ai-per-field-review.md),
+[ADR-0080](docs/adr/0080-immediate-editor-suggestion-reveal-and-in-modal-analysis.md)), and the
 administrator companion Settings **Automatic media analysis** toggle is backed
 by the fifth `companion_mutation` route,
 `PUT /api/admin/settings/automatic-analysis`
@@ -729,7 +733,8 @@ Current foundation files:
 - [`docs/adr/0067-administrator-companion-review-inbox-and-mutation-trust.md`](docs/adr/0067-administrator-companion-review-inbox-and-mutation-trust.md) records the companion review inbox and the first four `companion_mutation` routes.
 - [`docs/adr/0079-administrator-automatic-analysis-runtime-setting.md`](docs/adr/0079-administrator-automatic-analysis-runtime-setting.md) records the administrator companion Settings overlay and the fifth `companion_mutation` route.
 - [`docs/adr/0077-ordinary-alias-edit-affordance-and-per-field-ai-suggestions.md`](docs/adr/0077-ordinary-alias-edit-affordance-and-per-field-ai-suggestions.md) records the ordinary alias-edit affordance, per-field AI suggestion strips, and the workspace `GET /api/media/{media_id}/ai-suggestions` read route.
-- [`docs/adr/0078-gallery-card-ai-per-field-review.md`](docs/adr/0078-gallery-card-ai-per-field-review.md) records the Gallery card Analyze (brain-symbol) control as analyze-then-edit through the existing Edit dialog.
+- [`docs/adr/0078-gallery-card-ai-per-field-review.md`](docs/adr/0078-gallery-card-ai-per-field-review.md) records the Gallery card Analyze (brain-symbol) control as a per-field review path through the existing Edit dialog.
+- [`docs/adr/0080-immediate-editor-suggestion-reveal-and-in-modal-analysis.md`](docs/adr/0080-immediate-editor-suggestion-reveal-and-in-modal-analysis.md) records immediate newest-suggestion reveal, removal of Load, dropdown switching, and in-modal card/editor analysis progress.
 - [`docs/adr/0068-companion-review-save-and-readiness-triggered-publication.md`](docs/adr/0068-companion-review-save-and-readiness-triggered-publication.md) records companion review Save publication when ready.
 - [`docs/adr/0069-five-tag-generic-media-suggestion-contract.md`](docs/adr/0069-five-tag-generic-media-suggestion-contract.md) records the live generic v4 1–5 tag contract.
 - [`docs/adr/0070-companion-exclusion-of-movie-workflows.md`](docs/adr/0070-companion-exclusion-of-movie-workflows.md) records companion exclusion of movie workflows.

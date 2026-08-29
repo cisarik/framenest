@@ -56,13 +56,16 @@ history row opens hosted Details without Analyze by AI in that popup
 [ADR-0076](docs/adr/0076-companion-history-hosted-click-admin-analyzed-inbox-and-ordinary-own-history.md)).
 Workspace identities with only `metadata.alias.write` can edit the caller-private
 alias overlay through the existing Edit dialog, with per-field AI suggestion
-strips and dropdown-plus-Load chrome backed by
+strips revealed immediately from the newest stored run and a dropdown that
+switches suggestions without a Load step, backed by
 `GET /api/media/{media_id}/ai-suggestions`
-([ADR-0077](docs/adr/0077-ordinary-alias-edit-affordance-and-per-field-ai-suggestions.md)).
-The Gallery card brain-symbol Analyze control is analyze-then-edit: it opens
-the existing Edit dialog with proposal strips and performs no bulk
-last-write-wins save
-([ADR-0078](docs/adr/0078-gallery-card-ai-per-field-review.md)).
+([ADR-0077](docs/adr/0077-ordinary-alias-edit-affordance-and-per-field-ai-suggestions.md),
+[ADR-0080](docs/adr/0080-immediate-editor-suggestion-reveal-and-in-modal-analysis.md)).
+The Gallery card brain-symbol Analyze control is edit-then-analyze: after
+confirmation it opens the existing Edit dialog immediately and resolves
+proposal strips in place, with no bulk last-write-wins save
+([ADR-0078](docs/adr/0078-gallery-card-ai-per-field-review.md),
+[ADR-0080](docs/adr/0080-immediate-editor-suggestion-reveal-and-in-modal-analysis.md)).
 Automatic post-catalog analysis stays default-off; administrator-owned X catalog
 events may enqueue generic analysis when
 `FRAMENEST_AUTOMATIC_MEDIA_ANALYSIS_ENABLED` is true or when an administrator

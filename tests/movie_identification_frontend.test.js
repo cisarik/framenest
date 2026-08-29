@@ -1,4 +1,4 @@
-// Movie identification Load/status draft boundary checks for the packaged web shell.
+// Movie identification status/draft boundary checks for the packaged web shell.
 
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
@@ -48,6 +48,9 @@ function createStripElement() {
     textContent: "",
     attrs: {},
     children: [],
+    classList: {
+      toggle() {},
+    },
     setAttribute(name, value) {
       this.attrs[name] = String(value);
     },
@@ -93,16 +96,16 @@ function createStripRenderContext() {
       fetching: false,
       items: [],
       selectedRunId: null,
-      revealed: true,
       errorMessage: "",
       movieExcluded: false,
     },
     metadataAiTitleStrip: createStripElement(),
     metadataAiDescriptionStrip: createStripElement(),
     metadataAiTagsStrip: createStripElement(),
-    identityAllowsAiSuggestionLoadChrome() {
+    identityAllowsAiSuggestionChrome() {
       return true;
     },
+    metadataWorkspace: { current: { tagKeys: [] } },
     metadataWorkspaceIsAliasMode() {
       return false;
     },
@@ -125,7 +128,7 @@ function createStripRenderContext() {
   return context;
 }
 
-test("movie identification helpers preserve Load boundary and taxonomy mapping", () => {
+test("movie identification helpers preserve draft boundary and taxonomy mapping", () => {
   assert.match(APP_SOURCE, /function movieIdentificationEndpoint/);
   assert.match(APP_SOURCE, /function applyMovieIdentificationToMetadataWorkspace/);
   assert.match(APP_SOURCE, /function movieIdentificationIsPureUnknown/);
@@ -206,7 +209,7 @@ test("movie identification helpers preserve Load boundary and taxonomy mapping",
   assert.deepEqual(context.metadataWorkspace.current.tagKeys, ["desert"]);
 });
 
-test("movie Identify and Load stay non-canonical in source", () => {
+test("movie Identify and suggestion review stay non-canonical in source", () => {
   assert.match(APP_SOURCE, /Running movie identification/);
   assert.match(APP_SOURCE, /Movie identification in progress\./);
   // Empty suggestion fields must not clear existing draft values.
@@ -221,13 +224,7 @@ test("movie Identify and Load stay non-canonical in source", () => {
   assert.match(identifyBlock, /movie-identification/);
   assert.doesNotMatch(identifyBlock, /handleSaveMetadata/);
   assert.doesNotMatch(identifyBlock, /method:\s*"PUT"/);
-  const loadStart = APP_SOURCE.indexOf("async function handleLoadDurableAiSuggestion");
-  const loadEnd = APP_SOURCE.indexOf("async function handleAnalyzeMetadataByAi");
-  assert.ok(loadStart >= 0 && loadEnd > loadStart);
-  const loadBlock = APP_SOURCE.slice(loadStart, loadEnd);
-  assert.match(loadBlock, /selectedMetadataSuggestion/);
-  assert.doesNotMatch(loadBlock, /handleSaveMetadata/);
-  assert.doesNotMatch(loadBlock, /method:\s*"PUT"/);
+  assert.equal(APP_SOURCE.includes("handleLoadDurableAiSuggestion"), false);
   // Movie identification status fetch stays on the read-only status surface.
   const statusStart = APP_SOURCE.indexOf("async function refreshMetadataDurableAnalysis");
   const statusEnd = APP_SOURCE.indexOf("function applyAnalysisStatusPayload");
@@ -283,7 +280,6 @@ test("durable movie suggestion renders overlapping genres and tags as distinct f
     ],
   }];
   context.metadataSuggestionList.selectedRunId = "run-1";
-  context.metadataSuggestionList.revealed = true;
   context.renderMetadataSuggestionStrips();
 
   assert.equal(context.metadataAiTitleStrip.hidden, false);
@@ -395,8 +391,8 @@ test("durable movie suggestion empty and reset semantics clear stale facet value
   assert.equal(context.metadataAiTagsStrip.hidden, true);
   assert.equal(context.metadataAiTagsStrip.children.length, 0);
 
-  // Reset (unrevealed) hides every strip and clears all stale values.
-  context.metadataSuggestionList.revealed = false;
+  // Reset (no selected suggestion) hides every strip and clears stale values.
+  context.metadataSuggestionList.selectedRunId = null;
   context.renderMetadataSuggestionStrips();
   for (const strip of [
     context.metadataAiTitleStrip,

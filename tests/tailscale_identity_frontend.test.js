@@ -307,8 +307,8 @@ test("mutation helper always injects the FrameNest mutation header", () => {
 test("every unsafe fetch call site sends the mutation header", () => {
   const mutationSites = APP_SOURCE.match(/method: "(?:POST|PUT|PATCH|DELETE)"/g) || [];
   const wrappedSites = APP_SOURCE.match(/headers: framenestMutationHeaders\(/g) || [];
-  assert.equal(mutationSites.length, 29);
-  assert.equal(wrappedSites.length, 29);
+  assert.equal(mutationSites.length, 28);
+  assert.equal(wrappedSites.length, 28);
   assert.equal((APP_SOURCE.match(/"X-FrameNest-Request"/g) || []).length, 1);
 });
 
@@ -395,18 +395,19 @@ test("privileged controls are gated by capabilities in source", () => {
   assert.ok(identityGateBody.includes("companionWebHosted()"));
 });
 
-test("hosted Details hide Analyze by AI and keep Load chrome", () => {
+test("hosted Details hide Analyze by AI and keep suggestion chrome", () => {
   const controls = extractFunction(APP_SOURCE, "updateMetadataControls");
   assert.ok(controls.includes("identityAllowsAiAnalyze()"));
-  assert.ok(controls.includes("identityAllowsAiSuggestionLoadChrome()"));
+  assert.ok(controls.includes("identityAllowsAiSuggestionChrome()"));
+  assert.equal(controls.includes("identityAllowsAiSuggestionLoadChrome()"), false);
   assert.equal(controls.includes("identityAllowsAiSuggestionsChrome()"), false);
   assert.equal(controls.includes("URLSearchParams"), false);
   const analyze = extractFunction(APP_SOURCE, "identityAllowsAiAnalyze");
   assert.ok(analyze.includes("companionWebHosted()"));
   assert.ok(analyze.includes("analysis.run"));
-  const loadChrome = extractFunction(APP_SOURCE, "identityAllowsAiSuggestionLoadChrome");
-  assert.equal(loadChrome.includes("companionWebHosted()"), false);
-  assert.ok(loadChrome.includes("metadata.alias.write"));
+  const suggestionChrome = extractFunction(APP_SOURCE, "identityAllowsAiSuggestionChrome");
+  assert.equal(suggestionChrome.includes("companionWebHosted()"), false);
+  assert.ok(suggestionChrome.includes("metadata.alias.write"));
 });
 
 test("gallery AI quick action fails closed for missing unresolved and ordinary identity", () => {

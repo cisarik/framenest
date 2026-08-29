@@ -222,9 +222,11 @@ Implemented within this phase:
 - Gallery high-level filters for Memes, Movies, and YouTube as content-category query dimensions, plus creator-chip filtering by structured attribution identity, per [ADR-0045](docs/adr/0045-content-classification-and-movie-identification.md) and [ADR-0055](docs/adr/0055-youtube-creator-taxonomy-and-immutable-provenance.md).
 - bounded movie-identification analysis profile with reasoning ON, contact-sheet derivative transport, and durable run separation from generic analysis.
 - automatic built-in `Processed` workflow collection entered by the first durable tag save, cleared when all tags are removed, with a virtual `All media` Catalog scope and an optional `Processed` Catalog scope in the packaged browser.
-- ordinary alias-edit affordance with per-field AI suggestion strips and
-  dropdown-plus-Load chrome reading `GET /api/media/{media_id}/ai-suggestions`
-  ([ADR-0077](docs/adr/0077-ordinary-alias-edit-affordance-and-per-field-ai-suggestions.md)).
+- ordinary alias-edit affordance with per-field AI suggestion strips revealed
+  immediately from the newest stored run, with a dropdown that switches
+  suggestions without Load, reading `GET /api/media/{media_id}/ai-suggestions`
+  ([ADR-0077](docs/adr/0077-ordinary-alias-edit-affordance-and-per-field-ai-suggestions.md),
+  [ADR-0080](docs/adr/0080-immediate-editor-suggestion-reveal-and-in-modal-analysis.md)).
 
 Still unimplemented within this phase:
 
@@ -355,10 +357,12 @@ Status: partially implemented.
 
 Goal: build the first real scalable local gallery.
 
-The Gallery card brain-symbol Analyze control is analyze-then-edit: it opens
-the existing Edit dialog with proposal strips and performs no bulk
-last-write-wins save
-([ADR-0078](docs/adr/0078-gallery-card-ai-per-field-review.md)).
+The Gallery card brain-symbol Analyze control is edit-then-analyze: after
+confirmation it opens the existing Edit dialog immediately, shows in-modal
+progress, and resolves proposal strips in place with no bulk last-write-wins
+save
+([ADR-0078](docs/adr/0078-gallery-card-ai-per-field-review.md),
+[ADR-0080](docs/adr/0080-immediate-editor-suggestion-reveal-and-in-modal-analysis.md)).
 
 Key deliverables: cover-driven gallery, logical-item cards, local and remote-only card states, title search, multi-tag AND filtering, removable active filters, series views, storage/device state, short-media preview, accessibility support, reduced motion, reduced transparency, and lower-resource modes.
 

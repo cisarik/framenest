@@ -574,9 +574,19 @@
               </button>
               <ul id="metadata-ai-suggestion-list" class="metadata-ai-suggestion-list" role="listbox" hidden></ul>
             </div>
-            <button id="metadata-load-ai-suggestion-button" type="button" hidden disabled>Load</button>
           </div>
-          <p id="metadata-ai-status" class="metadata-note" aria-live="polite"></p>
+          <div
+            id="metadata-ai-progress"
+            class="metadata-ai-progress"
+            role="status"
+            aria-live="polite"
+            aria-atomic="true"
+            hidden
+          >
+            <span class="metadata-ai-progress__spinner" aria-hidden="true"></span>
+            <span>Analyzing media…</span>
+          </div>
+          <p id="metadata-ai-status" class="metadata-note" role="status" aria-live="polite" aria-atomic="true"></p>
         </section>
 
         <div class="metadata-workspace__body">

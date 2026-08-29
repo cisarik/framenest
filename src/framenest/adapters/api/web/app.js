@@ -101,7 +101,6 @@ const prefersReducedMotion = window.matchMedia && window.matchMedia("(prefers-re
 let metadataBeforeUnloadAttached = false;
 let metadataAiRequestToken = 0;
 let metadataDurableAnalysisToken = 0;
-let metadataDurableLoadToken = 0;
 let metadataSaveRequestToken = 0;
 let metadataSaveOwner = null;
 let metadataWorkspaceRevision = 0;
@@ -200,6 +199,7 @@ let metadataWorkspace = {
   notFound: false,
   statusOverride: null,
   analyzing: false,
+  analysisFailureCode: "",
   aiSuggestionApplied: false,
   editMode: "canonical",
   suggestedFilename: "",
@@ -260,7 +260,6 @@ const automaticAnalysisPollControllers = new Map();
 let metadataDurableAnalysis = {
   mediaId: null,
   fetching: false,
-  loadingIntoDraft: false,
   state: null,
   analysisDefinition: null,
   result: null,
@@ -274,7 +273,6 @@ let metadataSuggestionList = {
   fetching: false,
   items: [],
   selectedRunId: null,
-  revealed: false,
   errorMessage: "",
   movieExcluded: false,
 };
@@ -368,7 +366,7 @@ function metadataWorkspaceIsAliasMode() {
   return metadataWorkspace.editMode === "alias";
 }
 
-function identityAllowsAiSuggestionLoadChrome() {
+function identityAllowsAiSuggestionChrome() {
   return isWorkspaceAudience()
     && (
       identityHasCapability("metadata.alias.write")
@@ -813,12 +811,12 @@ const metadataTagStatus = document.querySelector("#metadata-tag-status");
 const metadataAiPanel = document.querySelector("#metadata-ai-panel");
 const metadataAiHeading = document.querySelector("#metadata-ai-heading");
 const metadataAiAnalyzeButton = document.querySelector("#metadata-ai-analyze-button");
-const metadataLoadAiSuggestionButton = document.querySelector("#metadata-load-ai-suggestion-button");
 const metadataAiSuggestionDropdown = document.querySelector("#metadata-ai-suggestion-dropdown");
 const metadataAiSuggestionToggle = document.querySelector("#metadata-ai-suggestion-toggle");
 const metadataAiSuggestionToggleLabel = document.querySelector("#metadata-ai-suggestion-toggle-label");
 const metadataAiSuggestionList = document.querySelector("#metadata-ai-suggestion-list");
 const metadataAiStatus = document.querySelector("#metadata-ai-status");
+const metadataAiProgress = document.querySelector("#metadata-ai-progress");
 const metadataAiFilenameNote = document.querySelector("#metadata-ai-filename-note");
 const metadataAiTitleStrip = document.querySelector("#metadata-ai-title-strip");
 const metadataAiDescriptionStrip = document.querySelector("#metadata-ai-description-strip");
@@ -2132,7 +2130,7 @@ function movieIdentificationStatusMessage(payload) {
   if (payload.state === "analyzed") {
     const result = payload.movie_identification_result;
     if (result && result.identification_status === "unknown") {
-      return "Movie identification returned unknown. Load is disabled for empty unknown results.";
+      return "Movie identification returned unknown with no editable suggestions.";
     }
     if (result && result.identification_status === "identified") {
       return "Movie identification ready for review.";
@@ -5278,10 +5276,10 @@ function cardAiQuickActionProviderBlocked() {
 function cardAiPreviewResponseMatchesRequest(payload, mediaId, locationId) {
   return Boolean(
     payload
-    && typeof payload.media_id === "string"
-    && typeof payload.location_id === "string"
-    && payload.media_id === String(mediaId)
-    && payload.location_id === String(locationId),
+    && payload.media_id != null
+    && payload.location_id != null
+    && String(payload.media_id) === String(mediaId)
+    && String(payload.location_id) === String(locationId),
   );
 }
 
@@ -5403,17 +5401,6 @@ function reconcileCatalogCardAiQuickActions() {
   });
 }
 
-function applyResolvedAiSuggestionToMetadataWorkspace(suggestion, tagKeys) {
-  metadataWorkspace.current.displayTitle = suggestion.title;
-  metadataWorkspace.current.description = suggestion.description;
-  metadataWorkspace.current.tagKeys = tagKeys;
-  metadataWorkspace.suggestedFilename = suggestion.suggestedFilename;
-  metadataWorkspace.aiSuggestionApplied = true;
-  metadataWorkspace.statusOverride = null;
-  advanceMetadataWorkspaceRevision();
-  metadataAiStatus.textContent = "AI suggestion loaded into draft.";
-}
-
 function applyMovieIdentificationToMetadataWorkspace(movieResult, tagKeys) {
   const title = typeof movieResult.identified_title === "string"
     ? movieResult.identified_title.trim()
@@ -5498,6 +5485,11 @@ async function handleAnalyzeCatalogCard(item, button) {
   const location = selectSupportedAvailableLocation(item);
   if (!location) return;
   if (cardAiQuickActionProviderBlocked()) return;
+  const confirmationContext = Object.freeze({
+    mediaId,
+    locationId: location.location_id,
+    capabilityRevision: aiCapabilityRevision,
+  });
   setCardAiQuickActionController(mediaId, { state: "confirming" });
   setCardAnalyzeButtonState(button, "confirming");
   const accepted = await requestConfirmation({
@@ -5513,57 +5505,60 @@ async function handleAnalyzeCatalogCard(item, button) {
     setCardAnalyzeButtonState(button, "idle");
     return;
   }
-  if (getCardAiQuickAction(mediaId).state !== "confirming") return;
-  const requestToken = (getCardAiQuickAction(mediaId).requestToken || 0) + 1;
-  setCardAiQuickActionController(mediaId, { state: "analyzing", requestToken });
-  setCardAnalyzeButtonState(button, "analyzing");
-  try {
-    const response = await fetch(mediaAiSuggestionEndpoint(mediaId, location.location_id), {
-      method: "POST",
-      headers: framenestMutationHeaders({
-        Accept: "application/json",
-        "Content-Type": "application/json",
-      }),
-      body: JSON.stringify({ confirm_cloud_upload: true }),
-      cache: "no-store",
-    });
-    const payload = await response.json();
-    const controller = getCardAiQuickAction(mediaId);
-    if (controller.requestToken !== requestToken || controller.state !== "analyzing") return;
-    if (!response.ok) {
-      setCardAiQuickActionController(mediaId, { state: "failed_analysis" });
-      setCardAnalyzeButtonState(button, "failed_analysis", aiSuggestionErrorMessage(payload));
-      return;
-    }
-    if (!cardAiPreviewResponseMatchesRequest(payload, mediaId, location.location_id)) {
-      setCardAiQuickActionController(mediaId, { state: "failed_analysis" });
-      setCardAnalyzeButtonState(
-        button,
-        "failed_analysis",
-        "AI response did not match the selected media. No metadata was changed.",
-      );
-      return;
-    }
-    const suggestion = aiSuggestionFromPayload(payload);
-    const opened = await handleOpenMetadataWorkspace(item, button, {
-      previewSuggestion: suggestion,
-      previewPayload: payload,
-    });
-    if (getCardAiQuickAction(mediaId).requestToken !== requestToken) return;
+  const currentLocation = selectSupportedAvailableLocation(item);
+  if (
+    getCardAiQuickAction(mediaId).state !== "confirming"
+    || !cardAiQuickActionEligible(item)
+    || !currentLocation
+    || currentLocation.location_id !== confirmationContext.locationId
+    || aiCapabilityRevision !== confirmationContext.capabilityRevision
+  ) {
     setCardAiQuickActionController(mediaId, { state: "idle" });
     setCardAnalyzeButtonState(button, "idle");
-    if (!opened) {
-      const status = button.closest(".catalog-card")?.querySelector(".catalog-card__analysis-status");
-      setCardAnalysisStatus(status, {
-        text: "AI suggestion is ready. Open Edit to review.",
-      });
-    }
-  } catch {
-    const controller = getCardAiQuickAction(mediaId);
-    if (controller.requestToken !== requestToken) return;
-    setCardAiQuickActionController(mediaId, { state: "failed_analysis" });
-    setCardAnalyzeButtonState(button, "failed_analysis", "AI analysis failed.");
+    return;
   }
+  const requestToken = (getCardAiQuickAction(mediaId).requestToken || 0) + 1;
+  setCardAiQuickActionController(mediaId, { state: "confirming", requestToken });
+  const opened = await handleOpenMetadataWorkspace(item, button);
+  if (
+    getCardAiQuickAction(mediaId).requestToken !== requestToken
+    || getCardAiQuickAction(mediaId).state !== "confirming"
+  ) return;
+  if (!opened) {
+    setCardAiQuickActionController(mediaId, { state: "idle" });
+    setCardAnalyzeButtonState(button, "idle");
+    const status = button.closest(".catalog-card")?.querySelector(".catalog-card__analysis-status");
+    setCardAnalysisStatus(status, {
+      text: "Analysis was not started. Keep editing or try again.",
+    });
+    return;
+  }
+  const workspaceLocation = metadataAiLocation();
+  if (
+    metadataWorkspace.openMediaId !== confirmationContext.mediaId
+    || metadataWorkspace.loading
+    || metadataWorkspace.unavailable
+    || metadataWorkspace.notFound
+    || !workspaceLocation
+    || workspaceLocation.location_id !== confirmationContext.locationId
+    || aiCapabilityRevision !== confirmationContext.capabilityRevision
+  ) {
+    setCardAiQuickActionController(mediaId, { state: "idle" });
+    setCardAnalyzeButtonState(button, "idle");
+    return;
+  }
+  const metadataConfirmationContext = captureMetadataAiConfirmationContext(workspaceLocation);
+  setCardAiQuickActionController(mediaId, { state: "analyzing", requestToken });
+  setCardAnalyzeButtonState(button, "analyzing");
+  await runMetadataAiAnalysis(metadataConfirmationContext, {
+    requestGuard: () => {
+      const controller = getCardAiQuickAction(mediaId);
+      return controller.requestToken === requestToken && controller.state === "analyzing";
+    },
+  });
+  if (getCardAiQuickAction(mediaId).requestToken !== requestToken) return;
+  setCardAiQuickActionController(mediaId, { state: "idle" });
+  setCardAnalyzeButtonState(button, "idle");
 }
 
 function setCatalogPagination(page, renderedCount = page.items.length) {
@@ -6272,22 +6267,12 @@ function updateMetadataControls() {
     renderMetadataAiAnalyzeButtonContent(metadataWorkspace.analyzing);
     metadataAiAnalyzeButton.setAttribute("aria-busy", metadataWorkspace.analyzing ? "true" : "false");
   }
-  if (metadataLoadAiSuggestionButton) {
-    const loadAvailable = identityAllowsAiSuggestionLoadChrome()
-      && metadataSuggestionList.items.length > 0
-      && Boolean(metadataSuggestionList.selectedRunId);
-    const loadBusy = metadataSuggestionList.fetching;
-    metadataLoadAiSuggestionButton.hidden = !loadAvailable && !loadBusy;
-    metadataLoadAiSuggestionButton.disabled = metadataWorkspace.loading
-      || metadataWorkspace.saving
-      || metadataWorkspace.analyzing
-      || loadBusy
-      || !loadAvailable;
-    metadataLoadAiSuggestionButton.textContent = "Load";
-    metadataLoadAiSuggestionButton.setAttribute("aria-busy", loadBusy ? "true" : "false");
+  if (metadataAiProgress) {
+    metadataAiProgress.hidden = !metadataWorkspace.analyzing;
+    metadataAiProgress.setAttribute("aria-busy", metadataWorkspace.analyzing ? "true" : "false");
   }
   if (metadataAiSuggestionDropdown) {
-    const showSelect = identityAllowsAiSuggestionLoadChrome()
+    const showSelect = identityAllowsAiSuggestionChrome()
       && metadataSuggestionList.items.length > 0;
     metadataAiSuggestionDropdown.hidden = !showSelect;
     const dropdownBusy = metadataWorkspace.loading
@@ -6305,7 +6290,9 @@ function renderMetadataAiAnalyzeButtonContent(isAnalyzing) {
   if (!metadataAiAnalyzeButton) return;
   metadataAiAnalyzeButton.replaceChildren();
   if (!isAnalyzing) {
-    metadataAiAnalyzeButton.textContent = "Analyze by AI";
+    metadataAiAnalyzeButton.textContent = metadataWorkspace.analysisFailureCode
+      ? "Retry analysis"
+      : "Analyze by AI";
     return;
   }
   const label = document.createElement("span");
@@ -6496,7 +6483,7 @@ function releaseMetadataAiRequest(requestContext) {
 
 function renderMetadataAiPanel() {
   if (!metadataAiPanel) return;
-  const showChrome = identityAllowsAiSuggestionLoadChrome();
+  const showChrome = identityAllowsAiSuggestionChrome();
   metadataAiPanel.hidden = !showChrome;
   if (metadataAiHeading) {
     metadataAiHeading.textContent = "AI suggestions";
@@ -6507,7 +6494,6 @@ function renderMetadataAiPanel() {
     const selected = selectedMetadataSuggestion();
     const showFilename = Boolean(
       showChrome
-      && metadataSuggestionList.revealed
       && selected
       && selected.suggestedFilename,
     );
@@ -6556,7 +6542,6 @@ function resetMetadataDurableAnalysisState() {
   metadataDurableAnalysis = {
     mediaId: null,
     fetching: false,
-    loadingIntoDraft: false,
     state: null,
     analysisDefinition: null,
     result: null,
@@ -6573,24 +6558,9 @@ function resetMetadataSuggestionListState() {
     fetching: false,
     items: [],
     selectedRunId: null,
-    revealed: false,
     errorMessage: "",
     movieExcluded: false,
   };
-}
-
-function durableAnalysisLoadAvailable() {
-  if (
-    metadataWorkspace.openMediaId === null
-    || metadataDurableAnalysis.mediaId !== metadataWorkspace.openMediaId
-    || metadataDurableAnalysis.state !== "analyzed"
-  ) {
-    return false;
-  }
-  if (metadataDurableAnalysis.analysisDefinition === "movie_identification") {
-    return movieIdentificationHasLoadableFields(metadataDurableAnalysis.movieResult);
-  }
-  return Boolean(aiSuggestionFromAutomaticAnalysisResult(metadataDurableAnalysis.result));
 }
 
 function selectedMetadataSuggestion() {
@@ -6749,7 +6719,7 @@ function appendSuggestionApplyButton(container, field, tagKey) {
 }
 
 function renderMetadataSuggestionStrips() {
-  const show = identityAllowsAiSuggestionLoadChrome() && metadataSuggestionList.revealed;
+  const show = identityAllowsAiSuggestionChrome();
   const item = show ? selectedMetadataSuggestion() : null;
   if (!item) {
     clearMetadataSuggestionStrip(metadataAiTitleStrip);
@@ -6783,10 +6753,19 @@ function renderMetadataSuggestionStrips() {
       item.tags.forEach((tag) => {
         const mapped = tag.status === "mapped" && tag.key;
         if (mapped) {
+          const alreadyAdded = metadataWorkspace.current.tagKeys.includes(tag.key);
+          const label = tag.displayName || tag.value || tag.key || "";
           const button = document.createElement("button");
           button.type = "button";
           button.className = "metadata-suggestion-tag metadata-suggestion-tag--mapped";
-          button.textContent = tag.displayName || tag.value || tag.key || "";
+          button.textContent = label;
+          button.setAttribute("aria-pressed", String(alreadyAdded));
+          button.setAttribute(
+            "aria-label",
+            alreadyAdded ? `${label}, already added to Current` : `Add suggested tag ${label} to Current`,
+          );
+          button.classList.toggle("metadata-suggestion-tag--already-added", alreadyAdded);
+          if (alreadyAdded) button.title = "Already added to Current";
           button.addEventListener("click", (event) => {
             event.preventDefault();
             event.stopPropagation();
@@ -6824,13 +6803,18 @@ function renderMetadataSuggestionStrips() {
 
 function copySuggestionFieldToCurrent(field, tagKey) {
   const item = selectedMetadataSuggestion();
-  if (!item || !metadataSuggestionList.revealed) return;
+  if (!item) return;
   if (field === "title") {
     metadataWorkspace.current.displayTitle = item.title || "";
   } else if (field === "description") {
     metadataWorkspace.current.description = item.description || "";
   } else if (field === "tag" && tagKey) {
-    if (metadataWorkspace.current.tagKeys.includes(tagKey)) return;
+    if (metadataWorkspace.current.tagKeys.includes(tagKey)) {
+      const definition = selectedTagDefinition(tagKey);
+      const label = definition ? definition.display_name : "That tag";
+      metadataAiStatus.textContent = `${label} is already in Current.`;
+      return;
+    }
     if (metadataWorkspace.current.tagKeys.length >= MAX_METADATA_TAGS) {
       setMetadataStatus("validation", "Tag limit reached.");
       updateMetadataControls();
@@ -6845,15 +6829,8 @@ function copySuggestionFieldToCurrent(field, tagKey) {
   renderMetadataWorkspace();
 }
 
-function handleMetadataSuggestionSelectChange() {
-  selectMetadataSuggestion(
-    metadataSuggestionList.selectedRunId,
-  );
-}
-
 function selectMetadataSuggestion(runId) {
   metadataSuggestionList.selectedRunId = runId || null;
-  metadataSuggestionList.revealed = false;
   closeMetadataSuggestionDropdown();
   renderMetadataSuggestionSelect();
   renderMetadataSuggestionStrips();
@@ -6867,12 +6844,11 @@ function presentInSessionSuggestion(suggestion, payload) {
   );
   metadataSuggestionList.items = [item, ...without];
   metadataSuggestionList.selectedRunId = item.analysisRunId;
-  metadataSuggestionList.revealed = true;
   metadataWorkspace.suggestedFilename = item.suggestedFilename || "";
 }
 
 async function refreshMetadataSuggestionList(mediaId) {
-  if (!mediaId || !identityAllowsAiSuggestionLoadChrome()) return;
+  if (!mediaId || !identityAllowsAiSuggestionChrome()) return;
   const token = ++metadataSuggestionListToken;
   metadataSuggestionList.mediaId = mediaId;
   metadataSuggestionList.fetching = true;
@@ -6889,7 +6865,6 @@ async function refreshMetadataSuggestionList(mediaId) {
     if (response.status === 409) {
       metadataSuggestionList.items = [];
       metadataSuggestionList.selectedRunId = null;
-      metadataSuggestionList.revealed = false;
       metadataSuggestionList.movieExcluded = true;
       renderMetadataWorkspace();
       return;
@@ -6903,7 +6878,6 @@ async function refreshMetadataSuggestionList(mediaId) {
     if (token !== metadataSuggestionListToken) return;
     if (metadataWorkspace.openMediaId !== mediaId) return;
     const previousId = metadataSuggestionList.selectedRunId;
-    const revealed = metadataSuggestionList.revealed;
     const selectedItem = selectedMetadataSuggestion();
     let items = Array.isArray(payload.suggestions)
       ? payload.suggestions.map(inboxSuggestionFromDetail).filter(Boolean)
@@ -6925,13 +6899,8 @@ async function refreshMetadataSuggestionList(mediaId) {
     metadataSuggestionList.items = items;
     if (previousId && items.some((item) => item.analysisRunId === previousId)) {
       metadataSuggestionList.selectedRunId = previousId;
-      metadataSuggestionList.revealed = revealed;
-    } else if (revealed && items.length > 0) {
-      metadataSuggestionList.selectedRunId = items[0].analysisRunId;
-      metadataSuggestionList.revealed = true;
     } else {
       metadataSuggestionList.selectedRunId = items.length > 0 ? items[0].analysisRunId : null;
-      metadataSuggestionList.revealed = false;
     }
     renderMetadataWorkspace();
   } catch {
@@ -6948,7 +6917,6 @@ async function refreshMetadataDurableAnalysis(mediaId, requestToken) {
   metadataDurableAnalysis = {
     mediaId,
     fetching: true,
-    loadingIntoDraft: false,
     state: null,
     analysisDefinition: null,
     result: null,
@@ -6972,7 +6940,6 @@ async function refreshMetadataDurableAnalysis(mediaId, requestToken) {
       metadataDurableAnalysis = {
         mediaId,
         fetching: false,
-        loadingIntoDraft: false,
         state: null,
         analysisDefinition: null,
         result: null,
@@ -6997,7 +6964,6 @@ async function refreshMetadataDurableAnalysis(mediaId, requestToken) {
     metadataDurableAnalysis = {
       mediaId,
       fetching: false,
-      loadingIntoDraft: false,
       state: null,
       analysisDefinition: null,
       result: null,
@@ -7055,7 +7021,6 @@ function applyAnalysisStatusPayload(mediaId, payload, preferMovie) {
   return {
     mediaId,
     fetching: false,
-    loadingIntoDraft: false,
     state,
     analysisDefinition,
     result,
@@ -7066,59 +7031,17 @@ function applyAnalysisStatusPayload(mediaId, payload, preferMovie) {
   };
 }
 
-async function handleLoadDurableAiSuggestion() {
-  if (
-    metadataWorkspace.openMediaId === null
-    || metadataWorkspace.loading
-    || metadataWorkspace.saving
-    || metadataWorkspace.analyzing
-    || metadataSuggestionList.fetching
-    || !identityAllowsAiSuggestionLoadChrome()
-  ) {
-    return;
-  }
-  if (!selectedMetadataSuggestion()) return;
-  metadataSuggestionList.revealed = true;
-  if (metadataAiStatus) metadataAiStatus.textContent = "Loaded";
-  renderMetadataWorkspace();
-}
-
-async function handleAnalyzeMetadataByAi() {
-  if (!aiCapability.available) {
-    metadataAiStatus.textContent = "AI analysis is not configured.";
-    return;
-  }
-  if (
-    metadataWorkspace.openMediaId === null
-    || metadataWorkspace.loading
-    || metadataWorkspace.saving
-  ) return;
-  if (metadataWorkspace.analyzing) return;
-  if (companionWebHosted() || metadataWorkspaceIsMovie() || metadataWorkspaceIsAliasMode()) return;
-  if (!identityHasCapability("analysis.run")) return;
-  const location = metadataAiLocation();
-  if (!location) {
-    metadataAiStatus.textContent = "AI analysis needs an available local GIF or MP4.";
-    return;
-  }
-  const confirmationContext = captureMetadataAiConfirmationContext(location);
-  const accepted = await requestConfirmation({
-    title: "Use AI analysis?",
-    message: "FrameNest will send up to 3 optimized preview frames and bounded metadata to the configured server-side AI provider. The original file, local path, and API key are not uploaded. Returned values become proposal strips beside Title, Description, and Tags. They do not replace the current unsaved values. The result will not be saved automatically, and the physical file will not be renamed.",
-    dismissLabel: "Not now",
-    confirmLabel: "Analyze by AI",
-    destructive: false,
-  });
-  if (!accepted) {
-    metadataAiStatus.textContent = "";
-    return;
-  }
+async function runMetadataAiAnalysis(confirmationContext, options) {
+  const requestGuard = options && typeof options.requestGuard === "function"
+    ? options.requestGuard
+    : null;
   if (!metadataAiConfirmationContextIsCurrent(confirmationContext)) {
     metadataAiStatus.textContent = "This editor changed before analysis could start. Confirm again to analyze.";
-    return;
+    return false;
   }
   const token = ++metadataAiRequestToken;
   metadataWorkspace.analyzing = true;
+  metadataWorkspace.analysisFailureCode = "";
   advanceMetadataWorkspaceRevision();
   const requestContext = Object.freeze({
     token,
@@ -7128,8 +7051,8 @@ async function handleAnalyzeMetadataByAi() {
     workspaceRevision: metadataWorkspaceRevision,
     capabilityRevision: aiCapabilityRevision,
   });
-  metadataAiStatus.textContent = "Analyzing…";
-  updateMetadataControls();
+  metadataAiStatus.textContent = "";
+  renderMetadataWorkspace();
   try {
     const response = await fetch(mediaAiSuggestionEndpoint(requestContext.mediaId, requestContext.locationId), {
       method: "POST",
@@ -7141,44 +7064,88 @@ async function handleAnalyzeMetadataByAi() {
       cache: "no-store",
     });
     const payload = await response.json();
-    if (!metadataAiRequestContextIsCurrent(requestContext)) {
+    const externallyCurrent = typeof requestGuard !== "function" || requestGuard();
+    if (!metadataAiRequestContextIsCurrent(requestContext) || !externallyCurrent) {
       releaseMetadataAiRequest(requestContext);
-      return;
+      return false;
     }
     if (!response.ok) {
+      metadataWorkspace.analysisFailureCode = payload && payload.error
+        ? String(payload.error.code || "AI_ANALYSIS_FAILED")
+        : "AI_ANALYSIS_FAILED";
       releaseMetadataAiRequest(requestContext);
       metadataAiStatus.textContent = aiSuggestionErrorMessage(payload);
       renderMetadataWorkspace();
-      return;
+      return false;
+    }
+    if (!cardAiPreviewResponseMatchesRequest(payload, requestContext.mediaId, requestContext.locationId)) {
+      metadataWorkspace.analysisFailureCode = "AI_RESPONSE_CONTEXT_MISMATCH";
+      releaseMetadataAiRequest(requestContext);
+      metadataAiStatus.textContent = "The AI result did not match this media. Try analysis again.";
+      renderMetadataWorkspace();
+      return false;
     }
     const suggestion = aiSuggestionFromPayload(payload);
     metadataWorkspace.analyzing = false;
+    metadataWorkspace.analysisFailureCode = "";
     advanceMetadataWorkspaceRevision();
     presentInSessionSuggestion(suggestion, payload);
-    metadataAiStatus.textContent = "Loaded";
+    metadataAiStatus.textContent = "Suggestion ready. Review and copy only the fields you want.";
     renderMetadataWorkspace();
   } catch {
     const requestIsCurrent = metadataAiRequestContextIsCurrent(requestContext);
+    if (requestIsCurrent) metadataWorkspace.analysisFailureCode = "AI_ANALYSIS_FAILED";
     if (releaseMetadataAiRequest(requestContext) && requestIsCurrent) {
-      metadataAiStatus.textContent = "AI analysis failed.";
+      metadataAiStatus.textContent = "AI analysis failed. Try again.";
       renderMetadataWorkspace();
     }
-    return;
+    return false;
   }
   await refreshMetadataSuggestionList(requestContext.mediaId);
+  return true;
+}
+
+async function handleAnalyzeMetadataByAi() {
+  if (!aiCapability.available) {
+    metadataAiStatus.textContent = "AI analysis is not configured.";
+    return false;
+  }
+  if (
+    metadataWorkspace.openMediaId === null
+    || metadataWorkspace.loading
+    || metadataWorkspace.saving
+  ) return false;
+  if (metadataWorkspace.analyzing) return false;
+  if (companionWebHosted() || metadataWorkspaceIsMovie() || metadataWorkspaceIsAliasMode()) return false;
+  if (!identityHasCapability("analysis.run")) return false;
+  const location = metadataAiLocation();
+  if (!location) {
+    metadataAiStatus.textContent = "AI analysis needs an available local GIF or MP4.";
+    return false;
+  }
+  const confirmationContext = captureMetadataAiConfirmationContext(location);
+  const accepted = await requestConfirmation({
+    title: metadataWorkspace.analysisFailureCode ? "Retry AI analysis?" : "Use AI analysis?",
+    message: "FrameNest will send up to 3 optimized preview frames and bounded metadata to the configured server-side AI provider. The original file, local path, and API key are not uploaded. Returned values become proposal strips beside Title, Description, and Tags. They do not replace the current unsaved values. The result will not be saved automatically, and the physical file will not be renamed.",
+    dismissLabel: "Not now",
+    confirmLabel: metadataWorkspace.analysisFailureCode ? "Retry analysis" : "Analyze by AI",
+    destructive: false,
+  });
+  if (!accepted) return false;
+  return runMetadataAiAnalysis(confirmationContext);
 }
 
 function aiSuggestionErrorMessage(payload) {
   const code = payload && payload.error ? payload.error.code : "";
-  if (code === "AI_PROVIDER_NOT_CONFIGURED") return "AI analysis is not configured.";
-  if (code === "CLOUD_CONFIRMATION_REQUIRED") return "AI analysis needs confirmation.";
-  if (code === "MEDIA_PREPARATION_UNAVAILABLE") return "This media cannot be analyzed locally.";
-  if (code === "AI_PROVIDER_AUTHENTICATION_FAILED") return "AI provider authentication was rejected.";
-  if (code === "AI_PROVIDER_RATE_LIMITED") return "AI provider rate limit was reached.";
-  if (code === "AI_PROVIDER_MODEL_UNAVAILABLE") return "AI provider model is not available.";
-  if (code === "AI_PROVIDER_INVALID_RESPONSE") return "AI response was invalid.";
-  if (code === "AI_PROVIDER_UNAVAILABLE") return "AI provider is not available.";
-  return "AI analysis failed.";
+  if (code === "AI_PROVIDER_NOT_CONFIGURED") return "AI analysis is not configured. Ask the server operator to configure it.";
+  if (code === "CLOUD_CONFIRMATION_REQUIRED") return "AI analysis needs confirmation. Try again and confirm the cloud request.";
+  if (code === "MEDIA_PREPARATION_UNAVAILABLE") return "This media cannot be prepared for analysis. Continue editing manually.";
+  if (code === "AI_PROVIDER_AUTHENTICATION_FAILED") return "AI provider authentication was rejected. Ask the server operator to check AI configuration.";
+  if (code === "AI_PROVIDER_RATE_LIMITED") return "The AI provider rate limit was reached. Try again later.";
+  if (code === "AI_PROVIDER_MODEL_UNAVAILABLE") return "The configured AI model is unavailable. Ask the server operator to check AI configuration.";
+  if (code === "AI_PROVIDER_INVALID_RESPONSE") return "The model returned an unusable response. Try analysis again.";
+  if (code === "AI_PROVIDER_UNAVAILABLE") return "The AI provider is unavailable. Try again later.";
+  return "AI analysis failed. Try again.";
 }
 
 async function ensureMetadataTagKey(displayName) {
@@ -7501,7 +7468,7 @@ async function handleOpenMetadataWorkspace(item, openerElement, { previewSuggest
       }
     }
     presentPreviewSuggestionInMetadataWorkspace(previewSuggestion, previewPayload);
-    if (previewSuggestion && identityAllowsAiSuggestionLoadChrome()) {
+    if (previewSuggestion && identityAllowsAiSuggestionChrome()) {
       await refreshMetadataSuggestionList(targetMediaId);
     }
     renderMetadataWorkspace();
@@ -7525,7 +7492,6 @@ async function handleOpenMetadataWorkspace(item, openerElement, { previewSuggest
   const token = metadataRequestToken + 1;
   metadataRequestToken = token;
   metadataDurableAnalysisToken += 1;
-  metadataDurableLoadToken += 1;
   metadataSuggestionListToken += 1;
   advanceMetadataWorkspaceRevision();
   metadataWorkspace = {
@@ -7537,6 +7503,7 @@ async function handleOpenMetadataWorkspace(item, openerElement, { previewSuggest
     notFound: false,
     statusOverride: null,
     analyzing: false,
+    analysisFailureCode: "",
     aiSuggestionApplied: false,
     editMode: identityUsesCanonicalMetadataWrite() ? "canonical" : "alias",
     suggestedFilename: "",
@@ -7621,7 +7588,7 @@ async function handleOpenMetadataWorkspace(item, openerElement, { previewSuggest
     if (metadataWorkspaceIsMovie()) {
       const durableToken = ++metadataDurableAnalysisToken;
       await refreshMetadataDurableAnalysis(mediaId, durableToken);
-    } else if (identityAllowsAiSuggestionLoadChrome()) {
+    } else if (identityAllowsAiSuggestionChrome()) {
       await refreshMetadataSuggestionList(mediaId);
     }
     return true;
@@ -7685,7 +7652,6 @@ function closeMetadataWorkspaceWithContext(discardContext, { reloadCatalog = tru
   metadataRequestToken += 1;
   metadataAiRequestToken += 1;
   metadataDurableAnalysisToken += 1;
-  metadataDurableLoadToken += 1;
   metadataSuggestionListToken += 1;
   advanceMetadataWorkspaceRevision();
   metadataWorkspace = {
@@ -7697,6 +7663,7 @@ function closeMetadataWorkspaceWithContext(discardContext, { reloadCatalog = tru
     notFound: false,
     statusOverride: null,
     analyzing: false,
+    analysisFailureCode: "",
     aiSuggestionApplied: false,
     editMode: "canonical",
     suggestedFilename: "",
@@ -11007,9 +10974,6 @@ metadataDescriptionInput.addEventListener("input", () => {
 metadataSaveButton.addEventListener("click", handleSaveMetadata);
 metadataDiscardButton.addEventListener("click", handleDiscardMetadataChanges);
 metadataAiAnalyzeButton.addEventListener("click", handleAnalyzeMetadataByAi);
-if (metadataLoadAiSuggestionButton) {
-  metadataLoadAiSuggestionButton.addEventListener("click", handleLoadDurableAiSuggestion);
-}
 if (metadataAiSuggestionToggle) {
   metadataAiSuggestionToggle.addEventListener("click", (event) => {
     event.preventDefault();

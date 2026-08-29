@@ -1,4 +1,4 @@
-// Real-browser rendered evidence for movie identification Load/status UX.
+// Real-browser rendered evidence for movie identification status UX.
 //
 // Gated behind FRAMENEST_RUN_BROWSER_EVIDENCE=1. Uses system google-chrome-stable
 // via DevTools Protocol over Node's built-in WebSocket. Synthetic media only.
@@ -267,7 +267,7 @@ async function waitFor(cdp, expression, { timeout = 20000, label = "condition" }
   throw new Error(`timed out waiting for ${label}; last=${JSON.stringify(last)}`);
 }
 
-test("real browser evidence: movie identification Load and taxonomy draft", { skip: gated, timeout: 180000 }, async () => {
+test("real browser evidence: movie identification status and taxonomy draft", { skip: gated, timeout: 180000 }, async () => {
   const workdir = fs.mkdtempSync(path.join(os.tmpdir(), "framenest-movie-browser-"));
   const mediaDir = path.join(workdir, "media");
   fs.mkdirSync(mediaDir);
@@ -336,39 +336,26 @@ test("real browser evidence: movie identification Load and taxonomy draft", { sk
       `document.querySelector("#metadata-movie-identify-button") && !document.querySelector("#metadata-movie-identify-button").hidden`,
       { label: "identify button visible" },
     );
-    await waitFor(
+    const loadButtonPresent = await evaluate(
       cdp,
-      `document.querySelector("#metadata-load-ai-suggestion-button") && !document.querySelector("#metadata-load-ai-suggestion-button").hidden`,
-      { label: "load button available for identified movie", timeout: 25000 },
+      `Boolean(document.querySelector("#metadata-load-ai-suggestion-button"))`,
     );
+    assert.equal(loadButtonPresent, false);
 
     const beforeTitle = await evaluate(cdp, `document.querySelector("#metadata-title-input").value`);
     assert.equal(beforeTitle, "Keep Title");
 
-    await evaluate(cdp, `document.querySelector("#metadata-load-ai-suggestion-button").click(); true`);
-    await waitFor(
-      cdp,
-      `document.querySelector("#metadata-title-input").value === "Synthetic Adventure"`,
-      { label: "title loaded into draft" },
-    );
-    const after = await evaluate(cdp, `({
+    const before = await evaluate(cdp, `({
       title: document.querySelector("#metadata-title-input").value,
       description: document.querySelector("#metadata-description-input").value,
       adventure: !!document.querySelector('#metadata-genres input[value="Adventure"]')?.checked,
       action: !!document.querySelector('#metadata-genres input[value="Action"]')?.checked,
-      status: document.querySelector("#metadata-ai-status")?.textContent || "",
     })`);
-    assert.equal(after.title, "Synthetic Adventure");
-    assert.match(after.description, /synthetic adventure/i);
-    assert.equal(after.adventure, true);
-    assert.equal(after.action, true);
-    assert.match(after.status, /loaded into draft/i);
+    assert.equal(before.title, "Keep Title");
+    assert.equal(before.adventure, false);
+    assert.equal(before.action, false);
 
-    // No canonical Save during Load: metadata baseline should remain dirty.
-    const dirty = await evaluate(cdp, `typeof metadataIsDirty === "function" ? metadataIsDirty() : null`);
-    assert.equal(dirty, true);
-
-    // Seed unknown via runtime state and prove Load disabled.
+    // Seed unknown via runtime state and prove generic Load chrome stays absent.
     await evaluate(cdp, `
       metadataDurableAnalysis.movieResult = {
         identified_title: null,
@@ -383,11 +370,11 @@ test("real browser evidence: movie identification Load and taxonomy draft", { sk
       updateMetadataControls();
       true;
     `);
-    const loadHidden = await evaluate(
+    const loadStillAbsent = await evaluate(
       cdp,
-      `document.querySelector("#metadata-load-ai-suggestion-button").hidden`,
+      `Boolean(document.querySelector("#metadata-load-ai-suggestion-button"))`,
     );
-    assert.equal(loadHidden, true);
+    assert.equal(loadStillAbsent, false);
 
     const consoleErrors = await evaluate(cdp, `
       (window.__framenestConsoleErrors || []).filter((msg) =>

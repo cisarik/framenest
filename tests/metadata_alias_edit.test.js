@@ -90,45 +90,50 @@ test("ordinary alias Edit hides classification chrome and canonical tag create",
   const classification = extractFunction("syncClassificationControlsFromWorkspace");
   assert.match(classification, /classificationRow\.hidden = true/);
   assert.doesNotMatch(classification, /classificationRow\.hidden = aliasMode/);
-  const loadChrome = extractFunction("identityAllowsAiSuggestionLoadChrome");
-  assert.match(loadChrome, /metadata\.alias\.write/);
-  assert.match(loadChrome, /metadata\.canonical\.write/);
-  assert.doesNotMatch(loadChrome, /companionWebHosted\(\)/);
-  assert.doesNotMatch(loadChrome, /media\.workflow\.read/);
+  const suggestionChrome = extractFunction("identityAllowsAiSuggestionChrome");
+  assert.match(suggestionChrome, /metadata\.alias\.write/);
+  assert.match(suggestionChrome, /metadata\.canonical\.write/);
+  assert.doesNotMatch(suggestionChrome, /companionWebHosted\(\)/);
+  assert.doesNotMatch(suggestionChrome, /media\.workflow\.read/);
   const analyze = extractFunction("identityAllowsAiAnalyze");
   assert.match(analyze, /analysis\.run/);
   assert.match(analyze, /companionWebHosted\(\)/);
   assert.match(analyze, /metadataWorkspaceIsAliasMode\(\)/);
 });
 
-test("per-field copy does not persist and Load does not bulk-apply", () => {
+test("per-field copy does not persist and obsolete Load semantics are absent", () => {
   const copyBody = extractFunction("copySuggestionFieldToCurrent");
   assert.equal(copyBody.includes("fetch("), false);
   assert.equal(copyBody.includes("handleSaveMetadata"), false);
   assert.equal(copyBody.includes("method:"), false);
-  const loadBody = extractFunction("handleLoadDurableAiSuggestion");
-  assert.equal(loadBody.includes("applyResolvedAiSuggestionToMetadataWorkspace"), false);
-  assert.equal(loadBody.includes("requestConfirmation("), false);
+  assert.equal(APP_SOURCE.includes("handleLoadDurableAiSuggestion"), false);
+  assert.equal(APP_SOURCE.includes("metadataLoadAiSuggestionButton"), false);
+  assert.equal(APP_SOURCE.includes("metadataSuggestionList.revealed"), false);
   assert.match(INDEX_SOURCE, /id="metadata-ai-title-strip"/);
-  assert.match(INDEX_SOURCE, />Load</);
+  assert.equal(INDEX_SOURCE.includes('id="metadata-load-ai-suggestion-button"'), false);
 });
 
-test("Load chrome is available in alias mode and hosted companion web", () => {
-  const loadChrome = extractFunction("identityAllowsAiSuggestionLoadChrome");
-  assert.match(loadChrome, /isWorkspaceAudience\(\)/);
-  assert.doesNotMatch(loadChrome, /metadataWorkspaceIsAliasMode\(\)/);
-  assert.doesNotMatch(loadChrome, /companionWebHosted\(\)/);
+test("suggestion chrome is available in alias mode and hosted companion web", () => {
+  const suggestionChrome = extractFunction("identityAllowsAiSuggestionChrome");
+  assert.match(suggestionChrome, /isWorkspaceAudience\(\)/);
+  assert.doesNotMatch(suggestionChrome, /metadataWorkspaceIsAliasMode\(\)/);
+  assert.doesNotMatch(suggestionChrome, /companionWebHosted\(\)/);
   const panel = extractFunction("renderMetadataAiPanel");
-  assert.match(panel, /identityAllowsAiSuggestionLoadChrome\(\)/);
+  assert.match(panel, /identityAllowsAiSuggestionChrome\(\)/);
   const controls = extractFunction("updateMetadataControls");
-  assert.match(controls, /identityAllowsAiSuggestionLoadChrome\(\)/);
+  assert.match(controls, /identityAllowsAiSuggestionChrome\(\)/);
   assert.match(controls, /identityAllowsAiAnalyze\(\)/);
 });
 
-test("mapped suggested tags are buttons and unmapped tags are not", () => {
+test("mapped tag state is accessible and unmapped authority follows alias/canonical mode", () => {
   const strips = extractFunction("renderMetadataSuggestionStrips");
   assert.match(strips, /metadata-suggestion-tag--mapped/);
   assert.match(strips, /copySuggestionFieldToCurrent\("tag", tag\.key\)/);
   assert.match(strips, /metadata-suggestion-tag--unmapped/);
   assert.match(strips, /document\.createElement\("button"\)/);
+  assert.match(strips, /metadata-suggestion-tag--already-added/);
+  assert.match(strips, /aria-pressed/);
+  assert.match(strips, /if \(!metadataWorkspaceIsAliasMode\(\)\)/);
+  const create = extractFunction("createAndSelectMetadataTag");
+  assert.match(create, /identityUsesCanonicalMetadataWrite\(\)/);
 });

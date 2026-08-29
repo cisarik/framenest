@@ -92,16 +92,16 @@ test("cataloged upload copy mentions automatic analysis only when enabled", () =
   assert.match(catalogedBranch, /automaticAnalysisCapability\.automatic_analysis_enabled/);
 });
 
-test("metadata editor exposes Load without Apply endpoint", () => {
-  assert.match(INDEX_SOURCE, /id="metadata-load-ai-suggestion-button"/);
-  assert.match(INDEX_SOURCE, />Load</);
+test("metadata editor immediately exposes suggestion strips without Load or Apply", () => {
+  assert.equal(INDEX_SOURCE.includes('id="metadata-load-ai-suggestion-button"'), false);
   assert.match(INDEX_SOURCE, /id="metadata-ai-suggestion-dropdown"/);
   assert.match(INDEX_SOURCE, /id="metadata-ai-suggestion-toggle"/);
   assert.equal(INDEX_SOURCE.includes('id="metadata-ai-suggestion-select"'), false);
   assert.match(INDEX_SOURCE, />AI suggestions</);
   assert.equal(INDEX_SOURCE.includes("View details"), false);
   assert.equal(INDEX_SOURCE.includes("Saved AI suggestion"), false);
-  assert.match(APP_SOURCE, /async function handleLoadDurableAiSuggestion/);
+  assert.equal(APP_SOURCE.includes("handleLoadDurableAiSuggestion"), false);
+  assert.equal(APP_SOURCE.includes("metadataSuggestionList.revealed"), false);
   assert.match(APP_SOURCE, /function mediaAiSuggestionsEndpoint/);
   assert.match(APP_SOURCE, /\/ai-suggestions\?limit=100/);
   assert.equal(APP_SOURCE.includes("companionReviewInboxDetailEndpoint"), false);
@@ -131,32 +131,12 @@ test("durable suggestion mapping keeps only title description tags and display f
   assert.equal(context.aiSuggestionFromAutomaticAnalysisResult({ title: "x" }), null);
 });
 
-test("Load reveals strips without Analyze, Save, or draft replacement", () => {
-  const loadBody = extractAsyncFunction("handleLoadDurableAiSuggestion");
-  assert.equal(loadBody.includes("method:"), false);
-  assert.equal(loadBody.includes("ai-suggestion-preview"), false);
-  assert.equal(loadBody.includes("confirm_cloud_upload"), false);
-  assert.equal(loadBody.includes("mediaAiSuggestionEndpoint"), false);
-  assert.equal(loadBody.includes("handleAnalyzeMetadataByAi"), false);
-  assert.equal(loadBody.includes("applyResolvedAiSuggestionToMetadataWorkspace"), false);
-  assert.equal(loadBody.includes("handleSaveMetadata"), false);
-  assert.equal(loadBody.includes("metadataEndpoint("), false);
-  assert.equal(loadBody.includes("Replace current draft?"), false);
-  assert.equal(loadBody.includes("requestConfirmation("), false);
-  assert.equal(loadBody.includes("window.confirm"), false);
-  assert.match(loadBody, /metadataSuggestionList\.revealed = true/);
-  assert.match(loadBody, /Loaded/);
-});
-
-test("brain apply helper still bulk-copies into Current and excludes collection mutation", () => {
-  const applyBody = extractFunction("applyResolvedAiSuggestionToMetadataWorkspace");
-  assert.match(applyBody, /metadataWorkspace\.current\.displayTitle = suggestion\.title/);
-  assert.match(applyBody, /metadataWorkspace\.current\.description = suggestion\.description/);
-  assert.match(applyBody, /metadataWorkspace\.current\.tagKeys = tagKeys/);
-  assert.match(applyBody, /metadataWorkspace\.suggestedFilename = suggestion\.suggestedFilename/);
-  assert.equal(applyBody.includes("collectionKey"), false);
-  assert.equal(applyBody.includes("collection"), false);
-  assert.match(applyBody, /AI suggestion loaded into draft\./);
+test("suggestion selection is local-only and generic bulk apply is removed", () => {
+  const selectBody = extractFunction("selectMetadataSuggestion");
+  assert.equal(selectBody.includes("fetch("), false);
+  assert.equal(selectBody.includes("handleSaveMetadata"), false);
+  assert.match(selectBody, /renderMetadataSuggestionStrips/);
+  assert.equal(APP_SOURCE.includes("applyResolvedAiSuggestionToMetadataWorkspace"), false);
 });
 
 test("generated-automatically essay and View details chrome are gone", () => {
@@ -168,7 +148,7 @@ test("generated-automatically essay and View details chrome are gone", () => {
   assert.equal(INDEX_SOURCE.includes("automatic_post_catalog"), false);
 });
 
-test("AI suggestions chrome sits above Title with Load and per-field strips", () => {
+test("AI suggestions chrome sits above Title with immediate per-field strips", () => {
   assert.match(INDEX_SOURCE, /id="metadata-ai-heading"/);
   assert.match(INDEX_SOURCE, />AI suggestions</);
   assert.equal(INDEX_SOURCE.includes("Saved AI suggestion"), false);
@@ -179,19 +159,17 @@ test("AI suggestions chrome sits above Title with Load and per-field strips", ()
   assert.equal(INDEX_SOURCE.includes("metadata-ai-filename-input"), false);
   const headingAt = INDEX_SOURCE.indexOf('id="metadata-ai-heading"');
   const titleAt = INDEX_SOURCE.indexOf('id="metadata-title-input"');
-  const loadAt = INDEX_SOURCE.indexOf('id="metadata-load-ai-suggestion-button"');
   const saveAt = INDEX_SOURCE.indexOf('id="metadata-save-button"');
   const analyzeAt = INDEX_SOURCE.indexOf('id="metadata-ai-analyze-button"');
   assert.ok(headingAt < titleAt);
-  assert.ok(loadAt < titleAt);
   assert.ok(saveAt < analyzeAt);
   const panelBody = extractFunction("renderMetadataAiPanel");
   assert.match(panelBody, /AI suggestions/);
-  assert.match(panelBody, /identityAllowsAiSuggestionLoadChrome\(\)/);
+  assert.match(panelBody, /identityAllowsAiSuggestionChrome\(\)/);
   assert.equal(panelBody.includes("New AI analysis is currently unavailable."), false);
 });
 
-test("suggested filename is an informational note after Load without an input", () => {
+test("suggested filename is an immediately revealed informational note without an input", () => {
   assert.match(INDEX_SOURCE, /id="metadata-ai-filename-note"/);
   assert.equal(INDEX_SOURCE.includes("metadata-ai-filename-input"), false);
   const panelBody = extractFunction("renderMetadataAiPanel");

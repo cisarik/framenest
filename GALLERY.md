@@ -113,13 +113,13 @@ administrators with `analysis.run` and `metadata.canonical.write` upon hover
 per-field review editor; it is not durable proof that analysis has or has not
 happened, and it is not restricted to incomplete metadata. Hosted companion
 Gallery and ordinary identities hide the card shortcut. When server AI is
-available, the shortcut confirms cloud upload, runs the existing
-identity-only suggestion preview, and opens the existing metadata editor with
-proposal strips beside Title, Description, and Tags. Current canonical values
-are not replaced. Persistence still requires `Save`, and the physical file is
-not renamed. Dismissing the editor leaves canonical metadata unchanged. When
-server AI is unavailable, the shortcut is natively disabled and does not open
-the AI Status panel or send an analysis request.
+available, the shortcut confirms cloud upload, opens the existing metadata
+editor immediately, and resolves proposal strips beside Title, Description, and
+Tags after the identity-only suggestion preview returns. Current canonical
+values are not replaced. Persistence still requires `Save`, and the physical
+file is not renamed. Dismissing the editor leaves canonical metadata unchanged.
+When server AI is unavailable, the shortcut is natively disabled and does not
+open the AI Status panel or send an analysis request.
 
 Gallery cards do not display the internal built-in `Processed` workflow label
 or timestamp. The `Processed` catalog scope and automatic persistence semantics

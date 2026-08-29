@@ -389,7 +389,6 @@ function createDocument() {
     ["#metadata-tag-search-input", "#metadata-dialog"],
     ["#metadata-save-button", "#metadata-dialog"],
     ["#metadata-ai-analyze-button", "#metadata-dialog"],
-    ["#metadata-load-ai-suggestion-button", "#metadata-dialog"],
     ["#metadata-ai-suggestion-dropdown", "#metadata-dialog"],
     ["#metadata-ai-suggestion-toggle", "#metadata-ai-suggestion-dropdown"],
     ["#metadata-ai-suggestion-list", "#metadata-ai-suggestion-dropdown"],
@@ -700,6 +699,7 @@ function setMetadataWorkspace(
       notFound: false,
       statusOverride: null,
       analyzing: false,
+      analysisFailureCode: "",
       aiSuggestionApplied: false,
       suggestedFilename: "",
       editMode: "canonical",
@@ -751,17 +751,15 @@ function metadataStateOf(harness) {
     confirmationRequestId: activeConfirmationRequest ? activeConfirmationRequest.id : null,
     focusedClose: document.activeElement === document.querySelector("#metadata-close-button"),
     focusedAnalyze: document.activeElement === document.querySelector("#metadata-ai-analyze-button"),
-    focusedLoadSuggestion: document.activeElement === document.querySelector("#metadata-load-ai-suggestion-button"),
     focusedTitle: document.activeElement === document.querySelector("#metadata-title-input"),
     focusedDismiss: document.activeElement === document.querySelector("#confirmation-dismiss-button"),
     beforeUnloadAttached: metadataBeforeUnloadAttached,
-    loadButtonHidden: document.querySelector("#metadata-load-ai-suggestion-button").hidden,
-    loadButtonDisabled: document.querySelector("#metadata-load-ai-suggestion-button").disabled,
+    analysisProgressHidden: document.querySelector("#metadata-ai-progress").hidden,
+    analysisFailureCode: metadataWorkspace.analysisFailureCode || "",
     analyzeButtonHidden: document.querySelector("#metadata-ai-analyze-button").hidden,
     titleStripHidden: document.querySelector("#metadata-ai-title-strip").hidden,
     filenameNoteHidden: document.querySelector("#metadata-ai-filename-note").hidden,
     selectHidden: document.querySelector("#metadata-ai-suggestion-dropdown").hidden,
-    suggestionRevealed: metadataSuggestionList.revealed,
     suggestionCount: metadataSuggestionList.items.length,
     selectedRunId: metadataSuggestionList.selectedRunId,
     collectionKey: metadataWorkspace.current.collectionKey,
@@ -870,7 +868,6 @@ function seedMetadataSuggestionList(harness, items = [suggestionListItem()]) {
       fetching: false,
       items: __suggestionItems,
       selectedRunId: __suggestionItems[0] ? __suggestionItems[0].analysisRunId : null,
-      revealed: false,
       errorMessage: "",
       movieExcluded: false,
     };
@@ -2709,6 +2706,8 @@ test("Metadata AI uses one revalidated media-location identity and one request o
   assert.equal(metadataStateOf(h).analyzing, true);
 
   pendingResponse.resolve(response({
+    media_id: MEDIA_A,
+    location_id: LOCATION_A,
     suggestion: {
       title: "AI title",
       description: "AI description",
@@ -2725,8 +2724,8 @@ test("Metadata AI uses one revalidated media-location identity and one request o
   assert.equal(state.currentTitle, "Unsaved title");
   assert.equal(state.currentDescription, "Unsaved description");
   assert.equal(state.suggestedFilename, "ai-title.mp4");
-  assert.equal(state.aiStatus, "Loaded");
-  assert.equal(state.suggestionRevealed, true);
+  assert.match(state.aiStatus, /Suggestion ready/);
+  assert.equal(state.analysisProgressHidden, true);
 });
 
 test("Metadata AI endpoint cannot mix live media with a captured location", async () => {
@@ -2734,6 +2733,8 @@ test("Metadata AI endpoint cannot mix live media with a captured location", asyn
   setMetadataWorkspace(h);
   enableMetadataAi(h);
   enqueue(h, "POST", metadataAiEndpoint(MEDIA_A, LOCATION_A), response({
+    media_id: MEDIA_A,
+    location_id: LOCATION_A,
     suggestion: {
       title: "Captured identity title",
       description: "Captured identity description",
@@ -2792,9 +2793,12 @@ test("Metadata AI stale same-media error and finally cannot release a newer requ
 
   assert.equal(h.run("metadataAiRequestToken"), ownerB);
   assert.equal(metadataStateOf(h).analyzing, true);
-  assert.equal(h.document.querySelector("#metadata-ai-status").textContent, "Analyzing…");
+  assert.equal(h.document.querySelector("#metadata-ai-status").textContent, "");
+  assert.equal(metadataStateOf(h).analysisProgressHidden, false);
 
   requestBResponse.resolve(response({
+    media_id: MEDIA_A,
+    location_id: LOCATION_A,
     suggestion: {
       title: "New owner title",
       description: "New owner description",
@@ -2811,7 +2815,7 @@ test("Metadata AI stale same-media error and finally cannot release a newer requ
   assert.equal(state.currentTitle, "Unsaved title");
   assert.equal(state.currentDescription, "Unsaved description");
   assert.equal(state.suggestedFilename, "new-owner.mp4");
-  assert.equal(state.aiStatus, "Loaded");
+  assert.match(state.aiStatus, /Suggestion ready/);
 });
 
 test("Metadata AI stale response media, location, and capability cannot apply", async (t) => {
@@ -2984,7 +2988,7 @@ test("Metadata AI response cannot overwrite a newer edit revision", async () => 
   assert.equal(state.metadataOpen, true);
 });
 
-test("Seeded suggestion list exposes Load and dropdown without revealing strips", async () => {
+test("Seeded suggestion list immediately reveals the selected suggestion without Load", async () => {
   const h = await createHarness();
   setMetadataWorkspace(h, {
     currentTitle: "Persisted title",
@@ -2994,41 +2998,14 @@ test("Seeded suggestion list exposes Load and dropdown without revealing strips"
   seedMetadataSuggestionList(h);
   const state = metadataStateOf(h);
   assert.equal(state.aiHeading, "AI suggestions");
-  assert.equal(state.loadButtonHidden, false);
-  assert.equal(state.loadButtonDisabled, false);
   assert.equal(state.selectHidden, false);
-  assert.equal(state.titleStripHidden, true);
-  assert.equal(state.suggestionRevealed, false);
+  assert.equal(state.titleStripHidden, false);
   assert.equal(state.currentTitle, "Persisted title");
-});
-
-test("Load reveals strips without Analyze, Save, or replacing Current", async () => {
-  const h = await createHarness();
-  setMetadataWorkspace(h, {
-    currentTitle: "Persisted title",
-    currentDescription: "Persisted description",
-    currentTags: ["persisted"],
-  });
-  seedMetadataSuggestionList(h);
-  await h.run("handleLoadDurableAiSuggestion()");
-  await h.flush();
-
   assert.equal(h.fetchController.matchingPrefix("GET", "/api/media/").length, 0);
   assert.equal(h.fetchController.matchingPrefix("POST", "/api/media/").length, 0);
   assert.equal(h.fetchController.matching("PUT", metadataEndpoint()).length, 0);
-  assert.equal(h.fetchController.matching("POST", metadataAiEndpoint()).length, 0);
-  assert.equal(h.fetchController.matchingPrefix("GET", "/api/companion/review-inbox/").length, 0);
-
-  const state = metadataStateOf(h);
-  assert.equal(state.currentTitle, "Persisted title");
-  assert.equal(state.currentDescription, "Persisted description");
-  assert.deepEqual(state.currentTags, ["persisted"]);
-  assert.equal(state.aiSuggestionApplied, false);
-  assert.equal(state.dirty, false);
-  assert.equal(state.suggestionRevealed, true);
-  assert.equal(state.titleStripHidden, false);
-  assert.equal(state.aiStatus, "Loaded");
-  assert.equal(state.metadataOpen, true);
+  assert.equal(INDEX_SOURCE.includes('id="metadata-load-ai-suggestion-button"'), false);
+  assert.equal(APP_SOURCE.includes("handleLoadDurableAiSuggestion"), false);
 });
 
 test("Copying one suggested field leaves other Current values and Save uses metadata PUT", async () => {
@@ -3039,8 +3016,6 @@ test("Copying one suggested field leaves other Current values and Save uses meta
     currentTags: ["persisted"],
   });
   seedMetadataSuggestionList(h);
-  await h.run("handleLoadDurableAiSuggestion()");
-  await h.flush();
   h.run('copySuggestionFieldToCurrent("title")');
   await h.flush();
 
@@ -3077,16 +3052,13 @@ test("Copying one suggested field leaves other Current values and Save uses meta
   assert.equal(h.fetchController.matching("POST", metadataAiEndpoint()).length, 0);
 });
 
-test("Dropdown change hides strips until Load and issues zero provider calls", async () => {
+test("Dropdown change immediately switches strips and issues zero provider calls", async () => {
   const h = await createHarness();
   setMetadataWorkspace(h);
   seedMetadataSuggestionList(h, [
     suggestionListItem({ analysisRunId: "run-1", title: "First title" }),
     suggestionListItem({ analysisRunId: "run-2", title: "Second title" }),
   ]);
-  await h.run("handleLoadDurableAiSuggestion()");
-  await h.flush();
-  assert.equal(metadataStateOf(h).suggestionRevealed, true);
   assert.equal(metadataStateOf(h).titleStripHidden, false);
 
   h.run('selectMetadataSuggestion("run-2")');
@@ -3094,19 +3066,19 @@ test("Dropdown change hides strips until Load and issues zero provider calls", a
 
   const after = metadataStateOf(h);
   assert.equal(after.selectedRunId, "run-2");
-  assert.equal(after.suggestionRevealed, false);
-  assert.equal(after.titleStripHidden, true);
+  assert.equal(after.titleStripHidden, false);
+  assert.equal(after.currentTitle, "Unsaved title");
   assert.equal(h.fetchController.matchingPrefix("POST", "/api/media/").length, 0);
   assert.equal(h.fetchController.matchingPrefix("GET", "/api/companion/review-inbox/").length, 0);
   assert.equal(confirmationStateOf(h).open, false);
 });
 
-test("Mapped tag copy appends one key; unknown tags have no copy action", async () => {
+test("Mapped suggested tag already-added, remove, re-add, and repeat own revisions exactly", async () => {
   const h = await createHarness();
   setMetadataWorkspace(h, {
     currentTitle: "Persisted title",
     currentDescription: "Persisted description",
-    currentTags: ["persisted"],
+    currentTags: ["persisted", "durable-tag"],
   });
   seedMetadataSuggestionList(h, [
     suggestionListItem({
@@ -3116,10 +3088,37 @@ test("Mapped tag copy appends one key; unknown tags have no copy action", async 
       ],
     }),
   ]);
-  await h.run("handleLoadDurableAiSuggestion()");
+  const initialRevision = metadataStateOf(h).revision;
+  const alreadyAdded = h.run(`(() => {
+    const button = document.querySelector("#metadata-ai-tags-strip").children[0];
+    return {
+      pressed: button.getAttribute("aria-pressed"),
+      label: button.getAttribute("aria-label"),
+      selectedClass: button.classList.contains("metadata-suggestion-tag--already-added"),
+    };
+  })()`);
+  assert.equal(alreadyAdded.pressed, "true");
+  assert.match(alreadyAdded.label, /already added to Current/);
+  assert.equal(alreadyAdded.selectedClass, true);
   h.run('copySuggestionFieldToCurrent("tag", "durable-tag")');
-  h.run('copySuggestionFieldToCurrent("tag")');
-  await h.flush();
+  assert.equal(metadataStateOf(h).revision, initialRevision);
+  assert.deepEqual(metadataStateOf(h).currentTags, ["persisted", "durable-tag"]);
+  assert.match(metadataStateOf(h).aiStatus, /already in Current/);
+
+  h.run('removeSelectedMetadataTag("durable-tag")');
+  const removedRevision = metadataStateOf(h).revision;
+  assert.equal(removedRevision, initialRevision + 1);
+  assert.deepEqual(metadataStateOf(h).currentTags, ["persisted"]);
+  assert.equal(
+    h.run('document.querySelector("#metadata-ai-tags-strip").children[0].getAttribute("aria-pressed")'),
+    "false",
+  );
+  h.run('copySuggestionFieldToCurrent("tag", "durable-tag")');
+  const readdedRevision = metadataStateOf(h).revision;
+  assert.deepEqual(metadataStateOf(h).currentTags, ["persisted", "durable-tag"]);
+  assert.equal(readdedRevision, removedRevision + 1);
+  h.run('copySuggestionFieldToCurrent("tag", "durable-tag")');
+  assert.equal(metadataStateOf(h).revision, readdedRevision);
   assert.deepEqual(metadataStateOf(h).currentTags, ["persisted", "durable-tag"]);
   assert.equal(h.fetchController.matching("PUT", metadataEndpoint()).length, 0);
   assert.equal(h.fetchController.matching("POST", "/api/canonical-tags").length, 0);
@@ -3151,9 +3150,9 @@ test("Stored suggestion stays loadable when Analyze is unavailable", async () =>
     renderMetadataWorkspace();
   `);
   const state = metadataStateOf(h);
-  assert.equal(state.loadButtonHidden, false);
   assert.equal(state.analyzeButtonHidden, true);
   assert.equal(state.selectHidden, false);
+  assert.equal(state.titleStripHidden, false);
 });
 
 test("Available Analyze remains distinct while stored suggestion stays loadable", async () => {
@@ -3168,11 +3167,11 @@ test("Available Analyze remains distinct while stored suggestion stays loadable"
   h.run("renderMetadataWorkspace()");
   const state = metadataStateOf(h);
   assert.equal(state.analyzeButtonHidden, false);
-  assert.equal(state.loadButtonHidden, false);
+  assert.equal(state.titleStripHidden, false);
   assert.equal(h.document.querySelector("#metadata-ai-analyze-button").disabled, false);
 });
 
-test("Suggested filename is an informational note after Load and is excluded from metadata Save", async () => {
+test("Suggested filename is an immediately visible informational note and is excluded from metadata Save", async () => {
   const h = await createHarness();
   setMetadataWorkspace(h, {
     currentTitle: "Persisted title",
@@ -3182,9 +3181,6 @@ test("Suggested filename is an informational note after Load and is excluded fro
   seedMetadataSuggestionList(h, [
     suggestionListItem({ suggestedFilename: "durable-ai.mp4" }),
   ]);
-  await h.run("handleLoadDurableAiSuggestion()");
-  await h.flush();
-
   assert.equal(metadataStateOf(h).filenameNoteHidden, false);
   assert.match(
     h.document.querySelector("#metadata-ai-filename-note").textContent,

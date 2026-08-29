@@ -822,16 +822,23 @@ def test_browser_editor_idle_ai_button_is_exact_and_not_loading(client: TestClie
 
 def test_browser_editor_ai_button_active_state_replaces_entire_content(client: TestClient) -> None:
     script = client.get("/assets/app.js").text
+    html = client.get("/").text
     render_button_body = _javascript_function(script, "renderMetadataAiAnalyzeButtonContent")
-    analyze_block = script[script.index("async function handleAnalyzeMetadataByAi") : script.index("function aiSuggestionErrorMessage")]
+    analyze_block = script[
+        script.index("async function runMetadataAiAnalysis") : script.index("function aiSuggestionErrorMessage")
+    ]
 
     assert "metadataAiAnalyzeButton.replaceChildren()" in render_button_body
-    assert 'metadataAiAnalyzeButton.textContent = "Analyze by AI"' in render_button_body
+    assert '"Analyze by AI"' in render_button_body
+    assert '"Retry analysis"' in render_button_body
     assert "loading-spinner" not in render_button_body
     assert 'label.textContent = "Analyzing…"' in render_button_body
     assert "metadataAiAnalyzeButton.append(label)" in render_button_body
-    assert 'metadataAiStatus.textContent = "Analyzing…"' in analyze_block
-    assert 'metadataAiStatus.textContent = "Loaded"' in analyze_block
+    assert 'id="metadata-ai-progress"' in html
+    assert "metadataAiProgress.hidden = !metadataWorkspace.analyzing" in script
+    assert 'metadataAiStatus.textContent = "Analyzing…"' not in analyze_block
+    assert 'metadataAiStatus.textContent = "Loaded"' not in analyze_block
+    assert "Suggestion ready. Review and copy only the fields you want." in analyze_block
 
 
 def test_browser_editor_ai_button_active_state_is_prominent_without_idle_animation(client: TestClient) -> None:
@@ -861,22 +868,24 @@ def test_browser_ai_replacement_is_session_only_without_mutation_api(
     client: TestClient,
 ) -> None:
     script = client.get("/assets/app.js").text
-    analyze_block = script[script.index("async function handleAnalyzeMetadataByAi") : script.index("function aiSuggestionErrorMessage")]
-    apply_body = _javascript_function(script, "applyResolvedAiSuggestionToMetadataWorkspace")
+    analyze_block = script[
+        script.index("async function runMetadataAiAnalysis") : script.index("function aiSuggestionErrorMessage")
+    ]
+    present_body = _javascript_function(script, "presentInSessionSuggestion")
+    copy_body = _javascript_function(script, "copySuggestionFieldToCurrent")
     controls_body = _javascript_function(script, "updateMetadataControls")
 
     assert "presentInSessionSuggestion(suggestion, payload)" in analyze_block
-    assert "applyResolvedAiSuggestionToMetadataWorkspace(suggestion, tagKeys)" not in analyze_block
-    assert "metadataWorkspace.current.displayTitle = suggestion.title" in apply_body
-    assert "metadataWorkspace.current.description = suggestion.description" in apply_body
-    assert "metadataWorkspace.current.tagKeys = tagKeys" in apply_body
-    assert "metadataWorkspace.suggestedFilename = suggestion.suggestedFilename" in apply_body
-    assert "metadataWorkspace.aiSuggestionApplied = true" in apply_body
+    assert "applyResolvedAiSuggestionToMetadataWorkspace" not in script
+    assert "metadataWorkspace.current.displayTitle = suggestion.title" not in present_body
+    assert "metadataWorkspace.current.description = suggestion.description" not in present_body
+    assert "metadataWorkspace.suggestedFilename = item.suggestedFilename || \"\"" in present_body
+    assert "metadataWorkspace.current.displayTitle = item.title || \"\"" in copy_body
     assert "metadataAiAnalyzeButton.hidden = !showAnalyze" in controls_body
     assert "analysisAvailable" in controls_body
     assert "fetch(metadataEndpoint" not in analyze_block
     assert "confirm_cloud_upload: true" in analyze_block
-    assert "if (metadataWorkspace.analyzing) return;" in analyze_block
+    assert "if (metadataWorkspace.analyzing) return false;" in analyze_block
     assert "proposal strips" in analyze_block
     assert "This editor changed before analysis could start." in analyze_block
 
@@ -884,16 +893,21 @@ def test_browser_ai_replacement_is_session_only_without_mutation_api(
 def test_browser_editor_ai_failure_restores_idle_action_and_preserves_values(client: TestClient) -> None:
     script = client.get("/assets/app.js").text
     controls_body = _javascript_function(script, "updateMetadataControls")
-    analyze_block = script[script.index("async function handleAnalyzeMetadataByAi") : script.index("function aiSuggestionErrorMessage")]
+    analyze_block = script[
+        script.index("async function runMetadataAiAnalysis") : script.index("function aiSuggestionErrorMessage")
+    ]
+    error_body = _javascript_function(script, "aiSuggestionErrorMessage")
 
     assert "metadataWorkspace.analyzing = false" in analyze_block
     assert "aiSuggestionErrorMessage(payload)" in analyze_block
-    assert '"AI analysis failed."' in analyze_block
+    assert "AI analysis failed. Try again." in error_body
+    assert "The model returned an unusable response. Try analysis again." in error_body
     assert "metadataWorkspace.current = " not in analyze_block
     assert "beforeRequest" not in analyze_block
     assert "renderMetadataAiAnalyzeButtonContent(metadataWorkspace.analyzing)" in controls_body
     assert "metadataAiAnalyzeButton.disabled = !showAnalyze" in controls_body
-    assert 'metadataAiAnalyzeButton.textContent = "Analyze by AI"' in script
+    assert '"Analyze by AI"' in script
+    assert '"Retry analysis"' in script
 
 
 def test_selected_metadata_tag_remove_is_red_and_bounded_to_current_media(client: TestClient) -> None:
@@ -1941,13 +1955,15 @@ def test_catalog_card_unavailable_ai_is_natively_disabled_without_status_shortcu
     assert "Generate first-pass AI metadata for" in state_body
     assert "Retry Analyze by AI" in state_body
     assert "Analyze by AI again" not in state_body
-    assert "cardAiPreviewResponseMatchesRequest(payload, mediaId, location.location_id)" in analyze_body
-    assert "AI response did not match the selected media. No metadata was changed." in analyze_body
+    run_body = _javascript_function(script, "runMetadataAiAnalysis")
+    assert "cardAiPreviewResponseMatchesRequest(payload, requestContext.mediaId, requestContext.locationId)" in run_body
+    assert "The AI result did not match this media. Try analysis again." in run_body
 
 
 def test_catalog_card_analyze_request_busy_success_and_failure_flow(client: TestClient) -> None:
     script = client.get("/assets/app.js").text
     analyze_body = _javascript_function(script, "handleAnalyzeCatalogCard")
+    run_body = _javascript_function(script, "runMetadataAiAnalysis")
     state_body = _javascript_function(script, "setCardAnalyzeButtonState")
     open_body = _javascript_function(script, "handleOpenMetadataWorkspace")
 
@@ -1960,18 +1976,21 @@ def test_catalog_card_analyze_request_busy_success_and_failure_flow(client: Test
     assert 'state: "applying"' not in analyze_body
     assert 'state: "idle"' in analyze_body
     assert 'state: "saved"' not in analyze_body
-    assert 'state: "failed_analysis"' in analyze_body
+    assert 'state: "failed_analysis"' not in analyze_body
     assert 'state: "failed_save"' not in analyze_body
-    assert "mediaAiSuggestionEndpoint(mediaId, location.location_id)" in analyze_body
-    assert "confirm_cloud_upload: true" in analyze_body
+    assert "handleOpenMetadataWorkspace(item, button)" in analyze_body
+    assert analyze_body.index("handleOpenMetadataWorkspace(item, button)") < analyze_body.index(
+        "runMetadataAiAnalysis(metadataConfirmationContext"
+    )
+    assert "previewSuggestion: suggestion" not in analyze_body
+    assert "mediaAiSuggestionEndpoint(requestContext.mediaId, requestContext.locationId)" in run_body
+    assert "confirm_cloud_upload: true" in run_body
     assert "await requestConfirmation({" in analyze_body
     assert 'title: "Analyze with AI?"' in analyze_body
     assert 'confirmLabel: "Analyze by AI"' in analyze_body
     assert "metadataTagKeysFromSuggestion(suggestion.tags)" not in analyze_body
     assert 'method: "PUT"' not in analyze_body
     assert "applySavedAiMetadataToCatalogSurfaces" not in analyze_body
-    assert "handleOpenMetadataWorkspace(item, button" in analyze_body
-    assert "previewSuggestion: suggestion" in analyze_body
     assert "presentPreviewSuggestionInMetadataWorkspace(previewSuggestion, previewPayload)" in open_body
     assert "applyResolvedAiSuggestionToMetadataWorkspace" not in open_body
     assert "fetch(metadataEndpoint(mediaId)" not in analyze_body
@@ -2587,9 +2606,16 @@ def test_browser_metadata_editor_exposes_durable_load_ai_suggestion(client: Test
     script = client.get("/assets/app.js").text
     css = client.get("/assets/styles.css").text
     dialog_section = html[html.index('id="metadata-dialog"') : html.index('id="catalog-browser"')]
+    select_body = _javascript_function(script, "selectMetadataSuggestion")
+    refresh_body = _javascript_function(script, "refreshMetadataSuggestionList")
+    copy_body = _javascript_function(script, "copySuggestionFieldToCurrent")
 
-    assert 'id="metadata-load-ai-suggestion-button"' in dialog_section
-    assert ">Load<" in dialog_section
+    assert 'id="metadata-load-ai-suggestion-button"' not in dialog_section
+    assert "handleLoadDurableAiSuggestion" not in script
+    assert "metadataSuggestionList.revealed" not in script
+    assert 'id="metadata-ai-progress"' in dialog_section
+    assert "metadata-ai-progress__spinner" in dialog_section
+    assert ">Load<" not in dialog_section
     assert "Load AI suggestion" not in dialog_section
     assert 'id="metadata-ai-suggestion-dropdown"' in dialog_section
     assert 'id="metadata-ai-suggestion-toggle"' in dialog_section
@@ -2600,20 +2626,16 @@ def test_browser_metadata_editor_exposes_durable_load_ai_suggestion(client: Test
     assert 'id="metadata-ai-details-toggle"' not in dialog_section
     assert 'id="metadata-durable-ai-suggestion"' not in dialog_section
     assert "Saved AI suggestion" not in dialog_section
-    assert "handleLoadDurableAiSuggestion" in script
     assert "mediaAiSuggestionsEndpoint" in script
     assert "companionReviewInboxDetailEndpoint" not in script
     assert "/apply" not in script
     assert "aiSuggestionOriginExplanation" not in script
-    load_body = _javascript_function(script, "handleLoadDurableAiSuggestion")
-    assert "automaticAnalysisEndpoint(mediaId)" not in load_body
-    assert "ai-suggestion-preview" not in load_body
-    assert "confirm_cloud_upload" not in load_body
-    assert "Replace current draft?" not in load_body
-    assert "applyResolvedAiSuggestionToMetadataWorkspace" not in load_body
-    assert "handleSaveMetadata" not in load_body
-    assert "window.confirm" not in load_body
-    assert "metadataSuggestionList.revealed = true" in load_body
+    assert "metadataSuggestionList.selectedRunId = items.length > 0 ? items[0].analysisRunId : null" in refresh_body
+    assert "metadataSuggestionList.revealed = false" not in select_body
+    assert "fetch(" not in copy_body
+    assert "handleSaveMetadata" not in copy_body
+    assert "applyResolvedAiSuggestionToMetadataWorkspace" not in script
+    assert "window.confirm" not in select_body
     assert "Durable AI suggestion" not in dialog_section
     assert "metadata-ai-filename-note" in dialog_section
     assert "metadata-ai-filename-input" not in dialog_section
@@ -2630,6 +2652,8 @@ def test_browser_metadata_editor_exposes_durable_load_ai_suggestion(client: Test
     assert ".metadata-dialog::backdrop" in css
     assert "rgba(0, 0, 0, 0.34)" in css
     assert "rgba(0, 0, 0, 0.52)" in css
+    assert ".metadata-ai-progress__spinner" in css
+    assert "metadata-suggestion-tag--already-added" in css
 
 
 def test_javascript_metadata_ai_analysis_requires_confirmation_and_identity_url(
@@ -2640,11 +2664,15 @@ def test_javascript_metadata_ai_analysis_requires_confirmation_and_identity_url(
     assert "function mediaAiSuggestionEndpoint(mediaId, locationId)" in script
     assert "${mediaId}/locations/${locationId}/ai-suggestion-preview" in script
     assert "handleAnalyzeMetadataByAi" in script
-    analyze_body = script[script.index("async function handleAnalyzeMetadataByAi") : script.index("function aiSuggestionErrorMessage")]
+    analyze_body = script[
+        script.index("async function handleAnalyzeMetadataByAi") : script.index("function aiSuggestionErrorMessage")
+    ]
     assert "await requestConfirmation({" in analyze_body
-    assert 'title: "Use AI analysis?"' in analyze_body
+    assert '"Use AI analysis?"' in analyze_body
+    assert '"Retry AI analysis?"' in analyze_body
     assert 'dismissLabel: "Not now"' in analyze_body
-    assert 'confirmLabel: "Analyze by AI"' in analyze_body
+    assert '"Analyze by AI"' in analyze_body
+    assert '"Retry analysis"' in analyze_body
     assert "confirm_cloud_upload: true" in script
     assert "metadataAiRequestToken" in script
     assert "token !== metadataAiRequestToken" in script
@@ -2656,21 +2684,21 @@ def test_javascript_metadata_ai_analysis_requires_confirmation_and_identity_url(
 
 def test_javascript_metadata_ai_success_populates_single_form_without_autosave_or_rename(client: TestClient) -> None:
     script = client.get("/assets/app.js").text
-    analyze_body = script[script.index("async function handleAnalyzeMetadataByAi") : script.index("function aiSuggestionErrorMessage")]
-    apply_body = _javascript_function(script, "applyResolvedAiSuggestionToMetadataWorkspace")
+    analyze_body = script[
+        script.index("async function runMetadataAiAnalysis") : script.index("function aiSuggestionErrorMessage")
+    ]
+    present_body = _javascript_function(script, "presentInSessionSuggestion")
+    copy_body = _javascript_function(script, "copySuggestionFieldToCurrent")
 
-    assert "metadataWorkspace.current.displayTitle = suggestion.title" in apply_body
-    assert "metadataWorkspace.current.description = suggestion.description" in apply_body
-    assert "metadataWorkspace.current.tagKeys = tagKeys" in apply_body
-    assert "metadataWorkspace.suggestedFilename = suggestion.suggestedFilename" in apply_body
-    assert "metadataWorkspace.aiSuggestionApplied = true" in apply_body
+    assert "metadataWorkspace.current.displayTitle = suggestion.title" not in present_body
+    assert "metadataWorkspace.suggestedFilename = item.suggestedFilename || \"\"" in present_body
+    assert "metadataWorkspace.current.displayTitle = item.title || \"\"" in copy_body
     assert "presentInSessionSuggestion(suggestion, payload)" in analyze_body
     assert "metadataTagKeysFromSuggestion(suggestion.tags)" not in analyze_body
-    assert "applyResolvedAiSuggestionToMetadataWorkspace(suggestion, tagKeys)" not in analyze_body
+    assert "applyResolvedAiSuggestionToMetadataWorkspace" not in script
     assert "metadataAiAnalyzeButton.hidden = !showAnalyze" in script
     assert "fetch(metadataEndpoint" not in analyze_body
-    assert "AI suggestion loaded into draft." in apply_body
-    assert "fetch(metadataEndpoint" not in analyze_body
+    assert "Suggestion ready. Review and copy only the fields you want." in analyze_body
     assert "handleUseMetadataAiDraft" not in script
     assert "handleDiscardMetadataAiDraft" not in script
 

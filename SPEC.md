@@ -646,8 +646,10 @@ own alias route. Public callers MUST receive `404`. Aliases MUST NOT appear
 in public or ordinary workspace catalog payloads.
 `GET /api/media/{media_id}/ai-suggestions` under `metadata.alias.write` MUST
 remain the workspace per-field AI suggestion read route for ordinary and
-administrator Load; the website reads only, and no apply route exists from
-this surface (implemented-for-backend).
+administrator suggestion review; the newest stored run MUST be visible when
+Edit opens, dropdown selection MUST switch the revealed suggestion without a
+Load step or provider call, the website reads only, and no apply route exists
+from this surface (implemented-for-backend).
 
 ## 20. Transfers and Duplicate Removal
 

@@ -38,13 +38,14 @@ AI` requires confirmation before any provider request. The ordinary editor does
 not offer provider administration or credential entry. The confirmation explains
 that up to three optimized preview frames and bounded metadata are sent through
 the server, while the original file, local path, and API key are not uploaded.
-During a request, the button shows `Analyzing…` in a high-contrast busy state
-without a spinner, and duplicate analysis requests are blocked. A successful
-result replaces the current unsaved title, description, and tags
-directly in the same editor, reveals an editable suggested filename when
-supplied, hides the Analyze action for that modal-open session, does not save
-metadata, and does not rename a physical file. A failed request restores the
-idle `Analyze by AI` action and preserves the current unsaved editor values.
+During a request, Edit shows an accessible indeterminate progress state
+inside the dialog, and duplicate analysis requests are blocked. A successful
+result reveals proposal strips beside title, description, and tags in the same
+editor without replacing Current, shows an informational suggested filename
+when supplied, keeps Analyze available for a later confirmed retry, does not
+save metadata, and does not rename a physical file. A failed request restores
+the idle `Analyze by AI` or `Retry analysis` action, keeps sanitized status
+inside the dialog, and preserves the current unsaved editor values.
 The save derives the automatic built-in `Processed` workflow collection from the
 durable tag list, but `Processed` is not an ordinary editor control.
 
@@ -133,8 +134,8 @@ an AI draft.
 
 `Current` must never be silently overwritten. Values enter `Current` through
 manual editing, explicit promotion from a future AI draft, or the current
-browser's confirmed `Analyze by AI` replacement flow. `Current` remains unsaved
-until the user performs an explicit durable save.
+browser's per-field copy from a revealed AI suggestion. `Current` remains
+unsaved until the user performs an explicit durable save.
 
 Unsaved `Current` work may be abandoned. A detail page must not save merely
 because it opened or because an AI draft exists.
