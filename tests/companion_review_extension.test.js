@@ -1131,8 +1131,8 @@ test("merged history renders analyzed and pending rows and never mutates the ifr
     nodes.historyList.childNodes[0].childNodes[0].getAttribute("data-media-id"),
     MEDIA_A
   );
-  assert.equal(nodes.history.hidden, false);
-  assert.equal(nodes.toggle.getAttribute("aria-expanded"), "true");
+  assert.equal(nodes.history.hidden, true);
+  assert.equal(nodes.toggle.getAttribute("aria-expanded"), "false");
   assert.equal(inbox.setHistoryExpanded(nodes.toggle, nodes.history, true), true);
   assert.equal(nodes.toggle.getAttribute("aria-expanded"), "true");
   assert.equal(nodes.history.hidden, false);
@@ -1158,6 +1158,178 @@ test("merged history renders analyzed and pending rows and never mutates the ifr
   assert.equal(hostFrame.hidden, false);
   assert.equal(hostFrame.src, ORIGIN);
   assert.doesNotMatch(extractNamedFunction(sidebarSource, "renderReviewInboxList"), /innerHTML/);
+});
+
+function sidebarShellNode(id, extra) {
+  const attrs = {};
+  const listeners = {};
+  const node = {
+    id,
+    hidden: (extra && extra.hidden) === true,
+    disabled: (extra && extra.disabled) === true,
+    checked: false,
+    value: "",
+    textContent: "",
+    open: false,
+    getAttribute(name) {
+      return Object.prototype.hasOwnProperty.call(attrs, name) ? attrs[name] : null;
+    },
+    setAttribute(name, value) {
+      attrs[name] = String(value);
+    },
+    removeAttribute(name) {
+      delete attrs[name];
+    },
+    addEventListener(type, fn) {
+      listeners[type] = listeners[type] || [];
+      listeners[type].push(fn);
+    },
+    dispatchClick() {
+      (listeners.click || []).forEach((fn) => fn({ target: node }));
+    },
+    querySelectorAll() {
+      return [];
+    },
+    focus() {},
+    show() {
+      node.open = true;
+    },
+    close() {
+      node.open = false;
+    },
+  };
+  return node;
+}
+
+function loadSidebarShell() {
+  const historyList = fakeListNode();
+  historyList.addEventListener = function addTestListener() {};
+  const expandedList = fakeListNode();
+  expandedList.addEventListener = function addTestListener() {};
+  const nodes = {
+    origin: sidebarShellNode("origin"),
+    "shell-status": sidebarShellNode("shell-status"),
+    frame: sidebarShellNode("frame", { hidden: true }),
+    "chrome-action": sidebarShellNode("chrome-action"),
+    "settings-dialog": sidebarShellNode("settings-dialog"),
+    "settings-open": sidebarShellNode("settings-open"),
+    "settings-close": sidebarShellNode("settings-close"),
+    "settings-save": sidebarShellNode("settings-save", { disabled: true }),
+    "admin-settings": sidebarShellNode("admin-settings", { hidden: true }),
+    "automatic-analysis-enabled": sidebarShellNode("automatic-analysis-enabled", { disabled: true }),
+    "automatic-analysis-error": sidebarShellNode("automatic-analysis-error", { hidden: true }),
+    "automatic-analysis-confirm": sidebarShellNode("automatic-analysis-confirm", { hidden: true }),
+    "automatic-analysis-confirm-ok": sidebarShellNode("automatic-analysis-confirm-ok"),
+    "automatic-analysis-confirm-cancel": sidebarShellNode("automatic-analysis-confirm-cancel"),
+    "review-history-toggle": sidebarShellNode("review-history-toggle"),
+    "review-history": sidebarShellNode("review-history", { hidden: true }),
+    "review-history-list": historyList,
+    "review-history-all": sidebarShellNode("review-history-all"),
+    "review-history-expanded": expandedList,
+    "review-dialog": sidebarShellNode("review-dialog"),
+    "review-frame": sidebarShellNode("review-frame"),
+  };
+  const context = {
+    FrameNestCompanion: companion,
+    document: {
+      hidden: false,
+      getElementById(id) {
+        return nodes[id] || null;
+      },
+      addEventListener() {},
+    },
+    chrome: {
+      runtime: {
+        id: "sidebar-shell-test",
+        lastError: null,
+        getURL(rel) {
+          return "chrome-extension://abc/" + rel;
+        },
+        sendMessage() {},
+      },
+      storage: {
+        local: {
+          get(_keys, callback) {
+            callback({});
+          },
+        },
+      },
+    },
+    window: {
+      addEventListener() {},
+    },
+    Object,
+    Boolean,
+    String,
+    Number,
+    Array,
+    Date,
+    Promise,
+    setTimeout,
+    clearTimeout,
+    setInterval() {
+      return 0;
+    },
+    clearInterval() {},
+  };
+  context.globalThis = context;
+  vm.createContext(context);
+  vm.runInContext(sidebarSource, context);
+  return { nodes, inbox: context.FrameNestReviewInbox };
+}
+
+test("history stays closed by default and only the toggle changes it across refreshes", () => {
+  const shell = loadSidebarShell();
+  const nodes = shell.nodes;
+  const items = [
+    {
+      media_id: MEDIA_A,
+      title: "First",
+      created_at_ms: 2,
+      analyzed: true,
+      analysis_run_id: RUN_NEW,
+      completed_at_ms: 5,
+      unopened: true,
+    },
+  ];
+  const chromeNodes = {
+    toggle: nodes["review-history-toggle"],
+    history: nodes["review-history"],
+    historyList: nodes["review-history-list"],
+    allButton: nodes["review-history-all"],
+    expandedList: nodes["review-history-expanded"],
+  };
+  shell.inbox.renderCollections(chromeNodes, items);
+  assert.equal(chromeNodes.history.hidden, true);
+  assert.equal(chromeNodes.toggle.getAttribute("aria-expanded"), "false");
+  assert.equal(chromeNodes.toggle.disabled, false);
+  assert.equal(chromeNodes.allButton.hidden, false);
+
+  chromeNodes.toggle.dispatchClick();
+  assert.equal(chromeNodes.history.hidden, false);
+  assert.equal(chromeNodes.toggle.getAttribute("aria-expanded"), "true");
+
+  shell.inbox.renderCollections(chromeNodes, items);
+  assert.equal(chromeNodes.history.hidden, false);
+  assert.equal(chromeNodes.toggle.getAttribute("aria-expanded"), "true");
+
+  chromeNodes.toggle.dispatchClick();
+  assert.equal(chromeNodes.history.hidden, true);
+  assert.equal(chromeNodes.toggle.getAttribute("aria-expanded"), "false");
+
+  shell.inbox.renderCollections(chromeNodes, items);
+  assert.equal(chromeNodes.history.hidden, true);
+  assert.equal(chromeNodes.toggle.getAttribute("aria-expanded"), "false");
+
+  shell.inbox.renderCollections(chromeNodes, []);
+  assert.equal(chromeNodes.history.hidden, true);
+  assert.equal(chromeNodes.toggle.disabled, true);
+  assert.equal(chromeNodes.allButton.hidden, true);
+
+  shell.inbox.renderCollections(chromeNodes, items);
+  assert.equal(chromeNodes.history.hidden, true);
+  assert.equal(chromeNodes.toggle.getAttribute("aria-expanded"), "false");
+  assert.equal(chromeNodes.toggle.disabled, false);
 });
 
 test("compact analyzed history is newest-first, capped at five, then All", () => {

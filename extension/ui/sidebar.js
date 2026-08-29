@@ -66,6 +66,7 @@
 
   const REVIEW = companion.REVIEW_INBOX;
   const COMPACT_ANALYZED_LIMIT = 5;
+  let historyUserExpanded = false;
 
   function historyStampMs(item) {
     if (!item) {
@@ -215,10 +216,11 @@
       nodes.allButton.disabled = !hasHistory;
     }
     if (!hasHistory) {
+      historyUserExpanded = false;
       setReviewHistoryExpanded(nodes.toggle, nodes.history, false);
       setAllExpanded(nodes, false);
     } else {
-      setReviewHistoryExpanded(nodes.toggle, nodes.history, true);
+      setReviewHistoryExpanded(nodes.toggle, nodes.history, historyUserExpanded);
     }
     return {
       historyItems: partitioned.items,
@@ -233,6 +235,7 @@
       renderReviewInboxList(nodes.expandedList, []);
     }
     nodes.toggle.disabled = disableToggle === true;
+    historyUserExpanded = false;
     setReviewHistoryExpanded(nodes.toggle, nodes.history, false);
     if (nodes.allButton) {
       nodes.allButton.hidden = true;
@@ -443,6 +446,7 @@
     hideAdminSettings();
     reviewHistoryToggle.disabled = true;
     reviewHistoryAll.disabled = true;
+    historyUserExpanded = false;
     setReviewHistoryExpanded(reviewHistoryToggle, reviewHistory, false);
     setAllExpanded(reviewChromeNodes, false);
     reviewHistoryList.querySelectorAll("button").forEach((button) => {
@@ -552,7 +556,7 @@
   }
 
   function onHistoryToggle() {
-    setReviewHistoryExpanded(
+    historyUserExpanded = setReviewHistoryExpanded(
       reviewHistoryToggle,
       reviewHistory,
       reviewHistoryToggle.getAttribute("aria-expanded") !== "true"
