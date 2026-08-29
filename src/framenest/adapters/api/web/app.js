@@ -6794,10 +6794,27 @@ function renderMetadataSuggestionStrips() {
           });
           metadataAiTagsStrip.appendChild(button);
         } else {
-          const chip = document.createElement("span");
-          chip.className = "metadata-suggestion-tag metadata-suggestion-tag--unmapped";
-          chip.textContent = tag.displayName || tag.value || tag.key || "";
-          metadataAiTagsStrip.appendChild(chip);
+          const label = tag.displayName || tag.value || tag.key || "";
+          if (!metadataWorkspaceIsAliasMode()) {
+            const button = document.createElement("button");
+            button.type = "button";
+            button.className =
+              "metadata-suggestion-tag metadata-suggestion-tag--unmapped metadata-suggestion-tag--unmapped-actionable";
+            button.textContent = label;
+            button.setAttribute("title", "Not in catalog tags — click to add");
+            button.addEventListener("click", (event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              createAndSelectMetadataTag(label);
+            });
+            metadataAiTagsStrip.appendChild(button);
+          } else {
+            const chip = document.createElement("span");
+            chip.className = "metadata-suggestion-tag metadata-suggestion-tag--unmapped";
+            chip.textContent = label;
+            chip.setAttribute("title", "Not in catalog tags");
+            metadataAiTagsStrip.appendChild(chip);
+          }
         }
       });
       metadataAiTagsStrip.hidden = false;

@@ -103,6 +103,9 @@ function createStripRenderContext() {
     identityAllowsAiSuggestionLoadChrome() {
       return true;
     },
+    metadataWorkspaceIsAliasMode() {
+      return false;
+    },
     copySuggestionFieldToCurrent() {},
     document: {
       createElement() {

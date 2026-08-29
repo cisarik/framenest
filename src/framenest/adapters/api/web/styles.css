@@ -3142,6 +3142,19 @@ h2 {
   opacity: 0.72;
 }
 
+.metadata-suggestion-tag--unmapped-actionable {
+  pointer-events: auto;
+  cursor: pointer;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+}
+
+.metadata-suggestion-tag--unmapped-actionable:hover,
+.metadata-suggestion-tag--unmapped-actionable:focus-visible {
+  background: rgba(0, 255, 65, 0.18);
+}
+
 .metadata-field {
   display: grid;
   gap: 6px;
