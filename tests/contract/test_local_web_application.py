@@ -523,17 +523,6 @@ def test_javascript_metadata_save_refreshes_catalog_and_preserves_filters(
     assert "catalogState.offset = 0" not in save_block
 
 
-def test_javascript_loads_library_list_without_auto_scanning(client: TestClient) -> None:
-    script = client.get("/assets/app.js").text
-    assert 'const LIBRARIES_ENDPOINT = "/api/libraries";' in script
-    assert "fetch(LIBRARIES_ENDPOINT" in script
-    assert "loadLibraries();" in script
-    assert "scan-preview" in script
-    assert "addEventListener(\"click\"" in script
-    assert "function handlePreviewClick" in script
-    assert "handlePreviewClick(library, card);" in script
-
-
 def test_javascript_loads_catalog_without_auto_scan_analysis_or_ai(client: TestClient) -> None:
     script = client.get("/assets/app.js").text
     assert 'const MEDIA_CATALOG_ENDPOINT = "/api/media";' in script
@@ -543,82 +532,11 @@ def test_javascript_loads_catalog_without_auto_scan_analysis_or_ai(client: TestC
     assert "function buildCatalogQueryParams" in script
     assert "fetch(`${MEDIA_CATALOG_ENDPOINT}" in script
     catalog_block = script[
-        script.index("async function loadCatalog") : script.index("async function handleImportClick")
+        script.index("async function loadCatalog") : script.index("function applyAdminCatalogFilters")
     ]
     assert "scan-preview" not in catalog_block
     assert "media-analysis-preview" not in catalog_block
     assert "media-suggestion-preview" not in catalog_block
-
-
-def test_browser_does_not_run_analysis_on_initialization_or_candidate_render(
-    client: TestClient,
-) -> None:
-    script = client.get("/assets/app.js").text
-    assert "media-analysis-preview" in script
-    assert "checkHealth();" in script
-    assert "loadLibraries();" in script
-    assert "handleInspectClick" in script
-    assert "renderScanResult(card, payload);" in script
-    render_scan_block = script[
-        script.index("function renderScanResult") : script.index("async function handleInspectClick")
-    ]
-    assert "media-analysis-preview" not in render_scan_block
-
-
-def test_browser_analysis_is_explicit_and_disables_conflicting_actions(
-    client: TestClient,
-) -> None:
-    html = client.get("/").text
-    script = client.get("/assets/app.js").text
-
-    assert "Inspect locally" in html or "Inspect locally" in script
-    assert "addEventListener(\"click\"" in script
-    assert "handleInspectClick(payload.library_id, candidate" in script
-    assert "setInspectActionsDisabled(true)" in script
-    assert "setInspectActionsDisabled(false)" in script
-    assert "analysisRequestToken" in script
-
-
-def test_browser_analysis_states_are_distinct_and_truthful(client: TestClient) -> None:
-    html = client.get("/").text
-    script = client.get("/assets/app.js").text
-    combined = html + script
-
-    assert "Local preview" in combined
-    assert "Preparing local metadata and representative frames" in combined
-    assert "Local media analysis is not available" in combined
-    assert "Invalid media relative path" in combined
-    assert "Local analysis results are ephemeral" in combined
-
-
-def test_browser_scan_import_is_explicit_and_same_origin(client: TestClient) -> None:
-    html = client.get("/").text
-    script = client.get("/assets/app.js").text
-    combined = html + script
-
-    assert "explicitly import" in html or "handleImportClick" in script
-    assert 'const MEDIA_IMPORTS_ENDPOINT = "media-imports";' in script
-    assert "handleImportClick(payload.library_id, candidate" in script
-    assert "Importing selected candidate" in script
-    assert "Already imported" in script
-    assert "Candidate was not found in the current scan." in script
-    assert "payload.status === \"already_imported\"" in script
-    assert "body: JSON.stringify({ relative_path: candidate.relative_path })" in script
-    assert "Import" in combined
-    assert "document.querySelectorAll(\".import-button\")" not in script
-    assert "importRequestToken" not in script
-
-
-def test_successful_import_refreshes_catalog_without_mutating_import_behavior(
-    client: TestClient,
-) -> None:
-    script = client.get("/assets/app.js").text
-
-    assert "await loadCatalog();" in script
-    import_block = script[script.index("async function handleImportClick") : script.index("async function handleInspectClick")]
-    assert "await loadCatalog();" in import_block
-    assert "payload.status === \"already_imported\"" in import_block
-    assert "body: JSON.stringify({ relative_path: candidate.relative_path })" in import_block
 
 
 def test_catalog_rendering_uses_safe_dom_text_apis_and_no_inline_html(client: TestClient) -> None:
@@ -628,7 +546,6 @@ def test_catalog_rendering_uses_safe_dom_text_apis_and_no_inline_html(client: Te
     assert "renderCatalogCard" in script
     assert "deriveCatalogFallbackTitle" in script
     assert "textContent" in script
-    assert "appendText" in script
     assert "innerHTML" not in script
     assert "insertAdjacentHTML" not in script
 
@@ -667,10 +584,10 @@ def test_browser_loads_ai_capability_without_invoking_analysis(client: TestClien
     assert 'const AI_CAPABILITY_ENDPOINT = "/api/ai/media-suggestion-capability";' in script
     assert "loadAiCapability();" in script
     assert "fetch(AI_CAPABILITY_ENDPOINT" in script
-    assert "media-suggestion-preview" in script
-    assert script.index("media-suggestion-preview") > script.index("async function handleAnalyzeClick")
     assert "checkHealth();" in script
-    assert "loadLibraries();" in script
+    capability_body = _javascript_function(script, "loadAiCapability")
+    assert "ai-suggestion-preview" not in capability_body
+    assert "media-analysis-preview" not in capability_body
 
 
 def test_browser_presents_ai_capability_states_from_api(client: TestClient) -> None:
@@ -716,28 +633,10 @@ def test_browser_analyze_is_explicit_confirmed_and_cloud_disclosed(client: TestC
     assert "Cancel analysis" not in combined
     assert "Provider selection" not in combined
     assert "Model selection" not in combined
-    candidate_analyze_block = script[
-        script.index("async function handleAnalyzeClick") : script.index("async function handlePreviewClick")
-    ]
     metadata_analyze_block = script[
         script.index("async function handleAnalyzeMetadataByAi") : script.index("function aiSuggestionErrorMessage")
     ]
-    assert "progress" not in (candidate_analyze_block + metadata_analyze_block).lower()
-
-
-def test_browser_analyze_appears_only_after_successful_local_inspection(
-    client: TestClient,
-) -> None:
-    script = client.get("/assets/app.js").text
-
-    assert "renderAiPanelUnavailable" in script
-    assert "renderAnalysisSuccess(card, payload)" in script
-    assert "renderAiPanelReady(card, payload)" in script
-    success_block = script[script.index("function renderAnalysisSuccess") : script.index("function renderScanResult")]
-    assert "renderAiPanelReady(card, payload)" in success_block
-    assert "resetAiReview(card)" in script
-    assert "analysisRequestToken" in script
-    assert "suggestionRequestToken" in script
+    assert "progress" not in metadata_analyze_block.lower()
 
 
 def test_browser_editor_uses_single_form_ai_assistance(client: TestClient) -> None:
@@ -1498,13 +1397,6 @@ def test_javascript_library_rendering_does_not_show_uuid(client: TestClient) -> 
     assert "Library ID" not in script
     assert "path flavor" not in script
     assert "Root path is intentionally hidden" not in script
-
-
-def test_javascript_scan_error_is_terse(client: TestClient) -> None:
-    script = client.get("/assets/app.js").text
-    assert "Scan failed" in script
-    assert "Scan preview failed before the local response could be read" not in script
-    assert "Scan preview failed with a sanitized local error" not in script
 
 
 def test_javascript_removes_obsolete_catalog_search_handlers(client: TestClient) -> None:
@@ -2861,7 +2753,7 @@ def test_javascript_upload_uses_capability_registry_and_no_file_byte_persistence
     client: TestClient,
 ) -> None:
     script = client.get("/assets/app.js").text
-    upload_block = script[script.index("function uploadEndpoint") : script.index("function formatDuration")]
+    upload_block = script[script.index("function uploadEndpoint") : script.index("function revokePreviewObjectUrls")]
 
     assert 'const UPLOADS_ENDPOINT = "/api/uploads";' in script
     assert 'const UPLOAD_CAPABILITY_ENDPOINT = "/api/uploads/capability";' in script
@@ -2922,7 +2814,7 @@ def test_javascript_upload_states_polling_cancel_and_gallery_boundaries_are_trut
     client: TestClient,
 ) -> None:
     script = client.get("/assets/app.js").text
-    upload_block = script[script.index("function uploadEndpoint") : script.index("function formatDuration")]
+    upload_block = script[script.index("function uploadEndpoint") : script.index("function revokePreviewObjectUrls")]
 
     for label in (
         "Preparing",
