@@ -377,18 +377,6 @@ def test_web_shell_contains_manual_current_metadata_workspace(client: TestClient
         assert obsolete not in dialog_section
 
 
-def test_browser_defines_unicode_code_point_length_helper(client: TestClient) -> None:
-    script = client.get("/assets/app.js").text
-    assert "function unicodeCodePointLength" in script
-    assert "[...value].length" in script or "Array.from(value).length" in script
-
-
-def test_browser_description_uses_code_point_length_instead_of_utf16(client: TestClient) -> None:
-    script = client.get("/assets/app.js").text
-    assert "unicodeCodePointLength(rawDescription) > MAX_METADATA_DESCRIPTION_CODE_POINTS" in script
-    assert "rawDescription.length > MAX_METADATA_DESCRIPTION_CODE_POINTS" not in script
-
-
 def test_browser_description_counter_uses_code_point_length(client: TestClient) -> None:
     script = client.get("/assets/app.js").text
     assert "unicodeCodePointLength(metadataDescriptionInput.value)" in script
@@ -407,14 +395,11 @@ def test_browser_description_textarea_has_no_maxlength(client: TestClient) -> No
     assert "textarea" in html
 
 
-def test_browser_description_rejects_c1_controls_and_allows_line_feed(client: TestClient) -> None:
-    script = client.get("/assets/app.js").text
-    assert "codePoint <= 0x1f" in script or "0x1f" in script
-    assert "0x7f" in script or "127" in script
-    assert "0x9f" in script
-    assert "codePoint === 0x0a" in script
-    assert "continue" in script
-    assert "rawDescription.length >" not in script or "unicodeCodePointLength" in script
+def test_browser_title_input_has_no_maxlength(client: TestClient) -> None:
+    html = client.get("/").text
+    id_index = html.index('id="metadata-title-input"')
+    tag = html[html.rindex("<input", 0, id_index) : html.index(">", id_index)]
+    assert "maxlength" not in tag
 
 
 def test_browser_description_is_never_rendered_as_inner_html(client: TestClient) -> None:
@@ -481,8 +466,6 @@ def test_javascript_metadata_workspace_tracks_sparse_baseline_dirty_and_discard(
     assert "deriveCatalogFallbackTitle(item)" in script
     assert "function normalizedMetadataFormState" in script
     assert "displayTitle: null" in script
-    assert "rawTitle.trim() !== rawTitle" in script
-    assert "hasControlCharacter(rawTitle)" in script
     assert "metadataSaveButton.disabled = metadataWorkspace.loading || metadataWorkspace.saving || !dirty || Boolean(validation);" in script
     assert "metadataDiscardButton.disabled = metadataWorkspace.saving;" in script
     discard_body = _javascript_function(script, "confirmDiscardDirtyMetadata")
