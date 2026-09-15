@@ -1185,3 +1185,28 @@ def test_imported_preview_joins_inbox_and_own_history(tmp_path: Path) -> None:
     finally:
         dispose_engine(engine)
 
+
+def test_analysis_run_id_parsing_returns_analysis_run_identity() -> None:
+    from framenest.application.companion_review import _parse_analysis_run_id
+    from framenest.domain.identities import MediaId
+    from framenest.domain.media_analysis_runs import MediaAnalysisRunId
+
+    parsed = _parse_analysis_run_id(GENERIC_RUN)
+    assert isinstance(parsed, MediaAnalysisRunId)
+    assert not isinstance(parsed, MediaId)
+    assert parsed.to_string() == GENERIC_RUN
+
+
+def test_analysis_run_id_parsing_keeps_sanitized_failure_contract() -> None:
+    from framenest.application.companion_review import _parse_analysis_run_id
+    from framenest.application.ports.companion_review_repository import (
+        CompanionReviewAnalysisRunNotFoundError,
+    )
+
+    for invalid in ("not-a-run-id", "", "91111111-1111-1111-8111-111111111111"):
+        try:
+            _parse_analysis_run_id(invalid)
+        except CompanionReviewAnalysisRunNotFoundError:
+            continue
+        raise AssertionError(f"{invalid!r} did not raise the sanitized not-found error")
+

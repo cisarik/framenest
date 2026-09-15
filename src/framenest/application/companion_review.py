@@ -25,12 +25,12 @@ from framenest.domain.content_publication import (
     derive_content_publication_readiness,
 )
 from framenest.domain.identities import FrameNestIdentityError, MediaId
+from framenest.domain.media_analysis_runs import MediaAnalysisRunId
 
 if TYPE_CHECKING:
     from framenest.application.ports.companion_review_repository import (
         CompanionReviewRepository,
     )
-    from framenest.domain.media_analysis_runs import MediaAnalysisRunId
 
 DEFAULT_COMPANION_REVIEW_LIMIT = 25
 MAX_COMPANION_REVIEW_LIMIT = 100
@@ -620,7 +620,7 @@ def _parse_media_id(value: str) -> MediaId:
 
 def _parse_analysis_run_id(value: str) -> MediaAnalysisRunId:
     try:
-        return MediaId.from_string(value)
+        parsed = MediaId.from_string(value)
     except FrameNestIdentityError as exc:
         from framenest.application.ports.companion_review_repository import (
             CompanionReviewAnalysisRunNotFoundError,
@@ -629,6 +629,7 @@ def _parse_analysis_run_id(value: str) -> MediaAnalysisRunId:
         raise CompanionReviewAnalysisRunNotFoundError(
             "The requested analysis run was not found."
         ) from exc
+    return MediaAnalysisRunId(parsed.to_string())
 
 
 def _require_actor_login_key(actor_login_key: str) -> str:

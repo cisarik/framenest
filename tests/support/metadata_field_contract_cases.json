@@ -1,0 +1,274 @@
+{
+  "fixture_version": 1,
+  "fixture_purpose": [
+    "Shared acceptance cases for the FrameNest metadata field contract.",
+    "Both an executable Node client executor (tests/metadata_form_contract.test.js)",
+    "and an executable Python server executor",
+    "(tests/contract/test_metadata_field_contract_parity.py) read this file.",
+    "Expectations are derived from the actual backend domain contract; the fixture",
+    "is acceptance data only and is never loaded by production code."
+  ],
+  "value_form": [
+    "A case value is a JSON string, a JSON array, or an object of the form",
+    "{\"repeat\": [\"unit\", count]} which expands to the unit string repeated",
+    "count times. The repeat form keeps astral and maximum-boundary values",
+    "readable in source."
+  ],
+  "field_semantics": {
+    "title": [
+      "Raw user-entered title field value. An empty or whitespace-only value",
+      "clears the title: the client submits null and the server accepts absence.",
+      "Non-blank titles must not start or end with whitespace, must contain no",
+      "control characters (Unicode category Cc), and must not exceed 240",
+      "Unicode code points."
+    ],
+    "description": [
+      "Raw user-entered description value. An empty or whitespace-only value",
+      "clears the description: the client submits null and the server accepts",
+      "absence. Non-blank descriptions must not start or end with whitespace,",
+      "must not exceed 10000 Unicode code points, and may contain line feeds",
+      "but no other Unicode category Cc characters."
+    ],
+    "tag_display_name": [
+      "Raw user-entered new tag display name. The client trims and collapses",
+      "internal whitespace before sending; the server accepts the trimmed value.",
+      "The trimmed value must be non-empty, at most 80 Unicode code points, and",
+      "must contain no Unicode category Cc characters."
+    ],
+    "genre_set": [
+      "Selected movie genre display names. The server accepts at most 8 distinct",
+      "genres and rejects more than 8 before Save reaches the server."
+    ]
+  },
+  "cases": [
+    {
+      "id": "title-ascii-normal",
+      "field": "title",
+      "value": "Morning light",
+      "expected": "accepted"
+    },
+    {
+      "id": "title-empty-clears",
+      "field": "title",
+      "value": "",
+      "expected": "accepted"
+    },
+    {
+      "id": "title-whitespace-only-clears",
+      "field": "title",
+      "value": "   ",
+      "expected": "accepted"
+    },
+    {
+      "id": "title-outer-whitespace",
+      "field": "title",
+      "value": " Morning light ",
+      "expected": "rejected"
+    },
+    {
+      "id": "title-240-ascii-code-points",
+      "field": "title",
+      "value": { "repeat": ["a", 240] },
+      "expected": "accepted"
+    },
+    {
+      "id": "title-241-ascii-code-points",
+      "field": "title",
+      "value": { "repeat": ["a", 241] },
+      "expected": "rejected"
+    },
+    {
+      "id": "title-240-astral-code-points",
+      "field": "title",
+      "value": { "repeat": ["😀", 240] },
+      "expected": "accepted"
+    },
+    {
+      "id": "title-241-astral-code-points",
+      "field": "title",
+      "value": { "repeat": ["😀", 241] },
+      "expected": "rejected"
+    },
+    {
+      "id": "title-c0-control",
+      "field": "title",
+      "value": "Bad\u0000Title",
+      "expected": "rejected"
+    },
+    {
+      "id": "title-del-control",
+      "field": "title",
+      "value": "Bad\u007fTitle",
+      "expected": "rejected"
+    },
+    {
+      "id": "title-c1-control",
+      "field": "title",
+      "value": "Bad\u009fTitle",
+      "expected": "rejected"
+    },
+    {
+      "id": "description-ascii-normal",
+      "field": "description",
+      "value": "A calm afternoon.",
+      "expected": "accepted"
+    },
+    {
+      "id": "description-empty-clears",
+      "field": "description",
+      "value": "",
+      "expected": "accepted"
+    },
+    {
+      "id": "description-whitespace-only-clears",
+      "field": "description",
+      "value": "   ",
+      "expected": "accepted"
+    },
+    {
+      "id": "description-single-line-feed",
+      "field": "description",
+      "value": "line one\nline two",
+      "expected": "accepted"
+    },
+    {
+      "id": "description-leading-line-feed",
+      "field": "description",
+      "value": "\nline one",
+      "expected": "rejected"
+    },
+    {
+      "id": "description-trailing-line-feed",
+      "field": "description",
+      "value": "line one\n",
+      "expected": "rejected"
+    },
+    {
+      "id": "description-outer-space",
+      "field": "description",
+      "value": " padded ",
+      "expected": "rejected"
+    },
+    {
+      "id": "description-tab",
+      "field": "description",
+      "value": "tab\there",
+      "expected": "rejected"
+    },
+    {
+      "id": "description-carriage-return",
+      "field": "description",
+      "value": "carriage\rreturn",
+      "expected": "rejected"
+    },
+    {
+      "id": "description-c1-control",
+      "field": "description",
+      "value": "line\u0085break",
+      "expected": "rejected"
+    },
+    {
+      "id": "description-10000-code-points",
+      "field": "description",
+      "value": { "repeat": ["a", 10000] },
+      "expected": "accepted"
+    },
+    {
+      "id": "description-10001-code-points",
+      "field": "description",
+      "value": { "repeat": ["a", 10001] },
+      "expected": "rejected"
+    },
+    {
+      "id": "tag-ascii-normal",
+      "field": "tag_display_name",
+      "value": "Mood",
+      "expected": "accepted"
+    },
+    {
+      "id": "tag-outer-whitespace",
+      "field": "tag_display_name",
+      "value": "  Mood  ",
+      "expected": "accepted"
+    },
+    {
+      "id": "tag-internal-whitespace",
+      "field": "tag_display_name",
+      "value": "Mood Board",
+      "expected": "accepted"
+    },
+    {
+      "id": "tag-whitespace-only",
+      "field": "tag_display_name",
+      "value": "   ",
+      "expected": "rejected"
+    },
+    {
+      "id": "tag-80-ascii-code-points",
+      "field": "tag_display_name",
+      "value": { "repeat": ["a", 80] },
+      "expected": "accepted"
+    },
+    {
+      "id": "tag-81-ascii-code-points",
+      "field": "tag_display_name",
+      "value": { "repeat": ["a", 81] },
+      "expected": "rejected"
+    },
+    {
+      "id": "tag-c0-control",
+      "field": "tag_display_name",
+      "value": "Bad\u0000Tag",
+      "expected": "rejected"
+    },
+    {
+      "id": "tag-del-control",
+      "field": "tag_display_name",
+      "value": "Bad\u007fTag",
+      "expected": "rejected"
+    },
+    {
+      "id": "tag-c1-control",
+      "field": "tag_display_name",
+      "value": "Bad\u009fTag",
+      "expected": "rejected"
+    },
+    {
+      "id": "genres-empty",
+      "field": "genre_set",
+      "value": [],
+      "expected": "accepted"
+    },
+    {
+      "id": "genres-eight",
+      "field": "genre_set",
+      "value": [
+        "Drama",
+        "Comedy",
+        "Sci-Fi",
+        "Thriller",
+        "Horror",
+        "Action",
+        "Adventure",
+        "Documentary"
+      ],
+      "expected": "accepted"
+    },
+    {
+      "id": "genres-nine",
+      "field": "genre_set",
+      "value": [
+        "Drama",
+        "Comedy",
+        "Sci-Fi",
+        "Thriller",
+        "Horror",
+        "Action",
+        "Adventure",
+        "Documentary",
+        "Animation"
+      ],
+      "expected": "rejected"
+    }
+  ]
+}

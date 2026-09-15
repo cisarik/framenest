@@ -64,6 +64,7 @@ const UPLOAD_RECOVERY_CLEANUP_STATES = new Set([
 const MAX_METADATA_TITLE_CODE_POINTS = 240;
 const MAX_METADATA_DESCRIPTION_CODE_POINTS = 10000;
 const MAX_METADATA_TAGS = 32;
+const MAX_METADATA_GENRES = 8;
 const TAG_KEY_PATTERN = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/;
 const PROCESSED_COLLECTION = "processed";
 const MAX_REVIEW_TEXT = {
@@ -2428,7 +2429,7 @@ function unicodeCodePointLength(value) {
 function hasControlCharacter(value) {
   return [...value].some((character) => {
     const codePoint = character.codePointAt(0);
-    return (codePoint >= 0 && codePoint <= 31) || codePoint === 127;
+    return codePoint <= 0x1f || (codePoint >= 0x7f && codePoint <= 0x9f);
   });
 }
 
@@ -2481,8 +2482,11 @@ function normalizedMetadataFormState() {
   if (hasControlCharacter(rawTitle)) {
     return { error: "Title must not contain NUL or control characters." };
   }
-  if (rawTitle.length > MAX_METADATA_TITLE_CODE_POINTS) {
+  if (unicodeCodePointLength(rawTitle) > MAX_METADATA_TITLE_CODE_POINTS) {
     return { error: "Title must be 240 characters or fewer." };
+  }
+  if ((metadataWorkspace.current.genres || []).length > MAX_METADATA_GENRES) {
+    return { error: `Select at most ${MAX_METADATA_GENRES} genres.` };
   }
   if (rawTitle.trim() === "") {
     const desc = normalizedDescriptionState();
