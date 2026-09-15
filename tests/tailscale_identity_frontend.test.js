@@ -307,8 +307,8 @@ test("mutation helper always injects the FrameNest mutation header", () => {
 test("every unsafe fetch call site sends the mutation header", () => {
   const mutationSites = APP_SOURCE.match(/method: "(?:POST|PUT|PATCH|DELETE)"/g) || [];
   const wrappedSites = APP_SOURCE.match(/headers: framenestMutationHeaders\(/g) || [];
-  assert.equal(mutationSites.length, 28);
-  assert.equal(wrappedSites.length, 28);
+  assert.ok(mutationSites.length > 0);
+  assert.equal(mutationSites.length, wrappedSites.length);
   assert.equal((APP_SOURCE.match(/"X-FrameNest-Request"/g) || []).length, 1);
 });
 

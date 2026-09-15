@@ -35,12 +35,6 @@ function extractFunction(name) {
   throw new Error(`failed to extract ${name}`);
 }
 
-function extractConstArray(name) {
-  const match = APP_SOURCE.match(new RegExp(`const ${name} = \\[([\\s\\S]*?)\\];`));
-  assert.ok(match, `missing const ${name}`);
-  return `const ${name} = [${match[1]}];`;
-}
-
 function createStripElement() {
   return {
     hidden: true,
@@ -117,10 +111,7 @@ function createStripRenderContext() {
     },
   };
   vm.createContext(context);
-  vm.runInContext(extractConstArray("MOVIE_GENRE_OPTIONS"), context);
   vm.runInContext(extractFunction("movieIdentificationIsPureUnknown"), context);
-  vm.runInContext(extractFunction("movieIdentificationHasLoadableFields"), context);
-  vm.runInContext(extractFunction("movieSuggestionFromResult"), context);
   vm.runInContext(extractFunction("selectedMetadataSuggestion"), context);
   vm.runInContext(extractFunction("clearMetadataSuggestionStrip"), context);
   vm.runInContext(extractFunction("appendSuggestionApplyButton"), context);
@@ -128,36 +119,14 @@ function createStripRenderContext() {
   return context;
 }
 
-test("movie identification helpers preserve draft boundary and taxonomy mapping", () => {
+test("movie identification status distinguishes pure unknown results", () => {
   assert.match(APP_SOURCE, /function movieIdentificationEndpoint/);
-  assert.match(APP_SOURCE, /function applyMovieIdentificationToMetadataWorkspace/);
   assert.match(APP_SOURCE, /function movieIdentificationIsPureUnknown/);
-  assert.match(APP_SOURCE, /function movieIdentificationHasLoadableFields/);
   assert.match(APP_SOURCE, /movieIdentificationEndpoint\(mediaId\)/);
-  assert.match(APP_SOURCE, /applyMovieIdentificationToMetadataWorkspace\(movieResult, tagKeys\)/);
 
-  const context = {
-    MOVIE_GENRE_OPTIONS: undefined,
-    metadataWorkspace: {
-      current: {
-        displayTitle: "Keep Me",
-        description: "Keep description",
-        tagKeys: ["keep-tag"],
-        genres: ["Drama"],
-      },
-      suggestedFilename: null,
-      aiSuggestionApplied: false,
-      statusOverride: null,
-    },
-    metadataAiStatus: { textContent: "" },
-    advanceMetadataWorkspaceRevision() {},
-  };
+  const context = {};
   vm.createContext(context);
-  vm.runInContext(extractConstArray("MOVIE_GENRE_OPTIONS"), context);
   vm.runInContext(extractFunction("movieIdentificationIsPureUnknown"), context);
-  vm.runInContext(extractFunction("movieIdentificationHasLoadableFields"), context);
-  vm.runInContext(extractFunction("movieSuggestionFromResult"), context);
-  vm.runInContext(extractFunction("applyMovieIdentificationToMetadataWorkspace"), context);
 
   const unknown = {
     identified_title: null,
@@ -168,56 +137,39 @@ test("movie identification helpers preserve draft boundary and taxonomy mapping"
     description: "Movie could not be identified from the available frames.",
   };
   assert.equal(context.movieIdentificationIsPureUnknown(unknown), true);
-  assert.equal(context.movieIdentificationHasLoadableFields(unknown), false);
-  assert.equal(context.movieSuggestionFromResult(unknown), null);
-
-  const identified = {
-    identified_title: "Synthetic Adventure",
-    identification_status: "identified",
-    confidence: "high",
-    genres: ["Adventure", "not-a-genre"],
-    tags: ["desert"],
-    description: "A synthetic adventure film.",
-  };
-  assert.equal(context.movieIdentificationHasLoadableFields(identified), true);
-  const mapped = context.movieSuggestionFromResult(identified);
-  assert.equal(mapped.title, "Synthetic Adventure");
-  assert.deepEqual(mapped.genres, ["Adventure"]);
-  assert.deepEqual(mapped.tags, ["desert"]);
-  assert.equal(mapped.confidence, "high");
-
-  context.applyMovieIdentificationToMetadataWorkspace(identified, ["desert"]);
-  assert.equal(context.metadataWorkspace.current.displayTitle, "Synthetic Adventure");
-  assert.equal(context.metadataWorkspace.current.description, "A synthetic adventure film.");
-  assert.deepEqual(context.metadataWorkspace.current.genres, ["Adventure"]);
-  assert.deepEqual(context.metadataWorkspace.current.tagKeys, ["desert"]);
-
-  // Empty fields must not erase existing draft values.
-  context.applyMovieIdentificationToMetadataWorkspace(
-    {
-      identified_title: null,
-      description: "",
+  assert.equal(
+    context.movieIdentificationIsPureUnknown({
+      identified_title: "Synthetic Adventure",
+      identification_status: "unknown",
       genres: [],
       tags: [],
-      identification_status: "ambiguous",
-    },
-    [],
+    }),
+    false,
   );
-  assert.equal(context.metadataWorkspace.current.displayTitle, "Synthetic Adventure");
-  assert.equal(context.metadataWorkspace.current.description, "A synthetic adventure film.");
-  assert.deepEqual(context.metadataWorkspace.current.genres, ["Adventure"]);
-  assert.deepEqual(context.metadataWorkspace.current.tagKeys, ["desert"]);
+  assert.equal(
+    context.movieIdentificationIsPureUnknown({
+      identified_title: null,
+      identification_status: "identified",
+      genres: [],
+      tags: [],
+    }),
+    false,
+  );
+  assert.equal(
+    context.movieIdentificationIsPureUnknown({
+      identified_title: null,
+      identification_status: "unknown",
+      genres: ["Adventure"],
+      tags: [],
+    }),
+    false,
+  );
+  assert.equal(context.movieIdentificationIsPureUnknown(null), false);
 });
 
 test("movie Identify and suggestion review stay non-canonical in source", () => {
   assert.match(APP_SOURCE, /Running movie identification/);
   assert.match(APP_SOURCE, /Movie identification in progress\./);
-  // Empty suggestion fields must not clear existing draft values.
-  const applyBody = extractFunction("applyMovieIdentificationToMetadataWorkspace");
-  assert.match(applyBody, /if \(title\) \{/);
-  assert.match(applyBody, /if \(description\) \{/);
-  assert.match(applyBody, /if \(genres\.length > 0\) \{/);
-  assert.match(applyBody, /if \(Array\.isArray\(tagKeys\) && tagKeys\.length > 0\) \{/);
   const start = APP_SOURCE.indexOf('document.querySelector("#metadata-movie-identify-button")');
   assert.ok(start >= 0);
   const identifyBlock = APP_SOURCE.slice(start, APP_SOURCE.indexOf("let commandSearchDebounceTimer"));
@@ -265,6 +217,8 @@ test("durable renderer does not concatenate genres into tags", () => {
   assert.doesNotMatch(stripsBody, /\[\.\.\.suggestion\.genres/);
   // The suggestion tag renderer never touches the genre facet at all.
   assert.doesNotMatch(stripsBody, /genres/);
+  assert.doesNotMatch(stripsBody, /handleSaveMetadata/);
+  assert.doesNotMatch(stripsBody, /method:\s*"PUT"/);
   assert.match(APP_SOURCE, /#metadata-ai-tags-strip/);
 });
 
@@ -293,34 +247,11 @@ test("durable movie suggestion renders overlapping genres and tags as distinct f
     "Documentary, Crime, Documentary, Crime",
   );
   assert.doesNotMatch(collectStripRenderText(context), /Documentary, Crime, Documentary/);
-
-  // The movie mapping keeps overlapping genre and tag values as separate facet arrays.
-  const mapped = context.movieSuggestionFromResult({
-    identified_title: "The Tinder Swindler",
-    identification_status: "identified",
-    confidence: "high",
-    genres: ["Documentary", "Crime"],
-    tags: ["Documentary", "Crime"],
-    description: "The Tinder Swindler",
-  });
-  assert.deepEqual(mapped.genres, ["Documentary", "Crime"]);
-  assert.deepEqual(mapped.tags, ["Documentary", "Crime"]);
   assert.doesNotMatch(collectStripRenderText(context), /confidence/i);
 });
 
 test("durable movie suggestion keeps distinct genre and tag facet values", () => {
   const context = createStripRenderContext();
-  // The mapping keeps the genre facet and the tag facet values separate.
-  const mapped = context.movieSuggestionFromResult({
-    identified_title: "Distinct Facets",
-    identification_status: "identified",
-    confidence: "high",
-    genres: ["Documentary"],
-    tags: ["Romance scam", "True crime"],
-    description: "Distinct description",
-  });
-  assert.deepEqual(mapped.genres, ["Documentary"]);
-  assert.deepEqual(mapped.tags, ["Romance scam", "True crime"]);
 
   // The tag facet renders each suggested tag value once, as its own chip.
   context.metadataSuggestionList.items = [{
@@ -402,37 +333,4 @@ test("durable movie suggestion empty and reset semantics clear stale facet value
     assert.equal(strip.hidden, true);
     assert.equal(strip.children.length, 0);
   }
-});
-
-test("movie suggestion mapping preserves separate genres tags and confidence without Save", () => {
-  const context = {
-    MOVIE_GENRE_OPTIONS: undefined,
-  };
-  vm.createContext(context);
-  vm.runInContext(extractConstArray("MOVIE_GENRE_OPTIONS"), context);
-  vm.runInContext(extractFunction("movieIdentificationIsPureUnknown"), context);
-  vm.runInContext(extractFunction("movieIdentificationHasLoadableFields"), context);
-  vm.runInContext(extractFunction("movieSuggestionFromResult"), context);
-
-  const mapped = context.movieSuggestionFromResult({
-    identified_title: "The Tinder Swindler",
-    identification_status: "identified",
-    confidence: "high",
-    genres: ["Documentary", "Crime"],
-    tags: ["Documentary", "Crime"],
-    description: "The Tinder Swindler",
-  });
-  assert.deepEqual(mapped.genres, ["Documentary", "Crime"]);
-  assert.deepEqual(mapped.tags, ["Documentary", "Crime"]);
-  assert.equal(mapped.confidence, "high");
-  assert.equal(mapped.title, "The Tinder Swindler");
-  assert.equal(mapped.description, "The Tinder Swindler");
-
-  const applyBody = extractFunction("applyMovieIdentificationToMetadataWorkspace");
-  assert.match(applyBody, /metadataWorkspace\.current\.genres = genres/);
-  assert.match(applyBody, /metadataWorkspace\.current\.tagKeys = tagKeys/);
-  assert.doesNotMatch(applyBody, /handleSaveMetadata/);
-  assert.doesNotMatch(applyBody, /method:\s*"PUT"/);
-  assert.doesNotMatch(extractFunction("renderMetadataSuggestionStrips"), /handleSaveMetadata/);
-  assert.doesNotMatch(extractFunction("renderMetadataSuggestionStrips"), /method:\s*"PUT"/);
 });

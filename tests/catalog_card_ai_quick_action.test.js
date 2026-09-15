@@ -511,32 +511,6 @@ function createFlowHarness({ confirmAccepted = true, reducedMotion = true } = {}
     async loadCatalogTags() {
       return true;
     },
-    async ensureMetadataTagKey(displayName) {
-      const existing = context.findTagByDisplayName(displayName);
-      if (existing) return existing.key;
-      const key = context.uniqueTagKeyForDisplayName(displayName);
-      const endpoint = context.CANONICAL_TAGS_ENDPOINT;
-      const result = await context.fetch(endpoint, {
-        method: "POST",
-        headers: context.framenestMutationHeaders({
-          Accept: "application/json",
-          "Content-Type": "application/json",
-        }),
-        body: JSON.stringify({ key, display_name: displayName }),
-      });
-      const payload = await result.json();
-      if (!result.ok) throw new Error("Tag could not be added.");
-      context.canonicalTagDefinitions.push(payload.tag);
-      return payload.tag.key;
-    },
-    async metadataTagKeysFromSuggestion(tags) {
-      const tagKeys = [];
-      for (const tag of tags) {
-        const key = await context.ensureMetadataTagKey(tag);
-        if (!tagKeys.includes(key)) tagKeys.push(key);
-      }
-      return tagKeys;
-    },
     aiSuggestionFromPayload(payload) {
       const suggestion = payload.suggestion || {};
       return {
@@ -1137,7 +1111,6 @@ test("source wiring gates brain on identity, supported location, and movie exclu
   assert.equal(handleBody.includes("will replace the current canonical values"), false);
   assert.equal(handleBody.includes("last-write-wins"), false);
   assert.ok(handleBody.includes("runMetadataAiAnalysis("));
-  assert.equal(handleBody.includes("metadataTagKeysFromSuggestion(suggestion.tags)"), false);
   assert.equal(handleBody.includes("fetch(metadataEndpoint(mediaId)"), false);
   assert.equal(handleBody.includes('method: "PUT"'), false);
   assert.ok(handleBody.includes("handleOpenMetadataWorkspace(item, button"));

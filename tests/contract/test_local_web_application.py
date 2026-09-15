@@ -754,7 +754,6 @@ def test_browser_editor_uses_single_form_ai_assistance(client: TestClient) -> No
     assert "review-title-input" not in dialog_section
     assert "review-description-input" not in dialog_section
     assert "review-tag-input" not in dialog_section
-    assert "metadataTagKeysFromSuggestion" in script
     assert "provider_id" in script
     assert "model_id" in script
     assert "prompt_version" in script
@@ -995,17 +994,6 @@ def test_browser_metadata_workspace_no_manual_collection_picker_or_mark_button(c
     assert "manual collection" not in combined.lower()
 
 
-def test_browser_metadata_discard_restores_persisted_collection_state(client: TestClient) -> None:
-    script = client.get("/assets/app.js").text
-
-    start = script.index("function resetMetadataWorkspaceAfterDiscard()")
-    end = script.index("\n}\n", start) + len("\n}\n")
-    reset_body = script[start:end]
-
-    assert "collectionKey: metadataWorkspace.baseline.collectionKey" in reset_body
-    assert "processedAtMs: metadataWorkspace.baseline.processedAtMs" in reset_body
-
-
 def test_browser_metadata_workspace_uses_nullish_coalescing_for_collection_state(
     client: TestClient,
 ) -> None:
@@ -1021,23 +1009,6 @@ def test_browser_metadata_workspace_uses_nullish_coalescing_for_collection_state
     assert "payload.processed_at_ms || null" not in body
 
 
-def test_browser_metadata_workspace_renders_processed_time_semantically(client: TestClient) -> None:
-    html = client.get("/").text
-    script = client.get("/assets/app.js").text
-
-    dialog_section = html[html.index("metadata-dialog"):]
-    assert "metadata-collection-status" not in dialog_section
-    assert "createElement(\"time\")" in script or 'createElement("time")' in script
-    assert "datetime" in script
-    assert ".toISOString()" in script
-
-    start = script.index("function renderMetadataWorkspace()")
-    end = script.index("\n}\n", start) + len("\n}\n")
-    workspace_body = script[start:end]
-    assert "buildProcessedTimeElement" not in workspace_body
-    assert "processedAtMs" in script
-
-
 def test_browser_catalog_card_omits_internal_processed_status_and_time(client: TestClient) -> None:
     script = client.get("/assets/app.js").text
 
@@ -1048,35 +1019,13 @@ def test_browser_catalog_card_omits_internal_processed_status_and_time(client: T
     assert "catalog-card__status" not in card_body
     assert "catalog-card__status-dot" not in card_body
     assert "processed_at_ms" not in card_body
-    assert "buildProcessedTimeElement" not in card_body
-    assert "buildProcessedTimeElement" in script
-
-
-def test_browser_processed_time_helper_is_reusable_and_safe(client: TestClient) -> None:
-    script = client.get("/assets/app.js").text
-
-    helper_markers = [
-        "function buildProcessedTimeElement",
-        "function renderProcessedTime",
-        "function createProcessedTime",
-    ]
-    assert any(marker in script for marker in helper_markers)
-    for marker in helper_markers:
-        if marker in script:
-            start = script.index(marker)
-            end = script.index("\n}\n", start) + len("\n}\n")
-            helper_body = script[start:end]
-            assert "innerHTML" not in helper_body
-            assert ".textContent" in helper_body or ".datetime" in helper_body
-            break
 
 
 def test_browser_processed_time_never_uses_filesystem_timestamps(client: TestClient) -> None:
     script = client.get("/assets/app.js").text
 
     processed_time_section = (
-        _javascript_function(script, "buildProcessedTimeElement")
-        + _javascript_function(script, "applyMetadataPayloadToWorkspace")
+        _javascript_function(script, "applyMetadataPayloadToWorkspace")
         + _javascript_function(script, "renderMetadataWorkspace")
     )
     forbidden = (
@@ -1794,9 +1743,7 @@ def test_catalog_card_has_overlay_original_media_action_in_bottom_right(
     assert "editIcon()" in card_body
     assert 'editButton.setAttribute("aria-label", `Edit ${displayTitle}`)' in card_body
     assert 'editButton.title = "Edit"' in card_body
-    assert "mediaDownloadUrl(item.media_id" not in card_body
     assert "/download" not in card_body
-    assert "fetch(mediaDownloadUrl" not in script
     assert "createObjectURL" in script
     open_section = card_body[
         card_body.index("const editButton") : card_body.index("const analysisStatus")
@@ -1971,7 +1918,6 @@ def test_catalog_card_analyze_request_busy_success_and_failure_flow(client: Test
     assert "await requestConfirmation({" in analyze_body
     assert 'title: "Analyze with AI?"' in analyze_body
     assert 'confirmLabel: "Analyze by AI"' in analyze_body
-    assert "metadataTagKeysFromSuggestion(suggestion.tags)" not in analyze_body
     assert 'method: "PUT"' not in analyze_body
     assert "applySavedAiMetadataToCatalogSurfaces" not in analyze_body
     assert "presentPreviewSuggestionInMetadataWorkspace(previewSuggestion, previewPayload)" in open_body
@@ -2177,7 +2123,6 @@ def test_javascript_card_media_surface_is_accessible_and_card_title_opens_detail
     sync_body = _javascript_function(script, "syncCardMediaSurfaceToggleState")
     activate_body = _javascript_function(script, "activateCardPlayback")
     card_body = _javascript_function(script, "renderCatalogCard")
-    open_body = _javascript_function(script, "openPlaybackDetails")
 
     assert "syncCardMediaSurfaceToggleState(surface, item, title, false)" in surface_body
     assert "aria-label" in sync_body
@@ -2189,7 +2134,6 @@ def test_javascript_card_media_surface_is_accessible_and_card_title_opens_detail
     assert "event.key === \" \"" in surface_body
     assert "Open details for" in card_body
     assert "openDetailsDialog(item, titleButton)" in card_body
-    assert "openDetailsDialog(item, openerElement, { playWhenReady: true })" in open_body
     assert "mediaContentUrl" in _javascript_function(script, "renderDetailsMedia")
 
 
@@ -2677,7 +2621,6 @@ def test_javascript_metadata_ai_success_populates_single_form_without_autosave_o
     assert "metadataWorkspace.suggestedFilename = item.suggestedFilename || \"\"" in present_body
     assert "metadataWorkspace.current.displayTitle = item.title || \"\"" in copy_body
     assert "presentInSessionSuggestion(suggestion, payload)" in analyze_body
-    assert "metadataTagKeysFromSuggestion(suggestion.tags)" not in analyze_body
     assert "applyResolvedAiSuggestionToMetadataWorkspace" not in script
     assert "metadataAiAnalyzeButton.hidden = !showAnalyze" in script
     assert "fetch(metadataEndpoint" not in analyze_body

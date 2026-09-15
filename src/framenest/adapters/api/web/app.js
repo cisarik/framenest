@@ -8,7 +8,6 @@ const WORKSPACE_MEDIA_ENDPOINT = "/api/workspace/media";
 const ANALYSIS_PROPOSALS_ENDPOINT = "/api/admin/analysis-proposals";
 const ADMIN_MEDIA_ALIASES_PATH = "/aliases";
 const MEDIA_METADATA_ENDPOINT_PREFIX = "/api/media";
-const COMPANION_REVIEW_INBOX_ENDPOINT = "/api/companion/review-inbox";
 const CANONICAL_TAGS_ENDPOINT = "/api/canonical-tags";
 const AI_CAPABILITY_ENDPOINT = "/api/ai/media-suggestion-capability";
 const AUTOMATIC_ANALYSIS_CAPABILITY_ENDPOINT = "/api/ai/automatic-analysis-capability";
@@ -264,7 +263,6 @@ let metadataDurableAnalysis = {
   state: null,
   analysisDefinition: null,
   result: null,
-  movieResult: null,
   statusMessage: "",
   errorMessage: "",
   detailsExpanded: false,
@@ -2398,10 +2396,6 @@ function editIcon() {
   return inlineIcon("M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5Z", "Edit");
 }
 
-function downloadIcon() {
-  return inlineIcon("M12 3v12M7 10l5 5 5-5M5 20h14", "Download");
-}
-
 function openOriginalIcon() {
   return inlineIcon("M14 5h5v5M19 5l-8 8M17 13v5H5V6h5", "Open original media");
 }
@@ -4449,10 +4443,6 @@ function mediaContentUrl(mediaId, locationId) {
   return `${MEDIA_CATALOG_ENDPOINT}/${encodeURIComponent(mediaId)}/locations/${encodeURIComponent(locationId)}/content`;
 }
 
-function mediaDownloadUrl(mediaId, locationId) {
-  return `${MEDIA_CATALOG_ENDPOINT}/${encodeURIComponent(mediaId)}/locations/${encodeURIComponent(locationId)}/download`;
-}
-
 function mediaGalleryPreviewUrl(mediaId, locationId) {
   return `${MEDIA_CATALOG_ENDPOINT}/${encodeURIComponent(mediaId)}/locations/${encodeURIComponent(locationId)}/gallery-preview`;
 }
@@ -4663,25 +4653,6 @@ function addMetadataValue(metadataList, label, value) {
   detail.textContent = value;
   wrapper.append(term, detail);
   metadataList.appendChild(wrapper);
-}
-
-function buildProcessedTimeElement(processedAtMs) {
-  if (processedAtMs === null || processedAtMs === undefined) {
-    return null;
-  }
-  const numeric = Number(processedAtMs);
-  if (!Number.isFinite(numeric)) {
-    return null;
-  }
-  const date = new Date(numeric);
-  if (Number.isNaN(date.getTime())) {
-    return null;
-  }
-  const iso = date.toISOString();
-  const time = document.createElement("time");
-  time.datetime = iso;
-  time.textContent = iso;
-  return time;
 }
 
 function renderUnavailablePreview(card) {
@@ -5001,10 +4972,6 @@ function summarizeAvailability(locations) {
   return [...counts.entries()]
     .map(([key, count]) => `${count} ${key}`)
     .join(", ");
-}
-
-function openPlaybackDetails(item, openerElement) {
-  openDetailsDialog(item, openerElement, { playWhenReady: true });
 }
 
 function renderUnavailableCardMediaSurface(item, title) {
@@ -5405,39 +5372,6 @@ function reconcileCatalogCardAiQuickActions() {
   });
 }
 
-function applyMovieIdentificationToMetadataWorkspace(movieResult, tagKeys) {
-  const title = typeof movieResult.identified_title === "string"
-    ? movieResult.identified_title.trim()
-    : "";
-  const description = typeof movieResult.description === "string"
-    ? movieResult.description.trim()
-    : "";
-  const genres = Array.isArray(movieResult.genres)
-    ? movieResult.genres
-      .map((genre) => String(genre))
-      .filter((genre) => MOVIE_GENRE_OPTIONS.includes(genre))
-    : [];
-  if (title) {
-    metadataWorkspace.current.displayTitle = title;
-  }
-  if (description) {
-    metadataWorkspace.current.description = description;
-  }
-  if (genres.length > 0) {
-    metadataWorkspace.current.genres = genres;
-  }
-  if (Array.isArray(tagKeys) && tagKeys.length > 0) {
-    metadataWorkspace.current.tagKeys = tagKeys;
-  }
-  metadataWorkspace.aiSuggestionApplied = true;
-  metadataWorkspace.statusOverride = null;
-  advanceMetadataWorkspaceRevision();
-  if (typeof syncClassificationControlsFromWorkspace === "function") {
-    syncClassificationControlsFromWorkspace();
-  }
-  metadataAiStatus.textContent = "Movie identification loaded into draft.";
-}
-
 function movieIdentificationIsPureUnknown(result) {
   if (!result || typeof result !== "object") return false;
   if (String(result.identification_status || "") !== "unknown") return false;
@@ -5447,39 +5381,6 @@ function movieIdentificationIsPureUnknown(result) {
   const genres = Array.isArray(result.genres) ? result.genres.filter(Boolean) : [];
   const tags = Array.isArray(result.tags) ? result.tags.filter(Boolean) : [];
   return !title && genres.length === 0 && tags.length === 0;
-}
-
-function movieIdentificationHasLoadableFields(result) {
-  if (!result || typeof result !== "object") return false;
-  if (movieIdentificationIsPureUnknown(result)) return false;
-  const title = typeof result.identified_title === "string"
-    ? result.identified_title.trim()
-    : "";
-  const description = typeof result.description === "string"
-    ? result.description.trim()
-    : "";
-  const genres = Array.isArray(result.genres)
-    ? result.genres.filter((genre) => MOVIE_GENRE_OPTIONS.includes(String(genre)))
-    : [];
-  const tags = Array.isArray(result.tags) ? result.tags.filter(Boolean) : [];
-  return Boolean(title || description || genres.length > 0 || tags.length > 0);
-}
-
-function movieSuggestionFromResult(result) {
-  if (!movieIdentificationHasLoadableFields(result)) return null;
-  return {
-    title: typeof result.identified_title === "string" ? result.identified_title : "",
-    description: typeof result.description === "string" ? result.description : "",
-    tags: Array.isArray(result.tags) ? result.tags.map((tag) => String(tag)) : [],
-    genres: Array.isArray(result.genres)
-      ? result.genres
-        .map((genre) => String(genre))
-        .filter((genre) => MOVIE_GENRE_OPTIONS.includes(genre))
-      : [],
-    identificationStatus: String(result.identification_status || ""),
-    confidence: String(result.confidence || ""),
-    suggestedFilename: "",
-  };
 }
 
 async function handleAnalyzeCatalogCard(item, button) {
@@ -6057,14 +5958,6 @@ function setMetadataStatus(state, message) {
   }
 }
 
-function describeCatalogItem(item) {
-  const label = item.display_title || deriveCatalogFallbackTitle(item);
-  const location = item.locations && item.locations.length > 0
-    ? item.locations[0].relative_path
-    : "No known relative location";
-  return `${label}; ${formatCatalogKind(item.media_kind)}; ${location}; media ID ${item.media_id}`;
-}
-
 function advanceMetadataWorkspaceRevision() {
   metadataWorkspaceRevision += 1;
 }
@@ -6549,7 +6442,6 @@ function resetMetadataDurableAnalysisState() {
     state: null,
     analysisDefinition: null,
     result: null,
-    movieResult: null,
     statusMessage: "",
     errorMessage: "",
     detailsExpanded: false,
@@ -6924,7 +6816,6 @@ async function refreshMetadataDurableAnalysis(mediaId, requestToken) {
     state: null,
     analysisDefinition: null,
     result: null,
-    movieResult: null,
     statusMessage: "",
     errorMessage: "",
     detailsExpanded: false,
@@ -6947,7 +6838,6 @@ async function refreshMetadataDurableAnalysis(mediaId, requestToken) {
         state: null,
         analysisDefinition: null,
         result: null,
-        movieResult: null,
         statusMessage: "",
         errorMessage: preferMovie
           ? "Movie identification status could not be loaded."
@@ -6971,7 +6861,6 @@ async function refreshMetadataDurableAnalysis(mediaId, requestToken) {
       state: null,
       analysisDefinition: null,
       result: null,
-      movieResult: null,
       statusMessage: "",
       errorMessage: preferMovie
         ? "Movie identification status could not be loaded."
@@ -7028,7 +6917,6 @@ function applyAnalysisStatusPayload(mediaId, payload, preferMovie) {
     state,
     analysisDefinition,
     result,
-    movieResult,
     statusMessage,
     errorMessage,
     detailsExpanded: false,
@@ -7150,50 +7038,6 @@ function aiSuggestionErrorMessage(payload) {
   if (code === "AI_PROVIDER_INVALID_RESPONSE") return "The model returned an unusable response. Try analysis again.";
   if (code === "AI_PROVIDER_UNAVAILABLE") return "The AI provider is unavailable. Try again later.";
   return "AI analysis failed. Try again.";
-}
-
-async function ensureMetadataTagKey(displayName) {
-  const normalized = normalizedTagDisplayName(displayName);
-  const validation = tagDisplayNameError(normalized);
-  if (validation) throw new Error(validation);
-  const existing = findTagByDisplayName(normalized);
-  if (existing) return existing.key;
-  const key = uniqueTagKeyForDisplayName(normalized);
-  if (!key) throw new Error("Tag could not be added.");
-  const response = await fetch(CANONICAL_TAGS_ENDPOINT, {
-    method: "POST",
-    headers: framenestMutationHeaders({
-      Accept: "application/json",
-      "Content-Type": "application/json",
-    }),
-    body: JSON.stringify({ key, display_name: normalized }),
-    cache: "no-store",
-  });
-  const payload = await response.json();
-  if (!response.ok) throw new Error("Tag could not be added.");
-  await loadCatalogTags();
-  return payload.tag.key;
-}
-
-async function metadataTagKeysFromSuggestion(tags) {
-  const folded = new Set();
-  const tagNames = [];
-  for (const tag of tags) {
-    const key = tag.toLocaleLowerCase();
-    if (!folded.has(key)) {
-      folded.add(key);
-      tagNames.push(tag);
-    }
-  }
-  if (tagNames.length > MAX_METADATA_TAGS) {
-    throw new Error("Tag limit reached.");
-  }
-  const tagKeys = [];
-  for (const tag of tagNames) {
-    const key = await ensureMetadataTagKey(tag);
-    if (!tagKeys.includes(key)) tagKeys.push(key);
-  }
-  return tagKeys.slice(0, MAX_METADATA_TAGS);
 }
 
 function applyMetadataPayloadToWorkspace(payload) {
@@ -7627,19 +7471,6 @@ function selectMetadataTag(key) {
 
 function removeSelectedMetadataTag(key) {
   metadataWorkspace.current.tagKeys = metadataWorkspace.current.tagKeys.filter((tagKey) => tagKey !== key);
-  metadataWorkspace.statusOverride = null;
-  advanceMetadataWorkspaceRevision();
-  renderMetadataWorkspace();
-}
-
-function resetMetadataWorkspaceAfterDiscard() {
-  metadataWorkspace.current = {
-    displayTitle: metadataWorkspace.baseline.displayTitle || "",
-    description: metadataWorkspace.baseline.description || "",
-    tagKeys: [...metadataWorkspace.baseline.tagKeys],
-    collectionKey: metadataWorkspace.baseline.collectionKey,
-    processedAtMs: metadataWorkspace.baseline.processedAtMs,
-  };
   metadataWorkspace.statusOverride = null;
   advanceMetadataWorkspaceRevision();
   renderMetadataWorkspace();

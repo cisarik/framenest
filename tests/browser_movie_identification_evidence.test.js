@@ -355,27 +355,6 @@ test("real browser evidence: movie identification status and taxonomy draft", { 
     assert.equal(before.adventure, false);
     assert.equal(before.action, false);
 
-    // Seed unknown via runtime state and prove generic Load chrome stays absent.
-    await evaluate(cdp, `
-      metadataDurableAnalysis.movieResult = {
-        identified_title: null,
-        identification_status: "unknown",
-        confidence: "unknown",
-        genres: [],
-        tags: [],
-        description: "Movie could not be identified from the available frames.",
-      };
-      metadataDurableAnalysis.state = "analyzed";
-      metadataDurableAnalysis.analysisDefinition = "movie_identification";
-      updateMetadataControls();
-      true;
-    `);
-    const loadStillAbsent = await evaluate(
-      cdp,
-      `Boolean(document.querySelector("#metadata-load-ai-suggestion-button"))`,
-    );
-    assert.equal(loadStillAbsent, false);
-
     const consoleErrors = await evaluate(cdp, `
       (window.__framenestConsoleErrors || []).filter((msg) =>
         !String(msg).includes("favicon")
