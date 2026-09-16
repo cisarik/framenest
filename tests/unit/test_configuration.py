@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 from pydantic import SecretStr, ValidationError
 
-from framenest.configuration import load_settings
+from framenest.configuration import FrameNestSettings, load_settings
 
 FRAMENEST_ENV_VARS = (
     "FRAMENEST_HOST",
@@ -391,6 +391,43 @@ def test_invalid_configuration_produces_sanitized_validation_error(
         load_settings(env_file=None)
     error_text = str(exc_info.value)
     assert invalid_host not in error_text
+    assert secret_value not in error_text
+
+
+@pytest.mark.parametrize(
+    "provider_id",
+    ["nvidia-nim", "vercel-ai-gateway", "opencode-go"],
+)
+def test_ai_provider_id_accepts_builtin_and_declared_ids(provider_id: str) -> None:
+    settings = FrameNestSettings(_env_file=None, ai_provider_id=provider_id)
+
+    assert settings.ai_provider_id == provider_id
+
+
+def test_environment_override_accepts_declared_ai_provider_id(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("FRAMENEST_AI_PROVIDER_ID", "opencode-go")
+    settings = load_settings(env_file=None)
+
+    assert settings.ai_provider_id == "opencode-go"
+
+
+def test_invalid_ai_provider_id_produces_sanitized_validation_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    invalid_provider_id = "OpenCode!"
+    secret_value = "must-not-appear-in-error-output"
+    monkeypatch.setenv("FRAMENEST_AI_PROVIDER_ID", invalid_provider_id)
+    monkeypatch.setenv("FRAMENEST_API_KEY", secret_value)
+    with pytest.raises(ValidationError) as exc_info:
+        load_settings(env_file=None)
+    error_text = str(exc_info.value)
+    assert invalid_provider_id not in error_text
     assert secret_value not in error_text
 
 

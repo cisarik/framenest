@@ -50,7 +50,7 @@ DEFAULT_X_REQUEST_MAX_ACTIVE_PER_USER = 1
 DEFAULT_X_REQUEST_MAX_GLOBAL_ACTIVE = 8
 DEFAULT_X_REQUEST_MAX_SUBMITS_PER_HOUR = 6
 DEFAULT_X_REQUEST_MAX_FAILED_PER_24H = 10
-SUPPORTED_AI_PROVIDER_IDS = frozenset({"nvidia-nim", "vercel-ai-gateway"})
+_AI_PROVIDER_ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
 INGRESS_MODE_TCP = "tcp"
 INGRESS_MODE_TAILSCALE_UDS = "tailscale_uds"
 INGRESS_MODE_PUBLIC_PUBLISHED_UDS = "public_published_uds"
@@ -375,7 +375,7 @@ class FrameNestSettings(BaseSettings):
         if value is None:
             return None
         normalized = value.strip()
-        if normalized not in SUPPORTED_AI_PROVIDER_IDS:
+        if not _AI_PROVIDER_ID_PATTERN.fullmatch(normalized):
             raise ValueError("ai provider id is not supported")
         return normalized
 

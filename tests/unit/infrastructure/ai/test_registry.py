@@ -244,8 +244,10 @@ def test_declared_provider_without_credential_preserves_identity(tmp_path: Path)
 def test_environment_override_selects_declared_provider(tmp_path: Path) -> None:
     config_path = tmp_path / "config.json"
     _write_declared_config(config_path)
-    settings = _settings(tmp_path).model_copy(
-        update={"ai_provider_id": DECLARED_PROVIDER_ID, "ai_model_id": DECLARED_MODEL_ID}
+    settings = _settings(
+        tmp_path,
+        ai_provider_id=DECLARED_PROVIDER_ID,
+        ai_model_id=DECLARED_MODEL_ID,
     )
 
     resolved = resolve_ai_provider(
