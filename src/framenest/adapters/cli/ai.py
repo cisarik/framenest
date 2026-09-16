@@ -39,6 +39,11 @@ from framenest.infrastructure.ai.configuration import (
     write_ai_status_snapshot,
     write_ai_test_state,
 )
+from framenest.infrastructure.ai.activity_lock import (
+    AiActivityLock,
+    AiActivityLockError,
+    acquire_ai_activity_lock,
+)
 from framenest.infrastructure.ai.constants import (
     BUILTIN_PROVIDER_IDS,
     DEFAULT_PROVIDER_ID,
@@ -62,6 +67,15 @@ from framenest.infrastructure.ai.registry import (
     ResolvedAiProvider,
     provider_definitions,
     resolve_ai_provider,
+)
+from framenest.infrastructure.ai.vision_probe import (
+    EXPECTED_COLOR,
+    VISION_PROBE_PROMPT,
+    VisionProbeState,
+    default_vision_probe_state_path,
+    load_vision_probe_fixture,
+    match_expected_color,
+    write_vision_probe_state,
 )
 
 Input = Callable[[str], str]
@@ -170,6 +184,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="Confirm the non-interactive record removal.",
     )
     subcommands.add_parser("test", help="Run one explicit text-only provider connection test.")
+    vision_probe = subcommands.add_parser(
+        "vision-probe",
+        help="Run one non-persistent color vision probe with the committed fixture.",
+    )
+    vision_probe.add_argument(
+        "--confirm-cloud-upload",
+        action="store_true",
+        dest="confirm_cloud_upload",
+        help="Required explicit confirmation before contacting the configured provider.",
+    )
     still_frame_smoke = subcommands.add_parser(
         "still-frame-smoke",
         help="Run one non-persistent still-frame provider smoke with local images.",
@@ -235,6 +259,11 @@ def main(argv: Sequence[str] | None = None) -> int:
                 )
         if args.command == "test":
             return test_command(context)
+        if args.command == "vision-probe":
+            return vision_probe_command(
+                context,
+                confirm_cloud_upload=args.confirm_cloud_upload,
+            )
         if args.command == "still-frame-smoke":
             return still_frame_smoke_command(
                 context,
@@ -518,8 +547,8 @@ def test_command(context: _CliContext, *, output: Output = print) -> int:
         output(f"Required credential environment variable: {resolved.credential_environment_name}")
         return 2
     lock_path = resolved.test_state_path.parent / ".test.lock"
-    lock_fd = _acquire_test_lock(lock_path)
-    if lock_fd is None:
+    lock = _acquire_test_lock(lock_path)
+    if lock is None:
         output("AI test: provider_error")
         output("Another AI connection test is already running.")
         return 2
@@ -563,11 +592,87 @@ def test_command(context: _CliContext, *, output: Output = print) -> int:
         output(f"Model: {resolved.model_id}")
         return exit_code
     finally:
-        os.close(lock_fd)
+        lock.release()
+
+
+def vision_probe_command(
+    context: _CliContext,
+    *,
+    confirm_cloud_upload: bool,
+    output: Output = print,
+) -> int:
+    """Run one non-persistent provider-neutral color vision probe."""
+    if not confirm_cloud_upload:
+        output("AI vision probe: confirmation_required")
+        output("Pass --confirm-cloud-upload to contact the configured provider.")
+        return 2
+    resolved = _resolve(context)
+    if resolved.source == "unconfigured":
+        output("AI vision probe: not configured")
+        output("Configure server AI provider state before the vision probe.")
+        return 2
+    if not resolved.credential_available or resolved.provider is None:
+        output("AI vision probe: authentication_failed")
+        output("Credential available to this process: no")
+        output(f"Required credential environment variable: {resolved.credential_environment_name}")
+        return 2
+    if not _model_declares_vision(resolved):
+        output("AI vision probe: unsupported_model_capability")
+        output("The selected model does not declare the vision_input capability.")
+        return 2
+    state_path = default_vision_probe_state_path(resolved.config_path)
+    lock_path = state_path.parent / ".vision-probe.lock"
+    lock = _acquire_vision_probe_lock(lock_path)
+    if lock is None:
+        output("AI vision probe: provider_error")
+        output("Another AI provider operation is already running.")
+        return 2
+    try:
+        status = "provider_error"
+        matched = False
+        observed_color: str | None = None
+        exit_code = 2
         try:
-            lock_path.unlink(missing_ok=True)
-        except OSError:
-            pass
+            image_png = load_vision_probe_fixture()
+            content_text = resolved.provider.probe_vision(
+                prompt=VISION_PROBE_PROMPT,
+                image_png=image_png,
+            )
+            matched, observed_color = match_expected_color(content_text)
+            status = "success" if matched else "mismatch"
+            exit_code = 0 if matched else 2
+        except MediaSuggestionProviderAuthError:
+            status = "authentication_failed"
+        except MediaSuggestionProviderRateLimitedError:
+            status = "rate_limited_or_quota_exhausted"
+        except MediaSuggestionProviderModelUnavailableError:
+            status = "model_unavailable"
+        except MediaSuggestionProviderUnavailableError:
+            status = "provider_unreachable"
+        except MediaSuggestionProviderInvalidResponseError:
+            status = "invalid_response"
+        except MediaSuggestionProviderFailedError:
+            status = "provider_error"
+        except Exception:
+            status = "provider_error"
+        write_vision_probe_state(
+            VisionProbeState(
+                provider_id=resolved.provider_id,
+                model_id=resolved.model_id,
+                status=status,
+                matched=matched,
+                observed_color=observed_color,
+                probed_at_ms=now_ms(),
+            ),
+            state_path,
+        )
+        output(f"AI vision probe: {status}")
+        output(f"Expected color: {EXPECTED_COLOR}")
+        observed_text = "none" if observed_color is None else observed_color
+        output(f"Observed color: {observed_text}")
+        return exit_code
+    finally:
+        lock.release()
 
 
 def still_frame_smoke_command(
@@ -709,14 +814,24 @@ def _last_test_text(resolved: ResolvedAiProvider) -> str:
     return f"safe failure ({resolved.last_test.status})"
 
 
-def _acquire_test_lock(lock_path: Path) -> int | None:
-    lock_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+def _acquire_test_lock(lock_path: Path) -> AiActivityLock | None:
     try:
-        return os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
-    except FileExistsError:
-        return None
-    except OSError as exc:
+        return acquire_ai_activity_lock(lock_path)
+    except AiActivityLockError as exc:
         raise AiConfigurationError("AI test lock could not be created.") from exc
+
+
+def _acquire_vision_probe_lock(lock_path: Path) -> AiActivityLock | None:
+    try:
+        return acquire_ai_activity_lock(lock_path)
+    except AiActivityLockError as exc:
+        raise AiConfigurationError("AI vision probe lock could not be created.") from exc
+
+
+def _model_declares_vision(resolved: ResolvedAiProvider) -> bool:
+    if resolved.model_id is None:
+        return False
+    return "vision_input" in resolved.capabilities_for(resolved.model_id)
 
 
 if __name__ == "__main__":

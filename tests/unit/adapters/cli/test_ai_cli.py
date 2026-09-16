@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 import stat
 
@@ -35,6 +36,11 @@ from framenest.infrastructure.ai.provider_records import (
 )
 from framenest.infrastructure.ai.registry import resolve_ai_provider
 from framenest.infrastructure.ai.transport import HttpsJsonResponse
+from framenest.infrastructure.ai.vision_probe import (
+    VISION_PROBE_PROMPT,
+    default_vision_probe_state_path,
+    load_vision_probe_state,
+)
 
 DECLARED_PROVIDER_ID = "opencode-go"
 DECLARED_MODEL_ID = "deepseek-v4-flash-vision-exp"
@@ -991,3 +997,250 @@ def test_test_command_against_declared_provider_with_synthetic_credential(
     assert state.model_id == DECLARED_MODEL_ID
     assert state.status == "success"
     assert "AI test: success" in "\n".join(lines)
+
+
+class _ProbeProvider:
+    def __init__(self, *, result: str = "red", error: Exception | None = None) -> None:
+        self.result = result
+        self.error = error
+        self.calls: list[tuple[str, bytes]] = []
+
+    def probe_vision(self, *, prompt: str, image_png: bytes) -> str:
+        self.calls.append((prompt, image_png))
+        if self.error is not None:
+            raise self.error
+        return self.result
+
+
+def _vision_resolved(
+    tmp_path: Path,
+    provider: object,
+    *,
+    capabilities: tuple[str, ...] = ("vision_input",),
+) -> ai.ResolvedAiProvider:
+    return ai.ResolvedAiProvider(
+        provider_id=DECLARED_PROVIDER_ID,
+        display_name="OpenCode Go",
+        model_id=DECLARED_MODEL_ID,
+        source="server config",
+        credential_environment_name=DECLARED_CREDENTIAL_ENV,
+        credential_available=True,
+        provider=provider,
+        last_test=None,
+        last_status=None,
+        config_path=tmp_path / "ai" / "config.json",
+        test_state_path=tmp_path / "ai" / "test-state.json",
+        status_snapshot_path=tmp_path / "ai" / "status-snapshot.json",
+        protocol="openai-chat-completions",
+        base_url="https://opencode.ai/zen/go/v1",
+        provider_source="declared",
+        models=(
+            AiProviderModel(
+                model_id=DECLARED_MODEL_ID,
+                display_name="DeepSeek V4 Flash Vision Exp",
+                capabilities=capabilities,
+            ),
+        ),
+    )
+
+
+def test_vision_probe_requires_confirmation(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    def _fail(_context: ai._CliContext) -> ai.ResolvedAiProvider:
+        raise AssertionError("vision probe must not resolve before confirmation")
+
+    monkeypatch.setattr(ai, "_resolve", _fail)
+    lines: list[str] = []
+
+    result = ai.vision_probe_command(
+        ai._CliContext(config_path=tmp_path / "config.json"),
+        confirm_cloud_upload=False,
+        output=lines.append,
+    )
+
+    assert result == 2
+    assert "AI vision probe: confirmation_required" in "\n".join(lines)
+
+
+def test_vision_probe_success_persists_safe_state(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    provider = _ProbeProvider(result="Red.")
+    resolved = _vision_resolved(tmp_path, provider)
+    monkeypatch.setattr(ai, "_resolve", lambda _context: resolved)
+    lines: list[str] = []
+
+    result = ai.vision_probe_command(
+        ai._CliContext(config_path=resolved.config_path),
+        confirm_cloud_upload=True,
+        output=lines.append,
+    )
+
+    assert result == 0
+    assert len(provider.calls) == 1
+    prompt, image_png = provider.calls[0]
+    assert prompt == VISION_PROBE_PROMPT
+    assert image_png[:8] == b"\x89PNG\r\n\x1a\n"
+    output = "\n".join(lines)
+    assert "AI vision probe: success" in output
+    assert "Expected color: red" in output
+    assert "Observed color: red" in output
+    state = load_vision_probe_state(default_vision_probe_state_path(resolved.config_path))
+    assert state is not None
+    assert state.status == "success"
+    assert state.matched is True
+    assert state.observed_color == "red"
+    assert not (tmp_path / "ai" / ".vision-probe.lock").exists()
+
+
+def test_vision_probe_mismatch_is_honest_and_bounded(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    provider = _ProbeProvider(result="Blue.")
+    resolved = _vision_resolved(tmp_path, provider)
+    monkeypatch.setattr(ai, "_resolve", lambda _context: resolved)
+    lines: list[str] = []
+
+    result = ai.vision_probe_command(
+        ai._CliContext(config_path=resolved.config_path),
+        confirm_cloud_upload=True,
+        output=lines.append,
+    )
+
+    assert result == 2
+    output = "\n".join(lines)
+    assert "AI vision probe: mismatch" in output
+    assert "Expected color: red" in output
+    assert "Observed color: blue" in output
+    state = load_vision_probe_state(default_vision_probe_state_path(resolved.config_path))
+    assert state is not None
+    assert state.status == "mismatch"
+    assert state.matched is False
+    assert state.observed_color == "blue"
+
+
+def test_vision_probe_refuses_model_without_vision_capability(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    provider = _ProbeProvider()
+    resolved = _vision_resolved(tmp_path, provider, capabilities=())
+    monkeypatch.setattr(ai, "_resolve", lambda _context: resolved)
+    lines: list[str] = []
+
+    result = ai.vision_probe_command(
+        ai._CliContext(config_path=resolved.config_path),
+        confirm_cloud_upload=True,
+        output=lines.append,
+    )
+
+    assert result == 2
+    assert "AI vision probe: unsupported_model_capability" in "\n".join(lines)
+    assert provider.calls == []
+
+
+def test_vision_probe_busy_lock_fails_sanitized(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    provider = _ProbeProvider()
+    resolved = _vision_resolved(tmp_path, provider)
+    monkeypatch.setattr(ai, "_resolve", lambda _context: resolved)
+    lock_path = tmp_path / "ai" / ".vision-probe.lock"
+    lock_path.parent.mkdir(parents=True)
+    lock_path.write_text("", encoding="utf-8")
+    lines: list[str] = []
+
+    result = ai.vision_probe_command(
+        ai._CliContext(config_path=resolved.config_path),
+        confirm_cloud_upload=True,
+        output=lines.append,
+    )
+
+    assert result == 2
+    assert "Another AI provider operation is already running." in "\n".join(lines)
+    assert provider.calls == []
+    assert lock_path.exists()
+    assert not default_vision_probe_state_path(resolved.config_path).exists()
+
+
+def test_vision_probe_unconfigured_and_missing_credential_are_sanitized(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    unconfigured = ai.ResolvedAiProvider(
+        provider_id=None,
+        display_name=None,
+        model_id=None,
+        source="unconfigured",
+        credential_environment_name=None,
+        credential_available=False,
+        provider=None,
+        last_test=None,
+        last_status=None,
+        config_path=tmp_path / "ai" / "config.json",
+        test_state_path=tmp_path / "ai" / "test-state.json",
+        status_snapshot_path=tmp_path / "ai" / "status-snapshot.json",
+    )
+    monkeypatch.setattr(ai, "_resolve", lambda _context: unconfigured)
+    lines: list[str] = []
+
+    assert (
+        ai.vision_probe_command(
+            ai._CliContext(config_path=unconfigured.config_path),
+            confirm_cloud_upload=True,
+            output=lines.append,
+        )
+        == 2
+    )
+    assert "AI vision probe: not configured" in "\n".join(lines)
+
+    configured_without_credential = replace(
+        _vision_resolved(tmp_path, _ProbeProvider()),
+        credential_available=False,
+        provider=None,
+    )
+    monkeypatch.setattr(ai, "_resolve", lambda _context: configured_without_credential)
+    lines.clear()
+
+    assert (
+        ai.vision_probe_command(
+            ai._CliContext(config_path=configured_without_credential.config_path),
+            confirm_cloud_upload=True,
+            output=lines.append,
+        )
+        == 2
+    )
+    output = "\n".join(lines)
+    assert "AI vision probe: authentication_failed" in output
+    assert "Credential available to this process: no" in output
+
+
+def test_vision_probe_provider_failure_is_sanitized(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    provider = _ProbeProvider(error=MediaSuggestionProviderAuthError("raw provider secret"))
+    resolved = _vision_resolved(tmp_path, provider)
+    monkeypatch.setattr(ai, "_resolve", lambda _context: resolved)
+    lines: list[str] = []
+
+    result = ai.vision_probe_command(
+        ai._CliContext(config_path=resolved.config_path),
+        confirm_cloud_upload=True,
+        output=lines.append,
+    )
+
+    assert result == 2
+    output = "\n".join(lines)
+    assert "AI vision probe: authentication_failed" in output
+    assert "raw" not in output
+    assert "secret" not in output
+    state = load_vision_probe_state(default_vision_probe_state_path(resolved.config_path))
+    assert state is not None
+    assert state.status == "authentication_failed"
+    assert state.observed_color is None

@@ -52,6 +52,10 @@ from framenest.infrastructure.ai.transport import (
     TRANSPORT_RATE_LIMITED_MESSAGE,
     TRANSPORT_UNAVAILABLE_MESSAGE,
 )
+from framenest.infrastructure.ai.vision_probe import (
+    VISION_PROBE_PROMPT,
+    load_vision_probe_fixture,
+)
 
 _SECRET = "test-nvidia-secret-value"
 _SENSITIVE_PATH = "/sensitive-example/private-media.mp4"
@@ -269,6 +273,38 @@ def test_connection_test_sends_text_only_body_without_media_fields() -> None:
     assert payload["chat_template_kwargs"] == {"enable_thinking": False}
     assert "image_url" not in raw_body.decode("utf-8")
     assert "data:" not in raw_body.decode("utf-8")
+
+
+def test_probe_vision_sends_single_shared_probe_request_and_returns_content() -> None:
+    transport = _FakeTransport(body=_provider_response_payload("red"))
+    provider = NvidiaNimMediaSuggestionProvider(
+        NvidiaApiCredential(_SECRET),
+        transport,
+        model_id=DEFAULT_MODEL_ID,
+    )
+
+    text = provider.probe_vision(
+        prompt=VISION_PROBE_PROMPT,
+        image_png=load_vision_probe_fixture(),
+    )
+
+    assert text == "red"
+    assert len(transport.post_calls) == 1
+    assert transport.get_calls == []
+    url, headers, raw_body = transport.post_calls[0]
+    assert url == NVIDIA_CHAT_COMPLETIONS_URL
+    assert headers["Authorization"] == f"Bearer {_SECRET}"
+    assert "User-Agent" not in headers
+    payload = json.loads(raw_body)
+    assert payload["model"] == DEFAULT_MODEL_ID
+    assert payload["stream"] is False
+    assert payload["temperature"] == 0
+    assert "response_format" not in payload
+    content = payload["messages"][0]["content"]
+    assert content[0] == {"type": "text", "text": VISION_PROBE_PROMPT}
+    assert content[1]["type"] == "image_url"
+    assert content[1]["image_url"]["url"].startswith("data:image/jpeg;base64,")
+    assert "data:image/png" not in raw_body.decode("utf-8")
 
 
 def test_provider_uses_immediate_200_without_status_polling() -> None:

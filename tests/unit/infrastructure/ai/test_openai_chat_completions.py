@@ -31,11 +31,17 @@ from framenest.infrastructure.ai.constants import (
 from framenest.infrastructure.ai.credentials import GenericAiProviderCredential
 from framenest.infrastructure.ai.image_derivative import VlmImageDerivative
 from framenest.infrastructure.ai.openai_chat_completions import (
+    VISION_PROBE_MAX_TOKENS,
     OpenAiChatCompletionsMediaSuggestionProvider,
     build_chat_completions_connection_test_body,
     build_chat_completions_suggestion_body,
+    build_chat_completions_vision_probe_body,
 )
 from framenest.infrastructure.ai.transport import HttpsJsonResponse
+from framenest.infrastructure.ai.vision_probe import (
+    VISION_PROBE_PROMPT,
+    load_vision_probe_fixture,
+)
 
 BASE_URL = "https://opencode.ai/zen/go/v1"
 CHAT_COMPLETIONS_URL = BASE_URL + "/chat/completions"
@@ -304,3 +310,84 @@ def test_credential_value_never_appears_in_request_body() -> None:
 
     body = transport.calls[0][2]
     assert CREDENTIAL_SENTINEL.encode("utf-8") not in body
+
+
+def test_vision_probe_body_uses_single_image_and_no_response_format() -> None:
+    body = build_chat_completions_vision_probe_body(
+        model_id=MODEL_ID,
+        prompt=VISION_PROBE_PROMPT,
+        image=load_vision_probe_fixture(),
+    )
+
+    assert body["model"] == MODEL_ID
+    assert body["stream"] is False
+    assert body["temperature"] == 0
+    assert body["max_tokens"] == VISION_PROBE_MAX_TOKENS
+    assert "response_format" not in body
+    content = body["messages"][0]["content"]
+    assert content[0] == {"type": "text", "text": VISION_PROBE_PROMPT}
+    assert len(content) == 2
+    assert content[1]["type"] == "image_url"
+    encoded = json.dumps(body)
+    assert content[1]["image_url"]["url"].startswith("data:image/jpeg;base64,")
+    assert "data:image/png" not in encoded
+    assert "/Users/" not in encoded
+
+
+def test_probe_vision_performs_one_bounded_call_and_returns_content() -> None:
+    transport = _Transport(_success_response("red"))
+    provider = _provider(transport)
+
+    text = provider.probe_vision(
+        prompt=VISION_PROBE_PROMPT,
+        image_png=load_vision_probe_fixture(),
+    )
+
+    assert text == "red"
+    assert len(transport.calls) == 1
+    url, headers, body, max_request_bytes = transport.calls[0]
+    assert url == CHAT_COMPLETIONS_URL
+    assert headers["User-Agent"] == SHARED_USER_AGENT
+    assert max_request_bytes == MAX_REQUEST_BODY_BYTES
+    assert CREDENTIAL_SENTINEL not in body.decode("utf-8")
+
+
+@pytest.mark.parametrize(
+    ("status_code", "expected_error"),
+    [
+        (403, MediaSuggestionProviderAuthError),
+        (429, MediaSuggestionProviderRateLimitedError),
+        (404, MediaSuggestionProviderModelUnavailableError),
+        (500, MediaSuggestionProviderUnavailableError),
+        (400, MediaSuggestionProviderInvalidResponseError),
+    ],
+)
+def test_probe_vision_maps_status_errors(
+    status_code: int,
+    expected_error: type[Exception],
+) -> None:
+    transport = _Transport(HttpsJsonResponse(status_code=status_code, body=b'{"error":"raw"}'))
+    provider = _provider(transport)
+
+    with pytest.raises(expected_error):
+        provider.probe_vision(prompt=VISION_PROBE_PROMPT, image_png=load_vision_probe_fixture())
+
+    assert len(transport.calls) == 1
+
+
+def test_probe_vision_rejects_invalid_image_without_call() -> None:
+    transport = _Transport(_success_response("red"))
+    provider = _provider(transport)
+
+    with pytest.raises(MediaSuggestionProviderInvalidResponseError):
+        provider.probe_vision(prompt=VISION_PROBE_PROMPT, image_png=b"not a png")
+
+    assert transport.calls == []
+
+
+def test_probe_vision_rejects_bad_json_response() -> None:
+    transport = _Transport(HttpsJsonResponse(status_code=200, body=b"{not json"))
+    provider = _provider(transport)
+
+    with pytest.raises(MediaSuggestionProviderInvalidResponseError):
+        provider.probe_vision(prompt=VISION_PROBE_PROMPT, image_png=load_vision_probe_fixture())

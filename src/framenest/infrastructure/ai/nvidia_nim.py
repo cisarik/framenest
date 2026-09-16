@@ -1115,6 +1115,53 @@ class NvidiaNimMediaSuggestionProvider:
         except Exception:
             raise MediaSuggestionProviderFailedError(SUGGESTION_PROVIDER_FAILED_MESSAGE) from None
 
+    def probe_vision(self, *, prompt: str, image_png: bytes) -> str:
+        """Submit exactly one bounded single-image vision probe request."""
+        from framenest.infrastructure.ai.openai_chat_completions import (
+            build_chat_completions_vision_probe_body,
+        )
+
+        try:
+            body_dict = build_chat_completions_vision_probe_body(
+                model_id=self._model_id,
+                prompt=prompt,
+                image=image_png,
+            )
+            body = json.dumps(body_dict, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+        except (FrameNestImageDerivativeError, TypeError):
+            raise MediaSuggestionProviderInvalidResponseError(
+                SUGGESTION_PROVIDER_INVALID_RESPONSE_MESSAGE
+            ) from None
+        headers = {
+            "Authorization": self._credential.authorization_header(),
+            "Content-Type": "application/json",
+        }
+        try:
+            response = self._transport.post_json(
+                NVIDIA_CHAT_COMPLETIONS_URL,
+                headers=headers,
+                body=body,
+                max_request_bytes=MAX_REQUEST_BODY_BYTES,
+            )
+            response = self._resolve_pending_response(
+                response,
+                headers={"Authorization": headers["Authorization"]},
+            )
+            payload = _decode_json_body(response)
+        except HttpsTransportError as exc:
+            raise _map_transport_error(exc) from None
+        except (
+            MediaSuggestionProviderAuthError,
+            MediaSuggestionProviderInvalidResponseError,
+            MediaSuggestionProviderModelUnavailableError,
+            MediaSuggestionProviderRateLimitedError,
+            MediaSuggestionProviderUnavailableError,
+        ):
+            raise
+        except Exception:
+            raise MediaSuggestionProviderFailedError(SUGGESTION_PROVIDER_FAILED_MESSAGE) from None
+        return extract_message_content(payload)
+
     def _resolve_pending_response(
         self,
         response: object,

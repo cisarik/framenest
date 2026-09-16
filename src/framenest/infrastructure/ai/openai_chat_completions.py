@@ -60,6 +60,7 @@ from framenest.infrastructure.ai.transport import (
 CHAT_COMPLETIONS_PATH = "/chat/completions"
 MAX_SUGGESTION_TOKENS = 1024
 CONNECTION_TEST_MAX_TOKENS = 8
+VISION_PROBE_MAX_TOKENS = 16
 
 
 def _metadata_summary(request: MediaSuggestionRequest) -> str:
@@ -147,6 +148,37 @@ def build_chat_completions_connection_test_body(*, model_id: str) -> dict[str, A
         "stream": False,
         "temperature": 0,
         "max_tokens": CONNECTION_TEST_MAX_TOKENS,
+    }
+
+
+def build_chat_completions_vision_probe_body(
+    *,
+    model_id: str,
+    prompt: str,
+    image: bytes,
+) -> dict[str, Any]:
+    """Build one single-image vision probe request body without response_format."""
+    derivative = PillowVlmImageDerivativeEncoder().encode_png_bytes(image)
+    encoded = base64.b64encode(derivative.payload).decode("ascii")
+    return {
+        "model": model_id,
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": prompt},
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:{derivative.mime_type};base64,{encoded}",
+                        },
+                    },
+                ],
+            }
+        ],
+        "stream": False,
+        "temperature": 0,
+        "max_tokens": VISION_PROBE_MAX_TOKENS,
     }
 
 
@@ -274,6 +306,22 @@ class OpenAiChatCompletionsMediaSuggestionProvider:
         body = json.dumps(body_dict, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
         payload = self._post_and_decode(body)
         extract_message_content(payload)
+
+    def probe_vision(self, *, prompt: str, image_png: bytes) -> str:
+        """Run exactly one bounded single-image vision probe request."""
+        try:
+            body_dict = build_chat_completions_vision_probe_body(
+                model_id=self._model_id,
+                prompt=prompt,
+                image=image_png,
+            )
+            body = json.dumps(body_dict, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+        except (FrameNestImageDerivativeError, TypeError):
+            raise MediaSuggestionProviderInvalidResponseError(
+                SUGGESTION_PROVIDER_INVALID_RESPONSE_MESSAGE
+            ) from None
+        payload = self._post_and_decode(body)
+        return extract_message_content(payload)
 
     def _post_and_decode(self, body: bytes) -> dict[str, Any]:
         headers = {
