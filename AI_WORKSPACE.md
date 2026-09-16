@@ -49,15 +49,23 @@ inside the dialog, and preserves the current unsaved editor values.
 The save derives the automatic built-in `Processed` workflow collection from the
 durable tag list, but `Processed` is not an ordinary editor control.
 
-Server AI administration is currently a CLI boundary. `./framenest ai
-configure` writes only non-secret provider/model selection outside the
-repository, `./framenest ai status` is network-free and writes only a safe local
-status snapshot, and `./framenest ai test` is the only explicit text-only
-connection test. NVIDIA NIM remains supported. Vercel AI Gateway is also
-supported with preferred model `google/gemini-3.1-flash-lite`. Provider
-credentials remain in the server environment (`NVIDIA_API_KEY` or
-`AI_GATEWAY_API_KEY`) and are not stored in the browser, non-secret AI
-configuration file, or status snapshot.
+Server AI administration is an operator boundary: the CLI plus an
+authenticated administrator-only website surface over the trusted Tailscale
+workspace ingress. `./framenest ai configure` writes only non-secret
+provider/model selection outside the repository, `./framenest ai status` is
+network-free and writes only a safe local status snapshot, `./framenest ai
+test` is an explicit text-only connection test, `./framenest ai provider
+add|list|remove` manages declared records, and `./framenest ai vision-probe`
+runs one explicit synthetic color test. The administrator surface lists
+built-in and operator-declared providers, manages non-secret schema-v2
+declarative records, activates one provider/model, and runs explicit ping/pong
+diagnostics under `provider.operate` with audit-before-mutation. NVIDIA NIM and
+Vercel AI Gateway remain built-in providers, and declared OpenAI-compatible
+records (first instance OpenCode Go) add operator-declared models and
+capabilities. Provider credentials remain in the server environment
+(`NVIDIA_API_KEY`, `AI_GATEWAY_API_KEY`, and each declared record's credential
+environment-variable name such as `OPENCODE_API_KEY`) and are not stored in the
+browser, non-secret AI configuration file, or status snapshot.
 
 The browser AI capability response is read-only and distinguishes
 `not_configured`, `credential_unavailable`, `configured_unverified`,
@@ -193,22 +201,26 @@ Browsing, filtering, selecting, or highlighting a model must not invoke a
 provider. Only an explicit final action such as `Analyze with this model` may
 invoke analysis.
 
-Server-side administration remains responsible for credentials, provider
-configuration, provider enablement, defaults, discovery refresh, and
-unavailable-provider remediation. The workspace picker selects from configured,
-currently compatible choices.
+Server-side administration — now including the authenticated administrator
+website provider surface, schema-v2 declared provider records, and CLI record
+management — remains responsible for credentials, provider configuration,
+provider enablement, defaults, unavailable-provider remediation, and discovery
+refresh. Discovery refresh and the workspace picker itself remain deferred. The
+workspace picker selects from configured, currently compatible choices.
 
 Free or trial information must be treated as provider-reported and temporary,
 not as permanent product truth.
 
 ## Capability Labels
 
-Future filtering should use provider-neutral capability concepts such as
-`vision_input`, `video_input`, `structured_text_output`, `image_generation`,
-`image_editing`, `reference_image`, `local_execution`, and `cloud_execution`.
+Provider-neutral capability concepts such as `vision_input`, `video_input`,
+`structured_text_output`, `image_generation`, `image_editing`,
+`reference_image`, `local_execution`, and `cloud_execution` are now declared
+per provider record model and consumed for gating: Analyze and the vision probe
+refuse a selected model that does not declare `vision_input`.
 
-Exact implementation names, discovery contracts, compatibility registries,
-refresh cadence, and provider-specific fallbacks are deferred.
+Exact discovery contracts, compatibility registries, refresh cadence, and
+provider-specific fallbacks are deferred.
 
 The workspace must not assume every provider supports dynamic discovery, every
 model supports every workflow, one fixed model count exists, or one provider

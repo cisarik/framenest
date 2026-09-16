@@ -581,6 +581,18 @@ rollback. Check mode validates the selected private credential source and the
 selected tracked provider-specific drop-in template locally before any SSH
 activity.
 
+The helper supports three provider credential identities: `NVIDIA_API_KEY` for
+NVIDIA NIM, `AI_GATEWAY_API_KEY` for Vercel AI Gateway, and `OPENCODE_API_KEY`
+for operator-declared OpenCode Go records. Each identity uses its exact tracked
+two-line `LoadCredential=` drop-in template under `deploy/systemd/`
+(`framenest-ai-credential-nvidia-nim.conf`,
+`framenest-ai-credential-vercel-ai-gateway.conf`, and
+`framenest-ai-credential-opencode-go.conf`). An OpenCode Go provider record is
+declared and activated through the authenticated administrator AI providers
+surface or the `framenest-ai provider add` CLI before deployment; the helper
+installs only the selected credential and the non-secret provider/model
+selection.
+
 The systemd credential drop-in source is always the exact tracked template
 under `deploy/systemd/` for the selected provider. The helper validates the
 template's strict two-line `LoadCredential=` contract locally, transfers the

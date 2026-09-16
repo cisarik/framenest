@@ -70,14 +70,33 @@ The initial local media-analysis preparation boundary uses optional external `ff
 The initial media suggestion preview uses an explicit cloud-upload confirmation gate and sends provider requests only through the FrameNest server. Server AI administration is performed by `./framenest ai status`, `./framenest ai configure`, and `./framenest ai test`. `status` is network-free. `configure` writes only non-secret provider/model selection outside the repository and must not write API keys, Authorization headers, cookies, provider responses, prompts, frame data, media paths, or database paths. `test` is an explicit minimal text-only provider request and persists only a safe category and timestamp. NVIDIA NIM uses `NVIDIA_API_KEY`; Vercel AI Gateway uses `AI_GATEWAY_API_KEY`. Operator commands, browser diagnostics, and sanitized errors must not include API keys, Authorization headers, absolute paths, raw provider responses, raw prompts, PNG/base64 payloads, or reasoning/chain-of-thought content. Suggestion output is untrusted preview data and must not be persisted automatically.
 
 The ignored local-development file `.secrets/ai.env.fish` may export
-`NVIDIA_API_KEY` and/or `AI_GATEWAY_API_KEY` for the root launcher. The launcher
-must reject symlinks, non-private files, wrong ownership, and invalid Fish
-syntax before sourcing it, and must not print file contents or credential
-values. Production AI credentials are repository-supported through optional
-systemd credential drop-ins and exact-name `CREDENTIALS_DIRECTORY` resolution.
-The base service remains credential-optional, `/etc/framenest/framenest.env`
-remains non-secret, and real host installation remains a separately authorized
-deployment task.
+`NVIDIA_API_KEY`, `AI_GATEWAY_API_KEY`, and/or `OPENCODE_API_KEY` for the root
+launcher. The launcher must reject symlinks, non-private files, wrong
+ownership, and invalid Fish syntax before sourcing it, and must not print file
+contents or credential values. Production AI credentials are
+repository-supported through optional systemd credential drop-ins and
+exact-name `CREDENTIALS_DIRECTORY` resolution. The base service remains
+credential-optional, `/etc/framenest/framenest.env` remains non-secret, and
+real host installation remains a separately authorized deployment task.
+
+The administrator AI provider surface is an authenticated website boundary
+under `provider.operate`. It lists built-in and operator-declared
+OpenAI-compatible provider records, manages only non-secret schema-v2
+configuration, activates one provider/model, and runs explicit ping/pong
+diagnostics through the FrameNest server. Mutating routes require the exact
+external `Origin` plus `X-FrameNest-Request: 1` and are audited before
+mutation; ordinary identities receive sanitized 403 responses and never see
+the control. Browser responses and stored records expose only credential
+environment-variable names and availability booleans — never credential
+values, credential prefixes, Authorization headers, or provider payloads.
+Ping is an explicit text-only provider request. Pong requires explicit
+cloud-upload confirmation, sends exactly one repository-owned synthetic
+fixture image, and persists only a bounded observed token, never raw
+completion text. Provider operations hold one activity lock at a time
+(`.test.lock` for ping, `.vision-probe.lock` for pong), and a provider HTTP 403
+is reported as credential or entitlement rejection. Declared records and the
+active selection resolve per operation, so an added or activated provider
+takes effect without a service restart.
 
 The catalog backup foundation uses `framenest-backup` for the SQLite catalog
 only. Backup manifests and command output must not contain source paths,

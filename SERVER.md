@@ -292,12 +292,17 @@ verifies them.
 
 ## Server-Side AI Provider Boundary
 
-FrameNest now has an initial server-operated AI provider boundary for the local
-development server. Ordinary browser and desktop clients do not configure
-providers, select models, enter API keys, receive provider credentials, or call
-NVIDIA, Vercel, Google, or another provider directly. Browser clients may view
+FrameNest has a server-operated AI provider boundary for the local development
+server. Ordinary browser and desktop clients never configure providers, select
+models, enter API keys, receive provider credentials, or call NVIDIA, Vercel,
+OpenCode Go, Google, or another provider directly. Browser clients may view
 sanitized read-only server AI status and may explicitly request AI analysis
-through the FrameNest server when a provider is configured.
+through the FrameNest server when a provider is configured. Authenticated
+administrators additionally get a separate website surface under
+`provider.operate`: they may manage non-secret declarative provider records,
+activate one provider/model, and run explicit ping/pong diagnostics through
+the server. That surface exposes only credential environment-variable names
+and availability booleans, never credential values.
 
 Server operators use the root CLI:
 
@@ -319,7 +324,9 @@ The browser Status modal is read-only. Its AI tab shows the configured provider
 and model plus safe historical status rows when such state exists. Its Cloud tab
 uses the sanitized server status contract and reports the local development
 server as connected over loopback; when the Tailscale ingress mode is active it
-reports the exact external tailnet origin instead.
+reports the exact external tailnet origin instead. Provider administration
+lives in the separate administrator AI providers surface, not in this
+read-only modal.
 
 In development, provider credentials remain in the server process environment:
 `NVIDIA_API_KEY` for NVIDIA NIM and `AI_GATEWAY_API_KEY` for Vercel AI Gateway.
@@ -359,7 +366,10 @@ The current MacBook MVP does not include:
 - automatic synchronization;
 - per-user visibility state such as Trash;
 - media second-copy backup orchestration;
-- centralized browser provider Settings;
+- a desktop Settings app or generalized browser settings beyond the
+  authenticated administrator AI provider surface (the companion
+  automatic-analysis checkbox is unchanged and desktop Settings remains
+  unshipped);
 - multi-device conflict resolution;
 - server-side media import beyond the shipped upload and acquisition paths.
 

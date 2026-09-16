@@ -696,18 +696,19 @@ Provider secrets SHOULD remain server-held where possible.
 
 Provider secrets MUST NOT be returned to ordinary clients.
 
-Ordinary browser clients MUST NOT configure AI providers, activate models, enter
-provider API keys, receive provider API keys, or call external AI providers
-directly.
-
-Server AI provider administration MUST use an operator boundary. The initial
-operator boundary is `./framenest ai configure`, `./framenest ai status`, and
-`./framenest ai test`.
+Server AI provider administration MUST use an operator boundary: the CLI
+(`./framenest ai ...`) plus an authenticated administrator-only web surface
+reached through `provider.operate` over the trusted Tailscale workspace
+ingress. Ordinary browser clients MUST NOT configure AI providers, activate
+models, enter provider API keys, receive provider API keys, or call external AI
+providers directly.
 
 Server AI configuration files MUST contain only schema-versioned non-secret
-provider/model selection and safe timestamps. They MUST NOT contain API keys,
-Authorization headers, cookies, provider responses, prompts, frame data, media
-paths, or database paths.
+provider/model selection, declarative provider records (provider id, display
+name, protocol, base URL, credential environment-variable **name**, declared
+models, and declared capabilities), and safe timestamps. They MUST NOT contain
+API keys, Authorization headers, cookies, provider responses, prompts, frame
+data, media paths, or database paths.
 
 AI configuration precedence MUST preserve deployment overrides: explicit
 FrameNest provider/model environment overrides first, then persisted non-secret
@@ -718,10 +719,23 @@ is present and no explicit provider configuration exists, then unconfigured.
 explicit text-only provider request, upload no media data, and persist only a
 safe last-test category and timestamp.
 
-NVIDIA NIM and Vercel AI Gateway are supported server providers in this slice.
-Vercel AI Gateway uses `AI_GATEWAY_API_KEY` and preferred model
-`google/gemini-3.1-flash-lite`. NVIDIA NIM keeps the existing `NVIDIA_API_KEY`
-credential boundary and default model.
+Administrator-initiated `ping` MUST be an explicit text-only provider request;
+administrator-initiated `pong` MUST send exactly one repository-owned synthetic
+fixture image and MUST require explicit cloud-upload confirmation; neither MUST
+use catalog media, persist a suggestion, or run without an explicit
+administrator action. Analyze and the vision probe MUST refuse a selected model
+that does not declare `vision_input`. A provider HTTP `403` MUST be reported as
+credential or entitlement rejection, never as invalid output. Provider
+declarations MUST be `https://` only for non-loopback hosts; local-gateway base
+URLs remain deferred.
+
+NVIDIA NIM and Vercel AI Gateway remain supported built-in server providers,
+and the server supports operator-declared OpenAI-compatible provider records
+(first instance: OpenCode Go at `https://opencode.ai/zen/go/v1`) persisted as
+non-secret schema-versioned configuration. Vercel AI Gateway uses
+`AI_GATEWAY_API_KEY` and preferred model `google/gemini-3.1-flash-lite`.
+NVIDIA NIM keeps the existing `NVIDIA_API_KEY` credential boundary and default
+model.
 
 Suspicious filename analysis MUST occur only on user action.
 
