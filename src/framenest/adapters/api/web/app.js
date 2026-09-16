@@ -557,6 +557,21 @@ function applyIdentityCapabilities() {
   ) {
     closeWorkspaceMediaBrowser();
   }
+  const providerAdministrationAllowed = typeof identityAllowsProviderAdministration === "function"
+    && identityAllowsProviderAdministration();
+  if (typeof aiProvidersButton !== "undefined" && aiProvidersButton) {
+    aiProvidersButton.hidden = !providerAdministrationAllowed;
+  }
+  if (
+    !providerAdministrationAllowed
+    && typeof aiProvidersDialog !== "undefined"
+    && aiProvidersDialog
+    && typeof aiProvidersDialog.hasAttribute === "function"
+    && aiProvidersDialog.hasAttribute("open")
+    && typeof closeAiProvidersDialog === "function"
+  ) {
+    closeAiProvidersDialog();
+  }
   updateMetadataControls();
 }
 
@@ -638,6 +653,30 @@ const uploadOpenButton = document.querySelector("#upload-open-button");
 const identityBadge = document.querySelector("#identity-badge");
 const identityStatusName = document.querySelector("#identity-status-name");
 const statusTailscaleAdminOnlyRows = document.querySelectorAll(".status-tailscale-admin-only");
+const aiProvidersButton = document.querySelector("#ai-providers-button");
+const aiProvidersDialog = document.querySelector("#ai-providers-dialog");
+const aiProvidersCloseButton = document.querySelector("#ai-providers-close-button");
+const aiProvidersActiveSummary = document.querySelector("#ai-providers-active-summary");
+const aiProvidersStatus = document.querySelector("#ai-providers-status");
+const aiProvidersList = document.querySelector("#ai-providers-list");
+const aiProvidersForm = document.querySelector("#ai-providers-form");
+const aiProvidersJsonPreview = document.querySelector("#ai-providers-json-preview");
+const aiProviderIdInput = document.querySelector("#ai-provider-id");
+const aiProviderNameInput = document.querySelector("#ai-provider-name");
+const aiProviderBaseUrlInput = document.querySelector("#ai-provider-base-url");
+const aiProviderCredentialEnvInput = document.querySelector("#ai-provider-credential-env");
+const aiProviderProtocolInput = document.querySelector("#ai-provider-protocol");
+const aiProviderModelsList = document.querySelector("#ai-provider-models");
+const aiProviderAddModelButton = document.querySelector("#ai-provider-add-model");
+const aiProviderSaveButton = document.querySelector("#ai-provider-save");
+const aiProviderActivateButton = document.querySelector("#ai-provider-activate");
+const aiProviderPingButton = document.querySelector("#ai-provider-ping");
+const aiProviderPongButton = document.querySelector("#ai-provider-pong");
+const aiProviderDeleteButton = document.querySelector("#ai-provider-delete");
+const aiProviderPongConfirm = document.querySelector("#ai-provider-pong-confirm");
+const aiProviderPongConfirmNote = document.querySelector("#ai-provider-pong-confirm-note");
+const aiProviderPongCancelButton = document.querySelector("#ai-provider-pong-cancel");
+const aiProviderPongConfirmButton = document.querySelector("#ai-provider-pong-confirm-button");
 const uploadDialog = document.querySelector("#upload-dialog");
 const uploadDialogTitle = document.querySelector("#upload-dialog-title");
 const uploadCloseButton = document.querySelector("#upload-close-button");
@@ -11808,3 +11847,949 @@ if (xRequestForm) xRequestForm.addEventListener("submit", submitXRequest);
 if (xAdminOpenButton) xAdminOpenButton.addEventListener("click", openXAdminDialog);
 if (xAdminCloseButton) xAdminCloseButton.addEventListener("click", closeXAdminDialog);
 if (xAdminForm) xAdminForm.addEventListener("submit", reviewXClaim);
+
+/* --- Administrator AI provider surface --- */
+
+const AI_ADMIN_PROVIDERS_ENDPOINT = "/api/admin/ai/providers";
+const AI_ADMIN_SELECTION_ENDPOINT = "/api/admin/ai/active-selection";
+const AI_ADMIN_PING_ENDPOINT = "/api/admin/ai/ping";
+const AI_ADMIN_PONG_ENDPOINT = "/api/admin/ai/pong";
+const AI_PROVIDER_DECLARED_PROTOCOL = "openai-chat-completions";
+const AI_PROVIDER_BUILTIN_IDS = new Set(["nvidia-nim", "vercel-ai-gateway"]);
+
+let lastFocusedElementBeforeAiProviders = null;
+let aiProviderPongArmed = false;
+let aiProvidersState = {
+  loaded: false,
+  providers: [],
+  activeProviderId: null,
+  activeModelId: null,
+  configurationSource: "",
+  selectedProviderId: "",
+  message: "",
+  errorMessage: "",
+  busy: false,
+};
+
+function identityAllowsProviderAdministration() {
+  return identityState.resolved
+    && isWorkspaceAudience()
+    && identityHasCapability("provider.operate")
+    && (identityState.available || identityState.audience === "trusted_loopback");
+}
+
+function aiProviderSourceLabel(source) {
+  return source === "declared" ? "Declared" : "Built-in";
+}
+
+function aiProviderCredentialHint(provider) {
+  const envName = provider && typeof provider.credential_env === "string"
+    ? provider.credential_env.trim()
+    : "";
+  const suffix = envName ? ` Set ${envName} for the FrameNest server process.` : "";
+  return `Credential available to this process: no.${suffix}`;
+}
+
+function aiProviderLastTestLabel(provider) {
+  const lastTest = provider && provider.last_test;
+  if (lastTest && typeof lastTest.status === "string") {
+    return `Last ping: ${lastTest.status}`;
+  }
+  return "Last ping: not tested";
+}
+
+function aiProviderLastProbeLabel(provider) {
+  const probe = provider && provider.last_vision_probe;
+  if (!probe || typeof probe.status !== "string") {
+    return "Last vision test: not run";
+  }
+  if (probe.status === "mismatch") {
+    const observed = typeof probe.observed_color === "string" && probe.observed_color
+      ? ` (observed ${probe.observed_color})`
+      : "";
+    return `Last vision test: mismatch${observed}`;
+  }
+  return `Last vision test: ${probe.status}`;
+}
+
+function aiProviderRowActions(provider, activeProviderId) {
+  if (!provider || typeof provider !== "object") {
+    return {
+      canEdit: false,
+      canDelete: false,
+      canActivate: false,
+      canPing: false,
+      canTestVision: false,
+    };
+  }
+  const declared = provider.source === "declared";
+  const credentialAvailable = provider.credential_available === true;
+  return {
+    canEdit: declared,
+    canDelete: declared && provider.provider_id !== activeProviderId,
+    canActivate: true,
+    canPing: credentialAvailable,
+    canTestVision: credentialAvailable && provider.supports_vision === true,
+  };
+}
+
+function aiProviderStatusMessage(code, fallback) {
+  switch (code) {
+    case "AI_PROVIDER_AUTHENTICATION_FAILED":
+      return "The provider rejected the credential or this model is not included in your subscription.";
+    case "AI_PROVIDER_RATE_LIMITED":
+      return "The provider rate limit was reached. Try again later.";
+    case "AI_PROVIDER_MODEL_UNAVAILABLE":
+      return "The configured model is not available to this provider.";
+    case "AI_PROVIDER_UNAVAILABLE":
+      return "The provider is not reachable right now.";
+    case "AI_PROVIDER_INVALID_RESPONSE":
+      return "The provider returned an invalid response.";
+    case "AI_PROVIDER_FAILED":
+      return "The provider request failed.";
+    case "AI_PROVIDER_BUSY":
+      return "Another AI provider operation is already running.";
+    case "AI_PROVIDER_BUILTIN":
+      return "Built-in providers cannot be edited or deleted.";
+    case "AI_PROVIDER_ACTIVE":
+      return "The active provider cannot be deleted; select another provider first.";
+    case "AI_PROVIDER_NOT_CONFIGURED":
+      return "The provider credential is not available to this process.";
+    case "AI_MODEL_CAPABILITY_MISSING":
+      return "The selected model does not declare vision support.";
+    case "CLOUD_CONFIRMATION_REQUIRED":
+      return "Explicit color-test confirmation is required.";
+    case "AI_CONFIG_UNAVAILABLE":
+      return "The AI provider configuration could not be read or saved.";
+    default:
+      return fallback || "The AI provider request failed.";
+  }
+}
+
+function aiProviderResponseMessage(payload, fallback) {
+  const error = payload && payload.error;
+  if (error && typeof error.message === "string" && error.message.trim()) {
+    return error.message.trim();
+  }
+  const code = error && typeof error.code === "string" ? error.code : "";
+  return aiProviderStatusMessage(code, fallback);
+}
+
+function sortedJsonValue(value) {
+  if (Array.isArray(value)) {
+    return value.map((entry) => sortedJsonValue(entry));
+  }
+  if (value && typeof value === "object") {
+    const sorted = {};
+    for (const key of Object.keys(value).sort()) {
+      sorted[key] = sortedJsonValue(value[key]);
+    }
+    return sorted;
+  }
+  return value;
+}
+
+function buildAiProviderRecordPayload({ name, baseUrl, credentialEnv, models }) {
+  const normalizedModels = {};
+  for (const model of Array.isArray(models) ? models : []) {
+    const modelId = model && typeof model.modelId === "string" ? model.modelId.trim() : "";
+    if (!modelId) continue;
+    const declaredName = model && typeof model.displayName === "string" && model.displayName.trim()
+      ? model.displayName.trim()
+      : modelId;
+    normalizedModels[modelId] = {
+      name: declaredName,
+      capabilities: model && model.visionInput ? ["vision_input"] : [],
+    };
+  }
+  return {
+    name: typeof name === "string" ? name.trim() : "",
+    protocol: AI_PROVIDER_DECLARED_PROTOCOL,
+    base_url: typeof baseUrl === "string" ? baseUrl.trim() : "",
+    credential_env: typeof credentialEnv === "string" ? credentialEnv.trim() : "",
+    models: normalizedModels,
+  };
+}
+
+function formatAiProviderJsonPreview(record) {
+  return JSON.stringify(sortedJsonValue(record), null, 2);
+}
+
+function aiProviderModelRows() {
+  if (!aiProviderModelsList || typeof aiProviderModelsList.querySelectorAll !== "function") {
+    return [];
+  }
+  const rows = [];
+  for (const row of aiProviderModelsList.querySelectorAll("[data-ai-provider-model-row]")) {
+    const modelIdInput = row.querySelector("[data-ai-provider-model-id]");
+    const nameInput = row.querySelector("[data-ai-provider-model-name]");
+    const visionInput = row.querySelector("[data-ai-provider-model-vision]");
+    rows.push({
+      modelId: modelIdInput ? modelIdInput.value : "",
+      displayName: nameInput ? nameInput.value : "",
+      visionInput: Boolean(visionInput && visionInput.checked),
+    });
+  }
+  return rows;
+}
+
+function collectAiProviderFormRecord() {
+  return buildAiProviderRecordPayload({
+    name: aiProviderNameInput ? aiProviderNameInput.value : "",
+    baseUrl: aiProviderBaseUrlInput ? aiProviderBaseUrlInput.value : "",
+    credentialEnv: aiProviderCredentialEnvInput ? aiProviderCredentialEnvInput.value : "",
+    models: aiProviderModelRows(),
+  });
+}
+
+function renderAiProviderJsonPreview() {
+  if (!aiProvidersJsonPreview) return;
+  aiProvidersJsonPreview.textContent = formatAiProviderJsonPreview(collectAiProviderFormRecord());
+}
+
+function handleAiProviderFormInput() {
+  renderAiProviderJsonPreview();
+}
+
+function providerById(providerId) {
+  if (!providerId) return null;
+  return aiProvidersState.providers.find(
+    (provider) => provider && provider.provider_id === providerId,
+  ) || null;
+}
+
+function activeProviderEntry() {
+  return providerById(aiProvidersState.activeProviderId);
+}
+
+function applyAiProvidersPayload(payload) {
+  const providers = payload && Array.isArray(payload.providers) ? payload.providers : [];
+  aiProvidersState.loaded = true;
+  aiProvidersState.providers = providers;
+  aiProvidersState.activeProviderId = payload && typeof payload.active_provider_id === "string"
+    ? payload.active_provider_id
+    : null;
+  aiProvidersState.activeModelId = payload && typeof payload.active_model_id === "string"
+    ? payload.active_model_id
+    : null;
+  aiProvidersState.configurationSource = payload && typeof payload.configuration_source === "string"
+    ? payload.configuration_source
+    : "";
+  if (!aiProvidersState.selectedProviderId && aiProvidersState.activeProviderId) {
+    aiProvidersState.selectedProviderId = aiProvidersState.activeProviderId;
+  }
+}
+
+async function fetchAiProvidersList() {
+  const response = await fetch(AI_ADMIN_PROVIDERS_ENDPOINT, {
+    headers: { Accept: "application/json" },
+    cache: "no-store",
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(aiProviderResponseMessage(payload, "The AI provider list is unavailable."));
+  }
+  return payload;
+}
+
+async function loadAiProviders() {
+  aiProvidersState.errorMessage = "";
+  try {
+    const payload = await fetchAiProvidersList();
+    applyAiProvidersPayload(payload);
+  } catch (error) {
+    aiProvidersState.loaded = false;
+    aiProvidersState.providers = [];
+    aiProvidersState.activeProviderId = null;
+    aiProvidersState.activeModelId = null;
+    aiProvidersState.errorMessage = error && error.message
+      ? error.message
+      : "The AI provider list is unavailable.";
+  }
+  renderAiProvidersState();
+}
+
+function setAiProviderButtonDisabled(button, disabled) {
+  if (button) button.disabled = Boolean(disabled);
+}
+
+function setAiProvidersBusy(busy, message) {
+  aiProvidersState.busy = Boolean(busy);
+  if (aiProvidersDialog && typeof aiProvidersDialog.setAttribute === "function") {
+    aiProvidersDialog.setAttribute("aria-busy", aiProvidersState.busy ? "true" : "false");
+  }
+  setAiProviderButtonDisabled(aiProviderPingButton, aiProvidersState.busy);
+  setAiProviderButtonDisabled(aiProviderPongButton, aiProvidersState.busy);
+  if (message !== undefined) {
+    aiProvidersState.message = aiProvidersState.busy ? message : "";
+  }
+  renderAiProvidersStatusLine();
+  if (!aiProvidersState.busy) {
+    renderAiProviderActionControls();
+  }
+}
+
+function renderAiProvidersSummary() {
+  if (!aiProvidersActiveSummary) return;
+  const lines = [];
+  const active = activeProviderEntry();
+  if (active) {
+    lines.push(`Active provider: ${active.display_name || active.provider_id} (${active.provider_id})`);
+    lines.push(`Model: ${active.selected_model_id || aiProvidersState.activeModelId || "not selected"}`);
+    lines.push(`Credential available to this process: ${active.credential_available ? "yes" : "no"}`);
+  } else {
+    lines.push("Active provider: none");
+    lines.push("Credential available to this process: no");
+  }
+  if (aiProvidersState.configurationSource === "environment") {
+    lines.push("Warning: an environment override currently shadows these settings.");
+  }
+  aiProvidersActiveSummary.textContent = lines.join("\n");
+}
+
+function renderAiProvidersStatusLine() {
+  if (!aiProvidersStatus) return;
+  if (aiProvidersState.errorMessage) {
+    aiProvidersStatus.textContent = aiProvidersState.errorMessage;
+  } else if (aiProvidersState.message) {
+    aiProvidersStatus.textContent = aiProvidersState.message;
+  } else {
+    aiProvidersStatus.textContent = aiProvidersState.loaded ? "" : "Loading providers…";
+  }
+}
+
+function aiProviderFact(text) {
+  const line = document.createElement("span");
+  line.className = "ai-provider-fact";
+  line.textContent = text;
+  return line;
+}
+
+function aiProviderActionButton(label, handler, disabled, destructive) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = destructive
+    ? "ai-provider-button ai-provider-button--danger"
+    : "ai-provider-button";
+  button.textContent = label;
+  button.disabled = Boolean(disabled);
+  button.addEventListener("click", handler);
+  return button;
+}
+
+function buildAiProviderRow(provider) {
+  const row = document.createElement("div");
+  row.className = "ai-provider-row";
+  row.dataset.providerId = provider.provider_id;
+  if (provider.provider_id === aiProvidersState.selectedProviderId) {
+    row.classList.add("ai-provider-row--selected");
+  }
+  const head = document.createElement("div");
+  head.className = "ai-provider-row__head";
+  const name = document.createElement("span");
+  name.className = "ai-provider-row__name";
+  name.textContent = provider.display_name || provider.provider_id;
+  head.appendChild(name);
+  const identifier = document.createElement("span");
+  identifier.className = "ai-provider-row__id";
+  identifier.textContent = provider.provider_id;
+  head.appendChild(identifier);
+  const badge = document.createElement("span");
+  badge.className = provider.source === "declared"
+    ? "ai-provider-badge ai-provider-badge--declared"
+    : "ai-provider-badge";
+  badge.textContent = aiProviderSourceLabel(provider.source);
+  head.appendChild(badge);
+  if (provider.provider_id === aiProvidersState.activeProviderId) {
+    const activeBadge = document.createElement("span");
+    activeBadge.className = "ai-provider-badge ai-provider-badge--active";
+    activeBadge.textContent = "Active";
+    head.appendChild(activeBadge);
+  }
+  row.appendChild(head);
+  const facts = document.createElement("div");
+  facts.className = "ai-provider-facts";
+  facts.appendChild(aiProviderFact(`Protocol: ${provider.protocol || "unknown"}`));
+  facts.appendChild(aiProviderFact(`Base URL: ${provider.base_url || "unknown"}`));
+  facts.appendChild(
+    aiProviderFact(`Credential environment variable: ${provider.credential_env || "unknown"}`),
+  );
+  facts.appendChild(
+    aiProviderFact(
+      provider.credential_available
+        ? "Credential available to this process: yes"
+        : aiProviderCredentialHint(provider),
+    ),
+  );
+  facts.appendChild(aiProviderFact(aiProviderLastTestLabel(provider)));
+  facts.appendChild(aiProviderFact(aiProviderLastProbeLabel(provider)));
+  row.appendChild(facts);
+  const models = document.createElement("div");
+  models.className = "ai-provider-model-chips";
+  for (const model of Array.isArray(provider.models) ? provider.models : []) {
+    const chip = document.createElement("span");
+    const selected = model.model_id === provider.selected_model_id;
+    chip.className = selected
+      ? "ai-provider-chip ai-provider-chip--selected"
+      : "ai-provider-chip";
+    const capabilities = Array.isArray(model.capabilities) && model.capabilities.length
+      ? ` [${model.capabilities.join(", ")}]`
+      : "";
+    chip.textContent = `${model.model_id}${selected ? " (selected)" : ""}${capabilities}`;
+    models.appendChild(chip);
+  }
+  row.appendChild(models);
+  const actions = document.createElement("div");
+  actions.className = "ai-provider-actions";
+  const availability = aiProviderRowActions(provider, aiProvidersState.activeProviderId);
+  actions.appendChild(
+    aiProviderActionButton(
+      "Use for analysis",
+      () => activateAiProvider(provider.provider_id),
+      !availability.canActivate,
+    ),
+  );
+  actions.appendChild(
+    aiProviderActionButton(
+      "Ping",
+      () => runAiProviderPing(provider.provider_id),
+      !availability.canPing,
+    ),
+  );
+  actions.appendChild(
+    aiProviderActionButton(
+      "Test vision",
+      () => requestAiProviderPong(provider.provider_id),
+      !availability.canTestVision,
+    ),
+  );
+  if (availability.canEdit) {
+    actions.appendChild(
+      aiProviderActionButton("Edit", () => editAiProvider(provider.provider_id), false),
+    );
+  }
+  if (availability.canDelete) {
+    actions.appendChild(
+      aiProviderActionButton("Delete", () => deleteAiProvider(provider.provider_id), false, true),
+    );
+  }
+  row.appendChild(actions);
+  return row;
+}
+
+function renderAiProvidersList() {
+  if (!aiProvidersList) return;
+  if (typeof aiProvidersList.replaceChildren === "function") {
+    aiProvidersList.replaceChildren();
+  } else {
+    aiProvidersList.textContent = "";
+  }
+  if (aiProvidersState.errorMessage || aiProvidersState.providers.length === 0) {
+    return;
+  }
+  for (const provider of aiProvidersState.providers) {
+    aiProvidersList.appendChild(buildAiProviderRow(provider));
+  }
+}
+
+function renderAiProviderActionControls() {
+  const selection = providerById(aiProvidersState.selectedProviderId);
+  const availability = aiProviderRowActions(selection, aiProvidersState.activeProviderId);
+  if (!aiProvidersState.busy) {
+    setAiProviderButtonDisabled(aiProviderPingButton, !availability.canPing);
+    setAiProviderButtonDisabled(aiProviderPongButton, !availability.canTestVision);
+  }
+  setAiProviderButtonDisabled(aiProviderActivateButton, !selection);
+  setAiProviderButtonDisabled(aiProviderDeleteButton, !availability.canDelete);
+}
+
+function renderAiProvidersState() {
+  renderAiProvidersSummary();
+  renderAiProvidersList();
+  renderAiProvidersStatusLine();
+  renderAiProviderActionControls();
+}
+
+async function openAiProvidersDialog() {
+  if (!identityAllowsProviderAdministration() || !aiProvidersDialog) return;
+  lastFocusedElementBeforeAiProviders = document.activeElement;
+  aiProvidersState.selectedProviderId = "";
+  aiProvidersState.message = "";
+  aiProvidersState.errorMessage = "";
+  cancelAiProviderPong();
+  resetAiProviderForm();
+  renderAiProvidersState();
+  if (typeof aiProvidersDialog.showModal === "function") {
+    aiProvidersDialog.showModal();
+  } else {
+    aiProvidersDialog.setAttribute("open", "");
+  }
+  const title = typeof aiProvidersDialog.querySelector === "function"
+    ? aiProvidersDialog.querySelector(".settings-dialog__title")
+    : null;
+  if (title && typeof title.focus === "function") title.focus();
+  await loadAiProviders();
+}
+
+function closeAiProvidersDialog() {
+  if (!aiProvidersDialog) return;
+  cancelAiProviderPong();
+  if (typeof aiProvidersDialog.close === "function") {
+    aiProvidersDialog.close();
+  } else {
+    aiProvidersDialog.removeAttribute("open");
+  }
+  if (lastFocusedElementBeforeAiProviders && typeof lastFocusedElementBeforeAiProviders.focus === "function") {
+    lastFocusedElementBeforeAiProviders.focus();
+  } else if (aiProvidersButton && typeof aiProvidersButton.focus === "function") {
+    aiProvidersButton.focus();
+  }
+  lastFocusedElementBeforeAiProviders = null;
+}
+
+function aiProviderModelRow({ modelId, displayName, visionInput }) {
+  const row = document.createElement("div");
+  row.className = "ai-provider-model-row";
+  row.dataset.aiProviderModelRow = "1";
+  const idField = document.createElement("input");
+  idField.type = "text";
+  idField.placeholder = "Model ID";
+  idField.autocomplete = "off";
+  idField.spellcheck = false;
+  idField.dataset.aiProviderModelId = "1";
+  idField.setAttribute("aria-label", "Model ID");
+  idField.value = modelId || "";
+  idField.addEventListener("input", handleAiProviderFormInput);
+  const nameField = document.createElement("input");
+  nameField.type = "text";
+  nameField.placeholder = "Model display name";
+  nameField.autocomplete = "off";
+  nameField.dataset.aiProviderModelName = "1";
+  nameField.setAttribute("aria-label", "Model display name");
+  nameField.value = displayName || "";
+  nameField.addEventListener("input", handleAiProviderFormInput);
+  const visionLabel = document.createElement("label");
+  visionLabel.className = "ai-provider-model-row__check";
+  const visionBox = document.createElement("input");
+  visionBox.type = "checkbox";
+  visionBox.dataset.aiProviderModelVision = "1";
+  visionBox.checked = Boolean(visionInput);
+  visionBox.addEventListener("change", handleAiProviderFormInput);
+  visionLabel.appendChild(visionBox);
+  const visionText = document.createElement("span");
+  visionText.textContent = "vision_input";
+  visionLabel.appendChild(visionText);
+  const removeButton = document.createElement("button");
+  removeButton.type = "button";
+  removeButton.className = "ai-provider-button ai-provider-button--danger";
+  removeButton.textContent = "Remove";
+  removeButton.addEventListener("click", () => {
+    if (typeof row.remove === "function") row.remove();
+    renderAiProviderJsonPreview();
+  });
+  row.appendChild(idField);
+  row.appendChild(nameField);
+  row.appendChild(visionLabel);
+  row.appendChild(removeButton);
+  return row;
+}
+
+function renderAiProviderModelRows(models) {
+  if (!aiProviderModelsList) return;
+  if (typeof aiProviderModelsList.replaceChildren === "function") {
+    aiProviderModelsList.replaceChildren();
+  } else {
+    aiProviderModelsList.textContent = "";
+  }
+  const entries = Array.isArray(models) && models.length
+    ? models
+    : [{ model_id: "", display_name: "", capabilities: [] }];
+  for (const model of entries) {
+    const capabilities = Array.isArray(model.capabilities) ? model.capabilities : [];
+    aiProviderModelsList.appendChild(
+      aiProviderModelRow({
+        modelId: model.model_id || "",
+        displayName: model.display_name || "",
+        visionInput: capabilities.includes("vision_input"),
+      }),
+    );
+  }
+  renderAiProviderJsonPreview();
+}
+
+function addAiProviderModelRow() {
+  if (!aiProviderModelsList) return;
+  aiProviderModelsList.appendChild(
+    aiProviderModelRow({ modelId: "", displayName: "", visionInput: true }),
+  );
+  renderAiProviderJsonPreview();
+}
+
+function resetAiProviderForm() {
+  if (aiProviderIdInput) aiProviderIdInput.value = "";
+  if (aiProviderNameInput) aiProviderNameInput.value = "";
+  if (aiProviderBaseUrlInput) aiProviderBaseUrlInput.value = "";
+  if (aiProviderCredentialEnvInput) aiProviderCredentialEnvInput.value = "";
+  if (aiProviderProtocolInput) aiProviderProtocolInput.value = AI_PROVIDER_DECLARED_PROTOCOL;
+  renderAiProviderModelRows([]);
+}
+
+function editAiProvider(providerId) {
+  const provider = providerById(providerId);
+  if (!provider || provider.source !== "declared") {
+    aiProvidersState.errorMessage = "Built-in providers cannot be edited.";
+    renderAiProvidersState();
+    return;
+  }
+  aiProvidersState.selectedProviderId = provider.provider_id;
+  if (aiProviderIdInput) aiProviderIdInput.value = provider.provider_id;
+  if (aiProviderNameInput) aiProviderNameInput.value = provider.display_name || "";
+  if (aiProviderBaseUrlInput) aiProviderBaseUrlInput.value = provider.base_url || "";
+  if (aiProviderCredentialEnvInput) aiProviderCredentialEnvInput.value = provider.credential_env || "";
+  if (aiProviderProtocolInput) aiProviderProtocolInput.value = AI_PROVIDER_DECLARED_PROTOCOL;
+  renderAiProviderModelRows(provider.models || []);
+  renderAiProviderActionControls();
+}
+
+function requestAiProviderPong(providerId) {
+  const provider = providerById(providerId) || activeProviderEntry();
+  if (!provider) {
+    aiProvidersState.errorMessage = "Select a provider first.";
+    renderAiProvidersState();
+    return;
+  }
+  const availability = aiProviderRowActions(provider, aiProvidersState.activeProviderId);
+  if (!availability.canTestVision) {
+    aiProvidersState.errorMessage = provider.credential_available
+      ? "The selected model does not declare vision support."
+      : aiProviderCredentialHint(provider);
+    renderAiProvidersState();
+    return;
+  }
+  aiProvidersState.selectedProviderId = provider.provider_id;
+  aiProviderPongArmed = true;
+  if (aiProviderPongConfirm) aiProviderPongConfirm.hidden = false;
+  if (aiProviderPongConfirmNote) {
+    aiProviderPongConfirmNote.textContent =
+      `Send the color test through ${provider.display_name || provider.provider_id}? `
+      + "FrameNest sends only a tiny solid-red test square made by FrameNest. "
+      + "The provider bills image tokens for this request, and no catalog media is used.";
+  }
+  renderAiProviderActionControls();
+}
+
+function cancelAiProviderPong() {
+  aiProviderPongArmed = false;
+  if (aiProviderPongConfirm) aiProviderPongConfirm.hidden = true;
+}
+
+async function activateAiProvider(providerId) {
+  const provider = providerById(providerId) || activeProviderEntry();
+  if (!provider) return;
+  const models = Array.isArray(provider.models) ? provider.models : [];
+  const modelId = provider.selected_model_id
+    || (models.length ? models[0].model_id : "");
+  if (!modelId) {
+    aiProvidersState.errorMessage = "The provider declares no model to activate.";
+    renderAiProvidersState();
+    return;
+  }
+  aiProvidersState.selectedProviderId = provider.provider_id;
+  setAiProvidersBusy(true, "Activating provider…");
+  try {
+    const response = await fetch(AI_ADMIN_SELECTION_ENDPOINT, {
+      method: "PUT",
+      headers: framenestMutationHeaders({
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      }),
+      body: JSON.stringify({ provider_id: provider.provider_id, model_id: modelId }),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      aiProvidersState.errorMessage = aiProviderResponseMessage(
+        payload,
+        "The provider selection could not be saved.",
+      );
+    } else {
+      aiProvidersState.message =
+        `Active provider: ${provider.display_name || provider.provider_id} (${modelId}).`;
+      aiProvidersState.errorMessage = "";
+    }
+  } catch {
+    aiProvidersState.errorMessage = "The server is unreachable. Try activating the provider again.";
+  } finally {
+    setAiProvidersBusy(false);
+  }
+  renderAiProvidersState();
+  await loadAiProviders();
+}
+
+async function saveAiProviderRecord(event) {
+  if (event && typeof event.preventDefault === "function") event.preventDefault();
+  const providerId = aiProviderIdInput ? aiProviderIdInput.value.trim() : "";
+  if (!providerId) {
+    aiProvidersState.errorMessage = "A provider ID is required.";
+    renderAiProvidersState();
+    return;
+  }
+  if (AI_PROVIDER_BUILTIN_IDS.has(providerId)) {
+    aiProvidersState.errorMessage = "Built-in providers cannot be edited.";
+    renderAiProvidersState();
+    return;
+  }
+  const record = collectAiProviderFormRecord();
+  setAiProvidersBusy(true, "Saving provider record…");
+  try {
+    const response = await fetch(
+      `${AI_ADMIN_PROVIDERS_ENDPOINT}/${encodeURIComponent(providerId)}`,
+      {
+        method: "PUT",
+        headers: framenestMutationHeaders({
+          Accept: "application/json",
+          "Content-Type": "application/json",
+        }),
+        body: JSON.stringify(record),
+      },
+    );
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      aiProvidersState.errorMessage = aiProviderResponseMessage(
+        payload,
+        "The provider record could not be saved.",
+      );
+    } else {
+      aiProvidersState.selectedProviderId = providerId;
+      aiProvidersState.message = `Provider record saved: ${providerId}.`;
+      aiProvidersState.errorMessage = "";
+    }
+  } catch {
+    aiProvidersState.errorMessage = "The server is unreachable. Try saving the record again.";
+  } finally {
+    setAiProvidersBusy(false);
+  }
+  renderAiProvidersState();
+  await loadAiProviders();
+}
+
+async function deleteAiProvider(providerId) {
+  const provider = providerById(providerId);
+  if (!provider || provider.source !== "declared") {
+    aiProvidersState.errorMessage = "Built-in providers cannot be deleted.";
+    renderAiProvidersState();
+    return;
+  }
+  if (provider.provider_id === aiProvidersState.activeProviderId) {
+    aiProvidersState.errorMessage =
+      "The active provider cannot be deleted; select another provider first.";
+    renderAiProvidersState();
+    return;
+  }
+  setAiProvidersBusy(true, "Removing provider record…");
+  try {
+    const response = await fetch(
+      `${AI_ADMIN_PROVIDERS_ENDPOINT}/${encodeURIComponent(provider.provider_id)}`,
+      {
+        method: "DELETE",
+        headers: framenestMutationHeaders({ Accept: "application/json" }),
+      },
+    );
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      aiProvidersState.errorMessage = aiProviderResponseMessage(
+        payload,
+        "The provider record could not be removed.",
+      );
+    } else {
+      if (aiProvidersState.selectedProviderId === provider.provider_id) {
+        aiProvidersState.selectedProviderId = "";
+      }
+      aiProvidersState.message = `Provider record removed: ${provider.provider_id}.`;
+      aiProvidersState.errorMessage = "";
+    }
+  } catch {
+    aiProvidersState.errorMessage = "The server is unreachable. Try removing the record again.";
+  } finally {
+    setAiProvidersBusy(false);
+  }
+  renderAiProvidersState();
+  await loadAiProviders();
+}
+
+async function runAiProviderPing(providerId) {
+  const provider = providerById(providerId) || activeProviderEntry();
+  if (!provider) {
+    aiProvidersState.errorMessage = "Select a provider first.";
+    renderAiProvidersState();
+    return;
+  }
+  if (provider.credential_available !== true) {
+    aiProvidersState.errorMessage = aiProviderCredentialHint(provider);
+    renderAiProvidersState();
+    return;
+  }
+  aiProvidersState.selectedProviderId = provider.provider_id;
+  setAiProvidersBusy(true, "Testing connection…");
+  try {
+    const response = await fetch(AI_ADMIN_PING_ENDPOINT, {
+      method: "POST",
+      headers: framenestMutationHeaders({
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      }),
+      body: JSON.stringify({}),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      aiProvidersState.errorMessage = aiProviderResponseMessage(
+        payload,
+        "The provider connection test failed.",
+      );
+    } else {
+      aiProvidersState.message = `Connection test: ${payload.status || "success"}.`;
+      aiProvidersState.errorMessage = "";
+    }
+  } catch {
+    aiProvidersState.errorMessage = "The server is unreachable. Try the connection test again.";
+  } finally {
+    setAiProvidersBusy(false);
+  }
+  renderAiProvidersState();
+  await loadAiProviders();
+}
+
+async function confirmAiProviderPong() {
+  if (!aiProviderPongArmed) return;
+  const provider = providerById(aiProvidersState.selectedProviderId) || activeProviderEntry();
+  if (!provider) return;
+  cancelAiProviderPong();
+  setAiProvidersBusy(true, "Sending the color test…");
+  try {
+    const response = await fetch(AI_ADMIN_PONG_ENDPOINT, {
+      method: "POST",
+      headers: framenestMutationHeaders({
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      }),
+      body: JSON.stringify({ confirm_cloud_upload: true }),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      aiProvidersState.errorMessage = aiProviderResponseMessage(
+        payload,
+        "The color test failed.",
+      );
+    } else if (payload.status === "mismatch") {
+      const observed = typeof payload.observed_color === "string" && payload.observed_color
+        ? ` Observed: ${payload.observed_color}.`
+        : "";
+      aiProvidersState.message = `The model answered, but not with the expected color.${observed}`;
+      aiProvidersState.errorMessage = "";
+    } else {
+      aiProvidersState.message =
+        `Vision probe: success. Expected ${payload.expected_color || "red"}, `
+        + `observed ${payload.observed_color || "red"}.`;
+      aiProvidersState.errorMessage = "";
+    }
+  } catch {
+    aiProvidersState.errorMessage = "The server is unreachable. Try the color test again.";
+  } finally {
+    setAiProvidersBusy(false);
+  }
+  renderAiProvidersState();
+  await loadAiProviders();
+}
+
+if (aiProvidersButton) {
+  aiProvidersButton.addEventListener("click", () => {
+    void openAiProvidersDialog();
+  });
+}
+
+if (aiProvidersCloseButton) {
+  aiProvidersCloseButton.addEventListener("click", () => closeAiProvidersDialog());
+}
+
+if (aiProvidersForm) {
+  aiProvidersForm.addEventListener("submit", (event) => {
+    void saveAiProviderRecord(event);
+  });
+}
+
+if (aiProviderAddModelButton) {
+  aiProviderAddModelButton.addEventListener("click", addAiProviderModelRow);
+}
+
+if (aiProviderSaveButton) {
+  aiProviderSaveButton.addEventListener("click", (event) => {
+    if (typeof event.preventDefault === "function") event.preventDefault();
+    void saveAiProviderRecord(event);
+  });
+}
+
+if (aiProviderActivateButton) {
+  aiProviderActivateButton.addEventListener("click", () => {
+    void activateAiProvider(aiProvidersState.selectedProviderId);
+  });
+}
+
+if (aiProviderPingButton) {
+  aiProviderPingButton.addEventListener("click", () => {
+    void runAiProviderPing(aiProvidersState.selectedProviderId);
+  });
+}
+
+if (aiProviderPongButton) {
+  aiProviderPongButton.addEventListener("click", () => {
+    requestAiProviderPong(aiProvidersState.selectedProviderId);
+  });
+}
+
+if (aiProviderDeleteButton) {
+  aiProviderDeleteButton.addEventListener("click", () => {
+    void deleteAiProvider(aiProvidersState.selectedProviderId);
+  });
+}
+
+if (aiProviderPongCancelButton) {
+  aiProviderPongCancelButton.addEventListener("click", cancelAiProviderPong);
+}
+
+if (aiProviderPongConfirmButton) {
+  aiProviderPongConfirmButton.addEventListener("click", () => {
+    void confirmAiProviderPong();
+  });
+}
+
+for (const aiProviderTextInput of [
+  aiProviderIdInput,
+  aiProviderNameInput,
+  aiProviderBaseUrlInput,
+  aiProviderCredentialEnvInput,
+]) {
+  if (aiProviderTextInput) {
+    aiProviderTextInput.addEventListener("input", handleAiProviderFormInput);
+  }
+}
+
+if (aiProvidersDialog) {
+  aiProvidersDialog.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      if (confirmationOwnsTopmostModal()) return;
+      if (aiProviderPongArmed) {
+        cancelAiProviderPong();
+        return;
+      }
+      closeAiProvidersDialog();
+    }
+  });
+  aiProvidersDialog.addEventListener("cancel", (event) => {
+    handleParentDialogCancel(event, closeAiProvidersDialog);
+  });
+  aiProvidersDialog.addEventListener("click", (event) => {
+    if (event.target === aiProvidersDialog) {
+      closeAiProvidersDialog();
+    }
+  });
+}

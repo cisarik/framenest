@@ -126,6 +126,17 @@
           <span id="ai-status-button-text" class="visually-hidden">Checking AI</span>
         </button>
         <button
+          id="ai-providers-button"
+          class="status-button status-button--icon"
+          type="button"
+          hidden
+          aria-label="AI provider administration"
+          title="AI provider administration"
+        >
+          <span class="status-button__glyph" aria-hidden="true">🛠️</span>
+          <span id="ai-providers-button-text" class="visually-hidden">AI providers</span>
+        </button>
+        <button
           id="identity-badge"
           class="status-button identity-badge"
           type="button"
@@ -457,6 +468,68 @@
           <p id="status-tailscale-note" class="settings-dialog__note">
             Access is restricted through the Tailscale tailnet. FrameNest does not expose this application on the public internet.
           </p>
+        </div>
+      </div>
+    </dialog>
+
+    <dialog id="ai-providers-dialog" class="settings-dialog" aria-label="AI providers">
+      <div class="settings-dialog__header">
+        <h2 id="ai-providers-dialog-title" class="settings-dialog__title" tabindex="-1">AI providers</h2>
+        <button id="ai-providers-close-button" class="settings-dialog__close" type="button" aria-label="Close AI providers">✕</button>
+      </div>
+      <div class="settings-dialog__body">
+        <div class="settings-dialog__section">
+          <h3 class="settings-dialog__section-title">Active provider</h3>
+          <p id="ai-providers-active-summary" class="settings-dialog__note ai-provider-summary">Loading providers…</p>
+          <p id="ai-providers-status" class="ai-provider-status" role="status" aria-live="polite" aria-atomic="true"></p>
+        </div>
+        <div class="settings-dialog__section">
+          <h3 class="settings-dialog__section-title">Providers</h3>
+          <div id="ai-providers-list" class="ai-provider-list" role="list" aria-label="Configured AI providers"></div>
+        </div>
+        <div class="settings-dialog__section">
+          <h3 class="settings-dialog__section-title">Declared record</h3>
+          <form id="ai-providers-form" class="ai-provider-form" novalidate>
+            <label class="ai-provider-field" for="ai-provider-id">
+              <span>Provider ID</span>
+              <input id="ai-provider-id" name="provider_id" type="text" autocomplete="off" spellcheck="false">
+            </label>
+            <label class="ai-provider-field" for="ai-provider-name">
+              <span>Display name</span>
+              <input id="ai-provider-name" name="name" type="text" autocomplete="off">
+            </label>
+            <label class="ai-provider-field" for="ai-provider-base-url">
+              <span>Base URL</span>
+              <input id="ai-provider-base-url" name="base_url" type="text" autocomplete="off" spellcheck="false">
+            </label>
+            <label class="ai-provider-field" for="ai-provider-credential-env">
+              <span>Credential environment variable name</span>
+              <input id="ai-provider-credential-env" name="credential_env" type="text" autocomplete="off" spellcheck="false">
+            </label>
+            <label class="ai-provider-field" for="ai-provider-protocol">
+              <span>Protocol</span>
+              <input id="ai-provider-protocol" name="protocol" type="text" value="openai-chat-completions" readonly>
+            </label>
+            <p class="settings-dialog__note">Other protocols are not supported yet.</p>
+            <div id="ai-provider-models" class="ai-provider-models" aria-label="Declared models"></div>
+            <button id="ai-provider-add-model" class="ai-provider-button" type="button">Add model</button>
+            <div class="ai-provider-actions">
+              <button id="ai-provider-save" class="ai-provider-button ai-provider-button--primary" type="submit">Save record</button>
+              <button id="ai-provider-activate" class="ai-provider-button" type="button">Use for analysis</button>
+              <button id="ai-provider-ping" class="ai-provider-button" type="button">Ping</button>
+              <button id="ai-provider-pong" class="ai-provider-button" type="button">Test vision</button>
+              <button id="ai-provider-delete" class="ai-provider-button ai-provider-button--danger" type="button">Delete</button>
+            </div>
+          </form>
+          <h3 class="settings-dialog__section-title">Record JSON preview</h3>
+          <pre id="ai-providers-json-preview" class="ai-provider-preview" aria-label="Non-secret provider record JSON preview"></pre>
+        </div>
+        <div id="ai-provider-pong-confirm" class="ai-provider-confirm" hidden>
+          <p id="ai-provider-pong-confirm-note" class="ai-provider-confirm__note"></p>
+          <div class="ai-provider-confirm__actions">
+            <button id="ai-provider-pong-cancel" class="ai-provider-button" type="button">Cancel</button>
+            <button id="ai-provider-pong-confirm-button" class="ai-provider-button ai-provider-button--primary" type="button">Send the color test</button>
+          </div>
         </div>
       </div>
     </dialog>
