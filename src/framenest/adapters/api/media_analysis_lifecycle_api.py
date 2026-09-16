@@ -159,6 +159,7 @@ class MediaAnalysisLifecycleApiDependencies:
     provider_configured: bool
     provider_id: str | None = None
     model_id: str | None = None
+    read_provider: Callable[[], object] | None = None
     request_manual_analysis: (
         Callable[[MediaId, MediaLocationId], MediaAnalysisRun] | None
     ) = None
@@ -184,10 +185,23 @@ def create_media_analysis_lifecycle_api_router(
         response_model=AutomaticAnalysisCapabilityResponse,
     )
     def automatic_analysis_capability() -> AutomaticAnalysisCapabilityResponse:
+        automatic_analysis_enabled = _resolve_automatic_analysis_enabled(
+            dependencies.automatic_analysis_enabled
+        )
+        if dependencies.read_provider is not None:
+            try:
+                resolved = dependencies.read_provider()
+            except Exception:
+                resolved = None
+            if resolved is not None:
+                return AutomaticAnalysisCapabilityResponse(
+                    automatic_analysis_enabled=automatic_analysis_enabled,
+                    provider_configured=getattr(resolved, "provider", None) is not None,
+                    provider_id=getattr(resolved, "provider_id", None),
+                    model_id=getattr(resolved, "model_id", None),
+                )
         return AutomaticAnalysisCapabilityResponse(
-            automatic_analysis_enabled=_resolve_automatic_analysis_enabled(
-                dependencies.automatic_analysis_enabled
-            ),
+            automatic_analysis_enabled=automatic_analysis_enabled,
             provider_configured=dependencies.provider_configured,
             provider_id=dependencies.provider_id,
             model_id=dependencies.model_id,
@@ -366,7 +380,7 @@ def create_media_analysis_lifecycle_api_router(
                 "Cloud frame upload confirmation is required.",
                 409,
             )
-        if not dependencies.provider_configured:
+        if not _provider_configured(dependencies):
             return _error(
                 "AI_PROVIDER_NOT_CONFIGURED",
                 "AI analysis is not configured.",
@@ -505,6 +519,15 @@ def create_media_analysis_lifecycle_api_router(
         )
 
     return router
+
+
+def _provider_configured(dependencies: MediaAnalysisLifecycleApiDependencies) -> bool:
+    if dependencies.read_provider is not None:
+        try:
+            return getattr(dependencies.read_provider(), "provider", None) is not None
+        except Exception:
+            return False
+    return dependencies.provider_configured
 
 
 def _resolve_automatic_analysis_enabled(

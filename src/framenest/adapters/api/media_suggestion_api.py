@@ -172,6 +172,7 @@ class MediaSuggestionApiDependencies:
     last_status_check: dict[str, object] | None = None
     last_connection_test: dict[str, object] | None = None
     read_status: Callable[[], MediaSuggestionStatusRead] | None = None
+    read_provider: Callable[[], object] | None = None
     audience_policy: ContentAudiencePolicy | None = None
 
 
@@ -184,6 +185,19 @@ def create_media_suggestion_api_router(dependencies: MediaSuggestionApiDependenc
         response_model=MediaSuggestionCapabilityResponse,
     )
     def media_suggestion_capability() -> JSONResponse:
+        if dependencies.read_provider is not None:
+            try:
+                resolved = dependencies.read_provider()
+            except Exception:
+                resolved = None
+            if resolved is None:
+                return _json_response(_unavailable_capability_response(dependencies.prompt_version))
+            return _json_response(
+                _resolved_capability_response(
+                    resolved,
+                    prompt_version=dependencies.prompt_version,
+                )
+            )
         current_status = _current_status_payload(dependencies)
         provider_selected = dependencies.provider_id is not None and dependencies.model_id is not None
         credential_available = dependencies.credential_available or dependencies.provider_configured
@@ -234,7 +248,7 @@ def create_media_suggestion_api_router(dependencies: MediaSuggestionApiDependenc
                 CLOUD_CONFIRMATION_REQUIRED_CODE,
                 CLOUD_CONFIRMATION_REQUIRED_MESSAGE,
             )
-        if dependencies.preview_suggestion is None or not dependencies.provider_configured:
+        if dependencies.preview_suggestion is None or not _provider_configured(dependencies):
             return _error_response(
                 503,
                 AI_PROVIDER_NOT_CONFIGURED_CODE,
@@ -335,7 +349,7 @@ def create_media_suggestion_api_router(dependencies: MediaSuggestionApiDependenc
                 CLOUD_CONFIRMATION_REQUIRED_CODE,
                 CLOUD_CONFIRMATION_REQUIRED_MESSAGE,
             )
-        if dependencies.preview_imported_suggestion is None or not dependencies.provider_configured:
+        if dependencies.preview_imported_suggestion is None or not _provider_configured(dependencies):
             return _error_response(
                 503,
                 AI_PROVIDER_NOT_CONFIGURED_CODE,
@@ -405,6 +419,108 @@ def _current_status_payload(dependencies: MediaSuggestionApiDependencies) -> Med
         return dependencies.read_status()
     except Exception:
         return MediaSuggestionStatusRead()
+
+
+def _provider_configured(dependencies: MediaSuggestionApiDependencies) -> bool:
+    if dependencies.read_provider is not None:
+        try:
+            return getattr(dependencies.read_provider(), "provider", None) is not None
+        except Exception:
+            return False
+    return dependencies.provider_configured
+
+
+def _resolved_capability_response(
+    resolved: object,
+    *,
+    prompt_version: str,
+) -> MediaSuggestionCapabilityResponse:
+    provider_selected = (
+        getattr(resolved, "provider_id", None) is not None
+        and getattr(resolved, "model_id", None) is not None
+    )
+    credential_available = bool(getattr(resolved, "credential_available", False))
+    last_test = getattr(resolved, "last_test", None)
+    last_status = getattr(resolved, "last_status", None)
+    return MediaSuggestionCapabilityResponse(
+        available=getattr(resolved, "provider", None) is not None,
+        provider_id=getattr(resolved, "provider_id", None),
+        provider_display_name=getattr(resolved, "display_name", None),
+        model_id=getattr(resolved, "model_id", None),
+        prompt_version=prompt_version,
+        execution="server",
+        status=_resolved_capability_status(
+            provider_selected=provider_selected,
+            credential_available=credential_available,
+            last_connection_test_status=(
+                None if last_test is None else getattr(last_test, "status", None)
+            ),
+        ),
+        configured=provider_selected,
+        credential_available=credential_available,
+        last_status_check=_persisted_status_payload(last_status),
+        last_connection_test=_persisted_test_payload(last_test),
+        requires_explicit_confirmation=True,
+    )
+
+
+def _unavailable_capability_response(prompt_version: str) -> MediaSuggestionCapabilityResponse:
+    return MediaSuggestionCapabilityResponse(
+        available=False,
+        provider_id=None,
+        provider_display_name=None,
+        model_id=None,
+        prompt_version=prompt_version,
+        execution="server",
+        status="not_configured",
+        configured=False,
+        credential_available=False,
+        last_status_check=None,
+        last_connection_test=None,
+        requires_explicit_confirmation=True,
+    )
+
+
+def _resolved_capability_status(
+    *,
+    provider_selected: bool,
+    credential_available: bool,
+    last_connection_test_status: str | None,
+) -> AiProviderStatus:
+    if not provider_selected:
+        return "not_configured"
+    if not credential_available:
+        return "credential_unavailable"
+    if last_connection_test_status == "success":
+        return "available"
+    if last_connection_test_status in {
+        "authentication_failed",
+        "rate_limited_or_quota_exhausted",
+        "model_unavailable",
+        "provider_unreachable",
+    }:
+        return last_connection_test_status
+    if last_connection_test_status in {"invalid_response", "provider_error"}:
+        return "provider_error"
+    return "configured_unverified"
+
+
+def _persisted_test_payload(last_test: object | None) -> dict[str, object] | None:
+    if last_test is None:
+        return None
+    return {
+        "status": getattr(last_test, "status"),
+        "tested_at_ms": getattr(last_test, "tested_at_ms"),
+    }
+
+
+def _persisted_status_payload(last_status: object | None) -> dict[str, object] | None:
+    if last_status is None:
+        return None
+    return {
+        "configuration_state": getattr(last_status, "configuration_state"),
+        "checked_at_ms": getattr(last_status, "checked_at_ms"),
+    }
 
 
 def _capability_status(

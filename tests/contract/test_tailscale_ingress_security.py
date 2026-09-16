@@ -1768,3 +1768,46 @@ def test_companion_apply_requires_dual_capabilities_and_hosted_origin(
     assert _error_code(write_only) == "CAPABILITY_DENIED"
 
 
+
+# --- Administrator AI provider routes --------------------------------------
+
+
+AI_ADMIN_ROUTE_SPECS = (
+    ("GET", "/api/admin/ai/providers"),
+    ("PUT", "/api/admin/ai/providers/provider-id-value"),
+    ("DELETE", "/api/admin/ai/providers/provider-id-value"),
+    ("PUT", "/api/admin/ai/active-selection"),
+    ("POST", "/api/admin/ai/ping"),
+    ("POST", "/api/admin/ai/pong"),
+)
+
+
+def test_ai_admin_route_policies_are_provider_operate_gated_and_non_companion() -> None:
+    from framenest.domain.identity_access import CAPABILITY_PROVIDER_OPERATE
+
+    for method, path in AI_ADMIN_ROUTE_SPECS:
+        matching = [
+            policy
+            for policy in ROUTE_POLICIES
+            if policy.match(method, path) is not None
+        ]
+        assert len(matching) == 1, (method, path)
+        policy = matching[0]
+        assert policy.capability == CAPABILITY_PROVIDER_OPERATE, (method, path)
+        assert policy.additional_capabilities == (), (method, path)
+        assert policy.companion_mutation is False, (method, path)
+
+
+def test_ai_admin_routes_deny_ordinary_tailscale_identities(
+    tailscale_client,
+) -> None:
+    client, _ = tailscale_client
+    for method, path in AI_ADMIN_ROUTE_SPECS:
+        headers = (
+            _mutation_headers(USER_LOGIN)
+            if method in {"PUT", "POST", "DELETE"}
+            else _serve_headers(USER_LOGIN)
+        )
+        response = client.request(method, path, headers=headers, json={})
+        assert response.status_code == 403, (method, path)
+        assert _error_code(response) == "CAPABILITY_DENIED", (method, path)

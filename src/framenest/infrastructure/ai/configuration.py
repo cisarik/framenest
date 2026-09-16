@@ -7,9 +7,9 @@ import os
 import sys
 import tempfile
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping
 
 from framenest.infrastructure.ai.constants import BUILTIN_PROVIDER_IDS
 from framenest.infrastructure.ai.provider_records import (
@@ -223,6 +223,18 @@ def write_ai_server_config(config: AiServerConfig, path: Path) -> None:
         "updated_at_ms": config.updated_at_ms,
     }
     _atomic_write_json(path, payload, max_payload_bytes=MAX_AI_CONFIG_BYTES)
+
+
+def mutate_ai_server_config(
+    config_path: Path,
+    mutator: Callable[[AiServerConfig | None], AiServerConfig],
+) -> AiServerConfig:
+    """Read, transform, and atomically write one non-secret AI config file."""
+    current = load_ai_server_config(config_path)
+    updated = mutator(current)
+    refreshed = replace(updated, updated_at_ms=now_ms())
+    write_ai_server_config(refreshed, config_path)
+    return refreshed
 
 
 def _parse_declared_providers(payload: object) -> dict[str, AiProviderRecord]:

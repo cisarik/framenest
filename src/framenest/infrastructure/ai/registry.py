@@ -8,6 +8,10 @@ from pathlib import Path
 from collections.abc import Callable
 from typing import Mapping
 
+from framenest.application.media_suggestion import (
+    MediaSuggestionProviderUnavailableError,
+    SUGGESTION_PROVIDER_UNAVAILABLE_MESSAGE,
+)
 from framenest.configuration import FrameNestSettings
 from framenest.infrastructure.ai.configuration import (
     AiConfigurationError,
@@ -197,6 +201,63 @@ def resolve_ai_provider(
         provider_source=None if definition is None else definition.source,
         models=() if definition is None else definition.models,
     )
+
+
+class DynamicAiProviderResolver:
+    """Resolve the active provider from current state on every call."""
+
+    def __init__(
+        self,
+        settings: FrameNestSettings,
+        *,
+        environ: Mapping[str, str] | None = None,
+        config_path: Path | None = None,
+        transport: JsonTransport | None = None,
+    ) -> None:
+        self._settings = settings
+        self._environ = environ
+        self._config_path = config_path
+        self._transport = transport
+
+    def resolve(self) -> ResolvedAiProvider:
+        """Re-read the persisted config and environment for one resolution."""
+        return resolve_ai_provider(
+            self._settings,
+            environ=self._environ,
+            config_path=self._config_path,
+            transport=self._transport,
+        )
+
+
+class LazyResolvedAiProvider:
+    """Delegate one provider operation to a per-operation dynamic resolution."""
+
+    def __init__(self, resolver: DynamicAiProviderResolver) -> None:
+        self._resolver = resolver
+
+    def suggest(self, request: object) -> object:
+        return self._require_provider().suggest(request)
+
+    def test_connection(self) -> None:
+        self._require_provider().test_connection()
+
+    def probe_vision(self, *, prompt: str, image_png: bytes) -> str:
+        return self._require_provider().probe_vision(
+            prompt=prompt,
+            image_png=image_png,
+        )
+
+    def _require_provider(self) -> object:
+        resolved = self._resolver.resolve()
+        provider = resolved.provider
+        if provider is None:
+            raise MediaSuggestionProviderUnavailableError(
+                SUGGESTION_PROVIDER_UNAVAILABLE_MESSAGE
+            )
+        return provider
+
+    def __repr__(self) -> str:
+        return "LazyResolvedAiProvider(<redacted>)"
 
 
 def ai_provider_persisted_status_reader(

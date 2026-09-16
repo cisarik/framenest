@@ -15,6 +15,10 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 from pydantic import BaseModel
 
+from framenest.adapters.api.ai_admin_api import (
+    AiAdminApiDependencies,
+    create_ai_admin_api_router,
+)
 from framenest.adapters.api.media_analysis_api import (
     MediaAnalysisApiDependencies,
     create_media_analysis_api_router,
@@ -231,7 +235,12 @@ from framenest.configuration import (
     load_settings,
 )
 from framenest.infrastructure.runtime_settings import RuntimeSettingsStore
-from framenest.infrastructure.ai.registry import ai_provider_persisted_status_reader, resolve_ai_provider
+from framenest.infrastructure.ai.registry import (
+    DynamicAiProviderResolver,
+    LazyResolvedAiProvider,
+    ai_provider_persisted_status_reader,
+    resolve_ai_provider,
+)
 from framenest.infrastructure.filesystem.library_scanner import LocalLibraryScanner
 from framenest.infrastructure.filesystem.media_content import LocalMediaContentReader
 from framenest.infrastructure.filesystem.quarantine_storage import FilesystemQuarantineStorage
@@ -358,6 +367,7 @@ def create_app(
     media_analysis_lifecycle_api_dependencies: (
         MediaAnalysisLifecycleApiDependencies | None
     ) = None,
+    ai_admin_api_dependencies: AiAdminApiDependencies | None = None,
     content_publication_api_dependencies: ContentPublicationApiDependencies
     | None = None,
     workspace_media_api_dependencies: WorkspaceMediaApiDependencies | None = None,
@@ -387,6 +397,7 @@ def create_app(
 
         return create_public_published_app(resolved_settings)
     runtime_settings_store = RuntimeSettingsStore.from_settings(resolved_settings)
+    ai_provider_resolver = DynamicAiProviderResolver(resolved_settings)
     tailscale_ingress_enabled = (
         resolved_settings.ingress_mode == INGRESS_MODE_TAILSCALE_UDS
     )
@@ -617,34 +628,31 @@ def create_app(
     if media_suggestion_api_dependencies is None:
         assert owned_library_repository is not None
         resolved_ai = resolve_ai_provider(resolved_settings)
-        provider = resolved_ai.provider
-        suggestion_preview = None
-        imported_suggestion_preview = None
-        if provider is not None:
-            suggestion_preview = PreviewMediaSuggestion(
-                owned_library_repository,
-                LocalMediaAnalysisAdapter(),
-                provider,
+        lazy_ai_provider = LazyResolvedAiProvider(ai_provider_resolver)
+        suggestion_preview = PreviewMediaSuggestion(
+            owned_library_repository,
+            LocalMediaAnalysisAdapter(),
+            lazy_ai_provider,
+        )
+        imported_suggestion_preview = PreviewImportedMediaSuggestion(
+            owned_media_repository,
+            owned_library_repository,
+            LocalMediaAnalysisAdapter(),
+            lazy_ai_provider,
+            PersistImportedPreviewAnalysis(
+                owned_media_analysis_run_repository,
+                owned_media_metadata_repository,
             )
-            imported_suggestion_preview = PreviewImportedMediaSuggestion(
-                owned_media_repository,
-                owned_library_repository,
-                LocalMediaAnalysisAdapter(),
-                provider,
-                PersistImportedPreviewAnalysis(
-                    owned_media_analysis_run_repository,
-                    owned_media_metadata_repository,
-                )
-                if (
-                    owned_media_analysis_run_repository is not None
-                    and owned_media_metadata_repository is not None
-                )
-                else None,
+            if (
+                owned_media_analysis_run_repository is not None
+                and owned_media_metadata_repository is not None
             )
+            else None,
+        )
         media_suggestion_api_dependencies = MediaSuggestionApiDependencies(
             preview_suggestion=suggestion_preview,
             preview_imported_suggestion=imported_suggestion_preview,
-            provider_configured=suggestion_preview is not None,
+            provider_configured=resolved_ai.provider is not None,
             provider_id=resolved_ai.provider_id,
             provider_display_name=resolved_ai.display_name,
             model_id=resolved_ai.model_id,
@@ -657,6 +665,7 @@ def create_app(
             last_status_check=_last_status_payload(resolved_ai.last_status),
             last_connection_test=_last_test_payload(resolved_ai.last_test),
             read_status=_media_suggestion_status_reader(resolved_ai),
+            read_provider=ai_provider_resolver.resolve,
             audience_policy=owned_content_audience_policy,
         )
     if media_analysis_lifecycle_api_dependencies is None:
@@ -664,7 +673,8 @@ def create_app(
         assert owned_media_repository is not None
         assert owned_library_repository is not None
         resolved_analysis_ai = resolve_ai_provider(resolved_settings)
-        analysis_provider = resolved_analysis_ai.provider
+        startup_analysis_provider = resolved_analysis_ai.provider
+        lazy_analysis_provider = LazyResolvedAiProvider(ai_provider_resolver)
         analysis_scheduler = ScheduleAutomaticMediaAnalysis(
             owned_media_analysis_run_repository,
             enabled=runtime_settings_store.is_enabled,
@@ -679,7 +689,7 @@ def create_app(
                 owned_media_repository,
                 owned_library_repository,
                 LocalMediaAnalysisAdapter(analysis_process_runner),
-                analysis_provider,
+                lazy_analysis_provider,
             ),
             max_attempts=resolved_settings.automatic_media_analysis_max_attempts,
             process_runner=analysis_process_runner,
@@ -693,7 +703,9 @@ def create_app(
         )
         movie_identification_executor = None
         movie_identification_requester = None
-        if analysis_provider is not None and hasattr(analysis_provider, "identify_movie"):
+        if startup_analysis_provider is not None and hasattr(
+            startup_analysis_provider, "identify_movie"
+        ):
             from framenest.application.movie_identification_lifecycle import (
                 ExecuteMovieIdentificationRun,
                 request_movie_identification,
@@ -707,7 +719,7 @@ def create_app(
                 owned_media_repository,
                 owned_library_repository,
                 LocalMovieIdentificationAdapter(),
-                analysis_provider,
+                startup_analysis_provider,
                 provider_id=resolved_analysis_ai.provider_id,
                 model_id=resolved_analysis_ai.model_id,
             )
@@ -728,9 +740,10 @@ def create_app(
                 owned_media_analysis_run_repository
             ),
             automatic_analysis_enabled=runtime_settings_store.is_enabled,
-            provider_configured=analysis_provider is not None,
+            provider_configured=startup_analysis_provider is not None,
             provider_id=resolved_analysis_ai.provider_id,
             model_id=resolved_analysis_ai.model_id,
+            read_provider=ai_provider_resolver.resolve,
             request_manual_analysis=owned_media_analysis_coordinator.request_manual,
             request_movie_identification=movie_identification_requester,
             read_movie_identification=ReadAutomaticMediaAnalysis(
@@ -748,6 +761,10 @@ def create_app(
                 if owned_companion_review_repository is None
                 else GetCompanionReviewDetail(owned_companion_review_repository)
             ),
+        )
+    if ai_admin_api_dependencies is None:
+        ai_admin_api_dependencies = AiAdminApiDependencies(
+            resolver=ai_provider_resolver
         )
     if content_publication_api_dependencies is None:
         assert owned_content_publication_repository is not None
@@ -1301,6 +1318,7 @@ def create_app(
             RuntimeSettingsApiDependencies(store=runtime_settings_store)
         )
     )
+    app.include_router(create_ai_admin_api_router(ai_admin_api_dependencies))
     app.include_router(
         create_content_publication_api_router(
             content_publication_api_dependencies

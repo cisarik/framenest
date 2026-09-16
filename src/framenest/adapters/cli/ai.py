@@ -10,14 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Sequence
 
-from framenest.application.media_suggestion import (
-    MediaSuggestionProviderAuthError,
-    MediaSuggestionProviderFailedError,
-    MediaSuggestionProviderInvalidResponseError,
-    MediaSuggestionProviderModelUnavailableError,
-    MediaSuggestionProviderRateLimitedError,
-    MediaSuggestionProviderUnavailableError,
-)
+from framenest.infrastructure.ai.provider_activity import classify_provider_exception
 from framenest.infrastructure.ai.still_frame_smoke import (
     FrameNestStillFrameSmokeError,
     STILL_FRAME_SMOKE_INVALID_MESSAGE,
@@ -557,26 +550,8 @@ def test_command(context: _CliContext, *, output: Output = print) -> int:
         exit_code = 0
         try:
             resolved.provider.test_connection()
-        except MediaSuggestionProviderAuthError:
-            category = "authentication_failed"
-            exit_code = 2
-        except MediaSuggestionProviderRateLimitedError:
-            category = "rate_limited_or_quota_exhausted"
-            exit_code = 2
-        except MediaSuggestionProviderModelUnavailableError:
-            category = "model_unavailable"
-            exit_code = 2
-        except MediaSuggestionProviderUnavailableError:
-            category = "provider_unreachable"
-            exit_code = 2
-        except MediaSuggestionProviderInvalidResponseError:
-            category = "invalid_response"
-            exit_code = 2
-        except MediaSuggestionProviderFailedError:
-            category = "provider_error"
-            exit_code = 2
-        except Exception:
-            category = "provider_error"
+        except Exception as exc:
+            category = classify_provider_exception(exc)
             exit_code = 2
         write_ai_test_state(
             AiTestState(
@@ -641,20 +616,8 @@ def vision_probe_command(
             matched, observed_color = match_expected_color(content_text)
             status = "success" if matched else "mismatch"
             exit_code = 0 if matched else 2
-        except MediaSuggestionProviderAuthError:
-            status = "authentication_failed"
-        except MediaSuggestionProviderRateLimitedError:
-            status = "rate_limited_or_quota_exhausted"
-        except MediaSuggestionProviderModelUnavailableError:
-            status = "model_unavailable"
-        except MediaSuggestionProviderUnavailableError:
-            status = "provider_unreachable"
-        except MediaSuggestionProviderInvalidResponseError:
-            status = "invalid_response"
-        except MediaSuggestionProviderFailedError:
-            status = "provider_error"
-        except Exception:
-            status = "provider_error"
+        except Exception as exc:
+            status = classify_provider_exception(exc)
         write_vision_probe_state(
             VisionProbeState(
                 provider_id=resolved.provider_id,
@@ -710,26 +673,8 @@ def still_frame_smoke_command(
         return 2
     try:
         suggestion = resolved.provider.suggest(request)
-    except MediaSuggestionProviderAuthError:
-        output("AI still-frame smoke: authentication_failed")
-        return 2
-    except MediaSuggestionProviderRateLimitedError:
-        output("AI still-frame smoke: rate_limited_or_quota_exhausted")
-        return 2
-    except MediaSuggestionProviderModelUnavailableError:
-        output("AI still-frame smoke: model_unavailable")
-        return 2
-    except MediaSuggestionProviderUnavailableError:
-        output("AI still-frame smoke: provider_unreachable")
-        return 2
-    except MediaSuggestionProviderInvalidResponseError:
-        output("AI still-frame smoke: invalid_response")
-        return 2
-    except MediaSuggestionProviderFailedError:
-        output("AI still-frame smoke: provider_error")
-        return 2
-    except Exception:
-        output("AI still-frame smoke: provider_error")
+    except Exception as exc:
+        output(f"AI still-frame smoke: {classify_provider_exception(exc)}")
         return 2
     output("AI still-frame smoke: success")
     output(f"Provider: {resolved.display_name}")

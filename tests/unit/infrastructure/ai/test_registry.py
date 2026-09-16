@@ -16,6 +16,9 @@ from framenest.infrastructure.ai.configuration import (
     write_ai_server_config,
 )
 from framenest.infrastructure.ai.constants import VERCEL_AI_GATEWAY_DEFAULT_MODEL_ID
+from framenest.application.media_suggestion import (
+    MediaSuggestionProviderUnavailableError,
+)
 from framenest.infrastructure.ai.openai_chat_completions import (
     OpenAiChatCompletionsMediaSuggestionProvider,
 )
@@ -25,9 +28,13 @@ from framenest.infrastructure.ai.provider_records import (
 )
 from framenest.infrastructure.ai.registry import (
     PROVIDER_DEFINITIONS,
+    DynamicAiProviderResolver,
+    LazyResolvedAiProvider,
+    ResolvedAiProvider,
     provider_definitions,
     resolve_ai_provider,
 )
+from framenest.infrastructure.ai.transport import HttpsJsonResponse
 
 DECLARED_PROVIDER_ID = "opencode-go"
 DECLARED_MODEL_ID = "deepseek-v4-flash-vision-exp"
@@ -318,3 +325,141 @@ def test_declared_provider_selection_uses_persisted_model_not_default(tmp_path: 
     assert resolved.model_id == second_model_id
     assert resolved.capabilities_for(second_model_id) == ()
     assert resolved.capabilities_for(DECLARED_MODEL_ID) == ("vision_input",)
+
+
+class _SuccessfulTransport:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, dict[str, str], bytes, int]] = []
+
+    def post_json(
+        self,
+        url: str,
+        *,
+        headers: dict[str, str],
+        body: bytes,
+        max_request_bytes: int,
+    ) -> HttpsJsonResponse:
+        self.calls.append((url, dict(headers), body, max_request_bytes))
+        return HttpsJsonResponse(
+            status_code=200,
+            body=b'{"choices":[{"message":{"content":"ok"}}]}',
+        )
+
+
+class _RecordingProvider:
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    def test_connection(self) -> None:
+        self.calls.append("test_connection")
+
+    def probe_vision(self, *, prompt: str, image_png: bytes) -> str:
+        self.calls.append("probe_vision")
+        return "red"
+
+    def suggest(self, request: object) -> str:
+        self.calls.append("suggest")
+        return "suggestion"
+
+
+class _StubResolver:
+    def __init__(self, resolved: ResolvedAiProvider) -> None:
+        self._resolved = resolved
+
+    def resolve(self) -> ResolvedAiProvider:
+        return self._resolved
+
+
+def _resolved_with_provider(tmp_path: Path, provider: object) -> ResolvedAiProvider:
+    return ResolvedAiProvider(
+        provider_id=DECLARED_PROVIDER_ID,
+        display_name="OpenCode Go",
+        model_id=DECLARED_MODEL_ID,
+        source="server config",
+        credential_environment_name=DECLARED_CREDENTIAL_ENV,
+        credential_available=True,
+        provider=provider,
+        last_test=None,
+        last_status=None,
+        config_path=tmp_path / "config.json",
+        test_state_path=tmp_path / "test-state.json",
+        status_snapshot_path=tmp_path / "status-snapshot.json",
+        provider_source="declared",
+    )
+
+
+def test_dynamic_resolver_rereads_rewritten_config(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.json"
+    resolver = DynamicAiProviderResolver(
+        _settings(tmp_path),
+        environ={DECLARED_CREDENTIAL_ENV: "synthetic-declared-secret"},
+        config_path=config_path,
+    )
+
+    first = resolver.resolve()
+    assert first.provider_id is None
+    assert first.source == "unconfigured"
+
+    _write_declared_config(config_path)
+
+    second = resolver.resolve()
+    assert second.provider_id == DECLARED_PROVIDER_ID
+    assert second.model_id == DECLARED_MODEL_ID
+    assert second.source == "server config"
+    assert second.configured is True
+
+
+def test_lazy_provider_resolves_the_current_configuration_per_operation(
+    tmp_path: Path,
+) -> None:
+    config_path = tmp_path / "config.json"
+    transport = _SuccessfulTransport()
+    resolver = DynamicAiProviderResolver(
+        _settings(tmp_path),
+        environ={DECLARED_CREDENTIAL_ENV: "synthetic-declared-secret"},
+        config_path=config_path,
+        transport=transport,
+    )
+    lazy = LazyResolvedAiProvider(resolver)
+
+    with pytest.raises(MediaSuggestionProviderUnavailableError):
+        lazy.test_connection()
+    assert transport.calls == []
+
+    _write_declared_config(config_path)
+
+    lazy.test_connection()
+    assert len(transport.calls) == 1
+    assert transport.calls[0][0] == "https://opencode.ai/zen/go/v1/chat/completions"
+
+
+def test_lazy_provider_delegates_each_operation_to_the_resolved_provider(
+    tmp_path: Path,
+) -> None:
+    provider = _RecordingProvider()
+    lazy = LazyResolvedAiProvider(_StubResolver(_resolved_with_provider(tmp_path, provider)))
+
+    lazy.test_connection()
+    lazy.probe_vision(prompt="prompt", image_png=b"png")
+    lazy.suggest(object())
+
+    assert provider.calls == ["test_connection", "probe_vision", "suggest"]
+    assert "synthetic-declared-secret" not in repr(lazy)
+
+
+def test_lazy_provider_raises_sanitized_unavailable_when_unconfigured(
+    tmp_path: Path,
+) -> None:
+    unconfigured = resolve_ai_provider(
+        _settings(tmp_path),
+        environ={},
+        config_path=tmp_path / "missing.json",
+    )
+    lazy = LazyResolvedAiProvider(_StubResolver(unconfigured))
+
+    with pytest.raises(MediaSuggestionProviderUnavailableError):
+        lazy.test_connection()
+    with pytest.raises(MediaSuggestionProviderUnavailableError):
+        lazy.suggest(object())
+    with pytest.raises(MediaSuggestionProviderUnavailableError):
+        lazy.probe_vision(prompt="prompt", image_png=b"png")
