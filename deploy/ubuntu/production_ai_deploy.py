@@ -44,12 +44,14 @@ AI_CAPABILITY_URL = "http://127.0.0.1:8000/api/ai/media-suggestion-capability"
 PROVIDER_CREDENTIALS = {
     "nvidia-nim": "NVIDIA_API_KEY",
     "vercel-ai-gateway": "AI_GATEWAY_API_KEY",
+    "opencode-go": "OPENCODE_API_KEY",
 }
 
 PROVIDER_DROPIN_TEMPLATES = {
     "nvidia-nim": DEPLOY_SYSTEMD_DIR / "framenest-ai-credential-nvidia-nim.conf",
     "vercel-ai-gateway": DEPLOY_SYSTEMD_DIR
     / "framenest-ai-credential-vercel-ai-gateway.conf",
+    "opencode-go": DEPLOY_SYSTEMD_DIR / "framenest-ai-credential-opencode-go.conf",
 }
 
 
@@ -422,10 +424,12 @@ def _extract_fish_secret(path: Path, identity: str) -> str:
     script = (
         "set -e NVIDIA_API_KEY; "
         "set -e AI_GATEWAY_API_KEY; "
+        "set -e OPENCODE_API_KEY; "
         "source $argv[1] >/dev/null 2>/dev/null; "
         "switch $argv[2]; "
         "case NVIDIA_API_KEY; printf '%s' $NVIDIA_API_KEY; "
         "case AI_GATEWAY_API_KEY; printf '%s' $AI_GATEWAY_API_KEY; "
+        "case OPENCODE_API_KEY; printf '%s' $OPENCODE_API_KEY; "
         "case '*'; exit 2; "
         "end"
     )

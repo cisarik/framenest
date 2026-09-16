@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import stat
 from pathlib import Path
 
 import pytest
@@ -22,6 +23,40 @@ from framenest.infrastructure.ai.configuration import (
     write_ai_test_state,
 )
 from framenest.infrastructure.ai.constants import VERCEL_AI_GATEWAY_DEFAULT_MODEL_ID
+from framenest.infrastructure.ai.provider_records import (
+    AiProviderModel,
+    AiProviderRecord,
+)
+
+DECLARED_PROVIDER_ID = "opencode-go"
+DECLARED_MODEL_ID = "deepseek-v4-flash-vision-exp"
+
+
+def _declared_record() -> AiProviderRecord:
+    return AiProviderRecord(
+        provider_id=DECLARED_PROVIDER_ID,
+        display_name="OpenCode Go",
+        protocol="openai-chat-completions",
+        base_url="https://opencode.ai/zen/go/v1",
+        credential_env="OPENCODE_API_KEY",
+        models=(
+            AiProviderModel(
+                model_id=DECLARED_MODEL_ID,
+                display_name="DeepSeek V4 Flash Vision Exp",
+                capabilities=("vision_input",),
+            ),
+        ),
+        source="declared",
+    )
+
+
+def _declared_config() -> AiServerConfig:
+    return AiServerConfig(
+        active_provider_id=DECLARED_PROVIDER_ID,
+        provider_models={DECLARED_PROVIDER_ID: DECLARED_MODEL_ID},
+        updated_at_ms=1_725_000_000_000,
+        providers={DECLARED_PROVIDER_ID: _declared_record()},
+    )
 
 
 def test_config_path_override_is_absolute(tmp_path: Path) -> None:
@@ -49,10 +84,247 @@ def test_write_and_load_config_persists_no_secret(tmp_path: Path) -> None:
     assert loaded is not None
     assert loaded.active_provider_id == "vercel-ai-gateway"
     assert loaded.provider_models["vercel-ai-gateway"] == VERCEL_AI_GATEWAY_DEFAULT_MODEL_ID
+    assert loaded.providers == {}
     raw = path.read_text(encoding="utf-8")
     assert "API_KEY" not in raw
     assert "Authorization" not in raw
+    assert "Bearer" not in raw
     assert "data:" not in raw
+
+
+def test_v2_declared_config_round_trips_with_exact_keys(tmp_path: Path) -> None:
+    path = tmp_path / "config" / "ai.json"
+
+    write_ai_server_config(_declared_config(), path)
+
+    loaded = load_ai_server_config(path)
+    assert loaded == _declared_config()
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    assert sorted(payload) == [
+        "active_provider_id",
+        "provider_models",
+        "providers",
+        "schema_version",
+        "updated_at_ms",
+    ]
+    assert payload["schema_version"] == 2
+    record = payload["providers"][DECLARED_PROVIDER_ID]
+    assert sorted(record) == ["base_url", "credential_env", "models", "name", "protocol"]
+    assert record["credential_env"] == "OPENCODE_API_KEY"
+    assert sorted(record["models"][DECLARED_MODEL_ID]) == ["capabilities", "name"]
+    raw = path.read_text(encoding="utf-8")
+    assert raw.count("API_KEY") == 1
+    assert "Authorization" not in raw
+    assert "Bearer" not in raw
+    assert "data:" not in raw
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+
+
+def test_v1_read_upgrades_to_v2_without_inventing_providers(tmp_path: Path) -> None:
+    path = tmp_path / "config" / "ai.json"
+    path.parent.mkdir()
+    path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "active_provider_id": "nvidia-nim",
+                "provider_models": {"nvidia-nim": "nvidia/example", "vercel-ai-gateway": "google/custom"},
+                "updated_at_ms": 5,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    loaded = load_ai_server_config(path)
+    assert loaded is not None
+    assert loaded.schema_version == 2
+    assert loaded.active_provider_id == "nvidia-nim"
+    assert loaded.provider_models == {
+        "nvidia-nim": "nvidia/example",
+        "vercel-ai-gateway": "google/custom",
+    }
+    assert loaded.providers == {}
+
+    upgraded_path = tmp_path / "config" / "upgraded.json"
+    write_ai_server_config(loaded, upgraded_path)
+    upgraded = json.loads(upgraded_path.read_text(encoding="utf-8"))
+    assert upgraded["schema_version"] == 2
+    assert upgraded["providers"] == {}
+    assert upgraded["active_provider_id"] == "nvidia-nim"
+    assert upgraded["provider_models"] == {
+        "nvidia-nim": "nvidia/example",
+        "vercel-ai-gateway": "google/custom",
+    }
+
+
+def test_v1_read_keeps_builtin_default_selection(tmp_path: Path) -> None:
+    path = tmp_path / "ai.json"
+    path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "active_provider_id": "vercel-ai-gateway",
+                "provider_models": {},
+                "updated_at_ms": 5,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    loaded = load_ai_server_config(path)
+    assert loaded is not None
+    assert loaded.provider_models == {
+        "vercel-ai-gateway": VERCEL_AI_GATEWAY_DEFAULT_MODEL_ID
+    }
+
+
+def test_unsupported_or_missing_config_version_is_rejected(tmp_path: Path) -> None:
+    path = tmp_path / "ai.json"
+    for schema_version in (3, "2", None):
+        path.write_text(
+            json.dumps(
+                {
+                    "schema_version": schema_version,
+                    "active_provider_id": "vercel-ai-gateway",
+                    "provider_models": {},
+                    "updated_at_ms": 5,
+                }
+            ),
+            encoding="utf-8",
+        )
+        with pytest.raises(AiConfigurationError, match="version is unsupported"):
+            load_ai_server_config(path)
+
+
+@pytest.mark.parametrize(
+    "providers",
+    [
+        {"opencode-go": {"name": "OpenCode Go"}},
+        {
+            "opencode-go": {
+                "name": "OpenCode Go",
+                "protocol": "openai-chat-completions",
+                "base_url": "https://opencode.ai/zen/go/v1",
+                "credential_env": "OPENCODE_API_KEY",
+                "models": {
+                    DECLARED_MODEL_ID: {
+                        "name": "DeepSeek V4 Flash Vision Exp",
+                        "capabilities": ["vision_input"],
+                        "extra": True,
+                    }
+                },
+            }
+        },
+        {
+            "opencode-go": {
+                "name": "OpenCode Go",
+                "protocol": "openai-chat-completions",
+                "base_url": "http://opencode.ai/zen/go/v1",
+                "credential_env": "OPENCODE_API_KEY",
+                "models": {
+                    DECLARED_MODEL_ID: {
+                        "name": "DeepSeek V4 Flash Vision Exp",
+                        "capabilities": ["vision_input"],
+                    }
+                },
+            }
+        },
+        {"nvidia-nim": {"name": "Collision"}},
+    ],
+)
+def test_malformed_declared_records_fail_closed(
+    tmp_path: Path,
+    providers: dict[str, object],
+) -> None:
+    path = tmp_path / "ai.json"
+    path.write_text(
+        json.dumps(
+            {
+                "schema_version": 2,
+                "active_provider_id": "vercel-ai-gateway",
+                "provider_models": {},
+                "providers": providers,
+                "updated_at_ms": 5,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(AiConfigurationError):
+        load_ai_server_config(path)
+
+
+def test_declared_active_without_selected_model_is_rejected(tmp_path: Path) -> None:
+    path = tmp_path / "ai.json"
+    path.write_text(
+        json.dumps(
+            {
+                "schema_version": 2,
+                "active_provider_id": DECLARED_PROVIDER_ID,
+                "provider_models": {},
+                "providers": {DECLARED_PROVIDER_ID: _serialized_declared_record()},
+                "updated_at_ms": 5,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(AiConfigurationError, match="malformed"):
+        load_ai_server_config(path)
+
+
+def test_selection_for_undeclared_provider_is_rejected(tmp_path: Path) -> None:
+    path = tmp_path / "ai.json"
+    path.write_text(
+        json.dumps(
+            {
+                "schema_version": 2,
+                "active_provider_id": "vercel-ai-gateway",
+                "provider_models": {"opencode-go": DECLARED_MODEL_ID},
+                "providers": {},
+                "updated_at_ms": 5,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(AiConfigurationError, match="malformed"):
+        load_ai_server_config(path)
+
+
+def test_oversized_config_is_rejected(tmp_path: Path) -> None:
+    path = tmp_path / "ai.json"
+    path.write_text(
+        json.dumps(
+            {
+                "schema_version": 2,
+                "active_provider_id": "vercel-ai-gateway",
+                "provider_models": {},
+                "providers": {},
+                "updated_at_ms": 5,
+                "padding": "x" * (64 * 1024 + 1),
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(AiConfigurationError):
+        load_ai_server_config(path)
+
+
+def _serialized_declared_record() -> dict[str, object]:
+    return {
+        "name": "OpenCode Go",
+        "protocol": "openai-chat-completions",
+        "base_url": "https://opencode.ai/zen/go/v1",
+        "credential_env": "OPENCODE_API_KEY",
+        "models": {
+            DECLARED_MODEL_ID: {
+                "name": "DeepSeek V4 Flash Vision Exp",
+                "capabilities": ["vision_input"],
+            }
+        },
+    }
 
 
 def test_malformed_config_is_sanitized(tmp_path: Path) -> None:
@@ -183,7 +455,7 @@ def test_safe_status_snapshot_round_trips_fully_unconfigured_state(tmp_path: Pat
             checked_at_ms=456,
         ),
         AiStatusSnapshot(
-            provider_id="unsupported",
+            provider_id="Unsupported Provider",
             model_id=VERCEL_AI_GATEWAY_DEFAULT_MODEL_ID,
             configuration_state="not_configured",
             checked_at_ms=456,
@@ -208,3 +480,47 @@ def test_safe_status_snapshot_rejects_invalid_identity_combinations(
 ) -> None:
     with pytest.raises(AiConfigurationError):
         write_ai_status_snapshot(snapshot, tmp_path / "status-snapshot.json")
+
+
+def test_test_state_and_status_snapshot_accept_declared_identifiers(tmp_path: Path) -> None:
+    test_state_path = tmp_path / "test-state.json"
+    snapshot_path = tmp_path / "status-snapshot.json"
+
+    write_ai_test_state(
+        AiTestState(
+            provider_id=DECLARED_PROVIDER_ID,
+            model_id=DECLARED_MODEL_ID,
+            status="success",
+            tested_at_ms=123,
+        ),
+        test_state_path,
+    )
+    write_ai_status_snapshot(
+        AiStatusSnapshot(
+            provider_id=DECLARED_PROVIDER_ID,
+            model_id=DECLARED_MODEL_ID,
+            configuration_state="configured",
+            checked_at_ms=456,
+        ),
+        snapshot_path,
+    )
+
+    state = load_ai_test_state(test_state_path)
+    assert state is not None
+    assert state.provider_id == DECLARED_PROVIDER_ID
+    snapshot = load_ai_status_snapshot(snapshot_path)
+    assert snapshot is not None
+    assert snapshot.provider_id == DECLARED_PROVIDER_ID
+
+
+def test_test_state_rejects_unbounded_identifier(tmp_path: Path) -> None:
+    with pytest.raises(AiConfigurationError):
+        write_ai_test_state(
+            AiTestState(
+                provider_id="bad provider",
+                model_id=DECLARED_MODEL_ID,
+                status="success",
+                tested_at_ms=123,
+            ),
+            tmp_path / "test-state.json",
+        )

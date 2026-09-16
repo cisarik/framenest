@@ -16,12 +16,88 @@ from framenest.application.media_suggestion import (
     MediaSuggestionProviderRateLimitedError,
     MediaSuggestionProviderUnavailableError,
 )
+from framenest.configuration import FrameNestSettings
 from framenest.infrastructure.ai.configuration import (
+    AiConfigurationError,
+    AiServerConfig,
     load_ai_server_config,
     load_ai_status_snapshot,
     load_ai_test_state,
+    write_ai_server_config,
 )
-from framenest.infrastructure.ai.constants import DEFAULT_PROVIDER_ID, VERCEL_AI_GATEWAY_DEFAULT_MODEL_ID
+from framenest.infrastructure.ai.constants import (
+    DEFAULT_PROVIDER_ID,
+    VERCEL_AI_GATEWAY_DEFAULT_MODEL_ID,
+)
+from framenest.infrastructure.ai.provider_records import (
+    AiProviderModel,
+    AiProviderRecord,
+)
+from framenest.infrastructure.ai.registry import resolve_ai_provider
+from framenest.infrastructure.ai.transport import HttpsJsonResponse
+
+DECLARED_PROVIDER_ID = "opencode-go"
+DECLARED_MODEL_ID = "deepseek-v4-flash-vision-exp"
+DECLARED_CREDENTIAL_ENV = "OPENCODE_API_KEY"
+
+
+def _declared_record() -> AiProviderRecord:
+    return AiProviderRecord(
+        provider_id=DECLARED_PROVIDER_ID,
+        display_name="OpenCode Go",
+        protocol="openai-chat-completions",
+        base_url="https://opencode.ai/zen/go/v1",
+        credential_env=DECLARED_CREDENTIAL_ENV,
+        models=(
+            AiProviderModel(
+                model_id=DECLARED_MODEL_ID,
+                display_name="DeepSeek V4 Flash Vision Exp",
+                capabilities=("vision_input",),
+            ),
+        ),
+        source="declared",
+    )
+
+
+def _write_declared_config(config_path: Path, *, active_provider_id: str = "vercel-ai-gateway") -> None:
+    provider_models = (
+        {DECLARED_PROVIDER_ID: DECLARED_MODEL_ID}
+        if active_provider_id == DECLARED_PROVIDER_ID
+        else {}
+    )
+    write_ai_server_config(
+        AiServerConfig(
+            active_provider_id=active_provider_id,
+            provider_models=provider_models,
+            updated_at_ms=1,
+            providers={DECLARED_PROVIDER_ID: _declared_record()},
+        ),
+        config_path,
+    )
+
+
+def _provider_add_arguments(config_path: Path) -> list[str]:
+    return [
+        "--config-path",
+        str(config_path),
+        "provider",
+        "add",
+        "--provider-id",
+        DECLARED_PROVIDER_ID,
+        "--name",
+        "OpenCode Go",
+        "--protocol",
+        "openai-chat-completions",
+        "--base-url",
+        "https://opencode.ai/zen/go/v1",
+        "--credential-env",
+        DECLARED_CREDENTIAL_ENV,
+        "--model-id",
+        DECLARED_MODEL_ID,
+        "--capability",
+        "vision_input",
+        "--yes",
+    ]
 
 
 def test_configure_can_cancel_without_mutation(tmp_path: Path) -> None:
@@ -505,3 +581,413 @@ def test_still_frame_smoke_rejects_non_nvidia_provider(
     )
     assert result == 2
     assert "unsupported_provider" in "\n".join(lines)
+
+
+def test_provider_add_writes_declared_record_without_secret_values(tmp_path: Path) -> None:
+    config_path = tmp_path / "config" / "ai.json"
+
+    assert ai.main(_provider_add_arguments(config_path)) == 0
+
+    config = load_ai_server_config(config_path)
+    assert config is not None
+    assert config.active_provider_id == "vercel-ai-gateway"
+    assert sorted(config.providers) == [DECLARED_PROVIDER_ID]
+    record = config.providers[DECLARED_PROVIDER_ID]
+    assert record.display_name == "OpenCode Go"
+    assert record.credential_env == DECLARED_CREDENTIAL_ENV
+    assert record.models[0].capabilities == ("vision_input",)
+    raw = config_path.read_text(encoding="utf-8")
+    assert raw.count("API_KEY") == 1
+    assert "Authorization" not in raw
+    assert "Bearer" not in raw
+    assert "data:" not in raw
+
+
+def test_provider_add_requires_confirmation(tmp_path: Path) -> None:
+    config_path = tmp_path / "config" / "ai.json"
+    arguments = _provider_add_arguments(config_path)
+    arguments.remove("--yes")
+
+    assert ai.main(arguments) == 2
+
+    assert not config_path.exists()
+
+
+def test_provider_add_refuses_builtin_identifier(tmp_path: Path) -> None:
+    config_path = tmp_path / "config" / "ai.json"
+    arguments = _provider_add_arguments(config_path)
+    arguments[arguments.index(DECLARED_PROVIDER_ID)] = "nvidia-nim"
+
+    assert ai.main(arguments) == 2
+
+    assert not config_path.exists()
+
+
+def test_provider_add_requires_one_name_per_model_id(tmp_path: Path) -> None:
+    config_path = tmp_path / "config" / "ai.json"
+    arguments = _provider_add_arguments(config_path)
+    arguments.extend(
+        [
+            "--model-id",
+            "second-model",
+            "--model-name",
+            "Only one name",
+        ]
+    )
+
+    assert ai.main(arguments) == 2
+
+    assert not config_path.exists()
+
+
+def test_provider_add_upserts_declared_record(tmp_path: Path) -> None:
+    config_path = tmp_path / "config" / "ai.json"
+    assert ai.main(_provider_add_arguments(config_path)) == 0
+
+    lines: list[str] = []
+    context = ai._CliContext(config_path=config_path)
+
+    assert (
+        ai.provider_add_command(
+            context,
+            provider_id=DECLARED_PROVIDER_ID,
+            name="OpenCode Go Updated",
+            protocol="openai-chat-completions",
+            base_url="https://opencode.ai/zen/go/v1",
+            credential_env=DECLARED_CREDENTIAL_ENV,
+            model_ids=(DECLARED_MODEL_ID,),
+            model_names=(),
+            capabilities=("vision_input",),
+            confirmed=True,
+            output=lines.append,
+        )
+        == 0
+    )
+
+    config = load_ai_server_config(config_path)
+    assert config is not None
+    assert sorted(config.providers) == [DECLARED_PROVIDER_ID]
+    assert config.providers[DECLARED_PROVIDER_ID].display_name == "OpenCode Go Updated"
+    assert any("updated" in line for line in lines)
+
+
+def test_provider_add_rejects_empty_model_list(tmp_path: Path) -> None:
+    with pytest.raises(AiConfigurationError):
+        ai.provider_add_command(
+            ai._CliContext(config_path=tmp_path / "config.json"),
+            provider_id=DECLARED_PROVIDER_ID,
+            name="OpenCode Go",
+            protocol="openai-chat-completions",
+            base_url="https://opencode.ai/zen/go/v1",
+            credential_env=DECLARED_CREDENTIAL_ENV,
+            model_ids=(),
+            model_names=(),
+            capabilities=(),
+            confirmed=True,
+        )
+
+
+def test_provider_list_reports_sanitized_fields(tmp_path: Path) -> None:
+    config_path = tmp_path / "config" / "ai.json"
+    assert ai.main(_provider_add_arguments(config_path)) == 0
+    lines: list[str] = []
+
+    result = ai.provider_list_command(
+        ai._CliContext(config_path=config_path),
+        output=lines.append,
+        environ={DECLARED_CREDENTIAL_ENV: "synthetic-declared-secret"},
+    )
+
+    output = "\n".join(lines)
+    assert result == 0
+    assert f"- {DECLARED_PROVIDER_ID} | OpenCode Go | source=declared" in output
+    assert "protocol=openai-chat-completions" in output
+    assert "base_url=https://opencode.ai/zen/go/v1" in output
+    assert f"credential_env={DECLARED_CREDENTIAL_ENV}" in output
+    assert "credential_available=yes" in output
+    assert f"models={DECLARED_MODEL_ID}" in output
+    assert "- nvidia-nim | NVIDIA NIM | source=builtin" in output
+    assert "- vercel-ai-gateway | Vercel AI Gateway | source=builtin" in output
+    assert "synthetic-declared-secret" not in output
+
+
+def test_provider_list_reports_missing_credential(tmp_path: Path) -> None:
+    config_path = tmp_path / "config" / "ai.json"
+    _write_declared_config(config_path)
+    lines: list[str] = []
+
+    assert (
+        ai.provider_list_command(
+            ai._CliContext(config_path=config_path),
+            output=lines.append,
+            environ={},
+        )
+        == 0
+    )
+
+    assert "credential_available=no" in "\n".join(lines)
+
+
+def test_provider_remove_refuses_builtin_and_active_records(tmp_path: Path) -> None:
+    config_path = tmp_path / "config" / "ai.json"
+
+    assert (
+        ai.main(
+            [
+                "--config-path",
+                str(config_path),
+                "provider",
+                "remove",
+                "--provider-id",
+                "nvidia-nim",
+                "--yes",
+            ]
+        )
+        == 2
+    )
+
+    _write_declared_config(config_path, active_provider_id=DECLARED_PROVIDER_ID)
+    assert (
+        ai.main(
+            [
+                "--config-path",
+                str(config_path),
+                "provider",
+                "remove",
+                "--provider-id",
+                DECLARED_PROVIDER_ID,
+                "--yes",
+            ]
+        )
+        == 2
+    )
+    config = load_ai_server_config(config_path)
+    assert config is not None
+    assert sorted(config.providers) == [DECLARED_PROVIDER_ID]
+
+
+def test_provider_remove_deletes_inactive_declared_record(tmp_path: Path) -> None:
+    config_path = tmp_path / "config" / "ai.json"
+    _write_declared_config(config_path)
+
+    assert (
+        ai.main(
+            [
+                "--config-path",
+                str(config_path),
+                "provider",
+                "remove",
+                "--provider-id",
+                DECLARED_PROVIDER_ID,
+                "--yes",
+            ]
+        )
+        == 0
+    )
+
+    config = load_ai_server_config(config_path)
+    assert config is not None
+    assert config.providers == {}
+    assert config.active_provider_id == "vercel-ai-gateway"
+
+
+def test_provider_remove_requires_confirmation(tmp_path: Path) -> None:
+    config_path = tmp_path / "config" / "ai.json"
+    _write_declared_config(config_path)
+
+    assert (
+        ai.main(
+            [
+                "--config-path",
+                str(config_path),
+                "provider",
+                "remove",
+                "--provider-id",
+                DECLARED_PROVIDER_ID,
+            ]
+        )
+        == 2
+    )
+
+    config = load_ai_server_config(config_path)
+    assert config is not None
+    assert sorted(config.providers) == [DECLARED_PROVIDER_ID]
+
+
+def test_configure_interactive_selects_declared_provider(tmp_path: Path) -> None:
+    config_path = tmp_path / "config" / "ai.json"
+    _write_declared_config(config_path)
+    answers = iter(["3", "", "yes"])
+    lines: list[str] = []
+
+    result = ai.configure_command(
+        ai._CliContext(config_path=config_path),
+        prompt=lambda _prompt: next(answers),
+        output=lines.append,
+    )
+
+    assert result == 0
+    config = load_ai_server_config(config_path)
+    assert config is not None
+    assert config.active_provider_id == DECLARED_PROVIDER_ID
+    assert config.provider_models[DECLARED_PROVIDER_ID] == DECLARED_MODEL_ID
+    assert any("declared" in line for line in lines)
+
+
+def test_configure_interactive_rejects_undeclared_model(tmp_path: Path) -> None:
+    config_path = tmp_path / "config" / "ai.json"
+    _write_declared_config(config_path)
+    answers = iter(["3", "some-other-model", "yes"])
+
+    with pytest.raises(AiConfigurationError):
+        ai.configure_command(
+            ai._CliContext(config_path=config_path),
+            prompt=lambda _prompt: next(answers),
+            output=lambda _line: None,
+        )
+
+    config = load_ai_server_config(config_path)
+    assert config is not None
+    assert config.active_provider_id == "vercel-ai-gateway"
+
+
+def test_configure_non_interactive_accepts_declared_provider(tmp_path: Path) -> None:
+    config_path = tmp_path / "config" / "ai.json"
+    _write_declared_config(config_path)
+    lines: list[str] = []
+
+    result = ai.configure_non_interactive_command(
+        ai._CliContext(config_path=config_path),
+        provider_id=DECLARED_PROVIDER_ID,
+        model_id=DECLARED_MODEL_ID,
+        output=lines.append,
+    )
+
+    assert result == 0
+    config = load_ai_server_config(config_path)
+    assert config is not None
+    assert config.active_provider_id == DECLARED_PROVIDER_ID
+    assert config.provider_models[DECLARED_PROVIDER_ID] == DECLARED_MODEL_ID
+    assert any(f"Required credential environment variable: {DECLARED_CREDENTIAL_ENV}" in line for line in lines)
+
+
+def test_configure_non_interactive_rejects_undeclared_model(tmp_path: Path) -> None:
+    config_path = tmp_path / "config" / "ai.json"
+    _write_declared_config(config_path)
+
+    with pytest.raises(AiConfigurationError):
+        ai.configure_non_interactive_command(
+            ai._CliContext(config_path=config_path),
+            provider_id=DECLARED_PROVIDER_ID,
+            model_id="some-other-model",
+            output=lambda _line: None,
+        )
+
+
+def test_configure_non_interactive_rejects_undeclared_provider(tmp_path: Path) -> None:
+    config_path = tmp_path / "config" / "ai.json"
+    _write_declared_config(config_path)
+
+    with pytest.raises(AiConfigurationError):
+        ai.configure_non_interactive_command(
+            ai._CliContext(config_path=config_path),
+            provider_id="undeclared-provider",
+            model_id="some-model",
+            output=lambda _line: None,
+        )
+
+
+def test_status_reports_declared_provider_source(tmp_path: Path) -> None:
+    config_path = tmp_path / "ai" / "config.json"
+    _write_declared_config(config_path, active_provider_id=DECLARED_PROVIDER_ID)
+    lines: list[str] = []
+
+    assert ai.status_command(ai._CliContext(config_path=config_path), output=lines.append) == 0
+
+    output = "\n".join(lines)
+    assert "Active provider: OpenCode Go" in output
+    assert "Provider source: declared" in output
+    assert "Credential available to this process: no" in output
+
+
+def test_status_reports_builtin_provider_source(tmp_path: Path) -> None:
+    config_path = tmp_path / "ai" / "config.json"
+    write_ai_server_config(
+        AiServerConfig(
+            active_provider_id="vercel-ai-gateway",
+            provider_models={},
+            updated_at_ms=1,
+        ),
+        config_path,
+    )
+    lines: list[str] = []
+
+    assert ai.status_command(ai._CliContext(config_path=config_path), output=lines.append) == 0
+
+    assert "Provider source: builtin" in "\n".join(lines)
+
+
+def test_status_unconfigured_reports_no_provider_source(tmp_path: Path) -> None:
+    lines: list[str] = []
+
+    assert (
+        ai.status_command(
+            ai._CliContext(config_path=tmp_path / "missing" / "config.json"),
+            output=lines.append,
+            write_snapshot=False,
+        )
+        == 0
+    )
+
+    assert "Provider source: none" in "\n".join(lines)
+
+
+def test_test_command_against_declared_provider_with_synthetic_credential(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    config_path = tmp_path / "ai" / "config.json"
+    _write_declared_config(config_path, active_provider_id=DECLARED_PROVIDER_ID)
+
+    class _Transport:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def post_json(
+            self,
+            url: str,
+            *,
+            headers: dict[str, str],
+            body: bytes,
+            max_request_bytes: int,
+        ) -> HttpsJsonResponse:
+            self.calls += 1
+            return HttpsJsonResponse(
+                status_code=200,
+                body=b'{"choices":[{"message":{"content":"ok"}}]}',
+            )
+
+    transport = _Transport()
+    settings = FrameNestSettings(
+        database_path=tmp_path / "catalog.sqlite3",
+        _env_file=None,
+    )
+    resolved = resolve_ai_provider(
+        settings,
+        environ={DECLARED_CREDENTIAL_ENV: "synthetic-declared-secret"},
+        config_path=config_path,
+        transport=transport,
+    )
+    monkeypatch.setattr(ai, "_resolve", lambda _context: resolved)
+    lines: list[str] = []
+
+    result = ai.test_command(ai._CliContext(config_path=config_path), output=lines.append)
+
+    assert result == 0
+    assert transport.calls == 1
+    state = load_ai_test_state(tmp_path / "ai" / "test-state.json")
+    assert state is not None
+    assert state.provider_id == DECLARED_PROVIDER_ID
+    assert state.model_id == DECLARED_MODEL_ID
+    assert state.status == "success"
+    assert "AI test: success" in "\n".join(lines)

@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Sequence
@@ -32,15 +33,36 @@ from framenest.infrastructure.ai.configuration import (
     default_ai_config_path,
     load_ai_server_config,
     now_ms,
-    provider_default_model,
     validate_model_id,
     validate_provider_id,
     write_ai_server_config,
     write_ai_status_snapshot,
     write_ai_test_state,
 )
-from framenest.infrastructure.ai.constants import DEFAULT_PROVIDER_ID, VERCEL_AI_GATEWAY_PROVIDER_ID
-from framenest.infrastructure.ai.registry import PROVIDER_DEFINITIONS, ResolvedAiProvider, resolve_ai_provider
+from framenest.infrastructure.ai.constants import (
+    BUILTIN_PROVIDER_IDS,
+    DEFAULT_PROVIDER_ID,
+    VERCEL_AI_GATEWAY_PROVIDER_ID,
+)
+from framenest.infrastructure.ai.credentials import load_ai_credential
+from framenest.infrastructure.ai.provider_records import (
+    AiProviderModel,
+    AiProviderRecord,
+    AiProviderRecordError,
+    validate_credential_environment_name,
+    validate_declared_base_url,
+    validate_declared_capabilities,
+    validate_declared_protocol,
+    validate_model_identifier,
+    validate_provider_display_name,
+    validate_provider_identifier,
+)
+from framenest.infrastructure.ai.registry import (
+    AiProviderDefinition,
+    ResolvedAiProvider,
+    provider_definitions,
+    resolve_ai_provider,
+)
 
 Input = Callable[[str], str]
 Output = Callable[[str], None]
@@ -85,6 +107,68 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Confirm a non-interactive provider/model configuration.",
     )
+    provider = subcommands.add_parser(
+        "provider",
+        help="Manage operator-declared non-secret provider records.",
+    )
+    provider_commands = provider.add_subparsers(dest="provider_command", required=True)
+    provider_add = provider_commands.add_parser(
+        "add",
+        help="Create or update one declared provider record.",
+    )
+    provider_add.add_argument("--provider-id", required=True, help="Declared provider ID.")
+    provider_add.add_argument("--name", required=True, help="Provider display name.")
+    provider_add.add_argument(
+        "--protocol",
+        required=True,
+        help="Declared provider protocol (openai-chat-completions).",
+    )
+    provider_add.add_argument("--base-url", required=True, help="HTTPS base URL.")
+    provider_add.add_argument(
+        "--credential-env",
+        required=True,
+        help="Credential environment variable name, never a value.",
+    )
+    provider_add.add_argument(
+        "--model-id",
+        action="append",
+        dest="model_ids",
+        required=True,
+        help="Declared model ID. Repeat for more models.",
+    )
+    provider_add.add_argument(
+        "--model-name",
+        action="append",
+        dest="model_names",
+        default=[],
+        help="Optional model display name. Provide one per model ID or none.",
+    )
+    provider_add.add_argument(
+        "--capability",
+        action="append",
+        dest="capabilities",
+        default=[],
+        help="Declared model capability applied to all listed models. Repeatable.",
+    )
+    provider_add.add_argument(
+        "--yes",
+        action="store_true",
+        help="Confirm the non-interactive record write.",
+    )
+    provider_commands.add_parser(
+        "list",
+        help="List built-in and declared provider records without provider calls.",
+    )
+    provider_remove = provider_commands.add_parser(
+        "remove",
+        help="Remove one declared provider record.",
+    )
+    provider_remove.add_argument("--provider-id", required=True, help="Declared provider ID.")
+    provider_remove.add_argument(
+        "--yes",
+        action="store_true",
+        help="Confirm the non-interactive record removal.",
+    )
     subcommands.add_parser("test", help="Run one explicit text-only provider connection test.")
     still_frame_smoke = subcommands.add_parser(
         "still-frame-smoke",
@@ -127,6 +211,28 @@ def main(argv: Sequence[str] | None = None) -> int:
                     model_id=args.model_id,
                 )
             return configure_command(context)
+        if args.command == "provider":
+            if args.provider_command == "add":
+                return provider_add_command(
+                    context,
+                    provider_id=args.provider_id,
+                    name=args.name,
+                    protocol=args.protocol,
+                    base_url=args.base_url,
+                    credential_env=args.credential_env,
+                    model_ids=tuple(args.model_ids),
+                    model_names=tuple(args.model_names),
+                    capabilities=tuple(args.capabilities),
+                    confirmed=args.yes,
+                )
+            if args.provider_command == "list":
+                return provider_list_command(context)
+            if args.provider_command == "remove":
+                return provider_remove_command(
+                    context,
+                    provider_id=args.provider_id,
+                    confirmed=args.yes,
+                )
         if args.command == "test":
             return test_command(context)
         if args.command == "still-frame-smoke":
@@ -135,7 +241,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 image_paths=tuple(args.images),
                 confirm_cloud_upload=args.confirm_cloud_upload,
             )
-    except AiConfigurationError as exc:
+    except (AiConfigurationError, AiProviderRecordError) as exc:
         print(f"AI configuration error: {exc}", file=sys.stderr)
         return 2
     return 2
@@ -163,6 +269,7 @@ def status_command(
     output(f"Active provider: {_optional_text(resolved.display_name)}")
     output(f"Model: {_optional_text(resolved.model_id)}")
     output(f"Configuration source: {resolved.source}")
+    output(f"Provider source: {_optional_text(resolved.provider_source)}")
     output(f"Credential available to this process: {_yes_no(resolved.credential_available)}")
     output(f"Analysis state: {'configured' if resolved.configured else 'not configured'}")
     output(f"Last connection test: {_last_test_text(resolved)}")
@@ -178,25 +285,30 @@ def configure_command(
     """Interactively write non-secret provider/model selection."""
     existing = load_ai_server_config(context.config_path)
     provider_models = {} if existing is None else dict(existing.provider_models)
+    definitions = provider_definitions(existing)
+    ordered_provider_ids = _ordered_provider_ids(definitions)
     default_provider = existing.active_provider_id if existing is not None else VERCEL_AI_GATEWAY_PROVIDER_ID
+    if default_provider not in definitions:
+        default_provider = VERCEL_AI_GATEWAY_PROVIDER_ID
     output("AI provider configuration")
-    for index, provider_id in enumerate(PROVIDER_ORDER, start=1):
-        definition = PROVIDER_DEFINITIONS[provider_id]
+    for index, provider_id in enumerate(ordered_provider_ids, start=1):
+        definition = definitions[provider_id]
         marker = " [default]" if provider_id == default_provider else ""
-        output(f"{index}. {definition.display_name} ({provider_id}){marker}")
+        origin = "built-in" if definition.builtin else "declared"
+        output(f"{index}. {definition.display_name} ({provider_id}, {origin}){marker}")
     selection = prompt("Select provider [1]: ").strip()
     if selection.lower() in {"q", "quit", "cancel"}:
         output("Cancelled. No configuration was changed.")
         return 1
-    provider_id = _selected_provider(selection, default_provider)
-    provider_definition = PROVIDER_DEFINITIONS[provider_id]
-    proposed_model = provider_models.get(provider_id) or provider_default_model(provider_id)
+    provider_id = _selected_provider(selection, default_provider, ordered_provider_ids)
+    provider_definition = definitions[provider_id]
+    proposed_model = provider_models.get(provider_id) or provider_definition.default_model_id
     output(f"Proposed model: {proposed_model}")
     model_input = prompt("Model ID [default above]: ").strip()
     if model_input.lower() in {"q", "quit", "cancel"}:
         output("Cancelled. No configuration was changed.")
         return 1
-    model_id = validate_model_id(model_input or proposed_model)
+    model_id = _selection_model(model_input or proposed_model, provider_definition)
     output("")
     output(f"Provider: {provider_definition.display_name} ({provider_id})")
     output(f"Model: {model_id}")
@@ -209,6 +321,7 @@ def configure_command(
         active_provider_id=provider_id,
         provider_models=provider_models,
         updated_at_ms=now_ms(),
+        providers={} if existing is None else dict(existing.providers),
     )
     write_ai_server_config(config, context.config_path)
     output("AI configuration saved.")
@@ -230,20 +343,165 @@ def configure_non_interactive_command(
     selected_provider_id = validate_provider_id(provider_id)
     selected_model_id = validate_model_id(model_id)
     existing = load_ai_server_config(context.config_path)
+    definitions = provider_definitions(existing)
+    definition = definitions.get(selected_provider_id)
+    if definition is None:
+        raise AiConfigurationError("AI provider is not supported.")
+    selected_model_id = _selection_model(selected_model_id, definition)
     provider_models = {} if existing is None else dict(existing.provider_models)
     provider_models[selected_provider_id] = selected_model_id
     config = AiServerConfig(
         active_provider_id=selected_provider_id,
         provider_models=provider_models,
         updated_at_ms=now_ms(),
+        providers={} if existing is None else dict(existing.providers),
     )
     write_ai_server_config(config, context.config_path)
-    definition = PROVIDER_DEFINITIONS[selected_provider_id]
     output("AI configuration saved.")
     output(f"Active provider: {definition.display_name}")
     output(f"Model: {selected_model_id}")
     output(f"Configuration path: {context.config_path}")
     output(f"Required credential environment variable: {definition.credential_environment_name}")
+    return 0
+
+
+def provider_add_command(
+    context: _CliContext,
+    *,
+    provider_id: str,
+    name: str,
+    protocol: str,
+    base_url: str,
+    credential_env: str,
+    model_ids: Sequence[str],
+    model_names: Sequence[str],
+    capabilities: Sequence[str],
+    confirmed: bool,
+    output: Output = print,
+) -> int:
+    """Create or update one declared non-secret provider record."""
+    if not confirmed:
+        raise AiConfigurationError("AI provider record writes require --yes.")
+    selected_provider_id = validate_provider_identifier(provider_id)
+    if selected_provider_id in BUILTIN_PROVIDER_IDS:
+        raise AiConfigurationError("Built-in AI providers cannot be declared.")
+    selected_name = validate_provider_display_name(name)
+    selected_protocol = validate_declared_protocol(protocol)
+    selected_base_url = validate_declared_base_url(base_url)
+    selected_credential_env = validate_credential_environment_name(credential_env)
+    if not model_ids:
+        raise AiConfigurationError("At least one --model-id is required.")
+    if model_names and len(model_names) != len(model_ids):
+        raise AiConfigurationError(
+            "Provide one --model-name per --model-id or none at all."
+        )
+    selected_capabilities = validate_declared_capabilities(list(capabilities))
+    resolved_model_names = list(model_names) if model_names else list(model_ids)
+    models: list[AiProviderModel] = []
+    seen_model_ids: set[str] = set()
+    for raw_model_id, raw_model_name in zip(model_ids, resolved_model_names):
+        selected_model_id = validate_model_identifier(raw_model_id)
+        if selected_model_id in seen_model_ids:
+            raise AiConfigurationError("AI model IDs must be unique.")
+        seen_model_ids.add(selected_model_id)
+        models.append(
+            AiProviderModel(
+                model_id=selected_model_id,
+                display_name=validate_provider_display_name(raw_model_name),
+                capabilities=selected_capabilities,
+            )
+        )
+    record = AiProviderRecord(
+        provider_id=selected_provider_id,
+        display_name=selected_name,
+        protocol=selected_protocol,
+        base_url=selected_base_url,
+        credential_env=selected_credential_env,
+        models=tuple(models),
+        source="declared",
+    )
+    existing = load_ai_server_config(context.config_path)
+    providers = {} if existing is None else dict(existing.providers)
+    updated = selected_provider_id in providers
+    providers[selected_provider_id] = record
+    config = AiServerConfig(
+        active_provider_id=(
+            existing.active_provider_id if existing is not None else VERCEL_AI_GATEWAY_PROVIDER_ID
+        ),
+        provider_models={} if existing is None else dict(existing.provider_models),
+        updated_at_ms=now_ms(),
+        providers=providers,
+    )
+    write_ai_server_config(config, context.config_path)
+    output("AI provider record updated." if updated else "AI provider record saved.")
+    output(f"Provider: {selected_name} ({selected_provider_id})")
+    output(f"Protocol: {selected_protocol}")
+    output(f"Base URL: {selected_base_url}")
+    output(f"Credential environment variable: {selected_credential_env}")
+    for model in models:
+        output(f"Model: {model.model_id}")
+    return 0
+
+
+def provider_list_command(
+    context: _CliContext,
+    *,
+    output: Output = print,
+    environ: Mapping[str, str] | None = None,
+) -> int:
+    """Print sanitized built-in and declared provider records."""
+    source = os.environ if environ is None else environ
+    existing = load_ai_server_config(context.config_path)
+    definitions = provider_definitions(existing)
+    output("AI providers")
+    for provider_id in _ordered_provider_ids(definitions):
+        definition = definitions[provider_id]
+        credential = load_ai_credential(definition.credential_environment_name, source)
+        model_ids = ", ".join(model.model_id for model in definition.models)
+        output(
+            f"- {definition.provider_id} | {definition.display_name} | "
+            f"source={definition.source} | protocol={definition.protocol} | "
+            f"base_url={definition.base_url} | "
+            f"credential_env={definition.credential_environment_name} | "
+            f"credential_available={_yes_no(credential is not None)} | models={model_ids}"
+        )
+    return 0
+
+
+def provider_remove_command(
+    context: _CliContext,
+    *,
+    provider_id: str,
+    confirmed: bool,
+    output: Output = print,
+) -> int:
+    """Remove one declared non-secret provider record."""
+    if not confirmed:
+        raise AiConfigurationError("AI provider record removal requires --yes.")
+    selected_provider_id = validate_provider_identifier(provider_id)
+    if selected_provider_id in BUILTIN_PROVIDER_IDS:
+        raise AiConfigurationError("Built-in AI providers cannot be removed.")
+    existing = load_ai_server_config(context.config_path)
+    if existing is None or selected_provider_id not in existing.providers:
+        raise AiConfigurationError("AI provider record was not found.")
+    if existing.active_provider_id == selected_provider_id:
+        raise AiConfigurationError("The active AI provider cannot be removed.")
+    providers = dict(existing.providers)
+    providers.pop(selected_provider_id)
+    provider_models = {
+        key: value
+        for key, value in existing.provider_models.items()
+        if key != selected_provider_id
+    }
+    config = AiServerConfig(
+        active_provider_id=existing.active_provider_id,
+        provider_models=provider_models,
+        updated_at_ms=now_ms(),
+        providers=providers,
+    )
+    write_ai_server_config(config, context.config_path)
+    output("AI provider record removed.")
+    output(f"Provider: {selected_provider_id}")
     return 0
 
 
@@ -392,14 +650,47 @@ def _resolve(context: _CliContext) -> ResolvedAiProvider:
     return resolve_ai_provider(settings, config_path=context.config_path)
 
 
-def _selected_provider(selection: str, default_provider: str) -> str:
+def _ordered_provider_ids(
+    definitions: Mapping[str, AiProviderDefinition],
+) -> tuple[str, ...]:
+    builtin_order = tuple(
+        provider_id for provider_id in PROVIDER_ORDER if provider_id in definitions
+    )
+    declared_order = tuple(
+        sorted(
+            provider_id
+            for provider_id in definitions
+            if provider_id not in BUILTIN_PROVIDER_IDS
+        )
+    )
+    return builtin_order + declared_order
+
+
+def _selected_provider(
+    selection: str,
+    default_provider: str,
+    ordered_provider_ids: Sequence[str],
+) -> str:
     if not selection:
         return validate_provider_id(default_provider)
-    if selection in {"1", VERCEL_AI_GATEWAY_PROVIDER_ID}:
-        return VERCEL_AI_GATEWAY_PROVIDER_ID
-    if selection in {"2", DEFAULT_PROVIDER_ID}:
-        return DEFAULT_PROVIDER_ID
-    return validate_provider_id(selection)
+    if selection.isdigit():
+        index = int(selection)
+        if 1 <= index <= len(ordered_provider_ids):
+            return ordered_provider_ids[index - 1]
+        raise AiConfigurationError("AI provider is not supported.")
+    provider_id = validate_provider_id(selection)
+    if provider_id not in ordered_provider_ids:
+        raise AiConfigurationError("AI provider is not supported.")
+    return provider_id
+
+
+def _selection_model(model_id: str, definition: AiProviderDefinition) -> str:
+    validated = validate_model_id(model_id)
+    if not definition.builtin and all(
+        model.model_id != validated for model in definition.models
+    ):
+        raise AiConfigurationError("Model is not declared by the selected AI provider.")
+    return validated
 
 
 def _yes_no(value: bool) -> str:

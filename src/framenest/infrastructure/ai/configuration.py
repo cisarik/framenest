@@ -7,22 +7,29 @@ import os
 import sys
 import tempfile
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Mapping
 
-from framenest.infrastructure.ai.constants import (
-    DEFAULT_MODEL_ID,
-    DEFAULT_PROVIDER_ID,
-    VERCEL_AI_GATEWAY_DEFAULT_MODEL_ID,
-    VERCEL_AI_GATEWAY_PROVIDER_ID,
+from framenest.infrastructure.ai.constants import BUILTIN_PROVIDER_IDS
+from framenest.infrastructure.ai.provider_records import (
+    AiProviderRecord,
+    AiProviderRecordError,
+    MAX_AI_CONFIG_BYTES,
+    MAX_DECLARED_PROVIDERS,
+    builtin_default_model_id,
+    normalize_declared_provider_record,
+    serialize_declared_provider_record,
+    validate_declared_provider_map,
+    validate_model_identifier,
+    validate_provider_identifier,
 )
 
-AI_CONFIG_SCHEMA_VERSION = 1
+AI_CONFIG_SCHEMA_VERSION = 2
+AI_CONFIG_SCHEMA_VERSIONS = frozenset({1, AI_CONFIG_SCHEMA_VERSION})
 AI_TEST_STATE_SCHEMA_VERSION = 1
 AI_STATUS_SNAPSHOT_SCHEMA_VERSION = 1
 AI_CONFIG_PATH_ENVIRONMENT_NAME = "FRAMENEST_AI_CONFIG_PATH"
-SUPPORTED_PROVIDER_IDS = frozenset({DEFAULT_PROVIDER_ID, VERCEL_AI_GATEWAY_PROVIDER_ID})
 SAFE_TEST_STATUSES = frozenset(
     {
         "success",
@@ -48,6 +55,7 @@ class AiServerConfig:
     provider_models: dict[str, str]
     updated_at_ms: int
     schema_version: int = AI_CONFIG_SCHEMA_VERSION
+    providers: dict[str, AiProviderRecord] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
@@ -72,35 +80,20 @@ class AiStatusSnapshot:
     schema_version: int = AI_STATUS_SNAPSHOT_SCHEMA_VERSION
 
 
-def provider_default_model(provider_id: str) -> str:
-    """Return the default model for one supported provider."""
-    if provider_id == VERCEL_AI_GATEWAY_PROVIDER_ID:
-        return VERCEL_AI_GATEWAY_DEFAULT_MODEL_ID
-    if provider_id == DEFAULT_PROVIDER_ID:
-        return DEFAULT_MODEL_ID
-    raise AiConfigurationError("AI provider is not supported.")
-
-
 def validate_provider_id(provider_id: object) -> str:
-    """Validate one provider identifier."""
-    if not isinstance(provider_id, str):
-        raise AiConfigurationError("AI provider is not supported.")
-    normalized = provider_id.strip()
-    if normalized not in SUPPORTED_PROVIDER_IDS:
-        raise AiConfigurationError("AI provider is not supported.")
-    return normalized
+    """Validate one bounded provider identifier."""
+    try:
+        return validate_provider_identifier(provider_id)
+    except AiProviderRecordError:
+        raise AiConfigurationError("AI provider is not supported.") from None
 
 
 def validate_model_id(model_id: object) -> str:
     """Validate one bounded model identifier."""
-    if not isinstance(model_id, str):
-        raise AiConfigurationError("AI model is invalid.")
-    normalized = model_id.strip()
-    if not normalized or len(normalized) > 120:
-        raise AiConfigurationError("AI model is invalid.")
-    if any(character.isspace() for character in normalized):
-        raise AiConfigurationError("AI model is invalid.")
-    return normalized
+    try:
+        return validate_model_identifier(model_id)
+    except AiProviderRecordError:
+        raise AiConfigurationError("AI model is invalid.") from None
 
 
 def now_ms() -> int:
@@ -150,19 +143,43 @@ def load_ai_server_config(path: Path) -> AiServerConfig | None:
     if not normalized.exists():
         return None
     try:
-        payload = json.loads(normalized.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+        raw_text = normalized.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
         raise AiConfigurationError("AI configuration is malformed.") from None
-    if not isinstance(payload, dict) or payload.get("schema_version") != AI_CONFIG_SCHEMA_VERSION:
+    if len(raw_text.encode("utf-8")) > MAX_AI_CONFIG_BYTES:
+        raise AiConfigurationError("AI configuration is malformed.")
+    try:
+        payload = json.loads(raw_text)
+    except json.JSONDecodeError:
+        raise AiConfigurationError("AI configuration is malformed.") from None
+    if not isinstance(payload, dict):
+        raise AiConfigurationError("AI configuration is malformed.")
+    schema_version = payload.get("schema_version")
+    if schema_version not in AI_CONFIG_SCHEMA_VERSIONS:
         raise AiConfigurationError("AI configuration version is unsupported.")
+    try:
+        if schema_version == 1:
+            providers: dict[str, AiProviderRecord] = {}
+        else:
+            providers = _parse_declared_providers(payload.get("providers"))
+    except AiProviderRecordError as exc:
+        raise AiConfigurationError(str(exc)) from None
     provider_id = validate_provider_id(payload.get("active_provider_id"))
     provider_models_payload = payload.get("provider_models")
     if not isinstance(provider_models_payload, dict):
         raise AiConfigurationError("AI configuration is malformed.")
     provider_models: dict[str, str] = {}
     for key, value in provider_models_payload.items():
-        provider_models[validate_provider_id(key)] = validate_model_id(value)
-    provider_models.setdefault(provider_id, provider_default_model(provider_id))
+        selected_provider_id = validate_provider_id(key)
+        _reject_unknown_provider_id(selected_provider_id, providers)
+        provider_models[selected_provider_id] = validate_model_id(value)
+    if provider_id in providers:
+        if provider_id not in provider_models:
+            raise AiConfigurationError("AI configuration is malformed.")
+    elif provider_id in BUILTIN_PROVIDER_IDS:
+        provider_models.setdefault(provider_id, builtin_default_model_id(provider_id))
+    else:
+        raise AiConfigurationError("AI configuration is malformed.")
     updated_at_ms = payload.get("updated_at_ms")
     if not isinstance(updated_at_ms, int) or updated_at_ms < 0:
         raise AiConfigurationError("AI configuration is malformed.")
@@ -170,24 +187,69 @@ def load_ai_server_config(path: Path) -> AiServerConfig | None:
         active_provider_id=provider_id,
         provider_models=provider_models,
         updated_at_ms=updated_at_ms,
+        schema_version=AI_CONFIG_SCHEMA_VERSION,
+        providers=providers,
     )
 
 
 def write_ai_server_config(config: AiServerConfig, path: Path) -> None:
     """Atomically write one non-secret server AI config file."""
     provider_id = validate_provider_id(config.active_provider_id)
+    try:
+        providers = _validate_declared_providers(config.providers)
+    except AiProviderRecordError as exc:
+        raise AiConfigurationError(str(exc)) from None
     provider_models = {
         validate_provider_id(key): validate_model_id(value)
         for key, value in config.provider_models.items()
     }
-    provider_models.setdefault(provider_id, provider_default_model(provider_id))
+    for selected_provider_id in provider_models:
+        _reject_unknown_provider_id(selected_provider_id, providers)
+    if provider_id in providers:
+        if provider_id not in provider_models:
+            raise AiConfigurationError("AI configuration is malformed.")
+    elif provider_id in BUILTIN_PROVIDER_IDS:
+        provider_models.setdefault(provider_id, builtin_default_model_id(provider_id))
+    else:
+        raise AiConfigurationError("AI configuration is malformed.")
     payload = {
         "schema_version": AI_CONFIG_SCHEMA_VERSION,
         "active_provider_id": provider_id,
         "provider_models": provider_models,
+        "providers": {
+            record_provider_id: serialize_declared_provider_record(record)
+            for record_provider_id, record in providers.items()
+        },
         "updated_at_ms": config.updated_at_ms,
     }
-    _atomic_write_json(path, payload)
+    _atomic_write_json(path, payload, max_payload_bytes=MAX_AI_CONFIG_BYTES)
+
+
+def _parse_declared_providers(payload: object) -> dict[str, AiProviderRecord]:
+    return validate_declared_provider_map(payload)
+
+
+def _validate_declared_providers(
+    providers: Mapping[str, AiProviderRecord],
+) -> dict[str, AiProviderRecord]:
+    if not isinstance(providers, Mapping) or len(providers) > MAX_DECLARED_PROVIDERS:
+        raise AiProviderRecordError("AI provider record is malformed.")
+    validated: dict[str, AiProviderRecord] = {}
+    for key, record in providers.items():
+        normalized = normalize_declared_provider_record(record)
+        if normalized.provider_id != key:
+            raise AiProviderRecordError("AI provider record is malformed.")
+        validated[normalized.provider_id] = normalized
+    return validated
+
+
+def _reject_unknown_provider_id(
+    provider_id: str,
+    providers: Mapping[str, AiProviderRecord],
+) -> None:
+    if provider_id in BUILTIN_PROVIDER_IDS or provider_id in providers:
+        return
+    raise AiConfigurationError("AI configuration is malformed.")
 
 
 def load_ai_test_state(path: Path) -> AiTestState | None:
@@ -309,11 +371,19 @@ def _prepare_existing_or_missing_path(path: Path) -> Path:
     return normalized
 
 
-def _atomic_write_json(path: Path, payload: dict[str, Any]) -> None:
+def _atomic_write_json(
+    path: Path,
+    payload: dict[str, Any],
+    *,
+    max_payload_bytes: int | None = None,
+) -> None:
     normalized = _prepare_existing_or_missing_path(path)
     parent = normalized.parent
     if parent.exists() and not parent.is_dir():
         raise AiConfigurationError("AI configuration directory is invalid.")
+    body = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8") + b"\n"
+    if max_payload_bytes is not None and len(body) > max_payload_bytes:
+        raise AiConfigurationError("AI configuration is too large.")
     parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     if parent.is_symlink():
         raise AiConfigurationError("AI configuration directory must not be a symlink.")
@@ -321,7 +391,6 @@ def _atomic_write_json(path: Path, payload: dict[str, Any]) -> None:
         os.chmod(parent, 0o700)
     except OSError:
         pass
-    body = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8") + b"\n"
     fd = -1
     temp_name = ""
     temp_path: Path | None = None

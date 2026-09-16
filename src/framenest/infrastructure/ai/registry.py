@@ -11,6 +11,7 @@ from typing import Mapping
 from framenest.configuration import FrameNestSettings
 from framenest.infrastructure.ai.configuration import (
     AiConfigurationError,
+    AiServerConfig,
     AiStatusSnapshot,
     AiTestState,
     default_ai_config_path,
@@ -19,29 +20,41 @@ from framenest.infrastructure.ai.configuration import (
     load_ai_server_config,
     load_ai_status_snapshot,
     load_ai_test_state,
-    provider_default_model,
     validate_model_id,
     validate_provider_id,
 )
 from framenest.infrastructure.ai.constants import (
+    BUILTIN_PROVIDER_IDS,
     DEFAULT_PROVIDER_ID,
-    VERCEL_AI_GATEWAY_PROVIDER_ID,
 )
 from framenest.infrastructure.ai.credentials import (
     NVIDIA_API_KEY_ENVIRONMENT_NAME,
-    VERCEL_AI_GATEWAY_API_KEY_ENVIRONMENT_NAME,
+    load_ai_credential,
     load_nvidia_api_credential,
-    load_vercel_ai_gateway_credential,
 )
 from framenest.infrastructure.ai.nvidia_nim import JsonTransport, NvidiaNimMediaSuggestionProvider
-from framenest.infrastructure.ai.vercel_gateway import VercelAiGatewayMediaSuggestionProvider
+from framenest.infrastructure.ai.openai_chat_completions import (
+    OpenAiChatCompletionsMediaSuggestionProvider,
+)
+from framenest.infrastructure.ai.provider_records import (
+    AiProviderModel,
+    AiProviderRecord,
+    OPENAI_CHAT_COMPLETIONS_PROTOCOL,
+    builtin_provider_records,
+)
 
 
 @dataclass(frozen=True, slots=True)
 class AiProviderDefinition:
     provider_id: str
     display_name: str
+    protocol: str
+    base_url: str
     credential_environment_name: str
+    source: str
+    default_model_id: str
+    models: tuple[AiProviderModel, ...]
+    builtin: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -58,10 +71,20 @@ class ResolvedAiProvider:
     config_path: Path
     test_state_path: Path
     status_snapshot_path: Path
+    protocol: str | None = None
+    base_url: str | None = None
+    provider_source: str | None = None
+    models: tuple[AiProviderModel, ...] = ()
 
     @property
     def configured(self) -> bool:
         return self.provider is not None
+
+    def capabilities_for(self, model_id: str) -> tuple[str, ...]:
+        for model in self.models:
+            if model.model_id == model_id:
+                return model.capabilities
+        return ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,18 +93,37 @@ class AiProviderPersistedStatus:
     last_status: AiStatusSnapshot | None
 
 
-PROVIDER_DEFINITIONS = {
-    DEFAULT_PROVIDER_ID: AiProviderDefinition(
-        provider_id=DEFAULT_PROVIDER_ID,
-        display_name="NVIDIA NIM",
-        credential_environment_name=NVIDIA_API_KEY_ENVIRONMENT_NAME,
-    ),
-    VERCEL_AI_GATEWAY_PROVIDER_ID: AiProviderDefinition(
-        provider_id=VERCEL_AI_GATEWAY_PROVIDER_ID,
-        display_name="Vercel AI Gateway",
-        credential_environment_name=VERCEL_AI_GATEWAY_API_KEY_ENVIRONMENT_NAME,
-    ),
-}
+def _definition_from_record(record: AiProviderRecord, *, builtin: bool) -> AiProviderDefinition:
+    return AiProviderDefinition(
+        provider_id=record.provider_id,
+        display_name=record.display_name,
+        protocol=record.protocol,
+        base_url=record.base_url,
+        credential_environment_name=record.credential_env,
+        source=record.source,
+        default_model_id=record.models[0].model_id,
+        models=record.models,
+        builtin=builtin,
+    )
+
+
+def _builtin_definitions() -> dict[str, AiProviderDefinition]:
+    return {
+        provider_id: _definition_from_record(record, builtin=True)
+        for provider_id, record in builtin_provider_records().items()
+    }
+
+
+PROVIDER_DEFINITIONS = _builtin_definitions()
+
+
+def provider_definitions(config: AiServerConfig | None) -> dict[str, AiProviderDefinition]:
+    """Merge built-in definitions with one config's declared records."""
+    definitions = _builtin_definitions()
+    if config is not None:
+        for provider_id, record in config.providers.items():
+            definitions[provider_id] = _definition_from_record(record, builtin=False)
+    return definitions
 
 
 def resolve_ai_provider(
@@ -94,36 +136,37 @@ def resolve_ai_provider(
     """Resolve the active server AI provider and instantiate it when credentialed."""
     source = os.environ if environ is None else environ
     resolved_config_path = config_path or default_ai_config_path(source)
+    persisted: AiServerConfig | None = None
     provider_id: str | None = None
     model_id: str | None = None
     configuration_source = "unconfigured"
     if settings.ai_provider_id is not None:
         provider_id = validate_provider_id(settings.ai_provider_id)
-        model_id = (
-            validate_model_id(settings.ai_model_id)
-            if settings.ai_model_id is not None
-            else provider_default_model(provider_id)
-        )
+        if settings.ai_model_id is not None:
+            model_id = validate_model_id(settings.ai_model_id)
         configuration_source = "environment"
+        if provider_id not in BUILTIN_PROVIDER_IDS:
+            persisted = load_ai_server_config(resolved_config_path)
     else:
         persisted = load_ai_server_config(resolved_config_path)
         if persisted is not None:
             provider_id = persisted.active_provider_id
-            model_id = persisted.provider_models.get(provider_id) or provider_default_model(provider_id)
-            model_id = validate_model_id(model_id)
+            model_id = persisted.provider_models.get(provider_id)
             configuration_source = "server config"
         elif source.get(NVIDIA_API_KEY_ENVIRONMENT_NAME, "").strip():
             provider_id = DEFAULT_PROVIDER_ID
-            model_id = provider_default_model(provider_id)
             configuration_source = "legacy compatibility"
-    if provider_id is None:
-        definition = None
-        credential_available = False
-        provider = None
-    else:
-        assert model_id is not None
-        definition = PROVIDER_DEFINITIONS[provider_id]
-        provider = _build_provider(provider_id, model_id, source, transport=transport)
+    definition = None
+    credential_available = False
+    provider = None
+    if provider_id is not None:
+        definition = provider_definitions(persisted).get(provider_id)
+        if definition is None:
+            raise AiConfigurationError("AI provider is not supported.")
+        if model_id is None:
+            model_id = definition.default_model_id
+        model_id = validate_model_id(model_id)
+        provider = _build_provider(definition, model_id, source, transport=transport)
         credential_available = provider is not None
     test_state_path = default_ai_test_state_path(resolved_config_path)
     status_snapshot_path = default_ai_status_snapshot_path(resolved_config_path)
@@ -149,6 +192,10 @@ def resolve_ai_provider(
         config_path=resolved_config_path,
         test_state_path=test_state_path,
         status_snapshot_path=status_snapshot_path,
+        protocol=None if definition is None else definition.protocol,
+        base_url=None if definition is None else definition.base_url,
+        provider_source=None if definition is None else definition.source,
+        models=() if definition is None else definition.models,
     )
 
 
@@ -181,23 +228,29 @@ def ai_provider_persisted_status_reader(
 
 
 def _build_provider(
-    provider_id: str,
+    definition: AiProviderDefinition,
     model_id: str,
     environ: Mapping[str, str],
     *,
     transport: JsonTransport | None,
 ) -> object | None:
-    if provider_id == DEFAULT_PROVIDER_ID:
+    if definition.provider_id == DEFAULT_PROVIDER_ID:
         credential = load_nvidia_api_credential(environ)
         if credential is None:
             return None
         return NvidiaNimMediaSuggestionProvider(credential, transport=transport, model_id=model_id)
-    if provider_id == VERCEL_AI_GATEWAY_PROVIDER_ID:
-        credential = load_vercel_ai_gateway_credential(environ)
+    if definition.protocol == OPENAI_CHAT_COMPLETIONS_PROTOCOL:
+        credential = load_ai_credential(definition.credential_environment_name, environ)
         if credential is None:
             return None
-        return VercelAiGatewayMediaSuggestionProvider(credential, transport=transport, model_id=model_id)
-    raise AiConfigurationError("AI provider is not supported.")
+        return OpenAiChatCompletionsMediaSuggestionProvider(
+            credential,
+            base_url=definition.base_url,
+            provider_id=definition.provider_id,
+            model_id=model_id,
+            transport=transport,
+        )
+    raise AiConfigurationError("AI provider protocol is not supported.")
 
 
 def _load_matching_test_state(

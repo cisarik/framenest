@@ -194,11 +194,58 @@ def test_exact_provider_to_credential_mapping(tmp_path: Path, capsys: Any) -> No
     assert "Credential identity: NVIDIA_API_KEY" in capsys.readouterr().out
 
 
+def test_supported_provider_credential_and_template_maps_match_exactly() -> None:
+    assert production_ai_deploy.PROVIDER_CREDENTIALS == {
+        "nvidia-nim": "NVIDIA_API_KEY",
+        "vercel-ai-gateway": "AI_GATEWAY_API_KEY",
+        "opencode-go": "OPENCODE_API_KEY",
+    }
+    assert set(production_ai_deploy.PROVIDER_DROPIN_TEMPLATES) == set(
+        production_ai_deploy.PROVIDER_CREDENTIALS
+    )
+
+
+def test_opencode_go_credential_template_is_exact_two_line_contract() -> None:
+    template = production_ai_deploy._load_provider_dropin_template("opencode-go")
+
+    assert template.identity == "OPENCODE_API_KEY"
+    assert template.payload == (
+        b"[Service]\n"
+        b"LoadCredential=OPENCODE_API_KEY:/etc/framenest/credentials/OPENCODE_API_KEY\n"
+    )
+
+
+def test_check_mode_reports_opencode_go_credential_identity(tmp_path: Path, capsys: Any) -> None:
+    result = production_ai_deploy.main(
+        [
+            "--target",
+            "framenest-nuc",
+            "--expected-hostname",
+            "framenest-nuc",
+            "--provider",
+            "opencode-go",
+            "--model",
+            "deepseek-v4-flash-vision-exp",
+            "--credential-file",
+            str(_credential_file(tmp_path)),
+            "--check",
+        ],
+        runner=_Runner(),
+    )
+
+    output = capsys.readouterr().out
+    assert result == 0
+    assert "Provider: opencode-go" in output
+    assert "Credential identity: OPENCODE_API_KEY" in output
+    assert SYNTHETIC_SECRET not in output
+
+
 @pytest.mark.parametrize(
     ("provider_id", "identity"),
     [
         ("nvidia-nim", "NVIDIA_API_KEY"),
         ("vercel-ai-gateway", "AI_GATEWAY_API_KEY"),
+        ("opencode-go", "OPENCODE_API_KEY"),
     ],
 )
 def test_provider_template_mapping_loads_exact_tracked_bytes(
@@ -814,6 +861,7 @@ def test_local_ai_env_source_validation_and_extraction(tmp_path: Path) -> None:
             [
                 "set -gx NVIDIA_API_KEY unrelated-sentinel",
                 f"set -gx AI_GATEWAY_API_KEY {SYNTHETIC_SECRET}",
+                f"set -gx OPENCODE_API_KEY {SYNTHETIC_SECRET}",
                 "",
             ]
         ),
@@ -829,6 +877,15 @@ def test_local_ai_env_source_validation_and_extraction(tmp_path: Path) -> None:
 
     assert secret.value == SYNTHETIC_SECRET
     assert secret.identity == "AI_GATEWAY_API_KEY"
+
+    opencode_secret = production_ai_deploy.load_local_secret(
+        provider_id="opencode-go",
+        credential_file=None,
+        local_ai_env=env_path,
+    )
+
+    assert opencode_secret.value == SYNTHETIC_SECRET
+    assert opencode_secret.identity == "OPENCODE_API_KEY"
 
 
 def test_local_ai_env_rejects_symlink_and_insecure_permissions(tmp_path: Path) -> None:

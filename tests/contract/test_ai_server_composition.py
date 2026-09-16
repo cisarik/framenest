@@ -11,12 +11,21 @@ from fastapi.testclient import TestClient
 from framenest.adapters.api.application import create_app
 from framenest.configuration import FrameNestSettings
 from framenest.infrastructure.ai.configuration import (
+    AiServerConfig,
     AiTestState,
     default_ai_test_state_path,
+    write_ai_server_config,
     write_ai_test_state,
+)
+from framenest.infrastructure.ai.provider_records import (
+    AiProviderModel,
+    AiProviderRecord,
 )
 
 NVIDIA_MODEL_ID = "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning"
+DECLARED_PROVIDER_ID = "opencode-go"
+DECLARED_MODEL_ID = "deepseek-v4-flash-vision-exp"
+DECLARED_CREDENTIAL_ENV = "OPENCODE_API_KEY"
 
 
 def _client(tmp_path: Path, *, provider_id: str) -> TestClient:
@@ -263,3 +272,64 @@ def test_capability_get_does_not_create_missing_test_state_directory(
     assert response.status_code == 200
     assert response.json()["status"] == "configured_unverified"
     assert not test_state_path.parent.exists()
+
+
+def _declared_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
+    config_path = tmp_path / "ai" / "config.json"
+    monkeypatch.setenv("FRAMENEST_AI_CONFIG_PATH", str(config_path))
+    monkeypatch.delenv("OPENCODE_API_KEY", raising=False)
+    monkeypatch.delenv("NVIDIA_API_KEY", raising=False)
+    monkeypatch.delenv("AI_GATEWAY_API_KEY", raising=False)
+    write_ai_server_config(
+        AiServerConfig(
+            active_provider_id=DECLARED_PROVIDER_ID,
+            provider_models={DECLARED_PROVIDER_ID: DECLARED_MODEL_ID},
+            updated_at_ms=1_725_000_000_000,
+            providers={
+                DECLARED_PROVIDER_ID: AiProviderRecord(
+                    provider_id=DECLARED_PROVIDER_ID,
+                    display_name="OpenCode Go",
+                    protocol="openai-chat-completions",
+                    base_url="https://opencode.ai/zen/go/v1",
+                    credential_env=DECLARED_CREDENTIAL_ENV,
+                    models=(
+                        AiProviderModel(
+                            model_id=DECLARED_MODEL_ID,
+                            display_name="DeepSeek V4 Flash Vision Exp",
+                            capabilities=("vision_input",),
+                        ),
+                    ),
+                    source="declared",
+                )
+            },
+        ),
+        config_path,
+    )
+    settings = FrameNestSettings(
+        database_path=tmp_path / "catalog.sqlite3",
+        _env_file=None,
+    )
+    return TestClient(create_app(settings=settings))
+
+
+def test_declared_provider_resolves_at_startup_with_credential_unavailable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _declared_client(tmp_path, monkeypatch)
+
+    response = client.get("/api/ai/media-suggestion-capability")
+
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "no-store"
+    payload = response.json()
+    assert payload["provider_id"] == DECLARED_PROVIDER_ID
+    assert payload["provider_display_name"] == "OpenCode Go"
+    assert payload["model_id"] == DECLARED_MODEL_ID
+    assert payload["configured"] is True
+    assert payload["available"] is False
+    assert payload["credential_available"] is False
+    assert payload["status"] == "credential_unavailable"
+    assert "synthetic" not in response.text
+    assert DECLARED_CREDENTIAL_ENV not in response.text
+    assert "FRAMENEST_AI_CONFIG_PATH" not in response.text
