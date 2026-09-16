@@ -215,6 +215,17 @@ def _imported_suggestion_result() -> ImportedMediaSuggestionPreviewResult:
     )
 
 
+class _ResolvedModel:
+    def __init__(self, capabilities: tuple[str, ...]) -> None:
+        self.provider = object()
+        self.model_id = "resolved-model"
+        self.capabilities = capabilities
+
+    def capabilities_for(self, model_id: str) -> tuple[str, ...]:
+        del model_id
+        return self.capabilities
+
+
 def _client(
     *,
     configured: bool = True,
@@ -228,6 +239,7 @@ def _client(
     database_path: Path | None = None,
     last_status_check: dict[str, object] | None = None,
     last_connection_test: dict[str, object] | None = None,
+    read_provider: object | None = None,
 ) -> tuple[TestClient, _FakeSuggestionPreview, _FakeImportedSuggestionPreview]:
     suggestion_preview = preview or _FakeSuggestionPreview()
     imported_suggestion_preview = imported_preview or _FakeImportedSuggestionPreview()
@@ -258,6 +270,7 @@ def _client(
             status=status,
             last_status_check=last_status_check,
             last_connection_test=last_connection_test,
+            read_provider=read_provider,  # type: ignore[arg-type]
         ),
     )
     return TestClient(app), suggestion_preview, imported_suggestion_preview
@@ -484,6 +497,42 @@ def test_unconfigured_provider_returns_503_without_preview_call() -> None:
     assert response.json()["error"]["code"] == "AI_PROVIDER_NOT_CONFIGURED"
     assert preview.calls == []
     assert imported_preview.calls == []
+
+
+def test_non_vision_selected_model_is_refused_on_both_preview_routes() -> None:
+    client, preview, imported_preview = _client(
+        read_provider=lambda: _ResolvedModel(()),
+    )
+
+    listed = _post_preview(client)
+    imported = _post_imported_preview(client)
+
+    for response in (listed, imported):
+        assert response.status_code == 409
+        assert response.headers["cache-control"] == "no-store"
+        assert response.json() == {
+            "error": {
+                "code": "AI_MODEL_CAPABILITY_MISSING",
+                "message": "The selected AI model does not support image analysis.",
+            }
+        }
+    assert preview.calls == []
+    assert imported_preview.calls == []
+    assert "Authorization" not in listed.text + imported.text
+
+
+def test_vision_declared_selected_model_still_analyzes() -> None:
+    client, preview, imported_preview = _client(
+        read_provider=lambda: _ResolvedModel(("vision_input",)),
+    )
+
+    listed = _post_preview(client)
+    imported = _post_imported_preview(client)
+
+    assert listed.status_code == 200
+    assert imported.status_code == 200
+    assert len(preview.calls) == 1
+    assert len(imported_preview.calls) == 1
 
 
 @pytest.mark.parametrize(

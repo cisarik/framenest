@@ -151,6 +151,10 @@ from framenest.application.gallery_preview import GalleryPreviewService
 from framenest.application.media_cover import CoverService
 from framenest.application.media_suggestion import PreviewMediaSuggestion
 from framenest.application.media_suggestion import PreviewImportedMediaSuggestion
+from framenest.application.media_suggestion import (
+    MediaSuggestionProviderUnavailableError,
+    SUGGESTION_PROVIDER_UNAVAILABLE_MESSAGE,
+)
 from framenest.application.upload_transport import (
     UploadTransportLimits,
     UploadTransportService,
@@ -683,6 +687,15 @@ def create_app(
             owned_media_analysis_run_repository,
         )
         analysis_process_runner = SubprocessRunner()
+
+        def _read_analysis_model_capabilities() -> tuple[str, ...]:
+            resolved_model = ai_provider_resolver.resolve()
+            if resolved_model.provider is None:
+                raise MediaSuggestionProviderUnavailableError(
+                    SUGGESTION_PROVIDER_UNAVAILABLE_MESSAGE
+                )
+            return resolved_model.capabilities_for(resolved_model.model_id or "")
+
         analysis_executor = InterruptAwareMediaAnalysisRunExecutor(
             owned_media_analysis_run_repository,
             AutomaticImportedMediaSuggestionExecutor(
@@ -690,6 +703,7 @@ def create_app(
                 owned_library_repository,
                 LocalMediaAnalysisAdapter(analysis_process_runner),
                 lazy_analysis_provider,
+                read_model_capabilities=_read_analysis_model_capabilities,
             ),
             max_attempts=resolved_settings.automatic_media_analysis_max_attempts,
             process_runner=analysis_process_runner,

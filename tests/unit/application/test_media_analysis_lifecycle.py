@@ -9,8 +9,10 @@ import pytest
 
 from framenest.application.media_analysis_lifecycle import (
     AutomaticAnalysisPublicView,
+    AutomaticImportedMediaSuggestionExecutor,
     CatalogedAnalysisTarget,
     ExecuteAutomaticMediaAnalysisRun,
+    MediaAnalysisLifecycleModelCapabilityError,
     PersistImportedPreviewAnalysis,
     RequestManualMediaAnalysis,
     ScheduleAutomaticMediaAnalysis,
@@ -915,3 +917,116 @@ def test_imported_preview_join_supersedes_prior_terminal_success() -> None:
         "record_analyzed",
     ]
     assert metadata.save_calls == 0
+
+
+class _RecordingMediaRepository:
+    def __init__(self) -> None:
+        self.get_calls = 0
+
+    def get_media(self, media_id):
+        del media_id
+        self.get_calls += 1
+        return None
+
+
+class _RecordingProvider:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def suggest(self, request):
+        del request
+        self.calls += 1
+        return _suggestion()
+
+
+def _capability_executor(
+    read_model_capabilities,
+    *,
+    media_repository=None,
+    provider=None,
+):
+    return AutomaticImportedMediaSuggestionExecutor(
+        media_repository=media_repository or _RecordingMediaRepository(),  # type: ignore[arg-type]
+        library_repository=object(),  # type: ignore[arg-type]
+        preparer=object(),  # type: ignore[arg-type]
+        provider=provider or _RecordingProvider(),
+        read_model_capabilities=read_model_capabilities,
+    )
+
+
+def test_automatic_executor_refuses_non_vision_model_before_any_work() -> None:
+    media_repository = _RecordingMediaRepository()
+    provider = _RecordingProvider()
+    executor = _capability_executor(
+        lambda: (),
+        media_repository=media_repository,
+        provider=provider,
+    )
+
+    with pytest.raises(MediaAnalysisLifecycleModelCapabilityError):
+        executor.execute(MEDIA_ID, LOCATION_ID)
+
+    assert media_repository.get_calls == 0
+    assert provider.calls == 0
+
+
+def test_automatic_executor_none_capability_reader_keeps_current_behavior() -> None:
+    media_repository = _RecordingMediaRepository()
+    executor = _capability_executor(None, media_repository=media_repository)
+
+    with pytest.raises(MediaSuggestionPreparationUnavailableError):
+        executor.execute(MEDIA_ID, LOCATION_ID)
+
+    assert media_repository.get_calls == 1
+
+
+def test_non_vision_automatic_run_fails_non_retryably_without_submission() -> None:
+    repository = _FakeRepository()
+    scheduler = ScheduleAutomaticMediaAnalysis(repository, enabled=True, now_ms=lambda: 1)
+    run = scheduler.execute(
+        CatalogedAnalysisTarget(media_id=MEDIA_ID, media_location_id=LOCATION_ID)
+    )
+    assert run is not None
+    provider = _RecordingProvider()
+    service = ExecuteAutomaticMediaAnalysisRun(
+        repository,
+        _capability_executor(lambda: (), provider=provider),
+        max_attempts=3,
+        now_ms=lambda: 2,
+    )
+
+    failed = service.execute(run)
+
+    assert failed.state is MediaAnalysisRunState.FAILED
+    assert failed.error_code == "PROVIDER_MODEL_CAPABILITY_MISSING"
+    assert failed.error_message == "AI provider model does not support image analysis."
+    assert failed.provider_submission_occurred is False
+    assert provider.calls == 0
+    assert "requeue_for_retry" not in repository.transactions
+
+
+def test_unavailable_capability_reader_still_classifies_as_provider_unavailable() -> None:
+    repository = _FakeRepository()
+    scheduler = ScheduleAutomaticMediaAnalysis(repository, enabled=True, now_ms=lambda: 1)
+    run = scheduler.execute(
+        CatalogedAnalysisTarget(media_id=MEDIA_ID, media_location_id=LOCATION_ID)
+    )
+    assert run is not None
+    provider = _RecordingProvider()
+
+    def _raise_unavailable():
+        raise MediaSuggestionProviderUnavailableError("down")
+
+    service = ExecuteAutomaticMediaAnalysisRun(
+        repository,
+        _capability_executor(_raise_unavailable, provider=provider),
+        max_attempts=1,
+        now_ms=lambda: 2,
+    )
+
+    failed = service.execute(run)
+
+    assert failed.state is MediaAnalysisRunState.FAILED
+    assert failed.error_code == "PROVIDER_UNAVAILABLE"
+    assert failed.provider_submission_occurred is True
+    assert provider.calls == 0

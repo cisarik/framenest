@@ -48,6 +48,8 @@ CLOUD_CONFIRMATION_REQUIRED_CODE = "CLOUD_CONFIRMATION_REQUIRED"
 CLOUD_CONFIRMATION_REQUIRED_MESSAGE = "Explicit cloud upload confirmation is required."
 AI_PROVIDER_NOT_CONFIGURED_CODE = "AI_PROVIDER_NOT_CONFIGURED"
 AI_PROVIDER_NOT_CONFIGURED_MESSAGE = "The AI suggestion provider is not configured."
+AI_MODEL_CAPABILITY_MISSING_CODE = "AI_MODEL_CAPABILITY_MISSING"
+AI_MODEL_CAPABILITY_MISSING_MESSAGE = "The selected AI model does not support image analysis."
 LIBRARY_NOT_FOUND_CODE = "LIBRARY_NOT_FOUND"
 LIBRARY_NOT_FOUND_MESSAGE = "Library not found."
 INVALID_MEDIA_PATH_CODE = "INVALID_MEDIA_PATH"
@@ -254,6 +256,12 @@ def create_media_suggestion_api_router(dependencies: MediaSuggestionApiDependenc
                 AI_PROVIDER_NOT_CONFIGURED_CODE,
                 AI_PROVIDER_NOT_CONFIGURED_MESSAGE,
             )
+        if _model_lacks_vision(dependencies):
+            return _error_response(
+                409,
+                AI_MODEL_CAPABILITY_MISSING_CODE,
+                AI_MODEL_CAPABILITY_MISSING_MESSAGE,
+            )
         try:
             relative_path = _media_relative_path_from_request(request.relative_path)
             result = dependencies.preview_suggestion.execute(
@@ -355,6 +363,12 @@ def create_media_suggestion_api_router(dependencies: MediaSuggestionApiDependenc
                 AI_PROVIDER_NOT_CONFIGURED_CODE,
                 AI_PROVIDER_NOT_CONFIGURED_MESSAGE,
             )
+        if _model_lacks_vision(dependencies):
+            return _error_response(
+                409,
+                AI_MODEL_CAPABILITY_MISSING_CODE,
+                AI_MODEL_CAPABILITY_MISSING_MESSAGE,
+            )
         try:
             result = dependencies.preview_imported_suggestion.execute(
                 parsed_media_id,
@@ -428,6 +442,21 @@ def _provider_configured(dependencies: MediaSuggestionApiDependencies) -> bool:
         except Exception:
             return False
     return dependencies.provider_configured
+
+
+def _model_lacks_vision(dependencies: MediaSuggestionApiDependencies) -> bool:
+    """True only when a dynamic resolution proves the selected model has no vision_input."""
+    if dependencies.read_provider is None:
+        return False
+    try:
+        resolved = dependencies.read_provider()
+    except Exception:
+        return False
+    capabilities_for = getattr(resolved, "capabilities_for", None)
+    if not callable(capabilities_for):
+        return False
+    model_id = getattr(resolved, "model_id", None)
+    return "vision_input" not in capabilities_for(model_id or "")
 
 
 def _resolved_capability_response(

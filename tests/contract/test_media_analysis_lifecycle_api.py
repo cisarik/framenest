@@ -390,6 +390,135 @@ def test_manual_durable_analysis_request_requires_confirmation_and_schedules() -
     assert PRIVATE_PATH not in accepted.text
 
 
+class _ResolvedModel:
+    def __init__(self, capabilities: tuple[str, ...]) -> None:
+        self.provider = object()
+        self.model_id = "resolved-model"
+        self.capabilities = capabilities
+
+    def capabilities_for(self, model_id: str) -> tuple[str, ...]:
+        del model_id
+        return self.capabilities
+
+
+def _manual_capability_client(
+    read_provider: object,
+) -> tuple[TestClient, list[object]]:
+    from framenest.domain.media_analysis_runs import (
+        AUTOMATIC_POST_CATALOG_ANALYSIS_DEFINITION,
+        MediaAnalysisRun,
+        MediaAnalysisRunId,
+        MediaAnalysisRunState,
+    )
+    from framenest.domain.identities import MediaLocationId
+
+    calls: list[object] = []
+
+    def _request(media_id: MediaId, location_id: object) -> MediaAnalysisRun:
+        assert isinstance(location_id, MediaLocationId)
+        calls.append(location_id)
+        return MediaAnalysisRun(
+            id=MediaAnalysisRunId("11111111-1111-4111-8111-111111111111"),
+            media_id=media_id,
+            media_location_id=location_id,
+            analysis_definition=AUTOMATIC_POST_CATALOG_ANALYSIS_DEFINITION,
+            state=MediaAnalysisRunState.PENDING,
+            attempt_count=0,
+            provider_id=None,
+            model_id=None,
+            prompt_version=None,
+            result_schema_version=None,
+            result_json=None,
+            error_code=None,
+            error_message=None,
+            created_at_ms=10,
+            started_at_ms=None,
+            completed_at_ms=None,
+            version=1,
+        )
+
+    settings = FrameNestSettings(
+        host="127.0.0.1",
+        database_path=Path("/tmp/framenest-analysis-lifecycle-capability.sqlite3"),
+        automatic_media_analysis_enabled=False,
+        _env_file=None,
+    )
+    app = create_app(
+        settings=settings,
+        library_api_dependencies=LibraryApiDependencies(
+            repository=object(),  # type: ignore[arg-type]
+            scan_preview=object(),
+            catalog_available=lambda: True,
+        ),
+        media_analysis_api_dependencies=MediaAnalysisApiDependencies(
+            prepare_preview=object(),
+            catalog_available=lambda: True,
+        ),
+        media_suggestion_api_dependencies=MediaSuggestionApiDependencies(
+            preview_suggestion=None,
+            provider_configured=False,
+        ),
+        media_analysis_lifecycle_api_dependencies=MediaAnalysisLifecycleApiDependencies(
+            read_analysis=_FakeReadAnalysis(
+                AutomaticAnalysisPublicView(
+                    state="not_requested",
+                    analysis_definition=None,
+                    provider_id=None,
+                    model_id=None,
+                    prompt_version=None,
+                    result=None,
+                    error_code=None,
+                    error_message=None,
+                    attempt_count=None,
+                    created_at_ms=None,
+                    started_at_ms=None,
+                    completed_at_ms=None,
+                )
+            ),  # type: ignore[arg-type]
+            automatic_analysis_enabled=False,
+            provider_configured=True,
+            provider_id="nvidia-nim",
+            model_id="resolved-model",
+            read_provider=read_provider,  # type: ignore[arg-type]
+            request_manual_analysis=_request,  # type: ignore[arg-type]
+        ),
+    )
+    return TestClient(app), calls
+
+
+def test_manual_durable_analysis_refuses_non_vision_selected_model() -> None:
+    client, calls = _manual_capability_client(lambda: _ResolvedModel(()))
+    location_id = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+
+    response = client.post(
+        f"/api/media/{CANONICAL_MEDIA_ID}/locations/{location_id}/durable-analysis",
+        json={"confirm_cloud_upload": True},
+    )
+
+    assert response.status_code == 409
+    assert response.json()["error"] == {
+        "code": "AI_MODEL_CAPABILITY_MISSING",
+        "message": "The selected AI model does not support image analysis.",
+    }
+    assert calls == []
+    assert SECRET not in response.text
+    assert PRIVATE_PATH not in response.text
+
+
+def test_manual_durable_analysis_accepts_vision_selected_model() -> None:
+    client, calls = _manual_capability_client(lambda: _ResolvedModel(("vision_input",)))
+    location_id = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+
+    response = client.post(
+        f"/api/media/{CANONICAL_MEDIA_ID}/locations/{location_id}/durable-analysis",
+        json={"confirm_cloud_upload": True},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["state"] == "pending"
+    assert len(calls) == 1
+
+
 def test_manual_durable_analysis_after_terminal_returns_new_pending_run() -> None:
     from framenest.domain.media_analysis_runs import (
         AUTOMATIC_POST_CATALOG_ANALYSIS_DEFINITION,

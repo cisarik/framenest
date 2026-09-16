@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 import json
 from typing import Protocol
@@ -76,6 +76,10 @@ class MediaAnalysisLifecycleDisabledError(MediaAnalysisLifecycleError):
 
 class MediaAnalysisLifecycleNotConfiguredError(MediaAnalysisLifecycleError):
     """Raised when no provider is configured for automatic analysis."""
+
+
+class MediaAnalysisLifecycleModelCapabilityError(MediaAnalysisLifecycleError):
+    """Raised when the selected provider model cannot analyze images."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -489,11 +493,13 @@ class AutomaticImportedMediaSuggestionExecutor:
         library_repository: LibraryRepository,
         preparer: LocalMediaAnalysisPreparer,
         provider: MediaSuggestionProvider | None,
+        read_model_capabilities: Callable[[], Sequence[str]] | None = None,
     ) -> None:
         self._media_repository = media_repository
         self._library_repository = library_repository
         self._preparer = preparer
         self._provider = provider
+        self._read_model_capabilities = read_model_capabilities
 
     def execute(
         self,
@@ -504,6 +510,12 @@ class AutomaticImportedMediaSuggestionExecutor:
             raise MediaAnalysisLifecycleNotConfiguredError(
                 "automatic analysis provider is not configured"
             )
+        if self._read_model_capabilities is not None:
+            capabilities = self._read_model_capabilities()
+            if "vision_input" not in capabilities:
+                raise MediaAnalysisLifecycleModelCapabilityError(
+                    "AI provider model does not support image analysis"
+                )
         media = self._media_repository.get_media(media_id)
         if media is None:
             raise MediaSuggestionPreparationUnavailableError(
@@ -576,6 +588,12 @@ class ReadAutomaticMediaAnalysis:
 def _classify_failure(exc: Exception) -> tuple[str, str, bool]:
     if isinstance(exc, MediaAnalysisLifecycleNotConfiguredError):
         return "PROVIDER_NOT_CONFIGURED", "AI provider is not configured.", False
+    if isinstance(exc, MediaAnalysisLifecycleModelCapabilityError):
+        return (
+            "PROVIDER_MODEL_CAPABILITY_MISSING",
+            "AI provider model does not support image analysis.",
+            False,
+        )
     if isinstance(exc, MediaSuggestionProviderAuthError):
         return "PROVIDER_AUTH", "AI provider authentication failed.", False
     if isinstance(exc, MediaSuggestionProviderRateLimitedError):

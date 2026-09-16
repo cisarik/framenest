@@ -386,6 +386,12 @@ def create_media_analysis_lifecycle_api_router(
                 "AI analysis is not configured.",
                 503,
             )
+        if _model_lacks_vision(dependencies):
+            return _error(
+                "AI_MODEL_CAPABILITY_MISSING",
+                "The selected AI model does not support image analysis.",
+                409,
+            )
         if dependencies.request_manual_analysis is None:
             return _error(
                 "ANALYSIS_REQUEST_UNAVAILABLE",
@@ -528,6 +534,21 @@ def _provider_configured(dependencies: MediaAnalysisLifecycleApiDependencies) ->
         except Exception:
             return False
     return dependencies.provider_configured
+
+
+def _model_lacks_vision(dependencies: MediaAnalysisLifecycleApiDependencies) -> bool:
+    """True only when a dynamic resolution proves the selected model has no vision_input."""
+    if dependencies.read_provider is None:
+        return False
+    try:
+        resolved = dependencies.read_provider()
+    except Exception:
+        return False
+    capabilities_for = getattr(resolved, "capabilities_for", None)
+    if not callable(capabilities_for):
+        return False
+    model_id = getattr(resolved, "model_id", None)
+    return "vision_input" not in capabilities_for(model_id or "")
 
 
 def _resolve_automatic_analysis_enabled(
