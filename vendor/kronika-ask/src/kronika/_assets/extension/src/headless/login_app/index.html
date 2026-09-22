@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kronika headless login</title>
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<header>
+<h1>Headless login</h1>
+<p id="status" role="status">starting</p>
+<button id="page-toggle" type="button">Page view</button>
+<button id="done" type="button">Done</button>
+</header>
+<main>
+<section id="form-view">
+<h2 id="step-title">Waiting for the engine page</h2>
+<p id="step-labels" class="hint"></p>
+<div id="messages"></div>
+<form id="credential-form" autocomplete="off" hidden>
+<label id="value-label" for="value-input">Value</label>
+<input id="value-input" name="value" type="text" autocomplete="off" spellcheck="false">
+<button id="submit" type="submit">Continue</button>
+</form>
+<div id="captcha-actions" hidden>
+<button id="captcha-open" type="button">Solve CAPTCHA</button>
+</div>
+</section>
+<section id="captcha-view" hidden>
+<p>Click the CAPTCHA image to solve it; the image refreshes after each click.</p>
+<img id="captcha-image" alt="CAPTCHA region" draggable="false">
+<div class="row">
+<button id="captcha-refresh" type="button">Refresh</button>
+<button id="captcha-page" type="button">Full page view</button>
+</div>
+</section>
+<section id="page-view" hidden>
+<p>Interactive page view: click the page and type into the focused field.</p>
+<img id="page-image" alt="Engine page" draggable="false">
+<div class="row">
+<button id="page-refresh" type="button">Refresh</button>
+<button id="page-captcha" type="button" hidden>CAPTCHA view</button>
+</div>
+<div class="row">
+<input id="page-text" type="text" autocomplete="off" spellcheck="false" placeholder="Text for the focused field">
+<button id="page-send" type="button">Type</button>
+</div>
+</section>
+</main>
+<script src="app.js" defer></script>
+</body>
+</html>

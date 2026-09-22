@@ -1,0 +1,266 @@
+{
+  "upstream_commit": "66c40d43c577276b0ad304a494fbbb1ffb6fc933",
+  "upstream_tree": "848f247434deea4c217170c012612b39e41557f3",
+  "paths": [
+    {
+      "source": "src/kronika/__init__.py",
+      "source_blob": "3dc1f76bc69e3f559bee6253b24fc93acee9e1f9",
+      "destination": "vendor/kronika-ask/src/kronika/__init__.py",
+      "destination_blob": "ee076d4d0ab7de30974d5a56a6eea03df25026af",
+      "disposition": "rewritten"
+    },
+    {
+      "source": "src/kronika/__main__.py",
+      "source_blob": "167c664b71a5fb99466e3ec8ba307934952b4161",
+      "destination": "vendor/kronika-ask/src/kronika/__main__.py",
+      "destination_blob": "167c664b71a5fb99466e3ec8ba307934952b4161",
+      "disposition": "kept"
+    },
+    {
+      "source": "src/kronika/cli.py",
+      "source_blob": "6b69fd06f966242718f2ba5fed583e97de8e962d",
+      "destination": "vendor/kronika-ask/src/kronika/cli.py",
+      "destination_blob": "deffb63e2f3e9e73ecc17de5ffd9798c435b1cf7",
+      "disposition": "rewritten"
+    },
+    {
+      "source": "src/kronika/client.py",
+      "source_blob": "ef5c8910538b3c54bc763d75c7c7299399a74e5f",
+      "destination": "vendor/kronika-ask/src/kronika/client.py",
+      "destination_blob": "fe84cf67ae85d377229a78de742fb3181b893d2e",
+      "disposition": "rewritten"
+    },
+    {
+      "source": "src/kronika/config.py",
+      "source_blob": "bf003ddab328002dce201394971f8b7b5a9d6819",
+      "destination": "vendor/kronika-ask/src/kronika/config.py",
+      "destination_blob": "2a25def3bfb50ce03544ef5b4d08a831b73e99d9",
+      "disposition": "rewritten"
+    },
+    {
+      "source": "src/kronika/errors.py",
+      "source_blob": "47e3d3d692bc9833ee9b1b5cd4bf76386c86ffd0",
+      "destination": "vendor/kronika-ask/src/kronika/errors.py",
+      "destination_blob": "47e3d3d692bc9833ee9b1b5cd4bf76386c86ffd0",
+      "disposition": "kept"
+    },
+    {
+      "source": "src/kronika/paths.py",
+      "source_blob": "063292b6cc0307f62b8ec7878f4ca5b465fe8e1c",
+      "destination": "vendor/kronika-ask/src/kronika/paths.py",
+      "destination_blob": "86e7e7d63439b03ffff6bec1e39b834fa04ad840",
+      "disposition": "rewritten"
+    },
+    {
+      "source": "src/kronika/projects.py",
+      "source_blob": "19205dc622a6dbf9180d13631d61b7dcbef7c98e",
+      "destination": "vendor/kronika-ask/src/kronika/projects.py",
+      "destination_blob": "eae6c2d045ce52b0a20ce821866ad0368673c80d",
+      "disposition": "rewritten"
+    },
+    {
+      "source": "src/kronika/bridge/__init__.py",
+      "source_blob": "522a418fb5b72b17906ae30b535130d7bd828724",
+      "destination": "vendor/kronika-ask/src/kronika/bridge/__init__.py",
+      "destination_blob": "c58fc0def79752a78c35fc54732a51303ac2bc1e",
+      "disposition": "rewritten"
+    },
+    {
+      "source": "src/kronika/bridge/auth.py",
+      "source_blob": "77070a70e89542cbf877d6c175d9ccb94703a875",
+      "destination": "vendor/kronika-ask/src/kronika/bridge/auth.py",
+      "destination_blob": "da73b391e341bb21903eab4bad0d374e13464013",
+      "disposition": "rewritten"
+    },
+    {
+      "source": "src/kronika/bridge/jobs.py",
+      "source_blob": "72edd499d36538b6c934039716f702f650a4eeb1",
+      "destination": "vendor/kronika-ask/src/kronika/bridge/jobs.py",
+      "destination_blob": "acb8e84c29fe6a524d7ae1376161a08c86ba9d75",
+      "disposition": "rewritten"
+    },
+    {
+      "source": "src/kronika/bridge/results.py",
+      "source_blob": "c2184847de6bda0a7c57bb26f433cff70fa4c168",
+      "destination": "vendor/kronika-ask/src/kronika/bridge/results.py",
+      "destination_blob": "9ef4041b4862ec79a7cae3fab25a7431d2d2de61",
+      "disposition": "rewritten"
+    },
+    {
+      "source": "src/kronika/bridge/server.py",
+      "source_blob": "ebc8e9f00df92dcd01d915e77a904eaead2b3e52",
+      "destination": "vendor/kronika-ask/src/kronika/bridge/server.py",
+      "destination_blob": "58ef55234af067cf191ff6961fcb19413ade2154",
+      "disposition": "rewritten"
+    },
+    {
+      "source": "src/kronika/bridge/store.py",
+      "source_blob": "8f45b885e85326e5638c35842f54a91806782af4",
+      "destination": "vendor/kronika-ask/src/kronika/bridge/store.py",
+      "destination_blob": "8f45b885e85326e5638c35842f54a91806782af4",
+      "disposition": "kept"
+    },
+    {
+      "source": "extension/src/adapters/adapter.js",
+      "source_blob": "d59bd7a92b9af75f3c26c6e6051726688915e3cd",
+      "destination": "vendor/kronika-ask/src/kronika/_assets/extension/src/adapters/adapter.js",
+      "destination_blob": "d59bd7a92b9af75f3c26c6e6051726688915e3cd",
+      "disposition": "kept"
+    },
+    {
+      "source": "extension/src/adapters/pack_v5.json",
+      "source_blob": "22414672373e11bc203ece34d4ef27f521faa66e",
+      "destination": "vendor/kronika-ask/src/kronika/_assets/extension/src/adapters/pack_v5.json",
+      "destination_blob": "22414672373e11bc203ece34d4ef27f521faa66e",
+      "disposition": "kept"
+    },
+    {
+      "source": "extension/src/protocol.js",
+      "source_blob": "166f2b20c68c4760f058747810ffd5cdafd06143",
+      "destination": "vendor/kronika-ask/src/kronika/_assets/extension/src/protocol.js",
+      "destination_blob": "f3f59616ae7f9cea256110dd205b83ad271f2bb8",
+      "disposition": "rewritten"
+    },
+    {
+      "source": "extension/src/url_guard.js",
+      "source_blob": "73f734dba017558920d9fc234d8608d52f5a1551",
+      "destination": "vendor/kronika-ask/src/kronika/_assets/extension/src/url_guard.js",
+      "destination_blob": "73f734dba017558920d9fc234d8608d52f5a1551",
+      "disposition": "kept"
+    },
+    {
+      "source": "extension/src/engine/dom_engine.js",
+      "source_blob": "92327b2e0c75c36d5521b62f8a4a90426b6e5e7f",
+      "destination": "vendor/kronika-ask/src/kronika/_assets/extension/src/engine/dom_engine.js",
+      "destination_blob": "fb2b41babaa3354c46636fece5a5d31ecd0e2843",
+      "disposition": "rewritten"
+    },
+    {
+      "source": "extension/src/engine/index.js",
+      "source_blob": "5b4ae7ff3debc7ea12821fd97a17078334e7ae2c",
+      "destination": "vendor/kronika-ask/src/kronika/_assets/extension/src/engine/index.js",
+      "destination_blob": "5b4ae7ff3debc7ea12821fd97a17078334e7ae2c",
+      "disposition": "kept"
+    },
+    {
+      "source": "extension/src/engine/interventions.js",
+      "source_blob": "f2502e907a3d39be38e456e939ecee96e249cd0c",
+      "destination": "vendor/kronika-ask/src/kronika/_assets/extension/src/engine/interventions.js",
+      "destination_blob": "f2502e907a3d39be38e456e939ecee96e249cd0c",
+      "disposition": "kept"
+    },
+    {
+      "source": "extension/src/job_runner.js",
+      "source_blob": "36387a8e2ba4ff34b3ab14c9b289705c5cdaac79",
+      "destination": null,
+      "disposition": "deleted"
+    },
+    {
+      "source": "extension/src/headless/bridge_client.mjs",
+      "source_blob": "e10b43ba7b1a69fc2700cb8997b40d63bf8dc972",
+      "destination": "vendor/kronika-ask/src/kronika/_assets/extension/src/headless/bridge_client.mjs",
+      "destination_blob": "814c809d040143395ec9bda5512efbc03e59fcf4",
+      "disposition": "rewritten"
+    },
+    {
+      "source": "extension/src/headless/cdp_client.mjs",
+      "source_blob": "624f9f3452c195f497cf49a2cf0ee186470bdbb5",
+      "destination": "vendor/kronika-ask/src/kronika/_assets/extension/src/headless/cdp_client.mjs",
+      "destination_blob": "624f9f3452c195f497cf49a2cf0ee186470bdbb5",
+      "disposition": "kept"
+    },
+    {
+      "source": "extension/src/headless/driver.mjs",
+      "source_blob": "fbfc97aef753b880012c6dc8b86765782eee2616",
+      "destination": "vendor/kronika-ask/src/kronika/_assets/extension/src/headless/driver.mjs",
+      "destination_blob": "fbfc97aef753b880012c6dc8b86765782eee2616",
+      "disposition": "kept"
+    },
+    {
+      "source": "extension/src/headless/runner.mjs",
+      "source_blob": "5f3513e059b8b7ae5be6d92cc845e726535b65b5",
+      "destination": "vendor/kronika-ask/src/kronika/_assets/extension/src/headless/runner.mjs",
+      "destination_blob": "21610fa57383ce688e3047968d256ff5cb6e55e2",
+      "disposition": "rewritten"
+    },
+    {
+      "source": "extension/src/headless/job_engine.mjs",
+      "source_blob": "60db86623f339aadfdc743718936f68d196f02b4",
+      "destination": "vendor/kronika-ask/src/kronika/_assets/extension/src/headless/job_engine.mjs",
+      "destination_blob": "5ce4ca6567fed132d353161c5bbcfbece6864e6a",
+      "disposition": "rewritten"
+    },
+    {
+      "source": "extension/src/headless/resource_policy.mjs",
+      "source_blob": "cdb6a0fdd720126f471e082597dca70b2eb471c6",
+      "destination": "vendor/kronika-ask/src/kronika/_assets/extension/src/headless/resource_policy.mjs",
+      "destination_blob": "3c8cad44b70df9674978cca8cbeaa08c49b79d9b",
+      "disposition": "rewritten"
+    },
+    {
+      "source": "extension/src/headless/login_server.mjs",
+      "source_blob": "c95a82401b252c5289994f2fb93a7e5cb7d5e24c",
+      "destination": "vendor/kronika-ask/src/kronika/_assets/extension/src/headless/login_server.mjs",
+      "destination_blob": "c95a82401b252c5289994f2fb93a7e5cb7d5e24c",
+      "disposition": "kept"
+    },
+    {
+      "source": "extension/src/headless/login_app/index.html",
+      "source_blob": "59c5acb17b07bfa0eb902d1c390dea87e53a8076",
+      "destination": "vendor/kronika-ask/src/kronika/_assets/extension/src/headless/login_app/index.html",
+      "destination_blob": "59c5acb17b07bfa0eb902d1c390dea87e53a8076",
+      "disposition": "kept"
+    },
+    {
+      "source": "extension/src/headless/login_app/app.js",
+      "source_blob": "8df942c0099ff58c742b2f600bc05f29001dda53",
+      "destination": "vendor/kronika-ask/src/kronika/_assets/extension/src/headless/login_app/app.js",
+      "destination_blob": "8df942c0099ff58c742b2f600bc05f29001dda53",
+      "disposition": "kept"
+    },
+    {
+      "source": "extension/src/headless/login_app/app.css",
+      "source_blob": "1ca34ffe8641850ea48e7e9c76679496f6d7d556",
+      "destination": "vendor/kronika-ask/src/kronika/_assets/extension/src/headless/login_app/app.css",
+      "destination_blob": "1ca34ffe8641850ea48e7e9c76679496f6d7d556",
+      "disposition": "kept"
+    },
+    {
+      "source": "extension/src/headless/probe.mjs",
+      "source_blob": "46b0a2ba73cf99387c8e64ea741263bdaa9c4b92",
+      "destination": "vendor/kronika-ask/src/kronika/_assets/extension/src/headless/probe.mjs",
+      "destination_blob": "bd15afd9d1b394dafa518182256f18b21e43ecf0",
+      "disposition": "rewritten"
+    },
+    {
+      "source": "pyproject.toml",
+      "source_blob": "bb6da45258b3980fdaaf01b47133443307fcdc54",
+      "destination": null,
+      "disposition": "deleted"
+    },
+    {
+      "source": "scripts/kronika",
+      "source_blob": "0fb306d15e28539910872b62159068b0fcca494e",
+      "destination": null,
+      "disposition": "deleted"
+    },
+    {
+      "source": "scripts/dev-setup.sh",
+      "source_blob": "f97ce56f85fbe9ed66334f4ee800e8b56c98c41b",
+      "destination": null,
+      "disposition": "deleted"
+    },
+    {
+      "source": "extension/src/headless/deep_research.mjs",
+      "source_blob": "4815aab233a63942e7c778b91f59f2ccbb57c51c",
+      "destination": null,
+      "disposition": "deleted"
+    },
+    {
+      "source": "extension/src/headless/capture_assets.mjs",
+      "source_blob": "24ff51e0afc14d1de7bb03a2fcc5974d56f06de0",
+      "destination": null,
+      "disposition": "deleted"
+    }
+  ]
+}

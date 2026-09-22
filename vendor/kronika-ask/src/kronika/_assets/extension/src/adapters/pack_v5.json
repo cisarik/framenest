@@ -1,0 +1,169 @@
+{
+  "pack_version": 5,
+  "target": "chatgpt.com",
+  "proto_min": 1,
+  "locators": {
+    "composer": {
+      "required": true,
+      "strategies": [
+        {
+          "kind": "css",
+          "value": "div#prompt-textarea[contenteditable=\"true\"]"
+        },
+        {
+          "kind": "css",
+          "value": "textarea[name=\"prompt-textarea\"]"
+        },
+        {
+          "kind": "role",
+          "value": "textbox"
+        }
+      ]
+    },
+    "send": {
+      "required": true,
+      "strategies": [
+        {
+          "kind": "css",
+          "value": "#composer-submit-button"
+        },
+        {
+          "kind": "testid",
+          "value": "send-button"
+        }
+      ]
+    },
+    "assistant_message": {
+      "required": true,
+      "strategies": [
+        {
+          "kind": "css",
+          "value": "[data-message-author-role=\"assistant\"]"
+        }
+      ]
+    },
+    "stop_control": {
+      "required": false,
+      "strategies": [
+        {
+          "kind": "testid",
+          "value": "stop-button"
+        },
+        {
+          "kind": "css",
+          "value": "button[aria-label*=\"Stop\" i]"
+        }
+      ]
+    },
+    "upload_input": {
+      "required": false,
+      "strategies": [
+        {
+          "kind": "css",
+          "value": "input[type=\"file\"]"
+        }
+      ]
+    },
+    "login_wall": {
+      "required": false,
+      "strategies": [
+        {
+          "kind": "url_path",
+          "value": "/auth/login"
+        },
+        {
+          "kind": "css",
+          "value": "a[href*=\"/auth/login\"]"
+        }
+      ]
+    },
+    "web_search_open": {
+      "required": false,
+      "strategies": [
+        {
+          "kind": "css",
+          "value": "#composer-plus-btn"
+        }
+      ]
+    },
+    "web_search_item": {
+      "required": false,
+      "strategies": [
+        {
+          "kind": "text",
+          "value": "Web search",
+          "exact": true
+        }
+      ]
+    },
+    "web_search_pill": {
+      "required": false,
+      "strategies": [
+        {
+          "kind": "css",
+          "value": "[data-inline-selection-pill][data-id=\"search\"]"
+        },
+        {
+          "kind": "css",
+          "value": "[data-system-hint-type=\"search\"][data-keyword=\"Web search\"]"
+        }
+      ]
+    },
+    "deep_research_item": {
+      "required": false,
+      "strategies": [
+        {
+          "kind": "text",
+          "value": "Deep research",
+          "exact": true
+        }
+      ]
+    },
+    "deep_research_pill": {
+      "required": false,
+      "strategies": [
+        {
+          "kind": "css",
+          "value": "[data-inline-selection-pill][data-keyword=\"Deep research\"]"
+        },
+        {
+          "kind": "css",
+          "value": "[data-system-hint-type=\"plugin:connector_openai_deep_research\"][data-keyword=\"Deep research\"]"
+        }
+      ]
+    },
+    "deep_research_export": {
+      "required": false,
+      "strategies": [
+        {
+          "kind": "css",
+          "value": "button[aria-label=\"Export\"]"
+        }
+      ]
+    },
+    "deep_research_copy": {
+      "required": false,
+      "strategies": [
+        {
+          "kind": "text",
+          "value": "Copy contents",
+          "exact": true
+        }
+      ]
+    },
+    "user_message": {
+      "required": true,
+      "strategies": [
+        {
+          "kind": "css",
+          "value": "[data-message-author-role=\"user\"]"
+        }
+      ]
+    }
+  },
+  "constants": {
+    "stability_ms": 2500,
+    "poll_ms": 500,
+    "upload_wait_ms": 15000
+  }
+}

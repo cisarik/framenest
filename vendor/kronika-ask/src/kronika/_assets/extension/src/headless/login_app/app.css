@@ -1,0 +1,152 @@
+:root {
+  color-scheme: dark;
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+body {
+  margin: 0;
+  background: #14161a;
+  color: #e8eaed;
+}
+
+header {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.6rem 1rem;
+  border-bottom: 1px solid #2c3038;
+}
+
+h1 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+h2 {
+  margin: 0 0 0.4rem;
+  font-size: 1.05rem;
+  font-weight: 600;
+}
+
+#status {
+  margin: 0;
+  flex: 1;
+  color: #9aa0a6;
+  font-size: 0.85rem;
+}
+
+#done,
+#page-toggle {
+  padding: 0.4rem 1.2rem;
+  border: 1px solid #5f6368;
+  border-radius: 0.35rem;
+  background: #2c3038;
+  color: #e8eaed;
+  font: inherit;
+  cursor: pointer;
+}
+
+#done:hover:enabled,
+#page-toggle:hover:enabled {
+  background: #3c4043;
+}
+
+#done:disabled,
+#page-toggle:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+main {
+  max-width: 58rem;
+  margin: 0 auto;
+  padding: 1rem 1.25rem 3rem;
+}
+
+section {
+  display: block;
+}
+
+.hint {
+  margin: 0 0 0.75rem;
+  color: #9aa0a6;
+  font-size: 0.85rem;
+}
+
+#messages p {
+  margin: 0.35rem 0;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid #7f4a3a;
+  border-radius: 0.35rem;
+  background: #2b1d19;
+  font-size: 0.9rem;
+}
+
+form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem;
+  margin: 0.5rem 0;
+}
+
+label {
+  font-size: 0.9rem;
+  color: #bdc1c6;
+}
+
+input[type="text"],
+input[type="password"],
+input[type="email"] {
+  flex: 1;
+  min-width: 16rem;
+  padding: 0.5rem 0.65rem;
+  border: 1px solid #5f6368;
+  border-radius: 0.35rem;
+  background: #1b1e24;
+  color: #e8eaed;
+  font: inherit;
+}
+
+button {
+  padding: 0.5rem 1rem;
+  border: 1px solid #5f6368;
+  border-radius: 0.35rem;
+  background: #2c3038;
+  color: #e8eaed;
+  font: inherit;
+  cursor: pointer;
+}
+
+button:hover:enabled {
+  background: #3c4043;
+}
+
+button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem;
+  margin-top: 0.6rem;
+}
+
+#captcha-image,
+#page-image {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 0.5rem 0;
+  border: 1px solid #2c3038;
+  background: #000;
+  cursor: crosshair;
+}
+
+[hidden] {
+  display: none !important;
+}
