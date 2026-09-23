@@ -14,6 +14,97 @@ ordinary-audience content publication are separate concepts.
 
 This specification translates approved direction from [PRODUCT.md](PRODUCT.md), [README.md](README.md), [AGENTS.md](AGENTS.md), and [SECURITY.md](SECURITY.md) into requirements. It does not select frameworks, schemas, protocols, or packaging tools.
 
+## Accepted Kronika Transition Requirements
+
+[ADR-0082](docs/adr/0082-kronika-one-product-and-private-records.md) records
+the accepted one-product architecture. This section governs the S0-S10 target;
+S0 changes documentation only. The existing implementation remains at schema
+head `0033`. Requirements and implementation summaries below that describe
+published-only Gallery, administrator-wide private-content access or a public
+reader are pre-transition contracts, superseded for new Kronika records by
+this section. Their presence is not a claim that the transition is implemented.
+
+### Product and Ownership
+
+The existing repository MUST become one Kronika. The internal `framenest`
+package, migration history, compatible HTTP headers and deployment identifiers
+MUST remain during this stage. The capture kernel MUST move from
+`vendor/kronika-ask/src/kronika` to `src/kronika_capture`, with command
+`kronika-capture`; after verification only one executable implementation MUST
+remain. Missing Search/Research, export and sanitization features and relevant
+tests MAY be selectively restored from the accepted source, with provenance.
+The source manager, accounts, family library and Git history MUST NOT be ported.
+Existing FrameNest JPEG preparation, deterministic ZIP and budget calculations
+MUST remain in the application.
+
+A common record in the existing catalog MUST identify its type, content,
+owner, visibility, creation time, first timeline-entry time and display name.
+Media MUST keep its existing tables; complete text documents MUST use the same
+database. Owner identity MUST come from verified Tailscale identity or an
+explicitly configured local owner, never a client-supplied `user_id`.
+Every new record MUST start `private`; only explicit owner sharing changes it
+to `family` for mapped household members. Administrator role alone MUST NOT
+grant access to another owner's private content. Lists, counts, search,
+details, previews, playback, downloads and direct APIs MUST enforce access.
+Family sharing MUST NOT create public publication. Public composition MUST
+stay off and MUST NOT expose new records.
+
+### Timeline and Complete Results
+
+Timeline MUST become the landing page using the existing shell, CSS and
+controls. Gallery MUST remain a separate working view with the existing
+Details/player behavior and authorized unanalyzed media. No new frontend
+framework or design system is introduced.
+
+Media ownership MUST exist at catalog insertion, with no timeline-entry time
+until successful validated analysis. One medium MUST have at most one card.
+Reanalysis MUST preserve its first entry time and update the existing result;
+failure MUST NOT create a card or erase an earlier successful result. Existing
+metadata-suggestion approval MUST remain required. Search/Research MUST enter
+only after a complete result is saved transactionally and idempotently. Pending
+and failed jobs MUST remain outside Timeline.
+
+Timeline MUST order newest entry first, then stable ID order, with default page
+size 24 and maximum 100. Filters MUST combine Search/Research and existing media
+categories; GIF MUST remain a technical format rather than replace Meme.
+Complete text/Markdown MUST be preserved. Archived HTML MUST be sanitized,
+contain no JavaScript or external resources, and never be injected as trusted
+HTML into the main application. New APIs MUST join the existing explicit
+permission table and mutation protection.
+
+### Capture and Transition Gates
+
+The application and capture MUST be separate processes communicating through
+the loopback bridge. Capture MUST use one persistent Chromium on Xvfb and one
+dedicated profile, with no per-task launch, automatic stealth, model/reasoning
+inspection or selection, or external LLM API fallback. A web restart or bridge
+outage MUST NOT restart the browser. `needs_admin` MUST pause work until
+explicit readiness-checked continuation; a possibly sent prompt MUST NOT be
+automatically resent. Administrator waiting has a separate 30-minute limit;
+manual browser starts are at least five minutes apart, without a restart loop.
+
+The bridge MUST use a per-install token, exact Host/Origin checks, no wildcard
+CORS and `127.0.0.1` binding. Search/Research accept no attachment; media capture
+accepts at most one validated stored ZIP, at most 32 MiB and 256 JPEG frames,
+each at most 128 KiB and 480 px on its long side. Names MUST be sequential
+`frame-0001.jpg` onward without paths, duplicates or gaps. Encrypted, nested,
+compressed or non-JPEG members MUST be rejected before browser contact.
+Private staging and exact-owner cleanup are required. The verified existing
+budget MAY lower these limits; video MUST retain at least 12 frames. Synthetic
+image-understanding evidence MUST precede real media use; upload success alone
+is insufficient. Failure MUST stop this branch without model switching or
+challenge bypass.
+
+The old test databases MUST NOT be imported. A separately authorized reset
+MUST identify exact database/WAL/SHM objects, stop writers, and create the new
+empty database through normal migrations. It MUST NOT remove source media,
+profiles, identity configuration, secrets or archives, or rewrite migration
+history. Rollback restores previous code with a compatible empty database, not
+the deleted test data. Personal photos/local photo AI, native share apps,
+external-provider additions, public publication and production hardening are
+outside S0-S10. The exact sequence and acceptance gates are in
+[ROADMAP.md](ROADMAP.md).
+
 ## 2. Normative Language
 
 The terms MUST, MUST NOT, SHOULD, SHOULD NOT, and MAY are normative.
@@ -283,7 +374,10 @@ remains authoritative in normal operation. Sidecars do not overwrite the
 catalog. Ordinary metadata Save does not write sidecars. Missing sidecars do
 not invalidate catalog state.
 
-SQLite or another approved local database is an index/cache.
+Earlier index/cache language does not make the live catalog disposable during
+normal operation. The existing database is authoritative; the accepted
+one-time empty-database transition in ADR-0082 is limited to unwanted test data
+and does not implement sidecar rebuild or import.
 
 The local index SHOULD be rebuildable from durable metadata where feasible.
 Sidecar-to-catalog import, rebuild, synchronization, drift repair, automatic
@@ -379,10 +473,16 @@ Final image formats and thumbnail sizes remain unresolved.
 
 The gallery MUST provide a premium dark and cover-driven experience.
 
-Ordinary Gallery queries MUST return only media with durable
-content-publication truth. Public query parameters MUST NOT widen that audience.
+For the pre-transition implementation only, ordinary Gallery queries return
+only media with durable content-publication truth. Public query parameters
+MUST NOT widen that audience.
 Unpublished media MUST be indistinguishable from unknown media to callers
 without the explicit administrator workflow-read capability.
+
+ADR-0082 replaces that audience rule for Kronika records with owner/family
+access, including media awaiting analysis in Gallery. Administrator workflow
+capability is not a private-content read override. Timeline eligibility is
+separate from Gallery visibility and from public publication.
 
 Catalog membership, `Processed`, AI-analysis state, upload storage publication,
 and content publication MUST remain distinct. Content-publication readiness
@@ -594,10 +694,13 @@ Application capabilities must later be defined.
 
 This document does not place current Tailscale command syntax in the specification.
 
-### Dual-audience public published and Tailscale workspace
+### Pre-transition dual-audience contract
 
-Accepted architecture direction in
+Historical direction and existing implementation contract recorded in
 [ADR-0074](docs/adr/0074-dual-audience-public-published-and-tailscale-workspace-boundary.md).
+ADR-0082 supersedes public rollout and administrator private-content access
+for new Kronika records. The following clauses describe the retained baseline,
+not an instruction to enable its public composition or expose new records.
 The local-only `public_published_uds` published-reader is implemented-for-backend.
 These remaining dual-audience requirements MUST NOT be read as shipped public
 bind, TLS, Funnel, or NUC exposure, except the sole publication-gate
@@ -607,7 +710,7 @@ The workspace remote path MUST remain authenticated Tailscale Serve to
 `/run/framenest/framenest.sock` and `tailscale_uds`.
 
 Administrator `PUT /api/admin/media/{media_id}/content-publication`, guarded
-by `media.content.publish`, MUST become the sole future promotion and
+by `media.content.publish`, is the baseline's sole promotion and
 unpublication path for every media type, including movies
 (implemented-for-backend). The same PUT MUST treat an omitted body as
 publish-preserving and `{"published": false}` as unpublication, returning
@@ -827,8 +930,10 @@ Apple Silicon macOS is the first development and test environment.
 Ubuntu Server 24.04 on the Intel NUC6i5SYH is the current FrameNest
 development-and-testing machine
 ([ADR-0075](docs/adr/0075-nuc-development-test-target-and-routine-release-refresh.md)):
-it runs only FrameNest, its state is disposable and reinitializable, and it is
-routinely refreshed toward public `main`.
+its accepted role remains development/test for this one product, routinely
+refreshed toward public `main`. Capture is a planned separate process in that
+product. ADR-0082 limits reset to the unwanted test databases under separate
+authority; current host state MUST be verified by preflight.
 
 Broader macOS, Linux, and Windows portability remains required.
 

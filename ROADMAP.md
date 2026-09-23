@@ -11,7 +11,48 @@ phases, long-term scope, frozen or parked product logical wholes, and
 explicitly deferred work. Frozen and parked wholes below are durable backlog
 preservation, not active authorization and not ADR mutations.
 
-## Near-Term MacBook MVP Convergence
+## Active Kronika Sequence: S0-S10
+
+[ADR-0082](docs/adr/0082-kronika-one-product-and-private-records.md) fixes
+the current one-product direction. This sequence takes precedence over the
+older phase ordering below. S0 records the architecture only; later rows are
+not completed by this documentation change. One implementation grant executes
+one row. Preflight, independent acceptance, publication and deployment require
+their own bounded authority and may remain within the same row.
+
+| Slice | Useful outcome | Evidence before advancing |
+|---|---|---|
+| S0 | One-product rules, code ownership, private records and empty-database decision in current docs and ADR-0082 | Documentation contradiction review, exact allowlist, unchanged AP pin; E0/E1 |
+| S1 | Move the existing kernel to `src/kronika_capture`; update imports, packaging and provenance; remove the verified vendor duplicate | Existing CLI/bridge/protocol and packaging tests; one implementation and complete packaged assets; E2 |
+| S2 | Persistent browser, durable job states, reconnect, `needs_admin` and no automatic resend | Fake-driver lifecycle/failure evidence and fresh independent targeted review; E3 |
+| S3 | Capture service source and extension of the existing release helper, followed by separately authorized host setup | Read-only host preflight; separate supervision; Cooperator login and authorized synthetic text ask; E3 |
+| S4 | Selectively restore Search/Research and complete safe export | Mode/completion/sanitization regressions, typed unavailable-mode failures and targeted provider-boundary review; E2/R3 |
+| S5 | One bounded ZIP and existing JPEG/ZIP/budget integration | Adversarial archive/cleanup tests, independent file-boundary review, then authorized synthetic image-understanding proof; E3 |
+| S6 | Common records, atomic ownership and private/family access across existing routes | Empty-schema/migration and two-user/direct-file privacy tests; fresh independent permission review; E3 |
+| S7 | One application capture client, transactional result bindings, media integration and Search/Research APIs | Crash/retry idempotency, no duplicate cards, no fabricated model/reasoning metadata, busy/cancel/timeout handling; E2/E3 |
+| S8 | Timeline landing, Search/Research details, explicit sharing and Kronika presentation in the existing shell | Stable cards/filtering/pagination, safe rendering, Gallery/image/GIF/playback regressions; E2 |
+| S9 | Integrated acceptance, exact stopped-writer reset and deployment of the accepted candidate | Fresh integrated evidence; separate host preflight/reset grant; empty catalog; Cooperator rendered acceptance on exact public-main NUC release; E3 |
+| S10 | Rename old Kronika to `kronika-capture-archive`, FrameNest to `kronika`, update source references and archive the former repository last | Explicit rename/publication authority, exact refs/history and release verification; no force/history rewrite |
+
+The eight required proofs are private access even through direct files; family
+sharing without publication; idempotent cards/results; no automatic second
+send after errors/restarts; browser continuity across tasks/web outages; ZIP
+rejection before ChatGPT contact and safe cleanup; complete safe Search/Research
+output; and one packaged capture implementation with working assets.
+
+Use the existing baseline-bound AP Python route and `node --test`, with no new
+test toolchain. This S0 documentation task runs no tests. NUC/browser/provider
+facts require later preflight or bounded live evidence, not historical traces.
+Preserve the AP pin and upgrade ledger. Personal-photo AI, old-database import,
+native share apps, new external providers, public publication and production
+hardening are outside this sequence. The existing release helper remains the
+only deployment system; no mass `framenest` rename is part of the transition.
+
+## Earlier MacBook MVP Convergence (Foundation History)
+
+The following phases preserve earlier foundation status and the longer-term
+horizon. They do not replace S0-S10, authorize public rollout, or override
+ADR-0082 ownership and privacy rules for new records.
 
 The minimum logical-media and physical-location persistence foundation and
 explicit idempotent import from selected scan candidates now exist on MacBook.
@@ -302,13 +343,13 @@ Implemented within this phase:
   toggleable from the companion Settings overlay without restart
   ([ADR-0079](docs/adr/0079-administrator-automatic-analysis-runtime-setting.md)).
 
-Companion review Save may publish when ready
-([ADR-0068](docs/adr/0068-companion-review-save-and-readiness-triggered-publication.md));
-analysis completion still never auto-publishes.
-[ADR-0074](docs/adr/0074-dual-audience-public-published-and-tailscale-workspace-boundary.md)
-is accepted architecture direction that will make the administrator publication
-PUT the sole future promotion and unpublication path, including for movies;
-that successor is not shipped.
+The historical Save-triggered publication rule in
+[ADR-0068](docs/adr/0068-companion-review-save-and-readiness-triggered-publication.md)
+was succeeded by the implemented administrator publication PUT in
+[ADR-0074](docs/adr/0074-dual-audience-public-published-and-tailscale-workspace-boundary.md).
+Companion Save/Apply does not publish. ADR-0082 now excludes new Kronika records
+from public publication; neither earlier contract authorizes family sharing
+through publication.
 
 Still required for phase exit: broader adapter coverage, generalized downloader
 UI, and additional source adapters beyond the shipped YouTube/X foundations.
@@ -418,8 +459,8 @@ workspace socket in the approved direction.
 accepts a second, local-only `public_published_uds` published-reader
 composition; that reader is implemented-for-backend and is not exposed
 externally (no public bind, TLS listener, Funnel, or NUC enablement). The
-remaining public-origin rollout successors are not shipped and are not part of
-this phase's current implementation.
+remaining public-origin rollout successors are not shipped and are superseded
+for the active Kronika sequence by ADR-0082: public composition stays off.
 
 ## Phase 13 — Authoritative Multi-Device Catalog
 

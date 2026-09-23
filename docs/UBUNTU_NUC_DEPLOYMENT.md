@@ -28,11 +28,11 @@ bounded task. Production-server phrasing elsewhere in this runbook is legacy
 framing pending a dedicated editorial refactor; operational commands other
 than the section 5 schema-jump annex are unchanged.
 
-A second public listener or public TLS termination for a
-`public_published_uds` composition is a new operational object. It requires
-separate explicit grants and is not part of routine `framenest-release`
-updates today. This runbook's operational commands are unchanged; see
-[ADR-0074](adr/0074-dual-audience-public-published-and-tailscale-workspace-boundary.md).
+The public-reader direction in
+[ADR-0074](adr/0074-dual-audience-public-published-and-tailscale-workspace-boundary.md)
+is retained as history. ADR-0082 keeps public composition off for the Kronika
+transition; no new records may be exposed through it. A public listener or TLS
+rollout is outside this stage and outside routine release updates.
 
 Classification: deployment operator runbook.
 
@@ -49,13 +49,52 @@ Inbound links: [ADR-0032](adr/0032-ubuntu-nuc-deployment-foundation.md),
 Cleanup/update owner: future explicitly authorized Worker under an Orchestrator
 task. Git history remains the archive.
 
+## Accepted Kronika Transition (Not Yet Deployed)
+
+[ADR-0082](adr/0082-kronika-one-product-and-private-records.md) accepts one
+product here, with the existing FrameNest application and a separate capture
+runtime. S0 changes documentation only. The existing operational commands below
+remain unchanged and do not establish that capture services are installed.
+
+The sole release route remains `deploy/ubuntu/framenest-release`; S3 extends
+it for separately supervised web, bridge and browser runner. Planned capture
+uses account `kronika-capture`, private state under `/var/lib/kronika-capture`,
+one persistent Chromium on permanent Xvfb and a dedicated profile. A normal web
+release must not restart that browser. A capture runtime update receives one
+planned restart after draining work and enforcing the five-minute start brake.
+Bridge outages reconnect; browser crashes pause instead of restarting in a
+loop. These are target requirements, not observed host facts.
+
+Before host mutation, a separate read-only preflight must verify exact release
+provenance, active services/writers, installed Node/Chromium/display tooling,
+sandbox/AppArmor readiness, paths, permissions and loopback port availability.
+Historical host notes are not proof of current readiness. Login and challenge
+intervention use a temporary loopback-only VNC/noVNC view over SSH operated by
+the Cooperator. Only he backs up/restores the opaque profile, with Chromium
+stopped. Agents do not inspect credentials or profile contents.
+
+S9 requires independent integrated acceptance before joint deployment, followed
+by a separately authorized exact-object reset. Preflight identifies both old
+application databases and their WAL/SHM files; all writers stop before deletion.
+No whole state directory, media, profile, identity configuration, secret or
+archive is removed. No old database is imported. Normal migrations create the
+empty catalog; migration history and the helper's explicit
+`migration-required` continuation remain. Rollback uses previous code and a
+compatible empty database, not deleted test data.
+
+Cooperator rendered acceptance follows publication to exact public `main` and
+refresh of that candidate on NUC. S10 repository renames and source URL changes
+require later explicit authority, verified refs and release checks; local host
+paths and deployment identifiers need not be renamed. See
+[ROADMAP.md](../ROADMAP.md) for S0-S10. None of this authorizes host work now.
+
 ## Current Target
 
 ```text
 Intel NUC6i5SYH
 Ubuntu Server 24.04 LTS
 x86_64
-personal production server
+development-and-testing machine
 ```
 
 The future Ubuntu VPS target is portability scope only. It is not the immediate

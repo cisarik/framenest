@@ -24,6 +24,52 @@ and [ADR-0074](docs/adr/0074-dual-audience-public-published-and-tailscale-worksp
 Cleanup/update owner: future explicitly authorized Worker under an Orchestrator
 task. Git history remains the archive.
 
+## Accepted Kronika Application and Capture Boundary
+
+[ADR-0082](docs/adr/0082-kronika-one-product-and-private-records.md) records
+the next architecture in this same repository. S0 documents it only. Existing
+FrameNest implementation summaries below remain the pre-transition baseline;
+they do not prove that capture deployment or common-record privacy exists.
+
+The application owns one authoritative catalog, media, complete Search/Research
+documents, identity, sharing and Timeline. Capture owns the ChatGPT interaction
+and bounded job/result state, not family records or access decisions. It runs
+in a separate process behind a `127.0.0.1` bridge. The planned package/command
+are `kronika_capture` / `kronika-capture`; existing `framenest` package, headers,
+migrations and service identities remain. Frame preparation, deterministic ZIP
+and budget calculations stay in the application.
+
+Application requests use stable request IDs. The existing bridge is extended,
+not accompanied by another browser queue: one active job includes a paused
+one; identical retries return the same job, conflicting content is refused,
+and terminal state/results are retained for 24 hours with a 256-record bound
+that refuses admission rather than prematurely dropping idempotency. The
+application saves complete results and their job bindings transactionally and
+idempotently. Pending/error jobs are not timeline records.
+
+One persistent headed Chromium on permanent Xvfb uses one dedicated profile.
+Bridge outages reconnect without closing it; normal web releases do not
+restart it. Login/challenge states enter `needs_admin`, block new work and
+require explicit readiness-checked continuation. A possibly sent prompt is
+never automatically resent; an ambiguous outcome is a typed failure. Admin
+waiting has a separate 30-minute deadline. Browser crashes pause service;
+manual starts are at least five minutes apart, without an automatic restart
+loop. The Cooperator alone uses a temporary loopback-only view over SSH.
+
+Existing Tailscale Serve, restricted UDS provenance, explicit identity mapping
+and mutation protection remain the ingress. New records always start private;
+ownership comes from verified identity or an explicitly configured local
+owner. The administrator role is not an override for private content. Shared
+records are readable by mapped household members; every content route and
+query must enforce that rule. Family sharing never invokes content-publication
+APIs. The public composition stays off and excludes new records.
+
+The frontend receives no bridge token. Archived generated content preserves
+complete text/Markdown and uses isolated sanitized HTML without scripts or
+external resources. The main application must not trust captured HTML.
+Host setup, real capture calls and the exact stopped-writer database reset
+remain later authorized steps in [ROADMAP.md](ROADMAP.md), not S0 effects.
+
 ## Server Authority
 
 ADR-0035 records the current server/client authority model. A FrameNest server
@@ -55,12 +101,17 @@ membership, cookies, or same-machine execution.
 The Intel NUC currently serves as the FrameNest development-and-testing
 machine
 ([ADR-0075](docs/adr/0075-nuc-development-test-target-and-routine-release-refresh.md)):
-it runs only FrameNest, its catalog and media state is disposable and
-reinitializable, and it is routinely refreshed toward public `main` through the
+its accepted role is the development/test home of this product, routinely
+refreshed toward public `main` through the
 immutable release-update contract. It was previously framed as the personal
 production server role ([ADR-0032](docs/adr/0032-ubuntu-nuc-deployment-foundation.md));
 dated production facts remain history. The NUC is not required for local
 ownership and must not make FrameNest a public-cloud or SaaS dependency.
+
+ADR-0082 adds capture as part of the same product, not another project. The
+accepted reset concerns the unwanted test databases only; it is not blanket
+permission to delete media or state directories. Installed browser tooling,
+active services and profile readiness require a later read-only preflight.
 
 The NUC currently provides authoritative catalog serving for the disposable
 development-and-testing instance. Later or incomplete NUC capabilities
@@ -266,6 +317,8 @@ to `/run/framenest/framenest.sock` and `tailscale_uds`.
 ships a local-only `public_published_uds` published-reader composition.
 That composition is not exposed externally, has no TLS listener, Funnel, or
 NUC bind.
+This is retained implementation history; ADR-0082 keeps the public composition
+off and forbids exposing new Kronika records through it.
 Funnel to the workspace socket stays forbidden. FrameNest must not require
 router port forwarding. Tailscale networking is not sufficient authorization by
 itself; application-level authorization remains required. The accepted

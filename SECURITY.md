@@ -8,8 +8,8 @@ There is no stable or supported public release and no security response service
 level yet. The Ubuntu NUC operates as the FrameNest development-and-testing
 machine
 ([ADR-0075](docs/adr/0075-nuc-development-test-target-and-routine-release-refresh.md)):
-it runs only FrameNest, its state is disposable and reinitializable, and it is
-routinely refreshed toward public `main` through the immutable release-update
+its accepted role is development/test for this one product, with routine
+refresh toward public `main` through the immutable release-update
 contract ([ADR-0060](docs/adr/0060-repeatable-immutable-nuc-release-update-contract.md)).
 An older release (`aec2f0091c10aed2fc2033dac154a0d9651b2b6d`, schema `0028`)
 was previously accepted as owner-authoritative production served over Tailscale
@@ -17,6 +17,58 @@ Serve only; that fact is dated history. Tailscale-only remote access remains in
 force and Funnel is not publicly exposed. NUC security hardening remains open
 before any future VPS deployment. Security-sensitive decisions are still being
 documented as the repository foundation and architecture are established.
+
+ADR-0082 limits the planned reset to unwanted test databases; neither that
+decision nor earlier disposable-state language authorizes deleting media,
+profiles or whole state directories. Actual host state requires later
+preflight verification.
+
+## Accepted Kronika Privacy and Capture Boundary
+
+[ADR-0082](docs/adr/0082-kronika-one-product-and-private-records.md) governs
+the one-product transition. These requirements are accepted for later slices;
+S0 does not implement authorization, deploy capture or establish host readiness.
+Existing upload, publication, companion and provider descriptions below are
+the pre-transition implementation, not exceptions to the new record policy.
+
+- Every new record starts private. The server derives ownership from verified
+  Tailscale identity and explicit mapping, never a client `user_id`. Local
+  administrator work requires a configured owner. Tailscale membership alone
+  is neither household membership nor administrator authority.
+- An owner explicitly shares with mapped household members. Administrator
+  status alone cannot read another owner's private content. Enforce the same
+  policy for lists/counts, search, detail, jobs, metadata, previews, covers,
+  playback, downloads and direct APIs, including existing administrator routes.
+- Family sharing never creates public publication. The public composition
+  remains off; even a direct public route must not expose new Kronika records.
+  Register new APIs in the exact permission table and existing Origin/mutation
+  protection instead of relying on hidden frontend controls.
+- Capture binds only `127.0.0.1`, uses a per-install token and exact Host/Origin
+  checks, and has no wildcard CORS. Tokens reach authorized local processes
+  only, never the frontend. Normal chat uses the ChatGPT page without an
+  external LLM API fallback or model/reasoning inspection or selection.
+- Never extract/read browser cookies, sessions, passwords, localStorage,
+  credential stores, profile contents, unrelated tabs or history. Real login
+  intervention belongs to the Cooperator through the temporary loopback-only
+  view over SSH. Opaque profile backup/restore also belongs only to him, with
+  the browser stopped; no automatic replacement profile is allowed.
+- `needs_admin` stops sending and admitting work until explicit continuation
+  passes readiness. A possibly sent prompt is never automatically repeated.
+  Browser failure pauses service instead of triggering a restart loop.
+- Validate the single bounded ZIP and actual JPEG data before browser contact.
+  Use server-owned staging IDs, directories `0700`, files `0600`, 15-minute
+  expiry for unbound uploads and cleanup at job end. Cleanup must not follow
+  symlinks. Existing budget limits and synthetic image-understanding proof
+  precede real media use; a successful upload alone is insufficient.
+- Preserve complete text/Markdown. Sanitize archived HTML, prohibit scripts
+  and external resources, and never inject generated HTML as trusted main-app
+  content. Log operational metadata only, never prompts, answers, media,
+  secret-bearing URLs, account data or raw browser diagnostics.
+
+The separate database-reset grant must stop writers and identify exact database
+and WAL/SHM objects. It must preserve media, profiles, identity configuration,
+secrets and Git/Meta archives. No old test data is imported. This stage is a
+development/test transition, not a production-hardening program.
 
 ## Reporting Security Issues
 
@@ -129,7 +181,9 @@ media library roots or the Gallery preview cache. Upload requests use
 server-generated session and storage identities and stream bytes directly to
 quarantine. Direct-upload routes require `upload.submit`. Mapped ordinary
 Tailscale users may submit; `upload.manage` remains administrator-only for
-explicit duplicate resolution and ownership override. Durable upload-session
+explicit duplicate resolution and ownership override in the pre-transition
+implementation. That override must not grant access to another owner's private
+Kronika content under ADR-0082. Durable upload-session
 ownership (`created_by_login_key`) and creation-time
 `duplicate_resolution_mode` are persisted by migration `0025`. Foreign ordinary
 callers receive sanitized `404 UPLOAD_SESSION_NOT_FOUND`. Bounded validation
@@ -247,13 +301,18 @@ FrameNest security work should follow these principles:
 - Require explicit confirmation for destructive actions.
 - Do not distribute provider secrets to ordinary client installations.
 
-### Dual-audience public trust boundary (accepted direction)
+### Pre-transition dual-audience public trust boundary
 
 [ADR-0074](docs/adr/0074-dual-audience-public-published-and-tailscale-workspace-boundary.md)
 records the dual-audience boundary. The local-only
 `public_published_uds` published-reader composition is implemented and is not
 exposed. It does not add a public bind, TLS listener, Funnel, or NUC
 enablement.
+
+ADR-0082 supersedes public rollout for this stage. The following controls
+describe the existing reader implementation; they do not permit enabling it
+or exposing new Kronika records. Family sharing uses verified household access,
+not this identity-absent audience.
 
 For the local-only public composition:
 

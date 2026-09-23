@@ -2,6 +2,34 @@
 
 FrameNest is a local-first, privacy-conscious, cross-platform library for video and animated media, designed around ownership, organization, and a premium visual gallery experience.
 
+## Accepted Transition to Kronika
+
+[ADR-0082](docs/adr/0082-kronika-one-product-and-private-records.md) records
+one Kronika built in this repository from the existing FrameNest application
+and the closed Kronika capture source. No new repository or second product is
+planned. The internal `framenest` package, migration history, HTTP headers and
+deployment identifiers remain; UI branding and the public repository rename
+belong to later slices, not this documentation change.
+
+The accepted target has Timeline as its main page, the existing Gallery as a
+separate working view, and Media, Search and Research records in one catalog.
+Every new record starts private; only explicit owner sharing makes it visible
+to mapped household members. Administrator status does not override private
+content access, and family sharing is not public publication.
+
+The application and capture will run as separate processes. The existing
+vendor kernel will move to `src/kronika_capture`, with one persistent browser
+behind a loopback bridge. Search/Research, bounded ZIP upload, common records,
+new privacy enforcement and Timeline are not shipped by S0. The existing
+code/status descriptions below remain the pre-transition baseline, including
+publication-based Gallery and administrator workflows; they are not the target
+privacy policy. Public composition stays off for the transition.
+
+The old databases contain unwanted test data. There is no import project;
+later authorized deployment uses an exact, stopped-writer empty-database reset
+without deleting media or browser profiles. See [ROADMAP.md](ROADMAP.md) for
+the locked S0-S10 sequence and gates. No host readiness is established here.
+
 ## Status
 
 FrameNest is in an early foundation, pre-alpha stage with a substantial shipped
@@ -72,7 +100,8 @@ extension-origin allowlist is configured
 [ADR-0076](docs/adr/0076-companion-history-hosted-click-admin-analyzed-inbox-and-ordinary-own-history.md),
 [docs/X_COMPANION.md](docs/X_COMPANION.md)).
 [ADR-0074](docs/adr/0074-dual-audience-public-published-and-tailscale-workspace-boundary.md)
-is accepted architecture for a dual-audience boundary: the Tailscale
+records the pre-transition dual-audience boundary, superseded for new Kronika
+records by ADR-0082: the Tailscale
 workspace writer remains the current remote path. The local-only
 `public_published_uds` composition and workspace rollout successors are
 implemented at this baseline. Public bind, TLS, and Funnel remain unshipped.
@@ -569,10 +598,11 @@ The current conceptual direction is:
   clients.
 - External VLC first for playback, with embedded libVLC considered later.
 - Workspace remote access through Tailscale Serve to
-  `/run/framenest/framenest.sock` rather than router port-forwarding. A second
-  public published-reader composition is accepted direction in
+  `/run/framenest/framenest.sock` rather than router port-forwarding. The
+  local-only published-reader implementation from
   [ADR-0074](docs/adr/0074-dual-audience-public-published-and-tailscale-workspace-boundary.md)
-  and is not shipped.
+  is retained baseline history. ADR-0082 keeps public composition off and
+  excludes new Kronika records; public rollout is outside this stage.
 
 The accepted desktop and distributed-media direction remains documentation-led
 for Tauri packaging. No Tauri scaffold or installer exists yet. The Ubuntu NUC
@@ -663,8 +693,11 @@ Initial development and testing targets Apple Silicon macOS.
 The Ubuntu NUC is the current FrameNest development-and-testing machine on
 Ubuntu Server 24.04 on the Intel NUC6i5SYH
 ([ADR-0075](docs/adr/0075-nuc-development-test-target-and-routine-release-refresh.md)):
-it runs only FrameNest, its state is disposable and reinitializable, and it is
-routinely refreshed toward public `main`. Broader cross-platform support remains an architectural requirement, and a future Ubuntu VPS remains a portability target.
+its accepted role remains development/test for this one product, routinely
+refreshed toward public `main`. ADR-0082 adds capture in later slices and limits
+the planned reset to exact old test-database objects. Current host state still
+requires preflight. Broader cross-platform support remains an architectural
+requirement, and a future Ubuntu VPS remains a portability target.
 
 ## Documentation Map
 

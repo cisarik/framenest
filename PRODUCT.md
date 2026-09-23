@@ -2,6 +2,13 @@
 
 ## 1. Product Identity
 
+The accepted product direction is one Kronika in the existing FrameNest
+repository, per
+[ADR-0082](docs/adr/0082-kronika-one-product-and-private-records.md). The
+following FrameNest foundation describes the application being retained.
+Package names, deployment identities and historical ADRs are not renamed in
+S0. The capture source contributes a module, not a second product or library.
+
 FrameNest is a local-first, privacy-conscious, cross-platform library for video and animated media. It is intended to help people acquire, organize, browse, preserve, and play media while keeping local ownership central.
 
 FrameNest is not merely:
@@ -16,7 +23,48 @@ Downloading, cataloging, gallery presentation, metadata, storage awareness,
 transfer, playback, and server/client coordination are parts of one product
 direction.
 
+### Accepted Kronika Experience (Not Yet Implemented)
+
+- Timeline is the landing page; the existing dark/green design, Gallery,
+  Details and playback remain. Gallery is a separate working view and can
+  contain authorized media awaiting analysis.
+- One catalog contains Media, Search and Research records. A common record has
+  stable identity, content reference, owner, `private` or `family` visibility,
+  creation time, first timeline-entry time and display name. Media keeps its
+  existing tables; text documents live in the same database.
+- Ownership exists when media is cataloged. Its first successful validated
+  analysis creates its single timeline card; reanalysis updates that record
+  without moving its original chronological position. Failure creates no new
+  card and preserves any earlier successful result.
+- Search and Research enter Timeline only when the complete result is saved.
+  Pending/error jobs belong in the working interface. Full text/Markdown is
+  preserved, and archived HTML is sanitized without scripts or external
+  resources. Analysis does not bypass metadata-suggestion approval.
+- Order is newest timeline entry first with stable ID ordering, 24 items by
+  default and a server maximum of 100. Filters combine Search/Research with
+  existing media categories; GIF is a format, not a replacement for Meme.
+- Every new record is private. Verified identity supplies its owner; local
+  administrator work needs an explicitly configured owner. Sharing is an
+  explicit owner action for mapped household members. Administrator status
+  is not permission to read another owner's private records.
+- Family sharing does not use public publication. The public composition stays
+  off and must never expose new records. These rules apply to all content
+  access, including direct file endpoints.
+
+The old databases contain unwanted test data and will not be imported. A later
+authorized reset creates an empty catalog through normal migrations; source
+media, profiles and identity configuration are preserved. Personal photos and
+their future local AI analysis, native share apps, new external LLM providers,
+public publication and production hardening are outside this stage. The
+broader desktop/media horizon below is not added to S0-S10 scope.
+
 ## 2. Current Product Status
+
+This section describes the implemented pre-transition foundation. In
+particular, published-only Gallery and administrator-wide review are current
+code behaviors that later slices must replace for Kronika records; they do not
+override the accepted privacy rules above. No new Timeline or common-record
+behavior is implemented by this documentation update.
 
 FrameNest is currently in foundation-stage, pre-alpha development.
 
@@ -72,17 +120,20 @@ events may enqueue generic analysis when
 enables the companion Settings overlay
 ([ADR-0066](docs/adr/0066-administrator-owned-x-automatic-generic-analysis.md),
 [ADR-0079](docs/adr/0079-administrator-automatic-analysis-runtime-setting.md)).
-YouTube remains suppressed. Companion review Save may publish when title,
-description, and at least one tag are present
-([ADR-0068](docs/adr/0068-companion-review-save-and-readiness-triggered-publication.md));
-analysis completion does not publish. The live generic suggestion contract is
+YouTube remains suppressed. The earlier Save-triggered publication rule in
+[ADR-0068](docs/adr/0068-companion-review-save-and-readiness-triggered-publication.md)
+was succeeded by ADR-0074: Companion Save/Apply does not publish; the
+administrator publication PUT is the baseline publication path. ADR-0082
+excludes new Kronika records from public publication entirely. The live generic
+suggestion contract is
 v4 with 1–5 most significant tags
 ([ADR-0069](docs/adr/0069-five-tag-generic-media-suggestion-contract.md)).
 Companion maps onto existing catalog tags only and does not create tags. Movie
 and genre workflows stay out of companion
 ([ADR-0070](docs/adr/0070-companion-exclusion-of-movie-workflows.md)).
 [ADR-0074](docs/adr/0074-dual-audience-public-published-and-tailscale-workspace-boundary.md)
-is accepted architecture for a dual-audience boundary. The local-only
+records the pre-transition dual-audience boundary. ADR-0082 supersedes its
+public-rollout direction for the current Kronika stage. The local-only
 `public_published_uds` published-reader is implemented-for-backend and is not
 exposed externally: there is no public bind, TLS listener, Funnel, or NUC
 enablement. The remaining public-origin rollout successors are not shipped.
@@ -103,8 +154,10 @@ shell, but no Tauri scaffold
 exists yet. Development remains MacBook-first; Ubuntu Server 24.04 on the Intel
 NUC6i5SYH is the current development-and-testing machine
 ([ADR-0075](docs/adr/0075-nuc-development-test-target-and-routine-release-refresh.md)):
-it runs only FrameNest, its state is disposable and reinitializable, and it is
-routinely refreshed toward public `main`. This document defines
+its accepted role remains development/test for this one product, routinely
+refreshed toward public `main`. ADR-0082 limits the planned reset to the old
+test databases and adds capture in a later slice; actual host state requires
+preflight verification. This document defines
 approved product direction; it does not claim full product implementation.
 
 ## 3. Product Vision
@@ -274,9 +327,11 @@ membership, cookies, or same-machine execution.
 
 The Intel NUC is the FrameNest development-and-testing machine
 ([ADR-0075](docs/adr/0075-nuc-development-test-target-and-routine-release-refresh.md)):
-it runs only FrameNest, its state is disposable and reinitializable, and it is
-routinely refreshed toward public `main`; it is not required for local
-ownership. Workspace access remains Tailscale-only. NUC security hardening
+its accepted role covers this one product, including the planned separate
+capture process. Routine refresh targets public `main`; the old test-database
+reset is a separately authorized exact-object operation, not permission to
+remove media or profiles. Current host facts require preflight; the NUC is not
+required for local ownership. Workspace access remains Tailscale-only. NUC security hardening
 remains open and is required before future VPS deployment; present NUC
 operation does not imply VPS deployment or public Internet exposure.
 
@@ -456,8 +511,9 @@ Backend services must not be publicly exposed by default.
 
 Workspace remote functions follow a Tailscale-only direction.
 [ADR-0074](docs/adr/0074-dual-audience-public-published-and-tailscale-workspace-boundary.md)
-accepts a future local-only public published-reader composition; it is not
-shipped.
+records the local-only published-reader implementation retained as baseline
+history. ADR-0082 keeps it off for this stage and excludes new Kronika records;
+family sharing is a separate owner-authorized household operation.
 
 Application-level authorization remains necessary even when the network boundary is private.
 
@@ -480,10 +536,10 @@ The future desktop shell should provide single-instance behavior, a tray or macO
 Early product non-goals include:
 
 - Complete Android or iOS application.
-- Public internet hosting of the workspace application. A future
-  published-reader origin is accepted architecture direction in
+- Public internet hosting and public publication. The earlier published-reader
+  direction in
   [ADR-0074](docs/adr/0074-dual-audience-public-published-and-tailscale-workspace-boundary.md)
-  and is not current hosting.
+  is retained as history; ADR-0082 keeps it off for this stage.
 - Cloud backup.
 - Server-side transcoding infrastructure.
 - Embedded libVLC.

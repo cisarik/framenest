@@ -7,6 +7,24 @@ shell, catalog and metadata foundations, server-side AI suggestion review, a
 catalog backup foundation, and repository-native systemd source material for an
 Ubuntu NUC deployment workflow.
 
+## Accepted Kronika Direction
+
+[ADR-0082](docs/adr/0082-kronika-one-product-and-private-records.md) records
+the accepted transition to one Kronika in this existing repository. FrameNest
+supplies the application, catalog, media preparation, identity and deployment;
+the closed Kronika source supplies only the capture module. S0 records this
+direction in documentation; it does not implement or deploy the later slices.
+
+The internal `framenest` package, migration history, compatible HTTP headers
+and deployment identifiers remain. The planned capture package is
+`kronika_capture`, with command `kronika-capture`, communicating with the
+application over a loopback bridge. Preserve exactly one capture implementation
+after the verified vendor move; do not port a second manager, account system,
+family library or Git history. Do not perform a mass branding replacement.
+
+The locked sequence is S0-S10 in [ROADMAP.md](ROADMAP.md). One implementation
+grant covers one row; the roadmap itself grants no execution authority.
+
 <!-- BEGIN MANAGED AP INTEGRATION -->
 ## Analytic Programming
 
@@ -225,12 +243,40 @@ Original server media under `/srv/media` is read-only to the service by default.
 Do not grant broad service write access to source media to implement upload or
 ingest. Ordinary clients must never receive provider secrets.
 
+For the accepted Kronika record architecture, verified identity determines
+ownership, every new record starts private, and family sharing is explicit.
+Administrator status alone never permits reading another owner's private
+content. Apply this boundary to lists, search, detail, previews, playback,
+downloads and direct APIs. Family sharing never creates public publication;
+the public composition stays off and must not expose new records. These are
+requirements for the later implementation, not claims about the current code.
+
+Capture must use one persistent browser, loopback-only token authentication,
+bounded attachment staging and explicit `needs_admin` recovery without an
+automatic resend. Never inspect browser credentials, cookies, sessions,
+localStorage, profiles, unrelated tabs or history. Only the Cooperator handles
+real login; opaque profile backup/restore also belongs only to him, with the
+browser stopped for backup/restore. Normal capture uses the page as configured,
+without model/reasoning inspection,
+selection or external LLM API fallback. Generated output remains untrusted.
+
+The accepted empty-database transition requires its own exact-object reset
+grant after writers stop. It grants no deletion of media, profiles, identity
+configuration, secrets or archives and no import of the old test databases.
+
 ## Product Boundaries
 
 FrameNest remains local-first. A FrameNest server process is authoritative for
 catalog and server-owned state, but it may run locally and must not turn local
 ownership into public-cloud dependence. The premium gallery remains a flagship
 product invariant.
+
+Under ADR-0082, Timeline becomes the main page in S8 while Gallery remains a
+separate working view using the existing design and player. Media enters
+Timeline only after successful validated analysis; Search and Research enter
+only after their complete results are saved. Preserve existing metadata-review
+approval. Personal photos and their future local AI analysis are outside this
+stage, as are public publication and production hardening.
 
 Rendered UX acceptance belongs to Michal. The accepted Gallery and Details MVP
 visual behavior remains frozen unless a concrete defect is identified.

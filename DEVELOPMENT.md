@@ -23,6 +23,30 @@ test invocation rules live in
 [docs/WORKER_EXECUTION_CONTRACT.md](docs/WORKER_EXECUTION_CONTRACT.md). This
 launcher guide does not replace that contract.
 
+## Kronika Transition Boundary
+
+[ADR-0082](docs/adr/0082-kronika-one-product-and-private-records.md) accepts
+one Kronika in this repository. S0 records the direction only; the commands
+below still describe the existing FrameNest development launcher. They do not
+start a Kronika capture service or prove its browser readiness.
+
+Later slices move the existing vendor kernel to `src/kronika_capture` and add
+the `kronika-capture` command with its packaged browser assets. The internal
+`framenest` application, headers and migration history remain. The application
+and capture use separate processes: web restart must not close the persistent
+capture browser. Do not port the source manager, local accounts or library.
+
+NUC releases continue through `deploy/ubuntu/framenest-release`, extended in
+S3 rather than replaced by another deployment system. Host tooling, services,
+ports and browser readiness require a separately authorized read-only preflight
+before host changes. Login/profile operations belong to the Cooperator; real
+ChatGPT tasks require their own authority. S9 resets only the exact unwanted
+test databases after stopping writers and creates an empty catalog through
+normal migrations; launcher commands are not reset authority. The existing
+baseline-bound AP Python and Node test routes remain unchanged. See
+[ROADMAP.md](ROADMAP.md) and the
+[NUC runbook](docs/UBUNTU_NUC_DEPLOYMENT.md) for the later gates.
+
 ## First Run
 
 From the repository root:
