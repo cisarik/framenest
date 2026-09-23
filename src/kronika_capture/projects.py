@@ -12,7 +12,7 @@ import re
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from kronika.bridge.store import Store
+from kronika_capture.bridge.store import Store
 
 PROJECT_NAME_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]{0,31}$")
 PROJECT_PATH_RE = re.compile(r"^/g/(g-p-[A-Za-z0-9_-]+)(?:/[A-Za-z0-9._~-]+)*$")

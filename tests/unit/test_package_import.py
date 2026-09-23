@@ -11,3 +11,11 @@ def test_framenest_package_resolves_from_src_layout() -> None:
     )
 
     assert module_path.parent == expected_package_directory
+
+
+def test_capture_package_resolves_from_src_layout() -> None:
+    module = import_module("kronika_capture")
+    expected_package_directory = (
+        Path(__file__).resolve().parents[2] / "src" / "kronika_capture"
+    )
+    assert Path(module.__file__).resolve().parent == expected_package_directory

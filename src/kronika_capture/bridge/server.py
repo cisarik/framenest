@@ -13,12 +13,12 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
-from kronika import config
-from kronika.bridge import auth
-from kronika.bridge.jobs import CLIENT_KINDS, DEFAULT_CLIENT_KIND, BridgeError, JobManager, utc_now_iso
-from kronika.bridge.results import ResultStore
-from kronika.bridge.store import Store
-from kronika.errors import EXIT_BRIDGE
+from kronika_capture import config
+from kronika_capture.bridge import auth
+from kronika_capture.bridge.jobs import CLIENT_KINDS, DEFAULT_CLIENT_KIND, BridgeError, JobManager, utc_now_iso
+from kronika_capture.bridge.results import ResultStore
+from kronika_capture.bridge.store import Store
+from kronika_capture.errors import EXIT_BRIDGE
 
 LOGGER = logging.getLogger("kronika.bridge")
 

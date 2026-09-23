@@ -12,7 +12,7 @@ import os
 from importlib.resources import files
 from pathlib import Path
 
-from kronika.config import STATE_DIR_NAME
+from kronika_capture.config import STATE_DIR_NAME
 
 
 def state_dir(explicit: Path | str | None = None) -> Path:
@@ -45,5 +45,5 @@ def packaged_extension_path(*parts: str) -> Path:
     It does not consult the Git root or the process working directory.
     """
 
-    node = files("kronika").joinpath("_assets", "extension", "src", *parts)
+    node = files("kronika_capture").joinpath("_assets", "extension", "src", *parts)
     return Path(str(node))

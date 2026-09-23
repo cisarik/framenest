@@ -2,13 +2,13 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
-import { unsupportedJob } from "../vendor/kronika-ask/src/kronika/_assets/extension/src/headless/job_engine.mjs";
-import { PROTO_VERSION } from "../vendor/kronika-ask/src/kronika/_assets/extension/src/protocol.js";
+import { unsupportedJob } from "../src/kronika_capture/_assets/extension/src/headless/job_engine.mjs";
+import { PROTO_VERSION } from "../src/kronika_capture/_assets/extension/src/protocol.js";
 
 const pack = JSON.parse(
   readFileSync(
     new URL(
-      "../vendor/kronika-ask/src/kronika/_assets/extension/src/adapters/pack_v5.json",
+      "../src/kronika_capture/_assets/extension/src/adapters/pack_v5.json",
       import.meta.url
     ),
     "utf8"

@@ -49,3 +49,17 @@ def test_configuration_module_remains_independent_of_fastapi_stack() -> None:
     configuration_path = repository_root / CONFIGURATION_MODULE
     forbidden_roots = _collect_forbidden_imports(configuration_path)
     assert forbidden_roots == []
+
+
+def test_capture_package_remains_independent_of_fastapi_stack() -> None:
+    repository_root = Path(__file__).resolve().parents[2]
+    paths = sorted((repository_root / "src" / "kronika_capture").rglob("*.py"))
+    assert paths
+    violations: list[str] = []
+    for path in paths:
+        forbidden_roots = _collect_forbidden_imports(path)
+        if forbidden_roots:
+            violations.append(
+                f"{path.relative_to(repository_root)}: {sorted(set(forbidden_roots))}"
+            )
+    assert violations == []

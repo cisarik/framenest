@@ -17,6 +17,7 @@ FORBIDDEN_DOMAIN_IMPORT_ROOTS = frozenset(
     {
         "alembic",
         "fastapi",
+        "kronika_capture",
         "pydantic",
         "pydantic_settings",
         "sqlalchemy",
@@ -82,6 +83,35 @@ def test_application_ports_import_no_infrastructure_or_sqlalchemy() -> None:
             violations.append(
                 f"{path.relative_to(REPOSITORY_ROOT)}: {sorted(set(found))}"
             )
+    assert violations == []
+
+
+@pytest.mark.parametrize(
+    ("package_path", "forbidden_package"),
+    [
+        ("src/framenest/domain", "kronika_capture"),
+        ("src/framenest/application", "kronika_capture"),
+        ("src/kronika_capture", "framenest"),
+    ],
+)
+def test_application_and_capture_packages_are_independent(
+    package_path: str, forbidden_package: str,
+) -> None:
+    paths = sorted((REPOSITORY_ROOT / package_path).rglob("*.py"))
+    assert paths
+    violations: list[str] = []
+    for path in paths:
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                modules = [alias.name for alias in node.names]
+            elif isinstance(node, ast.ImportFrom):
+                modules = [node.module or ""]
+            else:
+                continue
+            for module in modules:
+                if module == forbidden_package or module.startswith(f"{forbidden_package}."):
+                    violations.append(f"{path.relative_to(REPOSITORY_ROOT)}: {module}")
     assert violations == []
 
 

@@ -9,7 +9,7 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
-from kronika import config, errors, projects
+from kronika_capture import config, errors, projects
 
 LOGGER = logging.getLogger("kronika.bridge.jobs")
 

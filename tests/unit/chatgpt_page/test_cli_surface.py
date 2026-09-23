@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from kronika.cli import main
-from kronika.config import UPLOAD_UNAVAILABLE
+from kronika_capture.cli import main
+from kronika_capture.config import UPLOAD_UNAVAILABLE
 
 REMOVED = (
     ["search", "latest"],

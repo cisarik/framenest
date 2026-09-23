@@ -8,9 +8,9 @@ from http.client import HTTPConnection
 
 import pytest
 
-from kronika.bridge.server import build_state, create_server
-from kronika.bridge.store import Store
-from kronika.config import UPLOAD_UNAVAILABLE
+from kronika_capture.bridge.server import build_state, create_server
+from kronika_capture.bridge.store import Store
+from kronika_capture.config import UPLOAD_UNAVAILABLE
 
 PROJECT_URL = "https://chatgpt.com/g/g-p-framenest-analysis"
 

@@ -11,7 +11,7 @@ import threading
 import time
 from pathlib import Path
 
-from kronika import config, paths
+from kronika_capture import config, paths
 
 JOB_GLOB = "*.json"
 

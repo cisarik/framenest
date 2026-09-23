@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from kronika.bridge.jobs import JobManager
-from kronika.bridge.store import Store
+from kronika_capture.bridge.jobs import JobManager
+from kronika_capture.bridge.store import Store
 
 
 class Clock:

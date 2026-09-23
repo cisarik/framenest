@@ -12,15 +12,15 @@ import subprocess
 import sys
 import time
 
-from kronika import __version__, paths
-from kronika.bridge.server import serve
-from kronika.client import (
+from kronika_capture import __version__, paths
+from kronika_capture.bridge.server import serve
+from kronika_capture.client import (
     BridgeClient,
     BridgeError,
     BridgeNoToken,
     BridgeUnreachable,
 )
-from kronika.config import (
+from kronika_capture.config import (
     APP_NAME,
     CLIENT_POLL_INTERVAL_S,
     CLIENT_WAITING_NOTICE_S,
@@ -30,7 +30,7 @@ from kronika.config import (
     MAX_ASK_TIMEOUT_S,
     UPLOAD_UNAVAILABLE,
 )
-from kronika.errors import (
+from kronika_capture.errors import (
     EXIT_BRIDGE,
     EXIT_CANCELLED,
     EXIT_OK,

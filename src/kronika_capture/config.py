@@ -1,7 +1,7 @@
 """Kernel constants for the stripped chatgpt-page ask bridge.
 
 Runtime directories are not constants. Callers pass an explicit state
-directory; the development default lives in :mod:`kronika.paths`.
+directory; the development default lives in :mod:`kronika_capture.paths`.
 """
 
 APP_NAME = "framenest-chatgpt-page"

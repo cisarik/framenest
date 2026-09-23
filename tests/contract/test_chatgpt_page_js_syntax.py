@@ -11,10 +11,8 @@ from pathlib import Path
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 EXTENSION_ROOT = (
     REPOSITORY_ROOT
-    / "vendor"
-    / "kronika-ask"
     / "src"
-    / "kronika"
+    / "kronika_capture"
     / "_assets"
     / "extension"
     / "src"
@@ -22,16 +20,16 @@ EXTENSION_ROOT = (
 PROTOCOL_TEST = REPOSITORY_ROOT / "tests" / "chatgpt_page_protocol.test.js"
 FORBIDDEN_IMPORT_ROOTS = frozenset(
     {
-        "kronika.library",
-        "kronika.markdown",
-        "kronika.sanitize",
+        "kronika_capture.library",
+        "kronika_capture.markdown",
+        "kronika_capture.sanitize",
     }
 )
 FORBIDDEN_MODULES = frozenset(
     {
-        "kronika.bridge.render",
-        "kronika.bridge.assets",
-        "kronika.bridge.capture_auth",
+        "kronika_capture.bridge.render",
+        "kronika_capture.bridge.assets",
+        "kronika_capture.bridge.capture_auth",
     }
 )
 
@@ -69,7 +67,7 @@ def test_protocol_version_error_codes_and_upload_locator_stay() -> None:
     assert re.search(r"export const PROTO_VERSION = 1;", protocol)
     pack = json.loads((EXTENSION_ROOT / "adapters" / "pack_v5.json").read_text(encoding="utf-8"))
     assert "upload_input" in pack["locators"]
-    errors = (REPOSITORY_ROOT / "vendor" / "kronika-ask" / "src" / "kronika" / "errors.py").read_text(
+    errors = (REPOSITORY_ROOT / "src" / "kronika_capture" / "errors.py").read_text(
         encoding="utf-8"
     )
     for code in (
@@ -85,8 +83,8 @@ def test_protocol_version_error_codes_and_upload_locator_stay() -> None:
         assert f'"{code}"' in errors
 
 
-def test_vendored_python_does_not_import_removed_modules() -> None:
-    package = REPOSITORY_ROOT / "vendor" / "kronika-ask" / "src" / "kronika"
+def test_capture_python_does_not_import_removed_modules() -> None:
+    package = REPOSITORY_ROOT / "src" / "kronika_capture"
     violations: list[str] = []
     for path in sorted(package.rglob("*.py")):
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
@@ -97,7 +95,7 @@ def test_vendored_python_does_not_import_removed_modules() -> None:
                 module = node.names[0].name
             else:
                 continue
-            if module in FORBIDDEN_MODULES or module.startswith("kronika.library"):
+            if module in FORBIDDEN_MODULES or module.startswith("kronika_capture.library"):
                 violations.append(f"{path.name}: {module}")
             if module.split(".")[0] in {"markdown", "sanitize"} or module in FORBIDDEN_IMPORT_ROOTS:
                 violations.append(f"{path.name}: {module}")

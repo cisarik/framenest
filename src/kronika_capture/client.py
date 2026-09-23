@@ -8,8 +8,8 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
-from kronika import paths
-from kronika.config import (
+from kronika_capture import paths
+from kronika_capture.config import (
     DEFAULT_ASK_TIMEOUT_S,
     DEFAULT_BRIDGE_HOST,
     DEFAULT_BRIDGE_PORT,

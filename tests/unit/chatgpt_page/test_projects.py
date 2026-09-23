@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from kronika.bridge.store import Store
-from kronika.paths import state_dir
-from kronika.projects import resolve
+from kronika_capture.bridge.store import Store
+from kronika_capture.paths import state_dir
+from kronika_capture.projects import resolve
 
 
 def test_development_default_uses_framenest_state_name(monkeypatch, tmp_path) -> None:

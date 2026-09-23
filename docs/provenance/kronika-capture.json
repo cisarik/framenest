@@ -1,0 +1,473 @@
+{
+  "schema_version": 1,
+  "upstreams": [
+    {
+      "repository": "https://github.com/cisarik/kronika.git",
+      "commit": "66c40d43c577276b0ad304a494fbbb1ffb6fc933",
+      "tree": "848f247434deea4c217170c012612b39e41557f3"
+    }
+  ],
+  "framenest_baseline": {
+    "repository": "https://github.com/cisarik/framenest.git",
+    "commit": "93e7742d56d46d4725d4561bd8751b15e55e5eb5",
+    "tree": "b357c765f8ca03c03cbbe0b087b98b6aa14a75e9",
+    "manifest_path": "vendor/kronika-ask/upstream.json",
+    "manifest_blob": "3d072d77b6efb76408686d4231cf00e390a75e5a"
+  },
+  "files": [
+    {
+      "source_path": "src/kronika/__init__.py",
+      "source_blob": "3dc1f76bc69e3f559bee6253b24fc93acee9e1f9",
+      "destination_path": "src/kronika_capture/__init__.py",
+      "disposition": "relocated",
+      "feature": "existing ask kernel",
+      "adaptation_summary": "Package description updated for the relocated namespace; behavior unchanged.",
+      "framenest_origin": {
+        "path": "vendor/kronika-ask/src/kronika/__init__.py",
+        "blob": "ee076d4d0ab7de30974d5a56a6eea03df25026af",
+        "disposition": "rewritten"
+      }
+    },
+    {
+      "source_path": "src/kronika/__main__.py",
+      "source_blob": "167c664b71a5fb99466e3ec8ba307934952b4161",
+      "destination_path": "src/kronika_capture/__main__.py",
+      "disposition": "relocated",
+      "feature": "existing ask kernel",
+      "adaptation_summary": "Python import/resource namespace or module documentation updated to kronika_capture; behavior unchanged.",
+      "framenest_origin": {
+        "path": "vendor/kronika-ask/src/kronika/__main__.py",
+        "blob": "167c664b71a5fb99466e3ec8ba307934952b4161",
+        "disposition": "kept"
+      }
+    },
+    {
+      "source_path": "src/kronika/cli.py",
+      "source_blob": "6b69fd06f966242718f2ba5fed583e97de8e962d",
+      "destination_path": "src/kronika_capture/cli.py",
+      "disposition": "relocated",
+      "feature": "existing ask kernel",
+      "adaptation_summary": "Python import/resource namespace or module documentation updated to kronika_capture; behavior unchanged.",
+      "framenest_origin": {
+        "path": "vendor/kronika-ask/src/kronika/cli.py",
+        "blob": "deffb63e2f3e9e73ecc17de5ffd9798c435b1cf7",
+        "disposition": "rewritten"
+      }
+    },
+    {
+      "source_path": "src/kronika/client.py",
+      "source_blob": "ef5c8910538b3c54bc763d75c7c7299399a74e5f",
+      "destination_path": "src/kronika_capture/client.py",
+      "disposition": "relocated",
+      "feature": "existing ask kernel",
+      "adaptation_summary": "Python import/resource namespace or module documentation updated to kronika_capture; behavior unchanged.",
+      "framenest_origin": {
+        "path": "vendor/kronika-ask/src/kronika/client.py",
+        "blob": "fe84cf67ae85d377229a78de742fb3181b893d2e",
+        "disposition": "rewritten"
+      }
+    },
+    {
+      "source_path": "src/kronika/config.py",
+      "source_blob": "bf003ddab328002dce201394971f8b7b5a9d6819",
+      "destination_path": "src/kronika_capture/config.py",
+      "disposition": "relocated",
+      "feature": "existing ask kernel",
+      "adaptation_summary": "Python import/resource namespace or module documentation updated to kronika_capture; behavior unchanged.",
+      "framenest_origin": {
+        "path": "vendor/kronika-ask/src/kronika/config.py",
+        "blob": "2a25def3bfb50ce03544ef5b4d08a831b73e99d9",
+        "disposition": "rewritten"
+      }
+    },
+    {
+      "source_path": "src/kronika/errors.py",
+      "source_blob": "47e3d3d692bc9833ee9b1b5cd4bf76386c86ffd0",
+      "destination_path": "src/kronika_capture/errors.py",
+      "disposition": "relocated",
+      "feature": "existing ask kernel",
+      "adaptation_summary": "Byte-identical relocation of the FrameNest baseline file.",
+      "framenest_origin": {
+        "path": "vendor/kronika-ask/src/kronika/errors.py",
+        "blob": "47e3d3d692bc9833ee9b1b5cd4bf76386c86ffd0",
+        "disposition": "kept"
+      }
+    },
+    {
+      "source_path": "src/kronika/paths.py",
+      "source_blob": "063292b6cc0307f62b8ec7878f4ca5b465fe8e1c",
+      "destination_path": "src/kronika_capture/paths.py",
+      "disposition": "relocated",
+      "feature": "existing ask kernel",
+      "adaptation_summary": "Python import/resource namespace or module documentation updated to kronika_capture; behavior unchanged.",
+      "framenest_origin": {
+        "path": "vendor/kronika-ask/src/kronika/paths.py",
+        "blob": "86e7e7d63439b03ffff6bec1e39b834fa04ad840",
+        "disposition": "rewritten"
+      }
+    },
+    {
+      "source_path": "src/kronika/projects.py",
+      "source_blob": "19205dc622a6dbf9180d13631d61b7dcbef7c98e",
+      "destination_path": "src/kronika_capture/projects.py",
+      "disposition": "relocated",
+      "feature": "existing ask kernel",
+      "adaptation_summary": "Python import/resource namespace or module documentation updated to kronika_capture; behavior unchanged.",
+      "framenest_origin": {
+        "path": "vendor/kronika-ask/src/kronika/projects.py",
+        "blob": "eae6c2d045ce52b0a20ce821866ad0368673c80d",
+        "disposition": "rewritten"
+      }
+    },
+    {
+      "source_path": "src/kronika/bridge/__init__.py",
+      "source_blob": "522a418fb5b72b17906ae30b535130d7bd828724",
+      "destination_path": "src/kronika_capture/bridge/__init__.py",
+      "disposition": "relocated",
+      "feature": "existing ask kernel",
+      "adaptation_summary": "Byte-identical relocation of the FrameNest baseline file.",
+      "framenest_origin": {
+        "path": "vendor/kronika-ask/src/kronika/bridge/__init__.py",
+        "blob": "c58fc0def79752a78c35fc54732a51303ac2bc1e",
+        "disposition": "rewritten"
+      }
+    },
+    {
+      "source_path": "src/kronika/bridge/auth.py",
+      "source_blob": "77070a70e89542cbf877d6c175d9ccb94703a875",
+      "destination_path": "src/kronika_capture/bridge/auth.py",
+      "disposition": "relocated",
+      "feature": "existing ask kernel",
+      "adaptation_summary": "Byte-identical relocation of the FrameNest baseline file.",
+      "framenest_origin": {
+        "path": "vendor/kronika-ask/src/kronika/bridge/auth.py",
+        "blob": "da73b391e341bb21903eab4bad0d374e13464013",
+        "disposition": "rewritten"
+      }
+    },
+    {
+      "source_path": "src/kronika/bridge/jobs.py",
+      "source_blob": "72edd499d36538b6c934039716f702f650a4eeb1",
+      "destination_path": "src/kronika_capture/bridge/jobs.py",
+      "disposition": "relocated",
+      "feature": "existing ask kernel",
+      "adaptation_summary": "Python import/resource namespace or module documentation updated to kronika_capture; behavior unchanged.",
+      "framenest_origin": {
+        "path": "vendor/kronika-ask/src/kronika/bridge/jobs.py",
+        "blob": "acb8e84c29fe6a524d7ae1376161a08c86ba9d75",
+        "disposition": "rewritten"
+      }
+    },
+    {
+      "source_path": "src/kronika/bridge/results.py",
+      "source_blob": "c2184847de6bda0a7c57bb26f433cff70fa4c168",
+      "destination_path": "src/kronika_capture/bridge/results.py",
+      "disposition": "relocated",
+      "feature": "existing ask kernel",
+      "adaptation_summary": "Byte-identical relocation of the FrameNest baseline file.",
+      "framenest_origin": {
+        "path": "vendor/kronika-ask/src/kronika/bridge/results.py",
+        "blob": "9ef4041b4862ec79a7cae3fab25a7431d2d2de61",
+        "disposition": "rewritten"
+      }
+    },
+    {
+      "source_path": "src/kronika/bridge/server.py",
+      "source_blob": "ebc8e9f00df92dcd01d915e77a904eaead2b3e52",
+      "destination_path": "src/kronika_capture/bridge/server.py",
+      "disposition": "relocated",
+      "feature": "existing ask kernel",
+      "adaptation_summary": "Python import/resource namespace or module documentation updated to kronika_capture; behavior unchanged.",
+      "framenest_origin": {
+        "path": "vendor/kronika-ask/src/kronika/bridge/server.py",
+        "blob": "58ef55234af067cf191ff6961fcb19413ade2154",
+        "disposition": "rewritten"
+      }
+    },
+    {
+      "source_path": "src/kronika/bridge/store.py",
+      "source_blob": "8f45b885e85326e5638c35842f54a91806782af4",
+      "destination_path": "src/kronika_capture/bridge/store.py",
+      "disposition": "relocated",
+      "feature": "existing ask kernel",
+      "adaptation_summary": "Python import/resource namespace or module documentation updated to kronika_capture; behavior unchanged.",
+      "framenest_origin": {
+        "path": "vendor/kronika-ask/src/kronika/bridge/store.py",
+        "blob": "8f45b885e85326e5638c35842f54a91806782af4",
+        "disposition": "kept"
+      }
+    },
+    {
+      "source_path": "extension/src/adapters/adapter.js",
+      "source_blob": "d59bd7a92b9af75f3c26c6e6051726688915e3cd",
+      "destination_path": "src/kronika_capture/_assets/extension/src/adapters/adapter.js",
+      "disposition": "relocated",
+      "feature": "existing browser capture assets",
+      "adaptation_summary": "Byte-identical relocation of the FrameNest baseline file.",
+      "framenest_origin": {
+        "path": "vendor/kronika-ask/src/kronika/_assets/extension/src/adapters/adapter.js",
+        "blob": "d59bd7a92b9af75f3c26c6e6051726688915e3cd",
+        "disposition": "kept"
+      }
+    },
+    {
+      "source_path": "extension/src/adapters/pack_v5.json",
+      "source_blob": "22414672373e11bc203ece34d4ef27f521faa66e",
+      "destination_path": "src/kronika_capture/_assets/extension/src/adapters/pack_v5.json",
+      "disposition": "relocated",
+      "feature": "existing browser capture assets",
+      "adaptation_summary": "Byte-identical relocation of the FrameNest baseline file.",
+      "framenest_origin": {
+        "path": "vendor/kronika-ask/src/kronika/_assets/extension/src/adapters/pack_v5.json",
+        "blob": "22414672373e11bc203ece34d4ef27f521faa66e",
+        "disposition": "kept"
+      }
+    },
+    {
+      "source_path": "extension/src/protocol.js",
+      "source_blob": "166f2b20c68c4760f058747810ffd5cdafd06143",
+      "destination_path": "src/kronika_capture/_assets/extension/src/protocol.js",
+      "disposition": "relocated",
+      "feature": "existing browser capture assets",
+      "adaptation_summary": "Byte-identical relocation of the FrameNest baseline file.",
+      "framenest_origin": {
+        "path": "vendor/kronika-ask/src/kronika/_assets/extension/src/protocol.js",
+        "blob": "f3f59616ae7f9cea256110dd205b83ad271f2bb8",
+        "disposition": "rewritten"
+      }
+    },
+    {
+      "source_path": "extension/src/url_guard.js",
+      "source_blob": "73f734dba017558920d9fc234d8608d52f5a1551",
+      "destination_path": "src/kronika_capture/_assets/extension/src/url_guard.js",
+      "disposition": "relocated",
+      "feature": "existing browser capture assets",
+      "adaptation_summary": "Byte-identical relocation of the FrameNest baseline file.",
+      "framenest_origin": {
+        "path": "vendor/kronika-ask/src/kronika/_assets/extension/src/url_guard.js",
+        "blob": "73f734dba017558920d9fc234d8608d52f5a1551",
+        "disposition": "kept"
+      }
+    },
+    {
+      "source_path": "extension/src/engine/dom_engine.js",
+      "source_blob": "92327b2e0c75c36d5521b62f8a4a90426b6e5e7f",
+      "destination_path": "src/kronika_capture/_assets/extension/src/engine/dom_engine.js",
+      "disposition": "relocated",
+      "feature": "existing browser capture assets",
+      "adaptation_summary": "Byte-identical relocation of the FrameNest baseline file.",
+      "framenest_origin": {
+        "path": "vendor/kronika-ask/src/kronika/_assets/extension/src/engine/dom_engine.js",
+        "blob": "fb2b41babaa3354c46636fece5a5d31ecd0e2843",
+        "disposition": "rewritten"
+      }
+    },
+    {
+      "source_path": "extension/src/engine/index.js",
+      "source_blob": "5b4ae7ff3debc7ea12821fd97a17078334e7ae2c",
+      "destination_path": "src/kronika_capture/_assets/extension/src/engine/index.js",
+      "disposition": "relocated",
+      "feature": "existing browser capture assets",
+      "adaptation_summary": "Byte-identical relocation of the FrameNest baseline file.",
+      "framenest_origin": {
+        "path": "vendor/kronika-ask/src/kronika/_assets/extension/src/engine/index.js",
+        "blob": "5b4ae7ff3debc7ea12821fd97a17078334e7ae2c",
+        "disposition": "kept"
+      }
+    },
+    {
+      "source_path": "extension/src/engine/interventions.js",
+      "source_blob": "f2502e907a3d39be38e456e939ecee96e249cd0c",
+      "destination_path": "src/kronika_capture/_assets/extension/src/engine/interventions.js",
+      "disposition": "relocated",
+      "feature": "existing browser capture assets",
+      "adaptation_summary": "Byte-identical relocation of the FrameNest baseline file.",
+      "framenest_origin": {
+        "path": "vendor/kronika-ask/src/kronika/_assets/extension/src/engine/interventions.js",
+        "blob": "f2502e907a3d39be38e456e939ecee96e249cd0c",
+        "disposition": "kept"
+      }
+    },
+    {
+      "source_path": "extension/src/headless/bridge_client.mjs",
+      "source_blob": "e10b43ba7b1a69fc2700cb8997b40d63bf8dc972",
+      "destination_path": "src/kronika_capture/_assets/extension/src/headless/bridge_client.mjs",
+      "disposition": "relocated",
+      "feature": "existing browser capture assets",
+      "adaptation_summary": "Byte-identical relocation of the FrameNest baseline file.",
+      "framenest_origin": {
+        "path": "vendor/kronika-ask/src/kronika/_assets/extension/src/headless/bridge_client.mjs",
+        "blob": "814c809d040143395ec9bda5512efbc03e59fcf4",
+        "disposition": "rewritten"
+      }
+    },
+    {
+      "source_path": "extension/src/headless/cdp_client.mjs",
+      "source_blob": "624f9f3452c195f497cf49a2cf0ee186470bdbb5",
+      "destination_path": "src/kronika_capture/_assets/extension/src/headless/cdp_client.mjs",
+      "disposition": "relocated",
+      "feature": "existing browser capture assets",
+      "adaptation_summary": "Byte-identical relocation of the FrameNest baseline file.",
+      "framenest_origin": {
+        "path": "vendor/kronika-ask/src/kronika/_assets/extension/src/headless/cdp_client.mjs",
+        "blob": "624f9f3452c195f497cf49a2cf0ee186470bdbb5",
+        "disposition": "kept"
+      }
+    },
+    {
+      "source_path": "extension/src/headless/driver.mjs",
+      "source_blob": "fbfc97aef753b880012c6dc8b86765782eee2616",
+      "destination_path": "src/kronika_capture/_assets/extension/src/headless/driver.mjs",
+      "disposition": "relocated",
+      "feature": "existing browser capture assets",
+      "adaptation_summary": "Byte-identical relocation of the FrameNest baseline file.",
+      "framenest_origin": {
+        "path": "vendor/kronika-ask/src/kronika/_assets/extension/src/headless/driver.mjs",
+        "blob": "fbfc97aef753b880012c6dc8b86765782eee2616",
+        "disposition": "kept"
+      }
+    },
+    {
+      "source_path": "extension/src/headless/runner.mjs",
+      "source_blob": "5f3513e059b8b7ae5be6d92cc845e726535b65b5",
+      "destination_path": "src/kronika_capture/_assets/extension/src/headless/runner.mjs",
+      "disposition": "relocated",
+      "feature": "existing browser capture assets",
+      "adaptation_summary": "Byte-identical relocation of the FrameNest baseline file.",
+      "framenest_origin": {
+        "path": "vendor/kronika-ask/src/kronika/_assets/extension/src/headless/runner.mjs",
+        "blob": "21610fa57383ce688e3047968d256ff5cb6e55e2",
+        "disposition": "rewritten"
+      }
+    },
+    {
+      "source_path": "extension/src/headless/job_engine.mjs",
+      "source_blob": "60db86623f339aadfdc743718936f68d196f02b4",
+      "destination_path": "src/kronika_capture/_assets/extension/src/headless/job_engine.mjs",
+      "disposition": "relocated",
+      "feature": "existing browser capture assets",
+      "adaptation_summary": "Byte-identical relocation of the FrameNest baseline file.",
+      "framenest_origin": {
+        "path": "vendor/kronika-ask/src/kronika/_assets/extension/src/headless/job_engine.mjs",
+        "blob": "5ce4ca6567fed132d353161c5bbcfbece6864e6a",
+        "disposition": "rewritten"
+      }
+    },
+    {
+      "source_path": "extension/src/headless/resource_policy.mjs",
+      "source_blob": "cdb6a0fdd720126f471e082597dca70b2eb471c6",
+      "destination_path": "src/kronika_capture/_assets/extension/src/headless/resource_policy.mjs",
+      "disposition": "relocated",
+      "feature": "existing browser capture assets",
+      "adaptation_summary": "Byte-identical relocation of the FrameNest baseline file.",
+      "framenest_origin": {
+        "path": "vendor/kronika-ask/src/kronika/_assets/extension/src/headless/resource_policy.mjs",
+        "blob": "3c8cad44b70df9674978cca8cbeaa08c49b79d9b",
+        "disposition": "rewritten"
+      }
+    },
+    {
+      "source_path": "extension/src/headless/login_server.mjs",
+      "source_blob": "c95a82401b252c5289994f2fb93a7e5cb7d5e24c",
+      "destination_path": "src/kronika_capture/_assets/extension/src/headless/login_server.mjs",
+      "disposition": "relocated",
+      "feature": "existing browser capture assets",
+      "adaptation_summary": "Byte-identical relocation of the FrameNest baseline file.",
+      "framenest_origin": {
+        "path": "vendor/kronika-ask/src/kronika/_assets/extension/src/headless/login_server.mjs",
+        "blob": "c95a82401b252c5289994f2fb93a7e5cb7d5e24c",
+        "disposition": "kept"
+      }
+    },
+    {
+      "source_path": "extension/src/headless/login_app/index.html",
+      "source_blob": "59c5acb17b07bfa0eb902d1c390dea87e53a8076",
+      "destination_path": "src/kronika_capture/_assets/extension/src/headless/login_app/index.html",
+      "disposition": "relocated",
+      "feature": "existing browser capture assets",
+      "adaptation_summary": "Byte-identical relocation of the FrameNest baseline file.",
+      "framenest_origin": {
+        "path": "vendor/kronika-ask/src/kronika/_assets/extension/src/headless/login_app/index.html",
+        "blob": "59c5acb17b07bfa0eb902d1c390dea87e53a8076",
+        "disposition": "kept"
+      }
+    },
+    {
+      "source_path": "extension/src/headless/login_app/app.js",
+      "source_blob": "8df942c0099ff58c742b2f600bc05f29001dda53",
+      "destination_path": "src/kronika_capture/_assets/extension/src/headless/login_app/app.js",
+      "disposition": "relocated",
+      "feature": "existing browser capture assets",
+      "adaptation_summary": "Byte-identical relocation of the FrameNest baseline file.",
+      "framenest_origin": {
+        "path": "vendor/kronika-ask/src/kronika/_assets/extension/src/headless/login_app/app.js",
+        "blob": "8df942c0099ff58c742b2f600bc05f29001dda53",
+        "disposition": "kept"
+      }
+    },
+    {
+      "source_path": "extension/src/headless/login_app/app.css",
+      "source_blob": "1ca34ffe8641850ea48e7e9c76679496f6d7d556",
+      "destination_path": "src/kronika_capture/_assets/extension/src/headless/login_app/app.css",
+      "disposition": "relocated",
+      "feature": "existing browser capture assets",
+      "adaptation_summary": "Byte-identical relocation of the FrameNest baseline file.",
+      "framenest_origin": {
+        "path": "vendor/kronika-ask/src/kronika/_assets/extension/src/headless/login_app/app.css",
+        "blob": "1ca34ffe8641850ea48e7e9c76679496f6d7d556",
+        "disposition": "kept"
+      }
+    },
+    {
+      "source_path": "extension/src/headless/probe.mjs",
+      "source_blob": "46b0a2ba73cf99387c8e64ea741263bdaa9c4b92",
+      "destination_path": "src/kronika_capture/_assets/extension/src/headless/probe.mjs",
+      "disposition": "relocated",
+      "feature": "existing browser capture assets",
+      "adaptation_summary": "Byte-identical relocation of the FrameNest baseline file.",
+      "framenest_origin": {
+        "path": "vendor/kronika-ask/src/kronika/_assets/extension/src/headless/probe.mjs",
+        "blob": "bd15afd9d1b394dafa518182256f18b21e43ecf0",
+        "disposition": "rewritten"
+      }
+    }
+  ],
+  "excluded_features": [
+    {
+      "source_location": "extension/src/job_runner.js",
+      "source_blob": "36387a8e2ba4ff34b3ab14c9b289705c5cdaac79",
+      "prior_disposition": "deleted",
+      "exclusion_reason": "Already excluded extension job runner; retain the existing headless kernel only."
+    },
+    {
+      "source_location": "pyproject.toml",
+      "source_blob": "bb6da45258b3980fdaaf01b47133443307fcdc54",
+      "prior_disposition": "deleted",
+      "exclusion_reason": "Source project packaging/setup is not ported; FrameNest remains the distribution and tooling owner."
+    },
+    {
+      "source_location": "scripts/kronika",
+      "source_blob": "0fb306d15e28539910872b62159068b0fcca494e",
+      "prior_disposition": "deleted",
+      "exclusion_reason": "Source project packaging/setup is not ported; FrameNest remains the distribution and tooling owner."
+    },
+    {
+      "source_location": "scripts/dev-setup.sh",
+      "source_blob": "f97ce56f85fbe9ed66334f4ee800e8b56c98c41b",
+      "prior_disposition": "deleted",
+      "exclusion_reason": "Source project packaging/setup is not ported; FrameNest remains the distribution and tooling owner."
+    },
+    {
+      "source_location": "extension/src/headless/deep_research.mjs",
+      "source_blob": "4815aab233a63942e7c778b91f59f2ccbb57c51c",
+      "prior_disposition": "deleted",
+      "exclusion_reason": "Already excluded from the ask kernel; restoration belongs to S4, not S1."
+    },
+    {
+      "source_location": "extension/src/headless/capture_assets.mjs",
+      "source_blob": "24ff51e0afc14d1de7bb03a2fcc5974d56f06de0",
+      "prior_disposition": "deleted",
+      "exclusion_reason": "Already excluded asset-capture subsystem; no feature restoration in S1."
+    }
+  ]
+}

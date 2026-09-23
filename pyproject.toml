@@ -20,13 +20,15 @@ framenest-previews = "framenest.adapters.cli.previews:main"
 framenest-covers = "framenest.adapters.cli.covers:main"
 framenest-recovery = "framenest.adapters.cli.recovery:main"
 framenest-sidecar = "framenest.adapters.cli.sidecar:main"
-framenest-chatgpt-page = "kronika.cli:main"
+kronika-capture = "kronika_capture.cli:main"
+# Compatibility alias: both commands use the same capture implementation.
+framenest-chatgpt-page = "kronika_capture.cli:main"
 
 [tool.poetry]
 package-mode = true
 packages = [
     { include = "framenest", from = "src" },
-    { include = "kronika", from = "vendor/kronika-ask/src" },
+    { include = "kronika_capture", from = "src" },
 ]
 include = [
     { path = "src/framenest/infrastructure/persistence/alembic_environment/script.py.mako", format = ["sdist", "wheel"] },
@@ -34,7 +36,7 @@ include = [
     { path = "src/framenest/adapters/api/web/styles.css", format = ["sdist", "wheel"] },
     { path = "src/framenest/adapters/api/web/app.js", format = ["sdist", "wheel"] },
     { path = "src/framenest/infrastructure/ai/fixtures/vision-probe-red-8x8.png", format = ["sdist", "wheel"] },
-    { path = "vendor/kronika-ask/src/kronika/_assets/**/*", format = ["sdist", "wheel"] },
+    { path = "src/kronika_capture/_assets/**/*", format = ["sdist", "wheel"] },
 ]
 
 [tool.poetry.group.dev.dependencies]
