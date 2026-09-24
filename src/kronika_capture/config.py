@@ -9,6 +9,11 @@ STATE_DIR_NAME = "framenest-chatgpt-page"
 DEFAULT_BRIDGE_HOST = "127.0.0.1"
 DEFAULT_BRIDGE_PORT = 8765
 PROTO_VERSION = 1
+# systemd LoadCredential= name. The file appears as $CREDENTIALS_DIRECTORY/token.
+SYSTEMD_BRIDGE_TOKEN_CREDENTIAL = "token"
+SYSTEMD_BRIDGE_TOKEN_MAX_BYTES = 4096
+# Same interval the runner's launch brake enforces before another browser start.
+CAPTURE_RESTART_BRAKE_MS = 300_000
 PACK_VERSION = 5
 API_VERSION = 1
 BRIDGE_VERSION = "0.1.0"

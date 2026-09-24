@@ -43,7 +43,18 @@ deploy/ubuntu/framenest-release status
 deploy/ubuntu/framenest-release check --release <40-hex-SHA>
 deploy/ubuntu/framenest-release deploy --release <40-hex-SHA> --yes
 deploy/ubuntu/framenest-release rollback --release <40-hex-SHA> --yes
+deploy/ubuntu/framenest-release activate-capture --release <40-hex-SHA> --yes
+deploy/ubuntu/framenest-release rollback-capture --release <40-hex-SHA> --yes
 ```
+
+`deploy` and `rollback` move only the web pointer `/opt/framenest/current` and
+`framenest.service`. They report the web SHA and the capture SHA.
+`activate-capture` and `rollback-capture` are the only operations that switch
+`/opt/framenest/capture-current` and restart the capture runner, and each does
+that restart once after the drain and five-minute brake checks. Capture units
+under `deploy/systemd/kronika-capture-*.service` and
+`deploy/systemd/kronika-capture.env.example` are source material. Nothing in
+this directory is evidence that capture is already deployed.
 
 `framenest-release` is the single Fish-compatible operator entry point; it
 resolves the repository root and runs `deploy/ubuntu/framenest_release.py`

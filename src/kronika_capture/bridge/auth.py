@@ -9,6 +9,8 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
+from kronika_capture import paths
+
 TOKEN_BYTES = 32
 
 
@@ -40,14 +42,24 @@ def _write_token(path: Path, token: str) -> None:
 
 
 def load_or_create_token(path: Path | str) -> str:
-    token_path = Path(path)
+    """Return the bridge token without changing comparison or minting rules.
+
+    A systemd credential, when present, is the token. An unusable credential
+    file does not fall through into minting a second token. Without that
+    file, the state-directory token is reused or created as before.
+    """
+
+    credential = paths.read_systemd_bridge_token()
+    if credential is not None:
+        return credential
+    token_file = Path(path)
     try:
-        existing = token_path.read_text(encoding="utf-8").strip()
+        existing = token_file.read_text(encoding="utf-8").strip()
     except OSError:
         existing = ""
     if existing:
         return existing
-    return rotate_token(token_path)
+    return rotate_token(token_file)
 
 
 def rotate_token(path: Path | str) -> str:

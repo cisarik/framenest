@@ -1,0 +1,23 @@
+[Unit]
+Description=Kronika capture loopback noVNC view
+Documentation=https://github.com/cisarik/framenest
+After=kronika-capture-vnc.service
+
+[Service]
+Type=simple
+User=kronika-capture
+Group=kronika-capture
+ExecStart=/usr/bin/websockify --web=/usr/share/novnc 127.0.0.1:6080 127.0.0.1:5900
+Restart=no
+RuntimeMaxSec=1800
+UMask=0077
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+ProtectControlGroups=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+RestrictSUIDSGID=true
+LockPersonality=true
+CapabilityBoundingSet=
+AmbientCapabilities=

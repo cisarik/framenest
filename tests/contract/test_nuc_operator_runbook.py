@@ -96,6 +96,9 @@ def test_runbook_contains_no_home_path_or_permission_broadening() -> None:
     assert "/home/" not in text
     for token in ("chmod", "chown", "usermod", "setfacl", "adduser", "addgroup"):
         assert token not in text
+    assert "Capture Runtime Sources (Not Deployed)" in text
+    assert "activate-capture" in text
+    assert "Agents do not open the view and do not enter credentials." in text
 
 
 def test_runbook_does_not_present_fish_launcher_as_nuc_interface() -> None:

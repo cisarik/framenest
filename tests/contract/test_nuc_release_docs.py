@@ -210,3 +210,15 @@ def test_runbook_documents_environmentfile_production_cli_and_bounded_readiness(
     assert "EnvironmentFile" in text
     assert "EXIT_READINESS_TIMEOUT" in text
     assert "30 seconds" in text
+
+
+def test_runbook_and_deploy_readme_document_capture_activation() -> None:
+    runbook = _text(RUNBOOK_PATH)
+    deploy = _text(DEPLOY_README_PATH)
+    assert "Capture Runtime Sources (Not Deployed)" in runbook
+    assert "activate-capture --release <40-hex-SHA> --yes" in runbook
+    assert "rollback-capture --release <40-hex-SHA> --yes" in runbook
+    assert "do not record a completed capture deployment" in runbook
+    assert "activate-capture --release <40-hex-SHA> --yes" in deploy
+    assert "rollback-capture --release <40-hex-SHA> --yes" in deploy
+    assert "evidence that capture is already deployed" in deploy

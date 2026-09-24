@@ -118,6 +118,10 @@ def test_make_manifest_contains_only_public_provenance() -> None:
         ap_pin=AP_PIN,
         superproject_sha256="c" * 64,
         ap_archive_sha256="d" * 64,
+        capture_code_tree="e" * 40,
+        capture_runtime_contract_sha256="1" * 64,
+        capture_unit_contract_sha256="2" * 64,
+        capture_bridge_protocol="1",
     )
 
     assert set(manifest) == {
@@ -125,6 +129,10 @@ def test_make_manifest_contains_only_public_provenance() -> None:
         "ap_gitlink",
         "superproject_archive_sha256",
         "ap_archive_sha256",
+        "capture_code_tree",
+        "capture_runtime_contract_sha256",
+        "capture_unit_contract_sha256",
+        "capture_bridge_protocol",
     }
     assert manifest["framenest_release_sha"] == RELEASE
     assert manifest["ap_gitlink"] == AP_PIN

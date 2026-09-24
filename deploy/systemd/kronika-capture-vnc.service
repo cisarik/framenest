@@ -1,0 +1,27 @@
+[Unit]
+Description=Kronika capture loopback VNC view
+Documentation=https://github.com/cisarik/framenest
+After=kronika-capture-xvfb.service
+Requires=kronika-capture-xvfb.service
+
+[Service]
+Type=simple
+User=kronika-capture
+Group=kronika-capture
+Environment=DISPLAY=:99
+Environment=XAUTHORITY=/run/kronika-capture/Xauthority
+ExecStart=/usr/bin/x11vnc -display :99 -localhost -rfbport 5900 -auth /run/kronika-capture/Xauthority -nopw -noxdamage
+Restart=no
+RuntimeMaxSec=1800
+UMask=0077
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/tmp/.X11-unix /run/kronika-capture
+ProtectControlGroups=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+RestrictSUIDSGID=true
+LockPersonality=true
+CapabilityBoundingSet=
+AmbientCapabilities=

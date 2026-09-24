@@ -20,5 +20,6 @@ if not test -x "$python"
     exit 1
 end
 
+# Every engine subcommand is forwarded unchanged, including capture activation.
 command "$python" "$engine" $argv
 exit $status

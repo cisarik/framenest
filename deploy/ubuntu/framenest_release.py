@@ -8,6 +8,8 @@ under Ubuntu system Python 3.12. It uses only the Python standard library.
 
 It never stores, prints, or transmits secrets; never invokes ``uv``; never
 runs migrations; and never accepts user-supplied remote shell commands.
+Web deploy and rollback move only ``/opt/framenest/current`` and
+``framenest.service``. Capture activation is a separate operation.
 """
 
 from __future__ import annotations
@@ -34,6 +36,15 @@ SERVICE_USER = "framenest"
 SERVICE_GROUP = "framenest"
 RELEASE_ROOT = "/opt/framenest/releases"
 CURRENT = "/opt/framenest/current"
+CAPTURE_CURRENT = "/opt/framenest/capture-current"
+CAPTURE_RUNNER_SERVICE = "kronika-capture-runner.service"
+CAPTURE_JOURNAL = "/var/lib/kronika-capture/capture-journal.sqlite3"
+CAPTURE_BRAKE_DIRECTORY = "/var/lib/kronika-capture/profile.capture-launch"
+CAPTURE_BRAKE_MS = 300_000
+CAPTURE_BRIDGE_PROTOCOL = "1"
+CAPTURE_DRAIN_DEADLINE_SECONDS = 30
+CAPTURE_READINESS_DEADLINE_SECONDS = 30
+CAPTURE_POLL_INTERVAL_SECONDS = 1
 ENV_FILE = "/etc/framenest/framenest.env"
 POETRY_BIN = "/opt/framenest/tooling/poetry/2.4.1/.venv/bin/poetry"
 CPYTHON_BIN = (
@@ -74,6 +85,25 @@ EXIT_ROLLBACK = 18
 EXIT_CLEANUP = 19
 EXIT_TRANSPORT = 20
 EXIT_PRIVILEGE = 21
+EXIT_CAPTURE_BUSY = 22
+EXIT_CAPTURE_BRAKE = 23
+
+CAPTURE_CONTRACT_PATHS = (
+    "deploy/systemd/kronika-capture.env.example",
+    "deploy/systemd/kronika-capture-xvfb.service",
+    "deploy/systemd/kronika-capture-bridge.service",
+    "deploy/systemd/kronika-capture-runner.service",
+    "deploy/systemd/kronika-capture-vnc.service",
+    "deploy/systemd/kronika-capture-view.service",
+)
+CAPTURE_RUNTIME_CONTRACT = (
+    "runtime: node-stdlib-only\n"
+    "packages: none\n"
+    "chromium: explicit-preflight-verified-executable\n"
+    "sandbox: unchanged\n"
+    "stealth: unsupported\n"
+)
+HEX64 = re.compile(r"^[0-9a-f]{64}$")
 
 
 class ReleaseError(Exception):
@@ -151,12 +181,26 @@ def make_manifest(
     ap_pin: str,
     superproject_sha256: str,
     ap_archive_sha256: str,
+    capture_code_tree: str,
+    capture_runtime_contract_sha256: str,
+    capture_unit_contract_sha256: str,
+    capture_bridge_protocol: str,
 ) -> dict[str, str]:
+    validate_release_sha(capture_code_tree)
+    if capture_bridge_protocol != CAPTURE_BRIDGE_PROTOCOL:
+        raise ReleaseError("capture bridge protocol is not compatible", EXIT_SOURCE_GATE)
+    for digest in (capture_runtime_contract_sha256, capture_unit_contract_sha256):
+        if not HEX64.match(digest):
+            raise ReleaseError("capture runtime identity is invalid", EXIT_SOURCE_GATE)
     return {
         "framenest_release_sha": release_sha,
         "ap_gitlink": ap_pin,
         "superproject_archive_sha256": superproject_sha256,
         "ap_archive_sha256": ap_archive_sha256,
+        "capture_code_tree": capture_code_tree,
+        "capture_runtime_contract_sha256": capture_runtime_contract_sha256,
+        "capture_unit_contract_sha256": capture_unit_contract_sha256,
+        "capture_bridge_protocol": capture_bridge_protocol,
     }
 
 
@@ -506,6 +550,151 @@ def cmd_remote_atomic_switch(release_path: str) -> str:
     )
 
 
+def cmd_remote_atomic_switch_capture(release_path: str) -> str:
+    return (
+        "set -e\n"
+        f"sudo -n ln -s {shlex.quote(release_path)} /opt/framenest/capture-current.next\n"
+        f"sudo -n mv -T /opt/framenest/capture-current.next {CAPTURE_CURRENT}"
+    )
+
+
+def cmd_remote_restart_capture_runner() -> str:
+    return f"sudo -n systemctl restart {CAPTURE_RUNNER_SERVICE}"
+
+
+def cmd_remote_read_optional_link(path: str) -> str:
+    quoted = shlex.quote(path)
+    return (
+        f"if sudo -n test -L {quoted}; then sudo -n readlink -n {quoted}; "
+        "else printf %s absent; fi"
+    )
+
+
+def _remote_python(script: str) -> str:
+    return "sudo -n python3 -c " + shlex.quote(script)
+
+
+def cmd_remote_capture_work_gate() -> str:
+    script = (
+        "# kronika-capture-work-gate\n"
+        "import json, sqlite3, stat\n"
+        "from pathlib import Path\n"
+        f"journal = Path({CAPTURE_JOURNAL!r})\n"
+        "live = {'offered', 'running'}\n"
+        "paused = {'needs_admin'}\n"
+        "def finish(value):\n"
+        "    print('blocked=' + value)\n"
+        "    raise SystemExit\n"
+        "try:\n"
+        "    if not journal.exists():\n"
+        "        finish('none')\n"
+        "    elif journal.is_symlink() or not stat.S_ISREG(journal.lstat().st_mode):\n"
+        "        finish('unverifiable')\n"
+        "    else:\n"
+        "        con = sqlite3.connect('file:' + journal.as_posix() + '?mode=ro', uri=True)\n"
+        "        statuses = []\n"
+        "        for (record,) in con.execute('SELECT record FROM jobs'):\n"
+        "            payload = json.loads(record)\n"
+        "            status = payload.get('status') if isinstance(payload, dict) else None\n"
+        "            if isinstance(status, str):\n"
+        "                statuses.append(status)\n"
+        "        service = ''\n"
+        "        row = con.execute('SELECT record FROM service WHERE singleton=1').fetchone()\n"
+        "        if row:\n"
+        "            service_payload = json.loads(row[0])\n"
+        "            if isinstance(service_payload, dict) and isinstance(service_payload.get('state'), str):\n"
+        "                service = service_payload['state']\n"
+        "        if any(status in live for status in statuses):\n"
+        "            finish('live')\n"
+        "        elif service == 'needs_admin' or any(status in paused for status in statuses):\n"
+        "            finish('paused')\n"
+        "        elif any(status == 'queued' for status in statuses):\n"
+        "            finish('queued')\n"
+        "        else:\n"
+        "            finish('none')\n"
+        "except Exception:\n"
+        "    finish('unverifiable')\n"
+    )
+    return _remote_python(script)
+
+
+def cmd_remote_capture_brake_gate() -> str:
+    script = (
+        "# kronika-capture-brake-gate\n"
+        "import json, stat, time\n"
+        "from pathlib import Path\n"
+        f"directory = Path({CAPTURE_BRAKE_DIRECTORY!r})\n"
+        f"limit = {CAPTURE_BRAKE_MS}\n"
+        "metadata = directory / 'last-start.json'\n"
+        "def finish(value):\n"
+        "    print('brake=' + value)\n"
+        "    raise SystemExit\n"
+        "try:\n"
+        "    if not directory.exists():\n"
+        "        finish('ok')\n"
+        "    elif directory.is_symlink() or not directory.is_dir():\n"
+        "        finish('refuse')\n"
+        "    elif (not metadata.exists()) or metadata.is_symlink() or not stat.S_ISREG(metadata.lstat().st_mode):\n"
+        "        finish('refuse')\n"
+        "    elif metadata.stat().st_size > 256:\n"
+        "        finish('refuse')\n"
+        "    else:\n"
+        "        payload = json.loads(metadata.read_text(encoding='utf-8'))\n"
+        "        started = payload.get('started_ms') if isinstance(payload, dict) else None\n"
+        "        now = time.time() * 1000\n"
+        "        if isinstance(started, bool) or not isinstance(started, (int, float)):\n"
+        "            finish('refuse')\n"
+        "        elif started < 0 or now < started or (now - started) < limit:\n"
+        "            finish('refuse')\n"
+        "        else:\n"
+        "            finish('ok')\n"
+        "except Exception:\n"
+        "    finish('refuse')\n"
+    )
+    return _remote_python(script)
+
+
+def cmd_remote_capture_readiness_gate() -> str:
+    script = (
+        "# kronika-capture-readiness-gate\n"
+        "import json, sqlite3, stat, subprocess\n"
+        "from pathlib import Path\n"
+        f"journal = Path({CAPTURE_JOURNAL!r})\n"
+        f"service = {CAPTURE_RUNNER_SERVICE!r}\n"
+        "def finish(value):\n"
+        "    print('readiness=' + value)\n"
+        "    raise SystemExit\n"
+        "try:\n"
+        "    shown = subprocess.run(\n"
+        "        ['systemctl', 'show', '-p', 'ActiveState', '--value', service],\n"
+        "        check=False, capture_output=True, text=True,\n"
+        "    )\n"
+        "    active = shown.stdout.strip()\n"
+        "    if active == 'failed':\n"
+        "        finish('failed')\n"
+        "    else:\n"
+        "        service_state = ''\n"
+        "        if journal.is_file() and not journal.is_symlink() and stat.S_ISREG(journal.lstat().st_mode):\n"
+        "            con = sqlite3.connect('file:' + journal.as_posix() + '?mode=ro', uri=True)\n"
+        "            row = con.execute('SELECT record FROM service WHERE singleton=1').fetchone()\n"
+        "            if row:\n"
+        "                payload = json.loads(row[0])\n"
+        "                if isinstance(payload, dict) and isinstance(payload.get('state'), str):\n"
+        "                    service_state = payload['state']\n"
+        "        if service_state == 'browser_unavailable':\n"
+        "            finish('browser_unavailable')\n"
+        "        elif service_state == 'needs_admin':\n"
+        "            finish('needs_admin')\n"
+        "        elif service_state == 'ready' and active == 'active':\n"
+        "            finish('ready')\n"
+        "        else:\n"
+        "            finish('starting')\n"
+        "except Exception:\n"
+        "    finish('unverifiable')\n"
+    )
+    return _remote_python(script)
+
+
 def cmd_remote_lock_hash(release_path: str) -> str:
     return f"sudo -n sha256sum {shlex.quote(release_path)}/poetry.lock"
 
@@ -562,6 +751,49 @@ def verify_ap_pin(runner: Runner, release_sha: str) -> str:
     if ap_head != gitlink:
         raise ReleaseError("local .ap HEAD differs from the release gitlink", EXIT_AP_MISMATCH)
     return gitlink
+
+
+def capture_runtime_identity(runner: Runner, release_sha: str) -> dict[str, str]:
+    """Identity of packaged capture code, its runtime contract, and unit sources."""
+
+    validate_release_sha(release_sha)
+    try:
+        code_tree = run_local_git(
+            runner, ["rev-parse", f"{release_sha}:src/kronika_capture"]
+        )
+    except ReleaseError as exc:
+        raise ReleaseError("capture code identity is unavailable", EXIT_SOURCE_GATE) from exc
+    if not SHA_PATTERN.match(code_tree):
+        raise ReleaseError("capture code identity is invalid", EXIT_SOURCE_GATE)
+    runtime_hash = hashlib.sha256(CAPTURE_RUNTIME_CONTRACT.encode("utf-8")).hexdigest()
+    chunks: list[str] = []
+    for path in CAPTURE_CONTRACT_PATHS:
+        try:
+            text = run_local_git(runner, ["show", f"{release_sha}:{path}"])
+        except ReleaseError as exc:
+            raise ReleaseError(
+                "capture unit contract is unavailable", EXIT_SOURCE_GATE
+            ) from exc
+        chunks.append(path + "\n" + text + "\n")
+    unit_hash = hashlib.sha256("".join(chunks).encode("utf-8")).hexdigest()
+    return {
+        "capture_code_tree": code_tree,
+        "capture_runtime_contract_sha256": runtime_hash,
+        "capture_unit_contract_sha256": unit_hash,
+        "capture_bridge_protocol": CAPTURE_BRIDGE_PROTOCOL,
+    }
+
+
+def retained_release_paths(*paths: str) -> tuple[str, ...]:
+    retained: list[str] = []
+    for path in paths:
+        if path and path != "absent" and path not in retained:
+            retained.append(path)
+    return tuple(retained)
+
+
+def format_release_pointers(web_sha: str, capture_sha: str) -> str:
+    return f"web_release: {web_sha}\ncapture_release: {capture_sha}"
 
 
 def build_archives(
@@ -711,6 +943,24 @@ def read_current_release(runner: Runner, transport: dict[str, str]) -> tuple[str
     raise ReleaseError("current release markers are unreadable", EXIT_TRANSPORT)
 
 
+def read_optional_release_sha(
+    runner: Runner, transport: dict[str, str], pointer: str
+) -> str:
+    raw = ssh(
+        runner, **transport, remote_command=cmd_remote_read_optional_link(pointer)
+    ).strip()
+    if raw == "absent":
+        return "absent"
+    validate_remote_path(raw, RELEASE_ROOT)
+    manifest = parse_json_status(
+        ssh(runner, **transport, remote_command=cmd_remote_read_manifest(raw))
+    )
+    sha = manifest.get("framenest_release_sha")
+    if not isinstance(sha, str) or not SHA_PATTERN.match(sha):
+        raise ReleaseError("referenced release identity is unreadable", EXIT_TRANSPORT)
+    return sha
+
+
 def read_backup_readiness(runner: Runner, transport: dict[str, str], release_path: str) -> str:
     raw = ssh(runner, **transport, remote_command=cmd_remote_backup_status(release_path))
     payload = parse_json_status(raw)
@@ -782,6 +1032,22 @@ def _build_parser() -> argparse.ArgumentParser:
     rollback.add_argument("--yes", action="store_true")
     _add_transport_args(rollback)
 
+    activate_capture = subcommands.add_parser(
+        "activate-capture",
+        help="Switch capture-current and restart the capture runner once.",
+    )
+    activate_capture.add_argument("--release", required=True)
+    activate_capture.add_argument("--yes", action="store_true")
+    _add_transport_args(activate_capture)
+
+    rollback_capture = subcommands.add_parser(
+        "rollback-capture",
+        help="Switch capture-current back under the same capture brake.",
+    )
+    rollback_capture.add_argument("--release", required=True)
+    rollback_capture.add_argument("--yes", action="store_true")
+    _add_transport_args(rollback_capture)
+
     remote = subcommands.add_parser("_remote", help=argparse.SUPPRESS)
     remote_sub = remote.add_subparsers(dest="remote_command", required=True)
     remote_extract_p = remote_sub.add_parser("_remote-extract", help=argparse.SUPPRESS)
@@ -832,6 +1098,8 @@ def main(
             return _cmd_deploy(args, command_runner)
         if args.command == "rollback":
             return _cmd_rollback(args, command_runner)
+        if args.command in ("activate-capture", "rollback-capture"):
+            return _cmd_capture_transition(args, command_runner)
         if args.command == "_remote":
             return _cmd_remote(args, command_runner)
         raise ReleaseError("invalid command", EXIT_USAGE)
@@ -856,8 +1124,11 @@ def _cmd_status(args: argparse.Namespace, runner: Runner) -> int:
     active = ssh(runner, **transport, remote_command=cmd_remote_service_is_active()).strip()
     db_revision = read_db_current_revision(runner, transport, current_path)
     backup = read_backup_readiness(runner, transport, current_path)
+    web_sha = str(manifest.get("framenest_release_sha", ""))
+    capture_sha = read_optional_release_sha(runner, transport, CAPTURE_CURRENT)
     print("framenest-release status")
-    print(f"active_release: {manifest.get('framenest_release_sha', '')}")
+    print(f"active_release: {web_sha}")
+    print(format_release_pointers(web_sha, capture_sha))
     print(f"release_path: {current_path}")
     print(f"service_active: {active}")
     print(f"database_revision: {db_revision}")
@@ -902,8 +1173,13 @@ def _cmd_check(args: argparse.Namespace, runner: Runner) -> int:
     print(f"public_main: {release_sha}")
     print(f"superproject_sha256: {super_hash}")
     print(f"ap_archive_sha256: {ap_hash}")
+    identity = capture_runtime_identity(runner, release_sha)
     print(f"current_release: {current_path}")
     print(f"backup_restore_readiness: {readiness}")
+    print(f"capture_code_tree: {identity['capture_code_tree']}")
+    print(f"capture_runtime_contract_sha256: {identity['capture_runtime_contract_sha256']}")
+    print(f"capture_unit_contract_sha256: {identity['capture_unit_contract_sha256']}")
+    print(f"capture_bridge_protocol: {identity['capture_bridge_protocol']}")
     return EXIT_OK
 
 
@@ -1036,12 +1312,14 @@ def _cmd_deploy(args: argparse.Namespace, runner: Runner) -> int:
         )
 
         # Write markers and publish atomically.
+        identity = capture_runtime_identity(runner, release_sha)
         manifest_json = json.dumps(
             make_manifest(
                 release_sha=release_sha,
                 ap_pin=ap_gitlink,
                 superproject_sha256=super_hash,
                 ap_archive_sha256=ap_hash,
+                **identity,
             ),
             sort_keys=True,
             separators=(",", ":"),
@@ -1133,7 +1411,9 @@ def _cmd_deploy(args: argparse.Namespace, runner: Runner) -> int:
         except ReleaseError as exc:
             raise ReleaseError("cleanup failed", EXIT_CLEANUP) from exc
 
+    capture_sha = read_optional_release_sha(runner, transport, CAPTURE_CURRENT)
     print(f"framenest-release deploy complete: {release_sha}")
+    print(format_release_pointers(release_sha, capture_sha))
     return EXIT_OK
 
 
@@ -1283,7 +1563,152 @@ def _cmd_rollback(args: argparse.Namespace, runner: Runner) -> int:
         ssh(runner, **transport, remote_command=cmd_remote_remove_file(remote_prev))
         ssh(runner, **transport, remote_command=cmd_remote_rm_deploy_dir())
 
+    capture_sha = read_optional_release_sha(runner, transport, CAPTURE_CURRENT)
     print(f"framenest-release rollback complete: {release_sha}")
+    print(format_release_pointers(release_sha, capture_sha))
+    return EXIT_OK
+
+
+def _poll_until(deadline: float) -> None:
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        return
+    time.sleep(min(CAPTURE_POLL_INTERVAL_SECONDS, remaining))
+
+
+def _drain_capture_work(runner: Runner, transport: dict[str, str]) -> None:
+    deadline = time.monotonic() + CAPTURE_DRAIN_DEADLINE_SECONDS
+    while True:
+        blocked = ssh(
+            runner, **transport, remote_command=cmd_remote_capture_work_gate()
+        ).strip()
+        if blocked == "blocked=none":
+            return
+        if blocked == "blocked=queued":
+            if time.monotonic() >= deadline:
+                raise ReleaseError("capture work did not drain", EXIT_CAPTURE_BUSY)
+            _poll_until(deadline)
+            continue
+        if blocked in ("blocked=live", "blocked=paused"):
+            raise ReleaseError("capture has live or paused work", EXIT_CAPTURE_BUSY)
+        raise ReleaseError("capture work state is unverifiable", EXIT_CAPTURE_BUSY)
+
+
+def _enforce_capture_brake(runner: Runner, transport: dict[str, str]) -> None:
+    brake = ssh(
+        runner, **transport, remote_command=cmd_remote_capture_brake_gate()
+    ).strip()
+    if brake != "brake=ok":
+        raise ReleaseError("capture restart brake refuses launch", EXIT_CAPTURE_BRAKE)
+
+
+def _verify_capture_readiness(runner: Runner, transport: dict[str, str]) -> None:
+    """Poll runner readiness. A failed browser launch is not started again."""
+
+    deadline = time.monotonic() + CAPTURE_READINESS_DEADLINE_SECONDS
+    while True:
+        state = ssh(
+            runner, **transport, remote_command=cmd_remote_capture_readiness_gate()
+        ).strip()
+        if state == "readiness=ready":
+            return
+        if state in (
+            "readiness=failed",
+            "readiness=browser_unavailable",
+            "readiness=needs_admin",
+        ):
+            raise ReleaseError("capture readiness failed", EXIT_SERVICE_TERMINAL)
+        if state != "readiness=starting":
+            raise ReleaseError("capture readiness is unverifiable", EXIT_READINESS)
+        if time.monotonic() >= deadline:
+            raise ReleaseError(
+                "capture readiness deadline exceeded", EXIT_READINESS_TIMEOUT
+            )
+        _poll_until(deadline)
+
+
+def _cmd_capture_transition(args: argparse.Namespace, runner: Runner) -> int:
+    release_sha = args.release
+    validate_release_sha(release_sha)
+    if not args.yes:
+        raise ReleaseError("capture transition requires --yes to confirm", EXIT_USAGE)
+    transport = _resolve_transport(args)
+    identity = capture_runtime_identity(runner, release_sha)
+    target = release_dir(release_sha)
+
+    ssh(runner, **transport, remote_command=cmd_remote_test_exists(target))
+    ssh(
+        runner,
+        **transport,
+        remote_command=cmd_remote_test_exists(f"{target}/.framenest-release-sha"),
+    )
+    installed_sha = ssh(
+        runner, **transport, remote_command=cmd_remote_read_release_sha(target)
+    ).strip()
+    if installed_sha != release_sha:
+        raise ReleaseError("installed release SHA does not match", EXIT_SOURCE_GATE)
+    manifest = parse_json_status(
+        ssh(runner, **transport, remote_command=cmd_remote_read_manifest(target))
+    )
+    if manifest.get("framenest_release_sha") != release_sha:
+        raise ReleaseError("installed release manifest does not match", EXIT_SOURCE_GATE)
+    for key, expected in identity.items():
+        if manifest.get(key) != expected:
+            raise ReleaseError("capture runtime identity does not match", EXIT_SOURCE_GATE)
+
+    web_path = ssh(
+        runner, **transport, remote_command=cmd_remote_readlink_current()
+    ).strip()
+    validate_remote_path(web_path, RELEASE_ROOT)
+    web_manifest = parse_json_status(
+        ssh(runner, **transport, remote_command=cmd_remote_read_manifest(web_path))
+    )
+    web_sha = web_manifest.get("framenest_release_sha")
+    if not isinstance(web_sha, str) or not SHA_PATTERN.match(web_sha):
+        raise ReleaseError("web release identity is unreadable", EXIT_TRANSPORT)
+
+    capture_link = ssh(
+        runner,
+        **transport,
+        remote_command=cmd_remote_read_optional_link(CAPTURE_CURRENT),
+    ).strip()
+    if capture_link != "absent":
+        validate_remote_path(capture_link, RELEASE_ROOT)
+        current_capture = parse_json_status(
+            ssh(
+                runner,
+                **transport,
+                remote_command=cmd_remote_read_manifest(capture_link),
+            )
+        )
+        if (
+            current_capture.get("capture_bridge_protocol")
+            != identity["capture_bridge_protocol"]
+        ):
+            raise ReleaseError(
+                "capture bridge protocol is not compatible", EXIT_SOURCE_GATE
+            )
+
+    _drain_capture_work(runner, transport)
+    _enforce_capture_brake(runner, transport)
+    ssh(runner, **transport, remote_command=cmd_remote_atomic_switch_capture(target))
+    try:
+        ssh(runner, **transport, remote_command=cmd_remote_restart_capture_runner())
+    except ReleaseError as exc:
+        print(format_release_pointers(web_sha, release_sha))
+        raise ReleaseError("capture runner restart failed", EXIT_READINESS) from exc
+    try:
+        _verify_capture_readiness(runner, transport)
+    except ReleaseError as exc:
+        print(format_release_pointers(web_sha, release_sha))
+        raise ReleaseError(
+            f"capture readiness failed without another browser launch ({exc})",
+            exc.exit_code,
+        ) from exc
+
+    label = "activate-capture" if args.command == "activate-capture" else "rollback-capture"
+    print(f"framenest-release {label} complete: {release_sha}")
+    print(format_release_pointers(web_sha, release_sha))
     return EXIT_OK
 
 

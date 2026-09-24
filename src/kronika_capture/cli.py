@@ -8,10 +8,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import stat
 import subprocess
 import sys
 import time
 import uuid
+from pathlib import Path
 
 from kronika_capture import __version__, paths
 from kronika_capture.bridge.server import serve
@@ -96,6 +99,27 @@ def build_parser() -> argparse.ArgumentParser:
     )
     login.set_defaults(handler=_cmd_login)
     login.add_argument("--chrome-path", required=True, help="preflight-verified Chromium executable")
+
+    runner = sub.add_parser("runner", help="launch the persistent browser runner")
+    runner_sub = runner.add_subparsers(dest="runner_command", required=True)
+    runner_run = runner_sub.add_parser("run", help="run until the service is stopped")
+    runner_run.add_argument(
+        "--chrome-path",
+        default=None,
+        help="explicit Chromium executable; defaults to KRONIKA_CHROMIUM_PATH",
+    )
+    runner_run.add_argument(
+        "--profile",
+        default=None,
+        help="owned Chromium profile directory (default: <state-dir>/chromium-profile)",
+    )
+    runner_run.add_argument("--port", type=int, default=DEFAULT_BRIDGE_PORT)
+    runner_run.add_argument(
+        "--headed",
+        action="store_true",
+        help="show the browser on the configured display",
+    )
+    runner_run.set_defaults(handler=_cmd_runner_run)
     return parser
 
 
@@ -234,6 +258,85 @@ def _cmd_bridge_status(args: argparse.Namespace) -> int:
         return EXIT_BRIDGE
     print(json.dumps(payload, indent=2, sort_keys=True))
     return EXIT_OK
+
+
+def configured_chromium(explicit: str | None) -> Path | None:
+    """Resolve one absolute, executable Chromium path. Never search ``PATH``."""
+
+    raw = (explicit or os.environ.get("KRONIKA_CHROMIUM_PATH") or "").strip()
+    if not raw or "\x00" in raw:
+        return None
+    path = Path(raw)
+    if not path.is_absolute():
+        return None
+    try:
+        info = path.stat()
+    except OSError:
+        return None
+    if not stat.S_ISREG(info.st_mode) or not os.access(path, os.X_OK):
+        return None
+    return path
+
+
+def runner_token_directory(state: Path) -> Path:
+    """Directory whose ``token`` file the existing runner already reads.
+
+    Systemd names the credential ``token``, so the credentials directory is
+    that parent. No token bytes are copied or placed on the command line.
+    """
+
+    credential = paths.systemd_bridge_token_path()
+    if credential is None:
+        return state
+    return credential.parent
+
+
+def build_runner_argv(args: argparse.Namespace) -> list[str] | None:
+    """Build the node runner command. The token value is never an argument."""
+
+    chrome = configured_chromium(args.chrome_path)
+    if chrome is None:
+        return None
+    if not isinstance(args.port, int) or isinstance(args.port, bool):
+        return None
+    if args.port != DEFAULT_BRIDGE_PORT and not 1 <= args.port <= 65535:
+        return None
+    state = _state_dir(args)
+    profile = args.profile or str(state / "chromium-profile")
+    script = paths.packaged_extension_path("headless", "runner.mjs")
+    if not script.is_file():
+        return None
+    argv = [
+        "node",
+        str(script),
+        "run",
+        "--state-dir",
+        str(runner_token_directory(state)),
+        "--profile",
+        profile,
+        "--port",
+        str(args.port),
+        "--chrome-path",
+        str(chrome),
+    ]
+    if args.headed:
+        argv.append("--headed")
+    return argv
+
+
+def _cmd_runner_run(args: argparse.Namespace) -> int:
+    if not isinstance(args.port, int) or isinstance(args.port, bool) or not 1 <= args.port <= 65535:
+        print("error: port is invalid", file=sys.stderr)
+        return EXIT_USAGE
+    if configured_chromium(args.chrome_path) is None:
+        print("error: explicit Chromium executable is required", file=sys.stderr)
+        return EXIT_USAGE
+    command = build_runner_argv(args)
+    if command is None:
+        print("error: packaged runner is missing", file=sys.stderr)
+        return EXIT_BRIDGE
+    completed = subprocess.run(command, check=False)
+    return int(completed.returncode)
 
 
 def _cmd_login(args: argparse.Namespace) -> int:

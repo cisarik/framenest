@@ -88,6 +88,82 @@ require later explicit authority, verified refs and release checks; local host
 paths and deployment identifiers need not be renamed. See
 [ROADMAP.md](../ROADMAP.md) for S0-S10. None of this authorizes host work now.
 
+## Capture Runtime Sources (Not Deployed)
+
+The capture units and the release-helper extension below are repository
+sources. They do not record a completed capture deployment, a created account,
+or a passed host preflight. A later read-only preflight and a separate host
+grant remain required before any of these units are installed.
+
+Planned paths, owned by the dedicated `kronika-capture` account:
+
+```text
+Private state:           /var/lib/kronika-capture
+Profile:                 /var/lib/kronika-capture/profile
+Journal:                 /var/lib/kronika-capture/capture-journal.sqlite3
+Staging:                 /var/lib/kronika-capture/staging
+Runtime directory:       /run/kronika-capture
+Nonsecret configuration: /etc/kronika-capture/capture.env
+Capture release pointer: /opt/framenest/capture-current
+Web release pointer:     /opt/framenest/current
+```
+
+Source units:
+
+```text
+deploy/systemd/kronika-capture-xvfb.service
+deploy/systemd/kronika-capture-bridge.service
+deploy/systemd/kronika-capture-runner.service
+deploy/systemd/kronika-capture-vnc.service
+deploy/systemd/kronika-capture-view.service
+deploy/systemd/kronika-capture.env.example
+```
+
+Xvfb and the runner set `Restart=no`. The bridge may restart on failure; the
+runner reconnects and is not stopped by a bridge restart. No capture unit is
+`PartOf=framenest.service`. Xvfb and the runner share display `:99`, the socket
+under `/tmp/.X11-unix`, and `/run/kronika-capture/Xauthority`. They do not use
+a private `/tmp`, and Xvfb does not disable access control. The cookie is
+generated when Xvfb starts. Browser debugging stays on loopback inside the
+runner. The launcher reads `KRONIKA_CHROMIUM_PATH` from the non-secret env
+file and requires an absolute executable. It does not search `PATH`, enable
+stealth, or weaken the sandbox.
+
+The per-install bridge token is not written in `capture.env`, unit arguments,
+or logs. Bridge and runner units load systemd credential `token` from the
+root-owned file `/etc/kronika-capture/credentials/kronika-bridge-token`. When
+`CREDENTIALS_DIRECTORY` contains that regular file, the bridge and the runner
+launcher use it. Otherwise they keep the existing state-directory `token`
+file. The web service does not receive this credential from
+`deploy/systemd/framenest.service` in this repository slice. A later host
+grant can install this drop-in for `framenest.service` without adding the web
+account to the capture account or opening the browser profile:
+
+```text
+[Service]
+LoadCredential=token:/etc/kronika-capture/credentials/kronika-bridge-token
+```
+
+State directories are mode `0700`. VNC and noVNC have no install section, so
+they stay stopped until an operator starts them. They listen only on
+`127.0.0.1` ports `5900` and `6080` and stop after `RuntimeMaxSec=1800` (30
+minutes). If either port is already bound, setup stops; the units do not pick
+another port. The Cooperator opens the view through an SSH tunnel to
+`127.0.0.1:6080`. Agents do not open the view and do not enter credentials.
+
+`framenest-release deploy` and `framenest-release rollback` still move only
+`/opt/framenest/current` and `framenest.service`. They report both pointer
+SHAs and do not restart capture. `activate-capture` and `rollback-capture`
+are the capture operations. Each one checks the installed release SHA, the
+capture identity in its manifest, and bridge protocol `1`; drains queued
+capture work; refuses a live or paused job; enforces the five-minute browser
+start brake; switches `capture-current`; restarts `kronika-capture-runner.service`
+exactly once; and checks readiness. A failed browser launch is not started
+again, and capture failure does not restart the web service. A release
+referenced by either pointer is retained. Web schema handling is unchanged:
+`migration-required` still stops `deploy --yes` at exit 13, and this helper
+does not migrate or delete a database.
+
 ## Current Target
 
 ```text
@@ -346,6 +422,8 @@ framenest-release status [transport arguments]
 framenest-release check --release <40-hex-SHA> [transport arguments]
 framenest-release deploy --release <40-hex-SHA> --yes [transport arguments]
 framenest-release rollback --release <40-hex-SHA> --yes [transport arguments]
+framenest-release activate-capture --release <40-hex-SHA> --yes [transport arguments]
+framenest-release rollback-capture --release <40-hex-SHA> --yes [transport arguments]
 ```
 
 Transport arguments are `--target`, `--user`, and `--identity`, with public-safe

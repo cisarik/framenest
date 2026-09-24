@@ -85,6 +85,10 @@ class FakeRunner:
             return f"{RELEASE}\trefs/heads/main"
         if "ls-tree" in combined and ".ap" in combined:
             return f"160000 commit {AP_PIN}\t.ap"
+        if "src/kronika_capture" in combined and "rev-parse" in combined:
+            return "d" * 40
+        if " show " in combined and "kronika-capture" in combined:
+            return "capture-contract\n"
         if "archive --format=tar" in combined:
             idx = combined.split().index("--output") + 1
             _write_tar(combined.split()[idx])
@@ -152,6 +156,10 @@ class FakeRunner:
             return json.dumps(engine.make_manifest(
                 release_sha=RELEASE, ap_pin=AP_PIN,
                 superproject_sha256="e" * 64, ap_archive_sha256="f" * 64,
+                capture_code_tree="d" * 40,
+                capture_runtime_contract_sha256="1" * 64,
+                capture_unit_contract_sha256="2" * 64,
+                capture_bridge_protocol="1",
             ))
         if "mv /opt/framenest/releases/" in combined and ".staging" in combined:
             return ""
@@ -161,6 +169,8 @@ class FakeRunner:
             return '{"operation":"status","restore_readiness":"ready"}'
         if "framenest-backup run-scheduled" in combined:
             return '{"operation":"run-scheduled","state":"succeeded","bundle_id":"b1"}'
+        if "test -L /opt/framenest/capture-current" in combined:
+            return "absent"
         if "readlink -n /opt/framenest/current" in combined:
             return self.current
         if "previous-release" in combined and "printf" in combined:
@@ -404,6 +414,10 @@ def test_cmd_remote_write_markers_uses_stdin_not_nested_quotes(tmp_path: Path) -
             ap_pin=AP_PIN,
             superproject_sha256="e" * 64,
             ap_archive_sha256="f" * 64,
+            capture_code_tree="d" * 40,
+            capture_runtime_contract_sha256="1" * 64,
+            capture_unit_contract_sha256="2" * 64,
+            capture_bridge_protocol="1",
         ),
         sort_keys=True,
         separators=(",", ":"),
@@ -600,6 +614,8 @@ def test_deploy_happy_path_sequence(tmp_path: Path, capsys: pytest.CaptureFixtur
     assert _index(runner, "framenest-backup run-scheduled") < _index(runner, "ln -s")
     # Single restart.
     assert _ssh_combined(runner).count("restart framenest.service") == 1
+    assert "capture-current.next" not in _ssh_combined(runner)
+    assert "restart kronika-capture-runner.service" not in _ssh_combined(runner)
     # Cleanup present.
     assert _index(runner, "rmdir /run/framenest-release-deploy") > _index(runner, "restart framenest.service")
 
@@ -786,8 +802,17 @@ def test_rollback_happy_path(tmp_path: Path, capsys: pytest.CaptureFixture) -> N
     runner = _RollbackRunner()
     result = engine.main(_args("rollback"), runner=runner)
     assert result == engine.EXIT_OK
-    assert "rollback complete" in capsys.readouterr().out
-    assert _ssh_combined(runner).count("restart framenest.service") == 1
+    captured = capsys.readouterr().out
+    assert "rollback complete" in captured
+    assert "web_release: " in captured
+    assert "capture_release: absent" in captured
+    combined = _ssh_combined(runner)
+    assert combined.count("restart framenest.service") == 1
+    assert "capture-current.next" not in combined
+    assert "kronika-capture-runner" not in combined
+    assert "/opt/framenest/releases/" not in "\n".join(
+        line for line in combined.splitlines() if "rm " in line or "rmdir" in line
+    )
 
 
 def test_rollback_requires_yes() -> None:

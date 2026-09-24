@@ -1,0 +1,31 @@
+[Unit]
+Description=Kronika capture virtual display
+Documentation=https://github.com/cisarik/framenest
+After=local-fs.target
+
+[Service]
+Type=simple
+User=kronika-capture
+Group=kronika-capture
+Environment=DISPLAY=:99
+Environment=XAUTHORITY=/run/kronika-capture/Xauthority
+ExecStartPre=/bin/sh -c 'umask 077; xauth -f /run/kronika-capture/Xauthority remove :99 >/dev/null 2>&1 || true; xauth -f /run/kronika-capture/Xauthority add :99 . "$(mcookie)"'
+ExecStart=/usr/bin/Xvfb :99 -screen 0 1280x800x24 -nolisten tcp -auth /run/kronika-capture/Xauthority
+Restart=no
+RuntimeDirectory=kronika-capture
+RuntimeDirectoryMode=0700
+UMask=0077
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/tmp/.X11-unix /run/kronika-capture
+ProtectControlGroups=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+RestrictSUIDSGID=true
+LockPersonality=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+[Install]
+WantedBy=multi-user.target
