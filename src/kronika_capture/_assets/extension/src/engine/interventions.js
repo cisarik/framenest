@@ -29,8 +29,19 @@
     const adapter = root.adapter;
     if (!adapter) return null;
     const pack = (ctx && ctx.pack) || {};
-    if (composerPresent(pack, adapter)) return null;
+    // Blocking dialogs/challenges take precedence even if a composer is visible.
+    if (typeof document !== "undefined") {
+      const visible = (selector) => [...document.querySelectorAll(selector)].slice(0, 16)
+        .filter((node) => node.isConnected && node.getClientRects().length > 0);
+      if (visible('iframe[src*="challenges.cloudflare.com"], [name="cf-turnstile-response"]').length)
+        return { kind: "captcha" };
+      const notices = visible('[role="alert"], [role="dialog"]')
+        .map((node) => String(node.textContent || "").slice(0, 512)).join(" ");
+      if (/limit reached|usage limit|try again later/i.test(notices)) return { kind: "limit" };
+      if (/consent|accept.*(terms|cookies)/i.test(notices)) return { kind: "consent" };
+    }
     if (loginWallDetected(pack, adapter)) return { kind: "login" };
+    if (composerPresent(pack, adapter)) return null;
     return null;
   }
 

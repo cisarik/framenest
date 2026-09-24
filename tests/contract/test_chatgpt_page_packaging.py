@@ -64,7 +64,7 @@ def test_provenance_covers_every_relocated_file() -> None:
         if path.is_file() and "__pycache__" not in path.parts
     }
     assert len(files) == len(destinations) == 32
-    assert destinations == actual
+    assert destinations | {"src/kronika_capture/bridge/journal.py"} == actual
     for entry in files:
         assert entry["source_path"]
         assert entry["disposition"] == "relocated"
@@ -100,7 +100,7 @@ def test_wheel_contains_kernel_assets_and_entry_point(tmp_path: Path) -> None:
             for path in CAPTURE_ROOT.rglob("*")
             if path.is_file() and "__pycache__" not in path.parts
         }
-        assert len(expected) == 32
+        assert len(expected) == 33
         assert {name for name in names if name.startswith("kronika_capture/")} == set(expected)
         for name, source in expected.items():
             assert wheel.read(name) == source.read_bytes(), name

@@ -1,4 +1,4 @@
-"""Durable local bridge state: job JSON, config, and the metadata-only log."""
+"""Local configuration and logs; active capture coordination belongs to Journal."""
 
 from __future__ import annotations
 
@@ -102,9 +102,8 @@ class Store:
                     self._remove_job(path)
                 else:
                     keep.append(path)
-            for path in keep[max(max_items, 0):]:
-                removed.append(path.name)
-                self._remove_job(path)
+            # Never evict unexpired coordination records to make room.
+            # Journal owns the active capture count and terminal retention.
             self._prune_orphan_job_dirs()
         return removed
 

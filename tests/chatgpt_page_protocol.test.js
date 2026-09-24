@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import { unsupportedJob } from "../src/kronika_capture/_assets/extension/src/headless/job_engine.mjs";
-import { PROTO_VERSION } from "../src/kronika_capture/_assets/extension/src/protocol.js";
+import { PROTO_VERSION, ERROR_CODES, CLIENT_CAPABILITIES } from "../src/kronika_capture/_assets/extension/src/protocol.js";
 
 const pack = JSON.parse(
   readFileSync(
@@ -17,6 +17,14 @@ const pack = JSON.parse(
 
 test("protocol version stays at 1", () => {
   assert.equal(PROTO_VERSION, 1);
+});
+
+test("durable capture capabilities and typed lifecycle errors are explicit", () => {
+  assert.deepEqual(CLIENT_CAPABILITIES, ["durable_submission", "admin_resume"]);
+  for (const code of ["E_BROWSER_UNAVAILABLE", "E_NEEDS_ADMIN", "E_SERVICE_LIMIT",
+    "E_IDEMPOTENCY_CONFLICT", "E_AMBIGUOUS_SEND", "E_JOURNAL_UNAVAILABLE"]) {
+    assert.ok(ERROR_CODES.includes(code));
+  }
 });
 
 test("upload_input locator is retained and unused by the ask gate", () => {

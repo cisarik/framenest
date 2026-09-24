@@ -17,10 +17,12 @@
 // drives the engine page through the driver. Logs carry job ids, phases, and
 // error codes, never prompts or answers.
 
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { basename, join } from "node:path";
+import { join } from "node:path";
 import { pathToFileURL } from "node:url";
+import { setTimeout as delay } from "node:timers/promises";
+import { performance } from "node:perf_hooks";
 
 import {
   BridgeClient,
@@ -33,8 +35,8 @@ import {
 } from "./bridge_client.mjs";
 import { CLIENT_CAPABILITIES } from "../protocol.js";
 import { ChromiumDriver } from "./driver.mjs";
-import { JobEngine } from "./job_engine.mjs";
-import { applyResourcePolicy, COUNTER_KEYS } from "./resource_policy.mjs";
+import { JobEngine, JobEngineError } from "./job_engine.mjs";
+import { applyResourcePolicy } from "./resource_policy.mjs";
 
 const PROTO = 1;
 const CLIENT_KIND = "headless";
@@ -56,7 +58,7 @@ function usage() {
     "  --port <port>       bridge port (default: recorded port or 8765)",
     "  --profile <dir>     engine profile for run (default: <state>/chromium-profile)",
     "  --engine <name>     engine for run (chromium only; default: chromium)",
-    "  --stealth           Chromium: add the bounded stealth launch flags",
+    "  --chrome-path <file>  explicitly configured, preflight-verified Chromium",
     "  --headed            Chromium: run with a visible window",
     "  --no-resource-policy  run: disable the HE-5a resource policy (diagnosis only)",
     "  --once              run: stop after one executed offer",
@@ -73,6 +75,7 @@ export function parseArgs(argv) {
     profile: null,
     engine: "chromium",
     stealth: false,
+    chromePath: null,
     headed: false,
     resourcePolicy: true,
     once: false,
@@ -97,9 +100,11 @@ export function parseArgs(argv) {
     } else if (flag === "--engine" && rest.length > 0) {
       options.engine = rest.shift();
       seen.add("engine");
+    } else if (flag === "--chrome-path" && rest.length > 0) {
+      options.chromePath = rest.shift();
+      seen.add("chrome-path");
     } else if (flag === "--stealth") {
-      options.stealth = true;
-      seen.add("stealth");
+      return { error: "stealth is not supported" };
     } else if (flag === "--headed") {
       options.headed = true;
       seen.add("headed");
@@ -126,7 +131,7 @@ export function parseArgs(argv) {
     for (const flag of [
       "profile",
       "engine",
-      "stealth",
+      "chrome-path",
       "headed",
       "no-resource-policy",
       "once",
@@ -139,6 +144,7 @@ export function parseArgs(argv) {
   if (options.engine !== "chromium") {
     return { error: "headless job execution is Chromium-only in this grant" };
   }
+  if (options.mode === "run" && !options.chromePath) return { error: "--chrome-path is required" };
   return { options };
 }
 
@@ -165,42 +171,10 @@ function buildClient(options) {
   return new BridgeClient({ url: `http://127.0.0.1:${port}`, token });
 }
 
-async function modeConnect(client, waitSeconds) {
-  const { pack, sha256 } = loadPack();
-  const hello = await client.hello({
-    proto: PROTO,
-    client: CLIENT_KIND,
-    pack_version: pack.pack_version,
-    pack_sha256: sha256,
-    capabilities: [...CLIENT_CAPABILITIES],
-  });
-  const result = {
-    mode: "connect",
-    client: CLIENT_KIND,
-    proto: PROTO,
-    pack_version: pack.pack_version,
-    pack_sha256: sha256,
-    hello,
-    next: null,
-  };
-  const offer = await client.nextOffer(waitSeconds, CLIENT_KIND);
-  if (offer.status === 204 && offer.job === null) {
-    result.next = { status: 204, job: null };
-    console.log(JSON.stringify(result, null, 2));
-    return EXIT_OK;
-  }
-  if (offer.job === null) {
-    result.next = { status: offer.status, job: null };
-    console.log(JSON.stringify(result, null, 2));
-    return EXIT_OK;
-  }
-  result.next = { status: offer.status, job_id: offer.job.job_id, kind: offer.job.kind };
-  console.log(JSON.stringify(result, null, 2));
-  console.error(
-    `error: [E_HEADLESS_JOB_OFFER] received an offer for job ${offer.job.job_id}; ` +
-      "the connect mode is a connectivity check and never executes jobs"
-  );
-  return EXIT_REFUSED;
+async function modeConnect(client) {
+  // A connectivity probe never registers an executor or consumes an offer.
+  await modeStatus(client);
+  return EXIT_OK;
 }
 
 async function modeStatus(client) {
@@ -225,177 +199,172 @@ function errorCode(error) {
   return typeof error.code === "string" && error.code ? error.code : "E_INTERNAL";
 }
 
-async function executeOffer({
-  client,
-  driver,
-  pack,
-  job,
-  log,
-  signal = null,
-  resourcePolicy = null,
-  heartbeatMs = JOB_HEARTBEAT_MS,
+export function offerIdentity(job) {
+  return { runner_id: job.runner_id, offer_id: job.offer_id, epoch: job.epoch };
+}
+
+function lifecycleError(code) {
+  return new JobEngineError(code, "lifecycle", "Capture lifecycle could not continue safely.");
+}
+
+export async function executeOffer({
+  client, driver, pack, job, signal = null, heartbeatMs = JOB_HEARTBEAT_MS,
+  sleep = (ms) => delay(ms), now = () => performance.now(), Engine = JobEngine, refresh = async () => {},
 }) {
-  const jobState = { cancelRequested: false, timedOut: false };
-  const policyBefore = resourcePolicy ? resourcePolicy.snapshot() : null;
+  const identity = offerIdentity(job);
+  let cancelled = false, heartbeatError = null, adminWait = 0;
   const emit = async (type, data) => {
-    try {
-      const payload = await client.events(job.job_id, [{ type, data }]);
-      if (payload && payload.cancel_requested === true) {
-        jobState.cancelRequested = true;
-      }
-    } catch (error) {
-      log(
-        `job ${job.job_id}: event post failed (${errorCode(error)}); job continues`
-      );
+    const reply = await client.events(job.job_id, [{ type, data }], identity);
+    if (reply.epoch !== job.epoch) throw lifecycleError("E_AMBIGUOUS_SEND");
+    cancelled ||= reply.cancel_requested === true || reply.terminal === true;
+    return reply;
+  };
+  const checkpoint = async (engine) => {
+    if (heartbeatError) throw heartbeatError;
+    await refresh();
+    const control = await emit("heartbeat", {});
+    if (cancelled || signal?.aborted) throw lifecycleError("E_CANCELLED");
+    const ready = await driver.readiness(pack, { observing: engine.submission === "send_confirmed" });
+    if (ready.state === "browser_unavailable") throw lifecycleError("E_BROWSER_UNAVAILABLE");
+    if (ready.state === "ready" && control.service_state === "ready") return;
+    if (engine.submission === "send_intent_persisted") throw lifecycleError("E_AMBIGUOUS_SEND");
+    const reason = ["E_LOGIN_REQUIRED", "E_CAPTCHA_REQUIRED", "E_CONSENT_REQUIRED",
+      "E_LIMIT_REACHED", "E_COMPOSER_NOT_FOUND"].includes(ready.reason) ? ready.reason : "E_NEEDS_ADMIN";
+    let pause = await emit("needs_admin", { reason });
+    const started = now();
+    for (;;) {
+      if (adminWait + now() - started >= 1800000) throw lifecycleError("E_INTERVENTION_TIMEOUT");
+      if (signal?.aborted || cancelled) throw lifecycleError("E_CANCELLED");
+      await sleep(500);
+      pause = await emit("heartbeat", {});
+      if (cancelled) throw lifecycleError("E_CANCELLED");
+      if (!pause.resume_id) continue;
+      const recheck = await driver.readiness(pack, { observing: engine.submission === "send_confirmed" });
+      if (recheck.state !== "ready") continue;
+      if (!(await engine.association())) throw lifecycleError("E_AMBIGUOUS_SEND");
+      const resumed = await emit("resumed", {
+        resume_id: pause.resume_id, intervention_id: pause.intervention_id,
+        ready: true, response_id: engine.responseId,
+      });
+      if (resumed.terminal || resumed.service_state !== "ready") throw lifecycleError("E_INTERVENTION_TIMEOUT");
+      const waited = now() - started;
+      adminWait += waited;
+      engine.deadlineMs += waited;
+      return;
     }
   };
-  await emit("status", { status: "accepted" });
   let result;
-  const unsupportedKind = job.kind !== "ask";
-  const unsupportedMode = job.mode !== null && job.mode !== undefined;
-  if (Array.isArray(job.files) && job.files.length > 0) {
-    result = failedResult("E_UPLOAD_FAILED", "upload");
-  } else if (unsupportedKind || unsupportedMode) {
-    result = failedResult(
-      job.mode === "web_search"
-        ? "E_WEB_SEARCH_UNAVAILABLE"
-        : job.mode === "deep_research"
-          ? "E_DEEP_RESEARCH_UNAVAILABLE"
-          : "E_INTERNAL",
-      unsupportedKind ? "kind" : "mode"
-    );
-  } else {
-    const timeoutMs = Math.max(1, Number(job.timeout_s) || 600) * 1000;
-    const engine = new JobEngine({
-      driver,
-      pack,
-      emit,
-      isCancelled: () =>
-        jobState.cancelRequested || Boolean(signal && signal.aborted),
-      deadlineMs: Date.now() + timeoutMs,
-      log,
+  let heartbeat;
+  try {
+    const accepted = await emit("status", { status: "accepted" });
+    if (accepted.terminal || cancelled) throw lifecycleError("E_AMBIGUOUS_SEND");
+    const engine = new Engine({ driver, pack, emit, checkpoint, now,
+      isCancelled: () => cancelled || Boolean(signal?.aborted),
+      deadlineMs: now() + Math.max(1, Number(job.timeout_s) || 600) * 1000,
     });
-    const timer = setTimeout(() => {
-      jobState.cancelRequested = true;
-      jobState.timedOut = true;
-    }, timeoutMs);
-    const heartbeat = setInterval(() => {
-      emit("progress", { phase: engine.phase });
+    heartbeat = setInterval(() => {
+      refresh().then(() => emit("heartbeat", {})).catch((error) => { heartbeatError = error; });
     }, heartbeatMs);
-    try {
-      result = await engine.run(job);
-    } catch (error) {
-      result = failedResult(errorCode(error), "engine");
-      if (error && error.message) {
-        log(`job ${job.job_id}: engine failure: ${String(error.message)}`);
-      }
-    } finally {
-      clearTimeout(timer);
-      clearInterval(heartbeat);
-    }
-  }
-  if (result.status !== "done" && jobState.timedOut) {
-    result = failedResult("E_RESPONSE_TIMEOUT", "observe");
-  } else if (result.status !== "done" && jobState.cancelRequested) {
-    result = {
-      status: "cancelled",
-      answer: null,
-      answer_html: null,
-      error_code: "E_CANCELLED",
-      url: null,
-    };
-  }
-  if (result.diagnostics) {
-    log(`job ${job.job_id}: diagnostics ${JSON.stringify(result.diagnostics)}`);
-  }
-  if (result.message) {
-    log(`job ${job.job_id}: ${result.message}`);
-  }
+    result = await engine.run(job);
+  } catch (error) {
+    result = { ...failedResult(errorCode(error), "lifecycle"), activity_stopped: false };
+  } finally { clearInterval(heartbeat); }
+  // Freeze exactly one result identity and body. Only delivery, never execution, retries.
   const payload = {
-    job_id: job.job_id,
-    status: result.status,
-    answer: result.answer === undefined ? null : result.answer,
-    answer_html: result.answer_html === undefined ? null : result.answer_html,
-    error_code: result.error_code === undefined ? null : result.error_code,
-    url: result.url === undefined ? null : result.url,
-    proto: PROTO,
+    ...identity, job_id: job.job_id, delivery_id: randomUUID(), status: result.status,
+    answer: result.answer ?? null, error_code: result.error_code ?? null,
+    answer_html: result.answer_html ?? null,
+    url: result.url ?? null, step: result.step || "engine",
+    activity_stopped: result.activity_stopped === true, proto: PROTO,
   };
   if (result.project_ok !== undefined) payload.project_ok = result.project_ok;
   if (result.appended !== undefined) payload.appended = result.appended;
-  if (result.status === "failed" && typeof result.step === "string") {
-    payload.step = result.step;
+  let attempt = 0;
+  while (!signal?.aborted) {
+    try { await client.result(job.job_id, payload); return result; }
+    catch (error) {
+      if (error.status === 409 || error.status === 404) return failedResult("E_AMBIGUOUS_SEND", "delivery");
+      await sleep(Math.min(30000, 250 * 2 ** Math.min(attempt++, 7)));
+    }
   }
-  try {
-    await client.result(job.job_id, payload);
-  } catch (error) {
-    log(`job ${job.job_id}: result post failed (${errorCode(error)})`);
-  }
-  if (resourcePolicy && policyBefore) {
-    const policyAfter = resourcePolicy.snapshot();
-    const parts = COUNTER_KEYS.map(
-      (key) => `${key}=${(policyAfter[key] || 0) - (policyBefore[key] || 0)}`
-    );
-    log(`resource_policy counters ${parts.join(" ")}`);
-  }
-  log(`job ${job.job_id}: ${result.status} ${result.error_code || ""}`.trim());
   return result;
 }
 
 export async function runJobLoop({
-  client,
-  driver,
-  pack,
-  packSha256 = null,
-  signal = null,
-  waitSeconds = NEXT_WAIT_S,
-  once = false,
-  resourcePolicy = null,
-  heartbeatMs = JOB_HEARTBEAT_MS,
-  log = () => {},
+  client, driver, pack, packSha256 = null, signal = null, waitSeconds = NEXT_WAIT_S,
+  once = false, heartbeatMs = JOB_HEARTBEAT_MS, log = () => {},
+  sleep = (ms) => delay(ms), execute = executeOffer,
 }) {
   const state = { jobs: 0 };
-  const hello = () =>
-    client.hello({
-      proto: PROTO,
-      client: CLIENT_KIND,
-      pack_version: pack.pack_version,
-      pack_sha256: packSha256,
-      capabilities: [...CLIENT_CAPABILITIES],
-    });
-  await hello();
-  const heartbeat = setInterval(() => {
-    hello().catch(() => {});
-  }, HELLO_INTERVAL_MS);
-  try {
-    while (!(signal && signal.aborted)) {
-      let offer;
-      try {
-        offer = await client.nextOffer(waitSeconds, CLIENT_KIND, signal);
-      } catch (error) {
-        if (signal && signal.aborted) break;
-        throw error;
+  const runnerId = randomUUID(), browserSession = randomUUID();
+  client.runnerId = runnerId;
+  let attempt = 0, resumeId = null;
+  const seenOffers = new Set();
+  while (!signal?.aborted) {
+    try {
+      const readiness = await driver.readiness(pack);
+      const hello = await client.hello({
+        proto: PROTO, client: CLIENT_KIND, runner_id: runnerId,
+        browser_session: browserSession, pack_version: pack.pack_version,
+        pack_sha256: packSha256, capabilities: [...CLIENT_CAPABILITIES],
+        readiness, resume_id: resumeId,
+      });
+      client.epoch = hello.epoch;
+      resumeId = hello.resume_id;
+      if (hello.service_state !== "ready" || readiness.state !== "ready") {
+        await sleep(1000);
+        continue;
       }
-      if (signal && signal.aborted) break;
+      const offer = await client.nextOffer(waitSeconds, CLIENT_KIND, signal);
+      attempt = 0;
+      if (signal?.aborted) break;
       if (!offer.job) continue;
       const job = offer.job;
-      log(`offer ${job.job_id} kind=${job.kind}${job.project ? " project" : ""}`);
-      await executeOffer({
-        client,
-        driver,
-        pack,
-        job,
-        log,
-        signal,
-        resourcePolicy,
-        heartbeatMs,
-      });
-      state.jobs += 1;
+      if (job.runner_id !== runnerId || job.epoch !== client.epoch || seenOffers.has(job.offer_id)) {
+        throw lifecycleError("E_AMBIGUOUS_SEND");
+      }
+      seenOffers.add(job.offer_id);
+      // Bound memory without permitting a previously consumed offer to execute:
+      // the bridge never offers a non-queued job; a new loop has a new runner identity.
+      if (seenOffers.size > 256) seenOffers.delete(seenOffers.values().next().value);
+      const refresh = async () => {
+        const hello = await client.hello({
+          proto: PROTO, client: CLIENT_KIND, runner_id: runnerId, browser_session: browserSession,
+          pack_version: pack.pack_version, capabilities: [...CLIENT_CAPABILITIES],
+          readiness: await driver.readiness(pack, { observing: true }),
+        });
+        if (hello.epoch !== job.epoch) throw lifecycleError("E_AMBIGUOUS_SEND");
+      };
+      await execute({ client, driver, pack, job, signal, heartbeatMs, sleep, refresh });
+      state.jobs++;
       if (once) break;
+    } catch {
+      if (signal?.aborted) break;
+      log("bridge unavailable; browser retained");
+      await sleep(Math.min(30000, 250 * 2 ** Math.min(attempt++, 7)));
     }
-  } finally {
-    clearInterval(heartbeat);
   }
   return state;
+}
+
+export async function runPersistentService({ driver, pack, client, afterOpen = async () => {}, ...options }) {
+  let startupFailed = false;
+  try {
+    await driver.start();
+    await driver.openPage();
+    await afterOpen();
+    await driver.navigate("https://chatgpt.com/");
+  } catch {
+    startupFailed = true;
+  }
+  // A failed startup is an unavailable service, never a browser restart loop.
+  const ownedDriver = startupFailed ? {
+    readiness: async () => ({ state: "browser_unavailable", reason: "E_BROWSER_UNAVAILABLE" }),
+  } : driver;
+  try { return await runJobLoop({ driver: ownedDriver, pack, client, ...options }); }
+  finally {
+    if (options.signal?.aborted || options.once) await driver.stop();
+  }
 }
 
 async function modeRun(options) {
@@ -405,8 +374,8 @@ async function modeRun(options) {
   const client = buildClient(options);
   const driver = new ChromiumDriver({
     profileDir,
+    chromePath: options.chromePath,
     headed: options.headed,
-    stealth: options.stealth,
   });
   const controller = new AbortController();
   let stopping = false;
@@ -421,29 +390,12 @@ async function modeRun(options) {
   const log = (message) => console.error(`[headless] ${message}`);
   let resourcePolicy = null;
   try {
-    log(
-      `engine chromium, profile ${basename(profileDir)}, stealth ${
-        options.stealth ? "on" : "off"
-      }`
-    );
-    await driver.start();
-    await driver.openPage();
-    // HE-5a: the policy applies only to the run mode, after the page exists and
-    // before the first chatgpt.com navigation; it is fail-open by design.
-    if (options.resourcePolicy) {
-      resourcePolicy = await applyResourcePolicy({ driver, log });
-    }
-    log("page open; hello and job loop");
-    const state = await runJobLoop({
-      client,
-      driver,
-      pack,
-      packSha256: sha256,
-      signal: controller.signal,
-      waitSeconds: options.wait,
-      once: options.once,
-      resourcePolicy,
-      log,
+    const state = await runPersistentService({
+      client, driver, pack, packSha256: sha256, signal: controller.signal,
+      waitSeconds: options.wait, once: options.once, log,
+      afterOpen: async () => {
+        if (options.resourcePolicy) resourcePolicy = await applyResourcePolicy({ driver, log });
+      },
     });
     log(`stopped after ${state.jobs} job(s)`);
     return EXIT_OK;
@@ -451,7 +403,6 @@ async function modeRun(options) {
     process.removeListener("SIGINT", onSignal);
     process.removeListener("SIGTERM", onSignal);
     if (resourcePolicy) resourcePolicy.dispose();
-    await driver.stop();
   }
 }
 

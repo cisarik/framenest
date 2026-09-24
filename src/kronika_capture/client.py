@@ -6,6 +6,7 @@ import json
 import urllib.error
 import urllib.parse
 import urllib.request
+import uuid
 from pathlib import Path
 
 from kronika_capture import paths
@@ -145,8 +146,10 @@ class BridgeClient:
         new_chat: bool = True,
         timeout_s: int = DEFAULT_ASK_TIMEOUT_S,
         project: str | None = None,
+        request_id: str | None = None,
     ) -> str:
         body: dict = {
+            "request_id": request_id or str(uuid.uuid4()),
             "prompt": prompt,
             "files": [],
             "new_chat": new_chat,
@@ -163,4 +166,10 @@ class BridgeClient:
 
     def cancel(self, job_id: str) -> dict:
         _, payload = self._request("POST", f"/v1/jobs/{job_id}/cancel", body={})
+        return payload
+
+    def resume(self, job_id: str | None, intervention_id: str) -> dict:
+        _, payload = self._request("POST", "/v1/resume", body={
+            "job_id": job_id, "intervention_id": intervention_id,
+        })
         return payload

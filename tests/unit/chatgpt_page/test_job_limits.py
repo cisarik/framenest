@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import uuid
+
 from kronika_capture.bridge.jobs import JobManager
 from kronika_capture.bridge.store import Store
 
@@ -22,14 +24,16 @@ def _manager(tmp_path, clock: Clock) -> JobManager:
         cancel_grace_s=10,
         connected_window_s=1000,
     )
-    manager.hello({"proto": 1, "client": "headless", "capabilities": []})
+    manager.hello({"proto": 1, "client": "headless", "capabilities": [],
+                   "runner_id": str(uuid.uuid4()), "browser_session": str(uuid.uuid4()),
+                   "readiness": {"state": "ready"}})
     return manager
 
 
 def test_queued_cancel_is_terminal(tmp_path) -> None:
     clock = Clock()
     manager = _manager(tmp_path, clock)
-    job = manager.create_job({"prompt": "hello"})
+    job = manager.create_job({"request_id": str(uuid.uuid4()), "prompt": "hello"})
     assert manager.cancel(job.job_id) == "cancelled"
     assert manager.get(job.job_id)["job"]["result"]["error_code"] == "E_CANCELLED"
 
@@ -37,10 +41,10 @@ def test_queued_cancel_is_terminal(tmp_path) -> None:
 def test_running_cancel_waits_for_the_grace_then_stops(tmp_path) -> None:
     clock = Clock()
     manager = _manager(tmp_path, clock)
-    job = manager.create_job({"prompt": "hello", "timeout_s": 100})
-    offered = manager.next_offer(0)
+    job = manager.create_job({"request_id": str(uuid.uuid4()), "prompt": "hello", "timeout_s": 100})
+    offered = manager.next_offer(0, runner_id=manager._service["runner_id"], epoch=manager._service["epoch"])
     assert offered is not None
-    manager.append_events(job.job_id, [{"type": "status", "data": {"status": "accepted"}}])
+    manager.append_events(job.job_id, [{"type": "status", "data": {"status": "accepted"}}], offered.offer())
     assert manager.cancel(job.job_id) == "running"
     clock.now = 9.0
     manager.watchdog()
@@ -55,7 +59,7 @@ def test_running_cancel_waits_for_the_grace_then_stops(tmp_path) -> None:
 def test_deadline_fails_the_job(tmp_path) -> None:
     clock = Clock()
     manager = _manager(tmp_path, clock)
-    job = manager.create_job({"prompt": "hello", "timeout_s": 5})
+    job = manager.create_job({"request_id": str(uuid.uuid4()), "prompt": "hello", "timeout_s": 5})
     clock.now = 5.0
     manager.watchdog()
     viewed = manager.get(job.job_id)["job"]

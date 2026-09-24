@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import threading
+import uuid
 from http.client import HTTPConnection
 
 import pytest
@@ -11,6 +12,10 @@ import pytest
 from kronika_capture.bridge.server import build_state, create_server
 from kronika_capture.bridge.store import Store
 from kronika_capture.config import UPLOAD_UNAVAILABLE
+
+RUNNER_ID = str(uuid.uuid4())
+BROWSER_ID = str(uuid.uuid4())
+EPOCHS = {}
 
 PROJECT_URL = "https://chatgpt.com/g/g-p-framenest-analysis"
 
@@ -32,6 +37,10 @@ def bridge(tmp_path):
 
 
 def _request(port, method, path, *, token=None, host=None, origin=None, body=None):
+    if path.startswith("/v1/next?"):
+        path += f"&runner_id={RUNNER_ID}&epoch={EPOCHS[port]}"
+    if path == "/v1/jobs" and body is not None:
+        body = {"request_id": str(uuid.uuid4()), **body}
     connection = HTTPConnection("127.0.0.1", port, timeout=5)
     headers = {"Host": host if host is not None else f"127.0.0.1:{port}"}
     if token is not None:
@@ -95,10 +104,13 @@ def _hello(port, token) -> None:
         "POST",
         "/v1/hello",
         token=token,
-        body={"proto": 1, "client": "headless", "capabilities": []},
+        body={"proto": 1, "client": "headless", "capabilities": [],
+              "runner_id": RUNNER_ID, "browser_session": BROWSER_ID,
+              "readiness": {"state": "ready"}},
     )
     assert status == 200
     assert payload["proto"] == 1
+    EPOCHS[port] = payload["epoch"]
 
 
 def test_one_job_is_busy_until_it_finishes(bridge) -> None:
@@ -146,12 +158,22 @@ def test_ask_text_round_trip_against_fake_executor(bridge) -> None:
     assert offer["job"]["job_id"] == job_id
     assert offer["job"]["mode"] is None
     assert offer["job"]["kind"] == "ask"
+    identity = {key: offer["job"][key] for key in ("runner_id", "offer_id", "epoch")}
+    for typ, data in (
+        ("status", {"status": "accepted"}),
+        ("send_intent", {}),
+        ("send_confirmed", {"response_id": str(uuid.uuid4())}),
+    ):
+        event_status, _ = _request(port, "POST", f"/v1/jobs/{job_id}/events",
+                                  token=state.token, body={**identity, "events": [{"type": typ, "data": data}]})
+        assert event_status == 200
     status, _done = _request(
         port,
         "POST",
         f"/v1/jobs/{job_id}/result",
         token=state.token,
-        body={"status": "done", "answer": "The Third Man", "url": None},
+        body={**identity, "delivery_id": str(uuid.uuid4()), "activity_stopped": True,
+              "status": "done", "answer": "The Third Man", "url": None},
     )
     assert status == 200
     status, viewed = _request(port, "GET", f"/v1/jobs/{job_id}", token=state.token)
@@ -226,3 +248,34 @@ def test_removed_modes_and_routes_fail_closed(bridge, tmp_path) -> None:
     )
     assert status == 200
     assert created["job_id"]
+
+def test_readiness_resume_and_request_replay_are_authenticated(bridge):
+    _server, state, port = bridge
+    status, health = _request(port, "GET", "/v1/health")
+    assert status == 200
+    assert set(health) == {"ok", "api", "api_version"}
+    status, _ = _request(port, "POST", "/v1/resume", body={})
+    assert status == 401
+    status, _ = _request(port, "GET", "/v1/status")
+    assert status == 401
+    _hello(port, state.token)
+    request_id = str(uuid.uuid4())
+    status, created = _request(port, "POST", "/v1/jobs", token=state.token,
+                               body={"request_id": request_id, "prompt": "PRIVATE CONTENT"})
+    assert status == 200 and created["request_id"] == request_id and created["status"] == "queued"
+    status, replay = _request(port, "POST", "/v1/jobs", token=state.token,
+                              body={"request_id": request_id, "prompt": "PRIVATE CONTENT"})
+    assert status == 200 and replay["job_id"] == created["job_id"]
+    status, conflict = _request(port, "POST", "/v1/jobs", token=state.token,
+                                 body={"request_id": request_id, "prompt": "different"})
+    assert status == 409 and conflict["error"]["code"] == "E_IDEMPOTENCY_CONFLICT"
+    status, metadata = _request(port, "GET", "/v1/status", token=state.token)
+    assert status == 200
+    assert "PRIVATE CONTENT" not in json.dumps(metadata)
+    for _ in range(2):
+        status, cancelled = _request(port, "POST", f"/v1/jobs/{created['job_id']}/cancel",
+                                     token=state.token, body={})
+        assert status == 200 and cancelled["status"] == "cancelled"
+    status, invalid = _request(port, "POST", "/v1/jobs", token=state.token,
+                               body={"request_id": None, "prompt": "invalid"})
+    assert status == 400

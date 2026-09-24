@@ -1,18 +1,7 @@
 // Bounded headless Chromium driver over raw CDP (HE-3c).
 //
-// ChromiumDriver launches the system Chromium (`/usr/bin/chromium` first;
-// Google Chrome is never a candidate) with --remote-debugging-port=0 and
-// discovers its endpoint from the profile's DevToolsActivePort file. It
-// extends BaseCdpDriver, which owns the shared CDP client (cdp_client.mjs)
-// and every wizard helper.
-//
-// Uses only Node built-ins: child_process for the engine process, fs/path for
-// the endpoint file, fetch for the CDP HTTP discovery endpoints, and the
-// built-in WebSocket for CDP itself. No npm dependencies, no playwright.
-//
-// `navigate` retries a `Page.navigate` timeout at most once with a typed log
-// and a bounded total wait; a second timeout fails with the original typed
-// error.
+// Chromium uses an explicit executable and a durable launch brake outside its profile.
+// CDP discovery consumes only a bounded endpoint line from process stderr.
 //
 // The HE-2d wizard helpers read only structural login state (`loginState`),
 // focus and fill a login field (`fillField`), click a known control
@@ -28,9 +17,9 @@
 // `E_LOGIN_NO_PROGRESS`. No value is ever included in an error.
 
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync } from "node:fs";
-import { access, readFile } from "node:fs/promises";
-import { basename, join } from "node:path";
+import { constants, openSync, closeSync, fsyncSync, writeFileSync, readFileSync, mkdirSync, rmdirSync, renameSync, statSync, lstatSync, realpathSync } from "node:fs";
+import { access } from "node:fs/promises";
+import { basename, dirname, isAbsolute, join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 
 import {
@@ -258,25 +247,97 @@ export function normalizeLoginState(raw) {
   };
 }
 
-export function readDevToolsActivePort(profileDir) {
-  return readFile(join(profileDir, "DevToolsActivePort"), "utf8");
+export class LaunchBrake {
+  constructor(directory, { now = Date.now } = {}) {
+    this.directory = directory;
+    this.now = now;
+    this.locked = false;
+  }
+  acquire() {
+    const now = this.now();
+    if (!Number.isFinite(now) || now < 0) throw new DriverError("E_BROWSER_UNAVAILABLE", "Launch time is unverifiable.");
+    let fresh = false;
+    try { mkdirSync(this.directory, { mode: 0o700 }); fresh = true; }
+    catch (error) { if (error.code !== "EEXIST") throw new DriverError("E_BROWSER_UNAVAILABLE", "Launch state is unavailable."); }
+    if (!lstatSync(this.directory).isDirectory() || lstatSync(this.directory).isSymbolicLink())
+      throw new DriverError("E_BROWSER_UNAVAILABLE", "Launch state is unavailable.");
+    try { mkdirSync(join(this.directory, "lock"), { mode: 0o700 }); this.locked = true; }
+    catch { throw new DriverError("E_BROWSER_UNAVAILABLE", "A browser launch is locked."); }
+    try {
+      const metadata = join(this.directory, "last-start.json");
+      if (!fresh) {
+        const stat = lstatSync(metadata);
+        if (!stat.isFile() || stat.size > 256) throw new Error();
+        const previous = JSON.parse(readFileSync(metadata, "utf8"));
+        if (!Number.isFinite(previous.started_ms) || previous.started_ms < 0 ||
+            now < previous.started_ms || now - previous.started_ms < 300000) throw new Error();
+      }
+      const temporary = join(this.directory, "last-start.tmp");
+      const fd = openSync(temporary, constants.O_WRONLY | constants.O_CREAT | constants.O_TRUNC | constants.O_NOFOLLOW, 0o600);
+      try { writeFileSync(fd, JSON.stringify({ started_ms: now })); fsyncSync(fd); }
+      finally { closeSync(fd); }
+      renameSync(temporary, metadata);
+      const directory = openSync(this.directory, "r");
+      try { fsyncSync(directory); } finally { closeSync(directory); }
+      const parent = openSync(dirname(this.directory), "r");
+      try { fsyncSync(parent); } finally { closeSync(parent); }
+    } catch {
+      this.release();
+      throw new DriverError("E_BROWSER_UNAVAILABLE", "Browser launch brake requires manual recovery or more time.");
+    }
+  }
+  release() {
+    if (this.locked) { rmdirSync(join(this.directory, "lock")); this.locked = false; }
+  }
 }
 
-// Chromium only: Google Chrome is deliberately not a candidate.
-export const CHROMIUM_BINARY_CANDIDATES = [
-  "/usr/bin/chromium",
-  "/usr/bin/chromium-browser",
-  "/usr/bin/ungoogled-chromium",
-];
+export function endpointParser() {
+  let buffer = "", consumed = 0, endpoint = null, discard = false;
+  return {
+    feed(chunk) {
+      if (endpoint || consumed >= 65536) return;
+      const text = Buffer.from(chunk).subarray(0, 65536 - consumed).toString("utf8");
+      consumed += Buffer.byteLength(text);
+      for (const character of text) {
+        if (character === "\n") {
+          const match = !discard && buffer.match(/^DevTools listening on (ws:\/\/127\.0\.0\.1:(\d+)\/devtools\/browser\/[a-zA-Z0-9-]+)\r?$/);
+          if (match && Number(match[2]) > 0 && Number(match[2]) <= 65535)
+            endpoint = { wsUrl: match[1], port: Number(match[2]) };
+          buffer = ""; discard = false;
+        } else if (!discard && buffer.length < 4096) buffer += character;
+        else { buffer = ""; discard = true; }
+      }
+    },
+    get endpoint() { return endpoint; },
+  };
+}
 
-export function pickChromiumBinary(
-  candidates = CHROMIUM_BINARY_CANDIDATES,
-  exists = existsSync
-) {
-  for (const candidate of candidates) {
-    if (exists(candidate)) return candidate;
+export function readinessExpression(pack) {
+  const selectors = {};
+  for (const key of ["composer", "send", "stop_control", "login_wall"]) {
+    selectors[key] = (pack?.locators?.[key]?.strategies || []).flatMap((s) =>
+      s.kind === "css" ? [s.value] : s.kind === "testid" ? ['[data-testid=' + JSON.stringify(s.value) + ']']
+        : s.kind === "role" ? ['[role=' + JSON.stringify(s.value) + ']'] : []);
   }
-  return null;
+  return "/* capture_readiness */(" + ((locators) => {
+    const visible = (node) => !!node && node.isConnected && node.getClientRects().length > 0;
+    const any = (queries) => queries.some((query) => {
+      try { return [...document.querySelectorAll(query)].slice(0, 64).some(visible); } catch { return false; }
+    });
+    if (location.origin !== "https://chatgpt.com") return { state: "needs_admin", reason: "E_NEEDS_ADMIN" };
+    if (any(['iframe[src*="challenges.cloudflare.com"]', '[name="cf-turnstile-response"]', '[data-testid="challenge"]']))
+      return { state: "needs_admin", reason: "E_CAPTCHA_REQUIRED" };
+    if (any(locators.login_wall) || any(['input[type="password"]', 'input[autocomplete="one-time-code"]']))
+      return { state: "needs_admin", reason: "E_LOGIN_REQUIRED" };
+    const alerts = [...document.querySelectorAll('[role="alert"], [role="dialog"]')].slice(0, 8)
+      .filter(visible).map((n) => String(n.textContent || "").slice(0, 512)).join(" ");
+    if (/limit reached|usage limit|try again later/i.test(alerts))
+      return { state: "needs_admin", reason: "E_LIMIT_REACHED" };
+    if (/consent|accept.*(terms|cookies)|agree.*terms/i.test(alerts))
+      return { state: "needs_admin", reason: "E_CONSENT_REQUIRED" };
+    if (!any(locators.composer)) return { state: "needs_admin", reason: "E_COMPOSER_NOT_FOUND" };
+    return { state: "ready", generating: any(locators.stop_control), send_present: any(locators.send) };
+  }).toString() + ")(" + JSON.stringify(selectors) + ")";
 }
 
 export function parseChromiumMajorVersion(text) {
@@ -326,28 +387,14 @@ export function chromiumLaunchArgs({
   const args = [
     `--user-data-dir=${profileDir}`,
     `--remote-debugging-port=${remoteDebuggingPort}`,
+    "--remote-debugging-address=127.0.0.1",
     "--no-first-run",
     "--no-default-browser-check",
     `--window-size=${windowSize}`,
   ];
   if (headless) args.push("--headless=new");
-  if (stealth) {
-    args.push(
-      "--disable-blink-features=AutomationControlled",
-      `--user-agent=${chromiumUserAgent(majorVersion)}`
-    );
-  }
+  if (stealth) throw new DriverError("E_BROWSER_UNAVAILABLE", "Stealth is not supported.");
   return args;
-}
-
-export function parseDevToolsActivePort(text) {
-  const lines = String(text || "").split(/\r?\n/).filter((line) => line.trim());
-  const port = lines.length > 0 ? Number(lines[0]) : NaN;
-  if (!Number.isInteger(port) || port <= 0 || port > 65535) {
-    throw new DriverError("E_DRIVER_START", "DevToolsActivePort has no usable port line");
-  }
-  const browserPath = lines[1] || "/devtools/browser";
-  return { port, browserPath };
 }
 
 export class BaseCdpDriver {
@@ -786,12 +833,10 @@ export class BaseCdpDriver {
 }
 
 export class ChromiumDriver extends BaseCdpDriver {
-  // System Chromium behind the same seam: raw CDP over the browser websocket,
-  // endpoint discovered from DevToolsActivePort inside the engine-owned
-  // profile. No playwright, no --enable-automation, no new dependency.
-  // `stealth` adds exactly the two HE-3e launch flags and defaults off.
   constructor({
     chromePath = null,
+    launchBrake = null,
+    spawnProcess = spawn,
     profileDir,
     headed = false,
     stealth = false,
@@ -805,7 +850,10 @@ export class ChromiumDriver extends BaseCdpDriver {
     noProgressPollMs = DEFAULT_NO_PROGRESS_POLL_MS,
   } = {}) {
     super({ cdpTimeoutMs });
-    this.chromePath = chromePath || ChromiumDriver.defaultBinary();
+    this.chromePath = chromePath;
+    this.spawnProcess = spawnProcess;
+    this.launchBrake = launchBrake;
+    this.startedOnce = false;
     this.profileDir = profileDir;
     this.headed = Boolean(headed);
     this.stealth = Boolean(stealth);
@@ -826,7 +874,7 @@ export class ChromiumDriver extends BaseCdpDriver {
   }
 
   static defaultBinary() {
-    return pickChromiumBinary();
+    return null; // Explicit executable configuration is mandatory.
   }
 
   get listener() {
@@ -834,95 +882,66 @@ export class ChromiumDriver extends BaseCdpDriver {
   }
 
   async start() {
-    if (this.child) return;
-    if (!this.chromePath) {
-      throw new DriverError(
-        "E_DRIVER_START",
-        "no Chromium binary was found or given"
-      );
+    if (this.startedOnce) throw new DriverError("E_BROWSER_UNAVAILABLE", "Automatic browser restart is forbidden.");
+    if (!this.chromePath || !isAbsolute(this.chromePath) || this.stealth) {
+      throw new DriverError("E_BROWSER_UNAVAILABLE", "An explicit Chromium executable without stealth is required.");
     }
     try {
+      await access(this.chromePath, constants.X_OK);
+      if (!statSync(this.chromePath).isFile()) throw new Error();
       await access(this.profileDir);
+      // Canonicalize the directory itself, never enumerate or read its contents.
+      // Login and capture must share the same brake even through path aliases.
+      const ownedProfile = realpathSync(this.profileDir);
+      this.launchBrake ||= new LaunchBrake(ownedProfile + ".capture-launch");
     } catch {
-      throw new DriverError(
-        "E_DRIVER_START",
-        `profile directory is missing: ${this.profileDir}`
-      );
+      throw new DriverError("E_BROWSER_UNAVAILABLE", "Browser preflight failed.");
     }
-    if (this.stealth && this.majorVersion === null) {
-      this.majorVersion = readChromiumMajorVersion(this.chromePath);
-    }
-    this.child = spawn(
-      this.chromePath,
-      chromiumLaunchArgs({
-        profileDir: this.profileDir,
-        headless: !this.headed,
-        stealth: this.stealth,
-        majorVersion: this.majorVersion,
-      }),
-      { stdio: ["ignore", "ignore", "ignore"] }
-    );
-    this.spawnError = null;
-    this.child.on("error", (error) => {
-      this.spawnError = error;
-    });
+    this.launchBrake.acquire();
+    this.startedOnce = true;
+    this.endpointReader = endpointParser();
     try {
+      this.child = this.spawnProcess(this.chromePath, chromiumLaunchArgs({
+        profileDir: this.profileDir, headless: !this.headed,
+      }), { stdio: ["ignore", "ignore", "pipe"] });
+      this.child.stderr.on("data", (chunk) => this.endpointReader.feed(chunk));
+      this.child.on("error", () => { this.spawnError = true; });
       const endpoint = await this._awaitEndpoint();
       this.port = endpoint.port;
-      this.browserWsUrl = `ws://127.0.0.1:${endpoint.port}${endpoint.browserPath}`;
-      const parsed = new URL(this.browserWsUrl);
-      assertLoopbackHost(parsed.hostname);
-      this.version = endpoint.version;
-      this.client = new CdpClient({
-        wsUrl: this.browserWsUrl,
-        cdpTimeoutMs: this.cdpTimeoutMs,
-      });
+      this.browserWsUrl = endpoint.wsUrl;
+      this.client = new CdpClient({ wsUrl: this.browserWsUrl, cdpTimeoutMs: this.cdpTimeoutMs });
       await this.client.connect();
-    } catch (error) {
+    } catch {
       await this.stop();
-      throw error;
+      throw new DriverError("E_BROWSER_UNAVAILABLE", "Browser startup failed.");
     }
   }
 
-  // Bounded wait for a live endpoint. A DevToolsActivePort file can outlive a
-  // crashed browser, so a port is accepted only after /json/version answers on
-  // loopback; a half-written or malformed file is retried, not trusted.
+  async readiness(pack, { observing = false } = {}) {
+    if (!this.child || this.child.exitCode !== null || this.child.signalCode !== null || !this.client || !this.targetId) {
+      return { state: "browser_unavailable", reason: "E_BROWSER_UNAVAILABLE" };
+    }
+    try {
+      const result = await this.evaluate(readinessExpression(pack));
+      if (result.state === "ready" && result.generating && !observing)
+        return { state: "needs_admin", reason: "E_AMBIGUOUS_SEND" };
+      if (result.state === "ready" && !result.generating && !result.send_present)
+        return { state: "needs_admin", reason: "E_COMPOSER_NOT_FOUND" };
+      return result;
+    } catch {
+      return { state: "browser_unavailable", reason: "E_BROWSER_UNAVAILABLE" };
+    }
+  }
+
   async _awaitEndpoint() {
     const deadline = Date.now() + this.startTimeoutMs;
     while (Date.now() < deadline) {
-      if (this.spawnError) {
-        const message = String(this.spawnError.message || this.spawnError);
-        throw new DriverError("E_DRIVER_START", `cannot start chrome: ${message}`);
-      }
-      if (this.child.exitCode !== null || this.child.signalCode !== null) {
-        throw new DriverError(
-          "E_DRIVER_START",
-          `chrome exited (code=${this.child.exitCode}, signal=${this.child.signalCode}) before listening`
-        );
-      }
-      const text = await readDevToolsActivePort(this.profileDir).catch(() => null);
-      if (text) {
-        let parsed = null;
-        try {
-          parsed = parseDevToolsActivePort(text);
-        } catch {
-          parsed = null;
-        }
-        if (parsed) {
-          try {
-            const version = await this._version(parsed.port);
-            return { port: parsed.port, browserPath: parsed.browserPath, version };
-          } catch {
-            // endpoint not ready yet; keep waiting within the bounded window
-          }
-        }
-      }
-      await delay(150);
+      if (this.spawnError || this.child.exitCode !== null || this.child.signalCode !== null)
+        throw new DriverError("E_BROWSER_UNAVAILABLE", "Browser did not start.");
+      if (this.endpointReader.endpoint) return this.endpointReader.endpoint;
+      await delay(50);
     }
-    throw new DriverError(
-      "E_DRIVER_START",
-      `chrome did not expose a CDP endpoint within ${this.startTimeoutMs} ms`
-    );
+    throw new DriverError("E_BROWSER_UNAVAILABLE", "Browser endpoint unavailable.");
   }
 
   async _version(port) {
@@ -944,9 +963,8 @@ export class ChromiumDriver extends BaseCdpDriver {
       this.client = null;
     }
     const child = this.child;
-    this.child = null;
     this.port = null;
-    if (!child) return;
+    if (!child) { this.launchBrake?.release(); return; }
     if (child.exitCode === null && child.signalCode === null) {
       child.kill("SIGTERM");
       const deadline = Date.now() + this.stopGraceMs;
@@ -962,5 +980,9 @@ export class ChromiumDriver extends BaseCdpDriver {
         await delay(300);
       }
     }
+    if (child.exitCode === null && child.signalCode === null)
+      throw new DriverError("E_BROWSER_UNAVAILABLE", "Browser termination is unconfirmed; launch remains locked.");
+    this.child = null;
+    this.launchBrake?.release();
   }
 }

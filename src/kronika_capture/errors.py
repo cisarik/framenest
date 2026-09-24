@@ -8,6 +8,12 @@ EXIT_INTERVENTION = 7
 EXIT_PROTO = 8
 
 ERROR_CODES = (
+    "E_BROWSER_UNAVAILABLE",
+    "E_NEEDS_ADMIN",
+    "E_SERVICE_LIMIT",
+    "E_IDEMPOTENCY_CONFLICT",
+    "E_AMBIGUOUS_SEND",
+    "E_JOURNAL_UNAVAILABLE",
     "E_PROTO_MISMATCH",
     "E_NO_TAB",
     "E_TAB_GONE",
@@ -47,3 +53,18 @@ _ERROR_EXIT_CODES = {
 
 def exit_code_for_error(code: str | None) -> int:
     return _ERROR_EXIT_CODES.get(code or "", EXIT_JOB_FAILED)
+
+
+def safe_message(code: str) -> str:
+    return {
+        "E_BUSY": "A task is already active.",
+        "E_BROWSER_UNAVAILABLE": "The browser is unavailable.",
+        "E_NEEDS_ADMIN": "Administrator intervention is required.",
+        "E_SERVICE_LIMIT": "Capture capacity is exhausted.",
+        "E_IDEMPOTENCY_CONFLICT": "The request identity conflicts with retained content.",
+        "E_AMBIGUOUS_SEND": "Submission association is uncertain; do not resend.",
+        "E_JOURNAL_UNAVAILABLE": "Durable capture state is unavailable.",
+        "E_RESPONSE_TIMEOUT": "The active response time limit expired.",
+        "E_INTERVENTION_TIMEOUT": "The administrator wait limit expired.",
+        "E_CANCELLED": "The task was cancelled.",
+    }.get(code, "The capture request could not be completed.")

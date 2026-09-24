@@ -16,7 +16,7 @@ from urllib.parse import parse_qs, urlsplit
 from kronika_capture import config
 from kronika_capture.bridge import auth
 from kronika_capture.bridge.jobs import CLIENT_KINDS, DEFAULT_CLIENT_KIND, BridgeError, JobManager, utc_now_iso
-from kronika_capture.bridge.results import ResultStore
+from kronika_capture.bridge.journal import JournalResults
 from kronika_capture.bridge.store import Store
 from kronika_capture.errors import EXIT_BRIDGE
 
@@ -33,7 +33,7 @@ class BridgeState:
     store: Store
     jobs: JobManager
     token: str
-    results: ResultStore
+    results: JournalResults
     port: int = 0
 
 
@@ -136,7 +136,7 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
             status, error_code = exc.status, exc.code
             self._send_error(exc.status, exc.code, exc.step, exc.message, allow_origin)
         except Exception:
-            LOGGER.exception("bridge: internal error handling %s %s", method, path)
+            LOGGER.error("bridge: internal request failure")
             status, error_code = 500, "E_INTERNAL"
             self._safe_send_error(500, "E_INTERNAL", "internal", "internal error", allow_origin)
         finally:
@@ -158,10 +158,15 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
         if method == "POST" and path == "/v1/hello":
             payload = state.jobs.hello(body)
             return self._send_json(200, payload, allow_origin), None, None
+        if method == "POST" and path == "/v1/resume":
+            return self._send_json(200, state.jobs.resume(body), allow_origin), None, None
         if method == "GET" and path == "/v1/next":
             wait = self._parse_wait(query)
             kind = self._parse_client(query)
-            job = state.jobs.next_offer(wait, kind)
+            job = state.jobs.next_offer(
+                wait, kind, runner_id=(query.get("runner_id") or [None])[0],
+                epoch=(query.get("epoch") or [None])[0],
+            )
             if job is None:
                 return self._send_empty(204, allow_origin), None, None
             return (
@@ -172,7 +177,8 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
         if method == "POST" and path == "/v1/jobs":
             job = state.jobs.create_job(body)
             return (
-                self._send_json(200, {"ok": True, "job_id": job.job_id}, allow_origin),
+                self._send_json(200, {"ok": True, "job_id": job.job_id,
+                                     "request_id": job.request_id, "status": job.status}, allow_origin),
                 None,
                 job.job_id,
             )
@@ -235,7 +241,7 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
             events = body.get("events")
             if not isinstance(events, list):
                 raise BridgeError("E_INTERNAL", "events", "events must be a list", 400)
-            payload = jobs.append_events(job_id, events)
+            payload = jobs.append_events(job_id, events, body)
             return self._send_json(200, payload, allow_origin), None, job_id
         if action == "result":
             jobs.resolve(job_id, body)
@@ -358,9 +364,8 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
 def build_state(store: Store | None = None) -> BridgeState:
     store = store or Store()
     token = auth.load_or_create_token(store.token_path)
-    results = ResultStore()
-    manager = JobManager(store, results=results)
-    store.prune()
+    manager = JobManager(store)
+    results = JournalResults(manager)
     return BridgeState(store=store, jobs=manager, token=token, results=results)
 
 
@@ -375,7 +380,7 @@ def _watchdog_loop(manager: JobManager, stop: threading.Event) -> None:
         try:
             manager.watchdog()
         except Exception:
-            LOGGER.exception("bridge: watchdog tick failed")
+            LOGGER.error("bridge: watchdog tick failed")
 
 
 def serve(

@@ -7,7 +7,7 @@ export const EXTENSION_VERSION = "0.1.0";
 export const ENGINE_VERSION = "0.1.0";
 
 // Removed modes are not advertised. Plain ask is the only offered job.
-export const CLIENT_CAPABILITIES = [];
+export const CLIENT_CAPABILITIES = ["durable_submission", "admin_resume"];
 
 export const PROGRESS_PHASES = [
   "accepted",
@@ -23,6 +23,12 @@ export const PROGRESS_PHASES = [
 ];
 
 export const ERROR_CODES = [
+  "E_BROWSER_UNAVAILABLE",
+  "E_NEEDS_ADMIN",
+  "E_SERVICE_LIMIT",
+  "E_IDEMPOTENCY_CONFLICT",
+  "E_AMBIGUOUS_SEND",
+  "E_JOURNAL_UNAVAILABLE",
   "E_PROTO_MISMATCH",
   "E_NO_TAB",
   "E_TAB_GONE",

@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+import { performance } from "node:perf_hooks";
 // Headless job engine: one plain ask over an owned Chromium driver.
 //
 // Search, web search, deep research, ingest, and authoring fail closed before
@@ -27,13 +29,8 @@ export const INGEST_ANSWER_HTML_MAX_CHARS = 1500000;
 export const AUTHOR_PROMPT_MAX_CHARS = 4000;
 export const COMPOSER_TIMEOUT_MS = 15000;
 export const SUBMIT_TIMEOUT_MS = 10000;
-// WSC6-CORRECTION-2: the deep-research acceptance window is longer than the
-// default submit window because the initial research turn can take a moment to
-// surface; every other mode keeps SUBMIT_TIMEOUT_MS. The bounded retry is
-// decided once, after the smaller of SUBMIT_RETRY_AFTER_MS and half the mode
-// window, and never exceeds two clicks in total.
+// Reserved timeout for the disabled research mode. Submission is always single-use.
 export const DEEP_RESEARCH_SUBMIT_TIMEOUT_MS = 60000;
-export const SUBMIT_RETRY_AFTER_MS = 5000;
 export const CLEAR_TIMEOUT_MS = 3000;
 export const MODE_TIMEOUT_MS = 5000;
 export const DEFAULT_STABILITY_MS = 2500;
@@ -421,7 +418,7 @@ ${PAGE_HELPERS(selectors)}
   const tag = el.tagName ? el.tagName.toLowerCase() : "";
   const raw = tag === "textarea" ? String(el.value || "") : el.innerText || el.textContent || "";
   const normalize = (text) => String(text || "").replace(/\\s+/g, " ").trim();
-  return normalize(raw).includes(${literal});
+  return normalize(raw) === ${literal};
 })()`
   );
 }
@@ -630,7 +627,8 @@ ${PAGE_HELPERS(selectors)}
       }
     }
   } catch (error) { html = null; }
-  return { count: nodes.length, text, html, url: location.href };
+  return { count: nodes.length, text, html, url: location.href,
+    response_key: node.getAttribute("data-message-id") || node.id || null };
 })()`
   );
 }
@@ -688,6 +686,8 @@ export class JobEngine {
     driver,
     pack,
     emit = async () => {},
+    checkpoint = async () => {},
+    now = () => performance.now(),
     isCancelled = () => false,
     deadlineMs = null,
     log = null,
@@ -698,13 +698,18 @@ export class JobEngine {
     composerTimeoutMs = COMPOSER_TIMEOUT_MS,
     submitTimeoutMs = SUBMIT_TIMEOUT_MS,
     deepResearchSubmitTimeoutMs = DEEP_RESEARCH_SUBMIT_TIMEOUT_MS,
-    submitRetryAfterMs = null,
     clearTimeoutMs = CLEAR_TIMEOUT_MS,
     modeTimeoutMs = MODE_TIMEOUT_MS,
   } = {}) {
     this.driver = driver;
     this.pack = pack && typeof pack === "object" ? pack : {};
     this.emit = emit;
+    this.checkpoint = checkpoint;
+    this.now = now;
+    this.submission = "not_started";
+    this.responseId = null;
+    this.responseKey = null;
+    this.pageIdentity = null;
     this.isCancelled = isCancelled;
     this.deadlineMs = Number.isFinite(deadlineMs) ? deadlineMs : null;
     this.log = typeof log === "function" ? log : () => {};
@@ -719,10 +724,6 @@ export class JobEngine {
       deepResearchSubmitTimeoutMs > 0
         ? deepResearchSubmitTimeoutMs
         : DEEP_RESEARCH_SUBMIT_TIMEOUT_MS;
-    this.submitRetryAfterMs =
-      Number.isFinite(submitRetryAfterMs) && submitRetryAfterMs > 0
-        ? submitRetryAfterMs
-        : null;
     this.clearTimeoutMs = clearTimeoutMs;
     this.modeTimeoutMs =
       Number.isFinite(modeTimeoutMs) && modeTimeoutMs > 0
@@ -753,6 +754,7 @@ export class JobEngine {
   }
 
   async run(job) {
+    this.prompt = job.prompt;
     let project = null;
     let result = null;
     const unsupported = unsupportedJob(job);
@@ -793,6 +795,8 @@ export class JobEngine {
           });
         }
       }
+      await this.bindPage();
+      await this.guard();
       await this._ensureComposer();
       if (project && !(await this._assertProject(project))) {
         throw new JobEngineError(
@@ -803,6 +807,7 @@ export class JobEngine {
         );
       }
       await this.progress("composed");
+      await this.guard();
       await this._insertPrompt(job.prompt);
       await this.progress("sent");
       const submitted = await this._submit({});
@@ -835,7 +840,48 @@ export class JobEngine {
         }
       }
     }
+    const stopped = await this.stopActivity(result.status !== "done");
+    result.activity_stopped = stopped && result.error_code !== "E_AMBIGUOUS_SEND";
     return result;
+  }
+
+  async bindPage() {
+    const key = randomUUID();
+    this.pageIdentity = await this.driver.evaluate(
+      "/* capture_bind */(globalThis.__kronikaCapturePage ||= " + JSON.stringify(key) + ")"
+    );
+    this.pageUrl = await this._currentUrl();
+  }
+
+  async association() {
+    const key = await this.driver.evaluate("/* capture_page */globalThis.__kronikaCapturePage");
+    if (!this.pageIdentity || key !== this.pageIdentity) return false;
+    if (this.submission === "send_confirmed") {
+      const state = await this._assistantState();
+      return state.response_key === this.responseKey && state.count === this.responseCount;
+    }
+    return this.submission === "not_started" && await this._currentUrl() === this.pageUrl;
+  }
+
+  async guard() {
+    if (this.isCancelled()) throw new JobEngineError("E_CANCELLED", this.phase, "Cancelled.");
+    await this.checkpoint(this);
+    if (this.pageIdentity && this.submission === "not_started" && !(await this.association()))
+      throw new JobEngineError("E_AMBIGUOUS_SEND", this.phase, "Page association was lost.");
+    if (this.deadlineMs !== null && this.now() >= this.deadlineMs)
+      throw new JobEngineError("E_RESPONSE_TIMEOUT", this.phase, "Active response time expired.");
+  }
+
+  async stopActivity(stop) {
+    try {
+      if (stop && await this._stopVisible()) {
+        const hit = await this._locatorHit("stop_control");
+        if (!hit || !this._validRect(hit.rect)) return false;
+        await this._clickRect(hit.rect);
+        for (let n = 0; n < 10 && await this._stopVisible(); n++) await delay(this.pollMs);
+      }
+      return !(await this._stopVisible());
+    } catch { return false; }
   }
 
   async _runDeepResearch() {
@@ -1040,15 +1086,13 @@ export class JobEngine {
   }
 
   async _ensureComposer() {
-    const deadline = Date.now() + this.composerTimeoutMs;
+    const deadline = this.now() + this.composerTimeoutMs;
     for (;;) {
-      if (this.isCancelled()) {
-        throw new JobEngineError("E_CANCELLED", "composer", "cancelled");
-      }
+      await this.guard();
       const state = await this._composerState();
       if (state && state.kind !== "other") return state;
-      if (Date.now() >= deadline) break;
-      await delay(Math.min(this.pollMs, Math.max(1, deadline - Date.now())));
+      if (this.now() >= deadline) break;
+      await delay(Math.min(this.pollMs, Math.max(1, deadline - this.now())));
     }
     throw await this._classifyBlocked();
   }
@@ -1187,7 +1231,7 @@ export class JobEngine {
   }
 
   _assertDeepResearchDeadline() {
-    if (this.deadlineMs !== null && Date.now() >= this.deadlineMs) {
+    if (this.deadlineMs !== null && this.now() >= this.deadlineMs) {
       throw new JobEngineError(
         "E_DEEP_RESEARCH_UNAVAILABLE",
         "mode",
@@ -1285,6 +1329,11 @@ export class JobEngine {
       if (this.isCancelled()) {
         throw new JobEngineError("E_CANCELLED", "compose", "cancelled");
       }
+      if (character === "\n" || character === "\r") {
+        // Text insertion cannot synthesize an Enter key submission before the barrier.
+        await this.driver.send("Input.insertText", { text: character });
+        continue;
+      }
       await this.driver.send("Input.dispatchKeyEvent", {
         type: "keyDown",
         key: character,
@@ -1331,15 +1380,16 @@ export class JobEngine {
   }
 
   async _waitFor(predicate, timeoutMs, step) {
-    const deadline = Date.now() + timeoutMs;
+    const deadline = this.now() + timeoutMs;
     for (;;) {
       if (this.isCancelled()) {
         throw new JobEngineError("E_CANCELLED", step, "cancelled");
       }
+      await this.guard();
       const value = await predicate();
       if (value) return value;
-      if (Date.now() >= deadline) return null;
-      await delay(Math.min(this.pollMs, Math.max(1, deadline - Date.now())));
+      if (this.now() >= deadline) return null;
+      await delay(Math.min(this.pollMs, Math.max(1, deadline - this.now())));
     }
   }
 
@@ -1351,13 +1401,6 @@ export class JobEngine {
     return Number.isFinite(windowMs) && windowMs > 0
       ? windowMs
       : SUBMIT_TIMEOUT_MS;
-  }
-
-  _submitRetryAfterMs(windowMs) {
-    if (this.submitRetryAfterMs !== null) {
-      return Math.min(this.submitRetryAfterMs, windowMs);
-    }
-    return Math.min(SUBMIT_RETRY_AFTER_MS, Math.max(1, Math.floor(windowMs / 2)));
   }
 
   async _conversationUserCount() {
@@ -1380,35 +1423,6 @@ export class JobEngine {
       return "assistantAppeared";
     }
     return null;
-  }
-
-  async _retrySubmitCandidate(mode, userBaseline, assistantBaseline) {
-    // WSC6-CORRECTION-2: the single bounded retry is allowed only while every
-    // observable "the first click did nothing" precondition still holds. All
-    // reads happen immediately before the click; a single no-change failure
-    // cancels the retry, so the click can never become a third click.
-    const composer = await this._composerState();
-    if (!composer || composer.empty === true) return null;
-    const send = await this._sendState();
-    if (!send || send.disabled === true || !this._validRect(send.rect)) {
-      return null;
-    }
-    if ((await this._conversationUserCount()) > userBaseline) return null;
-    if (mode === "deep_research") {
-      await this._assertDeepResearchActive(
-        "the deep-research pill was lost before the optional second send click; nothing was sent"
-      );
-    }
-    if ((await this._assistantState()).count > assistantBaseline) return null;
-    const remeasured = await this._sendState();
-    if (
-      !remeasured ||
-      remeasured.disabled === true ||
-      !this._validRect(remeasured.rect)
-    ) {
-      return null;
-    }
-    return remeasured;
   }
 
   async _submitDiagnostics() {
@@ -1485,97 +1499,67 @@ export class JobEngine {
     return diagnostics;
   }
 
-  async _submit({ mode = null } = {}) {
-    const ready = await this._waitFor(
-      async () => {
-        const state = await this._sendState();
-        if (!state || state.disabled === true) return null;
-        if (!this._validRect(state.rect)) return null;
-        return state;
-      },
-      this.submitTimeoutMs,
-      "submit"
-    );
-    if (!ready) {
-      throw new JobEngineError(
-        "E_SEND_NOT_READY",
-        "submit",
-        "the send control never became ready"
-      );
-    }
-    if (mode === "deep_research") {
-      await this._assertDeepResearchActive(
-        "the deep-research pill was lost after the send-ready wait; nothing was sent"
-      );
-    }
-    if (mode === "deep_research") {
-      await this._assertDeepResearchActive(
-        "the deep-research pill was lost immediately before submit; nothing was sent"
-      );
-    }
-    const assistantBaseline = (await this._assistantState()).count;
-    const userBaseline = await this._conversationUserCount();
-    const windowMs = this._submitAcceptanceWindowMs(mode);
-    const retryAfterMs = this._submitRetryAfterMs(windowMs);
-    const started = Date.now();
-    const deadline = started + windowMs;
-    let clicks = 1;
-    let retried = false;
-    await this._clickRect(ready.rect);
-    for (;;) {
-      if (this.isCancelled()) {
-        throw new JobEngineError("E_CANCELLED", "submit", "cancelled");
-      }
-      const signal = await this._submitSignal({ userBaseline, assistantBaseline });
-      if (signal) {
-        this.log(`submit: accepted (${signal}) with ${clicks} click(s)`);
-        return { baseline: assistantBaseline, submit_clicks: clicks };
-      }
-      const now = Date.now();
-      if (!retried && now - started >= retryAfterMs) {
-        retried = true;
-        const candidate = await this._retrySubmitCandidate(
-          mode,
-          userBaseline,
-          assistantBaseline
-        );
-        if (candidate) {
-          clicks += 1;
-          this.log(`submit: re-measured the send control and clicked once more (click ${clicks})`);
-          await this.emit("progress", { phase: "sent", submit_clicks: clicks });
-          await this._clickRect(candidate.rect);
-          continue;
+  async _submit() {
+    if (this.submission !== "not_started")
+      throw new JobEngineError("E_AMBIGUOUS_SEND", "submit", "Submission cannot be repeated.");
+    await this.guard();
+    let ready = await this._waitFor(async () => {
+      const state = await this._sendState();
+      return state && !state.disabled && this._validRect(state.rect) ? state : null;
+    }, this.submitTimeoutMs, "submit");
+    if (!ready) throw new JobEngineError("E_SEND_NOT_READY", "submit", "Send is unavailable.");
+    const baseline = (await this._assistantState()).count;
+    await this.guard();
+    if (typeof this.prompt !== "string" || !(await this._composerContains(this.prompt)))
+      throw new JobEngineError("E_INPUT_FAILED", "submit", "The composed prompt changed.");
+    ready = await this._sendState();
+    if (!ready || ready.disabled || !this._validRect(ready.rect))
+      throw new JobEngineError("E_SEND_NOT_READY", "submit", "Send is unavailable.");
+    // The barrier is single-use even when its acknowledgement is lost.
+    this.submission = "send_intent_persisted";
+    const ack = await this.emit("send_intent", {});
+    if (ack?.submission !== "send_intent_persisted" || ack.cancel_requested || ack.terminal)
+      throw new JobEngineError("E_JOURNAL_UNAVAILABLE", "submit", "Send intent was not acknowledged.");
+    try {
+      if (this.isCancelled()) throw new Error();
+      await this._clickRect(ready.rect);
+      const deadline = this.now() + this.submitTimeoutMs;
+      while (this.now() < deadline) {
+        if (this.isCancelled()) throw new Error();
+        if (this.deadlineMs !== null && this.now() >= this.deadlineMs) throw new Error();
+        const state = await this._assistantState();
+        if (state.count === baseline + 1 && typeof state.response_key === "string" && state.response_key) {
+          this.responseKey = state.response_key;
+          this.responseCount = state.count;
+          this.responseId = randomUUID();
+          const confirmed = await this.emit("send_confirmed", { response_id: this.responseId });
+          if (confirmed?.submission !== "send_confirmed" || confirmed.terminal) throw new Error();
+          this.submission = "send_confirmed";
+          return { baseline, submit_clicks: 1 };
         }
+        if (state.count > baseline + 1) throw new Error();
+        await delay(this.pollMs);
       }
-      if (now >= deadline) break;
-      await delay(Math.min(this.pollMs, Math.max(1, deadline - Date.now())));
+    } catch {
+      throw new JobEngineError("E_AMBIGUOUS_SEND", "submit", "Submission is uncertain; do not resend.");
     }
-    const diagnostics = await this._submitDiagnostics();
-    diagnostics.submit_clicks = clicks;
-    throw new JobEngineError(
-      "E_SEND_FAILED",
-      "submit",
-      clicks > 1
-        ? "neither send click was accepted within the mode window"
-        : "the send click was not accepted within the mode window",
-      diagnostics
-    );
+    throw new JobEngineError("E_AMBIGUOUS_SEND", "submit", "Submission is uncertain; do not resend.");
   }
 
   async _observeAnswer({ baseline }) {
-    const requested =
-      this.deadlineMs !== null ? this.deadlineMs - Date.now() : 600000;
-    const deadline = Date.now() + Math.max(requested, 1);
+    if (this.deadlineMs === null) this.deadlineMs = this.now() + 600000;
     let lastText = null;
-    let lastChange = Date.now();
+    let lastChange = this.now();
     let lastStop = false;
     let started = false;
     for (;;) {
       if (this.isCancelled()) {
         throw new JobEngineError("E_CANCELLED", "observe", "cancelled");
       }
+      await this.guard();
+      if (!(await this.association())) throw new JobEngineError("E_AMBIGUOUS_SEND", "observe", "Response association was lost.");
       const state = await this._assistantState();
-      const now = Date.now();
+      const now = this.now();
       if (state.count > baseline) {
         started = true;
         const stop = await this._stopVisible();
@@ -1608,8 +1592,8 @@ export class JobEngine {
           );
         }
       }
-      if (Date.now() >= deadline) break;
-      await delay(Math.min(this.pollMs, Math.max(1, deadline - Date.now())));
+      if (this.now() >= this.deadlineMs) break;
+      await delay(this.pollMs);
     }
     if (!started) {
       throw new JobEngineError(

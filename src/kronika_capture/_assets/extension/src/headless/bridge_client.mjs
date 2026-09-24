@@ -62,6 +62,8 @@ export class BridgeClient {
     this.url = String(url || "").replace(/\/+$/, "");
     this.token = String(token || "");
     this.timeoutMs = timeoutMs;
+    this.runnerId = null;
+    this.epoch = null;
   }
 
   async requestWithStatus(
@@ -212,6 +214,8 @@ export class BridgeClient {
   nextPath(waitSeconds, clientKind) {
     let path = "/v1/next?wait=" + encodeURIComponent(String(waitSeconds));
     if (clientKind) path += "&client=" + encodeURIComponent(String(clientKind));
+    path += "&runner_id=" + encodeURIComponent(this.runnerId || "");
+    path += "&epoch=" + encodeURIComponent(this.epoch || "");
     return path;
   }
 
@@ -236,11 +240,11 @@ export class BridgeClient {
     return { status, job: payload.job || null };
   }
 
-  events(jobId, events) {
+  events(jobId, events, identity = {}) {
     return this.request(
       "POST",
       "/v1/jobs/" + encodeURIComponent(jobId) + "/events",
-      { events }
+      { events, ...identity }
     );
   }
 

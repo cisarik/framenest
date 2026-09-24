@@ -11,6 +11,7 @@ import json
 import subprocess
 import sys
 import time
+import uuid
 
 from kronika_capture import __version__, paths
 from kronika_capture.bridge.server import serve
@@ -82,6 +83,10 @@ def build_parser() -> argparse.ArgumentParser:
     run.set_defaults(handler=_cmd_bridge_run)
     status = bridge_sub.add_parser("status", help="print bridge status JSON")
     status.set_defaults(handler=_cmd_bridge_status)
+    resume = bridge_sub.add_parser("resume", help="request an explicit readiness check")
+    resume.add_argument("--job-id", default=None)
+    resume.add_argument("--intervention-id", required=True)
+    resume.set_defaults(handler=_cmd_bridge_resume)
 
     login = sub.add_parser("login", help="launch the operator login wizard")
     login.add_argument(
@@ -90,6 +95,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="owned Chromium profile directory (default: <state-dir>/chromium-profile)",
     )
     login.set_defaults(handler=_cmd_login)
+    login.add_argument("--chrome-path", required=True, help="preflight-verified Chromium executable")
     return parser
 
 
@@ -129,6 +135,7 @@ def _cmd_ask(args: argparse.Namespace) -> int:
             prompt,
             timeout_s=args.timeout,
             project=args.project,
+            request_id=str(uuid.uuid4()),
         )
     except BridgeNoToken as exc:
         print(f"error: {exc}", file=sys.stderr)
@@ -144,7 +151,8 @@ def _cmd_ask(args: argparse.Namespace) -> int:
 
 def _poll_ask(client: BridgeClient, job_id: str, args: argparse.Namespace) -> int:
     started = time.monotonic()
-    deadline = started + args.timeout
+    # The bridge owns active time; this outer bound includes the separate admin budget.
+    deadline = started + args.timeout + 1800 + 30
     noticed = False
     while True:
         try:
@@ -236,10 +244,20 @@ def _cmd_login(args: argparse.Namespace) -> int:
         print("error: packaged login wizard is missing", file=sys.stderr)
         return EXIT_BRIDGE
     completed = subprocess.run(
-        ["node", str(script), "login", "--profile", profile],
+        ["node", str(script), "login", "--profile", profile, "--chrome-path", args.chrome_path],
         check=False,
     )
     return completed.returncode
+
+
+def _cmd_bridge_resume(args: argparse.Namespace) -> int:
+    try:
+        result = BridgeClient(state_dir=_state_dir(args)).resume(args.job_id, args.intervention_id)
+    except (BridgeError, BridgeNoToken, BridgeUnreachable):
+        print("error: readiness check could not be requested", file=sys.stderr)
+        return EXIT_BRIDGE
+    print(json.dumps(result, sort_keys=True))
+    return EXIT_OK
 
 
 def main(argv: list[str] | None = None) -> int:
