@@ -126,7 +126,9 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
             if method == "OPTIONS":
                 status = self._send_empty(204, allow_origin=allow_origin)
                 return
-            body, body_error = self._read_json_body(method)
+            result_route = JOB_ACTION_PATH.match(path)
+            is_result = bool(result_route and result_route.group(2) == "result")
+            body, body_error = self._read_json_body(method, is_result=is_result)
             if body_error is not None:
                 status, error_code = body_error
                 self._send_error(status, error_code, "request", "invalid request body", allow_origin)
@@ -277,7 +279,7 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
             raise BridgeError("E_INTERNAL", "jobs", "since must be an integer", 400)
         return max(since, 0)
 
-    def _read_json_body(self, method: str):
+    def _read_json_body(self, method: str, *, is_result=False):
         if method != "POST":
             return {}, None
         length_header = self.headers.get("Content-Length")
@@ -285,9 +287,11 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
             length = int(length_header) if length_header else 0
         except ValueError:
             return {}, (400, "E_INTERNAL")
-        if length < 0 or length > config.BODY_MAX_BYTES:
+        limit = config.RESULT_MAX_BYTES if is_result else config.BODY_MAX_BYTES
+        if length < 0 or length > limit:
             self.close_connection = True
-            return {}, (413 if length > config.BODY_MAX_BYTES else 400, "E_INTERNAL")
+            code = "E_RESULT_TOO_LARGE" if is_result and length > limit else "E_INTERNAL"
+            return {}, (413 if length > limit else 400, code)
         if length == 0:
             return {}, None
         raw = self.rfile.read(length)

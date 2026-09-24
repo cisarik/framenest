@@ -422,3 +422,121 @@ def test_confirmed_response_resume_requires_same_response_identity(tmp_path):
     with pytest.raises(BridgeError):
         event(manager, job, fence, "send_intent")
     assert manager.resolve(job.job_id, result(fence)) == "done"
+
+
+def queued_hello(manager, readiness, **extra):
+    return manager.hello({"proto": 1, "runner_id": manager._service["runner_id"],
+                          "browser_session": manager._service["browser_session"],
+                          "readiness": readiness, **extra})
+
+
+def pause_queued(manager):
+    return queued_hello(manager, {"state": "needs_admin", "reason": "E_LOGIN_REQUIRED"})
+
+
+def resume_queued(manager, job):
+    pending = manager.resume({"job_id": job.job_id,
+                              "intervention_id": manager.status()["intervention_id"]})
+    return queued_hello(manager, {"state": "ready"}, resume_id=pending["resume_id"])
+
+
+def test_queued_wait_retains_slot_deadline_and_requires_successful_explicit_recheck(tmp_path):
+    clock = Clock(0)
+    manager = manager_at(tmp_path, clock=clock, wall_clock=clock, connected_window_s=5000)
+    job = manager.create_job(request(timeout_s=10))
+    clock.value = 2
+    pause_queued(manager)
+    clock.value = 20
+    manager.watchdog()
+    view = manager.get(job.job_id)["job"]
+    assert (view["status"], view["phase"], view["admin_wait_s"]) == ("queued", "queued", 18)
+    assert manager.status()["jobs"]["active"] == 1
+    with pytest.raises(BridgeError, match="already active"):
+        manager.create_job(request())
+    # Neither passive readiness nor a failed explicit recheck grants an offer.
+    queued_hello(manager, {"state": "ready"})
+    assert manager.next_offer(0, runner_id=manager._service["runner_id"],
+                              epoch=manager._service["epoch"]) is None
+    pending = manager.resume({"job_id": job.job_id, "intervention_id": view["intervention_id"]})
+    queued_hello(manager, {"state": "needs_admin", "reason": "E_LOGIN_REQUIRED"},
+                 resume_id=pending["resume_id"])
+    queued_hello(manager, {"state": "ready"}, resume_id=pending["resume_id"])
+    assert manager.status()["readiness"] == "needs_admin"
+    assert manager.next_offer(0, runner_id=manager._service["runner_id"],
+                              epoch=manager._service["epoch"]) is None
+    with pytest.raises(BridgeError):
+        event(manager, job, {"runner_id": manager._service["runner_id"],
+                            "epoch": manager._service["epoch"], "offer_id": uid()}, "send_intent")
+    resume_queued(manager, job)
+    assert manager.get(job.job_id)["job"]["phase"] == "queued"
+    assert manager._jobs[job.job_id].deadline_mono == 28
+    clock.value = 27
+    manager.watchdog()
+    assert manager.get(job.job_id)["job"]["status"] == "queued"
+    assert offer(manager, job)["job_id"] == job.job_id
+
+
+@pytest.mark.parametrize("expiry", ["watchdog", "resume", "recovery"])
+def test_queued_cumulative_admin_limit_is_exact(tmp_path, expiry):
+    clock = Clock(0)
+    manager = manager_at(tmp_path, clock=clock, wall_clock=clock, connected_window_s=5000)
+    job = manager.create_job(request(timeout_s=10))
+    clock.value = 2
+    pause_queued(manager)
+    clock.value = 902
+    resume_queued(manager, job)
+    clock.value = 903
+    pause_queued(manager)
+    clock.value = 1802
+    manager.watchdog()
+    assert manager.get(job.job_id)["job"]["admin_wait_s"] == 1799
+    assert manager.status()["jobs"]["active"] == 1
+    clock.value = 1803
+    if expiry == "watchdog":
+        manager.watchdog()
+    elif expiry == "resume":
+        resume_queued(manager, job)
+    else:
+        manager.journal.close()
+        manager = JobManager(Store(tmp_path), clock=clock, wall_clock=clock)
+    view = manager.get(job.job_id)["job"]
+    assert view["status"] == "failed"
+    assert view["result"]["error_code"] == "E_INTERVENTION_TIMEOUT"
+    assert view["admin_wait_s"] == 1800
+    assert manager.status()["jobs"]["active"] == 0
+    assert manager.status()["readiness"] == "needs_admin"
+    manager.journal.close()
+
+
+def test_queued_wait_recovery_retains_time_and_fences_old_epoch(tmp_path):
+    clock, wall = Clock(0), Clock(1000)
+    manager = manager_at(tmp_path, clock=clock, wall_clock=wall, connected_window_s=5000)
+    job = manager.create_job(request(timeout_s=10))
+    clock.value, wall.value = 2, 1002
+    pause_queued(manager)
+    old_epoch, runner = manager._service["epoch"], manager._service["runner_id"]
+    manager.journal.close()
+    clock.value, wall.value = 0, 1020  # restarted monotonic clock
+    manager = JobManager(Store(tmp_path), clock=clock, wall_clock=wall)
+    ready(manager)
+    view = manager.get(job.job_id)["job"]
+    assert (view["status"], view["phase"], view["admin_wait_s"]) == ("queued", "queued", 18)
+    with pytest.raises(BridgeError):
+        manager.next_offer(0, runner_id=runner, epoch=old_epoch)
+    assert manager.next_offer(0, runner_id=manager._service["runner_id"],
+                              epoch=manager._service["epoch"]) is None
+    clock.value, wall.value = 3, 1023
+    resume_queued(manager, job)
+    assert manager._jobs[job.job_id].deadline_mono == 11
+    assert manager.get(job.job_id)["job"]["admin_wait_s"] == 21
+    assert offer(manager, job)["epoch"] != old_epoch
+
+
+def test_queued_pause_commit_failure_does_not_publish_wait(tmp_path, monkeypatch):
+    manager = manager_at(tmp_path)
+    job = manager.create_job(request())
+    monkeypatch.setattr(manager.journal, "commit", lambda *a, **kw: (_ for _ in ()).throw(JournalUnavailable()))
+    with pytest.raises(BridgeError) as error:
+        pause_queued(manager)
+    assert error.value.code == "E_JOURNAL_UNAVAILABLE"
+    assert manager._jobs[job.job_id].admin_started is None

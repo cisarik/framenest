@@ -36,7 +36,7 @@ def bridge(tmp_path):
         thread.join(timeout=5)
 
 
-def _request(port, method, path, *, token=None, host=None, origin=None, body=None):
+def _request(port, method, path, *, token=None, host=None, origin=None, body=None, with_headers=False):
     if path.startswith("/v1/next?"):
         path += f"&runner_id={RUNNER_ID}&epoch={EPOCHS[port]}"
     if path == "/v1/jobs" and body is not None:
@@ -54,7 +54,10 @@ def _request(port, method, path, *, token=None, host=None, origin=None, body=Non
     connection.request(method, path, body=payload, headers=headers)
     response = connection.getresponse()
     raw = response.read()
+    response_headers = dict(response.getheaders())
     connection.close()
+    if with_headers:
+        return response.status, json.loads(raw) if raw else None, response_headers
     if not raw:
         return response.status, None
     return response.status, json.loads(raw.decode("utf-8"))
@@ -96,6 +99,23 @@ def test_host_origin_and_token_are_rejected(bridge) -> None:
         origin=f"http://127.0.0.1:{port}",
     )
     assert status == 200
+
+
+@pytest.mark.parametrize("origin_kind", ["absent", "empty", "exact", "null", "foreign"])
+@pytest.mark.parametrize("authenticated", [False, True])
+def test_origin_presence_token_and_cors_contract(bridge, origin_kind, authenticated):
+    _server, state, port = bridge
+    origin = {"absent": None, "empty": "", "exact": f"http://127.0.0.1:{port}",
+              "null": "null", "foreign": "https://example.test"}[origin_kind]
+    status, _payload, headers = _request(
+        port, "GET", "/v1/status", token=state.token if authenticated else None,
+        origin=origin, with_headers=True,
+    )
+    approved = origin_kind in ("absent", "exact")
+    expected = (200 if authenticated else 401) if approved else 403
+    assert status == expected
+    assert headers.get("Access-Control-Allow-Origin") != "*"
+    assert headers.get("Access-Control-Allow-Origin") == (origin if approved and authenticated else None)
 
 
 def _hello(port, token) -> None:

@@ -156,10 +156,17 @@ class JobManager:
                     blocked = True
                 elif job.status == "queued":
                     elapsed = self._wall() - job.created_wall
-                    if elapsed < 0 or elapsed >= job.timeout_s:
+                    if job.admin_started_wall is not None:
+                        job.admin_wait_s += max(0, self._wall() - job.admin_started_wall)
+                        job.admin_started, job.admin_started_wall = self._clock(), self._wall()
+                        blocked = True
+                    active_elapsed = elapsed - job.admin_wait_s
+                    if job.admin_wait_s >= config.ADMIN_WAIT_MAX_S:
+                        self._terminal(job, "E_INTERVENTION_TIMEOUT", "recovery")
+                    elif elapsed < 0 or active_elapsed >= job.timeout_s:
                         self._terminal(job, "E_RESPONSE_TIMEOUT", "recovery")
                     else:
-                        job.deadline_mono = self._clock() + job.timeout_s - elapsed
+                        job.deadline_mono = self._clock() + job.timeout_s - max(0, active_elapsed)
                         job.last_progress_mono = self._clock()
             self._service = {"epoch": str(uuid.uuid4()), "state": "needs_admin" if blocked else "starting",
                              "reason": "E_AMBIGUOUS_SEND" if blocked else None,
@@ -240,6 +247,7 @@ class JobManager:
             state.update(runner_id=rid, browser_session=bid,
                          adapter={"pack_version": config.PACK_VERSION})
             active = self._active()
+            queued = copy.deepcopy(active) if active and active.status == "queued" else None
             if ready["state"] != "ready":
                 reason = ready.get("reason")
                 if not isinstance(reason, str) or reason not in ADMIN_REASONS | {"E_BROWSER_UNAVAILABLE", "E_AMBIGUOUS_SEND"}:
@@ -249,12 +257,28 @@ class JobManager:
                 self._block(state, reason, browser=ready["state"] == "browser_unavailable")
                 if payload.get("resume_id") != resume_id:
                     state["resume_id"] = resume_id
+                if queued is not None:
+                    if queued.admin_started is None:
+                        queued.admin_started, queued.admin_started_wall = self._clock(), self._wall()
+                        queued.intervention_id = str(uuid.uuid4())
+                    queued.intervention_reason = reason
+                    state["intervention_id"] = queued.intervention_id
             elif state["state"] == "starting" or (
                 (active is None or active.status == "queued") and state["resume_id"] is not None
                 and payload.get("resume_id") == state["resume_id"]
             ):
-                state.update(state="ready", reason=None, intervention_id=None, resume_id=None)
-            self._commit(service=state)
+                if queued is not None and queued.admin_started is not None:
+                    waited = max(0, self._clock() - queued.admin_started)
+                    if queued.admin_wait_s + waited >= config.ADMIN_WAIT_MAX_S:
+                        self._terminal(queued, "E_INTERVENTION_TIMEOUT", "intervention")
+                    else:
+                        queued.admin_wait_s += waited
+                        queued.deadline_mono += waited
+                        queued.admin_started = queued.admin_started_wall = None
+                        queued.intervention_id = queued.intervention_reason = None
+                if queued is None or queued.status == "queued":
+                    state.update(state="ready", reason=None, intervention_id=None, resume_id=None)
+            self._commit(queued, service=state)
             self._last_hello = self._clock()
             self._last_hello_iso = utc_now_iso()
             return {"ok": True, "proto": config.PROTO_VERSION, "bridge_version": config.BRIDGE_VERSION,
@@ -362,7 +386,7 @@ class JobManager:
                 self._runner({"runner_id": runner_id, "epoch": epoch})
                 if self._service["state"] == "ready":
                     for original in self._jobs.values():
-                        if original.status == "queued":
+                        if original.status == "queued" and original.admin_started is None:
                             job = copy.deepcopy(original)
                             job.status, job.phase = "offered", "offered"
                             job.runner_id, job.epoch = runner_id, epoch
@@ -544,7 +568,7 @@ class JobManager:
                 code = None
                 if job.cancel_requested and now - job.cancel_mono >= self.cancel_grace_s:
                     code = "E_CANCELLED"
-                elif job.status == "needs_admin":
+                elif job.admin_started is not None:
                     if job.admin_wait_s + max(0, now - job.admin_started) >= config.ADMIN_WAIT_MAX_S:
                         code = "E_INTERVENTION_TIMEOUT"
                 elif now >= job.deadline_mono:

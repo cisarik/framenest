@@ -33,7 +33,7 @@ import {
   readToken,
   resolveStateDir,
 } from "./bridge_client.mjs";
-import { CLIENT_CAPABILITIES } from "../protocol.js";
+import { CLIENT_CAPABILITIES, RESULT_MAX_BYTES } from "../protocol.js";
 import { ChromiumDriver } from "./driver.mjs";
 import { JobEngine, JobEngineError } from "./job_engine.mjs";
 import { applyResourcePolicy } from "./resource_policy.mjs";
@@ -269,8 +269,9 @@ export async function executeOffer({
   } catch (error) {
     result = { ...failedResult(errorCode(error), "lifecycle"), activity_stopped: false };
   } finally { clearInterval(heartbeat); }
-  // Freeze exactly one result identity and body. Only delivery, never execution, retries.
-  const payload = {
+  // Freeze one delivery identity. A size rejection replaces content with a small
+  // terminal failure; only delivery of that envelope, never execution, retries.
+  let payload = {
     ...identity, job_id: job.job_id, delivery_id: randomUUID(), status: result.status,
     answer: result.answer ?? null, error_code: result.error_code ?? null,
     answer_html: result.answer_html ?? null,
@@ -279,11 +280,23 @@ export async function executeOffer({
   };
   if (result.project_ok !== undefined) payload.project_ok = result.project_ok;
   if (result.appended !== undefined) payload.appended = result.appended;
+  const rejectSize = () => {
+    result = { ...failedResult("E_RESULT_TOO_LARGE", "delivery"),
+      activity_stopped: payload.activity_stopped };
+    payload = { ...identity, job_id: job.job_id, delivery_id: payload.delivery_id,
+      ...result, proto: PROTO };
+  };
+  if (Buffer.byteLength(JSON.stringify(payload), "utf8") > RESULT_MAX_BYTES) rejectSize();
   let attempt = 0;
   while (!signal?.aborted) {
     try { await client.result(job.job_id, payload); return result; }
     catch (error) {
       if (error.status === 409 || error.status === 404) return failedResult("E_AMBIGUOUS_SEND", "delivery");
+      if (error.status === 413 || error.code === "E_RESULT_TOO_LARGE") {
+        if (payload.error_code === "E_RESULT_TOO_LARGE") throw error;
+        rejectSize();
+        continue;
+      }
       await sleep(Math.min(30000, 250 * 2 ** Math.min(attempt++, 7)));
     }
   }

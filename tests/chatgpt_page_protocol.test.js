@@ -22,9 +22,11 @@ test("protocol version stays at 1", () => {
 test("durable capture capabilities and typed lifecycle errors are explicit", () => {
   assert.deepEqual(CLIENT_CAPABILITIES, ["durable_submission", "admin_resume"]);
   for (const code of ["E_BROWSER_UNAVAILABLE", "E_NEEDS_ADMIN", "E_SERVICE_LIMIT",
-    "E_IDEMPOTENCY_CONFLICT", "E_AMBIGUOUS_SEND", "E_JOURNAL_UNAVAILABLE"]) {
+    "E_IDEMPOTENCY_CONFLICT", "E_AMBIGUOUS_SEND", "E_JOURNAL_UNAVAILABLE", "E_RESULT_TOO_LARGE"]) {
     assert.ok(ERROR_CODES.includes(code));
   }
+  assert.ok(!ERROR_CODES.includes("E_ATTACHMENT_INVALID"));
+  assert.ok(!ERROR_CODES.includes("E_RESULT_EXPIRED"));
 });
 
 test("upload_input locator is retained and unused by the ask gate", () => {

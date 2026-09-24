@@ -1,5 +1,8 @@
 export const PROTO_VERSION = 1;
 
+// UTF-8 bytes of the entire JSON result envelope, including optional fields.
+export const RESULT_MAX_BYTES = 2 * 1024 * 1024;
+
 export const PACK_VERSION = 5;
 
 export const EXTENSION_VERSION = "0.1.0";
@@ -44,6 +47,7 @@ export const ERROR_CODES = [
   "E_ATTACHMENT_MISSING",
   "E_RESPONSE_TIMEOUT",
   "E_RESPONSE_EMPTY",
+  "E_RESULT_TOO_LARGE",
   "E_STALL",
   "E_FILE_MISSING",
   "E_FILE_TOO_LARGE",

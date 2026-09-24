@@ -93,7 +93,7 @@ def check_request(
         return AuthResult(False, 403, "E_INTERNAL", "forbidden Host header")
 
     allow_origin = None
-    if origin is not None and origin != "":
+    if origin is not None:
         allowed = f"http://{expected_host}"
         if origin != allowed:
             return AuthResult(False, 403, "E_INTERNAL", "forbidden Origin")

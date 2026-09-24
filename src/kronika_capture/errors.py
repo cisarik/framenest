@@ -29,6 +29,7 @@ ERROR_CODES = (
     "E_ATTACHMENT_MISSING",
     "E_RESPONSE_TIMEOUT",
     "E_RESPONSE_EMPTY",
+    "E_RESULT_TOO_LARGE",
     "E_STALL",
     "E_FILE_MISSING",
     "E_FILE_TOO_LARGE",
@@ -65,6 +66,7 @@ def safe_message(code: str) -> str:
         "E_AMBIGUOUS_SEND": "Submission association is uncertain; do not resend.",
         "E_JOURNAL_UNAVAILABLE": "Durable capture state is unavailable.",
         "E_RESPONSE_TIMEOUT": "The active response time limit expired.",
+        "E_RESULT_TOO_LARGE": "The complete result exceeds the delivery byte limit.",
         "E_INTERVENTION_TIMEOUT": "The administrator wait limit expired.",
         "E_CANCELLED": "The task was cancelled.",
     }.get(code, "The capture request could not be completed.")

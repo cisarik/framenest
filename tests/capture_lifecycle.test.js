@@ -9,6 +9,7 @@ import { join } from "node:path";
 import { JobEngine } from "../src/kronika_capture/_assets/extension/src/headless/job_engine.mjs";
 import { LaunchBrake, endpointParser, chromiumLaunchArgs, ChromiumDriver, readinessExpression } from "../src/kronika_capture/_assets/extension/src/headless/driver.mjs";
 import { executeOffer, runPersistentService, parseArgs } from "../src/kronika_capture/_assets/extension/src/headless/runner.mjs";
+import { RESULT_MAX_BYTES } from "../src/kronika_capture/_assets/extension/src/protocol.js";
 
 const pack = JSON.parse(readFileSync(new URL("../src/kronika_capture/_assets/extension/src/adapters/pack_v5.json", import.meta.url)));
 const uuid = () => randomUUID();
@@ -23,6 +24,60 @@ class FakeDriver {
   async navigate() {}
   async readiness() { return this.crashed ? { state: "browser_unavailable", reason: "E_BROWSER_UNAVAILABLE" } : { state: "ready" }; }
 }
+
+for (const excess of [0, 1]) {
+  test(`result limit includes exact serialized envelope at limit + ${excess} bytes`, async () => {
+    const offered = job(), driver = new FakeDriver();
+    let executions = 0, deliveries = 0;
+    const empty = {runner_id: offered.runner_id, offer_id: offered.offer_id, epoch: offered.epoch,
+      job_id: offered.job_id, delivery_id: uuid(), status: "done", answer: "", error_code: null,
+      answer_html: null, url: null, step: "engine", activity_stopped: true, proto: 1};
+    const answer = "x".repeat(RESULT_MAX_BYTES - Buffer.byteLength(JSON.stringify(empty)) + excess);
+    class Engine {
+      async run() { executions++; return {status: "done", answer, activity_stopped: true}; }
+    }
+    const client = {
+      async events() { return {epoch: offered.epoch}; },
+      async result(_id, body) {
+        deliveries++;
+        assert.ok(Buffer.byteLength(JSON.stringify(body)) <= RESULT_MAX_BYTES);
+        assert.equal(body.status, excess ? "failed" : "done");
+        assert.equal(body.error_code, excess ? "E_RESULT_TOO_LARGE" : null);
+        assert.equal(body.answer, excess ? null : answer);
+      },
+    };
+    await executeOffer({client, driver, pack, job: offered, Engine});
+    assert.equal(executions, 1);
+    assert.equal(deliveries, 1);
+    assert.equal(driver.stops, 0);
+  });
+}
+
+test("permanent 413 never repeats the rejected result or reexecutes the engine", async () => {
+  const offered = job();
+  let executions = 0;
+  const bodies = [];
+  class Engine {
+    async run() { executions++; return {status: "done", answer: "synthetic", activity_stopped: true}; }
+  }
+  const client = {
+    async events() { return {epoch: offered.epoch}; },
+    async result(_id, body) {
+      bodies.push(body);
+      if (bodies.length === 1) throw Object.assign(new Error("size"), {status: 413, code: "E_INTERNAL"});
+      if (bodies.length === 2) throw new Error("lost acknowledgement");
+      assert.equal(bodies.length, 3);
+    },
+  };
+  const result = await executeOffer({client, driver: new FakeDriver(), pack, job: offered, Engine,
+    sleep: async () => {}});
+  assert.equal(executions, 1);
+  assert.equal(result.error_code, "E_RESULT_TOO_LARGE");
+  assert.equal(bodies[0].status, "done");
+  assert.equal(bodies[1].status, "failed");
+  assert.equal(bodies[0].delivery_id, bodies[1].delivery_id);
+  assert.deepEqual(bodies[1], bodies[2]);
+});
 
 test("one persistent browser/page across jobs and capped bridge reconnect, no shutdown on outage", async () => {
   const driver = new FakeDriver(), controller = new AbortController();
