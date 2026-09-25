@@ -34,7 +34,7 @@ import {
   resolveStateDir,
 } from "./bridge_client.mjs";
 import { CLIENT_CAPABILITIES, RESULT_MAX_BYTES } from "../protocol.js";
-import { ChromiumDriver } from "./driver.mjs";
+import { ChromiumDriver, DriverError, safeStartupDiagnostic } from "./driver.mjs";
 import { JobEngine, JobEngineError } from "./job_engine.mjs";
 import { applyResourcePolicy } from "./resource_policy.mjs";
 
@@ -361,22 +361,51 @@ export async function runJobLoop({
 }
 
 export async function runPersistentService({ driver, pack, client, afterOpen = async () => {}, ...options }) {
-  let startupFailed = false;
+  let startupError = null, stage = "executable_preflight";
+  const report = (event, fields) => {
+    try { options.log?.(event + " " + JSON.stringify(fields)); }
+    catch { /* Logging must not replace the lifecycle outcome. */ }
+  };
   try {
     await driver.start();
+    stage = "page_opening";
     await driver.openPage();
     await afterOpen();
+    stage = "navigation";
     await driver.navigate("https://chatgpt.com/");
-  } catch {
-    startupFailed = true;
+  } catch (error) {
+    startupError = new DriverError("E_BROWSER_UNAVAILABLE", "Browser startup failed.");
+    startupError.startupDiagnostic = stage === "executable_preflight"
+      ? safeStartupDiagnostic(error?.startupDiagnostic, stage)
+      : safeStartupDiagnostic({ ...driver.startupDiagnostic, stage, reason: "operation_failed",
+        exit_code: driver.child?.exitCode, signal: driver.child?.signalCode });
   }
+  report("capture_startup", {
+    outcome: startupError ? "failed" : "started",
+    code: startupError ? "E_BROWSER_UNAVAILABLE" : null,
+    ...safeStartupDiagnostic(startupError?.startupDiagnostic ?? {
+      ...driver.startupDiagnostic, stage: "complete", reason: "none",
+    }),
+  });
+  if (startupError?.startupDiagnostic.cleanup_failed)
+    report("capture_cleanup", { outcome: "failed", phase: "startup", code: "E_BROWSER_UNAVAILABLE" });
   // A failed startup is an unavailable service, never a browser restart loop.
-  const ownedDriver = startupFailed ? {
+  const ownedDriver = startupError ? {
     readiness: async () => ({ state: "browser_unavailable", reason: "E_BROWSER_UNAVAILABLE" }),
   } : driver;
   try { return await runJobLoop({ driver: ownedDriver, pack, client, ...options }); }
   finally {
-    if (options.signal?.aborted || options.once) await driver.stop();
+    if (options.signal?.aborted || options.once) {
+      try { await driver.stop(); }
+      catch {
+        report("capture_cleanup", { outcome: "failed", phase: "shutdown", code: "E_BROWSER_UNAVAILABLE" });
+        if (startupError) {
+          startupError.startupDiagnostic.cleanup_failed = true;
+          throw startupError;
+        }
+        throw new DriverError("E_BROWSER_UNAVAILABLE", "Browser shutdown failed.");
+      }
+    }
   }
 }
 

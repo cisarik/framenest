@@ -43,7 +43,7 @@ CAPTURE_BRAKE_DIRECTORY = "/var/lib/kronika-capture/profile.capture-launch"
 CAPTURE_BRAKE_MS = 300_000
 CAPTURE_BRIDGE_PROTOCOL = "1"
 CAPTURE_DRAIN_DEADLINE_SECONDS = 30
-CAPTURE_READINESS_DEADLINE_SECONDS = 30
+CAPTURE_READINESS_DEADLINE_SECONDS = 180
 CAPTURE_POLL_INTERVAL_SECONDS = 1
 ENV_FILE = "/etc/framenest/framenest.env"
 POETRY_BIN = "/opt/framenest/tooling/poetry/2.4.1/.venv/bin/poetry"
@@ -654,12 +654,58 @@ def cmd_remote_capture_brake_gate() -> str:
     return _remote_python(script)
 
 
-def cmd_remote_capture_readiness_gate() -> str:
-    script = (
-        "# kronika-capture-readiness-gate\n"
-        "import json, sqlite3, stat, subprocess\n"
+def _capture_service_reader() -> str:
+    """Read only coordination metadata; never query jobs, results or credentials."""
+    return (
+        "import json, sqlite3, stat, uuid\n"
         "from pathlib import Path\n"
         f"journal = Path({CAPTURE_JOURNAL!r})\n"
+        "def valid_identity(value):\n"
+        "    return isinstance(value, str) and str(uuid.UUID(value)) == value\n"
+        "def read_service():\n"
+        "    try:\n"
+        "        info = journal.lstat()\n"
+        "    except FileNotFoundError:\n"
+        "        return {}\n"
+        "    if not stat.S_ISREG(info.st_mode):\n"
+        "        raise ValueError()\n"
+        "    con = sqlite3.connect('file:' + journal.as_posix() + '?mode=ro', uri=True)\n"
+        "    try:\n"
+        "        row = con.execute('SELECT record FROM service WHERE singleton=1').fetchone()\n"
+        "    finally:\n"
+        "        con.close()\n"
+        "    if row is None:\n"
+        "        return {}\n"
+        "    payload = json.loads(row[0])\n"
+        "    if not isinstance(payload, dict):\n"
+        "        raise ValueError()\n"
+        "    for key in ('runner_id', 'browser_session'):\n"
+        "        value = payload.get(key)\n"
+        "        if value is not None and not valid_identity(value):\n"
+        "            raise ValueError()\n"
+        "    return payload\n"
+    )
+
+
+def cmd_remote_capture_identity() -> str:
+    script = (
+        "# kronika-capture-identity-snapshot\n"
+        + _capture_service_reader()
+        + "try:\n"
+        "    payload = read_service()\n"
+        "    print(json.dumps([payload.get('runner_id'), payload.get('browser_session')]))\n"
+        "except Exception:\n"
+        "    print('identity=unverifiable')\n"
+    )
+    return _remote_python(script)
+
+
+def cmd_remote_capture_readiness_gate(previous_identity: tuple[str | None, str | None]) -> str:
+    script = (
+        "# kronika-capture-readiness-gate\n"
+        + _capture_service_reader()
+        + "import subprocess\n"
+        f"previous_identity = {previous_identity!r}\n"
         f"service = {CAPTURE_RUNNER_SERVICE!r}\n"
         "def finish(value):\n"
         "    print('readiness=' + value)\n"
@@ -669,18 +715,17 @@ def cmd_remote_capture_readiness_gate() -> str:
         "        ['systemctl', 'show', '-p', 'ActiveState', '--value', service],\n"
         "        check=False, capture_output=True, text=True,\n"
         "    )\n"
+        "    if shown.returncode != 0:\n"
+        "        finish('unverifiable')\n"
         "    active = shown.stdout.strip()\n"
         "    if active == 'failed':\n"
         "        finish('failed')\n"
         "    else:\n"
-        "        service_state = ''\n"
-        "        if journal.is_file() and not journal.is_symlink() and stat.S_ISREG(journal.lstat().st_mode):\n"
-        "            con = sqlite3.connect('file:' + journal.as_posix() + '?mode=ro', uri=True)\n"
-        "            row = con.execute('SELECT record FROM service WHERE singleton=1').fetchone()\n"
-        "            if row:\n"
-        "                payload = json.loads(row[0])\n"
-        "                if isinstance(payload, dict) and isinstance(payload.get('state'), str):\n"
-        "                    service_state = payload['state']\n"
+        "        payload = read_service()\n"
+        "        identity = (payload.get('runner_id'), payload.get('browser_session'))\n"
+        "        if not all(valid_identity(value) and value != old for value, old in zip(identity, previous_identity)):\n"
+        "            finish('starting')\n"
+        "        service_state = payload.get('state', '')\n"
         "        if service_state == 'browser_unavailable':\n"
         "            finish('browser_unavailable')\n"
         "        elif service_state == 'needs_admin':\n"
@@ -1602,13 +1647,32 @@ def _enforce_capture_brake(runner: Runner, transport: dict[str, str]) -> None:
         raise ReleaseError("capture restart brake refuses launch", EXIT_CAPTURE_BRAKE)
 
 
-def _verify_capture_readiness(runner: Runner, transport: dict[str, str]) -> None:
+def _snapshot_capture_identity(runner: Runner, transport: dict[str, str]) -> tuple[str | None, str | None]:
+    raw = ssh(runner, **transport, remote_command=cmd_remote_capture_identity()).strip()
+    try:
+        if len(raw) > 256:
+            raise ValueError()
+        identity = json.loads(raw)
+        if not isinstance(identity, list) or len(identity) != 2:
+            raise ValueError()
+        pattern = r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+        if any(value is not None and (not isinstance(value, str) or re.fullmatch(pattern, value) is None)
+               for value in identity):
+            raise ValueError()
+    except (ValueError, TypeError):
+        raise ReleaseError("capture identity is unverifiable", EXIT_READINESS) from None
+    return identity[0], identity[1]
+
+
+def _verify_capture_readiness(
+    runner: Runner, transport: dict[str, str], previous_identity: tuple[str | None, str | None],
+) -> None:
     """Poll runner readiness. A failed browser launch is not started again."""
 
     deadline = time.monotonic() + CAPTURE_READINESS_DEADLINE_SECONDS
     while True:
         state = ssh(
-            runner, **transport, remote_command=cmd_remote_capture_readiness_gate()
+            runner, **transport, remote_command=cmd_remote_capture_readiness_gate(previous_identity)
         ).strip()
         if state == "readiness=ready":
             return
@@ -1691,6 +1755,7 @@ def _cmd_capture_transition(args: argparse.Namespace, runner: Runner) -> int:
 
     _drain_capture_work(runner, transport)
     _enforce_capture_brake(runner, transport)
+    previous_identity = _snapshot_capture_identity(runner, transport)
     ssh(runner, **transport, remote_command=cmd_remote_atomic_switch_capture(target))
     try:
         ssh(runner, **transport, remote_command=cmd_remote_restart_capture_runner())
@@ -1698,7 +1763,7 @@ def _cmd_capture_transition(args: argparse.Namespace, runner: Runner) -> int:
         print(format_release_pointers(web_sha, release_sha))
         raise ReleaseError("capture runner restart failed", EXIT_READINESS) from exc
     try:
-        _verify_capture_readiness(runner, transport)
+        _verify_capture_readiness(runner, transport, previous_identity)
     except ReleaseError as exc:
         print(format_release_pointers(web_sha, release_sha))
         raise ReleaseError(

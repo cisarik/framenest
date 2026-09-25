@@ -130,6 +130,38 @@ Browser debugging stays on loopback inside the runner. The launcher reads `KRONI
 file and requires an absolute executable. It does not search `PATH`, enable
 stealth, or weaken the sandbox.
 
+The runner logs one `capture_startup` JSON outcome per startup attempt. Its
+public failure code remains `E_BROWSER_UNAVAILABLE`. The internal `stage`
+identifies `executable_preflight`, `profile_preflight`, `launch_lock`,
+`brake_metadata`, `spawn`, `endpoint`, `cdp_connection`, `page_opening`, or
+`navigation`; successful startup reports `complete`. The `reason` distinguishes
+an occupied lock (`locked`), an unexpired five-minute interval
+(`interval_unexpired`), and unverifiable brake metadata
+(`metadata_unverifiable`). Other reasons describe the failed operation rather
+than guessing its cause.
+
+Diagnostics contain only fixed enums, booleans, a bounded spawn errno, and an
+exit code from 0 through 255 when available. They preserve the child's exit
+code and allowlisted signal before cleanup, plus `endpoint_seen` and
+`endpoint_budget_exhausted`. The existing stderr budget is 65,536 bytes and
+4,096 characters per line. Recognized failure wording produces only one of
+`sandbox_namespace`, `display_authentication`, `temporary_storage_read_only`,
+or `profile_in_use`; unknown messages and unrelated warnings remain
+`unclassified`. Input text is discarded. Raw exceptions, stderr, URLs, argv,
+environment values, profile paths, DOM and credentials are never included in
+the startup record. For example:
+
+```text
+capture_startup {"outcome":"failed","code":"E_BROWSER_UNAVAILABLE","stage":"endpoint","reason":"process_exited","spawn_errno":null,"exit_code":1,"signal":null,"endpoint_seen":false,"endpoint_budget_exhausted":false,"stderr_classification":"unclassified","cleanup_failed":false}
+```
+
+A cleanup failure emits a separate `capture_cleanup` record and preserves the
+first startup failure. Unconfirmed termination retains the launch lock. A
+failed startup remains in the unavailable service loop without another launch
+attempt; confirmed termination releases the lock but does not reset the brake.
+These classifications narrow a later host diagnostic; synthetic tests alone
+do not establish whether Chromium can start on the host.
+
 The per-install bridge token is not written in `capture.env`, unit arguments,
 or logs. Bridge and runner units load systemd credential `token` from the
 root-owned file `/etc/kronika-capture/credentials/kronika-bridge-token`. When
@@ -158,12 +190,29 @@ SHAs and do not restart capture. `activate-capture` and `rollback-capture`
 are the capture operations. Each one checks the installed release SHA, the
 capture identity in its manifest, and bridge protocol `1`; drains queued
 capture work; refuses a live or paused job; enforces the five-minute browser
-start brake; switches `capture-current`; restarts `kronika-capture-runner.service`
-exactly once; and checks readiness. A failed browser launch is not started
-again, and capture failure does not restart the web service. A release
+start brake; snapshots the previous runner and browser-session identities from
+journal service metadata; switches `capture-current`; restarts
+`kronika-capture-runner.service` exactly once; and checks readiness. Readiness
+is accepted only when both valid identities have changed and the runner unit
+is active. Stale `ready`, `needs_admin`, and `browser_unavailable` records all
+remain `starting`. A failed unit is immediately terminal, as is fresh
+`needs_admin` or `browser_unavailable` readiness (exit 16). The bounded
+180-second deadline accommodates the existing 90-second connection fence and
+reconnect backoff; no fresh readiness by that deadline returns exit 17. Failure
+retains the new capture pointer and does not restart the runner again. An
+unverifiable identity snapshot refuses activation before the switch (exit 15).
+Capture failure does not restart the web service. A release
 referenced by either pointer is retained. Web schema handling is unchanged:
 `migration-required` still stops `deploy --yes` at exit 13, and this helper
 does not migrate or delete a database.
+
+A reconstructed journal with zero jobs and persisted `browser_unavailable`
+can require `needs_admin` / `E_AMBIGUOUS_SEND`. Recovery uses the existing
+explicit resume with a null job identity and the current intervention identity.
+It remains pending until a ready browser acknowledges the matching resume
+identity. Wrong job, intervention, or acknowledgement identities cannot clear
+the pause; fresh readiness alone is insufficient. No journal reset, schema
+change, or state-directory recreation is part of this recovery.
 
 ## Current Target
 

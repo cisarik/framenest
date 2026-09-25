@@ -247,6 +247,48 @@ export function normalizeLoginState(raw) {
   };
 }
 
+const STARTUP_STAGES = new Set([
+  "executable_preflight", "profile_preflight", "launch_lock", "brake_metadata",
+  "spawn", "endpoint", "cdp_connection", "page_opening", "navigation", "complete",
+]);
+const STARTUP_REASONS = new Set([
+  "unclassified", "none", "unavailable", "automatic_restart_forbidden",
+  "locked", "lock_unavailable", "interval_unexpired", "metadata_unverifiable",
+  "spawn_failed", "process_exited", "endpoint_timeout", "connection_failed", "operation_failed",
+]);
+const SPAWN_ERRNOS = new Set(["EACCES", "ENOENT", "ENOEXEC", "ENOMEM", "EMFILE", "ENFILE", "EAGAIN"]);
+const CHILD_SIGNALS = new Set([
+  "SIGABRT", "SIGBUS", "SIGFPE", "SIGHUP", "SIGILL", "SIGINT", "SIGKILL",
+  "SIGPIPE", "SIGQUIT", "SIGSEGV", "SIGSYS", "SIGTERM", "SIGTRAP",
+]);
+const STDERR_CLASSES = new Set([
+  "sandbox_namespace", "display_authentication", "temporary_storage_read_only", "profile_in_use",
+]);
+
+// Only this projection may cross the startup logging boundary. Never retain an
+// exception message, path, endpoint, argv, or arbitrary child output in it.
+export function safeStartupDiagnostic(value = {}, fallbackStage = "executable_preflight") {
+  const input = value && typeof value === "object" ? value : {};
+  return {
+    stage: STARTUP_STAGES.has(input.stage) ? input.stage :
+      STARTUP_STAGES.has(fallbackStage) ? fallbackStage : "executable_preflight",
+    reason: STARTUP_REASONS.has(input.reason) ? input.reason : "unclassified",
+    spawn_errno: input.spawn_errno == null ? null : SPAWN_ERRNOS.has(input.spawn_errno) ? input.spawn_errno : "OTHER",
+    exit_code: Number.isInteger(input.exit_code) && input.exit_code >= 0 && input.exit_code <= 255 ? input.exit_code : null,
+    signal: input.signal == null ? null : CHILD_SIGNALS.has(input.signal) ? input.signal : "OTHER",
+    endpoint_seen: input.endpoint_seen === true,
+    endpoint_budget_exhausted: input.endpoint_budget_exhausted === true,
+    stderr_classification: STDERR_CLASSES.has(input.stderr_classification) ? input.stderr_classification : "unclassified",
+    cleanup_failed: input.cleanup_failed === true,
+  };
+}
+
+function startupFailure(stage, reason, details = {}) {
+  const error = new DriverError("E_BROWSER_UNAVAILABLE", "Browser startup failed.");
+  error.startupDiagnostic = safeStartupDiagnostic({ ...details, stage, reason });
+  return error;
+}
+
 export class LaunchBrake {
   constructor(directory, { now = Date.now } = {}) {
     this.directory = directory;
@@ -255,22 +297,23 @@ export class LaunchBrake {
   }
   acquire() {
     const now = this.now();
-    if (!Number.isFinite(now) || now < 0) throw new DriverError("E_BROWSER_UNAVAILABLE", "Launch time is unverifiable.");
+    if (!Number.isFinite(now) || now < 0) throw startupFailure("brake_metadata", "metadata_unverifiable");
     let fresh = false;
     try { mkdirSync(this.directory, { mode: 0o700 }); fresh = true; }
-    catch (error) { if (error.code !== "EEXIST") throw new DriverError("E_BROWSER_UNAVAILABLE", "Launch state is unavailable."); }
-    if (!lstatSync(this.directory).isDirectory() || lstatSync(this.directory).isSymbolicLink())
-      throw new DriverError("E_BROWSER_UNAVAILABLE", "Launch state is unavailable.");
+    catch (error) { if (error.code !== "EEXIST") throw startupFailure("brake_metadata", "metadata_unverifiable"); }
+    try {
+      if (!lstatSync(this.directory).isDirectory() || lstatSync(this.directory).isSymbolicLink()) throw new Error();
+    } catch { throw startupFailure("brake_metadata", "metadata_unverifiable"); }
     try { mkdirSync(join(this.directory, "lock"), { mode: 0o700 }); this.locked = true; }
-    catch { throw new DriverError("E_BROWSER_UNAVAILABLE", "A browser launch is locked."); }
+    catch (error) { throw startupFailure("launch_lock", error.code === "EEXIST" ? "locked" : "lock_unavailable"); }
     try {
       const metadata = join(this.directory, "last-start.json");
       if (!fresh) {
         const stat = lstatSync(metadata);
         if (!stat.isFile() || stat.size > 256) throw new Error();
         const previous = JSON.parse(readFileSync(metadata, "utf8"));
-        if (!Number.isFinite(previous.started_ms) || previous.started_ms < 0 ||
-            now < previous.started_ms || now - previous.started_ms < 300000) throw new Error();
+        if (!Number.isFinite(previous.started_ms) || previous.started_ms < 0 || now < previous.started_ms) throw new Error();
+        if (now - previous.started_ms < 300000) throw startupFailure("brake_metadata", "interval_unexpired");
       }
       const temporary = join(this.directory, "last-start.tmp");
       const fd = openSync(temporary, constants.O_WRONLY | constants.O_CREAT | constants.O_TRUNC | constants.O_NOFOLLOW, 0o600);
@@ -281,9 +324,11 @@ export class LaunchBrake {
       try { fsyncSync(directory); } finally { closeSync(directory); }
       const parent = openSync(dirname(this.directory), "r");
       try { fsyncSync(parent); } finally { closeSync(parent); }
-    } catch {
-      this.release();
-      throw new DriverError("E_BROWSER_UNAVAILABLE", "Browser launch brake requires manual recovery or more time.");
+    } catch (error) {
+      const failure = startupFailure("brake_metadata",
+        error.startupDiagnostic?.reason === "interval_unexpired" ? "interval_unexpired" : "metadata_unverifiable");
+      try { this.release(); } catch { failure.startupDiagnostic.cleanup_failed = true; }
+      throw failure;
     }
   }
   release() {
@@ -291,24 +336,46 @@ export class LaunchBrake {
   }
 }
 
+function classifyStartupStderr(line) {
+  // Match failure wording, optionally prefixed by a Chromium ERROR/FATAL header.
+  // Warnings and mere mentions of sandbox/display/profile are not diagnoses.
+  const message = line.replace(/^\[[^\]\r\n]{1,160}:(?:ERROR|FATAL):[^\]\r\n]{1,240}\]\s*/, "");
+  if (/^(?:No usable sandbox!|Failed to move to new namespace:.*errno = Operation not permitted|Failed to unshare.*Operation not permitted)/.test(message))
+    return "sandbox_namespace";
+  if (/^(?:Missing X server or \$DISPLAY|Failed to open display|Authorization required, but no authorization protocol specified|Invalid MIT-MAGIC-COOKIE-1 key)/.test(message))
+    return "display_authentication";
+  if (/^(?:Failed|Unable|Could not) to (?:create|mkdtemp).*?(?:\/tmp\/|temporary|temp directory).*?Read-only file system/.test(message))
+    return "temporary_storage_read_only";
+  if (/^(?:The profile appears to be in use by another (?:Chromium|Google Chrome|Chrome) process|Failed to create a ProcessSingleton for your profile directory)/.test(message))
+    return "profile_in_use";
+  return "unclassified";
+}
+
 export function endpointParser() {
-  let buffer = "", consumed = 0, endpoint = null, discard = false;
+  let buffer = "", consumed = 0, endpoint = null, discard = false, classification = "unclassified";
   return {
     feed(chunk) {
       if (endpoint || consumed >= 65536) return;
-      const text = Buffer.from(chunk).subarray(0, 65536 - consumed).toString("utf8");
-      consumed += Buffer.byteLength(text);
+      const bytes = Buffer.from(chunk).subarray(0, 65536 - consumed);
+      const text = bytes.toString("utf8");
+      consumed += bytes.length;
       for (const character of text) {
         if (character === "\n") {
           const match = !discard && buffer.match(/^DevTools listening on (ws:\/\/127\.0\.0\.1:(\d+)\/devtools\/browser\/[a-zA-Z0-9-]+)\r?$/);
           if (match && Number(match[2]) > 0 && Number(match[2]) <= 65535)
             endpoint = { wsUrl: match[1], port: Number(match[2]) };
+          if (!discard && classification === "unclassified") classification = classifyStartupStderr(buffer);
           buffer = ""; discard = false;
+          if (endpoint) break;
         } else if (!discard && buffer.length < 4096) buffer += character;
         else { buffer = ""; discard = true; }
       }
     },
     get endpoint() { return endpoint; },
+    get diagnostics() {
+      return { endpoint_seen: endpoint !== null, endpoint_budget_exhausted: !endpoint && consumed >= 65536,
+        stderr_classification: classification };
+    },
   };
 }
 
@@ -867,6 +934,7 @@ export class ChromiumDriver extends BaseCdpDriver {
     this.noProgressPollMs = noProgressPollMs;
     this.child = null;
     this.spawnError = null;
+    this.startupDiagnostic = safeStartupDiagnostic();
     this.port = null;
     this.browserWsUrl = null;
     this.targetId = null;
@@ -882,38 +950,54 @@ export class ChromiumDriver extends BaseCdpDriver {
   }
 
   async start() {
-    if (this.startedOnce) throw new DriverError("E_BROWSER_UNAVAILABLE", "Automatic browser restart is forbidden.");
+    if (this.startedOnce) throw startupFailure("spawn", "automatic_restart_forbidden");
     if (!this.chromePath || !isAbsolute(this.chromePath) || this.stealth) {
-      throw new DriverError("E_BROWSER_UNAVAILABLE", "An explicit Chromium executable without stealth is required.");
+      throw startupFailure("executable_preflight", "unavailable");
     }
     try {
       await access(this.chromePath, constants.X_OK);
       if (!statSync(this.chromePath).isFile()) throw new Error();
+    } catch { throw startupFailure("executable_preflight", "unavailable"); }
+    try {
       await access(this.profileDir);
       // Canonicalize the directory itself, never enumerate or read its contents.
       // Login and capture must share the same brake even through path aliases.
       const ownedProfile = realpathSync(this.profileDir);
       this.launchBrake ||= new LaunchBrake(ownedProfile + ".capture-launch");
     } catch {
-      throw new DriverError("E_BROWSER_UNAVAILABLE", "Browser preflight failed.");
+      throw startupFailure("profile_preflight", "unavailable");
     }
     this.launchBrake.acquire();
     this.startedOnce = true;
     this.endpointReader = endpointParser();
+    let stage = "spawn", spawnErrno = null;
     try {
       this.child = this.spawnProcess(this.chromePath, chromiumLaunchArgs({
         profileDir: this.profileDir, headless: !this.headed,
       }), { stdio: ["ignore", "ignore", "pipe"] });
       this.child.stderr.on("data", (chunk) => this.endpointReader.feed(chunk));
-      this.child.on("error", () => { this.spawnError = true; });
+      this.child.on("error", (error) => { this.spawnError = true; spawnErrno = error?.code; });
+      stage = "endpoint";
       const endpoint = await this._awaitEndpoint();
       this.port = endpoint.port;
       this.browserWsUrl = endpoint.wsUrl;
+      stage = "cdp_connection";
       this.client = new CdpClient({ wsUrl: this.browserWsUrl, cdpTimeoutMs: this.cdpTimeoutMs });
       await this.client.connect();
-    } catch {
-      await this.stop();
-      throw new DriverError("E_BROWSER_UNAVAILABLE", "Browser startup failed.");
+      this.startupDiagnostic = safeStartupDiagnostic({ ...this.endpointReader.diagnostics, stage: "complete", reason: "none" });
+    } catch (error) {
+      if (this.spawnError) stage = "spawn";
+      const exited = this.child && (this.child.exitCode !== null || this.child.signalCode !== null);
+      const reason = stage === "spawn" ? "spawn_failed" : stage === "cdp_connection" ? "connection_failed"
+        : exited ? "process_exited" : "endpoint_timeout";
+      // Snapshot before stop(): a cleanup signal must not replace the initial exit.
+      const failure = startupFailure(stage, reason, {
+        ...this.endpointReader.diagnostics, spawn_errno: spawnErrno ?? (stage === "spawn" ? error?.code : null),
+        exit_code: this.child?.exitCode, signal: this.child?.signalCode,
+      });
+      try { await this.stop(); } catch { failure.startupDiagnostic.cleanup_failed = true; }
+      this.startupDiagnostic = failure.startupDiagnostic;
+      throw failure;
     }
   }
 

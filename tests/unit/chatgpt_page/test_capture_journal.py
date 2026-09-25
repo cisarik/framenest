@@ -273,6 +273,44 @@ def test_idle_resume_requires_new_readiness_and_status_contains_only_metadata(tm
         assert private not in public
 
 
+def test_zero_job_restart_clears_only_after_null_job_resume_and_fresh_ack(tmp_path):
+    manager = manager_at(tmp_path)
+    manager.hello({"proto": 1, "runner_id": manager._service["runner_id"],
+                   "browser_session": manager._service["browser_session"],
+                   "readiness": {"state": "browser_unavailable", "reason": "E_BROWSER_UNAVAILABLE"}})
+    assert manager.status()["jobs"] == {"active": 0, "total": 0}
+    manager.journal.close()
+
+    recovered = JobManager(Store(tmp_path))
+    state = recovered.status()
+    assert state["readiness"] == "needs_admin"
+    assert state["reason"] == "E_AMBIGUOUS_SEND"
+    assert state["jobs"] == {"active": 0, "total": 0}
+    intervention = state["intervention_id"]
+    for body in ({"job_id": None, "intervention_id": uid()},
+                 {"job_id": uid(), "intervention_id": intervention}):
+        with pytest.raises(BridgeError) as error:
+            recovered.resume(body)
+        assert error.value.code == "E_IDEMPOTENCY_CONFLICT"
+
+    hello = {"proto": 1, "runner_id": uid(), "browser_session": uid(),
+             "readiness": {"state": "ready"}}
+    recovered.hello(hello)
+    assert recovered.status()["readiness"] == "needs_admin"
+    pending = recovered.resume({"job_id": None, "intervention_id": intervention})
+    assert pending["status"] == "readiness_pending"
+    recovered.hello({**hello, "resume_id": uid()})
+    assert recovered.status()["readiness"] == "needs_admin"
+    recovered.hello({**hello, "resume_id": pending["resume_id"]})
+    cleared = recovered.status()
+    assert cleared["readiness"] == "ready"
+    assert cleared["reason"] is None and cleared["intervention_id"] is None
+    assert cleared["jobs"] == {"active": 0, "total": 0}
+    _, persisted = recovered.journal.load()
+    assert persisted["state"] == "ready" and persisted["resume_id"] is None
+    recovered.journal.close()
+
+
 def test_24_hour_256_retention_no_unexpired_eviction(tmp_path):
     wall = Clock(1000)
     manager = manager_at(tmp_path, wall_clock=wall)

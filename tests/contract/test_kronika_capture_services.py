@@ -7,10 +7,15 @@ runner. They do not contact a host, create a real token, or start a service.
 from __future__ import annotations
 
 import importlib.util
+from contextlib import redirect_stdout
+import io
 import json
 from pathlib import Path
 import shlex
+import sqlite3
+import subprocess
 import sys
+from types import SimpleNamespace
 
 import pytest
 
@@ -50,6 +55,8 @@ RELEASE = "a" * 40
 PREV = "c" * 40
 PREV_PATH = f"/opt/framenest/releases/{PREV}"
 TARGET = f"/opt/framenest/releases/{RELEASE}"
+OLD_IDENTITY = ("11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222")
+NEW_IDENTITY = ("33333333-3333-4333-8333-333333333333", "44444444-4444-4444-8444-444444444444")
 
 UNITS = {
     "xvfb": SYSTEMD / "kronika-capture-xvfb.service",
@@ -128,6 +135,8 @@ class CaptureRunner:
             return self.blocked.pop(0)
         if "kronika-capture-brake-gate" in combined:
             return self.brake
+        if "kronika-capture-identity-snapshot" in combined:
+            return json.dumps(OLD_IDENTITY)
         if "kronika-capture-readiness-gate" in combined:
             return self.readiness
         if "test -L /opt/framenest/capture-current" in combined:
@@ -324,7 +333,8 @@ def test_capture_gate_scripts_compile() -> None:
     for builder in (
         engine.cmd_remote_capture_work_gate,
         engine.cmd_remote_capture_brake_gate,
-        engine.cmd_remote_capture_readiness_gate,
+        engine.cmd_remote_capture_identity,
+        lambda: engine.cmd_remote_capture_readiness_gate(OLD_IDENTITY),
     ):
         parts = shlex.split(builder())
         assert parts[:4] == ["sudo", "-n", "python3", "-c"]
@@ -357,7 +367,8 @@ def test_capture_activation_switches_once_and_reports_both_shas(
     assert "framenest-db" not in transcript
     assert "migrate" not in transcript
     assert _index(runner, "kronika-capture-work-gate") < _index(runner, "kronika-capture-brake-gate")
-    assert _index(runner, "kronika-capture-brake-gate") < _index(runner, "capture-current.next")
+    assert _index(runner, "kronika-capture-brake-gate") < _index(runner, "kronika-capture-identity-snapshot")
+    assert _index(runner, "kronika-capture-identity-snapshot") < _index(runner, "capture-current.next")
     assert _index(runner, "capture-current.next") < _index(
         runner, "restart kronika-capture-runner.service"
     )
@@ -444,6 +455,161 @@ def test_capture_rollback_uses_the_same_single_runner_restart() -> None:
     assert transcript.count("restart kronika-capture-runner.service") == 1
     assert "restart framenest.service" not in transcript
     assert "/opt/framenest/current.next" not in transcript
+
+
+def _service_record(state="ready", identity=OLD_IDENTITY):
+    return {"state": state, "runner_id": identity[0], "browser_session": identity[1]}
+
+
+def _write_service(journal, payload):
+    with sqlite3.connect(journal) as con:
+        con.execute("CREATE TABLE IF NOT EXISTS service (singleton INTEGER PRIMARY KEY, record TEXT)")
+        con.execute("INSERT OR REPLACE INTO service VALUES (1, ?)", (json.dumps(payload),))
+
+
+def _run_metadata_script(command, monkeypatch, *, active="active", returncode=0):
+    """Execute the real generated gate against a synthetic journal; no host call."""
+    parts = shlex.split(command)
+    assert parts[:4] == ["sudo", "-n", "python3", "-c"]
+
+    def show(argv, **kwargs):
+        assert argv == ["systemctl", "show", "-p", "ActiveState", "--value", engine.CAPTURE_RUNNER_SERVICE]
+        return SimpleNamespace(returncode=returncode, stdout=active + "\n")
+
+    output = io.StringIO()
+    with monkeypatch.context() as patch, redirect_stdout(output):
+        patch.setattr(subprocess, "run", show)
+        try:
+            exec(compile(parts[4], "<synthetic-capture-gate>", "exec"), {})
+        except SystemExit as exc:
+            assert exc.code is None
+    return output.getvalue().strip()
+
+
+class JournalRunner(CaptureRunner):
+    def __init__(self, journal, monkeypatch, readings, *, active="active"):
+        super().__init__()
+        self.journal, self.monkeypatch = journal, monkeypatch
+        self.readings, self.active = list(readings), active
+        self.observed = []
+
+    def _ssh(self, combined):
+        if "kronika-capture-identity-snapshot" in combined:
+            command = engine.cmd_remote_capture_identity()
+        elif "kronika-capture-readiness-gate" in combined:
+            if len(self.readings) > 1:
+                payload = self.readings.pop(0)
+            else:
+                payload = self.readings[0]
+            _write_service(self.journal, payload)
+            # Use the command emitted by the transition, including its snapshot.
+            command = self.calls[-1][0][-1]
+        else:
+            return super()._ssh(combined)
+        value = _run_metadata_script(command, self.monkeypatch, active=self.active)
+        self.observed.append(value)
+        return value
+
+
+class CaptureClock:
+    def __init__(self):
+        self.now = 0.0
+
+    def monotonic(self):
+        return self.now
+
+    def sleep(self, seconds):
+        self.now += seconds
+
+
+def _journal_transition(tmp_path, monkeypatch, readings, *, active="active"):
+    journal = tmp_path / "synthetic-capture.sqlite3"
+    _write_service(journal, _service_record())
+    monkeypatch.setattr(engine, "CAPTURE_JOURNAL", str(journal))
+    clock = CaptureClock()
+    monkeypatch.setattr(engine.time, "monotonic", clock.monotonic)
+    monkeypatch.setattr(engine.time, "sleep", clock.sleep)
+    return JournalRunner(journal, monkeypatch, readings, active=active), clock
+
+
+@pytest.mark.parametrize("stale_state", ["ready", "browser_unavailable", "needs_admin"])
+def test_activation_waits_for_both_new_identities_in_the_real_journal_gate(tmp_path, monkeypatch, stale_state):
+    runner, clock = _journal_transition(tmp_path, monkeypatch, [
+        _service_record(stale_state), _service_record(identity=NEW_IDENTITY),
+    ])
+    assert engine.main(_activate(), runner=runner) == engine.EXIT_OK
+    assert runner.observed == [json.dumps(OLD_IDENTITY), "readiness=starting", "readiness=ready"]
+    assert clock.now == 1
+    assert _ssh(runner).count("restart kronika-capture-runner.service") == 1
+
+
+@pytest.mark.parametrize("state", ["needs_admin", "browser_unavailable"])
+def test_fresh_blocked_identity_is_terminal_without_a_second_restart(tmp_path, monkeypatch, capsys, state):
+    runner, clock = _journal_transition(tmp_path, monkeypatch, [_service_record(state, NEW_IDENTITY)])
+    assert engine.main(_activate(), runner=runner) == engine.EXIT_SERVICE_TERMINAL
+    assert runner.observed[-1] == f"readiness={state}"
+    assert clock.now == 0
+    transcript = _ssh(runner)
+    assert transcript.count("restart kronika-capture-runner.service") == 1
+    assert transcript.count("mv -T /opt/framenest/capture-current.next") == 1
+    assert f"capture_release: {RELEASE}" in capsys.readouterr().out
+
+
+def test_unchanged_ready_identity_times_out_after_180_seconds_without_retry(tmp_path, monkeypatch, capsys):
+    runner, clock = _journal_transition(tmp_path, monkeypatch, [_service_record()])
+    assert engine.CAPTURE_READINESS_DEADLINE_SECONDS == 180
+    assert engine.main(_activate(), runner=runner) == engine.EXIT_READINESS_TIMEOUT
+    assert clock.now == 180
+    assert set(runner.observed[1:]) == {"readiness=starting"}
+    assert _ssh(runner).count("restart kronika-capture-runner.service") == 1
+    assert _ssh(runner).count("mv -T /opt/framenest/capture-current.next") == 1
+    assert f"capture_release: {RELEASE}" in capsys.readouterr().out
+
+
+def test_failed_unit_is_terminal_even_with_the_old_identity(tmp_path, monkeypatch):
+    runner, clock = _journal_transition(tmp_path, monkeypatch, [_service_record()], active="failed")
+    assert engine.main(_activate(), runner=runner) == engine.EXIT_SERVICE_TERMINAL
+    assert runner.observed[-1] == "readiness=failed"
+    assert clock.now == 0
+    assert _ssh(runner).count("restart kronika-capture-runner.service") == 1
+
+
+@pytest.mark.parametrize("identity,active,expected", [
+    ((NEW_IDENTITY[0], OLD_IDENTITY[1]), "active", "starting"),
+    ((OLD_IDENTITY[0], NEW_IDENTITY[1]), "active", "starting"),
+    ((None, None), "active", "starting"),
+    (("invalid", NEW_IDENTITY[1]), "active", "unverifiable"),
+    (NEW_IDENTITY, "inactive", "starting"),
+    (NEW_IDENTITY, "active", "ready"),
+])
+def test_real_readiness_gate_requires_two_valid_changed_ids_and_active_unit(tmp_path, monkeypatch, identity, active, expected):
+    journal = tmp_path / "synthetic.sqlite3"
+    _write_service(journal, _service_record(identity=identity))
+    monkeypatch.setattr(engine, "CAPTURE_JOURNAL", str(journal))
+    assert _run_metadata_script(engine.cmd_remote_capture_readiness_gate(OLD_IDENTITY), monkeypatch, active=active) == f"readiness={expected}"
+
+
+def test_identity_snapshot_is_metadata_only_and_absence_allows_first_launch(tmp_path, monkeypatch):
+    journal = tmp_path / "synthetic.sqlite3"
+    monkeypatch.setattr(engine, "CAPTURE_JOURNAL", str(journal))
+    assert _run_metadata_script(engine.cmd_remote_capture_identity(), monkeypatch) == "[null, null]"
+    assert not journal.exists()
+    _write_service(journal, {**_service_record(identity=NEW_IDENTITY), "private": "SECRET-MARKER"})
+    snapshot = _run_metadata_script(engine.cmd_remote_capture_identity(), monkeypatch)
+    assert snapshot == json.dumps(NEW_IDENTITY)
+    assert "SECRET" not in snapshot
+    assert _run_metadata_script(engine.cmd_remote_capture_readiness_gate((None, None)), monkeypatch) == "readiness=ready"
+
+
+@pytest.mark.parametrize("raw", ["identity=unverifiable", "{}", '["invalid", null]', "x" * 257])
+def test_unverifiable_snapshot_refuses_before_pointer_switch(tmp_path, monkeypatch, raw):
+    class InvalidSnapshot(CaptureRunner):
+        def _ssh(self, combined):
+            return raw if "kronika-capture-identity-snapshot" in combined else super()._ssh(combined)
+    runner = InvalidSnapshot()
+    assert engine.main(_activate(), runner=runner) == engine.EXIT_READINESS
+    assert "capture-current.next" not in _ssh(runner)
+    assert "restart kronika-capture-runner.service" not in _ssh(runner)
 
 
 def test_web_rollback_leaves_capture_untouched(capsys: pytest.CaptureFixture[str]) -> None:

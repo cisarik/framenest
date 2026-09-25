@@ -2,12 +2,14 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import vm from "node:vm";
 import { randomUUID } from "node:crypto";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync, existsSync } from "node:fs";
+import { EventEmitter } from "node:events";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { JobEngine } from "../src/kronika_capture/_assets/extension/src/headless/job_engine.mjs";
-import { LaunchBrake, endpointParser, chromiumLaunchArgs, ChromiumDriver, readinessExpression } from "../src/kronika_capture/_assets/extension/src/headless/driver.mjs";
+import { LaunchBrake, endpointParser, chromiumLaunchArgs, ChromiumDriver, readinessExpression, safeStartupDiagnostic } from "../src/kronika_capture/_assets/extension/src/headless/driver.mjs";
+import { CdpClient } from "../src/kronika_capture/_assets/extension/src/headless/cdp_client.mjs";
 import { executeOffer, runPersistentService, parseArgs } from "../src/kronika_capture/_assets/extension/src/headless/runner.mjs";
 import { RESULT_MAX_BYTES } from "../src/kronika_capture/_assets/extension/src/protocol.js";
 
@@ -451,4 +453,268 @@ test("stop cannot release the launch lock while browser termination is unconfirm
   await assert.rejects(driver.stop(), { code: "E_BROWSER_UNAVAILABLE" });
   assert.equal(released, 0);
   assert.ok(driver.child); // a second stop cannot forget the still-running process
+});
+
+const secretMarker = "SYNTHETIC_STARTUP_SECRET";
+const endpointLine = "DevTools listening on ws://127.0.0.1:9222/devtools/browser/abc-123\n";
+
+function startupFixture(t, onSpawn = () => {}, options = {}) {
+  const root = mkdtempSync(join(tmpdir(), "capture-startup-" + secretMarker));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const chromePath = join(root, "chromium"), profileDir = join(root, "profile");
+  writeFileSync(chromePath, "", { mode: 0o700 });
+  mkdirSync(profileDir);
+  const child = new EventEmitter();
+  child.stderr = new EventEmitter();
+  child.exitCode = child.signalCode = null;
+  child.kill = (signal) => { child.signalCode = signal; };
+  const calls = [];
+  const driver = new ChromiumDriver({ chromePath, profileDir, startTimeoutMs: 100, stopGraceMs: 0,
+    spawnProcess: (...args) => { calls.push(args); onSpawn(child); return child; }, ...options });
+  return { driver, child, calls, root, chromePath, profileDir, brakeDir: profileDir + ".capture-launch" };
+}
+
+async function unavailableIterations(driver, extra = {}) {
+  const controller = new AbortController(), logs = [];
+  let starts = 0, hellos = 0, offers = 0;
+  const start = driver.start.bind(driver);
+  driver.start = async () => { starts++; return start(); };
+  const client = {
+    async hello(body) {
+      hellos++;
+      assert.equal(body.readiness.state, "browser_unavailable");
+      return { epoch: uuid(), service_state: "browser_unavailable" };
+    },
+    async nextOffer() { offers++; },
+  };
+  let failure;
+  try {
+    await runPersistentService({ driver, client, pack, signal: controller.signal,
+      sleep: async () => { if (hellos === 3) controller.abort(); },
+      log: (line) => logs.push(line), ...extra });
+  } catch (error) { failure = error; }
+  assert.equal(starts, 1);
+  assert.equal(hellos, 3);
+  assert.equal(offers, 0);
+  assert.equal(logs.filter((line) => line.startsWith("capture_startup ")).length, 1);
+  assert.ok(!logs.join("\n").includes(secretMarker));
+  const outcome = JSON.parse(logs.find((line) => line.startsWith("capture_startup ")).slice("capture_startup ".length));
+  assert.equal(outcome.code, "E_BROWSER_UNAVAILABLE");
+  assert.equal(outcome.outcome, "failed");
+  return { outcome, logs, failure };
+}
+
+for (const [scenario, stage, reason] of [
+  ["executable", "executable_preflight", "unavailable"],
+  ["profile", "profile_preflight", "unavailable"],
+  ["lock", "launch_lock", "locked"],
+  ["interval", "brake_metadata", "interval_unexpired"],
+  ["malformed", "brake_metadata", "metadata_unverifiable"],
+  ["missing", "brake_metadata", "metadata_unverifiable"],
+  ["future", "brake_metadata", "metadata_unverifiable"],
+  ["metadata-write", "brake_metadata", "metadata_unverifiable"],
+]) {
+  test(`real startup ${scenario} refusal is classified and never retried or logged verbatim`, async (t) => {
+    const { driver, calls, brakeDir } = startupFixture(t);
+    if (scenario === "executable") driver.chromePath += "-missing";
+    else if (scenario === "profile") driver.profileDir += "-missing";
+    else {
+      const first = new LaunchBrake(brakeDir, { now: () => 1000000 });
+      first.acquire();
+      if (scenario !== "lock") first.release();
+      driver.launchBrake = new LaunchBrake(brakeDir, { now: () => scenario === "interval" ? 1000001 : 1300000 });
+      if (scenario === "malformed") writeFileSync(join(brakeDir, "last-start.json"), secretMarker);
+      if (scenario === "missing") rmSync(join(brakeDir, "last-start.json"));
+      if (scenario === "future") writeFileSync(join(brakeDir, "last-start.json"), '{"started_ms":1400000}');
+      if (scenario === "metadata-write") mkdirSync(join(brakeDir, "last-start.tmp"));
+    }
+    const { outcome, failure } = await unavailableIterations(driver);
+    assert.equal(failure, undefined);
+    assert.equal(outcome.stage, stage);
+    assert.equal(outcome.reason, reason);
+    assert.equal(calls.length, 0);
+    assert.equal(existsSync(join(brakeDir, "lock")), scenario === "lock");
+  });
+}
+
+for (const asynchronous of [false, true]) {
+  test(`spawn errno survives ${asynchronous ? "asynchronous" : "synchronous"} failure without exception text`, async (t) => {
+    const { driver, calls, brakeDir } = startupFixture(t, (child) => {
+      const error = Object.assign(new Error(secretMarker), { code: "EACCES", path: secretMarker });
+      if (asynchronous) queueMicrotask(() => { child.exitCode = -2; child.emit("error", error); });
+      else throw error;
+    });
+    const { outcome, failure } = await unavailableIterations(driver);
+    assert.equal(failure, undefined);
+    assert.equal(outcome.stage, "spawn");
+    assert.equal(outcome.reason, "spawn_failed");
+    assert.equal(outcome.spawn_errno, "EACCES");
+    assert.equal(calls.length, 1);
+    assert.equal(existsSync(join(brakeDir, "lock")), false);
+  });
+}
+
+for (const classification of ["sandbox_namespace", "display_authentication", "temporary_storage_read_only", "profile_in_use"]) {
+  test(`bounded stderr classifies ${classification} and logs no raw line or path`, async (t) => {
+    const lines = {
+      sandbox_namespace: "[10:20:FATAL:zygote_host_impl_linux.cc:1] No usable sandbox! " + secretMarker,
+      display_authentication: "[10:20:ERROR:ozone_platform_x11.cc:1] Missing X server or $DISPLAY " + secretMarker,
+      temporary_storage_read_only: "[10:20:ERROR:filesystem.cc:1] Failed to create /tmp/" + secretMarker + ": Read-only file system",
+      profile_in_use: "The profile appears to be in use by another Chromium process " + secretMarker,
+    };
+    const { driver, calls } = startupFixture(t, (child) => queueMicrotask(() => {
+      const line = lines[classification];
+      child.stderr.emit("data", line.slice(0, 17));
+      child.stderr.emit("data", line.slice(17) + "\n");
+      child.exitCode = 23;
+    }));
+    const { outcome, failure } = await unavailableIterations(driver);
+    assert.equal(failure, undefined);
+    assert.equal(outcome.stage, "endpoint");
+    assert.equal(outcome.reason, "process_exited");
+    assert.equal(outcome.exit_code, 23);
+    assert.equal(outcome.signal, null);
+    assert.equal(outcome.stderr_classification, classification);
+    assert.equal(calls.length, 1);
+  });
+}
+
+test("stderr warnings, oversized lines and exhausted byte budget cannot manufacture a diagnosis or endpoint", () => {
+  for (const line of ["[10:20:WARNING:file.cc:1] No usable sandbox!", "warning: Missing X server or $DISPLAY",
+    secretMarker + " No usable sandbox!", "x".repeat(4097) + "No usable sandbox!"]) {
+    const parser = endpointParser();
+    parser.feed(line + "\n");
+    assert.equal(parser.diagnostics.stderr_classification, "unclassified");
+    parser.feed(endpointLine.slice(0, 30)); parser.feed(endpointLine.slice(30));
+    assert.equal(parser.diagnostics.endpoint_seen, true);
+  }
+  const exhausted = endpointParser();
+  exhausted.feed(Buffer.alloc(65535, 0xff)); // raw bytes, including invalid UTF-8
+  assert.equal(exhausted.diagnostics.endpoint_budget_exhausted, false);
+  exhausted.feed("x");
+  exhausted.feed("\nNo usable sandbox!\n" + endpointLine);
+  assert.deepEqual(exhausted.diagnostics, {
+    endpoint_seen: false, endpoint_budget_exhausted: true, stderr_classification: "unclassified",
+  });
+  for (const host of ["example.test", "localhost", "0.0.0.0", "[::1]", "127.0.0.1@evil.test"]) {
+    const parser = endpointParser(); parser.feed(endpointLine.replace("127.0.0.1", host));
+    assert.equal(parser.endpoint, null);
+    assert.equal(parser.diagnostics.endpoint_seen, false);
+  }
+});
+
+test("endpoint timeout carries budget exhaustion and preserves the pre-cleanup exit fields", async (t) => {
+  const { driver, calls } = startupFixture(t, (child) => queueMicrotask(() => {
+    child.stderr.emit("data", secretMarker + "x".repeat(70000));
+  }));
+  const { outcome } = await unavailableIterations(driver);
+  assert.equal(outcome.stage, "endpoint");
+  assert.equal(outcome.reason, "endpoint_timeout");
+  assert.equal(outcome.endpoint_budget_exhausted, true);
+  assert.equal(outcome.endpoint_seen, false);
+  assert.equal(outcome.signal, null); // cleanup SIGTERM is not the startup cause
+  assert.equal(calls.length, 1);
+});
+
+test("signal exit is captured before cleanup", async (t) => {
+  const { driver } = startupFixture(t, (child) => queueMicrotask(() => { child.signalCode = "SIGSYS"; }));
+  const { outcome } = await unavailableIterations(driver);
+  assert.equal(outcome.reason, "process_exited");
+  assert.equal(outcome.signal, "SIGSYS");
+  assert.equal(outcome.exit_code, null);
+});
+
+test("CDP failure is classified after the endpoint and confirmed cleanup releases the real brake", async (t) => {
+  t.mock.method(CdpClient.prototype, "connect", async () => { throw new Error(secretMarker); });
+  const { driver, brakeDir } = startupFixture(t, (child) => queueMicrotask(() => child.stderr.emit("data", endpointLine)));
+  const { outcome, failure } = await unavailableIterations(driver);
+  assert.equal(failure, undefined);
+  assert.equal(outcome.stage, "cdp_connection");
+  assert.equal(outcome.reason, "connection_failed");
+  assert.equal(outcome.endpoint_seen, true);
+  assert.equal(existsSync(join(brakeDir, "lock")), false);
+});
+
+for (const method of ["openPage", "afterOpen", "navigate"]) {
+  test(`${method} failure is one sanitized startup record over multiple unavailable iterations`, async () => {
+    const driver = new FakeDriver();
+    driver.startupDiagnostic = { endpoint_seen: true, stage: "complete", reason: "none" };
+    driver.child = { exitCode: method === "navigate" ? null : 17, signalCode: method === "navigate" ? "SIGSEGV" : null };
+    const fail = async () => { throw new Error("https://synthetic.invalid/" + secretMarker); };
+    if (method !== "afterOpen") driver[method] = fail;
+    const { outcome, failure } = await unavailableIterations(driver, method === "afterOpen" ? { afterOpen: fail } : {});
+    assert.equal(failure, undefined);
+    assert.equal(outcome.stage, method === "navigate" ? "navigation" : "page_opening");
+    assert.equal(outcome.reason, "operation_failed");
+    assert.equal(outcome.endpoint_seen, true);
+    assert.equal(outcome.exit_code, driver.child.exitCode);
+    assert.equal(outcome.signal, driver.child.signalCode);
+    assert.equal(driver.stops, 1);
+  });
+}
+
+test("unconfirmed cleanup retains the lock and cannot replace the first startup failure", async (t) => {
+  t.mock.method(CdpClient.prototype, "connect", async () => { throw new Error(secretMarker); });
+  const { driver, child, brakeDir } = startupFixture(t, (child) => queueMicrotask(() => child.stderr.emit("data", endpointLine)));
+  child.kill = () => {};
+  const { outcome, logs, failure } = await unavailableIterations(driver);
+  assert.equal(outcome.stage, "cdp_connection");
+  assert.equal(outcome.cleanup_failed, true);
+  assert.equal(failure.code, "E_BROWSER_UNAVAILABLE");
+  assert.equal(failure.startupDiagnostic.stage, "cdp_connection");
+  assert.ok(!failure.message.includes(secretMarker));
+  assert.equal(existsSync(join(brakeDir, "lock")), true);
+  assert.equal(logs.filter((line) => line.startsWith("capture_cleanup ")).length, 2);
+  child.signalCode = "SIGKILL";
+  await driver.stop();
+  assert.equal(existsSync(join(brakeDir, "lock")), false);
+});
+
+test("shutdown exception text is discarded and startup failure retains priority", async () => {
+  const driver = new FakeDriver();
+  driver.navigate = async () => { throw new Error(secretMarker); };
+  driver.stop = async () => { throw new Error("cleanup " + secretMarker); };
+  const { failure, logs } = await unavailableIterations(driver);
+  assert.equal(failure.startupDiagnostic.stage, "navigation");
+  assert.equal(failure.startupDiagnostic.cleanup_failed, true);
+  assert.ok(!failure.message.includes(secretMarker));
+  assert.equal(logs.filter((line) => line.startsWith("capture_cleanup ")).length, 1);
+});
+
+test("diagnostic projection drops arbitrary fields and normalizes invalid scalar values", () => {
+  const value = safeStartupDiagnostic({ stage: secretMarker, reason: secretMarker, spawn_errno: secretMarker,
+    exit_code: secretMarker, signal: secretMarker, endpoint_seen: secretMarker,
+    endpoint_budget_exhausted: secretMarker, stderr_classification: secretMarker, cleanup_failed: secretMarker,
+    message: secretMarker, stderr: secretMarker, path: secretMarker, url: secretMarker, argv: [secretMarker] });
+  assert.ok(!JSON.stringify(value).includes(secretMarker));
+  assert.deepEqual(value, { stage: "executable_preflight", reason: "unclassified", spawn_errno: "OTHER",
+    exit_code: null, signal: "OTHER", endpoint_seen: false, endpoint_budget_exhausted: false,
+    stderr_classification: "unclassified", cleanup_failed: false });
+});
+
+test("successful startup logs once, holds the brake until termination and preserves exact spawn arguments", async (t) => {
+  t.mock.method(CdpClient.prototype, "connect", async () => {});
+  const { driver, calls, chromePath, profileDir, brakeDir } = startupFixture(t,
+    (child) => queueMicrotask(() => child.stderr.emit("data", endpointLine)), { headed: true });
+  driver.openPage = async () => {};
+  driver.navigate = async () => {};
+  driver.readiness = async () => ({ state: "ready" });
+  const logs = [], controller = new AbortController();
+  await runPersistentService({ driver, pack, signal: controller.signal, log: (line) => logs.push(line), client: {
+    async hello() {
+      assert.equal(existsSync(join(brakeDir, "lock")), true);
+      return { epoch: uuid(), service_state: "ready" };
+    },
+    async nextOffer() { controller.abort(); return {}; },
+  } });
+  assert.deepEqual(calls, [[chromePath, ["--user-data-dir=" + profileDir, "--remote-debugging-port=0",
+    "--remote-debugging-address=127.0.0.1", "--no-first-run", "--no-default-browser-check", "--window-size=1280,720"],
+  { stdio: ["ignore", "ignore", "pipe"] }]]);
+  assert.equal(logs.length, 1);
+  const outcome = JSON.parse(logs[0].slice("capture_startup ".length));
+  assert.equal(outcome.outcome, "started");
+  assert.equal(outcome.stage, "complete");
+  assert.equal(outcome.endpoint_seen, true);
+  assert.ok(!logs[0].includes(secretMarker));
+  assert.equal(existsSync(join(brakeDir, "lock")), false);
 });
