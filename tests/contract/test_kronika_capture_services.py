@@ -202,13 +202,13 @@ def test_unit_sources_parse_and_keep_the_capture_boundary() -> None:
     assert "/run/kronika-capture/Xauthority" in runner
     assert "-auth /run/kronika-capture/Xauthority" in xvfb
     assert "-nolisten tcp" in xvfb
+    assert "-nolock" in xvfb
     assert " -ac" not in xvfb
     assert "-ac\n" not in xvfb
     assert "LoadCredential=token:/etc/kronika-capture/credentials/kronika-bridge-token" in bridge
     assert "LoadCredential=token:/etc/kronika-capture/credentials/kronika-bridge-token" in runner
     for unit in (bridge, runner, vnc, view, xvfb):
         assert "0.0.0.0" not in unit
-    assert "--state-dir /var/lib/kronika-capture" in bridge
     assert "--profile /var/lib/kronika-capture/profile" in runner
     assert "WorkingDirectory=/opt/framenest/capture-current" in bridge
     assert "WorkingDirectory=/opt/framenest/capture-current" in runner
@@ -225,6 +225,76 @@ def test_unit_sources_parse_and_keep_the_capture_boundary() -> None:
     assert "Restart=no" in view
     assert "StateDirectoryMode=0700" in bridge
     assert "StateDirectoryMode=0700" in runner
+
+
+def _exec_start_args(unit_text: str) -> list[str]:
+    for line in unit_text.splitlines():
+        if line.startswith("ExecStart="):
+            argv = shlex.split(line.split("=", 1)[1])
+            assert len(argv) >= 2
+            return argv[1:]
+    raise AssertionError("ExecStart missing")
+
+
+def test_cli_execstart_parses_and_rejects_the_old_option_order() -> None:
+    from kronika_capture.cli import build_parser
+
+    parser = build_parser()
+    expected = {
+        "bridge": [
+            "--state-dir",
+            "/var/lib/kronika-capture",
+            "bridge",
+            "run",
+            "--port",
+            "8765",
+        ],
+        "runner": [
+            "--state-dir",
+            "/var/lib/kronika-capture",
+            "runner",
+            "run",
+            "--profile",
+            "/var/lib/kronika-capture/profile",
+            "--port",
+            "8765",
+            "--headed",
+        ],
+    }
+    for name, args in expected.items():
+        assert _exec_start_args(_text(UNITS[name])) == args
+        parser.parse_args(args)
+
+    rejected = [
+        ["bridge", "run", "--state-dir", "/var/lib/kronika-capture", "--port", "8765"],
+        [
+            "runner",
+            "run",
+            "--state-dir",
+            "/var/lib/kronika-capture",
+            "--profile",
+            "/var/lib/kronika-capture/profile",
+            "--port",
+            "8765",
+            "--headed",
+        ],
+    ]
+    for old in rejected:
+        with pytest.raises(SystemExit) as caught:
+            parser.parse_args(old)
+        assert caught.value.code == 2
+
+
+def test_xvfb_lock_strategy_uses_nolock() -> None:
+    xvfb = _text(UNITS["xvfb"])
+    exec_start = next(line for line in xvfb.splitlines() if line.startswith("ExecStart="))
+    assert exec_start == (
+        "ExecStart=/usr/bin/Xvfb :99 -screen 0 1280x800x24 "
+        "-nolisten tcp -nolock -auth /run/kronika-capture/Xauthority"
+    )
+    assert "ReadWritePaths=/tmp/.X11-unix /run/kronika-capture" in xvfb
+    assert "ReadWritePaths=/tmp " not in xvfb
+    assert "ReadWritePaths=/tmp\n" not in xvfb
 
 
 def test_env_template_has_no_secret_and_matches_documented_paths() -> None:

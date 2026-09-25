@@ -11,7 +11,7 @@ Group=kronika-capture
 WorkingDirectory=/opt/framenest/capture-current
 Environment=PYTHONUNBUFFERED=1
 EnvironmentFile=/etc/kronika-capture/capture.env
-ExecStart=/opt/framenest/capture-current/.venv/bin/kronika-capture bridge run --state-dir /var/lib/kronika-capture --port 8765
+ExecStart=/opt/framenest/capture-current/.venv/bin/kronika-capture --state-dir /var/lib/kronika-capture bridge run --port 8765
 Restart=on-failure
 RestartSec=5s
 LoadCredential=token:/etc/kronika-capture/credentials/kronika-bridge-token
