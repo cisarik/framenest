@@ -310,6 +310,35 @@ def test_xvfb_lock_strategy_keeps_tmp_writable() -> None:
     assert "PrivateTmp=true" not in runner
 
 
+def test_runner_temporary_directory_stays_inside_the_runtime_boundary() -> None:
+    runner = _text(UNITS["runner"])
+    xvfb = _text(UNITS["xvfb"])
+    env = _text(ENV_EXAMPLE)
+    runner_lines = runner.splitlines()
+    assert "Environment=TMPDIR=/run/kronika-capture/tmp" in runner_lines
+    assert (
+        "ExecStartPre=/usr/bin/install -d -m 0700 "
+        "/var/lib/kronika-capture/profile "
+        "/var/lib/kronika-capture/staging "
+        "/run/kronika-capture/tmp"
+    ) in runner_lines
+    read_write = next(line for line in runner_lines if line.startswith("ReadWritePaths="))
+    assert read_write == (
+        "ReadWritePaths=/var/lib/kronika-capture /run/kronika-capture /tmp/.X11-unix"
+    )
+    assert "/tmp" not in read_write.split("=", 1)[1].split()
+    assert "PrivateTmp=true" not in runner
+    assert "PrivateTmp=true" not in xvfb
+    assert "ProtectSystem=strict" in runner
+    assert "NoNewPrivileges=true" in runner
+    assignments = [
+        line.split("=", 1)[0].strip()
+        for line in env.splitlines()
+        if line.strip() and not line.lstrip().startswith("#") and "=" in line
+    ]
+    assert "TMPDIR" not in assignments
+
+
 def test_env_template_has_no_secret_and_matches_documented_paths() -> None:
     text = _text(ENV_EXAMPLE)
     assert "KRONIKA_CHROMIUM_PATH=/usr/bin/chromium" in text

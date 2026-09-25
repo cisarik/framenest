@@ -12,8 +12,9 @@ WorkingDirectory=/opt/framenest/capture-current
 Environment=PYTHONUNBUFFERED=1
 Environment=DISPLAY=:99
 Environment=XAUTHORITY=/run/kronika-capture/Xauthority
+Environment=TMPDIR=/run/kronika-capture/tmp
 EnvironmentFile=/etc/kronika-capture/capture.env
-ExecStartPre=/usr/bin/install -d -m 0700 /var/lib/kronika-capture/profile /var/lib/kronika-capture/staging
+ExecStartPre=/usr/bin/install -d -m 0700 /var/lib/kronika-capture/profile /var/lib/kronika-capture/staging /run/kronika-capture/tmp
 ExecStart=/opt/framenest/capture-current/.venv/bin/kronika-capture --state-dir /var/lib/kronika-capture runner run --profile /var/lib/kronika-capture/profile --port 8765 --headed
 Restart=no
 LoadCredential=token:/etc/kronika-capture/credentials/kronika-bridge-token
