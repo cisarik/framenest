@@ -202,7 +202,6 @@ def test_unit_sources_parse_and_keep_the_capture_boundary() -> None:
     assert "/run/kronika-capture/Xauthority" in runner
     assert "-auth /run/kronika-capture/Xauthority" in xvfb
     assert "-nolisten tcp" in xvfb
-    assert "-nolock" in xvfb
     assert " -ac" not in xvfb
     assert "-ac\n" not in xvfb
     assert "LoadCredential=token:/etc/kronika-capture/credentials/kronika-bridge-token" in bridge
@@ -285,16 +284,21 @@ def test_cli_execstart_parses_and_rejects_the_old_option_order() -> None:
         assert caught.value.code == 2
 
 
-def test_xvfb_lock_strategy_uses_nolock() -> None:
+def test_xvfb_lock_strategy_keeps_tmp_writable() -> None:
     xvfb = _text(UNITS["xvfb"])
+    runner = _text(UNITS["runner"])
     exec_start = next(line for line in xvfb.splitlines() if line.startswith("ExecStart="))
     assert exec_start == (
         "ExecStart=/usr/bin/Xvfb :99 -screen 0 1280x800x24 "
-        "-nolisten tcp -nolock -auth /run/kronika-capture/Xauthority"
+        "-nolisten tcp -auth /run/kronika-capture/Xauthority"
     )
-    assert "ReadWritePaths=/tmp/.X11-unix /run/kronika-capture" in xvfb
-    assert "ReadWritePaths=/tmp " not in xvfb
-    assert "ReadWritePaths=/tmp\n" not in xvfb
+    assert "-nolisten tcp" in exec_start
+    assert "-auth /run/kronika-capture/Xauthority" in exec_start
+    assert "-nolock" not in exec_start
+    assert "-ac" not in exec_start
+    assert "ReadWritePaths=/tmp /tmp/.X11-unix /run/kronika-capture" in xvfb
+    assert "PrivateTmp=true" not in xvfb
+    assert "PrivateTmp=true" not in runner
 
 
 def test_env_template_has_no_secret_and_matches_documented_paths() -> None:

@@ -123,9 +123,10 @@ Xvfb and the runner set `Restart=no`. The bridge may restart on failure; the
 runner reconnects and is not stopped by a bridge restart. No capture unit is
 `PartOf=framenest.service`. Xvfb and the runner share display `:99`, the socket
 under `/tmp/.X11-unix`, and `/run/kronika-capture/Xauthority`. They do not use
-a private `/tmp`, and Xvfb does not disable access control. The cookie is
-generated when Xvfb starts. Browser debugging stays on loopback inside the
-runner. The launcher reads `KRONIKA_CHROMIUM_PATH` from the non-secret env
+a private `/tmp`, and Xvfb does not disable access control. Xvfb writes its
+display lock under `/tmp`, so the unit keeps `/tmp` writable while the rest of
+the filesystem stays read-only. The cookie is generated when Xvfb starts.
+Browser debugging stays on loopback inside the runner. The launcher reads `KRONIKA_CHROMIUM_PATH` from the non-secret env
 file and requires an absolute executable. It does not search `PATH`, enable
 stealth, or weaken the sandbox.
 
