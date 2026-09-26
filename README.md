@@ -5,30 +5,48 @@ FrameNest is a local-first, privacy-conscious, cross-platform library for video 
 ## Accepted Transition to Kronika
 
 [ADR-0082](docs/adr/0082-kronika-one-product-and-private-records.md) records
-one Kronika built in this repository from the existing FrameNest application
-and the closed Kronika capture source. No new repository or second product is
-planned. The internal `framenest` package, migration history, HTTP headers and
-deployment identifiers remain; UI branding and the public repository rename
-belong to later slices, not this documentation change.
+one Kronika built in this repository. No new repository or second product is
+planned. [ADR-0083](docs/adr/0083-modular-research-providers-and-administrator-curated-timeline.md)
+is the current target for Search, Research and the shared Timeline. The
+internal `framenest` package, migration history, HTTP headers and deployment
+identifiers remain; UI branding and the public repository rename belong to
+later slices. This documentation change does not implement them.
 
-The accepted target has Timeline as its main page, the existing Gallery as a
-separate working view, and Media, Search and Research records in one catalog.
-Every new record starts private; only explicit owner sharing makes it visible
-to mapped household members. Administrator status does not override private
-content access, and family sharing is not public publication.
+Accepted target, not yet implemented:
 
-The application and capture will run as separate processes. The existing
-vendor kernel will move to `src/kronika_capture`, with one persistent browser
-behind a loopback bridge. Search/Research, bounded ZIP upload, common records,
-new privacy enforcement and Timeline are not shipped by S0. The existing
-code/status descriptions below remain the pre-transition baseline, including
-publication-based Gallery and administrator workflows; they are not the target
-privacy policy. Public composition stays off for the transition.
+- The Timeline is the main page and contains only administrator-approved
+  records. Personal history is a separate view of questions and answers,
+  including complete Research reports and the caller's unfinished work.
+  Gallery remains a separate working view.
+- Search and Research use a provider-neutral application boundary. The first
+  provider is the OpenAI Responses API with fixed model `gpt-5.5-2026-04-23`
+  and native provider-managed research. FrameNest supervises that lifecycle.
+  There is no automatic fallback. The provider stays disabled until a later
+  slice.
+- An authenticated application administrator can read all product records,
+  including private and unfinished work. That access is application content
+  only. Owners do not publish directly to the shared page; administrators
+  approve completed questions and answers and successfully analyzed media.
+  The shared page is for verified household members only. Internet publication
+  stays disabled.
+
+Implemented state at this documentation slice:
+
+- MEME and Movie behavior already in the application remains.
+- The chatgpt.com capture module is present at `src/kronika_capture` and is
+  parked. It is not the current Search or Research provider. Bounded ZIP
+  activation stays parked with it.
+- Common records, personal history, administrator approval, the shared
+  Timeline and the research provider are not shipped.
+- The code and status descriptions below remain the pre-transition baseline,
+  including publication-based Gallery and administrator workflows. They are
+  not the target privacy policy.
 
 The old databases contain unwanted test data. There is no import project;
 later authorized deployment uses an exact, stopped-writer empty-database reset
 without deleting media or browser profiles. See [ROADMAP.md](ROADMAP.md) for
-the locked S0-S10 sequence and gates. No host readiness is established here.
+the active order and the parked capture rows. No host readiness or live
+provider readiness is established here.
 
 ## Status
 
@@ -100,8 +118,9 @@ extension-origin allowlist is configured
 [ADR-0076](docs/adr/0076-companion-history-hosted-click-admin-analyzed-inbox-and-ordinary-own-history.md),
 [docs/X_COMPANION.md](docs/X_COMPANION.md)).
 [ADR-0074](docs/adr/0074-dual-audience-public-published-and-tailscale-workspace-boundary.md)
-records the pre-transition dual-audience boundary, superseded for new Kronika
-records by ADR-0082: the Tailscale
+records the pre-transition dual-audience boundary. ADR-0082 kept internet
+publication off for new Kronika records. ADR-0083 adds administrator-curated
+household Timeline approval and does not enable that public reader: the Tailscale
 workspace writer remains the current remote path. The local-only
 `public_published_uds` composition and workspace rollout successors are
 implemented at this baseline. Public bind, TLS, and Funnel remain unshipped.
@@ -601,8 +620,10 @@ The current conceptual direction is:
   `/run/framenest/framenest.sock` rather than router port-forwarding. The
   local-only published-reader implementation from
   [ADR-0074](docs/adr/0074-dual-audience-public-published-and-tailscale-workspace-boundary.md)
-  is retained baseline history. ADR-0082 keeps public composition off and
-  excludes new Kronika records; public rollout is outside this stage.
+is retained baseline history. ADR-0082 keeps public composition off and
+excludes new Kronika records. ADR-0083 keeps internet publication disabled and
+uses administrator approval for the household Timeline. Public rollout is
+outside this stage.
 
 The accepted desktop and distributed-media direction remains documentation-led
 for Tauri packaging. No Tauri scaffold or installer exists yet. The Ubuntu NUC
@@ -694,9 +715,10 @@ The Ubuntu NUC is the current FrameNest development-and-testing machine on
 Ubuntu Server 24.04 on the Intel NUC6i5SYH
 ([ADR-0075](docs/adr/0075-nuc-development-test-target-and-routine-release-refresh.md)):
 its accepted role remains development/test for this one product, routinely
-refreshed toward public `main`. ADR-0082 adds capture in later slices and limits
-the planned reset to exact old test-database objects. Current host state still
-requires preflight. Broader cross-platform support remains an architectural
+refreshed toward public `main`. Capture remains parked. ADR-0083 adds a future
+research-provider credential gate and limits the planned reset to exact old
+test-database objects. Current host state and live provider readiness still
+require preflight. Broader cross-platform support remains an architectural
 requirement, and a future Ubuntu VPS remains a portability target.
 
 ## Documentation Map

@@ -17,93 +17,156 @@ This specification translates approved direction from [PRODUCT.md](PRODUCT.md), 
 ## Accepted Kronika Transition Requirements
 
 [ADR-0082](docs/adr/0082-kronika-one-product-and-private-records.md) records
-the accepted one-product architecture. This section governs the S0-S10 target;
-S0 changes documentation only. The existing implementation remains at schema
-head `0033`. Requirements and implementation summaries below that describe
-published-only Gallery, administrator-wide private-content access or a public
-reader are pre-transition contracts, superseded for new Kronika records by
-this section. Their presence is not a claim that the transition is implemented.
+the one-product architecture.
+[ADR-0083](docs/adr/0083-modular-research-providers-and-administrator-curated-timeline.md)
+is current for Search, Research, administrator access and Timeline entry.
+This section governs that target. The existing implementation remains at
+schema head `0033`. Requirements and implementation summaries below that
+describe published-only Gallery or a public reader are pre-transition
+contracts. Administrator read access to Kronika product records follows
+ADR-0083, not those older publication workflows. Their presence is not a
+claim that the transition is implemented.
 
-### Product and Ownership
+### Product, Ownership and Approval
 
 The existing repository MUST become one Kronika. The internal `framenest`
 package, migration history, compatible HTTP headers and deployment identifiers
-MUST remain during this stage. The capture kernel MUST move from
-`vendor/kronika-ask/src/kronika` to `src/kronika_capture`, with command
-`kronika-capture`; after verification only one executable implementation MUST
-remain. Missing Search/Research, export and sanitization features and relevant
-tests MAY be selectively restored from the accepted source, with provenance.
-The source manager, accounts, family library and Git history MUST NOT be ported.
-Existing FrameNest JPEG preparation, deterministic ZIP and budget calculations
-MUST remain in the application.
+MUST remain during this stage. The capture module at `src/kronika_capture`,
+command `kronika-capture`, MUST remain one parked module. A second manager,
+account system, family library or Git history MUST NOT be ported. Existing
+FrameNest JPEG preparation, deterministic ZIP and budget calculations MUST
+remain in the application and MUST NOT be reused as research attachments.
 
 A common record in the existing catalog MUST identify its type, content,
 owner, visibility, creation time, first timeline-entry time and display name.
-Media MUST keep its existing tables; complete text documents MUST use the same
-database. Owner identity MUST come from verified Tailscale identity or an
-explicitly configured local owner, never a client-supplied `user_id`.
-Every new record MUST start `private`; only explicit owner sharing changes it
-to `family` for mapped household members. Administrator role alone MUST NOT
-grant access to another owner's private content. Lists, counts, search,
-details, previews, playback, downloads and direct APIs MUST enforce access.
-Family sharing MUST NOT create public publication. Public composition MUST
-stay off and MUST NOT expose new records.
+Media MUST keep its existing tables. Complete question and answer documents,
+including Research reports, MUST use the same database. Owner identity MUST
+come from verified Tailscale identity or an explicitly configured local owner,
+never a client-supplied `user_id`.
 
-### Timeline and Complete Results
+Every new record MUST start private to its owner. An authenticated application
+administrator MUST be able to read all product records, including private and
+unfinished work. That privilege MUST be limited to application content. It
+MUST NOT grant provider secrets, browser credentials or host administration.
+Other ordinary household members MUST NOT read another owner's private or
+unfinished records. Lists, counts, search, details, previews, playback,
+downloads and direct APIs MUST enforce these rules.
 
-Timeline MUST become the landing page using the existing shell, CSS and
-controls. Gallery MUST remain a separate working view with the existing
-Details/player behavior and authorized unanalyzed media. No new frontend
+Household visibility MUST change only through explicit administrator approval
+of a completed question and answer record, or of successfully analyzed media.
+Owners MUST NOT publish directly to the shared page. Internet publication
+MUST stay disabled. Public composition MUST stay off and MUST NOT expose new
+records.
+
+### Timeline, Personal History and Completion
+
+The Timeline MUST become the landing page using the existing shell, CSS and
+controls, and MUST contain only administrator-approved records, including when
+the viewer is an administrator. Personal history MUST be a separate view of
+the caller's questions and answers, including complete Research reports and
+unfinished work. Gallery MUST remain a separate working view with the existing
+Details and player behavior and authorized unanalyzed media. No new frontend
 framework or design system is introduced.
 
-Media ownership MUST exist at catalog insertion, with no timeline-entry time
-until successful validated analysis. One medium MUST have at most one card.
-Reanalysis MUST preserve its first entry time and update the existing result;
-failure MUST NOT create a card or erase an earlier successful result. Existing
-metadata-suggestion approval MUST remain required. Search/Research MUST enter
-only after a complete result is saved transactionally and idempotently. Pending
-and failed jobs MUST remain outside Timeline.
+Media ownership MUST exist at catalog insertion. A medium MUST NOT receive a
+shared timeline-entry time until successful validated analysis has been
+approved by an administrator. One medium MUST have at most one card.
+Reanalysis MUST keep the previous approved projection until the new successful
+result is approved. Failure MUST NOT create a card or erase an earlier
+successful result. Existing metadata-suggestion approval MUST remain required.
+Successful analysis MUST NOT bypass it.
 
-Timeline MUST order newest entry first, then stable ID order, with default page
-size 24 and maximum 100. Filters MUST combine Search/Research and existing media
-categories; GIF MUST remain a technical format rather than replace Meme.
-Complete text/Markdown MUST be preserved. Archived HTML MUST be sanitized,
-contain no JavaScript or external resources, and never be injected as trusted
-HTML into the main application. New APIs MUST join the existing explicit
-permission table and mutation protection.
+A complete Search or Research save MUST make the question and answer available
+in personal history and in the administrator review inventory. That completion
+MUST NOT by itself insert a shared Timeline card. Pending and failed work MUST
+remain outside the shared Timeline. Approval MUST recheck the exact record
+version. Withdrawal MUST remove the shared card and MUST retain personal
+history.
 
-### Capture and Transition Gates
+The shared Timeline MUST order newest entry first, then stable ID order, with
+default page size 24 and maximum 100. Filters MUST combine Search, Research
+and existing media categories. GIF MUST remain a technical format rather than
+replace Meme.
 
-The application and capture MUST be separate processes communicating through
-the loopback bridge. Capture MUST use one persistent Chromium on Xvfb and one
-dedicated profile, with no per-task launch, automatic stealth, model/reasoning
-inspection or selection, or external LLM API fallback. A web restart or bridge
-outage MUST NOT restart the browser. `needs_admin` MUST pause work until
-explicit readiness-checked continuation; a possibly sent prompt MUST NOT be
-automatically resent. Administrator waiting has a separate 30-minute limit;
-manual browser starts are at least five minutes apart, without a restart loop.
+### Research Provider Contract and Resource Limits
 
-The bridge MUST use a per-install token, exact Host/Origin checks, no wildcard
-CORS and `127.0.0.1` binding. Search/Research accept no attachment; media capture
-accepts at most one validated stored ZIP, at most 32 MiB and 256 JPEG frames,
-each at most 128 KiB and 480 px on its long side. Names MUST be sequential
-`frame-0001.jpg` onward without paths, duplicates or gaps. Encrypted, nested,
-compressed or non-JPEG members MUST be rejected before browser contact.
-Private staging and exact-owner cleanup are required. The verified existing
-budget MAY lower these limits; video MUST retain at least 12 frames. Synthetic
-image-understanding evidence MUST precede real media use; upload success alone
-is insufficient. Failure MUST stop this branch without model switching or
-challenge bypass.
+Search and Research MUST use a provider-neutral application boundary. The
+first provider MUST be the OpenAI Responses API, provider id
+`openai-responses`, fixed model `gpt-5.5-2026-04-23`, with native
+provider-managed research. FrameNest MUST supervise submit, poll, cancel,
+validate, save and cleanup. The provider MUST execute the model and search
+loop. There MUST be no automatic fallback and no automatic generation retry.
+Clients MUST NOT supply endpoint, model, tool or credential fields. Research
+configuration MUST be disabled by default. An absent research section MUST
+mean disabled and MUST NOT prevent ordinary application startup. Media
+analysis provider selection MUST remain separate.
+
+Only the submitted question text and fixed non-secret instructions MAY leave
+the host. Research MUST NOT accept an attachment. The application MUST NOT
+fetch arbitrary result URLs. Page views, history reads and metadata saves
+MUST NOT start generation.
+
+Application thresholds MUST be Search USD 0.50, Research USD 5, daily USD 10
+and monthly USD 30. A provider monthly hard limit of USD 30 MUST be required
+before live use. Delayed enforcement and possible overshoot of the application
+thresholds are accepted and MUST be reported rather than hidden. A budget
+reservation MUST NOT be described as an absolute invoice cap. Initial limits
+MUST include reasoning effort `low` for Search and `high` for Research, tool
+allowlist `web_search` only, `max_tool_calls` 3 and 20, `max_output_tokens`
+4096 and 32768, deadlines 180 and 1800 seconds, global concurrency 1, prompt
+maximum 16384 UTF-8 bytes, answer maximum 2097152 UTF-8 bytes, and citation
+count maximum 200. A kill switch MUST block new admission and request
+cancellation.
+
+Local history of questions and answers, including complete Research reports,
+MUST be retained. The retrieved remote response MUST be deleted after
+validated local persistence or terminal reconciliation. That deletion MUST
+NOT be described as erasure of all provider state. Standard provider
+retention, including possible security retention after deletion, is accepted.
+Zero Data Retention MUST NOT be required.
+
+A successful result MUST have a terminal completed provider response, a
+complete final answer, no refusal or incomplete marker, and evidence that web
+search executed. The question MUST render as escaped text. The answer MUST
+render through a bounded Markdown and HTML allowlist. The complete original
+answer MUST be preserved. A formatting failure MUST display the entire escaped
+answer. Scripts, event handlers, external resources and automatic citation
+fetching MUST be prohibited. Generated HTML MUST NOT be injected into the main
+application DOM. New APIs MUST join the existing explicit permission table and
+mutation protection.
+
+### Parked Capture and Transition Gates
+
+The application and the parked capture module MUST remain separate processes
+communicating through the loopback bridge. Capture MUST use one persistent
+Chromium on Xvfb and one dedicated profile, with no per-task launch,
+automatic stealth, or model and reasoning inspection or selection. Capture
+MUST NOT fall back from the ChatGPT page to an external API. That prohibition
+does not forbid the separate research provider above. A web restart or bridge
+outage MUST NOT restart the browser. `needs_admin` MUST pause capture work
+until explicit readiness-checked continuation. A possibly sent prompt MUST NOT
+be automatically resent. Administrator waiting has a separate 30-minute limit.
+Manual browser starts are at least five minutes apart, without a restart loop.
+
+The bridge MUST use a per-install token, exact Host and Origin checks, no
+wildcard CORS and `127.0.0.1` binding. While S5 stays parked, a future capture
+ZIP MUST accept at most one validated stored ZIP, at most 32 MiB and 256 JPEG
+frames, each at most 128 KiB and 480 px on its long side, with sequential
+`frame-0001.jpg` names and rejection before browser contact. That ZIP path
+MUST NOT become research input.
 
 The old test databases MUST NOT be imported. A separately authorized reset
-MUST identify exact database/WAL/SHM objects, stop writers, and create the new
-empty database through normal migrations. It MUST NOT remove source media,
-profiles, identity configuration, secrets or archives, or rewrite migration
-history. Rollback restores previous code with a compatible empty database, not
-the deleted test data. Personal photos/local photo AI, native share apps,
-external-provider additions, public publication and production hardening are
-outside S0-S10. The exact sequence and acceptance gates are in
-[ROADMAP.md](ROADMAP.md).
+MUST identify exact database, WAL and SHM objects, stop writers, and create
+the new empty database through normal migrations. It MUST NOT remove source
+media, profiles, identity configuration, secrets or archives, or rewrite
+migration history. Rollback restores previous code with a compatible empty
+database, not the deleted test data. Personal photos and local photo AI,
+native share apps, providers other than the selected research provider and the
+parked capture module, internet publication and production hardening are
+outside the active sequence. The exact order and acceptance gates are in
+[ROADMAP.md](ROADMAP.md). S3 host completion, capture-mode Search and
+Research, S5 ZIP activation and S7-C MUST NOT be required before S4-A, S6,
+S4-B, S7-P, S8, S9 or S10.
 
 ## 2. Normative Language
 
@@ -479,10 +542,12 @@ MUST NOT widen that audience.
 Unpublished media MUST be indistinguishable from unknown media to callers
 without the explicit administrator workflow-read capability.
 
-ADR-0082 replaces that audience rule for Kronika records with owner/family
-access, including media awaiting analysis in Gallery. Administrator workflow
-capability is not a private-content read override. Timeline eligibility is
-separate from Gallery visibility and from public publication.
+ADR-0083 replaces that audience rule for Kronika records. Gallery may include
+authorized unanalyzed media. An authenticated application administrator can
+read Kronika product records, including private and unfinished work; that
+privilege is application content only. The shared Timeline contains only
+administrator-approved records. Timeline eligibility is separate from Gallery
+visibility and from internet publication.
 
 Catalog membership, `Processed`, AI-analysis state, upload storage publication,
 and content publication MUST remain distinct. Content-publication readiness
@@ -698,9 +763,11 @@ This document does not place current Tailscale command syntax in the specificati
 
 Historical direction and existing implementation contract recorded in
 [ADR-0074](docs/adr/0074-dual-audience-public-published-and-tailscale-workspace-boundary.md).
-ADR-0082 supersedes public rollout and administrator private-content access
-for new Kronika records. The following clauses describe the retained baseline,
-not an instruction to enable its public composition or expose new records.
+ADR-0082 supersedes public rollout for new Kronika records. ADR-0083
+supersedes the ADR-0082 denial of administrator private-content reading and
+keeps internet publication disabled. The following clauses describe the
+retained baseline, not an instruction to enable its public composition or
+expose new records. Household Timeline approval is not this publication path.
 The local-only `public_published_uds` published-reader is implemented-for-backend.
 These remaining dual-audience requirements MUST NOT be read as shipped public
 bind, TLS, Funnel, or NUC exposure, except the sole publication-gate

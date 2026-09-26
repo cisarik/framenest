@@ -14,6 +14,11 @@ supersedes conflicting publication/audience direction for new records while
 preserving earlier ADRs as historical decisions and retaining their unaffected
 foundations. Its relationship table identifies the affected boundaries; older
 `Accepted` rows do not override that later decision.
+[ADR-0083](0083-modular-research-providers-and-administrator-curated-timeline.md)
+partially supersedes ADR-0082 for capture-only Search and Research, owner-only
+private reading, direct owner sharing and completion-triggered Timeline entry.
+The ADR-0082 historical reasoning stays in that file. Unaffected ADR-0082
+decisions remain accepted. ADR-0083 is current where they conflict.
 
 Evidence packages such as [ARCHITECTURE_FOUNDATION_EVIDENCE.md](../ARCHITECTURE_FOUNDATION_EVIDENCE.md) collect primary-source research and provisional recommendations. Evidence packages are **not** accepted decisions. Only an ADR with status **Accepted** records project authority for an architecture choice.
 
@@ -113,4 +118,5 @@ An accepted ADR may only be changed by a later ADR that supersedes it. Editing a
 | 0079 | Administrator Automatic Analysis Runtime Setting | Accepted | 2026-08-27 | [0079-administrator-automatic-analysis-runtime-setting.md](0079-administrator-automatic-analysis-runtime-setting.md) |
 | 0080 | Immediate Editor Suggestion Reveal and In-Modal Analysis | Accepted | 2026-08-29 | [0080-immediate-editor-suggestion-reveal-and-in-modal-analysis.md](0080-immediate-editor-suggestion-reveal-and-in-modal-analysis.md) |
 | 0081 | Declarative OpenAI-Compatible Provider Registry and Administrator Vision Probe | Accepted | 2026-09-16 | [0081-declarative-openai-compatible-provider-registry-and-administrator-vision-probe.md](0081-declarative-openai-compatible-provider-registry-and-administrator-vision-probe.md) |
-| 0082 | Kronika One Product and Private Records | Accepted; implementation staged S0-S10 | 2026-09-23 | [0082-kronika-one-product-and-private-records.md](0082-kronika-one-product-and-private-records.md) |
+| 0082 | Kronika One Product and Private Records | Accepted; capture-only research, owner-only private reading, direct owner sharing and completion-triggered Timeline entry partially superseded by [ADR-0083](0083-modular-research-providers-and-administrator-curated-timeline.md) | 2026-09-23 | [0082-kronika-one-product-and-private-records.md](0082-kronika-one-product-and-private-records.md) |
+| 0083 | Modular Research Providers and Administrator-Curated Timeline | Accepted | 2026-09-26 | [0083-modular-research-providers-and-administrator-curated-timeline.md](0083-modular-research-providers-and-administrator-curated-timeline.md) |

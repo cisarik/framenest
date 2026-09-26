@@ -10,20 +10,23 @@ Ubuntu NUC deployment workflow.
 ## Accepted Kronika Direction
 
 [ADR-0082](docs/adr/0082-kronika-one-product-and-private-records.md) records
-the accepted transition to one Kronika in this existing repository. FrameNest
-supplies the application, catalog, media preparation, identity and deployment;
-the closed Kronika source supplies only the capture module. S0 records this
-direction in documentation; it does not implement or deploy the later slices.
+the accepted transition to one Kronika in this existing repository.
+[ADR-0083](docs/adr/0083-modular-research-providers-and-administrator-curated-timeline.md)
+records the current Search and Research architecture and the
+administrator-curated Timeline. FrameNest supplies the application, catalog,
+media preparation, identity and deployment. Search and Research are added
+through a provider-neutral application boundary. The chatgpt.com capture
+module, package `kronika_capture` and command `kronika-capture`, remains one
+parked module on the loopback bridge. Do not port a second manager, account
+system, family library or Git history. Do not perform a mass branding
+replacement.
 
 The internal `framenest` package, migration history, compatible HTTP headers
-and deployment identifiers remain. The planned capture package is
-`kronika_capture`, with command `kronika-capture`, communicating with the
-application over a loopback bridge. Preserve exactly one capture implementation
-after the verified vendor move; do not port a second manager, account system,
-family library or Git history. Do not perform a mass branding replacement.
-
-The locked sequence is S0-S10 in [ROADMAP.md](ROADMAP.md). One implementation
-grant covers one row; the roadmap itself grants no execution authority.
+and deployment identifiers remain. The active sequence after the documentation
+slice is S4-A, S6, S4-B, S7-P, S8, S9, then S10 in [ROADMAP.md](ROADMAP.md).
+The S3 host remainder, capture-mode Search and Research, S5 ZIP activation and
+S7-C capture integration stay parked. One implementation grant covers one row;
+the roadmap itself grants no execution authority.
 
 <!-- BEGIN MANAGED AP INTEGRATION -->
 ## Analytic Programming
@@ -244,21 +247,35 @@ Do not grant broad service write access to source media to implement upload or
 ingest. Ordinary clients must never receive provider secrets.
 
 For the accepted Kronika record architecture, verified identity determines
-ownership, every new record starts private, and family sharing is explicit.
-Administrator status alone never permits reading another owner's private
-content. Apply this boundary to lists, search, detail, previews, playback,
-downloads and direct APIs. Family sharing never creates public publication;
-the public composition stays off and must not expose new records. These are
-requirements for the later implementation, not claims about the current code.
+ownership and every new record starts private to its owner. An authenticated
+application administrator can read all product records, including private and
+unfinished work. That privilege is application content only. It grants no
+access to provider secrets, browser credentials or host administration.
+Ordinary household members cannot read another owner's private or unfinished
+records. Apply owner, administrator and household rules to lists, search,
+detail, previews, playback, downloads and direct APIs. Household publication
+of completed question and answer records, and of successfully analyzed media,
+is an administrator approval. Owners do not publish directly to the shared
+page. Internet publication stays disabled; the public composition stays off
+and must not expose new records. These are requirements for later
+implementation, not claims about the current code. The earlier administrator
+denial is retained only as history in ADR-0082 and is superseded by ADR-0083.
 
-Capture must use one persistent browser, loopback-only token authentication,
-bounded attachment staging and explicit `needs_admin` recovery without an
-automatic resend. Never inspect browser credentials, cookies, sessions,
-localStorage, profiles, unrelated tabs or history. Only the Cooperator handles
-real login; opaque profile backup/restore also belongs only to him, with the
-browser stopped for backup/restore. Normal capture uses the page as configured,
-without model/reasoning inspection,
-selection or external LLM API fallback. Generated output remains untrusted.
+The parked capture module must use one persistent browser, loopback-only token
+authentication, bounded attachment staging and explicit `needs_admin` recovery
+without an automatic resend. Never inspect browser credentials, cookies,
+sessions, localStorage, profiles, unrelated tabs or history. Only the
+Cooperator handles real login; opaque profile backup/restore also belongs only
+to him, with the browser stopped for backup/restore. Parked capture uses the
+page as configured, without model or reasoning inspection or selection, and
+without falling back from that page to an external API. Search and Research
+do not use that capture path. They use the ADR-0083 provider boundary: the
+first provider is the OpenAI Responses API with fixed model
+`gpt-5.5-2026-04-23` and native provider-managed research, supervised locally,
+with no automatic fallback. Only expressly submitted question text may leave
+the host on that path. Generated output remains untrusted. Research stays
+disabled until a later slice implements it. Live calls and credential
+provisioning need their own authority.
 
 The accepted empty-database transition requires its own exact-object reset
 grant after writers stop. It grants no deletion of media, profiles, identity
@@ -271,12 +288,16 @@ catalog and server-owned state, but it may run locally and must not turn local
 ownership into public-cloud dependence. The premium gallery remains a flagship
 product invariant.
 
-Under ADR-0082, Timeline becomes the main page in S8 while Gallery remains a
-separate working view using the existing design and player. Media enters
-Timeline only after successful validated analysis; Search and Research enter
-only after their complete results are saved. Preserve existing metadata-review
+Under ADR-0083, the Timeline is the main page and contains only
+administrator-approved records. Personal history is a separate view and stores
+questions and their answers, including complete Research reports and the
+caller's unfinished work. Gallery remains a separate working view using the
+existing design and player. Media enters the shared Timeline only after
+successful validated analysis and administrator approval. Search and Research
+become personal history when their complete results are saved; that completion
+does not by itself enter the Timeline. Preserve existing metadata-review
 approval. Personal photos and their future local AI analysis are outside this
-stage, as are public publication and production hardening.
+stage, as are internet publication and production hardening.
 
 Rendered UX acceptance belongs to Michal. The accepted Gallery and Details MVP
 visual behavior remains frozen unless a concrete defect is identified.

@@ -23,47 +23,88 @@ decision nor earlier disposable-state language authorizes deleting media,
 profiles or whole state directories. Actual host state requires later
 preflight verification.
 
-## Accepted Kronika Privacy and Capture Boundary
+## Accepted Kronika Privacy and Research Boundary
 
-[ADR-0082](docs/adr/0082-kronika-one-product-and-private-records.md) governs
-the one-product transition. These requirements are accepted for later slices;
-S0 does not implement authorization, deploy capture or establish host readiness.
-Existing upload, publication, companion and provider descriptions below are
-the pre-transition implementation, not exceptions to the new record policy.
+[ADR-0082](docs/adr/0082-kronika-one-product-and-private-records.md) remains
+the one-product decision.
+[ADR-0083](docs/adr/0083-modular-research-providers-and-administrator-curated-timeline.md)
+replaces four of its rules: capture-only Search and Research, owner-only
+private reading, direct owner sharing, and completion-triggered Timeline
+entry. The replaced sentences stay in ADR-0082 as retained history. This
+section is the current requirement. It does not implement authorization,
+provision a research credential, deploy capture or establish host readiness.
+Existing upload, publication, companion and media-provider descriptions below
+are the pre-transition implementation, not exceptions to this record policy.
 
-- Every new record starts private. The server derives ownership from verified
-  Tailscale identity and explicit mapping, never a client `user_id`. Local
-  administrator work requires a configured owner. Tailscale membership alone
-  is neither household membership nor administrator authority.
-- An owner explicitly shares with mapped household members. Administrator
-  status alone cannot read another owner's private content. Enforce the same
-  policy for lists/counts, search, detail, jobs, metadata, previews, covers,
-  playback, downloads and direct APIs, including existing administrator routes.
-- Family sharing never creates public publication. The public composition
-  remains off; even a direct public route must not expose new Kronika records.
-  Register new APIs in the exact permission table and existing Origin/mutation
-  protection instead of relying on hidden frontend controls.
-- Capture binds only `127.0.0.1`, uses a per-install token and exact Host/Origin
-  checks, and has no wildcard CORS. Tokens reach authorized local processes
-  only, never the frontend. Normal chat uses the ChatGPT page without an
-  external LLM API fallback or model/reasoning inspection or selection.
-- Never extract/read browser cookies, sessions, passwords, localStorage,
+- Every new record starts private to its owner. The server derives ownership
+  from verified Tailscale identity and explicit mapping, never a client
+  `user_id`. Local administrator work requires a configured owner. Tailscale
+  membership alone is neither household membership nor administrator
+  authority.
+- An authenticated application administrator can read all product records,
+  including private and unfinished work. This is a deliberate Cooperator
+  change and supersedes the ADR-0082 denial. The privilege is application
+  content only. It grants no access to provider secrets, browser credentials,
+  browser profiles or host administration. Ordinary household members still
+  cannot read another owner's private or unfinished records. Enforce owner,
+  administrator and household rules for lists, counts, search, detail, jobs,
+  metadata, previews, covers, playback, downloads and direct APIs.
+- Household publication is administrator approval of completed question and
+  answer records and of successfully analyzed media. Owners do not publish
+  directly to the shared page. The shared Timeline contains only
+  administrator-approved records. Internet publication stays disabled. The
+  public composition remains off; even a direct public route must not expose
+  new Kronika records. Register new APIs in the exact permission table and
+  existing Origin and mutation protection.
+- Permitted research egress is the expressly submitted question text plus
+  fixed non-secret instructions, sent only to the fixed OpenAI Responses
+  endpoint after an explicit authenticated submission. Private media,
+  derivatives, unrelated records, identities, browser state, local paths and
+  credentials must not be assembled into provider context. There is no
+  attachment and no automatic fallback to another provider. The first
+  provider is `openai-responses` with fixed model `gpt-5.5-2026-04-23`.
+  FrameNest supervises the lifecycle. The provider executes the native
+  research loop. Research configuration is disabled by default.
+- Provider output is untrusted. Preserve the complete answer text. Render
+  through a bounded allowlist, prohibit scripts and external resources, and
+  never inject generated HTML as trusted main-app content. Do not fetch
+  citation targets automatically.
+- Spend controls are application thresholds of Search USD 0.50, Research
+  USD 5, daily USD 10 and monthly USD 30, plus a provider monthly hard limit
+  of USD 30 before live use. Delayed enforcement and possible overshoot of
+  the application thresholds were accepted. A reservation is not an absolute
+  invoice cap. Automatic generation retries are forbidden. A kill switch
+  blocks admission and requests cancellation. Missing usage is an accounting
+  failure.
+- Standard provider retention, including possible security retention after
+  deletion of the retrieved response, was accepted. Zero Data Retention is
+  not required. Delete the remote response after validated local persistence
+  or terminal reconciliation, and do not describe that deletion as erasure of
+  all provider state. Local question and answer history, including complete
+  Research reports, is intentional.
+- Audit records may contain operational metadata, provider id, model id,
+  request id, terminal classification and usage figures. They must not
+  contain prompts, answers, media, credentials, secret-bearing URLs or raw
+  provider payloads.
+- The parked capture module binds only `127.0.0.1`, uses a per-install token
+  and exact Host and Origin checks, and has no wildcard CORS. Tokens reach
+  authorized local processes only, never the frontend. Parked capture uses
+  the ChatGPT page as configured, without model or reasoning inspection or
+  selection, and without falling back from that page to an external API. It
+  is not the research provider.
+- Never extract or read browser cookies, sessions, passwords, localStorage,
   credential stores, profile contents, unrelated tabs or history. Real login
   intervention belongs to the Cooperator through the temporary loopback-only
-  view over SSH. Opaque profile backup/restore also belongs only to him, with
-  the browser stopped; no automatic replacement profile is allowed.
-- `needs_admin` stops sending and admitting work until explicit continuation
-  passes readiness. A possibly sent prompt is never automatically repeated.
-  Browser failure pauses service instead of triggering a restart loop.
-- Validate the single bounded ZIP and actual JPEG data before browser contact.
-  Use server-owned staging IDs, directories `0700`, files `0600`, 15-minute
-  expiry for unbound uploads and cleanup at job end. Cleanup must not follow
-  symlinks. Existing budget limits and synthetic image-understanding proof
-  precede real media use; a successful upload alone is insufficient.
-- Preserve complete text/Markdown. Sanitize archived HTML, prohibit scripts
-  and external resources, and never inject generated HTML as trusted main-app
-  content. Log operational metadata only, never prompts, answers, media,
-  secret-bearing URLs, account data or raw browser diagnostics.
+  view over SSH. Opaque profile backup and restore also belong only to him,
+  with the browser stopped. No automatic replacement profile is allowed.
+- For the parked module, `needs_admin` stops sending and admitting work until
+  explicit continuation passes readiness. A possibly sent prompt is never
+  automatically repeated. Browser failure pauses service instead of
+  triggering a restart loop.
+- While capture ZIP activation stays parked, any future resume must validate
+  the single bounded ZIP and actual JPEG data before browser contact, use
+  server-owned staging with directories `0700` and files `0600`, and must not
+  treat that path as research input.
 
 The separate database-reset grant must stop writers and identify exact database
 and WAL/SHM objects. It must preserve media, profiles, identity configuration,
@@ -309,10 +350,12 @@ records the dual-audience boundary. The local-only
 exposed. It does not add a public bind, TLS listener, Funnel, or NUC
 enablement.
 
-ADR-0082 supersedes public rollout for this stage. The following controls
-describe the existing reader implementation; they do not permit enabling it
-or exposing new Kronika records. Family sharing uses verified household access,
-not this identity-absent audience.
+ADR-0082 supersedes public rollout for this stage. ADR-0083 keeps internet
+publication disabled and does not use this identity-absent audience for
+household sharing. Household Timeline access is administrator approval for
+verified household members. The following controls describe the existing
+reader implementation; they do not permit enabling it or exposing new Kronika
+records.
 
 For the local-only public composition:
 

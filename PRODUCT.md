@@ -4,10 +4,12 @@
 
 The accepted product direction is one Kronika in the existing FrameNest
 repository, per
-[ADR-0082](docs/adr/0082-kronika-one-product-and-private-records.md). The
-following FrameNest foundation describes the application being retained.
-Package names, deployment identities and historical ADRs are not renamed in
-S0. The capture source contributes a module, not a second product or library.
+[ADR-0082](docs/adr/0082-kronika-one-product-and-private-records.md) and
+[ADR-0083](docs/adr/0083-modular-research-providers-and-administrator-curated-timeline.md).
+The following FrameNest foundation describes the application being retained.
+Package names, deployment identities and historical ADRs are not renamed here.
+The chatgpt.com capture module remains parked. Search and Research are a
+provider-neutral application boundary, not a second product or library.
 
 FrameNest is a local-first, privacy-conscious, cross-platform library for video and animated media. It is intended to help people acquire, organize, browse, preserve, and play media while keeping local ownership central.
 
@@ -25,38 +27,62 @@ direction.
 
 ### Accepted Kronika Experience (Not Yet Implemented)
 
-- Timeline is the landing page; the existing dark/green design, Gallery,
-  Details and playback remain. Gallery is a separate working view and can
-  contain authorized media awaiting analysis.
+- The Timeline is the landing page and contains only administrator-approved
+  records. The existing dark/green design, Gallery, Details and playback
+  remain. Gallery is a separate working view and can contain authorized media
+  awaiting analysis. Personal history is a separate view.
+- Kronika stores questions and their answers, including complete Research
+  reports. Personal history includes the caller's unfinished and failed work.
+  A complete save makes a question and answer available in personal history
+  and in the administrator review inventory. That completion does not insert
+  a shared Timeline card.
 - One catalog contains Media, Search and Research records. A common record has
-  stable identity, content reference, owner, `private` or `family` visibility,
-  creation time, first timeline-entry time and display name. Media keeps its
-  existing tables; text documents live in the same database.
-- Ownership exists when media is cataloged. Its first successful validated
-  analysis creates its single timeline card; reanalysis updates that record
-  without moving its original chronological position. Failure creates no new
-  card and preserves any earlier successful result.
-- Search and Research enter Timeline only when the complete result is saved.
-  Pending/error jobs belong in the working interface. Full text/Markdown is
-  preserved, and archived HTML is sanitized without scripts or external
-  resources. Analysis does not bypass metadata-suggestion approval.
-- Order is newest timeline entry first with stable ID ordering, 24 items by
-  default and a server maximum of 100. Filters combine Search/Research with
-  existing media categories; GIF is a format, not a replacement for Meme.
-- Every new record is private. Verified identity supplies its owner; local
-  administrator work needs an explicitly configured owner. Sharing is an
-  explicit owner action for mapped household members. Administrator status
-  is not permission to read another owner's private records.
-- Family sharing does not use public publication. The public composition stays
-  off and must never expose new records. These rules apply to all content
-  access, including direct file endpoints.
+  stable identity, content reference, owner, visibility, creation time, first
+  timeline-entry time and display name. Media keeps its existing tables; text
+  documents live in the same database.
+- Ownership exists when media is cataloged. Successful validated analysis is
+  required before an administrator can approve a medium for the shared
+  Timeline. One medium has one card. Reanalysis keeps the previous approved
+  projection until the new successful result is approved. Failure creates no
+  new card and preserves any earlier successful result. Analysis does not
+  bypass metadata-suggestion approval.
+- Search and Research use a provider-neutral boundary. The first provider is
+  the OpenAI Responses API with fixed model `gpt-5.5-2026-04-23` and native
+  provider-managed research. FrameNest supervises the lifecycle. There is no
+  automatic fallback. The chatgpt.com capture module stays parked and is not
+  this provider. Research accepts no attachment.
+- Full text and Markdown are preserved. Rendering is sanitized, with no
+  scripts and no external resources. Generated output is untrusted.
+- Shared Timeline order is newest approved entry first with stable ID
+  ordering, 24 items by default and a server maximum of 100. Filters combine
+  Search, Research and existing media categories. GIF is a format, not a
+  replacement for Meme.
+- Every new record starts private to its owner. Verified identity supplies
+  that owner. An authenticated application administrator can read all product
+  records, including private and unfinished work. That access is application
+  content only and does not include provider secrets, browser credentials or
+  host administration. Other ordinary household members cannot read another
+  owner's private or unfinished records.
+- Administrators approve completed question and answer records, and
+  successfully analyzed media, for the shared page. Owners do not publish
+  directly to that page. The shared page is for verified household members
+  only. Internet publication stays disabled. The public composition stays off
+  and must never expose new records. These rules apply to all content access,
+  including direct file endpoints.
+
+Application budgets are Search USD 0.50, Research USD 5, daily USD 10 and
+monthly USD 30, plus a provider monthly hard limit of USD 30 before live use.
+Delayed enforcement and possible overshoot were accepted. Standard provider
+retention, including possible security retention after deletion of the
+retrieved response, was accepted. Zero Data Retention is not required.
 
 The old databases contain unwanted test data and will not be imported. A later
 authorized reset creates an empty catalog through normal migrations; source
 media, profiles and identity configuration are preserved. Personal photos and
-their future local AI analysis, native share apps, new external LLM providers,
-public publication and production hardening are outside this stage. The
-broader desktop/media horizon below is not added to S0-S10 scope.
+their future local AI analysis, native share apps, providers other than the
+selected OpenAI Responses provider and the parked capture module, internet
+publication and production hardening are outside this stage. The broader
+desktop/media horizon below is not added to the active S4-D through S10 scope.
 
 ## 2. Current Product Status
 
@@ -124,7 +150,9 @@ YouTube remains suppressed. The earlier Save-triggered publication rule in
 [ADR-0068](docs/adr/0068-companion-review-save-and-readiness-triggered-publication.md)
 was succeeded by ADR-0074: Companion Save/Apply does not publish; the
 administrator publication PUT is the baseline publication path. ADR-0082
-excludes new Kronika records from public publication entirely. The live generic
+excludes new Kronika records from internet publication. ADR-0083 keeps that
+exclusion and uses administrator approval, not that PUT, for the household
+Timeline. The live generic
 suggestion contract is
 v4 with 1–5 most significant tags
 ([ADR-0069](docs/adr/0069-five-tag-generic-media-suggestion-contract.md)).
@@ -133,7 +161,8 @@ and genre workflows stay out of companion
 ([ADR-0070](docs/adr/0070-companion-exclusion-of-movie-workflows.md)).
 [ADR-0074](docs/adr/0074-dual-audience-public-published-and-tailscale-workspace-boundary.md)
 records the pre-transition dual-audience boundary. ADR-0082 supersedes its
-public-rollout direction for the current Kronika stage. The local-only
+public-rollout direction for the current Kronika stage. ADR-0083 does not
+restore internet publication. The local-only
 `public_published_uds` published-reader is implemented-for-backend and is not
 exposed externally: there is no public bind, TLS listener, Funnel, or NUC
 enablement. The remaining public-origin rollout successors are not shipped.
@@ -512,8 +541,9 @@ Backend services must not be publicly exposed by default.
 Workspace remote functions follow a Tailscale-only direction.
 [ADR-0074](docs/adr/0074-dual-audience-public-published-and-tailscale-workspace-boundary.md)
 records the local-only published-reader implementation retained as baseline
-history. ADR-0082 keeps it off for this stage and excludes new Kronika records;
-family sharing is a separate owner-authorized household operation.
+history. ADR-0082 keeps it off for this stage and excludes new Kronika records.
+ADR-0083 makes household Timeline visibility an administrator approval for
+verified household members. Owners do not publish directly to that page.
 
 Application-level authorization remains necessary even when the network boundary is private.
 
@@ -539,7 +569,8 @@ Early product non-goals include:
 - Public internet hosting and public publication. The earlier published-reader
   direction in
   [ADR-0074](docs/adr/0074-dual-audience-public-published-and-tailscale-workspace-boundary.md)
-  is retained as history; ADR-0082 keeps it off for this stage.
+  is retained as history; ADR-0082 and ADR-0083 keep internet publication off
+  for this stage.
 - Cloud backup.
 - Server-side transcoding infrastructure.
 - Embedded libVLC.

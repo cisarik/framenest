@@ -11,48 +11,69 @@ phases, long-term scope, frozen or parked product logical wholes, and
 explicitly deferred work. Frozen and parked wholes below are durable backlog
 preservation, not active authorization and not ADR mutations.
 
-## Active Kronika Sequence: S0-S10
+## Active Kronika Sequence
 
 [ADR-0082](docs/adr/0082-kronika-one-product-and-private-records.md) fixes
-the current one-product direction. This sequence takes precedence over the
-older phase ordering below. S0 records the architecture only; later rows are
-not completed by this documentation change. One implementation grant executes
-one row. Preflight, independent acceptance, publication and deployment require
-their own bounded authority and may remain within the same row.
+the one-product direction.
+[ADR-0083](docs/adr/0083-modular-research-providers-and-administrator-curated-timeline.md)
+revises Search and Research delivery, administrator access and Timeline entry.
+This sequence takes precedence over the older phase ordering below. One
+implementation grant executes one row. Independent acceptance, publication,
+credential provisioning, host preflight, reset and live provider calls require
+their own bounded authority. A row does not grant them.
+
+S0 and the published S1-S3 repository sources remain prior rows. They are not
+reopened here. The S3 host remainder stays parked with the capture-mode rows
+below. The active order is:
+
+```text
+S4-D -> S4-A -> S6 -> S4-B -> S7-P -> S8 -> S9 -> S10
+```
 
 | Slice | Useful outcome | Evidence before advancing |
 |---|---|---|
-| S0 | One-product rules, code ownership, private records and empty-database decision in current docs and ADR-0082 | Documentation contradiction review, exact allowlist, unchanged AP pin; E0/E1 |
-| S1 | Move the existing kernel to `src/kronika_capture`; update imports, packaging and provenance; remove the verified vendor duplicate | Existing CLI/bridge/protocol and packaging tests; one implementation and complete packaged assets; E2 |
-| S2 | Persistent browser, durable job states, reconnect, `needs_admin` and no automatic resend | Fake-driver lifecycle/failure evidence and fresh independent targeted review; E3 |
-| S3 | Capture service source and extension of the existing release helper, followed by separately authorized host setup | Read-only host preflight; separate supervision; Cooperator login and authorized synthetic text ask; E3 |
-| S4 | Selectively restore Search/Research and complete safe export | Mode/completion/sanitization regressions, typed unavailable-mode failures and targeted provider-boundary review; E2/R3 |
-| S5 | One bounded ZIP and existing JPEG/ZIP/budget integration | Adversarial archive/cleanup tests, independent file-boundary review, then authorized synthetic image-understanding proof; E3 |
-| S6 | Common records, atomic ownership and private/family access across existing routes | Empty-schema/migration and two-user/direct-file privacy tests; fresh independent permission review; E3 |
-| S7 | One application capture client, transactional result bindings, media integration and Search/Research APIs | Crash/retry idempotency, no duplicate cards, no fabricated model/reasoning metadata, busy/cancel/timeout handling; E2/E3 |
-| S8 | Timeline landing, Search/Research details, explicit sharing and Kronika presentation in the existing shell | Stable cards/filtering/pagination, safe rendering, Gallery/image/GIF/playback regressions; E2 |
-| S9 | Integrated acceptance, exact stopped-writer reset and deployment of the accepted candidate | Fresh integrated evidence; separate host preflight/reset grant; empty catalog; Cooperator rendered acceptance on exact public-main NUC release; E3 |
-| S10 | Rename old Kronika to `kronika-capture-archive`, FrameNest to `kronika`, update source references and archive the former repository last | Explicit rename/publication authority, exact refs/history and release verification; no force/history rewrite |
+| S4-D | Durable documentation of modular research providers, the selected native OpenAI route, question and answer history, administrator read-all, administrator approval and the shared-only Timeline | Documentation contradiction review, exact allowlist, unchanged AP pin; E1 |
+| S4-A | Provider contracts, capability registry, configuration and a fake adapter. The real provider stays disabled | Import boundaries, configuration compatibility, selection snapshot, typed errors and rejection of the parked provider; E2 |
+| S6 | Common records, owner, administrator and household policy, and the approval service. No S3 or S5 dependency | Migration and all-route authorization tests, approval conflicts and public exclusion; fresh authorization review; E3 |
+| S4-B | Native OpenAI adapter, durable jobs, budgets, cancellation, cleanup and credential-deployment source. No live key or host mutation | Crash and idempotency, egress, secret handling, budget arithmetic and cleanup against a fake transport; fresh provider-boundary review; E3 |
+| S7-P | Atomic question and answer save, personal-history APIs, media-success integration and safe document rendering | Duplicate completion, full output, preserved media review, approved revisions and safe rendering; E3 |
+| S8 | Shared Timeline landing, personal history, Search and Research forms, administrator review and Kronika presentation. Gallery retained | Node behavior tests, safe rendering, Gallery, image, GIF and playback regressions; E2 |
+| S9 | Integrated acceptance on the new empty catalog, then a separately provisioned provider and household UX acceptance. Parked capture completion is not a gate | Fresh integrated review; separate publication, read-only host preflight, exact reset and live-call grants; Cooperator acceptance on the exact public-main NUC release; E3 |
+| S10 | Rename old Kronika to `kronika-capture-archive`, FrameNest to `kronika`, update source references and archive the former repository last | Explicit rename and publication authority, exact refs, history and release verification; no force or history rewrite |
 
-The eight required proofs are private access even through direct files; family
-sharing without publication; idempotent cards/results; no automatic second
-send after errors/restarts; browser continuity across tasks/web outages; ZIP
-rejection before ChatGPT contact and safe cleanup; complete safe Search/Research
-output; and one packaged capture implementation with working assets.
+Parked capture work has no authority on the active route:
+
+| Slice | Preserved outcome | Resume condition |
+|---|---|---|
+| S3 host remainder | Capture service sources and the release-helper extension stay in the tree. Host login and ask acceptance are not complete | A future explicit decision, after a read-only host preflight |
+| Capture-mode S4 | Selective Search and Research restore inside the parked capture module is not the active research route | A future explicit decision, after the capture module proves complete Search and Research |
+| S5 | Bounded ZIP activation. Existing JPEG, ZIP and budget code stays in place and is not external-research upload support | A future explicit decision and semantic ZIP evidence |
+| S7-C | Capture application integration, including bridge submission and capture-specific media integration | A future explicit decision. S7-P does not switch media analysis to the research provider |
+
+Active proofs are administrator read of product records without secret or host
+access; ordinary cross-owner denial; shared Timeline exclusion until
+administrator approval; personal history of questions and answers, including
+unfinished work; no automatic provider fallback or generation retry; complete
+safe Search and Research rendering; and research disabled by default. Parked
+capture proofs remain requirements of those parked rows: no automatic resend,
+browser continuity, ZIP rejection before ChatGPT contact, and one packaged
+capture implementation. They do not gate the active order.
 
 Use the existing baseline-bound AP Python route and `node --test`, with no new
-test toolchain. This S0 documentation task runs no tests. NUC/browser/provider
+test toolchain. S4-D is documentation only. NUC, browser and live-provider
 facts require later preflight or bounded live evidence, not historical traces.
 Preserve the AP pin and upgrade ledger. Personal-photo AI, old-database import,
-native share apps, new external providers, public publication and production
-hardening are outside this sequence. The existing release helper remains the
-only deployment system; no mass `framenest` rename is part of the transition.
+native share apps, providers other than the selected OpenAI Responses provider
+and the parked capture module, internet publication and production hardening
+are outside this sequence. The existing release helper remains the only
+deployment system; no mass `framenest` rename is part of the transition.
 
 ## Earlier MacBook MVP Convergence (Foundation History)
 
 The following phases preserve earlier foundation status and the longer-term
-horizon. They do not replace S0-S10, authorize public rollout, or override
-ADR-0082 ownership and privacy rules for new records.
+horizon. They do not replace the active Kronika sequence, authorize internet
+publication, or override ADR-0083 ownership, administrator access and Timeline
+rules for new records.
 
 The minimum logical-media and physical-location persistence foundation and
 explicit idempotent import from selected scan candidates now exist on MacBook.
@@ -347,9 +368,10 @@ The historical Save-triggered publication rule in
 [ADR-0068](docs/adr/0068-companion-review-save-and-readiness-triggered-publication.md)
 was succeeded by the implemented administrator publication PUT in
 [ADR-0074](docs/adr/0074-dual-audience-public-published-and-tailscale-workspace-boundary.md).
-Companion Save/Apply does not publish. ADR-0082 now excludes new Kronika records
-from public publication; neither earlier contract authorizes family sharing
-through publication.
+Companion Save/Apply does not publish. ADR-0082 excludes new Kronika records
+from internet publication. ADR-0083 keeps that exclusion. Household Timeline
+entry is administrator approval, not owner-direct sharing and not the
+ADR-0074 publication path. Neither earlier contract authorizes that approval.
 
 Still required for phase exit: broader adapter coverage, generalized downloader
 UI, and additional source adapters beyond the shipped YouTube/X foundations.

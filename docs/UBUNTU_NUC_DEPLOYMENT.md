@@ -52,12 +52,16 @@ task. Git history remains the archive.
 ## Accepted Kronika Transition (Not Yet Deployed)
 
 [ADR-0082](adr/0082-kronika-one-product-and-private-records.md) accepts one
-product here, with the existing FrameNest application and a separate capture
-runtime. S0 changes documentation only. The existing operational commands below
-remain unchanged and do not establish that capture services are installed.
+product here, with the existing FrameNest application and a separate parked
+capture runtime.
+[ADR-0083](adr/0083-modular-research-providers-and-administrator-curated-timeline.md)
+adds the research supervisor to that same application. This runbook change
+does not install either capability. The existing operational commands below
+remain unchanged and do not establish that capture services or a research
+credential are installed.
 
-The sole release route remains `deploy/ubuntu/framenest-release`; S3 extends
-it for separately supervised web, bridge and browser runner. Planned capture
+The sole release route remains `deploy/ubuntu/framenest-release`. Do not add
+a second deployment system. The S3 host remainder is parked. Planned capture
 uses account `kronika-capture`, private state under `/var/lib/kronika-capture`,
 one persistent Chromium on permanent Xvfb and a dedicated profile. A normal web
 release must not restart that browser. A capture runtime update receives one
@@ -86,7 +90,46 @@ Cooperator rendered acceptance follows publication to exact public `main` and
 refresh of that candidate on NUC. S10 repository renames and source URL changes
 require later explicit authority, verified refs and release checks; local host
 paths and deployment identifiers need not be renamed. See
-[ROADMAP.md](../ROADMAP.md) for S0-S10. None of this authorizes host work now.
+[ROADMAP.md](../ROADMAP.md) for the active order and the parked capture rows.
+None of this authorizes host work now.
+
+## Future Research Credential and Native Provider (Not Provisioned)
+
+ADR-0083 selects the OpenAI Responses API, model `gpt-5.5-2026-04-23`, with
+native provider-managed research supervised by this application. Nothing in
+this runbook provisions that provider, stores a key, sets a billing limit or
+places a live call. Research stays disabled until a later repository slice
+and a separate activation grant. A disabled or unconfigured research provider
+must not prevent ordinary `framenest.service` startup. `framenest-release`
+continues to move only the web release, as it does today.
+
+Future provisioning, not authorized here, uses one dedicated project-scoped
+credential identified as `KRONIKA_RESEARCH_OPENAI_API_KEY`. The non-secret
+configuration stores that identifier only. The intended production shape is a
+root-owned mode `0600` file
+`/etc/framenest/credentials/research-openai`, mapped with:
+
+```text
+LoadCredential=KRONIKA_RESEARCH_OPENAI_API_KEY:/etc/framenest/credentials/research-openai
+```
+
+The web service would read that named systemd credential through the existing
+credential boundary. It must not prefer an ambient API key. No key belongs in
+Git, unit arguments, logs or the frontend.
+
+Before any native provider call, a separate grant must show all of the
+following:
+
+- the repository research slice is accepted and still disabled by default;
+- the Cooperator has provisioned the dedicated credential;
+- the provider account has a monthly hard limit of USD 30;
+- application thresholds remain Search USD 0.50, Research USD 5, daily USD 10
+  and monthly USD 30, with the accepted possibility of delayed enforcement;
+- the call itself is an explicit bounded live test, not a side effect of
+  deploy, rollback or ordinary startup.
+
+Capture remains parked. The next section records its repository sources and
+does not record a completed capture deployment.
 
 ## Capture Runtime Sources (Not Deployed)
 

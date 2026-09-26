@@ -2,11 +2,48 @@
 
 ## Status
 
-`Accepted`
+`Accepted`; partially superseded by
+[ADR-0083](0083-modular-research-providers-and-administrator-curated-timeline.md)
 
 Accepted by the Cooperator on 2026-09-23. S0 records this decision only; it does
 not implement, publish or deploy the later slices. Existing application code,
-schema head `0033`, capture vendor packaging and service sources are unchanged.
+schema head `0033`, capture vendor packaging and service sources are unchanged
+by that documentation slice. The historical reasoning below is retained. Where
+this decision and ADR-0083 conflict, ADR-0083 is current for the four points
+named in the next section.
+
+## Partial supersession
+
+[ADR-0083](0083-modular-research-providers-and-administrator-curated-timeline.md),
+accepted on 2026-09-26, partially supersedes this decision. The superseded
+points are only:
+
+1. Capture-only Search and Research. This file treats missing Search and
+   Research as a selective restore into the capture module and forbids
+   fallback to an external LLM API. ADR-0083 delivers Search and Research
+   through a provider-neutral application boundary. The chatgpt.com capture
+   module remains parked and is not the current research provider.
+2. Owner-only private reading. The sentence below, "Administrator status alone
+   cannot read another owner's private records," and the ADR-0048 relationship
+   note are retained as the 2026-09-23 reasoning. ADR-0083 replaces that rule:
+   an authenticated application administrator can read all product records,
+   including private and unfinished work. That access is application content
+   only.
+3. Direct owner sharing. This file lets the owner explicitly share a record
+   with mapped household members. ADR-0083 replaces that with administrator
+   approval of completed question and answer records and successfully analyzed
+   media. Owners do not publish directly to the shared page.
+4. Completion-triggered Timeline entry. This file enters Search and Research
+   on the Timeline after a complete transactional save, and enters media after
+   the first successful validated analysis. ADR-0083 keeps those completions
+   in personal history and the administrator review inventory. The shared
+   Timeline contains only administrator-approved records.
+
+Unaffected decisions remain accepted. Those include one repository and
+application, the parked capture-module constraints, Gallery as a working view,
+sanitized output, the empty-database transition, the single release helper and
+the S10 public rename. Do not read the retained paragraphs below as permission
+to ignore ADR-0083 on the four points above.
 
 ## Decision Date
 

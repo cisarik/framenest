@@ -24,51 +24,81 @@ and [ADR-0074](docs/adr/0074-dual-audience-public-published-and-tailscale-worksp
 Cleanup/update owner: future explicitly authorized Worker under an Orchestrator
 task. Git history remains the archive.
 
-## Accepted Kronika Application and Capture Boundary
+## Accepted Kronika Application and Research Boundary
 
-[ADR-0082](docs/adr/0082-kronika-one-product-and-private-records.md) records
-the next architecture in this same repository. S0 documents it only. Existing
-FrameNest implementation summaries below remain the pre-transition baseline;
-they do not prove that capture deployment or common-record privacy exists.
+[ADR-0082](docs/adr/0082-kronika-one-product-and-private-records.md) and
+[ADR-0083](docs/adr/0083-modular-research-providers-and-administrator-curated-timeline.md)
+record the next architecture in this same repository. This section documents
+that target. Existing FrameNest implementation summaries below remain the
+pre-transition baseline. They do not prove that research, common-record
+privacy or capture deployment exists.
 
-The application owns one authoritative catalog, media, complete Search/Research
-documents, identity, sharing and Timeline. Capture owns the ChatGPT interaction
-and bounded job/result state, not family records or access decisions. It runs
-in a separate process behind a `127.0.0.1` bridge. The planned package/command
-are `kronika_capture` / `kronika-capture`; existing `framenest` package, headers,
-migrations and service identities remain. Frame preparation, deterministic ZIP
-and budget calculations stay in the application.
+The application owns one authoritative catalog, media, complete Search and
+Research documents, identity, administrator approval and the Timeline. There
+is no second server or deployment system. The existing `framenest` package,
+headers, migrations and service identities remain.
 
-Application requests use stable request IDs. The existing bridge is extended,
-not accompanied by another browser queue: one active job includes a paused
-one; identical retries return the same job, conflicting content is refused,
-and terminal state/results are retained for 24 hours with a 256-record bound
-that refuses admission rather than prematurely dropping idempotency. The
-application saves complete results and their job bindings transactionally and
-idempotently. Pending/error jobs are not timeline records.
+### Local supervision and the hosted research loop
 
-One persistent headed Chromium on permanent Xvfb uses one dedicated profile.
-Bridge outages reconnect without closing it; normal web releases do not
-restart it. Login/challenge states enter `needs_admin`, block new work and
-require explicit readiness-checked continuation. A possibly sent prompt is
-never automatically resent; an ambiguous outcome is a typed failure. Admin
-waiting has a separate 30-minute deadline. Browser crashes pause service;
-manual starts are at least five minutes apart, without an automatic restart
-loop. The Cooperator alone uses a temporary loopback-only view over SSH.
+FrameNest runs the supervisory runtime: authorize a submission, reserve
+budget, submit, poll, cancel, validate, save and reconcile cleanup. The model
+and web-search loop runs at the selected provider. The first provider is the
+OpenAI Responses API, id `openai-responses`, fixed model `gpt-5.5-2026-04-23`,
+with native provider-managed research and no automatic fallback. Research
+configuration is disabled by default. An absent research section means
+disabled. A disabled provider must not prevent ordinary application startup.
+
+Non-secret configuration stores the credential identifier
+`KRONIKA_RESEARCH_OPENAI_API_KEY` only. Production reads that one credential
+through the existing systemd credential boundary. Development may use the
+named environment variable only when an operator explicitly configures it.
+The server does not accept a client-supplied endpoint, model, tool or key.
+Ordinary clients never receive provider secrets. Media-analysis provider
+selection stays separate and is not replaced by the research provider.
+
+Only the submitted question text and fixed non-secret instructions may leave
+the host. Research accepts no attachment. The application does not fetch
+arbitrary result URLs. Generated output is untrusted. Complete question and
+answer text, including Research reports, is stored locally. The shared
+Timeline does not receive a card until an administrator approves the completed
+record.
+
+### Parked capture module
+
+The chatgpt.com capture module, package `kronika_capture` and command
+`kronika-capture`, remains parked. It is not the current Search or Research
+provider. It owns ChatGPT page interaction and its own bounded job state, not
+family records or access decisions. It runs in a separate process behind a
+`127.0.0.1` bridge. The frontend receives no bridge token. Frame preparation,
+deterministic ZIP and budget calculations stay in the application and are not
+research-upload support.
+
+While parked, its constraints remain: one active job includes a paused one;
+identical retries return the same job; conflicting content is refused;
+terminal state is bounded; one persistent headed Chromium on permanent Xvfb
+uses one dedicated profile; bridge outages reconnect without closing it;
+normal web releases do not restart it; `needs_admin` blocks new work until
+explicit continuation; a possibly sent prompt is never automatically resent;
+and the module does not fall back from the page to an external API. Host
+setup and real capture calls stay unauthorized.
+
+### Records and ingress
 
 Existing Tailscale Serve, restricted UDS provenance, explicit identity mapping
-and mutation protection remain the ingress. New records always start private;
-ownership comes from verified identity or an explicitly configured local
-owner. The administrator role is not an override for private content. Shared
-records are readable by mapped household members; every content route and
-query must enforce that rule. Family sharing never invokes content-publication
-APIs. The public composition stays off and excludes new records.
+and mutation protection remain the ingress. New records start private to the
+owner derived from verified identity or an explicitly configured local owner.
+An authenticated application administrator can read all product records,
+including private and unfinished work. That access is application content
+only. Household members see a record on the shared Timeline only after
+administrator approval. Owners do not publish directly to that page. Approval
+does not use the internet-publication APIs. The public composition stays off
+and excludes new records. Every content route and query must enforce these
+rules.
 
-The frontend receives no bridge token. Archived generated content preserves
-complete text/Markdown and uses isolated sanitized HTML without scripts or
-external resources. The main application must not trust captured HTML.
-Host setup, real capture calls and the exact stopped-writer database reset
-remain later authorized steps in [ROADMAP.md](ROADMAP.md), not S0 effects.
+Archived generated content preserves complete text and Markdown and uses
+isolated sanitized HTML without scripts or external resources. The main
+application must not trust generated HTML. The exact stopped-writer database
+reset remains a later authorized step in [ROADMAP.md](ROADMAP.md).
 
 ## Server Authority
 
@@ -108,10 +138,12 @@ production server role ([ADR-0032](docs/adr/0032-ubuntu-nuc-deployment-foundatio
 dated production facts remain history. The NUC is not required for local
 ownership and must not make FrameNest a public-cloud or SaaS dependency.
 
-ADR-0082 adds capture as part of the same product, not another project. The
+ADR-0082 keeps capture as part of the same product, now parked, not another
+project. ADR-0083 adds the research supervisor to this same server. The
 accepted reset concerns the unwanted test databases only; it is not blanket
 permission to delete media or state directories. Installed browser tooling,
-active services and profile readiness require a later read-only preflight.
+active services, profile readiness and research-credential readiness require
+a later read-only preflight.
 
 The NUC currently provides authoritative catalog serving for the disposable
 development-and-testing instance. Later or incomplete NUC capabilities
@@ -317,8 +349,10 @@ to `/run/framenest/framenest.sock` and `tailscale_uds`.
 ships a local-only `public_published_uds` published-reader composition.
 That composition is not exposed externally, has no TLS listener, Funnel, or
 NUC bind.
-This is retained implementation history; ADR-0082 keeps the public composition
-off and forbids exposing new Kronika records through it.
+This is retained implementation history. ADR-0082 keeps the public composition
+off and forbids exposing new Kronika records through it. ADR-0083 keeps
+internet publication disabled; household Timeline entry is administrator
+approval on this server, not this public composition.
 Funnel to the workspace socket stays forbidden. FrameNest must not require
 router port forwarding. Tailscale networking is not sufficient authorization by
 itself; application-level authorization remains required. The accepted
