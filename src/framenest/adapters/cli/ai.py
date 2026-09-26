@@ -344,6 +344,7 @@ def configure_command(
         provider_models=provider_models,
         updated_at_ms=now_ms(),
         providers={} if existing is None else dict(existing.providers),
+        research=None if existing is None else existing.research,
     )
     write_ai_server_config(config, context.config_path)
     output("AI configuration saved.")
@@ -377,6 +378,7 @@ def configure_non_interactive_command(
         provider_models=provider_models,
         updated_at_ms=now_ms(),
         providers={} if existing is None else dict(existing.providers),
+        research=None if existing is None else existing.research,
     )
     write_ai_server_config(config, context.config_path)
     output("AI configuration saved.")
@@ -453,6 +455,7 @@ def provider_add_command(
         provider_models={} if existing is None else dict(existing.provider_models),
         updated_at_ms=now_ms(),
         providers=providers,
+        research=None if existing is None else existing.research,
     )
     write_ai_server_config(config, context.config_path)
     output("AI provider record updated." if updated else "AI provider record saved.")
@@ -520,6 +523,7 @@ def provider_remove_command(
         provider_models=provider_models,
         updated_at_ms=now_ms(),
         providers=providers,
+        research=existing.research,
     )
     write_ai_server_config(config, context.config_path)
     output("AI provider record removed.")

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+import json
 from pathlib import Path
 import stat
 
@@ -35,6 +36,7 @@ from framenest.infrastructure.ai.provider_records import (
     AiProviderRecord,
 )
 from framenest.infrastructure.ai.registry import resolve_ai_provider
+from framenest.infrastructure.ai.research_configuration import default_research_configuration
 from framenest.infrastructure.ai.transport import HttpsJsonResponse
 from framenest.infrastructure.ai.vision_probe import (
     VISION_PROBE_PROMPT,
@@ -1244,3 +1246,133 @@ def test_vision_probe_provider_failure_is_sanitized(
     assert state is not None
     assert state.status == "authentication_failed"
     assert state.observed_color is None
+
+
+_MEDIA_PROVIDER_ID = "vercel-ai-gateway"
+_EXTRA_PROVIDER_ID = "local-media"
+_EXTRA_MODEL_ID = "local-vision"
+_EXTRA_CREDENTIAL_ENV = "LOCAL_MEDIA_API_KEY"
+
+
+def _assert_cli_media_and_research(
+    config_path: Path,
+    *,
+    research: object,
+    provider_ids: set[str],
+) -> None:
+    loaded = load_ai_server_config(config_path)
+    assert loaded is not None
+    assert loaded.research == research
+    assert loaded.active_provider_id == _MEDIA_PROVIDER_ID
+    assert loaded.provider_models == {_MEDIA_PROVIDER_ID: VERCEL_AI_GATEWAY_DEFAULT_MODEL_ID}
+    assert set(loaded.providers) == provider_ids
+    assert loaded.providers[DECLARED_PROVIDER_ID] == _declared_record()
+    payload = json.loads(config_path.read_text(encoding="utf-8"))
+    if research is None:
+        assert "research" not in payload
+    else:
+        assert "research" in payload
+
+
+def _exercise_configuration_writers(config_path: Path, *, research: object) -> None:
+    original_providers = {DECLARED_PROVIDER_ID}
+    context = ai._CliContext(config_path=config_path)
+
+    assert (
+        ai.configure_non_interactive_command(
+            context,
+            provider_id=_MEDIA_PROVIDER_ID,
+            model_id=VERCEL_AI_GATEWAY_DEFAULT_MODEL_ID,
+            output=lambda _line: None,
+        )
+        == 0
+    )
+    _assert_cli_media_and_research(
+        config_path,
+        research=research,
+        provider_ids=original_providers,
+    )
+
+    answers = iter(["", "", "yes"])
+    assert (
+        ai.configure_command(
+            context,
+            prompt=lambda _prompt: next(answers),
+            output=lambda _line: None,
+        )
+        == 0
+    )
+    _assert_cli_media_and_research(
+        config_path,
+        research=research,
+        provider_ids=original_providers,
+    )
+
+    assert (
+        ai.provider_add_command(
+            context,
+            provider_id=_EXTRA_PROVIDER_ID,
+            name="Local Media",
+            protocol="openai-chat-completions",
+            base_url="https://opencode.ai/zen/go/v1",
+            credential_env=_EXTRA_CREDENTIAL_ENV,
+            model_ids=(_EXTRA_MODEL_ID,),
+            model_names=(),
+            capabilities=("vision_input",),
+            confirmed=True,
+            output=lambda _line: None,
+        )
+        == 0
+    )
+    _assert_cli_media_and_research(
+        config_path,
+        research=research,
+        provider_ids=original_providers | {_EXTRA_PROVIDER_ID},
+    )
+
+    assert (
+        ai.provider_remove_command(
+            context,
+            provider_id=_EXTRA_PROVIDER_ID,
+            confirmed=True,
+            output=lambda _line: None,
+        )
+        == 0
+    )
+    _assert_cli_media_and_research(
+        config_path,
+        research=research,
+        provider_ids=original_providers,
+    )
+
+
+def test_cli_writers_preserve_research_configuration(tmp_path: Path) -> None:
+    research = default_research_configuration(enabled=True)
+    config_path = tmp_path / "with-research.json"
+    write_ai_server_config(
+        AiServerConfig(
+            active_provider_id=_MEDIA_PROVIDER_ID,
+            provider_models={_MEDIA_PROVIDER_ID: VERCEL_AI_GATEWAY_DEFAULT_MODEL_ID},
+            updated_at_ms=1,
+            providers={DECLARED_PROVIDER_ID: _declared_record()},
+            research=research,
+        ),
+        config_path,
+    )
+    stored = load_ai_server_config(config_path)
+    assert stored is not None
+    assert stored.research == research
+
+    _exercise_configuration_writers(config_path, research=research)
+
+    bare_path = tmp_path / "without-research.json"
+    write_ai_server_config(
+        AiServerConfig(
+            active_provider_id=_MEDIA_PROVIDER_ID,
+            provider_models={_MEDIA_PROVIDER_ID: VERCEL_AI_GATEWAY_DEFAULT_MODEL_ID},
+            updated_at_ms=1,
+            providers={DECLARED_PROVIDER_ID: _declared_record()},
+        ),
+        bare_path,
+    )
+    _exercise_configuration_writers(bare_path, research=None)
