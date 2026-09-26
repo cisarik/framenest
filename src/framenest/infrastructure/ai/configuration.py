@@ -12,6 +12,12 @@ from pathlib import Path
 from typing import Any, Callable, Mapping
 
 from framenest.infrastructure.ai.constants import BUILTIN_PROVIDER_IDS
+from framenest.infrastructure.ai.research_configuration import (
+    ResearchConfiguration,
+    ResearchConfigurationError,
+    parse_research_configuration,
+    serialize_research_configuration,
+)
 from framenest.infrastructure.ai.provider_records import (
     AiProviderRecord,
     AiProviderRecordError,
@@ -25,8 +31,18 @@ from framenest.infrastructure.ai.provider_records import (
     validate_provider_identifier,
 )
 
-AI_CONFIG_SCHEMA_VERSION = 2
-AI_CONFIG_SCHEMA_VERSIONS = frozenset({1, AI_CONFIG_SCHEMA_VERSION})
+AI_CONFIG_SCHEMA_VERSION = 3
+AI_CONFIG_SCHEMA_VERSIONS = frozenset({1, 2, AI_CONFIG_SCHEMA_VERSION})
+_V3_CONFIG_KEYS = frozenset(
+    {
+        "schema_version",
+        "active_provider_id",
+        "provider_models",
+        "providers",
+        "updated_at_ms",
+        "research",
+    }
+)
 AI_TEST_STATE_SCHEMA_VERSION = 1
 AI_STATUS_SNAPSHOT_SCHEMA_VERSION = 1
 AI_CONFIG_PATH_ENVIRONMENT_NAME = "FRAMENEST_AI_CONFIG_PATH"
@@ -56,6 +72,7 @@ class AiServerConfig:
     updated_at_ms: int
     schema_version: int = AI_CONFIG_SCHEMA_VERSION
     providers: dict[str, AiProviderRecord] = field(default_factory=dict)
+    research: ResearchConfiguration | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -154,9 +171,7 @@ def load_ai_server_config(path: Path) -> AiServerConfig | None:
         raise AiConfigurationError("AI configuration is malformed.") from None
     if not isinstance(payload, dict):
         raise AiConfigurationError("AI configuration is malformed.")
-    schema_version = payload.get("schema_version")
-    if schema_version not in AI_CONFIG_SCHEMA_VERSIONS:
-        raise AiConfigurationError("AI configuration version is unsupported.")
+    schema_version = _accepted_schema_version(payload.get("schema_version"))
     try:
         if schema_version == 1:
             providers: dict[str, AiProviderRecord] = {}
@@ -164,6 +179,7 @@ def load_ai_server_config(path: Path) -> AiServerConfig | None:
             providers = _parse_declared_providers(payload.get("providers"))
     except AiProviderRecordError as exc:
         raise AiConfigurationError(str(exc)) from None
+    research = _parse_research_section(schema_version, payload)
     provider_id = validate_provider_id(payload.get("active_provider_id"))
     provider_models_payload = payload.get("provider_models")
     if not isinstance(provider_models_payload, dict):
@@ -189,6 +205,7 @@ def load_ai_server_config(path: Path) -> AiServerConfig | None:
         updated_at_ms=updated_at_ms,
         schema_version=AI_CONFIG_SCHEMA_VERSION,
         providers=providers,
+        research=research,
     )
 
 
@@ -222,6 +239,8 @@ def write_ai_server_config(config: AiServerConfig, path: Path) -> None:
         },
         "updated_at_ms": config.updated_at_ms,
     }
+    if config.research is not None:
+        payload["research"] = _serialize_research_section(config.research)
     _atomic_write_json(path, payload, max_payload_bytes=MAX_AI_CONFIG_BYTES)
 
 
@@ -235,6 +254,36 @@ def mutate_ai_server_config(
     refreshed = replace(updated, updated_at_ms=now_ms())
     write_ai_server_config(refreshed, config_path)
     return refreshed
+
+
+def _accepted_schema_version(value: object) -> int:
+    if type(value) is not int or value not in AI_CONFIG_SCHEMA_VERSIONS:
+        raise AiConfigurationError("AI configuration version is unsupported.")
+    return value
+
+
+def _parse_research_section(
+    schema_version: int,
+    payload: Mapping[str, Any],
+) -> ResearchConfiguration | None:
+    """Read the optional research section. Versions 1 and 2 stay media-only."""
+    if schema_version < 3:
+        return None
+    if not set(payload).issubset(_V3_CONFIG_KEYS):
+        raise AiConfigurationError("AI configuration is malformed.")
+    if "research" not in payload:
+        return None
+    try:
+        return parse_research_configuration(payload["research"])
+    except ResearchConfigurationError:
+        raise AiConfigurationError("AI research configuration is malformed.") from None
+
+
+def _serialize_research_section(research: ResearchConfiguration) -> dict[str, Any]:
+    try:
+        return serialize_research_configuration(research)
+    except ResearchConfigurationError:
+        raise AiConfigurationError("AI research configuration is malformed.") from None
 
 
 def _parse_declared_providers(payload: object) -> dict[str, AiProviderRecord]:

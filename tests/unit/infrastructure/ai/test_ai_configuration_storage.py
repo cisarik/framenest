@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import stat
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -26,6 +27,10 @@ from framenest.infrastructure.ai.constants import VERCEL_AI_GATEWAY_DEFAULT_MODE
 from framenest.infrastructure.ai.provider_records import (
     AiProviderModel,
     AiProviderRecord,
+)
+from framenest.infrastructure.ai.research_configuration import (
+    default_research_configuration,
+    serialize_research_configuration,
 )
 
 DECLARED_PROVIDER_ID = "opencode-go"
@@ -107,7 +112,9 @@ def test_v2_declared_config_round_trips_with_exact_keys(tmp_path: Path) -> None:
         "schema_version",
         "updated_at_ms",
     ]
-    assert payload["schema_version"] == 2
+    assert payload["schema_version"] == 3
+    assert "research" not in payload
+    assert loaded.research is None
     record = payload["providers"][DECLARED_PROVIDER_ID]
     assert sorted(record) == ["base_url", "credential_env", "models", "name", "protocol"]
     assert record["credential_env"] == "OPENCODE_API_KEY"
@@ -137,7 +144,8 @@ def test_v1_read_upgrades_to_v2_without_inventing_providers(tmp_path: Path) -> N
 
     loaded = load_ai_server_config(path)
     assert loaded is not None
-    assert loaded.schema_version == 2
+    assert loaded.schema_version == 3
+    assert loaded.research is None
     assert loaded.active_provider_id == "nvidia-nim"
     assert loaded.provider_models == {
         "nvidia-nim": "nvidia/example",
@@ -148,7 +156,8 @@ def test_v1_read_upgrades_to_v2_without_inventing_providers(tmp_path: Path) -> N
     upgraded_path = tmp_path / "config" / "upgraded.json"
     write_ai_server_config(loaded, upgraded_path)
     upgraded = json.loads(upgraded_path.read_text(encoding="utf-8"))
-    assert upgraded["schema_version"] == 2
+    assert upgraded["schema_version"] == 3
+    assert "research" not in upgraded
     assert upgraded["providers"] == {}
     assert upgraded["active_provider_id"] == "nvidia-nim"
     assert upgraded["provider_models"] == {
@@ -180,7 +189,7 @@ def test_v1_read_keeps_builtin_default_selection(tmp_path: Path) -> None:
 
 def test_unsupported_or_missing_config_version_is_rejected(tmp_path: Path) -> None:
     path = tmp_path / "ai.json"
-    for schema_version in (3, "2", None):
+    for schema_version in (999, 4, "2", "3", None, True, 3.0):
         path.write_text(
             json.dumps(
                 {
@@ -524,3 +533,115 @@ def test_test_state_rejects_unbounded_identifier(tmp_path: Path) -> None:
             ),
             tmp_path / "test-state.json",
         )
+
+
+def test_v2_read_is_lossless_and_leaves_research_disabled(tmp_path: Path) -> None:
+    path = tmp_path / "ai.json"
+    original = {
+        "schema_version": 2,
+        "active_provider_id": DECLARED_PROVIDER_ID,
+        "provider_models": {DECLARED_PROVIDER_ID: DECLARED_MODEL_ID},
+        "providers": {DECLARED_PROVIDER_ID: _serialized_declared_record()},
+        "updated_at_ms": 5,
+    }
+    path.write_text(json.dumps(original), encoding="utf-8")
+    before = path.read_bytes()
+
+    loaded = load_ai_server_config(path)
+
+    assert path.read_bytes() == before
+    assert loaded is not None
+    assert loaded.schema_version == 3
+    assert loaded.research is None
+    assert loaded.active_provider_id == DECLARED_PROVIDER_ID
+    assert loaded.provider_models == {DECLARED_PROVIDER_ID: DECLARED_MODEL_ID}
+    assert loaded.providers[DECLARED_PROVIDER_ID] == _declared_record()
+
+    saved = tmp_path / "saved.json"
+    write_ai_server_config(loaded, saved)
+    payload = json.loads(saved.read_text(encoding="utf-8"))
+    assert payload["schema_version"] == 3
+    assert payload["active_provider_id"] == original["active_provider_id"]
+    assert payload["provider_models"] == original["provider_models"]
+    assert payload["providers"] == original["providers"]
+    assert payload["updated_at_ms"] == original["updated_at_ms"]
+    assert "research" not in payload
+
+
+def test_v3_round_trip_preserves_media_settings_and_research(tmp_path: Path) -> None:
+    path = tmp_path / "ai.json"
+    research = default_research_configuration(enabled=False)
+    write_ai_server_config(replace(_declared_config(), research=research), path)
+
+    loaded = load_ai_server_config(path)
+    assert loaded is not None
+    assert loaded.schema_version == 3
+    assert loaded.active_provider_id == DECLARED_PROVIDER_ID
+    assert loaded.provider_models == {DECLARED_PROVIDER_ID: DECLARED_MODEL_ID}
+    assert loaded.providers[DECLARED_PROVIDER_ID] == _declared_record()
+    assert loaded.research == research
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    assert payload["schema_version"] == 3
+    assert payload["providers"][DECLARED_PROVIDER_ID]["credential_env"] == "OPENCODE_API_KEY"
+    assert payload["research"]["enabled"] is False
+    assert payload["research"]["credential_identifier"] == "KRONIKA_RESEARCH_OPENAI_API_KEY"
+    assert "sk-" not in path.read_text(encoding="utf-8")
+    assert "endpoint" not in payload["research"]
+
+
+def test_absent_research_section_is_disabled(tmp_path: Path) -> None:
+    path = tmp_path / "ai.json"
+    path.write_text(
+        json.dumps(
+            {
+                "schema_version": 3,
+                "active_provider_id": "vercel-ai-gateway",
+                "provider_models": {},
+                "updated_at_ms": 5,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    loaded = load_ai_server_config(path)
+
+    assert loaded is not None
+    assert loaded.research is None
+    assert loaded.provider_models["vercel-ai-gateway"] == VERCEL_AI_GATEWAY_DEFAULT_MODEL_ID
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    ["unknown-field", "secret-field", "endpoint-field", "budget", "tool", "null-section", "top-level"],
+)
+def test_malformed_research_section_is_rejected(tmp_path: Path, mutation: str) -> None:
+    research = serialize_research_configuration(default_research_configuration())
+    secret = "sk-test-secret-value"
+    if mutation == "unknown-field":
+        research["extra"] = True
+    elif mutation == "secret-field":
+        research["api_key"] = secret
+    elif mutation == "endpoint-field":
+        research["endpoint"] = "https://example.invalid/v1"
+    elif mutation == "budget":
+        research["daily_budget_usd_micros"] = 10_000_001
+    elif mutation == "tool":
+        research["search"]["tool_allowlist"] = ["web_search", "code_interpreter"]
+    elif mutation == "null-section":
+        research = None
+    document = {
+        "schema_version": 3,
+        "active_provider_id": "vercel-ai-gateway",
+        "provider_models": {},
+        "updated_at_ms": 5,
+        "research": research,
+    }
+    if mutation == "top-level":
+        document["unexpected"] = True
+    path = tmp_path / "ai.json"
+    path.write_text(json.dumps(document), encoding="utf-8")
+
+    with pytest.raises(AiConfigurationError, match="malformed") as caught:
+        load_ai_server_config(path)
+
+    assert secret not in str(caught.value)
