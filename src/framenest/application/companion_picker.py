@@ -25,6 +25,7 @@ from framenest.domain.media import (
     MediaRelativePath,
 )
 from framenest.domain.media_classification import ContentCategory
+from framenest.domain.record_access import AccessScopeKind, RecordAccessScope
 
 COMPANION_API_VERSION = "framenest-companion.v1"
 COMPANION_PICKER_QUERY_INVALID_MESSAGE = MEDIA_CATALOG_QUERY_INVALID_MESSAGE
@@ -101,6 +102,10 @@ class ListCompanionPickerMedia:
             companion_kinds=(normalized_kind,) if normalized_kind is not None else (),
             cursor_created_at_ms=cursor_created_at_ms,
             cursor_media_id=cursor_media_id,
+            access_scope=RecordAccessScope(
+                kind=AccessScopeKind.MEMBER,
+                owner_login_key=login_key,
+            ),
         )
         page = self.repository.list_media(query)
         items = tuple(

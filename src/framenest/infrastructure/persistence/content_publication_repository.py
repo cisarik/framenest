@@ -9,6 +9,7 @@ from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from framenest.application.ports.content_publication_repository import (
+    ContentPublicationBoundRecordError,
     AdminMediaItem,
     AdminMediaPage,
     AdminMediaQuery,
@@ -76,8 +77,39 @@ class SqliteContentPublicationRepository:
                 _REPOSITORY_FAILURE_MESSAGE
             ) from exc
 
+    def bound_record_owner(self, media_id: MediaId) -> str | None:
+        def operation(connection: Connection) -> str | None:
+            from framenest.infrastructure.persistence.catalog_schema import (
+                kronika_records,
+            )
+
+            row = connection.execute(
+                select(kronika_records.c.owner_login_key).where(
+                    kronika_records.c.media_id == media_id.to_string()
+                )
+            ).scalar()
+            return None if row is None else str(row)
+
+        try:
+            return run_in_transaction(self._engine, operation)
+        except SQLAlchemyError as exc:
+            raise FrameNestContentPublicationRepositoryError(
+                _REPOSITORY_FAILURE_MESSAGE
+            ) from exc
+
     def is_published(self, media_id: MediaId) -> bool:
         def operation(connection: Connection) -> bool:
+            from framenest.infrastructure.persistence.catalog_schema import (
+                kronika_records,
+            )
+
+            bound = connection.execute(
+                select(kronika_records.c.id).where(
+                    kronika_records.c.media_id == media_id.to_string()
+                )
+            ).first()
+            if bound is not None:
+                return False
             return (
                 connection.execute(
                     select(media_content_publications.c.media_id).where(
@@ -229,6 +261,7 @@ class SqliteContentPublicationRepository:
     def publish(self, media_id: MediaId, published_at_ms: int) -> PublishContentResult:
         def operation(connection: Connection) -> PublishContentResult:
             media_id_text = media_id.to_string()
+            _reject_bound_record(connection, media_id_text)
             media_exists = connection.execute(
                 select(logical_media.c.id).where(logical_media.c.id == media_id_text)
             ).first()
@@ -282,6 +315,7 @@ class SqliteContentPublicationRepository:
     def unpublish(self, media_id: MediaId) -> PublishContentResult:
         def operation(connection: Connection) -> PublishContentResult:
             media_id_text = media_id.to_string()
+            _reject_bound_record(connection, media_id_text)
             media_exists = connection.execute(
                 select(logical_media.c.id).where(logical_media.c.id == media_id_text)
             ).first()
@@ -582,6 +616,20 @@ def _load_readiness(
         description=row["description"],
         canonical_tag_count=int(row["tag_count"]),
     )
+
+
+def _reject_bound_record(connection: Connection, media_id: str) -> None:
+    from framenest.infrastructure.persistence.record_repository import (
+        reject_if_media_bound,
+    )
+    from framenest.domain.records import RecordConflictError
+
+    try:
+        reject_if_media_bound(connection, media_id)
+    except RecordConflictError as exc:
+        raise ContentPublicationBoundRecordError(
+            "Legacy publication cannot change a bound record."
+        ) from exc
 
 
 def _get_publication(

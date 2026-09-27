@@ -226,6 +226,13 @@ class _ResolvedModel:
         return self.capabilities
 
 
+
+def _record_policy():
+    from tests.support.record_access import scoped_policy
+
+    return scoped_policy({CANONICAL_MEDIA_ID})
+
+
 def _client(
     *,
     configured: bool = True,
@@ -271,9 +278,13 @@ def _client(
             last_status_check=last_status_check,
             last_connection_test=last_connection_test,
             read_provider=read_provider,  # type: ignore[arg-type]
+            audience_policy=_record_policy(),
         ),
     )
-    return TestClient(app), suggestion_preview, imported_suggestion_preview
+    from framenest.domain.identity_access import ROLE_ADMIN
+    from tests.support.record_access import install_synthetic_caller
+
+    return TestClient(install_synthetic_caller(app, "ada", role=ROLE_ADMIN)), suggestion_preview, imported_suggestion_preview
 
 
 def _post_preview(

@@ -9,6 +9,7 @@ from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, UUID4
 
+from framenest.domain.record_access import scope_for_identity
 from framenest.adapters.api.content_audience_api import (
     ContentAudienceUnavailableError,
     content_audience_allows,
@@ -158,6 +159,7 @@ def create_media_catalog_api_router(dependencies: MediaCatalogApiDependencies) -
                 creator_attribution_kind=creator_attribution_kind,
                 creator_stable_id=creator_stable_id,
                 creator_handle=creator_handle,
+                access_scope=scope_for_identity(request.scope.get(SCOPE_IDENTITY)),
             )
         except MediaCatalogValidationError:
             return _error_response(

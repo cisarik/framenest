@@ -701,6 +701,7 @@ class TailscaleIngressMiddleware:
         external_origin: str,
         audit_recorder: object,
         companion_extension_origins: tuple[str, ...] = (),
+        local_identity: IdentityContext | None = None,
     ) -> None:
         if audit_recorder is None:
             raise TypeError("security audit recorder is required")
@@ -710,6 +711,7 @@ class TailscaleIngressMiddleware:
         self._external_host = external_origin.removeprefix("https://")
         self._audit_recorder = audit_recorder
         self._companion_extension_origins = frozenset(companion_extension_origins)
+        self._local_identity = local_identity
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope.get("type") != "http":
@@ -916,10 +918,18 @@ class TailscaleIngressMiddleware:
             scope[SCOPE_INGRESS_CHANNEL] = CHANNEL_LOCAL
             await self._app(scope, receive, send)
             return
-        if path == _OPERATOR_PATH_PREFIX or path.startswith(
+        operator = path == _OPERATOR_PATH_PREFIX or path.startswith(
             _OPERATOR_PATH_PREFIX + "/"
-        ):
+        )
+        if operator:
             scope[SCOPE_INGRESS_CHANNEL] = CHANNEL_LOCAL_OPERATOR
+        else:
+            scope[SCOPE_INGRESS_CHANNEL] = CHANNEL_LOCAL
+        if self._local_identity is not None:
+            scope[SCOPE_IDENTITY] = self._local_identity
+            await self._app(scope, receive, send)
+            return
+        if operator:
             await self._app(scope, receive, send)
             return
         await _send_error(

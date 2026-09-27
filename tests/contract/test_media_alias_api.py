@@ -80,6 +80,9 @@ def _app(get_alias=None, save_alias=None) -> FastAPI:
             get_alias=get_alias or _FakeGet(),
             save_alias=save_alias or _FakeSave(),
             catalog_available=lambda: True,
+            audience_policy=__import__(
+                "tests.support.record_access", fromlist=["scoped_policy"]
+            ).scoped_policy({MEDIA_ID}),
         )
     )
     app = FastAPI()

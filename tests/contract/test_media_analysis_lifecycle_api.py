@@ -35,6 +35,20 @@ class _FakeReadAnalysis:
         return self.view
 
 
+
+def _record_policy():
+    from tests.support.record_access import scoped_policy
+
+    return scoped_policy({CANONICAL_MEDIA_ID})
+
+
+def _with_admin(app):
+    from framenest.domain.identity_access import ROLE_ADMIN
+    from tests.support.record_access import install_synthetic_caller
+
+    return install_synthetic_caller(app, "ada", role=ROLE_ADMIN)
+
+
 def _client(view: AutomaticAnalysisPublicView, *, enabled: bool = True) -> TestClient:
     reader = _FakeReadAnalysis(view)
     settings = FrameNestSettings(
@@ -64,9 +78,10 @@ def _client(view: AutomaticAnalysisPublicView, *, enabled: bool = True) -> TestC
             provider_configured=True,
             provider_id="nvidia-nim",
             model_id="test-model",
+            audience_policy=_record_policy(),
         ),
     )
-    return TestClient(app)
+    return TestClient(_with_admin(app))
 
 
 def test_capability_and_not_requested_status() -> None:
@@ -274,9 +289,10 @@ def test_analyzed_read_is_side_effect_free_and_does_not_schedule_provider_work()
             provider_configured=True,
             provider_id="nvidia-nim",
             model_id="test-model",
+            audience_policy=_record_policy(),
         ),
     )
-    client = TestClient(app)
+    client = TestClient(_with_admin(app))
     first = client.get(f"/api/media/{CANONICAL_MEDIA_ID}/automatic-analysis")
     second = client.get(f"/api/media/{CANONICAL_MEDIA_ID}/automatic-analysis")
     assert first.status_code == 200
@@ -366,9 +382,10 @@ def test_manual_durable_analysis_request_requires_confirmation_and_schedules() -
             provider_id="nvidia-nim",
             model_id="test-model",
             request_manual_analysis=_request,  # type: ignore[arg-type]
+            audience_policy=_record_policy(),
         ),
     )
-    client = TestClient(app)
+    client = TestClient(_with_admin(app))
     denied = client.post(
         f"/api/media/{CANONICAL_MEDIA_ID}/locations/{location_id}/durable-analysis",
         json={"confirm_cloud_upload": False},
@@ -481,9 +498,10 @@ def _manual_capability_client(
             model_id="resolved-model",
             read_provider=read_provider,  # type: ignore[arg-type]
             request_manual_analysis=_request,  # type: ignore[arg-type]
+            audience_policy=_record_policy(),
         ),
     )
-    return TestClient(app), calls
+    return TestClient(_with_admin(app)), calls
 
 
 def test_manual_durable_analysis_refuses_non_vision_selected_model() -> None:
@@ -600,9 +618,10 @@ def test_manual_durable_analysis_after_terminal_returns_new_pending_run() -> Non
             provider_id="nvidia-nim",
             model_id="test-model",
             request_manual_analysis=_request,  # type: ignore[arg-type]
+            audience_policy=_record_policy(),
         ),
     )
-    client = TestClient(app)
+    client = TestClient(_with_admin(app))
     accepted = client.post(
         f"/api/media/{CANONICAL_MEDIA_ID}/locations/{location_id}/durable-analysis",
         json={"confirm_cloud_upload": True},

@@ -12,6 +12,7 @@ from framenest.adapters.api.gallery_preview_api import GalleryPreviewApiDependen
 from framenest.application.gallery_preview import GalleryPreviewNotFoundError, GalleryPreviewUnavailableError
 from framenest.application.ports.gallery_preview import OpenedGalleryPreview
 from framenest.configuration import FrameNestSettings
+from tests.support.record_access import install_synthetic_caller, scoped_policy
 
 MEDIA_ID = "12345678-1234-4234-9234-123456789abc"
 LOCATION_ID = "abcdefab-cdef-4abc-8def-abcdefabcdef"
@@ -43,7 +44,12 @@ def _opened(payload: bytes = JPEG_BYTES, etag: str = '"abc"') -> OpenedGalleryPr
     )
 
 
-def _client(service: _FakePreviewService, *, catalog_available: bool = True) -> TestClient:
+def _client(
+    service: _FakePreviewService,
+    *,
+    catalog_available: bool = True,
+    audience_ids: set[str] | None = None,
+) -> TestClient:
     settings = FrameNestSettings(
         database_path=Path("/tmp/framenest-gallery-preview-api.sqlite3"),
         gallery_preview_cache_path=Path("/tmp/framenest-gallery-preview-cache"),
@@ -52,8 +58,19 @@ def _client(service: _FakePreviewService, *, catalog_available: bool = True) -> 
     deps = GalleryPreviewApiDependencies(
         preview_service=service,
         catalog_available=lambda: catalog_available,
+        audience_policy=scoped_policy(
+            {MEDIA_ID} if audience_ids is None else audience_ids
+        ),
     )
-    return TestClient(create_app(settings=settings, gallery_preview_api_dependencies=deps))
+    app = create_app(settings=settings, gallery_preview_api_dependencies=deps)
+    return TestClient(install_synthetic_caller(app))
+
+
+def test_preview_denial_does_not_open_the_cache() -> None:
+    service = _FakePreviewService(result=_opened())
+    response = _client(service, audience_ids=set()).get(PREVIEW_PATH)
+    assert response.status_code == 404
+    assert service.calls == 0
 
 
 def test_gallery_preview_returns_jpeg_etag_and_no_paths() -> None:

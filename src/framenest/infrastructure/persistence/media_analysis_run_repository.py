@@ -306,6 +306,11 @@ class SqliteMediaAnalysisRunRepository:
             )
             if updated.rowcount != 1:
                 raise MediaAnalysisRunConflictError(_REPOSITORY_FAILURE_MESSAGE)
+            from framenest.infrastructure.persistence.record_repository import (
+                note_successful_analysis,
+            )
+
+            note_successful_analysis(connection, str(row["media_id"]), run_id)
             return _run_from_row(_require_row(connection, run_id))
 
         try:

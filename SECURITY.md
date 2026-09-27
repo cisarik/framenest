@@ -2,7 +2,12 @@
 
 ## Current Support Status
 
-FrameNest is in foundation-stage, pre-alpha development.
+FrameNest is in foundation-stage, pre-alpha development. Schema head `0034`
+adds private Kronika records and administrator approval as implementation
+evidence. That evidence is not an accepted, deployed, or published security
+boundary. Workspace content reads fail closed without a verified identity.
+New catalog files are created as private POSIX state (`0700` directory,
+`0600` database file). Windows ACLs are outside this implementation.
 
 There is no stable or supported public release and no security response service
 level yet. The Ubuntu NUC operates as the FrameNest development-and-testing

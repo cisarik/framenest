@@ -34,6 +34,7 @@ from framenest.adapters.api.tailscale_ingress import (
 )
 from framenest.domain.identity_access import (
     CAPABILITY_UPLOAD_MANAGE,
+    CAPABILITY_UPLOAD_SUBMIT,
     IdentityContext,
 )
 from framenest.domain.uploads import (
@@ -155,6 +156,26 @@ def create_upload_api_router(dependencies: UploadApiDependencies) -> APIRouter:
         origin_error = _reject_cross_origin_mutation(request)
         if origin_error is not None:
             return origin_error
+        try:
+            capability = dependencies.transport.get_capability()
+        except Exception as exc:
+            mapped = _map_error(exc)
+            if mapped is not None:
+                return mapped
+            return _error_response(
+                503,
+                UPLOAD_CAPABILITY_NOT_CONFIGURED,
+                "Upload capability is not configured.",
+            )
+        if not capability.uploads_enabled:
+            return _error_response(
+                503,
+                UPLOAD_CAPABILITY_NOT_CONFIGURED,
+                "Upload capability is not configured.",
+            )
+        identity_error = _require_upload_identity(request)
+        if identity_error is not None:
+            return identity_error
         created_by_login_key, duplicate_resolution_mode = _creation_ownership_fields(
             request
         )
@@ -181,7 +202,10 @@ def create_upload_api_router(dependencies: UploadApiDependencies) -> APIRouter:
         response_model=UploadCapabilityResponse,
         responses={503: {"model": ErrorResponse}},
     )
-    def upload_capability() -> UploadCapabilityResponse | JSONResponse:
+    def upload_capability(request: Request) -> UploadCapabilityResponse | JSONResponse:
+        identity_error = _require_upload_identity(request)
+        if identity_error is not None:
+            return identity_error
         try:
             capability = dependencies.transport.get_capability()
         except Exception:
@@ -398,6 +422,26 @@ def _session_id(upload_id: UUID4) -> UploadSessionId:
         raise UploadSessionNotFoundTransportError("upload session not found") from None
 
 
+def _require_upload_identity(request: Request) -> JSONResponse | None:
+    identity = _request_identity(request)
+    if identity is None or not identity.login_key:
+        return _error_response(
+            401,
+            "IDENTITY_REQUIRED",
+            "A verified identity is required.",
+        )
+    if not (
+        identity.has_capability(CAPABILITY_UPLOAD_SUBMIT)
+        or identity.has_capability(CAPABILITY_UPLOAD_MANAGE)
+    ):
+        return _error_response(
+            403,
+            "CAPABILITY_DENIED",
+            "The verified identity is not authorized for this action.",
+        )
+    return None
+
+
 def _request_identity(request: Request) -> IdentityContext | None:
     identity = request.scope.get(SCOPE_IDENTITY)
     if isinstance(identity, IdentityContext):
@@ -421,8 +465,8 @@ def may_access_upload_session(
     identity: IdentityContext | None,
 ) -> bool:
     """Return whether the request identity may observe or mutate the session."""
-    if identity is None:
-        return True
+    if identity is None or not identity.login_key:
+        return False
     if identity.has_capability(CAPABILITY_UPLOAD_MANAGE):
         return True
     if session.created_by_login_key is None:
@@ -436,8 +480,12 @@ def _enforce_upload_session_access(
     upload_id: UUID4,
 ) -> JSONResponse | None:
     identity = _request_identity(request)
-    if identity is None:
-        return None
+    if identity is None or not identity.login_key:
+        return _error_response(
+            404,
+            UPLOAD_SESSION_NOT_FOUND,
+            "Upload session not found.",
+        )
     try:
         session = transport.load_session(_session_id(upload_id))
     except Exception as exc:

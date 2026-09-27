@@ -9,6 +9,10 @@ It is not a real NUC backup record, media backup plan, secret backup plan,
 service-replacement procedure, or deployment acceptance record.
 
 Authoritative decision: [ADR-0033](adr/0033-catalog-backup-and-recovery-foundation.md).
+Catalog snapshots include migration `0034` tables when the source is at that
+head: documents, common records, and approved media projections. Backup and
+restore targets keep private POSIX permissions. This note is implementation
+evidence, not a deployment or restore acceptance of host data.
 Automated scheduling, retention, and restore-readiness:
 [ADR-0052](adr/0052-automated-catalog-backup-retention-and-restore-verification.md).
 Mounted-filesystem off-device copy and restore verification:

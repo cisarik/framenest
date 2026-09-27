@@ -124,7 +124,7 @@ for the authorized deployment whole.
 - [ ] Read-only engine: missing file refuses (`engine.py:59-63`), percent-
       encoded URI (`:65-66`), per-connection `PRAGMA query_only=ON`
       (`:83`), startup INSERT probe with rollback (`:101-122`).
-- [ ] Startup pins schema head `0033`
+- [ ] Startup pins schema head `0034`
       (`public_published_application.py:55`, enforced at `:263-276`).
 
 ### 4.3 [preflight] TLS termination baseline (reverse proxy)
@@ -225,7 +225,7 @@ The application owns none of these; the proxy MUST:
 
 ### 4.10 [rule] F-7 atomic reader/writer release ordering
 
-The public reader pins schema revision `0033`
+The public reader pins schema revision `0034`
 (`public_published_application.py:55`) and refuses to start otherwise. Any
 workspace-side migration therefore strands running readers until they are
 updated in the same release. Rule: **reader and writer always ship as one

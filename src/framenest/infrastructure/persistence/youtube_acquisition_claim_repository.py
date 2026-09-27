@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
-from sqlalchemy import and_, func, insert, or_, select, update
+from sqlalchemy import and_, exists, func, insert, or_, select, update
 from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
@@ -34,6 +34,7 @@ from framenest.domain.youtube_acquisition import (
     ensure_youtube_transition_allowed,
 )
 from framenest.infrastructure.persistence.catalog_schema import (
+    kronika_records,
     media_content_publications,
     youtube_acquisition_claims,
 )
@@ -296,6 +297,12 @@ class SqliteYouTubeAcquisitionClaimRepository:
                             youtube_acquisition_claims.c.media_id.is_not(None),
                             youtube_acquisition_claims.c.media_location_id.is_not(
                                 None
+                            ),
+                            ~exists(
+                                select(kronika_records.c.id).where(
+                                    kronika_records.c.media_id
+                                    == youtube_acquisition_claims.c.media_id
+                                )
                             ),
                         )
                     )

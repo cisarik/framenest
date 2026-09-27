@@ -230,6 +230,7 @@ class FrameNestSettings(BaseSettings):
     external_origin: str | None = Field(default=None)
     companion_extension_origins: list[str] = Field(default_factory=list)
     identity_map: dict[str, str] = Field(default_factory=dict, repr=False)
+    local_owner_login: str | None = Field(default=None, repr=False)
     automatic_media_analysis_enabled: bool = Field(default=False)
     automatic_media_analysis_max_attempts: int = Field(
         default=DEFAULT_MAX_ANALYSIS_ATTEMPTS,
@@ -439,6 +440,20 @@ class FrameNestSettings(BaseSettings):
             normalized.append(item)
         return normalized
 
+    @field_validator("local_owner_login")
+    @classmethod
+    def validate_local_owner_login(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        if not isinstance(value, str) or not value.strip():
+            return None
+        from framenest.domain.identity_access import normalize_login
+
+        try:
+            return normalize_login(value)
+        except FrameNestIdentityAccessError as exc:
+            raise ValueError("local owner login is invalid") from exc
+
     @field_validator("identity_map")
     @classmethod
     def validate_identity_map(cls, value: dict[str, str]) -> dict[str, str]:
@@ -450,6 +465,13 @@ class FrameNestSettings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_ingress_configuration(self) -> "FrameNestSettings":
+        if self.local_owner_login is not None:
+            try:
+                mapping = build_identity_mapping(self.identity_map)
+            except FrameNestIdentityAccessError as exc:
+                raise ValueError("local owner login is not mapped") from exc
+            if self.local_owner_login not in mapping:
+                raise ValueError("local owner login is not mapped")
         if self.ingress_mode == INGRESS_MODE_PUBLIC_PUBLISHED_UDS:
             resolved_uds = self.uds_path or DEFAULT_PUBLIC_PUBLISHED_UDS_PATH
             if resolved_uds == WORKSPACE_UDS_PATH:

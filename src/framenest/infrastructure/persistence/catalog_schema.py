@@ -2153,3 +2153,369 @@ media_analysis_proposals = Table(
         "id",
     ),
 )
+
+_KRONIKA_LOGIN_SQL = _COMPANION_REVIEW_LOGIN_KEY_SQL
+_KRONIKA_NOT_UUID = (
+    "NOT ({column} GLOB "
+    "'[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]-"
+    "[0-9a-f][0-9a-f][0-9a-f][0-9a-f]-"
+    "[0-9a-f][0-9a-f][0-9a-f][0-9a-f]-"
+    "[0-9a-f][0-9a-f][0-9a-f][0-9a-f]-"
+    "[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]"
+    "[0-9a-f][0-9a-f][0-9a-f][0-9a-f]')"
+)
+
+
+def _kronika_bytes(column: str, low: int, high: int) -> str:
+    return (
+        f"length(CAST({column} AS BLOB)) >= {low} "
+        f"AND length(CAST({column} AS BLOB)) <= {high}"
+    )
+
+
+kronika_documents = Table(
+    "kronika_documents",
+    metadata,
+    Column("id", Text(), nullable=False),
+    Column("operation_id", Text(), nullable=False),
+    Column("kind", Text(), nullable=False),
+    Column("question_text", Text(), nullable=False),
+    Column("answer_text", Text(), nullable=False),
+    Column("citations_json", Text(), nullable=False),
+    Column("completion_evidence_json", Text(), nullable=False),
+    Column("created_at_ms", Integer(), nullable=False),
+    Column("completed_at_ms", Integer(), nullable=False),
+    PrimaryKeyConstraint("id", name="pk_kronika_documents"),
+    UniqueConstraint("operation_id", name="uq_kronika_documents_operation_id"),
+    UniqueConstraint(
+        "id",
+        "operation_id",
+        "kind",
+        name="uq_kronika_documents_id_operation_kind",
+    ),
+    CheckConstraint("length(id) = 36", name="ck_kronika_documents_id_length"),
+    CheckConstraint(
+        f"{_kronika_bytes('operation_id', 1, 128)} AND {_KRONIKA_NOT_UUID.format(column='operation_id')}",
+        name="ck_kronika_documents_operation_id",
+    ),
+    CheckConstraint("kind IN ('search', 'research')", name="ck_kronika_documents_kind"),
+    CheckConstraint(
+        f"{_kronika_bytes('question_text', 1, 16384)} AND length(trim(question_text)) > 0",
+        name="ck_kronika_documents_question_text",
+    ),
+    CheckConstraint(
+        f"{_kronika_bytes('answer_text', 1, 2097152)} AND length(trim(answer_text)) > 0",
+        name="ck_kronika_documents_answer_text",
+    ),
+    CheckConstraint(
+        "length(citations_json) >= 2",
+        name="ck_kronika_documents_citations_json",
+    ),
+    CheckConstraint(
+        "length(completion_evidence_json) >= 2",
+        name="ck_kronika_documents_completion_evidence_json",
+    ),
+    CheckConstraint("created_at_ms >= 0", name="ck_kronika_documents_created_at_ms"),
+    CheckConstraint(
+        "completed_at_ms >= created_at_ms",
+        name="ck_kronika_documents_completed_at_ms",
+    ),
+)
+
+kronika_records = Table(
+    "kronika_records",
+    metadata,
+    Column("id", Text(), nullable=False),
+    Column("kind", Text(), nullable=False),
+    Column("owner_login_key", Text(), nullable=False),
+    Column("visibility", Text(), nullable=False, server_default="private"),
+    Column("media_id", Text(), nullable=True),
+    Column("document_id", Text(), nullable=True),
+    Column("final_operation_id", Text(), nullable=True),
+    Column("created_at_ms", Integer(), nullable=False),
+    Column("completed_at_ms", Integer(), nullable=True),
+    Column("timeline_entered_at_ms", Integer(), nullable=True),
+    Column("version", Integer(), nullable=False, server_default="1"),
+    Column("latest_successful_analysis_run_id", Text(), nullable=True),
+    Column("approved_analysis_run_id", Text(), nullable=True),
+    Column("approved_by_login_key", Text(), nullable=True),
+    Column("approved_at_ms", Integer(), nullable=True),
+    Column("approved_record_version", Integer(), nullable=True),
+    Column("approved_projection_json", Text(), nullable=True),
+    PrimaryKeyConstraint("id", name="pk_kronika_records"),
+    UniqueConstraint("media_id", name="uq_kronika_records_media_id"),
+    UniqueConstraint("document_id", name="uq_kronika_records_document_id"),
+    UniqueConstraint(
+        "final_operation_id", name="uq_kronika_records_final_operation_id"
+    ),
+    ForeignKeyConstraint(
+        ["media_id"],
+        ["logical_media.id"],
+        name="fk_kronika_records_media_id",
+        ondelete="RESTRICT",
+    ),
+    ForeignKeyConstraint(
+        ["document_id", "final_operation_id", "kind"],
+        [
+            "kronika_documents.id",
+            "kronika_documents.operation_id",
+            "kronika_documents.kind",
+        ],
+        name="fk_kronika_records_document",
+        ondelete="RESTRICT",
+    ),
+    ForeignKeyConstraint(
+        ["latest_successful_analysis_run_id"],
+        ["media_analysis_runs.id"],
+        name="fk_kronika_records_latest_analysis_run_id",
+        ondelete="RESTRICT",
+    ),
+    ForeignKeyConstraint(
+        ["approved_analysis_run_id"],
+        ["media_analysis_runs.id"],
+        name="fk_kronika_records_approved_analysis_run_id",
+        ondelete="RESTRICT",
+    ),
+    CheckConstraint("length(id) = 36", name="ck_kronika_records_id_length"),
+    CheckConstraint(
+        "kind IN ('media', 'search', 'research')",
+        name="ck_kronika_records_kind",
+    ),
+    CheckConstraint(
+        _KRONIKA_LOGIN_SQL.format(column="owner_login_key"),
+        name="ck_kronika_records_owner_login_key",
+    ),
+    CheckConstraint(
+        "visibility IN ('private', 'family')",
+        name="ck_kronika_records_visibility",
+    ),
+    CheckConstraint(
+        "("
+        "kind = 'media' AND media_id IS NOT NULL AND length(media_id) = 36 "
+        "AND document_id IS NULL AND final_operation_id IS NULL"
+        ") OR ("
+        "kind IN ('search', 'research') AND media_id IS NULL "
+        "AND document_id IS NOT NULL AND length(document_id) = 36 "
+        "AND final_operation_id IS NOT NULL "
+        f"AND {_kronika_bytes('final_operation_id', 1, 128)} "
+        f"AND {_KRONIKA_NOT_UUID.format(column='final_operation_id')} "
+        "AND completed_at_ms IS NOT NULL "
+        "AND latest_successful_analysis_run_id IS NULL "
+        "AND approved_analysis_run_id IS NULL"
+        ")",
+        name="ck_kronika_records_shape",
+    ),
+    CheckConstraint("created_at_ms >= 0", name="ck_kronika_records_created_at_ms"),
+    CheckConstraint(
+        "completed_at_ms IS NULL OR completed_at_ms >= created_at_ms",
+        name="ck_kronika_records_completed_at_ms",
+    ),
+    CheckConstraint(
+        "timeline_entered_at_ms IS NULL OR ("
+        "completed_at_ms IS NOT NULL AND timeline_entered_at_ms >= completed_at_ms"
+        ")",
+        name="ck_kronika_records_timeline_entered_at_ms",
+    ),
+    CheckConstraint("version >= 1", name="ck_kronika_records_version"),
+    CheckConstraint(
+        "latest_successful_analysis_run_id IS NULL "
+        "OR length(latest_successful_analysis_run_id) = 36",
+        name="ck_kronika_records_latest_analysis_length",
+    ),
+    CheckConstraint(
+        "approved_analysis_run_id IS NULL OR length(approved_analysis_run_id) = 36",
+        name="ck_kronika_records_approved_analysis_length",
+    ),
+    CheckConstraint(
+        "("
+        "approved_by_login_key IS NULL AND approved_at_ms IS NULL "
+        "AND approved_record_version IS NULL AND approved_projection_json IS NULL"
+        ") OR ("
+        "approved_by_login_key IS NOT NULL "
+        f"AND {_KRONIKA_LOGIN_SQL.format(column='approved_by_login_key')} "
+        "AND approved_at_ms IS NOT NULL AND approved_record_version IS NOT NULL "
+        "AND approved_projection_json IS NOT NULL "
+        "AND completed_at_ms IS NOT NULL AND timeline_entered_at_ms IS NOT NULL "
+        "AND approved_at_ms >= completed_at_ms "
+        "AND approved_at_ms >= timeline_entered_at_ms "
+        "AND approved_record_version >= 1 AND approved_record_version <= version "
+        "AND ("
+        "(kind = 'media' AND approved_analysis_run_id IS NOT NULL) "
+        "OR (kind IN ('search', 'research') AND approved_analysis_run_id IS NULL)"
+        ")"
+        ")",
+        name="ck_kronika_records_approval",
+    ),
+    CheckConstraint(
+        "visibility = 'private' OR ("
+        "visibility = 'family' AND approved_by_login_key IS NOT NULL"
+        ")",
+        name="ck_kronika_records_family_requires_approval",
+    ),
+)
+
+Index(
+    "ix_kronika_records_owner_history",
+    kronika_records.c.owner_login_key,
+    kronika_records.c.created_at_ms.desc(),
+    kronika_records.c.id.asc(),
+)
+Index(
+    "ix_kronika_records_admin_history",
+    kronika_records.c.created_at_ms.desc(),
+    kronika_records.c.id.asc(),
+)
+Index(
+    "ix_kronika_records_timeline",
+    kronika_records.c.visibility,
+    kronika_records.c.timeline_entered_at_ms.desc(),
+    kronika_records.c.id.asc(),
+)
+Index(
+    "ix_kronika_records_latest_analysis_run_id",
+    kronika_records.c.latest_successful_analysis_run_id,
+)
+Index(
+    "ix_kronika_records_approved_analysis_run_id",
+    kronika_records.c.approved_analysis_run_id,
+)
+
+kronika_approved_media = Table(
+    "kronika_approved_media",
+    metadata,
+    Column("record_id", Text(), nullable=False),
+    Column("media_id", Text(), nullable=False),
+    Column("approval_version", Integer(), nullable=False),
+    Column("content_category", Text(), nullable=False),
+    Column("acquisition_source", Text(), nullable=False),
+    Column("display_title", Text(), nullable=False),
+    Column("description", Text(), nullable=False),
+    Column("creator_attribution_kind", Text(), nullable=True),
+    Column("creator_stable_id", Text(), nullable=True),
+    Column("creator_handle", Text(), nullable=True),
+    Column("creator_display_name", Text(), nullable=True),
+    Column("cover_artifact_digest", Text(), nullable=True),
+    PrimaryKeyConstraint("record_id", name="pk_kronika_approved_media"),
+    UniqueConstraint("media_id", name="uq_kronika_approved_media_media_id"),
+    ForeignKeyConstraint(
+        ["record_id"],
+        ["kronika_records.id"],
+        name="fk_kronika_approved_media_record_id",
+        ondelete="RESTRICT",
+    ),
+    ForeignKeyConstraint(
+        ["media_id"],
+        ["logical_media.id"],
+        name="fk_kronika_approved_media_media_id",
+        ondelete="RESTRICT",
+    ),
+    CheckConstraint(
+        "length(record_id) = 36",
+        name="ck_kronika_approved_media_record_id_length",
+    ),
+    CheckConstraint(
+        "length(media_id) = 36",
+        name="ck_kronika_approved_media_media_id_length",
+    ),
+    CheckConstraint(
+        "approval_version >= 1",
+        name="ck_kronika_approved_media_approval_version",
+    ),
+    CheckConstraint(
+        "content_category IN ('general', 'meme', 'movie', 'youtube')",
+        name="ck_kronika_approved_media_content_category",
+    ),
+    CheckConstraint(
+        "length(display_title) >= 1 AND length(display_title) <= 240",
+        name="ck_kronika_approved_media_title",
+    ),
+    CheckConstraint(
+        "length(description) >= 1 AND length(description) <= 10000",
+        name="ck_kronika_approved_media_description",
+    ),
+    CheckConstraint(
+        "cover_artifact_digest IS NULL OR ("
+        "length(cover_artifact_digest) = 64 "
+        "AND cover_artifact_digest = lower(cover_artifact_digest) "
+        "AND cover_artifact_digest NOT GLOB '*[^0-9a-f]*')",
+        name="ck_kronika_approved_media_cover_digest",
+    ),
+)
+
+kronika_approved_media_tags = Table(
+    "kronika_approved_media_tags",
+    metadata,
+    Column("record_id", Text(), nullable=False),
+    Column("tag_key", Text(), nullable=False),
+    Column("display_name", Text(), nullable=False),
+    Column("position", Integer(), nullable=False),
+    PrimaryKeyConstraint("record_id", "tag_key", name="pk_kronika_approved_media_tags"),
+    ForeignKeyConstraint(
+        ["record_id"],
+        ["kronika_records.id"],
+        name="fk_kronika_approved_media_tags_record_id",
+        ondelete="RESTRICT",
+    ),
+    CheckConstraint(
+        "length(record_id) = 36",
+        name="ck_kronika_approved_media_tags_record_id",
+    ),
+    CheckConstraint(
+        "length(tag_key) >= 1 AND length(tag_key) <= 64",
+        name="ck_kronika_approved_media_tags_key",
+    ),
+    CheckConstraint(
+        "length(display_name) >= 1 AND length(display_name) <= 80",
+        name="ck_kronika_approved_media_tags_display_name",
+    ),
+    CheckConstraint(
+        "position >= 0 AND position < 32",
+        name="ck_kronika_approved_media_tags_position",
+    ),
+    Index(
+        "ix_kronika_approved_media_tags_record_position",
+        "record_id",
+        "position",
+    ),
+)
+
+kronika_approved_media_locations = Table(
+    "kronika_approved_media_locations",
+    metadata,
+    Column("record_id", Text(), nullable=False),
+    Column("location_id", Text(), nullable=False),
+    Column("library_id", Text(), nullable=False),
+    Column("relative_path", Text(), nullable=False),
+    Column("availability", Text(), nullable=False),
+    Column("observed_size_bytes", Integer(), nullable=True),
+    Column("observed_mtime_ns", Integer(), nullable=True),
+    PrimaryKeyConstraint(
+        "record_id",
+        "location_id",
+        name="pk_kronika_approved_media_locations",
+    ),
+    ForeignKeyConstraint(
+        ["record_id"],
+        ["kronika_records.id"],
+        name="fk_kronika_approved_media_locations_record_id",
+        ondelete="RESTRICT",
+    ),
+    ForeignKeyConstraint(
+        ["location_id"],
+        ["physical_media_locations.id"],
+        name="fk_kronika_approved_media_locations_location_id",
+        ondelete="RESTRICT",
+    ),
+    CheckConstraint(
+        "length(record_id) = 36 AND length(location_id) = 36 AND length(library_id) = 36",
+        name="ck_kronika_approved_media_locations_ids",
+    ),
+    CheckConstraint(
+        "length(relative_path) >= 1 AND length(relative_path) <= 4096",
+        name="ck_kronika_approved_media_locations_path",
+    ),
+    CheckConstraint(
+        "availability IN ('available', 'offline', 'missing', 'unverified', 'archived')",
+        name="ck_kronika_approved_media_locations_availability",
+    ),
+)

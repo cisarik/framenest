@@ -26,6 +26,10 @@ from fastapi import FastAPI
 from sqlalchemy import insert
 import uvicorn
 
+from framenest.adapters.api.local_identity_api import (
+    LocalIdentityMiddleware,
+    configured_local_identity,
+)
 from framenest.adapters.api.youtube_operator_api import (
     YouTubeOperatorApiDependencies,
     create_youtube_operator_api_router,
@@ -65,6 +69,12 @@ from framenest.application.youtube_acquisition import (
 )
 from framenest.configuration import FrameNestSettings
 from framenest.domain.identities import LibraryId
+from framenest.domain.identity_access import (
+    CAPABILITY_UPLOAD_MANAGE,
+    CAPABILITY_YOUTUBE_ACQUIRE,
+    build_identity_mapping,
+    mapped_role_has_capability,
+)
 from framenest.domain.uploads import (
     UploadSessionId,
     UploadSessionState,
@@ -107,6 +117,7 @@ from framenest.infrastructure.youtube.staging import (
 )
 
 HOST = "127.0.0.1"
+_LOCAL_OWNER_LOGIN = "kronika-operator@example.com"
 DESTINATION_ID = LibraryId.from_string(
     "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
 )
@@ -396,6 +407,15 @@ def _build_environment(
         discovery_retry_initial_delay_seconds=0,
         discovery_retry_max_delay_seconds=0,
     )
+    local_owner_mapping = build_identity_mapping({_LOCAL_OWNER_LOGIN: "admin"})
+
+    def _creator_manages_duplicates(login: str) -> bool:
+        return mapped_role_has_capability(
+            local_owner_mapping,
+            login,
+            CAPABILITY_UPLOAD_MANAGE,
+        )
+
     acquisition = YouTubeAcquisitionCoordinator(
         claims,
         _FakeDownloader(
@@ -411,6 +431,7 @@ def _build_environment(
         publication_coordinator=publication,
         chunk_size_bytes=8,
         poll_interval_seconds=0.01,
+        creator_manages_duplicates=_creator_manages_duplicates,
     )
     service = YouTubeAcquisitionService(
         claims,
@@ -457,6 +478,24 @@ def _build_environment(
                 enabled=True,
             )
         )
+    )
+    local_settings = FrameNestSettings(
+        database_path=roots.database_path,
+        host=HOST,
+        port=8000,
+        identity_map={_LOCAL_OWNER_LOGIN: "admin"},
+        local_owner_login=_LOCAL_OWNER_LOGIN,
+        _env_file=None,
+    )
+    local_identity = configured_local_identity(local_settings)
+    if local_identity is None or not local_identity.has_capability(
+        CAPABILITY_YOUTUBE_ACQUIRE
+    ):
+        raise RuntimeError("demo local owner is not configured")
+    app.add_middleware(
+        LocalIdentityMiddleware,
+        identity=local_identity,
+        origin=f"http://{local_settings.host}:{local_settings.port}",
     )
     environment.app = app
     return environment

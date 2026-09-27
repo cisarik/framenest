@@ -572,3 +572,55 @@ def test_missing_upstream_and_display_title_do_not_invent_product_title(
         assert denied.json() == unknown.json()
         assert hash_filename not in denied.text
         assert OWNER_LOGIN not in denied.text
+
+
+def test_forbidden_bound_media_link_is_unavailable_without_media_id(
+    tmp_path: Path,
+) -> None:
+    from framenest.domain.records import RecordId
+    from framenest.infrastructure.persistence.content_publication_repository import (
+        SqliteContentPublicationRepository,
+    )
+    from framenest.infrastructure.persistence.engine import run_in_immediate_transaction
+    from framenest.infrastructure.persistence.record_repository import (
+        SqliteRecordRepository,
+    )
+
+    database_path = tmp_path / "database" / "catalog.sqlite3"
+    database_path.parent.mkdir(parents=True)
+    library_root = tmp_path / "library"
+    library_root.mkdir()
+    settings = FrameNestSettings(
+        database_path=database_path,
+        gallery_preview_cache_path=tmp_path / "previews",
+        _env_file=None,
+    )
+    upgrade_database_to_head(settings)
+    library_id = _register_library(database_path, library_root)
+    _seed_private_owned_media(
+        database_path, library_id=library_id, owner_login=OWNER_LOGIN
+    )
+    engine = create_sqlite_engine(database_path)
+    try:
+        def bind(connection) -> None:
+            SqliteRecordRepository(engine).bind_media_record(
+                connection,
+                record_id=RecordId.new(),
+                media_id=MEDIA_ID,
+                owner_login_key=FOREIGN_LOGIN,
+                created_at_ms=3,
+            )
+
+        run_in_immediate_transaction(engine, bind)
+        service = YouTubeRequestService(
+            SqliteYouTubeAcquisitionClaimRepository(engine),
+            SqliteContentPublicationRepository(engine),
+            _StagingStub(),
+            limits=YouTubeRequestLimits(),
+        )
+        page = service.list_owned(created_by_login_key=OWNER_LOGIN)
+        assert len(page.items) == 1
+        assert page.items[0].phase == "unavailable"
+        assert page.items[0].media_id is None
+    finally:
+        dispose_engine(engine)

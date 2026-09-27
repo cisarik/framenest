@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from dataclasses import replace
 
-from sqlalchemy import and_, distinct, exists, func, or_, select
+from sqlalchemy import and_, distinct, exists, func, not_, or_, select
 from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -20,6 +21,10 @@ from framenest.application.ports.media_content import SUPPORTED_MEDIA_CONTENT
 from framenest.domain.media import MediaKind, MediaLocationAvailability
 from framenest.infrastructure.persistence.catalog_schema import (
     canonical_tags,
+    kronika_approved_media,
+    kronika_approved_media_locations,
+    kronika_approved_media_tags,
+    kronika_records,
     logical_media,
     media_canonical_tags,
     media_content_publications,
@@ -28,7 +33,15 @@ from framenest.infrastructure.persistence.catalog_schema import (
     x_assets,
     x_post_claims,
 )
+from framenest.domain.record_access import AccessScopeKind
 from framenest.infrastructure.persistence.engine import run_in_transaction
+from framenest.infrastructure.persistence.record_access import (
+    catalog_scope_predicate,
+    member_approved_media_predicate,
+    member_current_media_predicate,
+    record_bound_to_media,
+    unbound_published_or_owned,
+)
 
 _REPOSITORY_FAILURE_MESSAGE = "Media catalog query failed."
 _LIKE_ESCAPE = "\\"
@@ -41,6 +54,21 @@ class SqliteMediaCatalogRepository:
         self._engine = engine
 
     def list_media(self, query: MediaCatalogQuery) -> MediaCatalogPage:
+        if query.access_scope is None or not query.access_scope.allows_queries:
+            return MediaCatalogPage(
+                items=(),
+                total=0,
+                limit=query.limit,
+                offset=query.offset,
+                q=query.q,
+                tag_keys=query.tag_keys,
+                content_category=query.content_category,
+                acquisition_source=query.acquisition_source,
+                creator_attribution_kind=query.creator_attribution_kind,
+                creator_stable_id=query.creator_stable_id,
+                creator_handle=query.creator_handle,
+            )
+
         def operation(connection: Connection) -> MediaCatalogPage:
             tag_values = _distinct_tag_values(query)
             companion = query.companion_audience_login_key is not None
@@ -146,6 +174,12 @@ class SqliteMediaCatalogRepository:
                 )
                 for row in page_rows
             )
+            overlay = _approved_overlay(connection, query, media_ids)
+            if overlay:
+                items = tuple(
+                    _apply_approved_overlay(item, overlay.get(item.media_id))
+                    for item in items
+                )
             return MediaCatalogPage(
                 items=items,
                 total=int(total),
@@ -251,7 +285,15 @@ class SqliteMediaCatalogRepository:
             raise FrameNestMediaCatalogRepositoryError(_REPOSITORY_FAILURE_MESSAGE) from exc
 
 
+def _member_login(query: MediaCatalogQuery) -> str | None:
+    scope = query.access_scope
+    if scope is None or scope.kind is not AccessScopeKind.MEMBER:
+        return None
+    return scope.owner_login_key
+
+
 def _filtered_media_select(query: MediaCatalogQuery, tag_values: tuple[str, ...]):
+    member_login = _member_login(query)
     joined = logical_media.outerjoin(
         media_metadata,
         media_metadata.c.media_id == logical_media.c.id,
@@ -261,7 +303,7 @@ def _filtered_media_select(query: MediaCatalogQuery, tag_values: tuple[str, ...]
             media_content_publications,
             media_content_publications.c.media_id == logical_media.c.id,
         )
-    if tag_values:
+    if tag_values and member_login is None:
         joined = joined.join(
             media_canonical_tags,
             media_canonical_tags.c.media_id == logical_media.c.id,
@@ -283,20 +325,53 @@ def _filtered_media_select(query: MediaCatalogQuery, tag_values: tuple[str, ...]
         media_metadata.c.creator_display_name,
     ).select_from(joined)
     if query.q is not None:
-        statement = statement.where(
-            media_metadata.c.display_title.collate("NOCASE").like(
-                _like_pattern(query.q),
-                escape=_LIKE_ESCAPE,
-            )
+        live_title = media_metadata.c.display_title.collate("NOCASE").like(
+            _like_pattern(query.q),
+            escape=_LIKE_ESCAPE,
         )
+        if member_login is None:
+            statement = statement.where(live_title)
+        else:
+            approved_title = (
+                select(kronika_approved_media.c.display_title)
+                .where(kronika_approved_media.c.media_id == logical_media.c.id)
+                .scalar_subquery()
+            )
+            statement = statement.where(
+                or_(
+                    and_(member_current_media_predicate(member_login), live_title),
+                    and_(
+                        member_approved_media_predicate(member_login),
+                        approved_title.collate("NOCASE").like(
+                            _like_pattern(query.q),
+                            escape=_LIKE_ESCAPE,
+                        ),
+                    ),
+                )
+            )
     if query.collection_key is not None:
         statement = statement.where(
             media_metadata.c.collection_key == query.collection_key.value
         )
     if query.content_category is not None:
-        statement = statement.where(
-            media_metadata.c.content_category == query.content_category
-        )
+        live_category = media_metadata.c.content_category == query.content_category
+        if member_login is None:
+            statement = statement.where(live_category)
+        else:
+            approved_category = (
+                select(kronika_approved_media.c.content_category)
+                .where(kronika_approved_media.c.media_id == logical_media.c.id)
+                .scalar_subquery()
+            )
+            statement = statement.where(
+                or_(
+                    and_(member_current_media_predicate(member_login), live_category),
+                    and_(
+                        member_approved_media_predicate(member_login),
+                        approved_category == query.content_category,
+                    ),
+                )
+            )
     if query.acquisition_source is not None:
         statement = statement.where(
             media_metadata.c.acquisition_source == query.acquisition_source
@@ -319,10 +394,29 @@ def _filtered_media_select(query: MediaCatalogQuery, tag_values: tuple[str, ...]
             == query.creator_attribution_kind,
             media_metadata.c.creator_handle == query.creator_handle,
         )
-    if query.companion_audience_login_key is not None:
+    if query.companion_audience_login_key is not None and member_login is None:
         statement = statement.where(
             _companion_audience_predicate(query.companion_audience_login_key)
         )
+    elif query.companion_audience_login_key is not None and member_login is not None:
+        statement = statement.where(
+            or_(
+                exists(
+                    select(1)
+                    .select_from(kronika_records)
+                    .where(
+                        kronika_records.c.media_id == logical_media.c.id,
+                        kronika_records.c.owner_login_key == member_login,
+                    )
+                ),
+                and_(
+                    not_(record_bound_to_media()),
+                    _companion_audience_predicate(member_login),
+                ),
+                member_approved_media_predicate(member_login),
+            )
+        )
+    if query.companion_audience_login_key is not None:
         kinds = query.companion_kinds or (
             MediaKind.IMAGE.value,
             MediaKind.ANIMATED_IMAGE.value,
@@ -330,7 +424,23 @@ def _filtered_media_select(query: MediaCatalogQuery, tag_values: tuple[str, ...]
         )
         statement = statement.where(logical_media.c.media_kind.in_(kinds))
         statement = statement.where(_supported_companion_location_exists())
-    if tag_values:
+    statement = statement.where(catalog_scope_predicate(query.access_scope))
+    if member_login is not None and query.companion_audience_login_key is None:
+        statement = statement.where(unbound_published_or_owned(member_login))
+    if tag_values and member_login is not None:
+        statement = statement.where(
+            or_(
+                and_(
+                    member_current_media_predicate(member_login),
+                    _live_tags_cover(tag_values),
+                ),
+                and_(
+                    member_approved_media_predicate(member_login),
+                    _approved_tags_cover(tag_values),
+                ),
+            )
+        )
+    elif tag_values:
         statement = (
             statement.where(media_canonical_tags.c.tag_key.in_(tag_values))
             .group_by(
@@ -352,6 +462,159 @@ def _filtered_media_select(query: MediaCatalogQuery, tag_values: tuple[str, ...]
             .having(func.count(distinct(media_canonical_tags.c.tag_key)) == len(tag_values))
         )
     return statement
+
+
+def _live_tags_cover(tag_values: tuple[str, ...]):
+    return and_(
+        *[
+            exists(
+                select(1)
+                .select_from(media_canonical_tags)
+                .where(
+                    media_canonical_tags.c.media_id == logical_media.c.id,
+                    media_canonical_tags.c.tag_key == key,
+                )
+            )
+            for key in tag_values
+        ]
+    )
+
+
+def _approved_tags_cover(tag_values: tuple[str, ...]):
+    return and_(
+        *[
+            exists(
+                select(1)
+                .select_from(
+                    kronika_approved_media.join(
+                        kronika_approved_media_tags,
+                        kronika_approved_media_tags.c.record_id
+                        == kronika_approved_media.c.record_id,
+                    )
+                )
+                .where(
+                    kronika_approved_media.c.media_id == logical_media.c.id,
+                    kronika_approved_media_tags.c.tag_key == key,
+                )
+            )
+            for key in tag_values
+        ]
+    )
+
+
+def _approved_overlay(connection: Connection, query: MediaCatalogQuery, media_ids: tuple[str, ...]):
+    login = _member_login(query)
+    if login is None or not media_ids:
+        return {}
+    rows = connection.execute(
+        select(kronika_approved_media)
+        .select_from(
+            kronika_approved_media.join(
+                kronika_records,
+                kronika_records.c.id == kronika_approved_media.c.record_id,
+            )
+        )
+        .where(
+            kronika_approved_media.c.media_id.in_(media_ids),
+            kronika_records.c.owner_login_key != login,
+            kronika_records.c.visibility == "family",
+        )
+    ).mappings()
+    overlay: dict[str, dict[str, object]] = {}
+    record_ids: list[str] = []
+    for row in rows:
+        media_id = str(row["media_id"])
+        record_id = str(row["record_id"])
+        record_ids.append(record_id)
+        overlay[media_id] = {
+            "record_id": record_id,
+            "display_title": str(row["display_title"]),
+            "description": str(row["description"]),
+            "content_category": str(row["content_category"]),
+            "acquisition_source": str(row["acquisition_source"]),
+            "creator_attribution_kind": row["creator_attribution_kind"],
+            "creator_stable_id": row["creator_stable_id"],
+            "creator_handle": row["creator_handle"],
+            "creator_display_name": row["creator_display_name"],
+            "tags": [],
+            "locations": [],
+        }
+    if not record_ids:
+        return {}
+    tag_rows = connection.execute(
+        select(kronika_approved_media_tags)
+        .where(kronika_approved_media_tags.c.record_id.in_(record_ids))
+        .order_by(
+            kronika_approved_media_tags.c.record_id.asc(),
+            kronika_approved_media_tags.c.position.asc(),
+        )
+    ).mappings()
+    by_record = {item["record_id"]: item for item in overlay.values()}
+    for row in tag_rows:
+        by_record[str(row["record_id"])]["tags"].append(
+            CatalogMediaTag(
+                key=str(row["tag_key"]),
+                display_name=str(row["display_name"]),
+                position=int(row["position"]),
+            )
+        )
+    location_rows = connection.execute(
+        select(kronika_approved_media_locations).where(
+            kronika_approved_media_locations.c.record_id.in_(record_ids)
+        )
+    ).mappings()
+    for row in location_rows:
+        by_record[str(row["record_id"])]["locations"].append(
+            CatalogMediaLocation(
+                location_id=str(row["location_id"]),
+                library_id=str(row["library_id"]),
+                relative_path=str(row["relative_path"]),
+                availability=str(row["availability"]),
+                observed_size_bytes=(
+                    None
+                    if row["observed_size_bytes"] is None
+                    else int(row["observed_size_bytes"])
+                ),
+                observed_mtime_ns=(
+                    None
+                    if row["observed_mtime_ns"] is None
+                    else int(row["observed_mtime_ns"])
+                ),
+            )
+        )
+    return overlay
+
+
+def _apply_approved_overlay(item: CatalogMediaItem, overlay: dict[str, object] | None):
+    if overlay is None:
+        return item
+    return replace(
+        item,
+        display_title=str(overlay["display_title"]),
+        description=str(overlay["description"]),
+        content_category=str(overlay["content_category"]),
+        acquisition_source=str(overlay["acquisition_source"]),
+        creator_attribution_kind=(
+            None
+            if overlay["creator_attribution_kind"] is None
+            else str(overlay["creator_attribution_kind"])
+        ),
+        creator_stable_id=(
+            None if overlay["creator_stable_id"] is None else str(overlay["creator_stable_id"])
+        ),
+        creator_handle=(
+            None if overlay["creator_handle"] is None else str(overlay["creator_handle"])
+        ),
+        creator_display_name=(
+            None
+            if overlay["creator_display_name"] is None
+            else str(overlay["creator_display_name"])
+        ),
+        tags=tuple(overlay["tags"]),
+        locations=tuple(overlay["locations"]),
+        read_projection="approved",
+        cover_ready=False,
+    )
 
 
 def _companion_audience_predicate(login_key: str):

@@ -9,6 +9,8 @@ from fastapi.testclient import TestClient
 
 from framenest.adapters.api.application import create_app
 from framenest.adapters.api.media_content_api import MediaContentApiDependencies
+from framenest.adapters.api.tailscale_ingress import SCOPE_IDENTITY
+from tests.support.record_access import scoped_policy, synthetic_identity
 from framenest.application.media_content import (
     MediaContentFailedError,
     MediaContentNotFoundError,
@@ -60,16 +62,47 @@ def _client(
     resolve=None,
     catalog_available=True,
     database_path=None,
+    audience_ids: set[str] | None = None,
 ):
     deps = MediaContentApiDependencies(
         resolve_content=resolve or _FakeResolveContent(),
         catalog_available=lambda: catalog_available,
+        audience_policy=scoped_policy(
+            {MEDIA_ID} if audience_ids is None else audience_ids
+        ),
     )
     settings = FrameNestSettings(
         database_path=database_path or Path("/tmp/framenest-media-content-api.sqlite3"),
         _env_file=None,
     )
-    return TestClient(create_app(settings=settings, media_content_api_dependencies=deps))
+    app = create_app(settings=settings, media_content_api_dependencies=deps)
+
+    class _Caller:
+        def __init__(self, app):
+            self.app = app
+
+        async def __call__(self, scope, receive, send):
+            if scope.get("type") == "http":
+                scope[SCOPE_IDENTITY] = synthetic_identity("alice")
+            await self.app(scope, receive, send)
+
+    app.add_middleware(_Caller)
+    return TestClient(app)
+
+
+def test_content_and_download_denial_does_not_open_the_resolver():
+    class _Counting(_FakeResolveContent):
+        calls = 0
+
+        def execute(self, media_id, location_id):
+            self.calls += 1
+            return super().execute(media_id, location_id)
+
+    counting = _Counting(result=_resolved("image/gif", GIF_BYTES))
+    client = _client(resolve=counting, audience_ids=set())
+    assert client.get(CONTENT_PATH).status_code == 404
+    assert client.get(DOWNLOAD_PATH).status_code == 404
+    assert counting.calls == 0
 
 
 def test_full_gif_200():

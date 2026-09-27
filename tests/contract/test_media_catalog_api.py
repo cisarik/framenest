@@ -60,6 +60,7 @@ class _FakeListMediaCatalog:
         creator_attribution_kind: str | None = None,
         creator_stable_id: str | None = None,
         creator_handle: str | None = None,
+        access_scope: object | None = None,
     ) -> MediaCatalogPage:
         if self.queries is None:
             self.queries = []
@@ -79,6 +80,8 @@ class _FakeListMediaCatalog:
         )
         if self.error is not None:
             raise self.error
+        from framenest.domain.record_access import RecordAccessScope
+
         return ListMediaCatalog(_FakeCatalogRepository()).execute(
             q=q,
             tag_keys=tag_keys,
@@ -90,6 +93,9 @@ class _FakeListMediaCatalog:
             creator_attribution_kind=creator_attribution_kind,
             creator_stable_id=creator_stable_id,
             creator_handle=creator_handle,
+            access_scope=access_scope
+            if access_scope is not None
+            else RecordAccessScope.legacy_public(),
         )
 
 
@@ -137,15 +143,16 @@ def _client(
         database_path=database_path or Path("/tmp/framenest-media-catalog-api.sqlite3"),
         _env_file=None,
     )
-    return TestClient(
-        create_app(
-            settings=settings,
-            media_catalog_api_dependencies=MediaCatalogApiDependencies(
-                list_media=list_media or _FakeListMediaCatalog(),
-                catalog_available=lambda: catalog_available,
-            ),
-        )
+    from tests.support.record_access import install_synthetic_caller
+
+    app = create_app(
+        settings=settings,
+        media_catalog_api_dependencies=MediaCatalogApiDependencies(
+            list_media=list_media or _FakeListMediaCatalog(),
+            catalog_available=lambda: catalog_available,
+        ),
     )
+    return TestClient(install_synthetic_caller(app, "alice"))
 
 
 def test_successful_default_listing_exposes_complete_catalog_safe_fields() -> None:
@@ -310,6 +317,9 @@ def _overlay_client(
                 catalog_available=lambda: True,
                 get_media=_FakeGetMedia(),
                 list_aliases=list_aliases,
+                audience_policy=__import__(
+                    "tests.support.record_access", fromlist=["scoped_policy"]
+                ).scoped_policy({MEDIA_ID}),
             )
         )
     )
@@ -371,9 +381,8 @@ def test_catalog_merge_applies_caller_overlay_and_isolates_logins() -> None:
         {"key": "mathematics", "display_name": "Math", "position": 0}
     ]
     assert bob_get.json()["display_title"] == "Bob title"
-    assert public_list.json()["items"][0]["display_title"] == "Reinventing Entropy"
-    assert public_get.json()["display_title"] == "Reinventing Entropy"
-    assert public_list.json()["items"][0]["tags"][0]["key"] == "mathematics"
+    assert public_list.json()["items"] == []
+    assert public_get.status_code == 404
     assert aliases.calls == [
         ("alice@example.com", (MEDIA_ID,)),
         ("alice@example.com", (MEDIA_ID,)),

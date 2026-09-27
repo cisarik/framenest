@@ -17,6 +17,7 @@ from framenest.application.ports.analysis_proposal import (
 from framenest.domain.content_publication import derive_content_publication_readiness
 from framenest.domain.identities import MediaId
 from framenest.infrastructure.persistence.catalog_schema import (
+    kronika_records,
     logical_media,
     media_analysis_proposals,
     media_canonical_tags,
@@ -50,6 +51,13 @@ class SqliteAnalysisProposalRepository:
                 select(logical_media.c.id).where(logical_media.c.id == media_id_text)
             ).first()
             if exists is None:
+                raise AnalysisProposalMediaNotFoundError()
+            owner = connection.execute(
+                select(kronika_records.c.owner_login_key).where(
+                    kronika_records.c.media_id == media_id_text
+                )
+            ).scalar_one_or_none()
+            if owner is not None and owner != login_key:
                 raise AnalysisProposalMediaNotFoundError()
             connection.execute(
                 insert(media_analysis_proposals).values(

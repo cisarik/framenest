@@ -105,6 +105,9 @@ def _router_client(
                 automatic_analysis_enabled=False,
                 provider_configured=False,
                 list_suggestions=list_suggestions,  # type: ignore[arg-type]
+                audience_policy=__import__(
+                    "tests.support.record_access", fromlist=["scoped_policy"]
+                ).scoped_policy({MEDIA_ID}),
             )
         )
     )

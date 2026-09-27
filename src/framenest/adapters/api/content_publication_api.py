@@ -18,6 +18,7 @@ from framenest.application.content_publication import (
     ContentPublicationValidationError,
 )
 from framenest.application.ports.content_publication_repository import (
+    ContentPublicationBoundRecordError,
     ContentPublicationMediaNotFoundError,
     FrameNestContentPublicationRepositoryError,
 )
@@ -252,6 +253,12 @@ def create_content_publication_api_router(
             )
         except (ContentPublicationMediaNotFoundError, FrameNestIdentityError):
             return _error(404, MEDIA_NOT_FOUND_CODE, MEDIA_NOT_FOUND_MESSAGE)
+        except ContentPublicationBoundRecordError:
+            return _error(
+                409,
+                "BOUND_RECORD_CONFLICT",
+                "The media item cannot be published through the legacy action.",
+            )
         except FrameNestContentPublicationRepositoryError:
             return _error(
                 500,

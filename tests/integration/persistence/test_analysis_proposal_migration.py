@@ -93,7 +93,7 @@ def _seed_populated_0032(database_path: Path) -> None:
         connection.close()
 
 
-def test_head_is_0033() -> None:
+def test_head_is_0034() -> None:
     from framenest.infrastructure.persistence.migrations import _alembic_config
 
     with _alembic_config(
@@ -102,7 +102,7 @@ def test_head_is_0033() -> None:
         from alembic.script import ScriptDirectory
 
         scripts = ScriptDirectory.from_config(config)
-        assert scripts.get_current_head() == "0033"
+        assert scripts.get_current_head() == "0034"
 
 
 def test_empty_database_upgrades_to_0033(tmp_path: Path) -> None:

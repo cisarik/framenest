@@ -24,6 +24,12 @@ from framenest.domain.identity_access import (
     IdentityContext,
     normalize_login,
 )
+from framenest.domain.record_access import (
+    READ_CURRENT,
+    READ_DENY,
+    READ_LEGACY,
+    decide_bound_read,
+)
 from framenest.domain.media_metadata import CanonicalTagKey
 
 DEFAULT_ADMIN_MEDIA_LIMIT = 24
@@ -43,26 +49,35 @@ class ContentAudiencePolicy:
     youtube_requester_private_access: object | None = None
     x_requester_private_access: object | None = None
     upload_attributed_access: object | None = None
+    record_bindings: object | None = None
 
     def may_read(self, media_id: MediaId, identity: object) -> bool:
-        if (
-            isinstance(identity, IdentityContext)
-            and identity.has_capability(CAPABILITY_MEDIA_WORKFLOW_READ)
-        ):
-            return self.repository.media_exists(media_id)
-        if self.repository.is_published(media_id):
-            return True
-        if isinstance(identity, IdentityContext) and identity.login_key is not None:
-            for access in self._requester_accesses():
-                if access is None:
-                    continue
-                if bool(
-                    access.has_live_requester_media_access(
-                        media_id=media_id, login_key=identity.login_key
-                    )
-                ):
-                    return True
-        return False
+        return self.read_decision(media_id, identity) != READ_DENY
+
+    def read_decision(self, media_id: MediaId, identity: object) -> str:
+        """Return deny, current, approved, or legacy for one media item."""
+        binding = None
+        if self.record_bindings is not None:
+            binding = self.record_bindings.bound_record(media_id)
+        if binding is not None:
+            return decide_bound_read(identity, binding)
+        if not isinstance(identity, IdentityContext) or not identity.login_key:
+            return READ_DENY
+        exists = self.repository.media_exists(media_id)
+        if identity.has_capability(CAPABILITY_MEDIA_WORKFLOW_READ):
+            return READ_CURRENT if exists else READ_DENY
+        if exists and self.repository.is_published(media_id):
+            return READ_LEGACY
+        for access in self._requester_accesses():
+            if access is None:
+                continue
+            if bool(
+                access.has_live_requester_media_access(
+                    media_id=media_id, login_key=identity.login_key
+                )
+            ):
+                return READ_LEGACY
+        return READ_DENY
 
     def _requester_accesses(self) -> tuple[object, ...]:
         return (

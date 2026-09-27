@@ -10,6 +10,8 @@ from fastapi.testclient import TestClient
 import pytest
 
 from framenest.adapters.api.application import create_app
+from framenest.domain.identity_access import ROLE_ADMIN
+from tests.support.record_access import install_synthetic_caller
 from framenest.adapters.api.upload_api import UploadApiDependencies
 from framenest.application.ports.upload_media_validation import (
     UploadMediaValidationEvidence,
@@ -96,12 +98,16 @@ def _client_with_upload_validation(tmp_path: Path):
         locks=locks,
     )
     coordinator = UploadValidationCoordinator(repository, validator, locks)
-    app = create_app(
-        settings=settings,
-        upload_api_dependencies=UploadApiDependencies(
-            transport=transport,
-            validation_coordinator=coordinator,
+    app = install_synthetic_caller(
+        create_app(
+            settings=settings,
+            upload_api_dependencies=UploadApiDependencies(
+                transport=transport,
+                validation_coordinator=coordinator,
+            ),
         ),
+        "admin@example.com",
+        role=ROLE_ADMIN,
     )
     return TestClient(app), settings, engine, coordinator
 

@@ -69,6 +69,7 @@ from framenest.domain.youtube_acquisition import (
     LIVE_CATALOG_YOUTUBE_ACQUISITION_STATES,
     REQUESTER_PHASE_COMPLETED,
     REQUESTER_PHASE_COMPLETED_PRIVATE,
+    REQUESTER_PHASE_UNAVAILABLE,
     TERMINAL_YOUTUBE_ACQUISITION_STATES,
     FrameNestYouTubeAcquisitionError,
     YouTubeAcquisitionClaim,
@@ -237,6 +238,7 @@ class YouTubeAcquisitionService:
         *,
         submitted_url: str,
         confirmation_method: YouTubeConfirmationMethod,
+        created_by_login_key: str | None = None,
     ) -> YouTubeClaimSubmission:
         now_ms = self._now_ms()
         try:
@@ -244,6 +246,7 @@ class YouTubeAcquisitionService:
                 submitted_url=submitted_url,
                 confirmation_method=confirmation_method,
                 now_ms=now_ms,
+                created_by_login_key=created_by_login_key,
             )
         except FrameNestYouTubeAcquisitionError as exc:
             raise YouTubeAcquisitionInvalidRequestError(
@@ -291,7 +294,10 @@ class YouTubeAcquisitionService:
     def get(
         self,
         claim_id: YouTubeAcquisitionClaimId,
+        *,
+        created_by_login_key: str | None = None,
     ) -> YouTubeClaimSnapshot:
+        del created_by_login_key
         try:
             claim = self._repository.get(claim_id)
         except FrameNestYouTubeClaimRepositoryError as exc:
@@ -309,6 +315,7 @@ class YouTubeAcquisitionService:
         claim_id: YouTubeAcquisitionClaimId,
         *,
         confirmation_method: YouTubeConfirmationMethod,
+        created_by_login_key: str | None = None,
     ) -> YouTubeClaimSubmission:
         try:
             original = self._repository.get(claim_id)
@@ -339,6 +346,7 @@ class YouTubeAcquisitionService:
                 confirmation_method=confirmation_method,
                 now_ms=now_ms,
                 retry_of_claim_id=original.id,
+                created_by_login_key=created_by_login_key or original.created_by_login_key,
             )
             selected, created = self._repository.create_or_get_active(retry)
         except (
@@ -404,6 +412,16 @@ class YouTubeAcquisitionService:
             submitted_url=claim.submitted_url,
             canonical_url=claim.canonical_url,
         )
+
+
+def _bound_record_owner(publication_repository: object, media_id: object) -> str | None:
+    probe = getattr(publication_repository, "bound_record_owner", None)
+    if probe is None:
+        return None
+    owner = probe(media_id)
+    if owner is None:
+        return None
+    return str(owner)
 
 
 class YouTubeRequestService:
@@ -739,7 +757,14 @@ class YouTubeRequestService:
                 claim,
                 media_is_published=media_is_published,
             )
-            if phase in {
+            bound_owner = _bound_record_owner(
+                self._publication_repository, claim.media_id
+            )
+            requester = claim.created_by_login_key or ""
+            if bound_owner is not None and bound_owner != requester:
+                phase = REQUESTER_PHASE_UNAVAILABLE
+                media_id_text = None
+            elif phase in {
                 REQUESTER_PHASE_COMPLETED,
                 REQUESTER_PHASE_COMPLETED_PRIVATE,
             }:
@@ -770,6 +795,28 @@ class YouTubeRequestService:
         )
 
 
+def handoff_duplicate_resolution(
+    created_by_login_key: str | None,
+    *,
+    creator_manages_duplicates: Callable[[str], bool] | None = None,
+) -> tuple[str | None, UploadDuplicateResolutionMode]:
+    """Choose upload duplicate mode for one acquisition handoff.
+
+    A missing creator stays explicit, matching legacy ownerless operator
+    claims. A verified login is explicit only when the injected predicate
+    says that login may manage duplicates; otherwise it stays silent.
+    """
+    manages = False
+    if created_by_login_key is not None and creator_manages_duplicates is not None:
+        manages = bool(creator_manages_duplicates(created_by_login_key))
+    if created_by_login_key is None or manages:
+        return created_by_login_key, UploadDuplicateResolutionMode.EXPLICIT
+    return (
+        created_by_login_key,
+        UploadDuplicateResolutionMode.SILENT_KEEP_SEPARATE,
+    )
+
+
 class YouTubeAcquisitionCoordinator:
     """Sequential durable acquisition owner for the single-worker server."""
 
@@ -788,6 +835,7 @@ class YouTubeAcquisitionCoordinator:
         now_ms: Callable[[], int] = default_now_ms,
         poll_interval_seconds: float = DEFAULT_ACQUISITION_POLL_INTERVAL_SECONDS,
         batch_size: int = DEFAULT_ACQUISITION_BATCH_SIZE,
+        creator_manages_duplicates: Callable[[str], bool] | None = None,
     ) -> None:
         if (
             isinstance(chunk_size_bytes, bool)
@@ -814,6 +862,7 @@ class YouTubeAcquisitionCoordinator:
         self._now_ms = now_ms
         self._poll_interval_seconds = float(poll_interval_seconds)
         self._batch_size = batch_size
+        self._creator_manages_duplicates = creator_manages_duplicates
         self._runner: asyncio.Task[None] | None = None
         self._wake: asyncio.Event | None = None
         self._stopping = False
@@ -1161,14 +1210,12 @@ class YouTubeAcquisitionCoordinator:
             raise UploadTransportError("upload handoff failed")
         upload_id = UploadSessionId.from_string(claim.id.to_string())
         upload_storage_key = UploadStorageKey(claim.staging_key)
-        if claim.created_by_login_key is None:
-            created_by_login_key = None
-            duplicate_resolution_mode = UploadDuplicateResolutionMode.EXPLICIT
-        else:
-            created_by_login_key = claim.created_by_login_key
-            duplicate_resolution_mode = (
-                UploadDuplicateResolutionMode.SILENT_KEEP_SEPARATE
+        created_by_login_key, duplicate_resolution_mode = (
+            handoff_duplicate_resolution(
+                claim.created_by_login_key,
+                creator_manages_duplicates=self._creator_manages_duplicates,
             )
+        )
         snapshot = self._transport.create_session(
             display_filename=claim.generated_filename,
             declared_size_bytes=claim.downloaded_size_bytes,
@@ -1303,7 +1350,7 @@ class YouTubeAcquisitionCoordinator:
         ):
             return False
         if upload.state is UploadSessionState.DUPLICATE_PENDING:
-            if claim.created_by_login_key is not None:
+            if self._ordinary_creator(claim.created_by_login_key):
                 await self._transport.resolve_duplicate(
                     upload.id,
                     UploadDuplicateResolution.KEEP_SEPARATE,
@@ -1314,7 +1361,7 @@ class YouTubeAcquisitionCoordinator:
                 upload.id,
                 UploadDuplicateResolution.DISCARD,
             )
-        if claim.created_by_login_key is not None:
+        if self._ordinary_creator(claim.created_by_login_key):
             return False
         resolved_claim = self._repository.find_by_upload_id(
             canonical.upload.id
@@ -1331,6 +1378,19 @@ class YouTubeAcquisitionCoordinator:
         )
         self._save(claim, completed)
         return True
+
+    def _ordinary_creator(self, login: str | None) -> bool:
+        """Ordinary verified logins keep silent separation.
+
+        A missing creator and a creator with duplicate-management authority
+        follow the explicit reuse path. An unwired predicate keeps every
+        present login ordinary, which is the previous handoff behavior.
+        """
+        if login is None:
+            return False
+        if self._creator_manages_duplicates is None:
+            return True
+        return not bool(self._creator_manages_duplicates(login))
 
     def _complete_cataloged(
         self,

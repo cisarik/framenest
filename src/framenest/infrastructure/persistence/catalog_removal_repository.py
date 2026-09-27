@@ -86,6 +86,18 @@ class SqliteCatalogRemovalRepository:
         now_ms: int,
     ) -> CatalogRemovalReceipt:
         def operation(connection: Connection) -> CatalogRemovalReceipt:
+            from framenest.application.catalog_removal import (
+                CatalogRemovalBoundRecordError,
+            )
+            from framenest.domain.records import RecordConflictError
+            from framenest.infrastructure.persistence.record_repository import (
+                reject_if_media_bound,
+            )
+
+            try:
+                reject_if_media_bound(connection, media_id.to_string())
+            except RecordConflictError as exc:
+                raise CatalogRemovalBoundRecordError() from exc
             snapshot = _load_snapshot(connection, media_id)
             if snapshot is None:
                 raise CatalogRemovalNotFoundError("Media not found.")

@@ -16,6 +16,7 @@ from framenest.application.ports.media_catalog_repository import (
     MediaCatalogQuery,
 )
 from framenest.domain.media_metadata import CanonicalTagKey
+from framenest.domain.record_access import RecordAccessScope
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
 APPLICATION_MODULE = REPOSITORY_ROOT / "src" / "framenest" / "application" / "media_catalog.py"
@@ -45,11 +46,13 @@ def _execute(
     offset: int = 0,
 ) -> tuple[MediaCatalogPage, MediaCatalogQuery]:
     repository = _FakeCatalogRepository()
+    scope = RecordAccessScope.legacy_public()
     result = ListMediaCatalog(repository).execute(
         q=q,
         tag_keys=[] if tag_keys is None else tag_keys,
         limit=limit,
         offset=offset,
+        access_scope=scope,
     )
     return result, repository.queries[-1]
 
@@ -64,6 +67,7 @@ def test_default_query_construction() -> None:
         offset=0,
         collection_key=None,
         published_only=True,
+        access_scope=RecordAccessScope.legacy_public(),
     )
     assert result.q is None
     assert result.tag_keys == ()
@@ -117,6 +121,14 @@ def test_duplicate_tag_filters_are_normalized_in_first_seen_order() -> None:
 def test_pagination_validation(limit: int, offset: int) -> None:
     with pytest.raises(MediaCatalogValidationError):
         _execute(limit=limit, offset=offset)
+
+
+def test_missing_scope_denies_without_repository_call() -> None:
+    repository = _FakeCatalogRepository()
+    result = ListMediaCatalog(repository).execute()
+    assert repository.queries == []
+    assert result.items == ()
+    assert result.total == 0
 
 
 def test_media_catalog_application_imports_no_framework_or_infrastructure() -> None:

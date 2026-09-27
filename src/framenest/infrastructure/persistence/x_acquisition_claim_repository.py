@@ -39,6 +39,7 @@ from framenest.domain.x_acquisition import (
     ensure_x_transition_allowed,
 )
 from framenest.infrastructure.persistence.catalog_schema import (
+    kronika_records,
     x_assets,
     x_claim_pending_alias_tags,
     x_claim_pending_aliases,
@@ -560,6 +561,32 @@ class SqliteXAcquisitionClaimRepository:
             )
             rows = connection.execute(stmt).all()
             return tuple(_asset_from_row(row) for row in rows)
+
+        try:
+            return run_in_transaction(self._engine, operation)
+        except SQLAlchemyError as exc:
+            raise FrameNestXClaimRepositoryError(
+                _REPOSITORY_FAILURE_MESSAGE
+            ) from exc
+
+    def media_ids_hidden_from_requester(
+        self,
+        *,
+        login_key: str,
+        media_ids: tuple[str, ...],
+    ) -> frozenset[str]:
+        """Bound media owned by someone else must not be linked to this requester."""
+        if not media_ids:
+            return frozenset()
+
+        def operation(connection: Connection) -> frozenset[str]:
+            rows = connection.execute(
+                select(kronika_records.c.media_id).where(
+                    kronika_records.c.media_id.in_(tuple(media_ids)),
+                    kronika_records.c.owner_login_key != login_key,
+                )
+            ).all()
+            return frozenset(str(row[0]) for row in rows)
 
         try:
             return run_in_transaction(self._engine, operation)

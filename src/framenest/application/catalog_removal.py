@@ -35,6 +35,13 @@ class CatalogRemovalStateConflictError(CatalogRemovalError):
     """Raised when the consequence fingerprint no longer matches."""
 
 
+class CatalogRemovalBoundRecordError(CatalogRemovalStateConflictError):
+    """Raised when removal is refused because a common record is bound."""
+
+    def __init__(self) -> None:
+        super().__init__("Catalog removal is not available for this media item.")
+
+
 class CatalogRemovalValidationError(CatalogRemovalError, ValueError):
     """Raised for malformed removal requests."""
 

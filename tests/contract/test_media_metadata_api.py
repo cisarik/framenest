@@ -164,19 +164,21 @@ def _client(
         database_path=database_path or Path("/tmp/framenest-media-metadata-api.sqlite3"),
         _env_file=None,
     )
-    return TestClient(
-        create_app(
-            settings=settings,
-            media_metadata_api_dependencies=MediaMetadataApiDependencies(
-                create_tag=create_tag or _FakeCreateTag(),
-                list_tags=list_tags or _FakeListTags(),
-                get_metadata=get_metadata or _FakeGetMetadata(),
-                save_metadata=save_metadata or _FakeSaveMetadata(),
-                catalog_available=lambda: catalog_available,
-                ensure_companion_x_tag=ensure_companion_x_tag,
-            ),
-        )
+    from tests.support.record_access import install_synthetic_caller, scoped_policy
+
+    app = create_app(
+        settings=settings,
+        media_metadata_api_dependencies=MediaMetadataApiDependencies(
+            create_tag=create_tag or _FakeCreateTag(),
+            list_tags=list_tags or _FakeListTags(),
+            get_metadata=get_metadata or _FakeGetMetadata(),
+            save_metadata=save_metadata or _FakeSaveMetadata(),
+            catalog_available=lambda: catalog_available,
+            ensure_companion_x_tag=ensure_companion_x_tag,
+            audience_policy=scoped_policy({MEDIA_ID}),
+        ),
     )
+    return TestClient(install_synthetic_caller(app))
 
 
 def test_tag_creation_created_and_already_exists_statuses() -> None:

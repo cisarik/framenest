@@ -4,6 +4,10 @@
 
 This is the current browser-development workflow guide. It documents the local
 launcher that runs the pre-alpha web application in an external browser.
+Optional `FRAMENEST_LOCAL_OWNER_LOGIN` names a login that is already present
+in the identity map. Loopback TCP and the local operator channel can use that
+mapped role. It does not create an administrator by itself, and it does not
+apply to the public published composition.
 
 Classification: development operator guide.
 

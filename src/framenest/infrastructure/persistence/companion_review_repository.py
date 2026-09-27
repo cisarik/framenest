@@ -569,6 +569,11 @@ class SqliteCompanionReviewRepository:
                 media_id=media_id_text,
                 tag_keys=tuple(tag.key for tag in tags),
             )
+            from framenest.infrastructure.persistence.record_repository import (
+                bump_bound_record_version,
+            )
+
+            bump_bound_record_version(connection, media_id_text)
             return CompanionReviewApplyResult(
                 metadata_status=metadata_status,
                 canonical=CompanionReviewApplyCanonical(

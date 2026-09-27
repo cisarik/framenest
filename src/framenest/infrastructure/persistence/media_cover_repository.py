@@ -159,6 +159,11 @@ class SqliteMediaCoverRepository:
                 created = _get_cover(connection, media_id_text)
                 if created is None:
                     raise FrameNestMediaCoverRepositoryError(_REPOSITORY_FAILURE_MESSAGE)
+                from framenest.infrastructure.persistence.record_repository import (
+                    bump_bound_record_version,
+                )
+
+                bump_bound_record_version(connection, media_id_text)
                 return MediaCoverSetResult(outcome="created", cover=created)
             if expected_revision != current.revision:
                 raise MediaCoverConflictError(_REPOSITORY_FAILURE_MESSAGE)
@@ -168,6 +173,11 @@ class SqliteMediaCoverRepository:
             replaced = _get_cover(connection, media_id_text)
             if replaced is None:
                 raise FrameNestMediaCoverRepositoryError(_REPOSITORY_FAILURE_MESSAGE)
+            from framenest.infrastructure.persistence.record_repository import (
+                bump_bound_record_version,
+            )
+
+            bump_bound_record_version(connection, media_id_text)
             return MediaCoverSetResult(outcome="replaced", cover=replaced)
 
         try:

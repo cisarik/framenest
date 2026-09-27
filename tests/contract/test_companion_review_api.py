@@ -1095,6 +1095,9 @@ def test_imported_preview_joins_inbox_and_own_history(tmp_path: Path) -> None:
                     provider_configured=True,
                     credential_available=True,
                     status="available",
+                    audience_policy=__import__(
+                        "tests.support.record_access", fromlist=["scoped_policy"]
+                    ).scoped_policy({alice_media, extra_movie}),
                 ),
             )
         ) as client:

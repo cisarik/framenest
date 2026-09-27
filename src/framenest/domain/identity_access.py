@@ -16,6 +16,7 @@ ROLE_USER = "user"
 ROLES = frozenset({ROLE_ADMIN, ROLE_USER})
 
 IDENTITY_PROVENANCE_TAILSCALE_SERVE = "tailscale-serve"
+IDENTITY_PROVENANCE_LOCAL_CONFIG = "local-config"
 MAPPING_PROVENANCE_CONFIG = "config"
 
 CAPABILITY_GALLERY_READ = "gallery.read"
@@ -175,6 +176,31 @@ def build_identity_mapping(
     return mapping
 
 
+def identity_from_mapped_login(
+    *,
+    login_key: str,
+    mapping: Mapping[str, IdentityMappingEntry],
+    provenance: str,
+) -> IdentityContext:
+    """Build an identity from an already configured login. Never invents a role."""
+    normalized = normalize_login(login_key)
+    entry = mapping.get(normalized)
+    if entry is None or provenance not in {
+        IDENTITY_PROVENANCE_TAILSCALE_SERVE,
+        IDENTITY_PROVENANCE_LOCAL_CONFIG,
+        MAPPING_PROVENANCE_CONFIG,
+    }:
+        raise FrameNestIdentityAccessError("Identity login is invalid.")
+    return IdentityContext(
+        login=normalized,
+        login_key=normalized,
+        display_name=normalized,
+        role=entry.role,
+        capabilities=CAPABILITIES_BY_ROLE[entry.role],
+        provenance=provenance,
+    )
+
+
 def resolve_identity(
     *,
     login: object,
@@ -202,6 +228,26 @@ def resolve_identity(
         capabilities=CAPABILITIES_BY_ROLE[entry.role],
         provenance=IDENTITY_PROVENANCE_TAILSCALE_SERVE,
     )
+
+
+def mapped_role_has_capability(
+    mapping: Mapping[str, IdentityMappingEntry],
+    login: str,
+    capability: str,
+) -> bool:
+    """Return whether a mapped login's role holds one capability.
+
+    An unmapped or invalid login is false. This is the same role-capability
+    table ``IdentityContext.has_capability`` uses.
+    """
+    try:
+        login_key = normalize_login(login)
+    except FrameNestIdentityAccessError:
+        return False
+    entry = mapping.get(login_key)
+    if entry is None:
+        return False
+    return capability in CAPABILITIES_BY_ROLE.get(entry.role, frozenset())
 
 
 def _is_forbidden_login_character(character: str) -> bool:

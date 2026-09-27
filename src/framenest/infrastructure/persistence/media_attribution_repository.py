@@ -22,6 +22,7 @@ from framenest.application.ports.media_attribution import (
 from framenest.domain.content_publication import derive_content_publication_readiness
 from framenest.domain.identities import MediaId
 from framenest.infrastructure.persistence.catalog_schema import (
+    kronika_records,
     logical_media,
     media_canonical_tags,
     media_content_publications,
@@ -277,6 +278,16 @@ def load_media_contributions(
 
 
 def _attributed_media_ids(login_key: str):
+    """Own common records precede contributions. Contributions cover unbound media."""
+    def bound_media():
+        return select(kronika_records.c.media_id).where(
+            kronika_records.c.media_id.is_not(None)
+        )
+
+    owned = select(kronika_records.c.media_id.label("media_id")).where(
+        kronika_records.c.owner_login_key == login_key,
+        kronika_records.c.media_id.is_not(None),
+    )
     upload_ids = (
         select(upload_publications.c.media_id.label("media_id"))
         .select_from(
@@ -288,6 +299,7 @@ def _attributed_media_ids(login_key: str):
         .where(
             upload_sessions.c.created_by_login_key == login_key,
             upload_publications.c.media_id.is_not(None),
+            upload_publications.c.media_id.not_in(bound_media()),
         )
     )
     youtube_ids = select(
@@ -295,6 +307,7 @@ def _attributed_media_ids(login_key: str):
     ).where(
         youtube_acquisition_claims.c.created_by_login_key == login_key,
         youtube_acquisition_claims.c.media_id.is_not(None),
+        youtube_acquisition_claims.c.media_id.not_in(bound_media()),
     )
     x_ids = (
         select(x_assets.c.media_id.label("media_id"))
@@ -307,9 +320,10 @@ def _attributed_media_ids(login_key: str):
         .where(
             x_post_claims.c.created_by_login_key == login_key,
             x_assets.c.media_id.is_not(None),
+            x_assets.c.media_id.not_in(bound_media()),
         )
     )
-    return union(upload_ids, youtube_ids, x_ids)
+    return union(owned, upload_ids, youtube_ids, x_ids)
 
 
 def _load_tag_counts(

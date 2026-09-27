@@ -91,11 +91,12 @@ def test_adr_0076_is_accepted_and_indexed() -> None:
     assert "succeeded by [ADR-0076]" in index
 
 
-def test_current_schema_head_is_0033() -> None:
-    assert "schema head `0033`" in _text(REPOSITORY_ROOT / "README.md")
-    assert "schema head `0033`" in _text(REPOSITORY_ROOT / "SPEC.md")
-    assert "schema head `0033`" in _text(REPOSITORY_ROOT / "PRODUCT.md")
+def test_current_schema_head_is_0034() -> None:
+    assert "schema head `0034`" in _text(REPOSITORY_ROOT / "README.md")
+    assert "schema head `0034`" in _text(REPOSITORY_ROOT / "SPEC.md")
+    assert "schema head `0034`" in _text(REPOSITORY_ROOT / "PRODUCT.md")
     roadmap = _text(REPOSITORY_ROOT / "ROADMAP.md")
+    assert "The current schema head is revision `0034`" in roadmap
     assert "revision `0033`" in roadmap
     assert "companion_review_tag_sources" in roadmap
     assert "ADR-0031" in roadmap

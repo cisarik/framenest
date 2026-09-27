@@ -10,7 +10,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import AsyncIterator, Callable, Mapping
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import functools
 import hashlib
 import time
@@ -382,10 +382,21 @@ class XAcquisitionRequestService:
     def _live_catalog_categories(self, claim: XPostClaim) -> set[ContentCategory] | None:
         """Return live canonical categories, or None when they cannot be confirmed."""
         assets = self._repository.list_assets_for_post(claim.id)
+        hidden = _hidden_media_ids(
+            self._repository,
+            claim.created_by_login_key or "",
+            tuple(
+                item.media_id.to_string()
+                for item in assets
+                if item.media_id is not None
+            ),
+        )
         live: set[ContentCategory] = set()
         found = False
         for asset in assets:
             if asset.state is not XAssetState.CATALOGED or asset.media_id is None:
+                continue
+            if asset.media_id.to_string() in hidden:
                 continue
             found = True
             if self._metadata_repository is None:
@@ -570,8 +581,20 @@ class XAcquisitionRequestService:
         if self._alias_repository is None:
             raise XAcquisitionInfrastructureError("X alias overlay is unavailable.")
         now_ms = self._now_ms()
-        for asset in self._repository.list_assets_for_post(claim.id):
+        assets = self._repository.list_assets_for_post(claim.id)
+        hidden = _hidden_media_ids(
+            self._repository,
+            requester,
+            tuple(
+                item.media_id.to_string()
+                for item in assets
+                if item.media_id is not None
+            ),
+        )
+        for asset in assets:
             if asset.state not in SUCCESS_X_ASSET_STATES or asset.media_id is None:
+                continue
+            if asset.media_id.to_string() in hidden:
                 continue
             apply_alias_content_to_media(
                 self._alias_repository,
@@ -1427,7 +1450,36 @@ def _requester_snapshot(
     claim: XPostClaim, repository: XAcquisitionClaimRepository
 ) -> XClaimSnapshot:
     assets = repository.list_assets_for_post(claim.id)
-    return _administration_snapshot(claim, assets)
+    snapshot = _administration_snapshot(claim, assets)
+    hidden = _hidden_media_ids(
+        repository,
+        claim.created_by_login_key or "",
+        tuple(
+            asset.media_id.to_string()
+            for asset in assets
+            if asset.media_id is not None
+        ),
+    )
+    if not hidden:
+        return snapshot
+    return replace(
+        snapshot,
+        assets=tuple(
+            replace(item, media_id=None) if item.media_id in hidden else item
+            for item in snapshot.assets
+        ),
+    )
+
+
+def _hidden_media_ids(
+    repository: object,
+    login_key: str,
+    media_ids: tuple[str, ...],
+) -> frozenset[str]:
+    hide = getattr(repository, "media_ids_hidden_from_requester", None)
+    if hide is None or not media_ids:
+        return frozenset()
+    return frozenset(hide(login_key=login_key, media_ids=media_ids))
 
 
 def _asset_snapshot(asset: XAsset) -> XAssetSnapshot:

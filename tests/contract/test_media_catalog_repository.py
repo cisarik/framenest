@@ -11,6 +11,7 @@ from sqlalchemy import text
 from framenest.application.ports.media_catalog_repository import MediaCatalogQuery
 from framenest.domain import Device, DeviceId, Library, LibraryId, LibraryPathFlavor, LibraryRoot
 from framenest.domain.media_metadata import CanonicalTagKey
+from framenest.domain.record_access import AccessScopeKind, RecordAccessScope
 
 MEDIA_A = "11111111-1111-4111-8111-111111111111"
 MEDIA_B = "22222222-2222-4222-8222-222222222222"
@@ -150,6 +151,10 @@ def _query(
         limit=limit,
         offset=offset,
         collection_key=None,
+        access_scope=RecordAccessScope(
+            kind=AccessScopeKind.ADMINISTRATOR,
+            owner_login_key="admin",
+        ),
     )
 
 
@@ -225,6 +230,10 @@ def test_tag_filtering_uses_and_semantics_and_duplicate_keys_do_not_change_resul
                 limit=24,
                 offset=0,
                 collection_key=None,
+                access_scope=RecordAccessScope(
+                    kind=AccessScopeKind.ADMINISTRATOR,
+                    owner_login_key="admin",
+                ),
             )
         )
         unknown = repository.list_media(_query(tags=("unknown-tag",)))
@@ -279,6 +288,10 @@ def test_companion_audience_query_plan_executes_without_a_new_index(
         content_category="meme",
         companion_audience_login_key="owner@example.com",
         companion_kinds=("image", "animated_image", "video"),
+        access_scope=RecordAccessScope(
+            kind=AccessScopeKind.MEMBER,
+            owner_login_key="owner@example.com",
+        ),
     )
     try:
         compiled = _filtered_media_select(query, ()).compile(

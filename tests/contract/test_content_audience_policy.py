@@ -78,18 +78,31 @@ def _admin_identity() -> IdentityContext:
     )
 
 
+def _ordinary_identity() -> IdentityContext:
+    from framenest.domain.identity_access import ROLE_USER
+
+    return IdentityContext(
+        login="owner@example.com",
+        login_key="owner@example.com",
+        display_name="Owner",
+        role=ROLE_USER,
+        capabilities=CAPABILITIES_BY_ROLE[ROLE_USER],
+        provenance="tailscale-serve",
+    )
+
+
 def _client(
     settings: FrameNestSettings,
     *,
     admin: bool = False,
 ) -> TestClient:
     app = create_app(settings=settings)
-    if admin:
+    identity = _admin_identity() if admin else _ordinary_identity()
 
-        @app.middleware("http")
-        async def inject_admin(request: Request, call_next):
-            request.scope[SCOPE_IDENTITY] = _admin_identity()
-            return await call_next(request)
+    @app.middleware("http")
+    async def inject_identity(request: Request, call_next):
+        request.scope[SCOPE_IDENTITY] = identity
+        return await call_next(request)
 
     return TestClient(app)
 
@@ -115,10 +128,13 @@ def test_ordinary_catalog_is_published_only_and_cannot_request_unpublished() -> 
                 tag_keys=query.tag_keys,
             )
 
+    from framenest.domain.record_access import RecordAccessScope
+
     repository = CapturingRepository()
-    ListMediaCatalog(repository).execute()
+    ListMediaCatalog(repository).execute(access_scope=RecordAccessScope.legacy_public())
 
     assert repository.query.published_only is True
+    assert repository.query.access_scope == RecordAccessScope.legacy_public()
 
 
 def test_public_list_hides_unpublished_while_admin_list_can_inspect_it(

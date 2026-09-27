@@ -40,6 +40,10 @@ class ContentPublicationMediaNotFoundError(
     """Raised when the target logical medium is absent."""
 
 
+class ContentPublicationBoundRecordError(FrameNestContentPublicationRepositoryError):
+    """Legacy publication cannot change a bound Kronika record."""
+
+
 @dataclass(frozen=True, slots=True)
 class AdminMediaQuery:
     """Normalized bounded admin workflow query."""

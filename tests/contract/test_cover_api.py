@@ -158,7 +158,12 @@ def _client(
             request.scope[SCOPE_AUDIT_EVENT_ID] = "audit-event"
         return await call_next(request)
 
-    audience_policy = _AudiencePolicy(audience) if audience is not None else None
+    from tests.support.record_access import scoped_policy
+
+    if audience is None:
+        audience_policy = scoped_policy({MEDIA_ID}) if identity is not None else None
+    else:
+        audience_policy = _AudiencePolicy(audience)
     app.include_router(
         create_cover_api_router(
             CoverApiDependencies(

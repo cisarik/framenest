@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 
+from framenest.domain.record_access import RecordAccessScope
 from framenest.application.media_catalog import (
     ListMediaCatalog,
     MediaCatalogValidationError,
@@ -92,6 +93,7 @@ def test_stable_id_filtering_returns_correct_creator_media() -> None:
         )
     )
     page = ListMediaCatalog(repository).execute(
+        access_scope=RecordAccessScope.legacy_public(),
         creator_attribution_kind="youtube_channel",
         creator_stable_id="UC1",
     )
@@ -120,6 +122,7 @@ def test_normalized_handle_fallback_works() -> None:
         )
     )
     page = ListMediaCatalog(repository).execute(
+        access_scope=RecordAccessScope.legacy_public(),
         creator_attribution_kind="youtube_channel",
         creator_handle="@@Alice",
     )
@@ -147,6 +150,7 @@ def test_display_name_collisions_do_not_merge_identities() -> None:
         )
     )
     page = ListMediaCatalog(repository).execute(
+        access_scope=RecordAccessScope.legacy_public(),
         creator_attribution_kind="youtube_channel",
         creator_stable_id="UC1",
     )
@@ -166,6 +170,7 @@ def test_renamed_display_names_do_not_break_stable_id_filtering() -> None:
         )
     )
     page = ListMediaCatalog(repository).execute(
+        access_scope=RecordAccessScope.legacy_public(),
         creator_attribution_kind="youtube_channel",
         creator_stable_id="UC1",
     )
@@ -175,12 +180,16 @@ def test_renamed_display_names_do_not_break_stable_id_filtering() -> None:
 def test_display_name_only_filter_is_rejected() -> None:
     repository = _FakeCatalogRepository(())
     with pytest.raises(MediaCatalogValidationError):
-        ListMediaCatalog(repository).execute(creator_attribution_kind="youtube_channel")
+        ListMediaCatalog(repository).execute(
+            access_scope=RecordAccessScope.legacy_public(),
+            creator_attribution_kind="youtube_channel",
+        )
 
 
 def test_creator_filter_keeps_published_only_audience_gate() -> None:
     repository = _FakeCatalogRepository(())
     ListMediaCatalog(repository).execute(
+        access_scope=RecordAccessScope.legacy_public(),
         creator_attribution_kind="x_author",
         creator_handle="someone",
     )

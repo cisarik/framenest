@@ -297,7 +297,7 @@ def test_still_image_upload_catalog_content_and_single_provider_call(
         assert before_restart.status_code == 200
         assert before_restart.json()["display_title"] == "Canonical Still"
 
-    with TestClient(create_app(settings=settings)) as restarted:
+    with TestClient(_admin_app(settings)) as restarted:
         after_restart = restarted.get(f"/api/media/{media_id}/metadata")
         assert after_restart.status_code == 200
         assert after_restart.json()["display_title"] == "Canonical Still"

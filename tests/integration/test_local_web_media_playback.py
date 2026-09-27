@@ -10,6 +10,8 @@ from sqlalchemy import text
 
 from framenest.adapters.api.application import create_app
 from framenest.configuration import FrameNestSettings
+from framenest.domain.identity_access import ROLE_ADMIN
+from tests.support.record_access import install_synthetic_caller
 from framenest.domain import Device, DeviceId, Library, LibraryId, LibraryPathFlavor, LibraryRoot
 from framenest.infrastructure.persistence.device_repository import SqliteDeviceRepository
 from framenest.infrastructure.persistence.engine import create_sqlite_engine, dispose_engine
@@ -74,7 +76,13 @@ def test_local_web_playback_endpoint_returns_gif_and_mp4_content_identity_only(
     upgrade_database_to_head(settings)
     library_id = _register_library(database_path, library_root)
 
-    with TestClient(create_app(settings=settings)) as client:
+    with TestClient(
+        install_synthetic_caller(
+            create_app(settings=settings),
+            "admin@example.com",
+            role=ROLE_ADMIN,
+        )
+    ) as client:
         imported_entropy = client.post(
             f"/api/libraries/{library_id}/media-imports",
             json={"relative_path": "entropy.mp4"},
@@ -149,7 +157,13 @@ def test_local_web_playback_rejects_offline_location(
     upgrade_database_to_head(settings)
     library_id = _register_library(database_path, library_root)
 
-    with TestClient(create_app(settings=settings)) as client:
+    with TestClient(
+        install_synthetic_caller(
+            create_app(settings=settings),
+            "admin@example.com",
+            role=ROLE_ADMIN,
+        )
+    ) as client:
         imported = client.post(
             f"/api/libraries/{library_id}/media-imports",
             json={"relative_path": "offline.mp4"},
@@ -192,7 +206,13 @@ def test_local_web_download_uses_sanitized_fallback_for_unsafe_filename(
     upgrade_database_to_head(settings)
     library_id = _register_library(database_path, library_root)
 
-    with TestClient(create_app(settings=settings)) as client:
+    with TestClient(
+        install_synthetic_caller(
+            create_app(settings=settings),
+            "admin@example.com",
+            role=ROLE_ADMIN,
+        )
+    ) as client:
         imported = client.post(
             f"/api/libraries/{library_id}/media-imports",
             json={"relative_path": unsafe_name},
@@ -225,7 +245,13 @@ def test_local_web_download_rejects_missing_file_without_path_disclosure(
     upgrade_database_to_head(settings)
     library_id = _register_library(database_path, library_root)
 
-    with TestClient(create_app(settings=settings)) as client:
+    with TestClient(
+        install_synthetic_caller(
+            create_app(settings=settings),
+            "admin@example.com",
+            role=ROLE_ADMIN,
+        )
+    ) as client:
         imported = client.post(
             f"/api/libraries/{library_id}/media-imports",
             json={"relative_path": "missing-later.mp4"},

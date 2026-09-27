@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from sqlalchemy import delete, insert, select, update
+from sqlalchemy import delete, exists, insert, not_, select, update
 from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
@@ -43,6 +43,7 @@ from framenest.domain.media_metadata import (
 )
 from framenest.infrastructure.persistence.catalog_schema import (
     canonical_tags,
+    kronika_records,
     companion_review_field_sources,
     companion_review_tag_sources,
     logical_media,
@@ -138,6 +139,18 @@ class SqliteMediaMetadataRepository:
                         media_content_publications,
                         media_content_publications.c.media_id
                         == media_canonical_tags.c.media_id,
+                    )
+                )
+                .where(
+                    not_(
+                        exists(
+                            select(1)
+                            .select_from(kronika_records)
+                            .where(
+                                kronika_records.c.media_id
+                                == media_canonical_tags.c.media_id
+                            )
+                        )
                     )
                 )
                 .distinct()
@@ -416,6 +429,11 @@ class SqliteMediaMetadataRepository:
                 creator_handle=resolved_handle,
                 creator_display_name=resolved_display_name,
             )
+            from framenest.infrastructure.persistence.record_repository import (
+                bump_bound_record_version,
+            )
+
+            bump_bound_record_version(connection, media_id.to_string())
             return MediaMetadataSaveResult(status=status, metadata=snapshot)
 
         try:

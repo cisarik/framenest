@@ -227,9 +227,11 @@ from framenest.domain.identity_access import (
     AUDIENCE_TAILSCALE_WORKSPACE,
     AUDIENCE_TRUSTED_LOOPBACK,
     CAPABILITIES_BY_ROLE,
+    CAPABILITY_UPLOAD_MANAGE,
     IdentityContext,
     ROLE_ADMIN,
     build_identity_mapping,
+    mapped_role_has_capability,
 )
 import framenest.adapters.api.web as web_resources
 from framenest.configuration import (
@@ -267,7 +269,12 @@ from framenest.infrastructure.media_analysis.gallery_preview import (
     FilesystemGalleryPreviewCache,
     PillowGalleryPreviewEncoder,
 )
+from framenest.adapters.api.local_identity_api import (
+    LocalIdentityMiddleware,
+    configured_local_identity,
+)
 from framenest.infrastructure.persistence.engine import create_sqlite_engine, dispose_engine
+from framenest.infrastructure.persistence.record_repository import SqliteRecordRepository
 from framenest.infrastructure.persistence.catalog_removal_repository import (
     SqliteCatalogRemovalRepository,
 )
@@ -487,6 +494,7 @@ def create_app(
             youtube_requester_private_access=owned_youtube_claim_repository,
             x_requester_private_access=owned_x_claim_repository,
             upload_attributed_access=owned_media_attribution_repository,
+            record_bindings=SqliteRecordRepository(owned_engine),
         )
     if cover_api_dependencies is None:
         assert owned_media_repository is not None
@@ -975,6 +983,13 @@ def create_app(
                     ),
                 )
             )
+            def _youtube_creator_manages_duplicates(login: str) -> bool:
+                return mapped_role_has_capability(
+                    identity_mapping,
+                    login,
+                    CAPABILITY_UPLOAD_MANAGE,
+                )
+
             owned_youtube_acquisition_coordinator = YouTubeAcquisitionCoordinator(
                 owned_youtube_claim_repository,
                 selected_downloader,
@@ -985,6 +1000,7 @@ def create_app(
                 validation_coordinator=owned_upload_validation_coordinator,
                 publication_coordinator=owned_upload_publication_coordinator,
                 chunk_size_bytes=resolved_settings.upload_max_patch_bytes,
+                creator_manages_duplicates=_youtube_creator_manages_duplicates,
             )
             owned_youtube_acquisition_service = YouTubeAcquisitionService(
                 owned_youtube_claim_repository,
@@ -1377,7 +1393,16 @@ def create_app(
             companion_extension_origins=tuple(
                 resolved_settings.companion_extension_origins
             ),
+            local_identity=configured_local_identity(resolved_settings),
         )
+    elif resolved_settings.ingress_mode != INGRESS_MODE_PUBLIC_PUBLISHED_UDS:
+        local_identity = configured_local_identity(resolved_settings)
+        if local_identity is not None:
+            app.add_middleware(
+                LocalIdentityMiddleware,
+                identity=local_identity,
+                origin=f"http://{resolved_settings.host}:{resolved_settings.port}",
+            )
 
     @app.get("/", response_class=HTMLResponse)
     def root() -> HTMLResponse:

@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from framenest.domain.media_metadata import CanonicalTagKey, MediaCollectionKey
+from framenest.domain.record_access import RecordAccessScope
 
 
 class FrameNestMediaCatalogRepositoryError(RuntimeError):
@@ -31,6 +32,7 @@ class MediaCatalogQuery:
     companion_kinds: tuple[str, ...] = ()
     cursor_created_at_ms: int | None = None
     cursor_media_id: str | None = None
+    access_scope: RecordAccessScope | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -75,6 +77,7 @@ class CatalogMediaItem:
     creator_stable_id: str | None = None
     creator_handle: str | None = None
     creator_display_name: str | None = None
+    read_projection: str = "current"
 
 
 @dataclass(frozen=True, slots=True)

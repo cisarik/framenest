@@ -81,7 +81,11 @@ def upgrade_database_to_head(
 ) -> MigrationStatus:
     """Create the explicit database boundary and upgrade it to the package head."""
     try:
-        settings.database_path.parent.mkdir(parents=True, exist_ok=True)
+        from framenest.infrastructure.persistence.private_state import (
+            prepare_writable_catalog,
+        )
+
+        prepare_writable_catalog(settings.database_path)
         engine = create_sqlite_engine(
             settings.database_path,
             busy_timeout_seconds=busy_timeout_seconds,

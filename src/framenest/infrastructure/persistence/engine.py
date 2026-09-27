@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import math
+import os
+import sqlite3
 from collections.abc import Callable
 from pathlib import Path
 from typing import TypeVar
@@ -12,6 +14,11 @@ from sqlalchemy import event
 from sqlalchemy.engine import Connection, Engine, URL, create_engine
 
 from framenest.infrastructure.persistence.errors import FrameNestPersistenceError
+from framenest.infrastructure.persistence.private_state import (
+    prepare_readonly_catalog,
+    prepare_writable_catalog,
+    verify_private_catalog,
+)
 
 DEFAULT_BUSY_TIMEOUT_SECONDS = 5.0
 MAX_BUSY_TIMEOUT_SECONDS = 60.0
@@ -28,9 +35,24 @@ def create_sqlite_engine(
     normalized_timeout = _validate_busy_timeout(busy_timeout_seconds)
     normalized_path = _validate_database_path(database_path)
     url = URL.create("sqlite+pysqlite", database=str(normalized_path))
+
+    def _connect() -> sqlite3.Connection:
+        parent = normalized_path.parent
+        if parent.is_dir() and not parent.is_symlink():
+            prepare_writable_catalog(normalized_path)
+        previous = os.umask(0o077)
+        try:
+            return sqlite3.connect(
+                normalized_path,
+                timeout=normalized_timeout,
+                check_same_thread=False,
+            )
+        finally:
+            os.umask(previous)
+
     engine = create_engine(
         url,
-        connect_args={"timeout": normalized_timeout},
+        creator=_connect,
         echo=False,
         hide_parameters=True,
     )
@@ -44,6 +66,21 @@ def create_sqlite_engine(
             cursor.execute(f"PRAGMA busy_timeout={busy_timeout_milliseconds}")
         finally:
             cursor.close()
+        verify_private_catalog(normalized_path)
+
+    def _private_transaction_begin(connection: Connection) -> None:
+        if "framenest_umask" not in connection.info:
+            connection.info["framenest_umask"] = os.umask(0o077)
+
+    def _private_transaction_end(connection: Connection) -> None:
+        previous = connection.info.pop("framenest_umask", None)
+        if previous is not None:
+            os.umask(previous)
+        verify_private_catalog(normalized_path)
+
+    event.listen(engine, "begin", _private_transaction_begin)
+    event.listen(engine, "commit", _private_transaction_end)
+    event.listen(engine, "rollback", _private_transaction_end)
 
     return engine
 
@@ -64,9 +101,19 @@ def create_sqlite_readonly_engine(
         )
     encoded_path = quote(normalized_path.as_posix(), safe="/")
     uri = f"file:{encoded_path}?mode=ro"
+
+    def _connect_readonly() -> sqlite3.Connection:
+        prepare_readonly_catalog(normalized_path)
+        return sqlite3.connect(
+            f"file:{encoded_path}?mode=ro",
+            uri=True,
+            timeout=normalized_timeout,
+            check_same_thread=False,
+        )
+
     engine = create_engine(
         URL.create("sqlite+pysqlite", database=uri, query={"uri": "true"}),
-        connect_args={"timeout": normalized_timeout, "uri": True},
+        creator=_connect_readonly,
         echo=False,
         hide_parameters=True,
     )

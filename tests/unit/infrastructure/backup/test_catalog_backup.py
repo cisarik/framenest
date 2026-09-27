@@ -38,7 +38,7 @@ def test_create_catalog_backup_from_migrated_database(tmp_path: Path) -> None:
     manifest = _manifest(bundle)
     assert manifest["schema_version"] == 1
     assert manifest["catalog"]["logical_name"] == "catalog.sqlite3"
-    assert manifest["catalog"]["alembic_revision"] == "0033"
+    assert manifest["catalog"]["alembic_revision"] == "0034"
     assert manifest["catalog"]["size_bytes"] == (bundle / "catalog.sqlite3").stat().st_size
     assert manifest["catalog"]["sha256"] == result.catalog_sha256
     assert "source" not in json.dumps(manifest)
@@ -54,7 +54,7 @@ def test_create_uses_sqlite_snapshot_while_source_connection_is_open(tmp_path: P
 
         result = create_catalog_backup(database_path, tmp_path / "bundle")
 
-    assert result.alembic_revision == "0033"
+    assert result.alembic_revision == "0034"
 
 
 def test_create_does_not_mutate_source_database(tmp_path: Path) -> None:
@@ -328,7 +328,7 @@ def test_restore_verified_bundle_to_new_destination(tmp_path: Path) -> None:
     assert sha256_file(destination) == sha256_file(bundle / "catalog.sqlite3")
     with sqlite3.connect(destination) as connection:
         revision = connection.execute("SELECT version_num FROM alembic_version").fetchone()
-    assert revision == ("0033",)
+    assert revision == ("0034",)
     siblings = [
         path
         for path in destination.parent.iterdir()
@@ -422,12 +422,12 @@ def test_create_verify_and_restore_handle_sqlite_paths_with_uri_reserved_charact
     verified = verify_catalog_backup(bundle)
     restored = restore_catalog_backup(bundle, destination)
 
-    assert result.alembic_revision == "0033"
+    assert result.alembic_revision == "0034"
     assert verified.catalog_sha256 == result.catalog_sha256
     assert restored.catalog_sha256 == result.catalog_sha256
     with sqlite3.connect(destination) as connection:
         revision = connection.execute("SELECT version_num FROM alembic_version").fetchone()
-    assert revision == ("0033",)
+    assert revision == ("0034",)
 
 
 def test_create_fails_if_private_permissions_cannot_be_set_where_supported(
@@ -533,7 +533,7 @@ def test_backup_preserves_cover_rows_while_artifacts_remain_outside_bundle(
     bundle = tmp_path / "bundle"
     create_catalog_backup(database_path, bundle)
     manifest = _manifest(bundle)
-    assert manifest["catalog"]["alembic_revision"] == "0033"
+    assert manifest["catalog"]["alembic_revision"] == "0034"
     assert set(name for name in (bundle / "catalog.sqlite3").parent.iterdir()) or True
     bundle_names = {child.name for child in bundle.iterdir()}
     assert bundle_names == {"manifest.json", "catalog.sqlite3"}
@@ -548,3 +548,74 @@ def test_backup_preserves_cover_rows_while_artifacts_remain_outside_bundle(
         assert rows == [("11111111-1111-4111-8111-111111111111", 1, "b" * 64)]
     finally:
         restored.close()
+
+
+def test_backup_restore_preserves_documents_projections_and_private_modes(
+    tmp_path: Path,
+) -> None:
+    from framenest.application.records import RecordService
+    from framenest.domain.identity_access import ROLE_ADMIN, ROLE_USER
+    from framenest.domain.records import CompletedDocument, DocumentId, RecordKind
+    from framenest.domain.research import CompletionEvidence
+    from framenest.infrastructure.persistence.catalog_backup import (
+        create_catalog_backup,
+        restore_catalog_backup,
+    )
+    from framenest.infrastructure.persistence.engine import (
+        create_sqlite_engine,
+        dispose_engine,
+    )
+    from framenest.infrastructure.persistence.record_repository import (
+        SqliteRecordRepository,
+    )
+    from tests.support.record_access import synthetic_identity
+
+    database_path = _migrated_database(tmp_path / "source" / "catalog.sqlite3")
+    engine = create_sqlite_engine(database_path)
+    service = RecordService(SqliteRecordRepository(engine))
+    alice = synthetic_identity("alice", role=ROLE_USER)
+    admin = synthetic_identity("ada", role=ROLE_ADMIN)
+    document = CompletedDocument(
+        document_id=DocumentId.new(),
+        operation_id="search-op-backup",
+        kind=RecordKind.SEARCH,
+        question_text="Backup question",
+        answer_text="Backup answer",
+        citations=(),
+        evidence=CompletionEvidence(
+            provider_terminal=True,
+            answer_complete=True,
+            web_search_executed=True,
+            refusal_marker=False,
+            incomplete_marker=False,
+        ),
+        created_at_ms=3,
+        completed_at_ms=4,
+    )
+    try:
+        created = service.create_completed_document(alice, document)
+        candidate = service.prepare_approval(admin, created.summary.record_id)
+        service.approve(admin, candidate, approved_at_ms=8)
+    finally:
+        dispose_engine(engine)
+    bundle = tmp_path / "bundle"
+    create_catalog_backup(database_path, bundle)
+    assert (bundle.stat().st_mode & 0o777) == 0o700
+    assert ((bundle / "catalog.sqlite3").stat().st_mode & 0o777) == 0o600
+    destination = tmp_path / "restored.sqlite3"
+    restore_catalog_backup(bundle, destination)
+    assert (destination.stat().st_mode & 0o777) == 0o600
+    restored = sqlite3.connect(destination)
+    try:
+        answer = restored.execute(
+            "SELECT answer_text FROM kronika_documents WHERE operation_id = ?",
+            ("search-op-backup",),
+        ).fetchone()[0]
+        projection = restored.execute(
+            "SELECT approved_projection_json FROM kronika_records"
+        ).fetchone()[0]
+    finally:
+        restored.close()
+    assert answer == "Backup answer"
+    assert projection is not None
+    assert "Backup answer" in projection

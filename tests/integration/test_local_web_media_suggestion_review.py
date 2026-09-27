@@ -9,6 +9,13 @@ from fastapi.testclient import TestClient
 from sqlalchemy import inspect, text
 
 from framenest.adapters.api.application import create_app
+from framenest.application.content_publication import ContentAudiencePolicy
+from framenest.domain.identity_access import ROLE_ADMIN
+from framenest.infrastructure.persistence.content_publication_repository import (
+    SqliteContentPublicationRepository,
+)
+from framenest.infrastructure.persistence.record_repository import SqliteRecordRepository
+from tests.support.record_access import install_synthetic_caller
 from framenest.adapters.api.media_suggestion_api import MediaSuggestionApiDependencies
 from framenest.application.library_scan import LibraryScanCandidateKind
 from framenest.application.media_analysis import (
@@ -246,8 +253,9 @@ def test_local_web_imported_media_suggestion_uses_identity_and_is_readonly(
     provider = _DeterministicProvider()
     try:
         with TestClient(
-            create_app(
-                settings=settings,
+            install_synthetic_caller(
+                create_app(
+                    settings=settings,
                 media_suggestion_api_dependencies=MediaSuggestionApiDependencies(
                     preview_suggestion=None,
                     preview_imported_suggestion=PreviewImportedMediaSuggestion(
@@ -257,7 +265,14 @@ def test_local_web_imported_media_suggestion_uses_identity_and_is_readonly(
                         provider,
                     ),
                     provider_configured=True,
+                    audience_policy=ContentAudiencePolicy(
+                        SqliteContentPublicationRepository(engine),
+                        record_bindings=SqliteRecordRepository(engine),
+                    ),
                 ),
+                ),
+                "admin@example.com",
+                role=ROLE_ADMIN,
             )
         ) as client:
             missing_confirmation = client.post(

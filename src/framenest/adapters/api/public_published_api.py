@@ -230,6 +230,8 @@ def create_public_published_api_router(
         if not dependencies.catalog_available():
             return public_not_found_response()
         try:
+            from framenest.domain.record_access import RecordAccessScope
+
             result = dependencies.list_media.execute(
                 q=q,
                 tag_keys=tag,
@@ -237,6 +239,7 @@ def create_public_published_api_router(
                 offset=offset,
                 content_category=content_category,
                 acquisition_source=acquisition_source,
+                access_scope=RecordAccessScope.legacy_public(),
             )
         except MediaCatalogValidationError:
             return public_not_found_response()

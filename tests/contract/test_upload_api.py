@@ -12,6 +12,9 @@ from fastapi import Request
 from fastapi.testclient import TestClient
 
 from framenest.adapters.api.application import create_app
+from framenest.adapters.api.tailscale_ingress import SCOPE_IDENTITY
+from framenest.domain.identity_access import ROLE_ADMIN
+from tests.support.record_access import synthetic_identity
 from sqlalchemy import insert, text
 
 from framenest.adapters.api.upload_api import (
@@ -53,6 +56,20 @@ from framenest.infrastructure.persistence.upload_session_repository import (
 )
 
 
+def _identified(app):
+    class _Caller:
+        def __init__(self, inner):
+            self.inner = inner
+
+        async def __call__(self, scope, receive, send):
+            if scope.get("type") == "http" and SCOPE_IDENTITY not in scope:
+                scope[SCOPE_IDENTITY] = synthetic_identity("ada", role=ROLE_ADMIN)
+            await self.inner(scope, receive, send)
+
+    app.add_middleware(_Caller)
+    return app
+
+
 def _settings(tmp_path: Path, *, quarantine: bool = True, reserve: int = 0) -> FrameNestSettings:
     quarantine_root = tmp_path / "quarantine"
     if quarantine:
@@ -70,7 +87,7 @@ def _settings(tmp_path: Path, *, quarantine: bool = True, reserve: int = 0) -> F
 
 def _migrated_client(settings: FrameNestSettings) -> TestClient:
     upgrade_database_to_head(settings)
-    return TestClient(create_app(settings=settings))
+    return TestClient(_identified(create_app(settings=settings)))
 
 
 def _create(client: TestClient, *, size: int = 5, origin: str | None = None):
@@ -395,7 +412,7 @@ def test_patch_multiple_chunks_resume_after_app_reconstruction_and_complete(
     assert first.json()["state"] == "receiving"
     assert first.json()["received_size_bytes"] == 2
 
-    resumed_client = TestClient(create_app(settings=settings))
+    resumed_client = TestClient(_identified(create_app(settings=settings)))
     status = resumed_client.get(f"/api/uploads/{created['id']}")
     second = _patch(resumed_client, created["id"], status.json()["received_size_bytes"], b"cde")
     complete = resumed_client.post(f"/api/uploads/{created['id']}/complete")
@@ -432,7 +449,7 @@ def test_complete_notifies_validation_after_received_response(tmp_path: Path) ->
                 validation_coordinator=coordinator,
             ),
         )
-        client = TestClient(app)
+        client = TestClient(_identified(app))
         created = _create(client).json()
         assert _patch(client, created["id"], 0, b"abcde").status_code == 200
 
@@ -466,7 +483,7 @@ def test_unsuccessful_complete_does_not_notify_validation(tmp_path: Path) -> Non
                 validation_coordinator=coordinator,
             ),
         )
-        client = TestClient(app)
+        client = TestClient(_identified(app))
         created = _create(client).json()
 
         complete = client.post(f"/api/uploads/{created['id']}/complete")
@@ -497,7 +514,7 @@ def test_complete_response_survives_validation_notification_failure(tmp_path: Pa
                 validation_coordinator=_FailingCoordinator(),
             ),
         )
-        client = TestClient(app)
+        client = TestClient(_identified(app))
         created = _create(client).json()
         assert _patch(client, created["id"], 0, b"abcde").status_code == 200
 
@@ -590,7 +607,7 @@ def test_patch_raw_content_type_single_valid_header_is_accepted_and_advances_off
     settings = _settings(tmp_path)
     upgrade_database_to_head(settings)
     app = create_app(settings=settings)
-    upload_id = _create(TestClient(app), size=2).json()["id"]
+    upload_id = _create(TestClient(_identified(app)), size=2).json()["id"]
 
     status, payload = _raw_patch(
         app,
@@ -642,7 +659,7 @@ def test_patch_raw_content_type_rejects_ambiguous_or_invalid_values(
         settings = _settings(tmp_path / str(index))
         upgrade_database_to_head(settings)
         app = create_app(settings=settings)
-        upload_id = _create(TestClient(app), size=1).json()["id"]
+        upload_id = _create(TestClient(_identified(app)), size=1).json()["id"]
 
         status, payload = _raw_patch(
             app,
@@ -665,7 +682,7 @@ def test_patch_raw_content_length_and_upload_offset_singleton_contract_remains(
     settings = _settings(tmp_path)
     upgrade_database_to_head(settings)
     app = create_app(settings=settings)
-    client = TestClient(app)
+    client = TestClient(_identified(app))
 
     duplicate_content_length_id = _create(client, size=1).json()["id"]
     duplicate_content_length = _raw_patch(
@@ -1050,7 +1067,7 @@ def test_status_media_id_absent_until_cataloged_and_gates_published_disclosure(
             publication_repository=publications,
         )
         app = create_app(settings=settings, upload_api_dependencies=dependencies)
-        client = TestClient(app)
+        client = TestClient(_identified(app))
 
         published_status = client.get(f"/api/uploads/{upload_id}")
         assert published_status.status_code == 200
@@ -1146,7 +1163,7 @@ def test_quarantine_root_overlapping_registered_library_rejects_create(
         )
     finally:
         dispose_engine(engine)
-    client = TestClient(create_app(settings=settings))
+    client = TestClient(_identified(create_app(settings=settings)))
 
     response = _create(client)
 

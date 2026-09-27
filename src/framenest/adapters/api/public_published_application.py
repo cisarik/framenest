@@ -56,7 +56,7 @@ from framenest.infrastructure.persistence.media_metadata_repository import (
 from framenest.infrastructure.persistence.media_repository import SqliteMediaRepository
 from framenest.structured_logging import get_logger
 
-REQUIRED_PUBLIC_SCHEMA_REVISION = "0033"
+REQUIRED_PUBLIC_SCHEMA_REVISION = "0034"
 _SAFE_METHODS = frozenset({"GET", "HEAD"})
 LOGGER = get_logger("public_published_application")
 

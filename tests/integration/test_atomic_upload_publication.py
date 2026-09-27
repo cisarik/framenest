@@ -26,6 +26,8 @@ from framenest.application.upload_publication import (
 from framenest.application.upload_transport import UploadSessionLockRegistry
 from framenest.adapters.api.application import create_app
 from framenest.configuration import FrameNestSettings
+from framenest.domain.identity_access import ROLE_ADMIN
+from tests.support.record_access import install_synthetic_caller
 from framenest.domain.identities import LibraryId, MediaByteIdentityId
 from framenest.domain.upload_publications import (
     UploadPublicationCleanupState,
@@ -468,7 +470,13 @@ def test_full_application_lifecycle_automatically_publishes_valid_synthetic_gif(
     Image.new("P", (2, 2), color=1).save(payload_buffer, format="GIF")
     payload = payload_buffer.getvalue()
 
-    with TestClient(create_app(settings=settings)) as client:
+    with TestClient(
+        install_synthetic_caller(
+            create_app(settings=settings),
+            "admin@example.com",
+            role=ROLE_ADMIN,
+        )
+    ) as client:
         created = client.post(
             "/api/uploads",
             json={

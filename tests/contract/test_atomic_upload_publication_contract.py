@@ -37,6 +37,9 @@ class _PublicationCoordinator:
 
 
 class _DuplicateTransport:
+    def load_session(self, _session_id):
+        return type("Session", (), {"created_by_login_key": None})()
+
     async def resolve_duplicate(self, *_args):
         return UploadSessionSnapshot(
             id="11111111-1111-4111-8111-111111111111",
@@ -123,7 +126,10 @@ def test_duplicate_keep_notifies_publication_only_after_publish_pending_response
             )
         )
     )
-    client = TestClient(app)
+    from framenest.domain.identity_access import ROLE_ADMIN
+    from tests.support.record_access import install_synthetic_caller
+
+    client = TestClient(install_synthetic_caller(app, "ada", role=ROLE_ADMIN))
 
     response = client.post(
         "/api/uploads/11111111-1111-4111-8111-111111111111/duplicate-resolution",

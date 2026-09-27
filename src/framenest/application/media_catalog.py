@@ -19,6 +19,7 @@ from framenest.domain.media_classification import (
     ContentCategory,
     CreatorAttributionKind,
 )
+from framenest.domain.record_access import AccessScopeKind, RecordAccessScope
 from framenest.domain.media_metadata import (
     CanonicalTagKey,
     FrameNestMediaMetadataError,
@@ -57,6 +58,7 @@ class ListMediaCatalog:
         creator_attribution_kind: str | None = None,
         creator_stable_id: str | None = None,
         creator_handle: str | None = None,
+        access_scope: RecordAccessScope | None = None,
     ) -> MediaCatalogPage:
         creator_kind, creator_sid, creator_h = _normalize_creator_filter(
             creator_attribution_kind,
@@ -75,14 +77,33 @@ class ListMediaCatalog:
             creator_stable_id=creator_sid,
             creator_handle=creator_h,
             published_only=True,
+            access_scope=access_scope,
         )
+        if access_scope is None or not access_scope.allows_queries:
+            return MediaCatalogPage(
+                items=(),
+                total=0,
+                limit=query.limit,
+                offset=query.offset,
+                q=query.q,
+                tag_keys=query.tag_keys,
+                content_category=query.content_category,
+                acquisition_source=query.acquisition_source,
+                creator_attribution_kind=query.creator_attribution_kind,
+                creator_stable_id=query.creator_stable_id,
+                creator_handle=query.creator_handle,
+            )
         page = self.repository.list_media(query)
         if self.cover_states is None or not page.items:
             return page
-        media_ids = tuple(item.media_id for item in page.items)
-        states = self.cover_states(media_ids)
+        media_ids = tuple(
+            item.media_id for item in page.items if item.read_projection != "approved"
+        )
+        states = self.cover_states(media_ids) if media_ids else {}
         items = tuple(
-            replace(item, cover_ready=states.get(item.media_id, False))
+            item
+            if item.read_projection == "approved"
+            else replace(item, cover_ready=states.get(item.media_id, False))
             for item in page.items
         )
         return replace(page, items=items)

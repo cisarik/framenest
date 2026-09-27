@@ -20,11 +20,16 @@ from framenest.application.youtube_acquisition import (
 from framenest.adapters.api.tailscale_ingress import (
     CHANNEL_LOCAL_OPERATOR,
     CHANNEL_TAILSCALE,
+    SCOPE_IDENTITY,
     SCOPE_INGRESS_CHANNEL,
 )
 from framenest.domain.identities import (
     FrameNestIdentityError,
     YouTubeAcquisitionClaimId,
+)
+from framenest.domain.identity_access import (
+    CAPABILITY_YOUTUBE_ACQUIRE,
+    IdentityContext,
 )
 from framenest.domain.youtube_acquisition import YouTubeConfirmationMethod
 
@@ -37,6 +42,8 @@ YOUTUBE_OPERATOR_INVALID_URL = "YOUTUBE_OPERATOR_INVALID_URL"
 YOUTUBE_OPERATOR_CLAIM_NOT_FOUND = "YOUTUBE_OPERATOR_CLAIM_NOT_FOUND"
 YOUTUBE_OPERATOR_STATE_CONFLICT = "YOUTUBE_OPERATOR_STATE_CONFLICT"
 YOUTUBE_OPERATOR_UNAVAILABLE = "YOUTUBE_OPERATOR_UNAVAILABLE"
+YOUTUBE_OPERATOR_IDENTITY_REQUIRED = "IDENTITY_REQUIRED"
+YOUTUBE_OPERATOR_CAPABILITY_DENIED = "CAPABILITY_DENIED"
 
 _JSON_MEDIA_TYPE = b"application/json"
 _MAX_REQUEST_BODY_BYTES = 4_096
@@ -74,6 +81,9 @@ def create_youtube_operator_api_router(
         guard = _guard(request, dependencies)
         if guard is not None:
             return guard
+        identity = _acquisition_identity(request)
+        if isinstance(identity, JSONResponse):
+            return identity
         payload = await _read_json_model(request, YouTubeClaimCreateRequest)
         if isinstance(payload, JSONResponse):
             return payload
@@ -83,6 +93,7 @@ def create_youtube_operator_api_router(
                 confirmation_method=YouTubeConfirmationMethod(
                     payload.confirmation_method
                 ),
+                created_by_login_key=identity.login_key,
             )
             return JSONResponse(
                 status_code=201 if result.created else 200,
@@ -96,11 +107,17 @@ def create_youtube_operator_api_router(
         guard = _guard(request, dependencies)
         if guard is not None:
             return guard
+        identity = _acquisition_identity(request)
+        if isinstance(identity, JSONResponse):
+            return identity
         parsed = _claim_id(claim_id)
         if isinstance(parsed, JSONResponse):
             return parsed
         try:
-            snapshot = dependencies.service.get(parsed)  # type: ignore[union-attr]
+            snapshot = dependencies.service.get(  # type: ignore[union-attr]
+                parsed,
+                created_by_login_key=identity.login_key,
+            )
             return JSONResponse(status_code=200, content=asdict(snapshot))
         except Exception as exc:
             return _map_service_error(exc)
@@ -110,6 +127,9 @@ def create_youtube_operator_api_router(
         guard = _guard(request, dependencies)
         if guard is not None:
             return guard
+        identity = _acquisition_identity(request)
+        if isinstance(identity, JSONResponse):
+            return identity
         parsed = _claim_id(claim_id)
         if isinstance(parsed, JSONResponse):
             return parsed
@@ -122,6 +142,7 @@ def create_youtube_operator_api_router(
                 confirmation_method=YouTubeConfirmationMethod(
                     payload.confirmation_method
                 ),
+                created_by_login_key=identity.login_key,
             )
             return JSONResponse(
                 status_code=201 if result.created else 200,
@@ -173,6 +194,24 @@ def _guard(
             "Loopback operator access is required.",
         )
     return None
+
+
+def _acquisition_identity(request: Request) -> IdentityContext | JSONResponse:
+    """Loopback is not authority. Acquisition capability must already be verified."""
+    identity = request.scope.get(SCOPE_IDENTITY)
+    if not isinstance(identity, IdentityContext) or not identity.login_key:
+        return _error(
+            401,
+            YOUTUBE_OPERATOR_IDENTITY_REQUIRED,
+            "A verified identity is required.",
+        )
+    if not identity.has_capability(CAPABILITY_YOUTUBE_ACQUIRE):
+        return _error(
+            403,
+            YOUTUBE_OPERATOR_CAPABILITY_DENIED,
+            "The verified identity is not authorized for this action.",
+        )
+    return identity
 
 
 async def _read_json_model(
