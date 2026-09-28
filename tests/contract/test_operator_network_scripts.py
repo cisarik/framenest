@@ -403,17 +403,35 @@ def _run_bash(
     )
 
 
+def _fish_executable() -> str:
+    found = shutil.which("fish")
+    if found:
+        return found
+    # ap exec keeps PATH at /usr/bin:/bin. Homebrew fish stays outside that
+    # path on Darwin, so the gate tests resolve a known absolute executable.
+    for candidate in (
+        "/usr/bin/fish",
+        "/bin/fish",
+        "/usr/local/bin/fish",
+        "/opt/homebrew/bin/fish",
+    ):
+        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+            return candidate
+    pytest.fail("fish is not installed; Fish wrapper and gate tests cannot run")
+
+
 def _run_fish(
     script: Path,
     paths: dict[str, Path],
     args: list[str],
     *,
     extra_env: dict[str, str] | None = None,
+    clear_env: tuple[str, ...] = (),
 ) -> subprocess.CompletedProcess[str]:
-    fish = shutil.which("fish")
-    if fish is None:
-        pytest.fail("fish is not installed; Fish wrapper and gate tests cannot run")
+    fish = _fish_executable()
     env = _hook_env(paths)
+    for name in clear_env:
+        env.pop(name, None)
     if extra_env:
         env.update(extra_env)
     return subprocess.run(
@@ -818,6 +836,14 @@ def test_ssh_gate_includes_required_options(tmp_path: Path) -> None:
     assert "operator-user@" in logged
 
 
+_AMBIENT_NUC_SSH_NAMES = (
+    "FRAMENEST_NUC_SSH_TARGET",
+    "FRAMENEST_NUC_SSH_USER",
+    "FRAMENEST_NUC_SSH_IDENTITY",
+    "FRAMENEST_NUC_SSH_COMMAND",
+)
+
+
 @pytest.mark.parametrize("missing", ["target", "user", "identity", "command"])
 def test_ssh_gate_rejects_missing_required_values(tmp_path: Path, missing: str) -> None:
     paths = _install_fakes(tmp_path)
@@ -827,10 +853,22 @@ def test_ssh_gate_rejects_missing_required_values(tmp_path: Path, missing: str) 
         "identity": ["--identity", str(paths["identity"])],
         "command": ["--command", "framenest_mullvad_egress.sh status"],
     }
+    messages = {
+        "target": "Missing remote target.",
+        "user": "Missing remote user.",
+        "identity": "Missing identity file.",
+        "command": "Missing bounded remote command.",
+    }
     del args[missing]
     flat = [item for group in args.values() for item in group]
-    result = _run_fish(GATE_SCRIPT, paths, flat)
-    assert result.returncode != 0
+    result = _run_fish(
+        GATE_SCRIPT,
+        paths,
+        flat,
+        clear_env=_AMBIENT_NUC_SSH_NAMES,
+    )
+    assert result.returncode == 2
+    assert messages[missing] in result.stderr
     assert paths["ssh_log"].read_text(encoding="utf-8") == ""
 
 
@@ -950,6 +988,192 @@ def test_ssh_gate_attaches_agent_without_printing_socket(tmp_path: Path) -> None
     env_text = paths["env_log"].read_text(encoding="utf-8")
     assert "SSH_AUTH_SOCK_SET=1" in env_text
     assert str(socket_path) not in env_text
+    assert "true" in paths["ssh_log"].read_text(encoding="utf-8")
+
+
+_DARWIN_AGENT_SOCKET = "/var/run/com.apple.launchd.fixture/Listeners"
+_DARWIN_AGENT_RESOLVED = "/private/var/run/com.apple.launchd.fixture/Listeners"
+
+
+def _darwin_agent_env(**overrides: str) -> dict[str, str]:
+    env = {
+        "FRAMENEST_NETWORK_TEST_GPGCONF": "",
+        "FRAMENEST_NETWORK_TEST_UNAME": "Darwin",
+        "FRAMENEST_NETWORK_TEST_SSH_AUTH_SOCK": _DARWIN_AGENT_SOCKET,
+        "FRAMENEST_NETWORK_TEST_AGENT_IS_SOCKET": "1",
+        "FRAMENEST_NETWORK_TEST_AGENT_OWNER_MATCH": "1",
+        "FRAMENEST_NETWORK_TEST_AGENT_RESOLVED": _DARWIN_AGENT_RESOLVED,
+        "FRAMENEST_NETWORK_TEST_SSH_ADD_STATUS": "0",
+    }
+    env.update(overrides)
+    return env
+
+
+def _assert_probe_line(result: subprocess.CompletedProcess[str], expected: str) -> None:
+    stdout = result.stdout.strip()
+    if stdout not in {"ssh-agent: ready", "ssh-agent: absent"}:
+        raise AssertionError("probe output was not a sanitized agent status")
+    assert result.returncode == (0 if expected == "ssh-agent: ready" else 1)
+    assert stdout == expected
+    assert _DARWIN_AGENT_SOCKET not in _combined(result)
+    assert _DARWIN_AGENT_RESOLVED not in _combined(result)
+
+
+def test_ssh_gate_probe_accepts_validated_darwin_launchd_agent(tmp_path: Path) -> None:
+    """Causal regression: Darwin with no gpgconf accepts a validated launchd socket."""
+    paths = _install_fakes(tmp_path)
+    result = _run_fish(
+        GATE_SCRIPT,
+        paths,
+        ["--probe"],
+        extra_env=_darwin_agent_env(),
+        clear_env=("SSH_AUTH_SOCK",),
+    )
+    _assert_probe_line(result, "ssh-agent: ready")
+    assert paths["ssh_log"].read_text(encoding="utf-8") == ""
+
+
+def test_ssh_gate_probe_accepts_darwin_agent_with_no_identities(tmp_path: Path) -> None:
+    paths = _install_fakes(tmp_path)
+    result = _run_fish(
+        GATE_SCRIPT,
+        paths,
+        ["--probe"],
+        extra_env=_darwin_agent_env(FRAMENEST_NETWORK_TEST_SSH_ADD_STATUS="1"),
+        clear_env=("SSH_AUTH_SOCK",),
+    )
+    _assert_probe_line(result, "ssh-agent: ready")
+    assert paths["ssh_log"].read_text(encoding="utf-8") == ""
+
+
+@pytest.mark.parametrize(
+    ("case", "overrides"),
+    [
+        ("relative-path", {"FRAMENEST_NETWORK_TEST_SSH_AUTH_SOCK": "relative.sock"}),
+        ("dotdot-segment", {"FRAMENEST_NETWORK_TEST_SSH_AUTH_SOCK": "/tmp/../agent.sock"}),
+        ("non-socket", {"FRAMENEST_NETWORK_TEST_AGENT_IS_SOCKET": "0"}),
+        ("foreign-owner", {"FRAMENEST_NETWORK_TEST_AGENT_OWNER_MATCH": "0"}),
+        (
+            "outside-launchd",
+            {"FRAMENEST_NETWORK_TEST_AGENT_RESOLVED": "/tmp/not-launchd/Listeners"},
+        ),
+        ("dead-agent", {"FRAMENEST_NETWORK_TEST_SSH_ADD_STATUS": "2"}),
+        ("empty-sock", {"FRAMENEST_NETWORK_TEST_SSH_AUTH_SOCK": ""}),
+    ],
+)
+def test_ssh_gate_probe_rejects_invalid_darwin_agent(
+    tmp_path: Path,
+    case: str,
+    overrides: dict[str, str],
+) -> None:
+    del case
+    paths = _install_fakes(tmp_path)
+    result = _run_fish(
+        GATE_SCRIPT,
+        paths,
+        ["--probe"],
+        extra_env=_darwin_agent_env(**overrides),
+        clear_env=("SSH_AUTH_SOCK",),
+    )
+    _assert_probe_line(result, "ssh-agent: absent")
+    leaked = overrides.get("FRAMENEST_NETWORK_TEST_SSH_AUTH_SOCK", "")
+    if leaked:
+        assert leaked not in _combined(result)
+    resolved = overrides.get("FRAMENEST_NETWORK_TEST_AGENT_RESOLVED", "")
+    if resolved:
+        assert resolved not in _combined(result)
+    assert paths["ssh_log"].read_text(encoding="utf-8") == ""
+
+
+def test_ssh_gate_probe_ignores_darwin_fallback_on_linux(tmp_path: Path) -> None:
+    paths = _install_fakes(tmp_path)
+    result = _run_fish(
+        GATE_SCRIPT,
+        paths,
+        ["--probe"],
+        extra_env=_darwin_agent_env(FRAMENEST_NETWORK_TEST_UNAME="Linux"),
+        clear_env=("SSH_AUTH_SOCK",),
+    )
+    _assert_probe_line(result, "ssh-agent: absent")
+    assert paths["ssh_log"].read_text(encoding="utf-8") == ""
+
+
+def test_ssh_gate_probe_does_not_fall_back_when_gpgconf_fails(tmp_path: Path) -> None:
+    paths = _install_fakes(tmp_path)
+    env = _darwin_agent_env()
+    del env["FRAMENEST_NETWORK_TEST_GPGCONF"]
+    result = _run_fish(
+        GATE_SCRIPT,
+        paths,
+        ["--probe"],
+        extra_env=env,
+        clear_env=("SSH_AUTH_SOCK",),
+    )
+    _assert_probe_line(result, "ssh-agent: absent")
+    assert paths["ssh_log"].read_text(encoding="utf-8") == ""
+
+
+def test_ssh_gate_probe_prefers_present_gpgconf_over_darwin_fallback(
+    tmp_path: Path,
+) -> None:
+    socket_path = tmp_path / "agent.sock"
+    agent = _bind_unix_socket(socket_path)
+    try:
+        paths = _install_fakes(tmp_path, gpgconf_socket=socket_path)
+        env = _darwin_agent_env(FRAMENEST_NETWORK_TEST_SSH_AUTH_SOCK="relative.sock")
+        del env["FRAMENEST_NETWORK_TEST_GPGCONF"]
+        result = _run_fish(
+            GATE_SCRIPT,
+            paths,
+            ["--probe"],
+            extra_env=env,
+            clear_env=("SSH_AUTH_SOCK",),
+        )
+    finally:
+        agent.close()
+    _assert_probe_line(result, "ssh-agent: ready")
+    assert str(socket_path) not in _combined(result)
+    assert paths["ssh_log"].read_text(encoding="utf-8") == ""
+
+
+def test_ssh_gate_probe_darwin_fallback_inert_without_hook_values(
+    tmp_path: Path,
+) -> None:
+    paths = _install_fakes(tmp_path)
+    result = _run_fish(
+        GATE_SCRIPT,
+        paths,
+        ["--probe"],
+        extra_env={"FRAMENEST_NETWORK_TEST_GPGCONF": ""},
+    )
+    _assert_probe_line(result, "ssh-agent: absent")
+    assert paths["ssh_log"].read_text(encoding="utf-8") == ""
+
+
+def test_ssh_gate_darwin_fallback_sets_socket_for_ssh_child(tmp_path: Path) -> None:
+    paths = _install_fakes(tmp_path)
+    result = _run_fish(
+        GATE_SCRIPT,
+        paths,
+        [
+            "--target",
+            "nuc-magicdns-name",
+            "--user",
+            "operator-user",
+            "--identity",
+            str(paths["identity"]),
+            "--command",
+            "true",
+        ],
+        extra_env=_darwin_agent_env(),
+        clear_env=("SSH_AUTH_SOCK", *_AMBIENT_NUC_SSH_NAMES),
+    )
+    assert result.returncode == 0
+    assert _DARWIN_AGENT_SOCKET not in _combined(result)
+    assert _DARWIN_AGENT_RESOLVED not in _combined(result)
+    env_text = paths["env_log"].read_text(encoding="utf-8")
+    assert "SSH_AUTH_SOCK_SET=1" in env_text
+    assert _DARWIN_AGENT_SOCKET not in env_text
     assert "true" in paths["ssh_log"].read_text(encoding="utf-8")
 
 

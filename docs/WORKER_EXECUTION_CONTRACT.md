@@ -138,8 +138,9 @@ scripts/operator/network/framenest_nuc_worker_gate.fish \
   --target <name> --user <user> --identity <file> --command <bounded-command>
 ```
 
-`--probe` is the idempotent capability check: trusted `gpgconf` discovery,
-socket validation, and a sanitized `ssh-agent: ready` or `ssh-agent: absent`
+`--probe` is the idempotent capability check: trusted `gpgconf` discovery
+first, then on Darwin only a validated ambient launchd socket when `gpgconf`
+is unavailable, and a sanitized `ssh-agent: ready` or `ssh-agent: absent`
 result. It does not print the socket path and does not open SSH.
 
 The BatchMode SSH form remains the transport **when a later task actually

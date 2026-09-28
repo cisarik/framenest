@@ -143,9 +143,18 @@ as the sole project-owned NUC SSH route. They must not reconstruct
 scripts/operator/network/framenest_nuc_worker_gate.fish --probe
 ```
 
-`--probe` discovers the GPG-agent SSH socket through trusted `gpgconf`,
-validates that it is a socket, and prints only `ssh-agent: ready` or
-`ssh-agent: absent`. It does not print the socket path and does not open SSH.
+`--probe` prints only `ssh-agent: ready` or `ssh-agent: absent`. It does not
+print the socket path and does not open SSH. Discovery tries trusted
+`gpgconf` on `/usr/sbin:/usr/bin:/sbin:/bin` first. Only when `gpgconf` is
+absent from that path, and only when trusted `uname -s` is exactly `Darwin`,
+the gate accepts the ambient `SSH_AUTH_SOCK` if every check holds: non-empty,
+absolute, no `..` path segment, a Unix socket owned by the invoking effective
+user, and a `realpath` under `/private/var/run/com.apple.launchd.`. Liveness
+is `ssh-add -l` with output discarded; exit 0 or 1 is a working agent and any
+other status is refusal. The native launchd socket mode is not required to be
+restrictive. On success the gate sets that socket for its own process and for
+the SSH child. A found `gpgconf` that yields no socket, or a missing
+`gpgconf` on any other platform, stays `ssh-agent: absent`.
 A Cursor parent that lacks `SSH_AUTH_SOCK` is expected, not a host defect.
 The BatchMode SSH form above remains the transport when a later task grants
 NUC access; the gate attaches the agent for its own process without printing
@@ -249,5 +258,6 @@ WAN SSH. Serve remains the only remote FrameNest ingress.
 
 Scripts do not store tokens, cookies, account passwords, or private keys.
 The SSH gate requires an operator-supplied identity file path and does not
-hardcode it. Agent sockets discovered via `gpgconf` are used without printing.
+hardcode it. Agent sockets discovered via `gpgconf`, or on Darwin via the
+validated launchd fallback, are used without printing.
 `--probe` reports only `ssh-agent: ready` or `ssh-agent: absent`.

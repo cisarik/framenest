@@ -79,19 +79,176 @@ function _optional_gpgconf
     end
 end
 
+function _trusted_executable
+    set -l found (_trusted_lookup $argv[1])
+    if test -z "$found"
+        return 1
+    end
+    if not _is_absolute_executable $found
+        return 1
+    end
+    echo $found
+end
+
+function _is_safe_absolute_path
+    set -l candidate $argv[1]
+    if test -z "$candidate"
+        return 1
+    end
+    if not string match -q -- '/*' $candidate
+        return 1
+    end
+    for segment in (string split / -- $candidate)
+        if test "$segment" = ..
+            return 1
+        end
+    end
+    return 0
+end
+
+function _is_launchd_physical_path
+    set -l resolved $argv[1]
+    if not _is_safe_absolute_path "$resolved"
+        return 1
+    end
+    set -l prefix /private/var/run/com.apple.launchd.
+    if not string match -q -- "$prefix*" $resolved
+        return 1
+    end
+    set -l rest (string replace -- $prefix "" $resolved)
+    test -n "$rest"
+end
+
+function _gate_uname_s
+    if test "$FRAMENEST_NETWORK_TEST_HOOKS" = 1
+        echo "$FRAMENEST_NETWORK_TEST_UNAME"
+        return 0
+    end
+    set -l uname_bin (_trusted_executable uname)
+    if test $status -ne 0; or test -z "$uname_bin"
+        return 1
+    end
+    env -u APPIMAGE -u APPDIR -u ARGV0 -u LD_LIBRARY_PATH -u LD_PRELOAD \
+        PATH=$trusted_path \
+        $uname_bin -s 2>/dev/null
+end
+
+function _agent_liveness_ok
+    set -l live $argv[1]
+    if not string match -qr '^[0-9]+$' -- "$live"
+        return 1
+    end
+    test "$live" -eq 0; or test "$live" -eq 1
+end
+
+function _attach_darwin_ambient_from_hooks
+    set -l sock $FRAMENEST_NETWORK_TEST_SSH_AUTH_SOCK
+    if not _is_safe_absolute_path "$sock"
+        return 1
+    end
+    if test "$FRAMENEST_NETWORK_TEST_AGENT_IS_SOCKET" != 1
+        return 1
+    end
+    if test "$FRAMENEST_NETWORK_TEST_AGENT_OWNER_MATCH" != 1
+        return 1
+    end
+    if not _is_launchd_physical_path "$FRAMENEST_NETWORK_TEST_AGENT_RESOLVED"
+        return 1
+    end
+    if not _agent_liveness_ok "$FRAMENEST_NETWORK_TEST_SSH_ADD_STATUS"
+        return 1
+    end
+    set -gx SSH_AUTH_SOCK "$sock"
+    return 0
+end
+
+function _attach_darwin_ambient_from_system
+    set -l sock $SSH_AUTH_SOCK
+    if not _is_safe_absolute_path "$sock"
+        return 1
+    end
+    if not test -S "$sock"
+        return 1
+    end
+    set -l stat_bin (_trusted_executable stat)
+    if test $status -ne 0; or test -z "$stat_bin"
+        return 1
+    end
+    set -l id_bin (_trusted_executable id)
+    if test $status -ne 0; or test -z "$id_bin"
+        return 1
+    end
+    set -l realpath_bin (_trusted_executable realpath)
+    if test $status -ne 0; or test -z "$realpath_bin"
+        return 1
+    end
+    set -l ssh_add_bin (_trusted_executable ssh-add)
+    if test $status -ne 0; or test -z "$ssh_add_bin"
+        return 1
+    end
+    set -l owner (
+        env -u APPIMAGE -u APPDIR -u ARGV0 -u LD_LIBRARY_PATH -u LD_PRELOAD \
+            PATH=$trusted_path \
+            $stat_bin -f %u "$sock" 2>/dev/null
+    )
+    if test $status -ne 0; or test -z "$owner"
+        return 1
+    end
+    set -l euid (
+        env -u APPIMAGE -u APPDIR -u ARGV0 -u LD_LIBRARY_PATH -u LD_PRELOAD \
+            PATH=$trusted_path \
+            $id_bin -u 2>/dev/null
+    )
+    if test $status -ne 0; or test "$owner" != "$euid"
+        return 1
+    end
+    set -l resolved (
+        env -u APPIMAGE -u APPDIR -u ARGV0 -u LD_LIBRARY_PATH -u LD_PRELOAD \
+            PATH=$trusted_path \
+            $realpath_bin "$sock" 2>/dev/null
+    )
+    if test $status -ne 0; or not _is_launchd_physical_path "$resolved"
+        return 1
+    end
+    env -u APPIMAGE -u APPDIR -u ARGV0 -u LD_LIBRARY_PATH -u LD_PRELOAD \
+        PATH=$trusted_path \
+        SSH_AUTH_SOCK="$sock" \
+        $ssh_add_bin -l >/dev/null 2>&1
+    set -l add_status $status
+    if not _agent_liveness_ok "$add_status"
+        return 1
+    end
+    set -gx SSH_AUTH_SOCK "$sock"
+    return 0
+end
+
+function _attach_darwin_ambient
+    set -l platform (_gate_uname_s)
+    if test "$platform" != Darwin
+        return 1
+    end
+    if test "$FRAMENEST_NETWORK_TEST_HOOKS" = 1
+        _attach_darwin_ambient_from_hooks
+        return $status
+    end
+    _attach_darwin_ambient_from_system
+    return $status
+end
+
 function _attach_agent
     set -l gpgconf_bin
     set gpgconf_bin (_optional_gpgconf)
-    if test -z "$gpgconf_bin"
+    if test -n "$gpgconf_bin"
+        set -l agent_sock
+        set agent_sock (env -u APPIMAGE -u APPDIR -u ARGV0 -u LD_LIBRARY_PATH -u LD_PRELOAD PATH=$trusted_path $gpgconf_bin --list-dirs agent-ssh-socket 2>/dev/null)
+        if test $status -eq 0; and test -n "$agent_sock"; and test -S "$agent_sock"
+            set -gx SSH_AUTH_SOCK $agent_sock
+            return 0
+        end
         return 1
     end
-    set -l agent_sock
-    set agent_sock (env -u APPIMAGE -u APPDIR -u ARGV0 -u LD_LIBRARY_PATH -u LD_PRELOAD PATH=$trusted_path $gpgconf_bin --list-dirs agent-ssh-socket 2>/dev/null)
-    if test $status -eq 0; and test -n "$agent_sock"; and test -S "$agent_sock"
-        set -gx SSH_AUTH_SOCK $agent_sock
-        return 0
-    end
-    return 1
+    _attach_darwin_ambient
+    return $status
 end
 
 set -l target $FRAMENEST_NUC_SSH_TARGET

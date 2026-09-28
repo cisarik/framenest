@@ -30,11 +30,15 @@ The Fish wrapper accepts the same arguments and returns the Bash exit status.
 The SSH gate requires explicit `--target` / `--user` / `--identity` /
 `--command` values, or the public-safe environment variables documented in
 the operator contract. It never hardcodes those values. `--probe` validates
-GPG-agent SSH-socket capability without printing the socket or opening SSH.
+SSH-agent capability without printing the socket or opening SSH. Discovery
+tries trusted `gpgconf` first, then on Darwin only a validated ambient
+launchd socket when `gpgconf` is unavailable.
 
 ## Test-only command resolution
 
 Production resolves `tailscale`, `curl`, and related tools from a bounded
 trusted PATH and never executes a current-directory binary. Tests may set
-`FRAMENEST_NETWORK_TEST_HOOKS=1` plus absolute fake tool paths. That hook is
-not a production interface.
+`FRAMENEST_NETWORK_TEST_HOOKS=1` plus absolute fake tool paths. Darwin agent
+fallback tests may also supply simulated platform, socket, owner, prefix, and
+liveness outcomes through that same hook namespace. Those hooks are not a
+production interface.
