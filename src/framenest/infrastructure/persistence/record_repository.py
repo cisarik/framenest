@@ -172,6 +172,26 @@ class SqliteRecordRepository:
         except SQLAlchemyError as exc:
             raise RecordRepositoryError() from exc
 
+    def approved_projection_for_media(self, media_id: str) -> ApprovalProjection | None:
+        """Return the frozen snapshot stored for this media, or None."""
+
+        def operation(connection: Connection) -> ApprovalProjection | None:
+            stored = connection.execute(
+                select(kronika_records.c.approved_projection_json).where(
+                    kronika_records.c.media_id == media_id
+                )
+            ).scalar()
+            if stored is None:
+                return None
+            return projection_from_storage(str(stored))
+
+        try:
+            return run_in_transaction(self._engine, operation)
+        except (RecordStorageIntegrityError, RecordRepositoryError):
+            raise
+        except SQLAlchemyError as exc:
+            raise RecordRepositoryError() from exc
+
     def bind_media_record(
         self,
         connection: Connection,

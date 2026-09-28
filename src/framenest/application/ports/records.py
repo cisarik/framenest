@@ -129,3 +129,6 @@ class RecordRepository(Protocol):
         expected_version: int,
     ) -> ApprovalResult:
         """Withdraw household visibility inside one immediate transaction."""
+
+    def approved_projection_for_media(self, media_id: str) -> ApprovalProjection | None:
+        """Return the stored approval snapshot for one media id, or None."""

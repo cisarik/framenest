@@ -324,6 +324,40 @@ class CoverService:
         body = f"{self._thumbnail_cache.algorithm}|{cover.artifact_digest}"
         return '"' + hashlib.sha256(body.encode("utf-8")).hexdigest() + '"'
 
+    def thumbnail_etag_for_digest(self, media_id: MediaId, artifact_digest: str) -> str | None:
+        """ETag for one approved digest. A missing artifact is absence, not the current cover."""
+        if not isinstance(artifact_digest, str) or not artifact_digest:
+            return None
+        key = self._thumbnail_cache.key_for(
+            media_id=media_id,
+            artifact_digest=artifact_digest,
+        )
+        if not self._thumbnail_cache.contains(key):
+            return None
+        body = f"{self._thumbnail_cache.algorithm}|{artifact_digest}"
+        return '"' + hashlib.sha256(body.encode("utf-8")).hexdigest() + '"'
+
+    def open_thumbnail_for_digest(
+        self,
+        media_id: MediaId,
+        artifact_digest: str,
+    ) -> OpenedCoverThumbnail:
+        """Open the thumbnail for one approved digest, never the current cover."""
+        if not isinstance(artifact_digest, str) or not artifact_digest:
+            raise CoverMediaNotFoundError("Media not found.")
+        key = self._thumbnail_cache.key_for(
+            media_id=media_id,
+            artifact_digest=artifact_digest,
+        )
+        if not self._thumbnail_cache.contains(key):
+            raise CoverMediaNotFoundError("Media not found.")
+        try:
+            return self._thumbnail_cache.open(key)
+        except CoverThumbnailUnavailableError:
+            raise CoverMediaNotFoundError("Media not found.") from None
+        except Exception:
+            raise CoverFailedError("Accepted cover delivery failed.") from None
+
     def open_thumbnail(self, media_id: MediaId) -> OpenedCoverThumbnail:
         cover = self._cover_repository.get(media_id)
         if cover is None:

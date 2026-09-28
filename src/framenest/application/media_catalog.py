@@ -129,6 +129,17 @@ class GetMediaCatalogItem:
         states = self.cover_states((item.media_id,))
         return replace(item, cover_ready=states.get(item.media_id, False))
 
+    def execute_approved(self, media_id: str) -> CatalogMediaItem | None:
+        """Load the approved snapshot without consulting the current cover."""
+        try:
+            MediaId.from_string(media_id)
+        except FrameNestIdentityError as exc:
+            raise MediaCatalogValidationError(MEDIA_CATALOG_QUERY_INVALID_MESSAGE) from exc
+        loader = getattr(self.repository, "approved_catalog_item", None)
+        if not callable(loader):
+            return None
+        return loader(media_id)
+
 
 def _normalize_title_query(value: str | None) -> str | None:
     if value is None:

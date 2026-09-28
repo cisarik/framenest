@@ -9,10 +9,10 @@ from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, UUID4
 
-from framenest.domain.record_access import scope_for_identity
+from framenest.domain.record_access import READ_APPROVED, READ_DENY, scope_for_identity
 from framenest.adapters.api.content_audience_api import (
     ContentAudienceUnavailableError,
-    content_audience_allows,
+    content_audience_decision,
 )
 from framenest.adapters.api.tailscale_ingress import SCOPE_IDENTITY
 from framenest.application.content_publication import ContentAudiencePolicy
@@ -205,24 +205,28 @@ def create_media_catalog_api_router(dependencies: MediaCatalogApiDependencies) -
             return _catalog_unavailable_response()
         parsed_id = MediaId.from_string(str(media_id))
         try:
-            if not content_audience_allows(
+            decision = content_audience_decision(
                 request=request,
                 media_id=parsed_id,
                 policy=dependencies.audience_policy,
-            ):
-                return _error_response(
-                    404,
-                    MEDIA_NOT_FOUND_CODE,
-                    MEDIA_NOT_FOUND_MESSAGE,
-                )
+            )
         except ContentAudienceUnavailableError:
             return _error_response(
                 500,
                 MEDIA_CATALOG_QUERY_FAILED_CODE,
                 MEDIA_CATALOG_QUERY_FAILED_MESSAGE,
             )
+        if decision == READ_DENY:
+            return _error_response(
+                404,
+                MEDIA_NOT_FOUND_CODE,
+                MEDIA_NOT_FOUND_MESSAGE,
+            )
         try:
-            item = dependencies.get_media.execute(str(media_id))
+            if decision == READ_APPROVED:
+                item = dependencies.get_media.execute_approved(str(media_id))
+            else:
+                item = dependencies.get_media.execute(str(media_id))
         except MediaCatalogValidationError:
             return _error_response(
                 404,

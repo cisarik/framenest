@@ -26,8 +26,10 @@ from framenest.application.ports.media_repository import (
 )
 from framenest.adapters.api.content_audience_api import (
     ContentAudienceUnavailableError,
-    content_audience_allows,
+    content_audience_decision,
+    load_approved_projection,
 )
+from framenest.domain.record_access import READ_APPROVED, READ_DENY
 from framenest.application.content_publication import ContentAudiencePolicy
 from framenest.domain import MediaId, MediaLocationId
 
@@ -144,23 +146,48 @@ def _resolve_media_content(
             CATALOG_UNAVAILABLE_CODE,
             CATALOG_UNAVAILABLE_MESSAGE,
         )
+    parsed_media_id = MediaId.from_string(str(media_id))
     try:
-        if not content_audience_allows(
+        decision = content_audience_decision(
             request=request,
-            media_id=MediaId.from_string(str(media_id)),
+            media_id=parsed_media_id,
             policy=dependencies.audience_policy,
-        ):
-            return _error_response(
-                404,
-                MEDIA_CONTENT_NOT_FOUND_CODE,
-                MEDIA_NOT_FOUND_MESSAGE,
-            )
+        )
     except ContentAudienceUnavailableError:
         return _error_response(
             500,
             MEDIA_CONTENT_FAILED_CODE,
             MEDIA_CONTENT_FAILED_MESSAGE,
         )
+    if decision == READ_DENY:
+        return _error_response(
+            404,
+            MEDIA_CONTENT_NOT_FOUND_CODE,
+            MEDIA_NOT_FOUND_MESSAGE,
+        )
+    if decision == READ_APPROVED:
+        try:
+            projection = load_approved_projection(
+                policy=dependencies.audience_policy,
+                media_id=parsed_media_id,
+            )
+        except Exception:
+            return _error_response(
+                500,
+                MEDIA_CONTENT_FAILED_CODE,
+                MEDIA_CONTENT_FAILED_MESSAGE,
+            )
+        approved_locations = (
+            set()
+            if projection is None
+            else {str(item.location_id) for item in projection.locations}
+        )
+        if str(location_id) not in approved_locations:
+            return _error_response(
+                404,
+                MEDIA_CONTENT_NOT_FOUND_CODE,
+                MEDIA_NOT_FOUND_MESSAGE,
+            )
     try:
         return dependencies.resolve_content.execute(
             MediaId.from_string(str(media_id)),

@@ -11,8 +11,10 @@ from pydantic import BaseModel, UUID4
 
 from framenest.adapters.api.content_audience_api import (
     ContentAudienceUnavailableError,
-    content_audience_allows,
+    content_audience_decision,
+    load_approved_projection,
 )
+from framenest.domain.record_access import READ_APPROVED, READ_DENY
 from framenest.adapters.api.tailscale_ingress import (
     SCOPE_AUDIT_EVENT_ID,
     SCOPE_IDENTITY,
@@ -377,24 +379,41 @@ def create_cover_api_router(dependencies: CoverApiDependencies) -> APIRouter:
     ) -> Response | JSONResponse:
         if not dependencies.catalog_available():
             return _error(503, CATALOG_UNAVAILABLE_CODE, CATALOG_UNAVAILABLE_MESSAGE)
+        parsed_media_id = MediaId.from_string(str(media_id))
         try:
-            if not content_audience_allows(
+            decision = content_audience_decision(
                 request=request,
-                media_id=MediaId.from_string(str(media_id)),
+                media_id=parsed_media_id,
                 policy=dependencies.audience_policy,
-            ):
-                return _error(404, COVER_MEDIA_NOT_FOUND_CODE, MEDIA_NOT_FOUND_MESSAGE)
+            )
         except ContentAudienceUnavailableError:
             return _error(500, COVER_FAILED_CODE, MEDIA_CONTENT_FAILED_MESSAGE)
+        if decision == READ_DENY:
+            return _error(404, COVER_MEDIA_NOT_FOUND_CODE, MEDIA_NOT_FOUND_MESSAGE)
         try:
-            etag = dependencies.cover_service.thumbnail_etag(
-                MediaId.from_string(str(media_id))
-            )
-            if etag is None:
-                return _error(404, COVER_MEDIA_NOT_FOUND_CODE, MEDIA_NOT_FOUND_MESSAGE)
-            opened = dependencies.cover_service.open_thumbnail(
-                MediaId.from_string(str(media_id))
-            )
+            if decision == READ_APPROVED:
+                projection = load_approved_projection(
+                    policy=dependencies.audience_policy,
+                    media_id=parsed_media_id,
+                )
+                digest = None if projection is None else projection.cover_artifact_digest
+                if not digest:
+                    return _error(404, COVER_MEDIA_NOT_FOUND_CODE, MEDIA_NOT_FOUND_MESSAGE)
+                etag = dependencies.cover_service.thumbnail_etag_for_digest(
+                    parsed_media_id,
+                    digest,
+                )
+                if etag is None:
+                    return _error(404, COVER_MEDIA_NOT_FOUND_CODE, MEDIA_NOT_FOUND_MESSAGE)
+                opened = dependencies.cover_service.open_thumbnail_for_digest(
+                    parsed_media_id,
+                    digest,
+                )
+            else:
+                etag = dependencies.cover_service.thumbnail_etag(parsed_media_id)
+                if etag is None:
+                    return _error(404, COVER_MEDIA_NOT_FOUND_CODE, MEDIA_NOT_FOUND_MESSAGE)
+                opened = dependencies.cover_service.open_thumbnail(parsed_media_id)
         except CoverMediaNotFoundError:
             return _error(404, COVER_MEDIA_NOT_FOUND_CODE, MEDIA_NOT_FOUND_MESSAGE)
         except (FrameNestMediaRepositoryError, FrameNestLibraryRepositoryError):

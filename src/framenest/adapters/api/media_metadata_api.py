@@ -22,10 +22,13 @@ from framenest.application.ports.media_metadata_repository import (
 from framenest.adapters.api.content_audience_api import (
     ContentAudienceUnavailableError,
     content_audience_allows,
+    content_audience_decision,
+    load_approved_projection,
 )
 from framenest.application.content_publication import ContentAudiencePolicy
 from framenest.domain import FrameNestIdentityError
 from framenest.domain.identities import MediaId
+from framenest.domain.record_access import READ_APPROVED, READ_DENY
 from framenest.domain.media_classification import CreatorAttributionKind
 from framenest.domain.media_metadata import (
     CanonicalTagDisplayName,
@@ -312,23 +315,40 @@ def create_media_metadata_api_router(dependencies: MediaMetadataApiDependencies)
     ) -> MediaMetadataResponse | JSONResponse:
         if not dependencies.catalog_available():
             return _catalog_unavailable_response()
+        parsed_id = MediaId.from_string(str(media_id))
         try:
-            if not content_audience_allows(
+            decision = content_audience_decision(
                 request=request,
-                media_id=MediaId.from_string(str(media_id)),
+                media_id=parsed_id,
                 policy=dependencies.audience_policy,
-            ):
-                return _error_response(
-                    404,
-                    MEDIA_NOT_FOUND_CODE,
-                    MEDIA_NOT_FOUND_MESSAGE,
-                )
+            )
         except ContentAudienceUnavailableError:
             return _error_response(
                 500,
                 MEDIA_METADATA_OPERATION_FAILED_CODE,
                 MEDIA_METADATA_OPERATION_FAILED_MESSAGE,
             )
+        if decision == READ_DENY:
+            return _error_response(
+                404,
+                MEDIA_NOT_FOUND_CODE,
+                MEDIA_NOT_FOUND_MESSAGE,
+            )
+        if decision == READ_APPROVED:
+            try:
+                projection = load_approved_projection(
+                    policy=dependencies.audience_policy,
+                    media_id=parsed_id,
+                )
+            except Exception:
+                return _error_response(
+                    500,
+                    MEDIA_METADATA_OPERATION_FAILED_CODE,
+                    MEDIA_METADATA_OPERATION_FAILED_MESSAGE,
+                )
+            if projection is None:
+                return _error_response(404, MEDIA_NOT_FOUND_CODE, MEDIA_NOT_FOUND_MESSAGE)
+            return _approved_metadata_response(projection)
         try:
             result = dependencies.get_metadata.execute(str(media_id))
         except MediaMetadataMediaNotFoundError:
@@ -447,6 +467,31 @@ def _tag_response(tag: object) -> CanonicalTagResponse:
     return CanonicalTagResponse(
         key=tag.key.value,
         display_name=tag.display_name.value,
+    )
+
+
+def _approved_metadata_response(projection: object) -> MediaMetadataResponse:
+    """Serialize the approved snapshot without the current working metadata row."""
+    tags = getattr(projection, "tags", ())
+    return MediaMetadataResponse(
+        persisted=True,
+        display_title=getattr(projection, "display_title", None),
+        description=getattr(projection, "description", None),
+        tags=[
+            CanonicalTagResponse(key=str(tag.key), display_name=str(tag.display_name))
+            for tag in tags
+        ],
+        collection_key=None,
+        processed_at_ms=None,
+        created_at_ms=None,
+        updated_at_ms=None,
+        content_category=getattr(projection, "content_category", None) or "general",
+        acquisition_source=getattr(projection, "acquisition_source", None) or "unknown",
+        genres=[],
+        creator_attribution_kind=getattr(projection, "creator_attribution_kind", None),
+        creator_stable_id=getattr(projection, "creator_stable_id", None),
+        creator_handle=getattr(projection, "creator_handle", None),
+        creator_display_name=getattr(projection, "creator_display_name", None),
     )
 
 

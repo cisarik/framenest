@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
 from dataclasses import dataclass
+from types import SimpleNamespace
 
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse
@@ -18,15 +20,20 @@ from framenest.application.media_analysis_lifecycle import (
 from framenest.adapters.api.content_audience_api import (
     ContentAudienceUnavailableError,
     content_audience_allows,
+    content_audience_decision,
+    load_approved_projection,
 )
 from framenest.adapters.api.tailscale_ingress import SCOPE_IDENTITY
 from framenest.application.companion_review import (
     COMPANION_REVIEW_QUERY_INVALID_MESSAGE,
     DEFAULT_COMPANION_REVIEW_LIMIT,
     MAX_COMPANION_REVIEW_LIMIT,
+    CompanionReviewCodecError,
     CompanionReviewQueryError,
     GetCompanionReviewDetail,
     MappedSuggestedTag,
+    MappedTagStatus,
+    decode_stored_suggestion_result,
 )
 from framenest.application.content_publication import ContentAudiencePolicy
 from framenest.application.ports.companion_review_repository import (
@@ -36,6 +43,8 @@ from framenest.application.ports.companion_review_repository import (
     FrameNestCompanionReviewRepositoryError,
 )
 from framenest.domain.identities import FrameNestIdentityError, MediaId, MediaLocationId
+from framenest.domain.media_classification import MOVIE_IDENTIFICATION_ANALYSIS_DEFINITION
+from framenest.domain.record_access import READ_APPROVED, READ_DENY
 from framenest.domain.identity_access import IdentityContext
 from framenest.domain.media_analysis_runs import (
     AUTOMATIC_POST_CATALOG_ANALYSIS_DEFINITION,
@@ -231,15 +240,25 @@ def create_media_analysis_lifecycle_api_router(
             parsed_media_id = MediaId.from_string(media_id)
         except FrameNestIdentityError:
             return _error("MEDIA_NOT_FOUND", "Media not found.", 404)
-        audience_error = _audience_error(
-            request,
-            parsed_media_id,
-            dependencies.audience_policy,
-        )
-        if audience_error is not None:
-            if audience_error.status_code == 404:
-                return _error("MEDIA_NOT_FOUND", "Media not found.", 404)
-            return audience_error
+        try:
+            decision = content_audience_decision(
+                request=request,
+                media_id=parsed_media_id,
+                policy=dependencies.audience_policy,
+            )
+        except ContentAudienceUnavailableError:
+            return _error(
+                "ANALYSIS_STATUS_UNAVAILABLE",
+                "Analysis status is unavailable.",
+                503,
+            )
+        if decision == READ_DENY:
+            return _error("MEDIA_NOT_FOUND", "Media not found.", 404)
+        if decision == READ_APPROVED:
+            return _approved_suggestions_response(
+                request_policy=dependencies.audience_policy,
+                media_id=parsed_media_id,
+            )
         if dependencies.list_suggestions is None:
             return _error(
                 "CATALOG_UNAVAILABLE",
@@ -308,13 +327,26 @@ def create_media_analysis_lifecycle_api_router(
             parsed_media_id = MediaId.from_string(media_id)
         except FrameNestIdentityError:
             return _error("MEDIA_NOT_FOUND", "Media was not found.", 404)
-        audience_error = _audience_error(
+        decision_or_error = _analysis_read_decision(
             request,
             parsed_media_id,
             dependencies.audience_policy,
         )
-        if audience_error is not None:
-            return audience_error
+        if isinstance(decision_or_error, JSONResponse):
+            return decision_or_error
+        if decision_or_error == READ_APPROVED:
+            view = _approved_analysis_view(
+                dependencies.audience_policy,
+                parsed_media_id,
+                movie=False,
+            )
+            return _status_response(
+                media_id=parsed_media_id.to_string(),
+                view=view,
+                automatic_analysis_enabled=_resolve_automatic_analysis_enabled(
+                    dependencies.automatic_analysis_enabled
+                ),
+            )
         if dependencies.read_analysis is None:
             view = AutomaticAnalysisPublicView(
                 state="not_requested",
@@ -429,13 +461,26 @@ def create_media_analysis_lifecycle_api_router(
             parsed_media_id = MediaId.from_string(media_id)
         except FrameNestIdentityError:
             return _error("MEDIA_NOT_FOUND", "Media was not found.", 404)
-        audience_error = _audience_error(
+        decision_or_error = _analysis_read_decision(
             request,
             parsed_media_id,
             dependencies.audience_policy,
         )
-        if audience_error is not None:
-            return audience_error
+        if isinstance(decision_or_error, JSONResponse):
+            return decision_or_error
+        if decision_or_error == READ_APPROVED:
+            view = _approved_analysis_view(
+                dependencies.audience_policy,
+                parsed_media_id,
+                movie=True,
+            )
+            return _status_response(
+                media_id=parsed_media_id.to_string(),
+                view=view,
+                automatic_analysis_enabled=_resolve_automatic_analysis_enabled(
+                    dependencies.automatic_analysis_enabled
+                ),
+            )
         if dependencies.read_movie_identification is None:
             view = public_view_from_run(None)
         else:
@@ -641,6 +686,134 @@ def _error(code: str, message: str, status_code: int) -> JSONResponse:
     return JSONResponse(
         status_code=status_code,
         content=ErrorResponse(error=ErrorBody(code=code, message=message)).model_dump(),
+    )
+
+
+_SUGGESTION_RESULT_FIELDS = frozenset(
+    {
+        "title",
+        "description",
+        "collection",
+        "tags",
+        "suggested_filename",
+        "confidence",
+        "evidence",
+        "uncertainties",
+    }
+)
+
+
+def _analysis_read_decision(
+    request: Request,
+    media_id: MediaId,
+    policy: ContentAudiencePolicy | None,
+) -> str | JSONResponse:
+    try:
+        decision = content_audience_decision(
+            request=request,
+            media_id=media_id,
+            policy=policy,
+        )
+    except ContentAudienceUnavailableError:
+        return _error(
+            "ANALYSIS_STATUS_UNAVAILABLE",
+            "Analysis status is unavailable.",
+            503,
+        )
+    if decision == READ_DENY:
+        return _error("MEDIA_NOT_FOUND", "Media was not found.", 404)
+    return decision
+
+
+def _approved_analysis_view(
+    policy: ContentAudiencePolicy | None,
+    media_id: MediaId,
+    *,
+    movie: bool,
+) -> AutomaticAnalysisPublicView:
+    projection = load_approved_projection(policy=policy, media_id=media_id)
+    absent = public_view_from_run(None)
+    result = None if projection is None else projection.analysis_result
+    if not isinstance(result, dict):
+        return absent
+    if movie:
+        if "identified_title" not in result:
+            return absent
+        definition = MOVIE_IDENTIFICATION_ANALYSIS_DEFINITION
+    else:
+        if not _SUGGESTION_RESULT_FIELDS.issubset(result):
+            return absent
+        definition = AUTOMATIC_POST_CATALOG_ANALYSIS_DEFINITION
+    return AutomaticAnalysisPublicView(
+        state="analyzed",
+        analysis_definition=definition,
+        provider_id=None,
+        model_id=None,
+        prompt_version=None,
+        result=result,
+        error_code=None,
+        error_message=None,
+        attempt_count=None,
+        created_at_ms=None,
+        started_at_ms=None,
+        completed_at_ms=None,
+    )
+
+
+def _approved_suggestions_response(
+    *,
+    request_policy: ContentAudiencePolicy | None,
+    media_id: MediaId,
+) -> JSONResponse:
+    try:
+        projection = load_approved_projection(policy=request_policy, media_id=media_id)
+    except Exception:
+        return _error(
+            "MEDIA_AI_SUGGESTION_QUERY_FAILED",
+            "AI suggestion list failed.",
+            500,
+        )
+    suggestions: list[MediaAiSuggestionItemResponse] = []
+    result = None if projection is None else projection.analysis_result
+    run_id = None if projection is None else projection.analysis_run_id
+    if isinstance(result, dict) and isinstance(run_id, str) and run_id:
+        try:
+            stored = decode_stored_suggestion_result(
+                json.dumps(result, separators=(",", ":"), sort_keys=True)
+            )
+        except (CompanionReviewCodecError, TypeError, ValueError):
+            stored = None
+        if stored is not None:
+            suggestions.append(
+                _suggestion_item(
+                    SimpleNamespace(
+                        analysis_run_id=run_id,
+                        completed_at_ms=0,
+                        provider_id="",
+                        model_id="",
+                        prompt_version="",
+                        title=stored.title,
+                        description=stored.description,
+                        tags=tuple(
+                            MappedSuggestedTag(
+                                value=tag,
+                                status=MappedTagStatus.UNKNOWN,
+                                key=None,
+                                display_name=None,
+                            )
+                            for tag in stored.tags
+                        ),
+                        suggested_filename=stored.suggested_filename,
+                    )
+                )
+            )
+    return JSONResponse(
+        status_code=200,
+        content=MediaAiSuggestionListResponse(
+            suggestions=suggestions,
+            next_cursor=None,
+        ).model_dump(),
+        headers=_NO_STORE_HEADERS,
     )
 
 

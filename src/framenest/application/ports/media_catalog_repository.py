@@ -106,3 +106,6 @@ class MediaCatalogRepository(Protocol):
 
     def get_media_item(self, media_id: str) -> CatalogMediaItem | None:
         """Return one catalog item by media id, or None when absent."""
+
+    def approved_catalog_item(self, media_id: str) -> CatalogMediaItem | None:
+        """Return the approved catalog snapshot, or None when it is absent."""

@@ -44,6 +44,21 @@ def content_audience_decision(
     return str(decision)
 
 
+def load_approved_projection(*, policy: ContentAudiencePolicy | None, media_id: MediaId):
+    """Return the frozen projection for one media id, or None when it is absent.
+
+    Callers that already decided ``approved`` must not fall back to working state
+    when this returns None or raises.
+    """
+    if policy is None:
+        return None
+    bindings = getattr(policy, "record_bindings", None)
+    loader = getattr(bindings, "approved_projection_for_media", None)
+    if not callable(loader):
+        return None
+    return loader(media_id.to_string())
+
+
 def content_audience_allows(
     *,
     request: Request,
