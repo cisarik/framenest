@@ -76,3 +76,17 @@ def test_large_document_stays_bounded_and_escaped() -> None:
     html = render_markdown(payload)
     assert "<b>" not in html
     assert len(html) < 200_000
+
+
+def test_deep_quote_nesting_is_bounded_and_escaped() -> None:
+    from framenest.application.document_rendering import MAX_QUOTE_DEPTH
+
+    html = render_markdown(("> " * 1200) + "leaf")
+    assert "leaf" in html
+    assert html.count("<blockquote>") <= MAX_QUOTE_DEPTH + 1
+    assert html.count("<blockquote>") == html.count("</blockquote>")
+    document = render_record_document(
+        question_text="Deep?",
+        answer_text=("> " * 1200) + "leaf",
+    )
+    assert "leaf" in document

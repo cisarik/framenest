@@ -22,6 +22,10 @@ _INLINE = re.compile(
 )
 _SAFE_SCHEMES = ("http://", "https://", "mailto:")
 
+# Bounded quote nesting: deeper prefixes are rendered as escaped text instead
+# of recursing further, so hostile input cannot exhaust the call stack.
+MAX_QUOTE_DEPTH = 32
+
 
 def _safe_url(url: str) -> str | None:
     candidate = url.strip()
@@ -60,7 +64,7 @@ def render_inline(text: str) -> str:
     return "".join(result)
 
 
-def render_markdown(text: str) -> str:
+def render_markdown(text: str, *, _depth: int = 0) -> str:
     """Render the bounded Markdown subset of ``text`` as escaped HTML."""
     lines = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
     blocks: list[str] = []
@@ -89,8 +93,12 @@ def render_markdown(text: str) -> str:
 
     def flush_quote() -> None:
         if quote_lines:
-            inner = render_markdown("\n".join(quote_lines))
-            blocks.append(f"<blockquote>{inner}</blockquote>")
+            if _depth >= MAX_QUOTE_DEPTH:
+                escaped = "<br />".join(render_inline(line) for line in quote_lines)
+                blocks.append(f"<blockquote><p>{escaped}</p></blockquote>")
+            else:
+                inner = render_markdown("\n".join(quote_lines), _depth=_depth + 1)
+                blocks.append(f"<blockquote>{inner}</blockquote>")
             quote_lines.clear()
 
     def flush_code() -> None:
