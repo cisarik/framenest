@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping
+import time
+from collections.abc import Callable, Mapping
 
 from sqlalchemy import delete, func, insert, select, update
 from sqlalchemy.engine import Connection, Engine
@@ -26,12 +27,22 @@ from framenest.domain.record_access import (
     decide_bound_read,
     may_approve,
 )
+from framenest.application.ports.research import (
+    ResearchStoreError,
+)
+from framenest.domain.research import (
+    ResearchErrorCode,
+    ResearchLifecycleState,
+    ResultCompletion,
+    ResultCompletionReceipt,
+)
 from framenest.domain.records import (
     ApprovalProjection,
     ApprovedLocationSnapshot,
     ApprovedTagSnapshot,
     CompletedDocument,
     DocumentId,
+    NormalizedCitation,
     RecordConflictError,
     RecordId,
     RecordKind,
@@ -44,6 +55,7 @@ from framenest.domain.records import (
     projection_from_storage,
 )
 from framenest.infrastructure.persistence.catalog_schema import (
+    research_requests,
     kronika_approved_media,
     kronika_approved_media_locations,
     kronika_approved_media_tags,
@@ -865,3 +877,99 @@ def _replace_approved_media(
                 for item in projection.locations
             ],
         )
+
+
+class SqliteResearchResultCompletion:
+    """Atomic research completion over documents, records and the request bind.
+
+    One immediate transaction creates the immutable completed document, the
+    common record with a server-derived owner, and the research-request
+    ``record_id`` binding. An exact replay returns the existing binding.
+    """
+
+    def __init__(
+        self,
+        engine: Engine,
+        *,
+        clock_ms: Callable[[], int] | None = None,
+    ) -> None:
+        self._engine = engine
+        self._clock_ms = clock_ms or (lambda: time.time_ns() // 1_000_000)
+
+    def complete(self, completion: ResultCompletion) -> ResultCompletionReceipt:
+        def operation(connection: Connection) -> ResultCompletionReceipt:
+            request = (
+                connection.execute(
+                    select(research_requests).where(
+                        research_requests.c.operation_id
+                        == completion.operation_id
+                    )
+                )
+                .mappings()
+                .first()
+            )
+            if request is None:
+                raise ResearchStoreError(ResearchErrorCode.STORAGE)
+            if request["record_id"] is not None:
+                return ResultCompletionReceipt(
+                    operation_id=completion.operation_id,
+                    state=ResearchLifecycleState.SAVED,
+                )
+            now_ms = self._clock_ms()
+            created_at_ms = int(request["created_at_ms"])
+            document = CompletedDocument(
+                document_id=DocumentId.new(),
+                operation_id=completion.operation_id,
+                kind=RecordKind(str(request["kind"])),
+                question_text=str(request["prompt_text"]),
+                answer_text=completion.answer.text,
+                citations=tuple(
+                    NormalizedCitation(url=citation.url, title=citation.title)
+                    for citation in completion.answer.citations
+                ),
+                evidence=completion.answer.evidence,
+                created_at_ms=created_at_ms,
+                completed_at_ms=max(now_ms, created_at_ms),
+            )
+            record_id = RecordId.new()
+            connection.execute(
+                insert(kronika_documents).values(
+                    id=document.document_id.to_string(),
+                    operation_id=document.operation_id,
+                    kind=document.kind.value,
+                    question_text=document.question_text,
+                    answer_text=document.answer_text,
+                    citations_json=document.citations_json(),
+                    completion_evidence_json=document.evidence_json(),
+                    created_at_ms=document.created_at_ms,
+                    completed_at_ms=document.completed_at_ms,
+                )
+            )
+            connection.execute(
+                insert(kronika_records).values(
+                    id=record_id.to_string(),
+                    kind=document.kind.value,
+                    owner_login_key=parse_owner_login_key(
+                        str(request["owner_login_key"])
+                    ),
+                    visibility=RecordVisibility.PRIVATE.value,
+                    document_id=document.document_id.to_string(),
+                    final_operation_id=document.operation_id,
+                    created_at_ms=document.created_at_ms,
+                    completed_at_ms=document.completed_at_ms,
+                    version=1,
+                )
+            )
+            connection.execute(
+                update(research_requests)
+                .where(
+                    research_requests.c.operation_id == completion.operation_id
+                )
+                .values(record_id=record_id.to_string(), updated_at_ms=now_ms)
+            )
+            return ResultCompletionReceipt(
+                operation_id=completion.operation_id,
+                state=ResearchLifecycleState.SAVED,
+            )
+
+        return run_in_immediate_transaction(self._engine, operation)

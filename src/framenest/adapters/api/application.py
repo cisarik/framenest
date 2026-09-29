@@ -240,9 +240,8 @@ from framenest.configuration import (
     FrameNestSettings,
     load_settings,
 )
-from framenest.application.ports.research import ResearchStoreError
 from framenest.application.research import ResearchCoordinator
-from framenest.domain.research import ResearchErrorCode, ResearchOperationKind
+from framenest.domain.research import ResearchOperationKind
 from framenest.infrastructure.ai.configuration import (
     default_ai_config_path,
     load_ai_server_config,
@@ -256,6 +255,9 @@ from framenest.infrastructure.ai.research_registry import (
 from framenest.infrastructure.ai.transport import HttpsJsonTransport
 from framenest.infrastructure.persistence.research_budget_repository import (
     SqliteResearchBudgetLedger,
+)
+from framenest.infrastructure.persistence.record_repository import (
+    SqliteResearchResultCompletion,
 )
 from framenest.infrastructure.persistence.research_request_repository import (
     SqliteResearchRequestRepository,
@@ -383,17 +385,6 @@ def _read_web_resource(resource_name: str) -> bytes:
     return resource.read_bytes()
 
 
-class PendingResearchResultCompletion:
-    """Atomic Q/A completion arrives with S7-P.
-
-    Until then a completed provider result keeps its normalized checkpoint in
-    the ``validating`` state instead of fabricating a local record.
-    """
-
-    def complete(self, completion):  # pragma: no cover - refusal placeholder
-        raise ResearchStoreError(ResearchErrorCode.STORAGE)
-
-
 def _research_credential_key(identifier: str) -> str | None:
     """Read one named credential through the existing credential boundary."""
     credential = load_ai_credential(identifier)
@@ -443,7 +434,7 @@ def build_research_runtime(
         provider=adapter,
         requests=SqliteResearchRequestRepository(engine),
         ledger=SqliteResearchBudgetLedger(engine),
-        completion=PendingResearchResultCompletion(),
+        completion=SqliteResearchResultCompletion(engine),
         select=select,
     )
     if recover:

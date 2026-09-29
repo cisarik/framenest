@@ -457,6 +457,9 @@ class ResearchCoordinator:
             )
         if receipt.state is not ResearchLifecycleState.SAVED:
             return row
+        # The completion port owns the record binding; reload so the terminal
+        # save cannot clobber storage fields it wrote.
+        current = self._requests.get_request(row.record.operation_id) or row
         if self._price_schedule is None:
             accounting = ResearchAccountingState.UNKNOWN
             cost = None
@@ -464,7 +467,7 @@ class ResearchCoordinator:
             accounting = ResearchAccountingState.RECONCILED
             cost = usage_cost_micro_usd(answer.usage, self._price_schedule)
         return self._finish(
-            row,
+            current,
             ResearchLifecycleState.SAVED,
             None,
             accounting=accounting,
