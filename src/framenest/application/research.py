@@ -10,8 +10,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import secrets
 import time
-import uuid
 from collections.abc import Callable
 from dataclasses import replace
 
@@ -136,7 +136,9 @@ class ResearchCoordinator:
         self._select = select
         self._price_schedule = price_schedule
         self._clock_ms = clock_ms or (lambda: time.time_ns() // 1_000_000)
-        self._new_operation_id = new_operation_id or (lambda: str(uuid.uuid4()))
+        self._new_operation_id = new_operation_id or (
+            lambda: f"op-{secrets.token_hex(16)}"
+        )
 
     # -- admission ---------------------------------------------------------
 

@@ -348,3 +348,81 @@ class SqliteResearchRequestRepository:
             return tuple(_row_from_mapping(dict(row)) for row in rows)
 
         return run_in_transaction(self._engine, operation)
+
+    def list_for_owner(
+        self,
+        owner_login_key: str,
+        *,
+        limit: int,
+        offset: int = 0,
+    ) -> tuple[ResearchRequestRow, ...]:
+        def operation(connection: Connection) -> tuple[ResearchRequestRow, ...]:
+            rows = (
+                connection.execute(
+                    select(research_requests)
+                    .where(research_requests.c.owner_login_key == owner_login_key)
+                    .order_by(
+                        research_requests.c.created_at_ms.desc(),
+                        research_requests.c.operation_id.asc(),
+                    )
+                    .limit(max(0, int(limit)))
+                    .offset(max(0, int(offset)))
+                )
+                .mappings()
+                .all()
+            )
+            return tuple(_row_from_mapping(dict(row)) for row in rows)
+
+        return run_in_transaction(self._engine, operation)
+
+    def count_for_owner(self, owner_login_key: str) -> int:
+        def operation(connection: Connection) -> int:
+            from sqlalchemy import func
+
+            return int(
+                connection.execute(
+                    select(func.count())
+                    .select_from(research_requests)
+                    .where(research_requests.c.owner_login_key == owner_login_key)
+                ).scalar()
+                or 0
+            )
+
+        return run_in_transaction(self._engine, operation)
+
+    def list_all(
+        self,
+        *,
+        limit: int,
+        offset: int = 0,
+    ) -> tuple[ResearchRequestRow, ...]:
+        def operation(connection: Connection) -> tuple[ResearchRequestRow, ...]:
+            rows = (
+                connection.execute(
+                    select(research_requests)
+                    .order_by(
+                        research_requests.c.created_at_ms.desc(),
+                        research_requests.c.operation_id.asc(),
+                    )
+                    .limit(max(0, int(limit)))
+                    .offset(max(0, int(offset)))
+                )
+                .mappings()
+                .all()
+            )
+            return tuple(_row_from_mapping(dict(row)) for row in rows)
+
+        return run_in_transaction(self._engine, operation)
+
+    def count_all(self) -> int:
+        def operation(connection: Connection) -> int:
+            from sqlalchemy import func
+
+            return int(
+                connection.execute(
+                    select(func.count()).select_from(research_requests)
+                ).scalar()
+                or 0
+            )
+
+        return run_in_transaction(self._engine, operation)
