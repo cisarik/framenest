@@ -85,6 +85,34 @@ class ResearchResultCompletion(Protocol):
 
 
 @dataclass(frozen=True, slots=True)
+class ResearchSelectionSnapshot:
+    """Admission-time copy of the selected provider, model, limits and budgets.
+
+    Replacing the configuration later does not change an existing snapshot.
+    A stored configuration is not live readiness.
+    """
+
+    provider_id: str
+    model_id: str
+    kind: ResearchOperationKind
+    profile: ServerSelectedProfile
+    resource_limits: ApprovedResourceLimits
+    deadline_seconds: int
+    descriptor: ProviderDescriptor
+    live_ready: bool
+    daily_budget_usd_micros: int
+    monthly_budget_usd_micros: int
+
+
+class ResearchSelectionError(Exception):
+    """Sanitized selection failure. The message is the stable error code."""
+
+    def __init__(self, code: ResearchErrorCode) -> None:
+        super().__init__(code.value)
+        self.code = code
+
+
+@dataclass(frozen=True, slots=True)
 class ResearchRequestRow:
     """Durable research request row.
 
@@ -162,3 +190,6 @@ class ResearchRuntimeRepository(Protocol):
 
     def active_slot_operation_id(self) -> str | None:
         """Return the operation holding the single active slot, or none."""
+
+    def list_cleanup_pending(self, limit: int) -> tuple[ResearchRequestRow, ...]:
+        """Return terminal requests whose remote response still needs release."""

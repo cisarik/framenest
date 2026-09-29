@@ -16,6 +16,7 @@ from framenest.domain.research import (
     ApprovedResourceLimits,
     BudgetReservation,
     ProviderHandle,
+    TERMINAL_RESEARCH_LIFECYCLE_STATES,
     ResearchAccountingState,
     ResearchErrorCode,
     ResearchLifecycleState,
@@ -317,5 +318,33 @@ class SqliteResearchRequestRepository:
             if slot is None:
                 return None
             return None if slot[0] is None else str(slot[0])
+
+        return run_in_transaction(self._engine, operation)
+
+    def list_cleanup_pending(self, limit: int) -> tuple[ResearchRequestRow, ...]:
+        terminal_states = sorted(
+            state.value for state in TERMINAL_RESEARCH_LIFECYCLE_STATES
+        )
+
+        def operation(connection: Connection) -> tuple[ResearchRequestRow, ...]:
+            rows = (
+                connection.execute(
+                    select(research_requests)
+                    .where(
+                        research_requests.c.cleanup_state
+                        == ResearchRemoteCleanupState.PENDING.value,
+                        research_requests.c.remote_handle_json.is_not(None),
+                        research_requests.c.lifecycle_state.in_(terminal_states),
+                    )
+                    .order_by(
+                        research_requests.c.updated_at_ms.asc(),
+                        research_requests.c.operation_id.asc(),
+                    )
+                    .limit(max(0, int(limit)))
+                )
+                .mappings()
+                .all()
+            )
+            return tuple(_row_from_mapping(dict(row)) for row in rows)
 
         return run_in_transaction(self._engine, operation)

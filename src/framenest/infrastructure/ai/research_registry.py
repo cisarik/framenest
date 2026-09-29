@@ -12,8 +12,10 @@ accept new Search or Research work.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-
+from framenest.application.ports.research import (
+    ResearchSelectionError,
+    ResearchSelectionSnapshot,
+)
 from framenest.domain.research import (
     CHATGPT_PAGE_PROVIDER_ID,
     FIXED_OPENAI_RESPONSES_MODEL_ID,
@@ -42,34 +44,8 @@ from framenest.infrastructure.ai.research_configuration import (
 # Documented extension point only. It is not selectable and not imported.
 SELF_HOSTED_RESEARCH_EXTENSION = SELF_HOSTED_PROVIDER_EXTENSION
 
-
-class ResearchSelectionError(Exception):
-    """Sanitized selection failure. The message is the stable error code."""
-
-    def __init__(self, code: ResearchErrorCode) -> None:
-        if not isinstance(code, ResearchErrorCode):
-            raise ResearchValueError
-        super().__init__(code.value)
-        self.code = code
-
-
-@dataclass(frozen=True, slots=True)
-class ResearchSelectionSnapshot:
-    """Admission-time copy of the selected provider, model, and limits.
-
-    Replacing the configuration later does not change an existing snapshot.
-    ``live_ready`` stays false until a later slice ships an adapter. A stored
-    configuration is not live readiness.
-    """
-
-    provider_id: str
-    model_id: str
-    kind: ResearchOperationKind
-    profile: ServerSelectedProfile
-    resource_limits: ApprovedResourceLimits
-    deadline_seconds: int
-    descriptor: ProviderDescriptor
-    live_ready: bool
+# ResearchSelectionError and ResearchSelectionSnapshot are re-exported from the
+# application ports so the coordinator never imports this infrastructure module.
 
 
 def _accounting(*, reports: bool) -> AccountingCapabilities:
@@ -176,6 +152,8 @@ def select_research_provider(
         deadline_seconds=settings.deadline_seconds,
         descriptor=descriptor,
         live_ready=False,
+        daily_budget_usd_micros=config.daily_budget_usd_micros,
+        monthly_budget_usd_micros=config.monthly_budget_usd_micros,
     )
 
 
