@@ -34,6 +34,8 @@ from framenest.domain.identity_access import (
     CAPABILITY_METADATA_ALIAS_WRITE,
     CAPABILITY_METADATA_CANONICAL_WRITE,
     CAPABILITY_PROVIDER_OPERATE,
+    CAPABILITY_RECORDS_APPROVE,
+    CAPABILITY_RESEARCH_RUN,
     CAPABILITY_UPLOAD_SUBMIT,
     CAPABILITY_YOUTUBE_ACQUIRE,
     CAPABILITY_YOUTUBE_REQUEST,
@@ -669,6 +671,49 @@ ROUTE_POLICIES: tuple[RoutePolicy, ...] = (
         audit_action="upload.cancel",
         audit_target_type="upload_session",
         audit_target_group="upload_id",
+    ),
+    RoutePolicy(method="GET", template="/api/research/capabilities"),
+    RoutePolicy(
+        method="GET",
+        template="/api/research-requests",
+        capability=CAPABILITY_RESEARCH_RUN,
+    ),
+    RoutePolicy(
+        method="POST",
+        template="/api/research-requests",
+        capability=CAPABILITY_RESEARCH_RUN,
+        audit_action="research.request",
+    ),
+    RoutePolicy(
+        method="GET",
+        template="/api/research-requests/{operation_id}",
+        capability=CAPABILITY_RESEARCH_RUN,
+    ),
+    RoutePolicy(
+        method="POST",
+        template="/api/research-requests/{operation_id}/cancel",
+        capability=CAPABILITY_RESEARCH_RUN,
+        audit_action="research.cancel",
+    ),
+    RoutePolicy(
+        method="GET",
+        template="/api/admin/research-requests",
+        capability=CAPABILITY_RECORDS_APPROVE,
+    ),
+    RoutePolicy(method="GET", template="/api/my/records"),
+    RoutePolicy(method="GET", template="/api/timeline"),
+    RoutePolicy(method="GET", template="/api/records/{record_id}"),
+    RoutePolicy(method="GET", template="/api/records/{record_id}/render"),
+    RoutePolicy(
+        method="GET",
+        template="/api/admin/records",
+        capability=CAPABILITY_RECORDS_APPROVE,
+    ),
+    RoutePolicy(
+        method="POST",
+        template="/api/admin/records/{record_id}/approval",
+        capability=CAPABILITY_RECORDS_APPROVE,
+        audit_action="records.approval",
     ),
 )
 

@@ -213,6 +213,14 @@ from framenest.adapters.api.companion_review_api import (
     CompanionReviewApiDependencies,
     create_companion_review_api_router,
 )
+from framenest.adapters.api.records_api import (
+    RecordsApiDependencies,
+    create_records_api_router,
+)
+from framenest.adapters.api.research_api import (
+    ResearchApiDependencies,
+    create_research_api_router,
+)
 from framenest.adapters.api.x_admin_api import (
     XAdminApiDependencies,
     create_x_admin_api_router,
@@ -240,6 +248,7 @@ from framenest.configuration import (
     FrameNestSettings,
     load_settings,
 )
+from framenest.application.records import RecordService
 from framenest.application.research import ResearchCoordinator
 from framenest.domain.research import ResearchOperationKind
 from framenest.infrastructure.ai.configuration import (
@@ -1555,6 +1564,7 @@ def create_app(
         }
 
     research_runtime: ResearchCoordinator | None = None
+    research_configuration = None
     if owned_engine is not None:
         try:
             ai_server_config = load_ai_server_config(default_ai_config_path())
@@ -1571,6 +1581,22 @@ def create_app(
         except Exception:
             research_runtime = None
     app.state.research_runtime = research_runtime
+
+    if owned_engine is not None:
+        record_service = RecordService(SqliteRecordRepository(owned_engine))
+        app.state.record_service = record_service
+        app.include_router(
+            create_records_api_router(RecordsApiDependencies(service=record_service))
+        )
+        app.include_router(
+            create_research_api_router(
+                ResearchApiDependencies(
+                    requests=SqliteResearchRequestRepository(owned_engine),
+                    runtime=research_runtime,
+                    configuration=research_configuration,
+                )
+            )
+        )
 
     return app
 

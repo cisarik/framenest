@@ -142,6 +142,25 @@ def _family(path: str) -> tuple[str, str, str, str]:
             "own requests stay; foreign bound asset media_id is suppressed",
             "requester or administration snapshot",
         )
+    if path.startswith("/api/research") or path.startswith("/api/admin/research"):
+        return (
+            "verified caller; disabled runtime refuses admission",
+            "research.run or records.approve for administrator routes",
+            "owner or administrator; admission is idempotent by client request id",
+            "question history summary; answer text only through the completed record",
+        )
+    if (
+        path.startswith("/api/my/records")
+        or path.startswith("/api/timeline")
+        or path.startswith("/api/records/")
+        or path.startswith("/api/admin/records")
+    ):
+        return (
+            "verified caller or administrator",
+            "records.approve for administrator routes",
+            "bound-record decision inside the read; denial is the unknown-record body",
+            "current for owner and administrator; approved projection for other household members",
+        )
     if path.startswith("/api/workspace/"):
         return (
             "verified caller",
@@ -175,8 +194,8 @@ def _render(routes: set[tuple[str, str, str]]) -> str:
     lines = [
         "# Kronika access inventory",
         "",
-        "Current implementation evidence for schema head `0034`. This is not an acceptance record.",
-        "Future record, question-history, Timeline and render APIs are not installed.",
+        "Current implementation evidence for schema head `0035`. This is not an acceptance record.",
+        "Record, question-history, Timeline, render and research request APIs are installed.",
         "",
         "| Method | Path | Composition | Identity | Capability | Predicate | Projection | Mutation check | File open | Positive test | Negative test | Exclusion |",
         "|---|---|---|---|---|---|---|---|---|---|---|---|",
