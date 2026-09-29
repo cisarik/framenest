@@ -402,3 +402,46 @@ def test_domain_and_port_modules_keep_import_boundaries() -> None:
                     if module.startswith("framenest.") and module != "framenest.domain.research":
                         violations.append(f"{path.name}: {module}")
     assert violations == []
+
+
+def test_research_runtime_wiring_is_inert_when_disabled() -> None:
+    from framenest.adapters.api.application import build_research_runtime
+    from framenest.infrastructure.ai.research_configuration import (
+        default_research_configuration,
+    )
+
+    assert build_research_runtime(engine=None, configuration=None) is None
+    assert (
+        build_research_runtime(
+            engine=None,
+            configuration=default_research_configuration(enabled=False),
+        )
+        is None
+    )
+
+
+def test_research_runtime_wiring_builds_offline_objects_when_enabled() -> None:
+    from framenest.adapters.api.application import build_research_runtime
+    from framenest.infrastructure.ai.research_configuration import (
+        default_research_configuration,
+    )
+
+    class FakeTransport:
+        def post_json(self, url, *, headers, body, max_request_bytes):
+            raise AssertionError("no network during construction")
+
+        def get_json(self, url, *, headers):
+            raise AssertionError("no network during construction")
+
+        def delete_json(self, url, *, headers):
+            raise AssertionError("no network during construction")
+
+    runtime = build_research_runtime(
+        engine=object(),
+        configuration=default_research_configuration(enabled=True),
+        transport=FakeTransport(),
+        recover=False,
+    )
+    assert runtime is not None
+    descriptor = runtime._provider.describe()
+    assert descriptor.provider_id == "openai-responses"

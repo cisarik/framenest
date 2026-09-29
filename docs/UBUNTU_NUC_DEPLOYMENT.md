@@ -115,7 +115,9 @@ LoadCredential=KRONIKA_RESEARCH_OPENAI_API_KEY:/etc/framenest/credentials/resear
 
 The web service would read that named systemd credential through the existing
 credential boundary. It must not prefer an ambient API key. No key belongs in
-Git, unit arguments, logs or the frontend.
+Git, unit arguments, logs or the frontend. The repository source for that
+optional mapping is `deploy/systemd/framenest-research-credential.conf`;
+install it only during an explicitly authorized provisioned deployment.
 
 Before any native provider call, a separate grant must show all of the
 following:

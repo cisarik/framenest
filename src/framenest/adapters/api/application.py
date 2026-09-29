@@ -240,6 +240,26 @@ from framenest.configuration import (
     FrameNestSettings,
     load_settings,
 )
+from framenest.application.ports.research import ResearchStoreError
+from framenest.application.research import ResearchCoordinator
+from framenest.domain.research import ResearchErrorCode, ResearchOperationKind
+from framenest.infrastructure.ai.configuration import (
+    default_ai_config_path,
+    load_ai_server_config,
+)
+from framenest.infrastructure.ai.credentials import load_ai_credential
+from framenest.infrastructure.ai.openai_responses import OpenAIResponsesAdapter
+from framenest.infrastructure.ai.research_registry import (
+    ResearchSelectionError,
+    select_research_provider,
+)
+from framenest.infrastructure.ai.transport import HttpsJsonTransport
+from framenest.infrastructure.persistence.research_budget_repository import (
+    SqliteResearchBudgetLedger,
+)
+from framenest.infrastructure.persistence.research_request_repository import (
+    SqliteResearchRequestRepository,
+)
 from framenest.infrastructure.runtime_settings import RuntimeSettingsStore
 from framenest.infrastructure.ai.registry import (
     DynamicAiProviderResolver,
@@ -361,6 +381,77 @@ def _read_web_resource(resource_name: str) -> bytes:
     if not resource.is_file():
         raise HTTPException(status_code=404, detail="Not found")
     return resource.read_bytes()
+
+
+class PendingResearchResultCompletion:
+    """Atomic Q/A completion arrives with S7-P.
+
+    Until then a completed provider result keeps its normalized checkpoint in
+    the ``validating`` state instead of fabricating a local record.
+    """
+
+    def complete(self, completion):  # pragma: no cover - refusal placeholder
+        raise ResearchStoreError(ResearchErrorCode.STORAGE)
+
+
+def _research_credential_key(identifier: str) -> str | None:
+    """Read one named credential through the existing credential boundary."""
+    credential = load_ai_credential(identifier)
+    if credential is None:
+        return None
+    header = credential.authorization_header()
+    prefix = "Bearer "
+    return header[len(prefix):] if header.startswith(prefix) else None
+
+
+def build_research_runtime(
+    *,
+    engine,
+    configuration,
+    transport=None,
+    recover: bool = True,
+) -> ResearchCoordinator | None:
+    """Build the inert-by-default research runtime.
+
+    Returns ``None`` when research is disabled, unconfigured, or not
+    selectable. Construction performs no network I/O. ``recover`` classifies
+    stale local state and is guarded so an older catalogue never blocks
+    ordinary application startup.
+    """
+    if configuration is None or not getattr(configuration, "enabled", False):
+        return None
+
+    def select(kind: ResearchOperationKind):
+        return select_research_provider(configuration, kind=kind)
+
+    try:
+        select(ResearchOperationKind.SEARCH)
+    except ResearchSelectionError:
+        return None
+    if transport is None:
+        transport = HttpsJsonTransport(
+            timeout_seconds=configuration.http_operation_timeout_seconds,
+            max_response_bytes=configuration.provider_response_max_bytes,
+        )
+    adapter = OpenAIResponsesAdapter(
+        transport=transport,
+        api_key_supplier=lambda: _research_credential_key(
+            configuration.credential_identifier
+        ),
+    )
+    coordinator = ResearchCoordinator(
+        provider=adapter,
+        requests=SqliteResearchRequestRepository(engine),
+        ledger=SqliteResearchBudgetLedger(engine),
+        completion=PendingResearchResultCompletion(),
+        select=select,
+    )
+    if recover:
+        try:
+            coordinator.recover()
+        except Exception:
+            return None
+    return coordinator
 
 
 def create_app(
@@ -1471,6 +1562,24 @@ def create_app(
             "identity": None,
             "capabilities": sorted(CAPABILITIES_BY_ROLE[ROLE_ADMIN]),
         }
+
+    research_runtime: ResearchCoordinator | None = None
+    if owned_engine is not None:
+        try:
+            ai_server_config = load_ai_server_config(default_ai_config_path())
+        except Exception:
+            ai_server_config = None
+        research_configuration = (
+            ai_server_config.research if ai_server_config is not None else None
+        )
+        try:
+            research_runtime = build_research_runtime(
+                engine=owned_engine,
+                configuration=research_configuration,
+            )
+        except Exception:
+            research_runtime = None
+    app.state.research_runtime = research_runtime
 
     return app
 
