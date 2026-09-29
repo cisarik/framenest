@@ -2519,3 +2519,426 @@ kronika_approved_media_locations = Table(
         name="ck_kronika_approved_media_locations_availability",
     ),
 )
+
+_RESEARCH_LIFECYCLE_STATES = (
+    "'admitted', 'submitting', 'running', 'validating', 'saved', "
+    "'refused', 'failed', 'incomplete', 'cancel_requested', 'cancelled', "
+    "'timeout', 'submission_unknown'"
+)
+_RESEARCH_CLEANUP_STATES = "'not_required', 'pending', 'deleted', 'failed', 'unknown'"
+_RESEARCH_ACCOUNTING_STATES = "'reserved', 'reconciled', 'unknown'"
+_RESEARCH_LOWER_HEX_64 = (
+    "length({column}) = 64 "
+    "AND {column} = lower({column}) "
+    "AND {column} NOT GLOB '*[^0-9a-f]*'"
+)
+
+research_requests = Table(
+    "research_requests",
+    metadata,
+    Column("operation_id", Text(), nullable=False),
+    Column("owner_login_key", Text(), nullable=False),
+    Column("client_request_id", Text(), nullable=False),
+    Column("request_fingerprint", Text(), nullable=False),
+    Column("kind", Text(), nullable=False),
+    Column("prompt_text", Text(), nullable=False),
+    Column("prompt_utf8_bytes", Integer(), nullable=False),
+    Column("lifecycle_state", Text(), nullable=False),
+    Column("provider_id", Text(), nullable=False),
+    Column("model_id", Text(), nullable=False),
+    Column("configuration_version", Text(), nullable=False),
+    Column("reasoning_effort", Text(), nullable=False),
+    Column("max_tool_calls", Integer(), nullable=False),
+    Column("max_output_tokens", Integer(), nullable=False),
+    Column("deadline_seconds", Integer(), nullable=False),
+    Column("reservation_micro_usd", Integer(), nullable=False),
+    Column("remote_handle_json", Text(), nullable=True),
+    Column("checkpoint_json", Text(), nullable=True),
+    Column("checkpoint_sha256", Text(), nullable=True),
+    Column("record_id", Text(), nullable=True),
+    Column("error_code", Text(), nullable=True),
+    Column("cancel_requested_at_ms", Integer(), nullable=True),
+    Column("cancellation_confirmed_at_ms", Integer(), nullable=True),
+    Column("cleanup_state", Text(), nullable=False),
+    Column("accounting_state", Text(), nullable=False),
+    Column("created_at_ms", Integer(), nullable=False),
+    Column("admitted_at_ms", Integer(), nullable=False),
+    Column("submitted_at_ms", Integer(), nullable=True),
+    Column("finished_at_ms", Integer(), nullable=True),
+    Column("updated_at_ms", Integer(), nullable=False),
+    PrimaryKeyConstraint("operation_id", name="pk_research_requests"),
+    UniqueConstraint("record_id", name="uq_research_requests_record_id"),
+    UniqueConstraint(
+        "owner_login_key",
+        "client_request_id",
+        name="uq_research_requests_client",
+    ),
+    ForeignKeyConstraint(
+        ["record_id"],
+        ["kronika_records.id"],
+        name="fk_research_requests_record_id",
+        ondelete="RESTRICT",
+    ),
+    CheckConstraint(
+        f"{_kronika_bytes('operation_id', 1, 128)} AND {_KRONIKA_NOT_UUID.format(column='operation_id')}",
+        name="ck_research_requests_operation_id",
+    ),
+    CheckConstraint(
+        _KRONIKA_LOGIN_SQL.format(column="owner_login_key"),
+        name="ck_research_requests_owner_login_key",
+    ),
+    CheckConstraint(
+        _kronika_bytes("client_request_id", 1, 128),
+        name="ck_research_requests_client_request_id",
+    ),
+    CheckConstraint(
+        _RESEARCH_LOWER_HEX_64.format(column="request_fingerprint"),
+        name="ck_research_requests_fingerprint",
+    ),
+    CheckConstraint(
+        "kind IN ('search', 'research')",
+        name="ck_research_requests_kind",
+    ),
+    CheckConstraint(
+        f"{_kronika_bytes('prompt_text', 1, 16384)} AND length(trim(prompt_text)) > 0",
+        name="ck_research_requests_prompt_text",
+    ),
+    CheckConstraint(
+        "prompt_utf8_bytes >= 1 AND prompt_utf8_bytes <= 16384 "
+        "AND prompt_utf8_bytes = length(CAST(prompt_text AS BLOB))",
+        name="ck_research_requests_prompt_bytes",
+    ),
+    CheckConstraint(
+        f"lifecycle_state IN ({_RESEARCH_LIFECYCLE_STATES})",
+        name="ck_research_requests_lifecycle_state",
+    ),
+    CheckConstraint(
+        _kronika_bytes("provider_id", 1, 64),
+        name="ck_research_requests_provider_id",
+    ),
+    CheckConstraint(
+        _kronika_bytes("model_id", 1, 128),
+        name="ck_research_requests_model_id",
+    ),
+    CheckConstraint(
+        _kronika_bytes("configuration_version", 1, 16),
+        name="ck_research_requests_configuration_version",
+    ),
+    CheckConstraint(
+        "reasoning_effort IN ('low', 'high')",
+        name="ck_research_requests_reasoning_effort",
+    ),
+    CheckConstraint(
+        "max_tool_calls >= 1 AND max_tool_calls <= 20",
+        name="ck_research_requests_max_tool_calls",
+    ),
+    CheckConstraint(
+        "max_output_tokens >= 1 AND max_output_tokens <= 32768",
+        name="ck_research_requests_max_output_tokens",
+    ),
+    CheckConstraint(
+        "deadline_seconds >= 1 AND deadline_seconds <= 1800",
+        name="ck_research_requests_deadline_seconds",
+    ),
+    CheckConstraint(
+        "reservation_micro_usd >= 1 AND reservation_micro_usd <= 5000000",
+        name="ck_research_requests_reservation",
+    ),
+    CheckConstraint(
+        "remote_handle_json IS NULL OR "
+        "(length(remote_handle_json) >= 2 AND length(remote_handle_json) <= 65536)",
+        name="ck_research_requests_remote_handle",
+    ),
+    CheckConstraint(
+        "checkpoint_json IS NULL OR "
+        "(length(checkpoint_json) >= 2 AND length(checkpoint_json) <= 2097152)",
+        name="ck_research_requests_checkpoint_json",
+    ),
+    CheckConstraint(
+        "checkpoint_sha256 IS NULL OR ("
+        f"{_RESEARCH_LOWER_HEX_64.format(column='checkpoint_sha256')})",
+        name="ck_research_requests_checkpoint_sha256",
+    ),
+    CheckConstraint(
+        "record_id IS NULL OR length(record_id) = 36",
+        name="ck_research_requests_record_id",
+    ),
+    CheckConstraint(
+        f"error_code IS NULL OR {_kronika_bytes('error_code', 1, 64)}",
+        name="ck_research_requests_error_code",
+    ),
+    CheckConstraint(
+        "cancel_requested_at_ms IS NULL OR cancel_requested_at_ms >= 0",
+        name="ck_research_requests_cancel_requested_at_ms",
+    ),
+    CheckConstraint(
+        "cancellation_confirmed_at_ms IS NULL OR ("
+        "cancel_requested_at_ms IS NOT NULL "
+        "AND cancellation_confirmed_at_ms >= cancel_requested_at_ms)",
+        name="ck_research_requests_cancellation_confirmed_at_ms",
+    ),
+    CheckConstraint(
+        f"cleanup_state IN ({_RESEARCH_CLEANUP_STATES})",
+        name="ck_research_requests_cleanup_state",
+    ),
+    CheckConstraint(
+        f"accounting_state IN ({_RESEARCH_ACCOUNTING_STATES})",
+        name="ck_research_requests_accounting_state",
+    ),
+    CheckConstraint(
+        "created_at_ms >= 0",
+        name="ck_research_requests_created_at_ms",
+    ),
+    CheckConstraint(
+        "admitted_at_ms >= created_at_ms",
+        name="ck_research_requests_admitted_at_ms",
+    ),
+    CheckConstraint(
+        "submitted_at_ms IS NULL OR submitted_at_ms >= admitted_at_ms",
+        name="ck_research_requests_submitted_at_ms",
+    ),
+    CheckConstraint(
+        "finished_at_ms IS NULL OR finished_at_ms >= admitted_at_ms",
+        name="ck_research_requests_finished_at_ms",
+    ),
+    CheckConstraint(
+        "updated_at_ms >= created_at_ms",
+        name="ck_research_requests_updated_at_ms",
+    ),
+)
+Index(
+    "ix_research_requests_state",
+    research_requests.c.lifecycle_state,
+    research_requests.c.updated_at_ms,
+)
+Index(
+    "ix_research_requests_owner_history",
+    research_requests.c.owner_login_key,
+    research_requests.c.created_at_ms.desc(),
+    research_requests.c.operation_id.asc(),
+)
+
+research_active_slot = Table(
+    "research_active_slot",
+    metadata,
+    Column("id", Integer(), nullable=False),
+    Column("operation_id", Text(), nullable=True),
+    Column("held_since_ms", Integer(), nullable=True),
+    PrimaryKeyConstraint("id", name="pk_research_active_slot"),
+    ForeignKeyConstraint(
+        ["operation_id"],
+        ["research_requests.operation_id"],
+        name="fk_research_active_slot_operation_id",
+        ondelete="RESTRICT",
+    ),
+    CheckConstraint("id = 1", name="ck_research_active_slot_single_row"),
+    CheckConstraint(
+        "(operation_id IS NULL AND held_since_ms IS NULL) OR ("
+        "operation_id IS NOT NULL AND held_since_ms IS NOT NULL "
+        "AND held_since_ms >= 0)",
+        name="ck_research_active_slot_shape",
+    ),
+)
+
+research_operations = Table(
+    "research_operations",
+    metadata,
+    Column("operation_row_id", Text(), nullable=False),
+    Column("request_id", Text(), nullable=False),
+    Column("parent_operation_id", Text(), nullable=True),
+    Column("purpose", Text(), nullable=False),
+    Column("operation", Text(), nullable=False),
+    Column("attempt_number", Integer(), nullable=False),
+    Column("started_at_ms", Integer(), nullable=False),
+    Column("finished_at_ms", Integer(), nullable=True),
+    Column("terminal_classification", Text(), nullable=True),
+    Column("remote_handle_reference", Text(), nullable=True),
+    Column("transport_outcome", Text(), nullable=True),
+    Column("reserved_usd_micros", Integer(), nullable=True),
+    Column("input_tokens", Integer(), nullable=True),
+    Column("cached_input_tokens", Integer(), nullable=True),
+    Column("output_tokens", Integer(), nullable=True),
+    Column("reasoning_tokens_as_subset", Integer(), nullable=True),
+    Column("web_tool_calls", Integer(), nullable=True),
+    Column("calculated_cost_usd_micros", Integer(), nullable=True),
+    Column("accounting_state", Text(), nullable=False),
+    Column("cleanup_state", Text(), nullable=True),
+    Column("cancellation_state", Text(), nullable=True),
+    PrimaryKeyConstraint("operation_row_id", name="pk_research_operations"),
+    ForeignKeyConstraint(
+        ["request_id"],
+        ["research_requests.operation_id"],
+        name="fk_research_operations_request_id",
+        ondelete="RESTRICT",
+    ),
+    ForeignKeyConstraint(
+        ["parent_operation_id"],
+        ["research_operations.operation_row_id"],
+        name="fk_research_operations_parent",
+        ondelete="RESTRICT",
+    ),
+    CheckConstraint(
+        "length(operation_row_id) = 36",
+        name="ck_research_operations_row_id",
+    ),
+    CheckConstraint(
+        "parent_operation_id IS NULL OR length(parent_operation_id) = 36",
+        name="ck_research_operations_parent_id",
+    ),
+    CheckConstraint(
+        "purpose IN ('search', 'research', 'synthetic_acceptance')",
+        name="ck_research_operations_purpose",
+    ),
+    CheckConstraint(
+        "operation IN ('create', 'poll', 'cancel', 'delete')",
+        name="ck_research_operations_operation",
+    ),
+    CheckConstraint(
+        "attempt_number >= 1",
+        name="ck_research_operations_attempt_number",
+    ),
+    CheckConstraint(
+        "started_at_ms >= 0",
+        name="ck_research_operations_started_at_ms",
+    ),
+    CheckConstraint(
+        "finished_at_ms IS NULL OR finished_at_ms >= started_at_ms",
+        name="ck_research_operations_finished_at_ms",
+    ),
+    CheckConstraint(
+        f"terminal_classification IS NULL OR "
+        f"{_kronika_bytes('terminal_classification', 1, 64)}",
+        name="ck_research_operations_terminal_classification",
+    ),
+    CheckConstraint(
+        f"remote_handle_reference IS NULL OR "
+        f"{_kronika_bytes('remote_handle_reference', 1, 256)}",
+        name="ck_research_operations_remote_handle_reference",
+    ),
+    CheckConstraint(
+        f"transport_outcome IS NULL OR {_kronika_bytes('transport_outcome', 1, 64)}",
+        name="ck_research_operations_transport_outcome",
+    ),
+    CheckConstraint(
+        "reserved_usd_micros IS NULL OR "
+        "(reserved_usd_micros >= 0 AND reserved_usd_micros <= 5000000)",
+        name="ck_research_operations_reserved",
+    ),
+    CheckConstraint(
+        "input_tokens IS NULL OR input_tokens >= 0",
+        name="ck_research_operations_input_tokens",
+    ),
+    CheckConstraint(
+        "cached_input_tokens IS NULL OR cached_input_tokens >= 0",
+        name="ck_research_operations_cached_input_tokens",
+    ),
+    CheckConstraint(
+        "output_tokens IS NULL OR output_tokens >= 0",
+        name="ck_research_operations_output_tokens",
+    ),
+    CheckConstraint(
+        "reasoning_tokens_as_subset IS NULL OR reasoning_tokens_as_subset >= 0",
+        name="ck_research_operations_reasoning_tokens",
+    ),
+    CheckConstraint(
+        "web_tool_calls IS NULL OR web_tool_calls >= 0",
+        name="ck_research_operations_web_tool_calls",
+    ),
+    CheckConstraint(
+        "calculated_cost_usd_micros IS NULL OR calculated_cost_usd_micros >= 0",
+        name="ck_research_operations_calculated_cost",
+    ),
+    CheckConstraint(
+        "cached_input_tokens IS NULL OR input_tokens IS NULL "
+        "OR cached_input_tokens <= input_tokens",
+        name="ck_research_operations_cached_subset",
+    ),
+    CheckConstraint(
+        "reasoning_tokens_as_subset IS NULL OR ("
+        "output_tokens IS NOT NULL "
+        "AND reasoning_tokens_as_subset <= output_tokens)",
+        name="ck_research_operations_reasoning_subset",
+    ),
+    CheckConstraint(
+        f"accounting_state IN ({_RESEARCH_ACCOUNTING_STATES})",
+        name="ck_research_operations_accounting_state",
+    ),
+    CheckConstraint(
+        f"cleanup_state IS NULL OR {_kronika_bytes('cleanup_state', 1, 32)}",
+        name="ck_research_operations_cleanup_state",
+    ),
+    CheckConstraint(
+        f"cancellation_state IS NULL OR {_kronika_bytes('cancellation_state', 1, 32)}",
+        name="ck_research_operations_cancellation_state",
+    ),
+)
+Index(
+    "ix_research_operations_request",
+    research_operations.c.request_id,
+    research_operations.c.started_at_ms,
+)
+
+research_budget_holds = Table(
+    "research_budget_holds",
+    metadata,
+    Column("operation_id", Text(), nullable=False),
+    Column("day_key", Text(), nullable=False),
+    Column("month_key", Text(), nullable=False),
+    Column("reserved_usd_micros", Integer(), nullable=False),
+    Column("accounted_usd_micros", Integer(), nullable=True),
+    Column("state", Text(), nullable=False),
+    Column("created_at_ms", Integer(), nullable=False),
+    Column("reconciled_at_ms", Integer(), nullable=True),
+    PrimaryKeyConstraint("operation_id", name="pk_research_budget_holds"),
+    ForeignKeyConstraint(
+        ["operation_id"],
+        ["research_requests.operation_id"],
+        name="fk_research_budget_holds_request",
+        ondelete="RESTRICT",
+    ),
+    CheckConstraint(
+        "day_key GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'",
+        name="ck_research_budget_holds_day_key",
+    ),
+    CheckConstraint(
+        "month_key GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]'",
+        name="ck_research_budget_holds_month_key",
+    ),
+    CheckConstraint(
+        "reserved_usd_micros >= 1 AND reserved_usd_micros <= 5000000",
+        name="ck_research_budget_holds_reserved",
+    ),
+    CheckConstraint(
+        "accounted_usd_micros IS NULL OR accounted_usd_micros >= 0",
+        name="ck_research_budget_holds_accounted",
+    ),
+    CheckConstraint(
+        f"state IN ({_RESEARCH_ACCOUNTING_STATES})",
+        name="ck_research_budget_holds_state",
+    ),
+    CheckConstraint(
+        "(state = 'reserved' AND accounted_usd_micros IS NULL "
+        "AND reconciled_at_ms IS NULL) OR ("
+        "state IN ('reconciled', 'unknown') "
+        "AND accounted_usd_micros IS NOT NULL AND reconciled_at_ms IS NOT NULL)",
+        name="ck_research_budget_holds_shape",
+    ),
+    CheckConstraint(
+        "created_at_ms >= 0",
+        name="ck_research_budget_holds_created_at_ms",
+    ),
+    CheckConstraint(
+        "reconciled_at_ms IS NULL OR reconciled_at_ms >= created_at_ms",
+        name="ck_research_budget_holds_reconciled_at_ms",
+    ),
+)
+Index(
+    "ix_research_budget_holds_day",
+    research_budget_holds.c.day_key,
+    research_budget_holds.c.state,
+)
+Index(
+    "ix_research_budget_holds_month",
+    research_budget_holds.c.month_key,
+    research_budget_holds.c.state,
+)

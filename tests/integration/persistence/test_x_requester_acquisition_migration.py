@@ -91,7 +91,7 @@ def test_head_is_0030() -> None:
         from alembic.script import ScriptDirectory
 
         scripts = ScriptDirectory.from_config(config)
-        assert scripts.get_current_head() == "0034"
+        assert scripts.get_current_head() == "0035"
 
 
 def test_upgrade_0027_to_0028_creates_x_tables_and_preserves_rows(tmp_path: Path) -> None:

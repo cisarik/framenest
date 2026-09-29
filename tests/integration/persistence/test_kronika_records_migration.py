@@ -56,7 +56,7 @@ def test_head_is_0034() -> None:
         "framenest.infrastructure.persistence.alembic_environment"
     ) as config:
         scripts = ScriptDirectory.from_config(config)
-        assert scripts.get_current_head() == "0034"
+        assert scripts.get_current_head() == "0035"
 
 
 def test_empty_upgrade_downgrade_and_reupgrade(tmp_path: Path) -> None:
@@ -64,7 +64,7 @@ def test_empty_upgrade_downgrade_and_reupgrade(tmp_path: Path) -> None:
     _migrate(database, "head")
     connection = _connect(database)
     try:
-        assert _revision(connection) == "0034"
+        assert _revision(connection) == "0035"
         tables = {
             row[0]
             for row in connection.execute(
@@ -91,7 +91,7 @@ def test_empty_upgrade_downgrade_and_reupgrade(tmp_path: Path) -> None:
     _migrate(database, "head")
     connection = _connect(database)
     try:
-        assert _revision(connection) == "0034"
+        assert _revision(connection) == "0035"
     finally:
         connection.close()
 
@@ -162,7 +162,7 @@ def test_populated_downgrade_refuses_without_dropping_rows(tmp_path: Path) -> No
     assert "refused" in str(caught.value).lower()
     connection = _connect(database)
     try:
-        assert _revision(connection) == "0034"
+        assert _revision(connection) == "0035"
         assert connection.execute("SELECT COUNT(*) FROM kronika_documents").fetchone()[0] == 1
     finally:
         connection.close()
