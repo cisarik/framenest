@@ -1,6 +1,7 @@
 """Installed-package verification for FrameNest web application resources."""
 
 from __future__ import annotations
+from tests.support.tooling import resolve_tool
 
 import json
 import subprocess
@@ -36,7 +37,7 @@ def test_web_resources_are_included_in_built_wheel(
     wheelhouse.mkdir()
 
     build = subprocess.run(
-        ["poetry", "build", "--format", "wheel", "--output", str(wheelhouse)],
+        [resolve_tool("poetry"), "build", "--format", "wheel", "--output", str(wheelhouse)],
         cwd=REPOSITORY_ROOT,
         check=False,
         capture_output=True,
@@ -65,7 +66,7 @@ def test_web_resources_are_discoverable_from_installed_wheel(
     wheelhouse.mkdir()
 
     build = subprocess.run(
-        ["poetry", "build", "--format", "wheel", "--output", str(wheelhouse)],
+        [resolve_tool("poetry"), "build", "--format", "wheel", "--output", str(wheelhouse)],
         cwd=REPOSITORY_ROOT,
         check=False,
         capture_output=True,

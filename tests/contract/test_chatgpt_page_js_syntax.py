@@ -1,6 +1,7 @@
 """JavaScript syntax, protocol version, and retained pack keys."""
 
 from __future__ import annotations
+from tests.support.tooling import resolve_tool
 
 import ast
 import json
@@ -43,7 +44,7 @@ def test_retained_javascript_parses() -> None:
     assert files
     for path in files:
         check = subprocess.run(
-            ["node", "--check", str(path)],
+            [resolve_tool("node"), "--check", str(path)],
             cwd=REPOSITORY_ROOT,
             check=False,
             capture_output=True,
@@ -52,7 +53,7 @@ def test_retained_javascript_parses() -> None:
         )
         assert check.returncode == 0, f"{path}: {check.stderr}"
     protocol = subprocess.run(
-        ["node", "--test", str(PROTOCOL_TEST)],
+        [resolve_tool("node"), "--test", str(PROTOCOL_TEST)],
         cwd=REPOSITORY_ROOT,
         check=False,
         capture_output=True,

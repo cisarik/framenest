@@ -11,6 +11,7 @@ import sys
 from typing import Any
 
 import pytest
+from tests.support.tooling import resolve_tool
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 FISH_ENTRYPOINT = REPOSITORY_ROOT / "deploy" / "ubuntu" / "fn-production-env-deploy"
@@ -123,7 +124,7 @@ def test_fish_entrypoint_has_valid_syntax() -> None:
     first_line = FISH_ENTRYPOINT.read_text(encoding="utf-8").splitlines()[0]
 
     assert first_line == "#!/usr/bin/env fish"
-    subprocess.run(["fish", "--no-execute", str(FISH_ENTRYPOINT)], check=True)
+    subprocess.run([resolve_tool("fish"), "--no-execute", str(FISH_ENTRYPOINT)], check=True)
 
 
 def test_fish_entrypoint_avoids_shell_tracing_and_bash_secret_patterns() -> None:

@@ -10,6 +10,7 @@ import sys
 from typing import Any
 
 import pytest
+from tests.support.tooling import resolve_tool
 
 from framenest.adapters.cli import development as cli
 from framenest.infrastructure.runtime.development import RuntimeStatus
@@ -94,7 +95,7 @@ class _SetupScenario:
     ) -> subprocess.CompletedProcess[str]:
         self.prepare(failing_poetry=failing_poetry, without_uv=without_uv)
         return subprocess.run(
-            ["fish", str(self.launcher), "setup"],
+            [resolve_tool("fish"), str(self.launcher), "setup"],
             cwd=self.bin_dir,
             env=self.env(tools_only_path=without_uv),
             check=False,
@@ -104,7 +105,7 @@ class _SetupScenario:
 
     def fresh_fish(self, script: str) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
-            ["fish", "-c", script],
+            [resolve_tool("fish"), "-c", script],
             env=self.env(),
             check=False,
             text=True,
@@ -114,7 +115,7 @@ class _SetupScenario:
 
 def _real_fish_user_paths() -> list[str]:
     result = subprocess.run(
-        ["fish", "-c", "for p in $fish_user_paths; echo $p; end"],
+        [resolve_tool("fish"), "-c", "for p in $fish_user_paths; echo $p; end"],
         check=False,
         text=True,
         capture_output=True,
@@ -202,7 +203,7 @@ def test_root_wrapper_is_executable_fish_script() -> None:
 
     assert mode & stat.S_IXUSR
     assert ROOT_WRAPPER.read_text(encoding="utf-8").splitlines()[0] == "#!/usr/bin/env fish"
-    subprocess.run(["fish", "--no-execute", str(ROOT_WRAPPER)], check=True)
+    subprocess.run([resolve_tool("fish"), "--no-execute", str(ROOT_WRAPPER)], check=True)
 
 
 def test_root_wrapper_avoids_eval_and_bash_only_constructs() -> None:
@@ -235,7 +236,7 @@ def test_root_wrapper_resolves_script_root_from_another_cwd_and_preserves_exit(
     cwd.mkdir()
 
     result = subprocess.run(
-        ["fish", str(launcher), "status", "value with spaces"],
+        [resolve_tool("fish"), str(launcher), "status", "value with spaces"],
         cwd=cwd,
         check=False,
         text=True,
@@ -260,7 +261,7 @@ def test_root_wrapper_routes_ai_commands_to_ai_controller(tmp_path: Path) -> Non
     controller.chmod(0o755)
 
     result = subprocess.run(
-        ["fish", str(launcher), "ai", "status", "--config-path"],
+        [resolve_tool("fish"), str(launcher), "ai", "status", "--config-path"],
         check=False,
         text=True,
         capture_output=True,
@@ -300,7 +301,7 @@ def test_root_wrapper_loads_local_ai_env_for_ai_controller(tmp_path: Path) -> No
     controller.chmod(0o755)
 
     result = subprocess.run(
-        ["fish", str(launcher), "ai", "status"],
+        [resolve_tool("fish"), str(launcher), "ai", "status"],
         check=False,
         text=True,
         capture_output=True,
@@ -342,7 +343,7 @@ def test_root_wrapper_loads_local_ai_env_for_managed_start(tmp_path: Path) -> No
     controller.chmod(0o755)
 
     result = subprocess.run(
-        ["fish", str(launcher), "start", "--no-open"],
+        [resolve_tool("fish"), str(launcher), "start", "--no-open"],
         check=False,
         text=True,
         capture_output=True,
@@ -370,7 +371,7 @@ def test_root_wrapper_rejects_symlinked_local_ai_env(tmp_path: Path) -> None:
     controller.chmod(0o755)
 
     result = subprocess.run(
-        ["fish", str(launcher), "ai", "status"],
+        [resolve_tool("fish"), str(launcher), "ai", "status"],
         check=False,
         text=True,
         capture_output=True,
@@ -399,7 +400,7 @@ def test_root_wrapper_rejects_insecure_local_ai_env_permissions(tmp_path: Path) 
     controller.chmod(0o755)
 
     result = subprocess.run(
-        ["fish", str(launcher), "ai", "status"],
+        [resolve_tool("fish"), str(launcher), "ai", "status"],
         check=False,
         text=True,
         capture_output=True,
@@ -429,7 +430,7 @@ def test_root_wrapper_rejects_invalid_local_ai_env_before_execution(tmp_path: Pa
     controller.chmod(0o755)
 
     result = subprocess.run(
-        ["fish", str(launcher), "ai", "status"],
+        [resolve_tool("fish"), str(launcher), "ai", "status"],
         check=False,
         text=True,
         capture_output=True,

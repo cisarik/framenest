@@ -180,7 +180,8 @@ def test_ap_exec_child_contains_approved_execution_values() -> None:
     ).stdout.strip()
     assert resolved == baseline
 
-    assert set(os.environ) <= AP_ENVELOPE_KEYS | {
+    # macOS Core Foundation injects __CF_USER_TEXT_ENCODING at exec.
+    assert set(os.environ) <= AP_ENVELOPE_KEYS | {"__CF_USER_TEXT_ENCODING"} | {
         key for key in os.environ if key.startswith("PYTEST_")
     }
 

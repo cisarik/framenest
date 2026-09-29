@@ -7,6 +7,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from tests.support.tooling import resolve_tool, resolve_tool_optional
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 UBUNTU_DOC_PATH = REPOSITORY_ROOT / "docs" / "UBUNTU_NUC_DEPLOYMENT.md"
@@ -244,10 +245,10 @@ def test_fish_launcher_remains_development_only_and_repo_rooted() -> None:
     assert "./framenest youtube ingest URL" in text
 
 
-@pytest.mark.skipif(shutil.which("fish") is None, reason="fish is not installed")
+@pytest.mark.skipif(resolve_tool_optional("fish") is None, reason="fish is not installed")
 def test_fish_launcher_parses_on_its_development_host() -> None:
     result = subprocess.run(
-        ["fish", "--no-execute", str(LAUNCHER_PATH)],
+        [resolve_tool("fish"), "--no-execute", str(LAUNCHER_PATH)],
         capture_output=True,
         text=True,
         check=False,

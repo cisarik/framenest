@@ -86,6 +86,10 @@ def _process_group_exists(pgid: int) -> bool:
         os.killpg(pgid, 0)
     except ProcessLookupError:
         return False
+    except PermissionError:
+        # Darwin reports EPERM for a group whose members are all gone or
+        # unreapable zombies; there is no live signalable member to clean up.
+        return False
     except OSError:
         raise ProcessExecutionError(PROCESS_FAILED_MESSAGE) from None
     return True
@@ -95,6 +99,9 @@ def _signal_process_group(pgid: int, sig: signal.Signals) -> None:
     try:
         os.killpg(pgid, sig)
     except ProcessLookupError:
+        return
+    except PermissionError:
+        # Same Darwin semantics as _process_group_exists: nothing signalable.
         return
     except OSError:
         raise ProcessExecutionError(PROCESS_FAILED_MESSAGE) from None

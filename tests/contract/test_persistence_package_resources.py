@@ -1,6 +1,7 @@
 """Installed-package verification for FrameNest migration resources."""
 
 from __future__ import annotations
+from tests.support.tooling import resolve_tool
 
 import json
 import subprocess
@@ -19,7 +20,7 @@ def test_migration_resources_are_discoverable_from_installed_wheel(
     wheelhouse.mkdir()
 
     build = subprocess.run(
-        ["poetry", "build", "--format", "wheel", "--output", str(wheelhouse)],
+        [resolve_tool("poetry"), "build", "--format", "wheel", "--output", str(wheelhouse)],
         cwd=REPOSITORY_ROOT,
         check=False,
         capture_output=True,

@@ -9,12 +9,28 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 import stat
 import subprocess
 import sys
 import time
 import uuid
 from pathlib import Path
+
+_FALLBACK_TOOL_DIRECTORIES = ("/opt/homebrew/bin", "/usr/local/bin")
+
+
+def _node_executable() -> str:
+    """Resolve node from PATH, then standard Homebrew locations on macOS."""
+    found = shutil.which("node")
+    if found:
+        return found
+    for directory in _FALLBACK_TOOL_DIRECTORIES:
+        candidate = Path(directory) / "node"
+        if candidate.is_file() and os.access(candidate, os.X_OK):
+            return str(candidate)
+    return "node"
+
 
 from kronika_capture import __version__, paths
 from kronika_capture.bridge.server import serve
@@ -307,7 +323,7 @@ def build_runner_argv(args: argparse.Namespace) -> list[str] | None:
     if not script.is_file():
         return None
     argv = [
-        "node",
+        _node_executable(),
         str(script),
         "run",
         "--state-dir",
@@ -347,7 +363,7 @@ def _cmd_login(args: argparse.Namespace) -> int:
         print("error: packaged login wizard is missing", file=sys.stderr)
         return EXIT_BRIDGE
     completed = subprocess.run(
-        ["node", str(script), "login", "--profile", profile, "--chrome-path", args.chrome_path],
+        [_node_executable(), str(script), "login", "--profile", profile, "--chrome-path", args.chrome_path],
         check=False,
     )
     return completed.returncode

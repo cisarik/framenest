@@ -59,6 +59,7 @@ USER_CAPABILITIES = {
     "youtube.request",
     "x.request",
     "metadata.alias.write",
+    "research.run",
 }
 
 

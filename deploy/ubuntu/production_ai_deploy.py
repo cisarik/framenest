@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import shlex
 import stat
+import shutil
 import subprocess
 import sys
 from typing import Callable, Sequence
@@ -414,8 +415,24 @@ def _sanitize_secret(value: str) -> str:
     return value.strip()
 
 
+def _resolve_fish_executable() -> str:
+    """Resolve fish from PATH, then standard Homebrew locations on macOS."""
+    found = shutil.which("fish")
+    if found:
+        return found
+    for directory in ("/opt/homebrew/bin", "/usr/local/bin"):
+        candidate = Path(directory) / "fish"
+        if candidate.is_file() and os.access(candidate, os.X_OK):
+            return str(candidate)
+    return "fish"
+
+
 def _run_fish_no_execute(path: Path) -> None:
-    result = subprocess.run(["fish", "--no-execute", str(path)], check=False, capture_output=True)
+    result = subprocess.run(
+        [_resolve_fish_executable(), "--no-execute", str(path)],
+        check=False,
+        capture_output=True,
+    )
     if result.returncode != 0:
         raise DeploymentInputError("Credential source is invalid.")
 
@@ -434,7 +451,7 @@ def _extract_fish_secret(path: Path, identity: str) -> str:
         "end"
     )
     result = subprocess.run(
-        ["fish", "-c", script, str(path), identity],
+        [_resolve_fish_executable(), "-c", script, str(path), identity],
         check=False,
         capture_output=True,
         text=True,

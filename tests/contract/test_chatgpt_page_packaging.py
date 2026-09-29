@@ -1,6 +1,7 @@
 """Capture resources, provenance and both entry points in the built wheel."""
 
 from __future__ import annotations
+from tests.support.tooling import resolve_tool
 
 import json
 import subprocess
@@ -80,7 +81,7 @@ def test_wheel_contains_kernel_assets_and_entry_point(tmp_path: Path) -> None:
     wheelhouse = tmp_path / "wheelhouse"
     wheelhouse.mkdir()
     build = subprocess.run(
-        ["poetry", "build", "--format", "wheel", "--output", str(wheelhouse)],
+        [resolve_tool("poetry"), "build", "--format", "wheel", "--output", str(wheelhouse)],
         cwd=REPOSITORY_ROOT,
         check=False,
         capture_output=True,

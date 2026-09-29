@@ -1,6 +1,7 @@
 """Installed-package verification for the committed vision-probe fixture."""
 
 from __future__ import annotations
+from tests.support.tooling import resolve_tool
 
 import subprocess
 import zipfile
@@ -28,7 +29,7 @@ def test_vision_probe_fixture_is_included_in_built_wheel(tmp_path: Path) -> None
     wheelhouse.mkdir()
 
     build = subprocess.run(
-        ["poetry", "build", "--format", "wheel", "--output", str(wheelhouse)],
+        [resolve_tool("poetry"), "build", "--format", "wheel", "--output", str(wheelhouse)],
         cwd=REPOSITORY_ROOT,
         check=False,
         capture_output=True,

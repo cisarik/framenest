@@ -9,6 +9,7 @@ from html.parser import HTMLParser
 from pathlib import Path
 
 import pytest
+from tests.support.tooling import resolve_tool
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
 
@@ -103,7 +104,7 @@ def _evaluate_upload_should_poll(
         f"process.stdout.write(JSON.stringify(uploadShouldPoll({snapshot_literal})));\n"
     )
     result = subprocess.run(
-        ["node", "-e", program],
+        [resolve_tool("node"), "-e", program],
         check=True,
         capture_output=True,
         text=True,

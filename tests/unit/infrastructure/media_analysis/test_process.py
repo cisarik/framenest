@@ -130,6 +130,9 @@ def _cleanup_process_group(pgid: int) -> None:
         os.killpg(pgid, signal.SIGKILL)
     except ProcessLookupError:
         return
+    except PermissionError:
+        # Darwin: the group holds no signalable member any more.
+        return
 
 
 def _descendant_probe_script(

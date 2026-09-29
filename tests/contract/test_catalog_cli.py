@@ -14,6 +14,7 @@ from typing import Any
 from unittest.mock import patch
 
 import pytest
+from tests.support.tooling import resolve_tool
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 CATALOG_CONSOLE_SCRIPT = REPOSITORY_ROOT / ".venv" / "bin" / "framenest-catalog"
@@ -1071,8 +1072,9 @@ def test_library_scan_preview_direct_process_has_no_traceback_or_leaks(tmp_path:
 
 
 def _generate_tiny_mp4(path: Path) -> None:
-    ffmpeg = shutil.which("ffmpeg")
-    if ffmpeg is None:
+    try:
+        ffmpeg = resolve_tool("ffmpeg")
+    except FileNotFoundError:
         pytest.fail("ffmpeg is required for analyze-preview contract tests")
     subprocess.run(
         [

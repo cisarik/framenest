@@ -6,6 +6,7 @@ import subprocess
 import uuid
 
 import pytest
+from tests.support.tooling import resolve_tool
 
 from kronika_capture import config, errors
 from kronika_capture.bridge.jobs import JobManager
@@ -87,7 +88,7 @@ def test_oversized_runner_result_is_durable_typed_failure(bridge, monkeypatch, m
     status, offered = _request(port, "GET", "/v1/next?wait=0", token=state.token)
     assert status == 200
     completed = subprocess.run(
-        ["node", "--input-type=module", "-e", RUNNER_PROBE],
+        [resolve_tool("node"), "--input-type=module", "-e", RUNNER_PROBE],
         cwd=Path(__file__).resolve().parents[3],
         input=json.dumps({"port": port, "token": state.token, "job": offered["job"],
                           "mode": mode, "limit": limit}),

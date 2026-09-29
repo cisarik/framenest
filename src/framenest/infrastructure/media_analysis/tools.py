@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import os
 import shutil
+from pathlib import Path
 
 from framenest.application.media_analysis import (
     FFPROBE_TIMEOUT_SECONDS,
@@ -19,9 +21,23 @@ TOOL_NOT_AVAILABLE_MESSAGE = "Required external media tool is not available."
 TOOL_IDENTITY_FAILED_MESSAGE = "External media tool identity check failed."
 
 
+_FALLBACK_TOOL_DIRECTORIES = ("/opt/homebrew/bin", "/usr/local/bin")
+
+
 def resolve_executable(name: str) -> str:
-    """Resolve one external tool to an absolute executable path."""
+    """Resolve one external tool to an absolute executable path.
+
+    ``PATH`` comes first. When it does not contain the tool, standard Homebrew
+    locations cover macOS development hosts whose execution envelope fixes
+    ``PATH`` to ``/usr/bin:/bin``.
+    """
     resolved = shutil.which(name)
+    if resolved is None:
+        for directory in _FALLBACK_TOOL_DIRECTORIES:
+            candidate = Path(directory) / name
+            if candidate.is_file() and os.access(candidate, os.X_OK):
+                resolved = str(candidate)
+                break
     if resolved is None:
         raise ProcessExecutionError(TOOL_NOT_AVAILABLE_MESSAGE)
     return resolved
