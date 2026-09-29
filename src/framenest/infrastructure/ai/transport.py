@@ -73,6 +73,19 @@ class HttpsJsonTransport:
         )
         return self._execute(request)
 
+    def delete_json(
+        self,
+        url: str,
+        *,
+        headers: Mapping[str, str],
+    ) -> HttpsJsonResponse:
+        request = urllib.request.Request(
+            url,
+            headers=dict(headers),
+            method="DELETE",
+        )
+        return self._execute(request)
+
     def _execute(self, request: urllib.request.Request) -> HttpsJsonResponse:
         try:
             with urllib.request.urlopen(

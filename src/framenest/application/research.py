@@ -290,10 +290,16 @@ class ResearchCoordinator:
                 accounting=ResearchAccountingState.UNKNOWN,
             )
         if observation.kind is ProviderObservationKind.FAILED:
+            code = observation.error_code or ResearchErrorCode.PROVIDER_UNAVAILABLE
+            state = (
+                ResearchLifecycleState.INCOMPLETE
+                if code is ResearchErrorCode.INCOMPLETE_RESULT
+                else ResearchLifecycleState.FAILED
+            )
             return self._finish(
                 row,
-                ResearchLifecycleState.FAILED,
-                observation.error_code or ResearchErrorCode.PROVIDER_UNAVAILABLE,
+                state,
+                code,
                 accounting=ResearchAccountingState.UNKNOWN,
             )
         if observation.kind is ProviderObservationKind.CANCELLED:
@@ -362,10 +368,16 @@ class ResearchCoordinator:
                 accounting=ResearchAccountingState.UNKNOWN,
             )
         if observation.kind is ProviderObservationKind.FAILED:
+            code = observation.error_code or ResearchErrorCode.PROVIDER_UNAVAILABLE
+            state = (
+                ResearchLifecycleState.INCOMPLETE
+                if code is ResearchErrorCode.INCOMPLETE_RESULT
+                else ResearchLifecycleState.FAILED
+            )
             return self._finish(
                 row,
-                ResearchLifecycleState.FAILED,
-                observation.error_code or ResearchErrorCode.PROVIDER_UNAVAILABLE,
+                state,
+                code,
                 accounting=ResearchAccountingState.UNKNOWN,
             )
         if observation.kind is ProviderObservationKind.CANCELLED:
@@ -521,10 +533,16 @@ class ResearchCoordinator:
                 accounting=ResearchAccountingState.UNKNOWN,
             )
         if observation.kind is ProviderObservationKind.FAILED:
+            code = observation.error_code or ResearchErrorCode.PROVIDER_UNAVAILABLE
+            state = (
+                ResearchLifecycleState.INCOMPLETE
+                if code is ResearchErrorCode.INCOMPLETE_RESULT
+                else ResearchLifecycleState.FAILED
+            )
             return self._finish(
                 row,
-                ResearchLifecycleState.FAILED,
-                observation.error_code or ResearchErrorCode.PROVIDER_UNAVAILABLE,
+                state,
+                code,
                 accounting=ResearchAccountingState.UNKNOWN,
             )
         return row
