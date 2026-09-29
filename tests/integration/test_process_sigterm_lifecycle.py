@@ -16,7 +16,7 @@ from pathlib import Path
 import pytest
 
 WORKTREE_ROOT = Path(__file__).resolve().parents[2]
-CANONICAL_PYTHON = Path("/home/agile/Projects/framenest/.venv/bin/python")
+CANONICAL_PYTHON = Path(__file__).resolve().parents[2] / ".venv" / "bin" / "python"
 CHILD_SCRIPT = r'''
 from __future__ import annotations
 

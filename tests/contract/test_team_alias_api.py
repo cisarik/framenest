@@ -422,18 +422,18 @@ def test_trusted_ingress_records_team_alias_list_audit_event(tmp_path: Path) -> 
     assert row["http_status"] == 200
 
 
-def test_schema_head_sentences_are_0034() -> None:
+def test_schema_head_sentences_are_0035() -> None:
     readme = (REPOSITORY_ROOT / "README.md").read_text(encoding="utf-8")
     product = (REPOSITORY_ROOT / "PRODUCT.md").read_text(encoding="utf-8")
     roadmap = (REPOSITORY_ROOT / "ROADMAP.md").read_text(encoding="utf-8")
     spec = (REPOSITORY_ROOT / "SPEC.md").read_text(encoding="utf-8")
-    assert "schema head `0034`" in readme
+    assert "schema head `0035`" in readme
     assert "schema head `0032`" not in readme
-    assert "schema head `0034`" in product
+    assert "schema head `0035`" in product
     assert "schema head `0032`" not in product
-    assert "The current schema head is revision `0034`" in roadmap
+    assert "The current schema head is revision `0035`" in roadmap
     assert "The current schema head is revision `0032`" not in roadmap
-    assert "schema head `0034`" in spec
+    assert "schema head `0035`" in spec
     assert "implemented-for-backend" in spec
     assert "`GET /api/admin/media/{media_id}/aliases`" in spec
     assert "`metadata.alias.team.read`" in spec

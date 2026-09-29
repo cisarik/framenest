@@ -2,7 +2,7 @@
 
 ## Current Support Status
 
-FrameNest is in foundation-stage, pre-alpha development. Schema head `0034`
+FrameNest is in foundation-stage, pre-alpha development. Schema head `0035`
 adds private Kronika records and administrator approval as implementation
 evidence. That evidence is not an accepted, deployed, or published security
 boundary. Workspace content reads fail closed without a verified identity.

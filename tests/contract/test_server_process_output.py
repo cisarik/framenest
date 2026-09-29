@@ -17,7 +17,7 @@ from typing import Any
 import pytest
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
-CANONICAL_PYTHON = Path("/home/agile/Projects/framenest/.venv/bin/python")
+CANONICAL_PYTHON = Path(__file__).resolve().parents[2] / ".venv" / "bin" / "python"
 REPRESENTATIVE_SECRET = "process-output-contract-api-key-secret"
 STARTUP_TIMEOUT_SECONDS = 8.0
 SHUTDOWN_TIMEOUT_SECONDS = 8.0

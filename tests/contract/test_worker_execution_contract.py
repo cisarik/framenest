@@ -45,7 +45,7 @@ def test_ap_exec_precedes_raw_human_shell_python_routes() -> None:
     ap_route = text.index("## Canonical Cursor Worker Python Route")
     human_shell = text.index("## Clean Human Development Shell Only")
     poetry = text.index("poetry run pytest")
-    raw_venv = text.index("/home/agile/Projects/framenest/.venv/bin/python -m pytest")
+    raw_venv = text.index("<physical-repository-root>/.venv/bin/python -m pytest")
     assert ap_route < human_shell
     assert human_shell < poetry
     assert human_shell < raw_venv
@@ -88,4 +88,11 @@ def test_ledger_records_accepted_route_binding_observation() -> None:
     assert "Closure action: retain-active\n" in text
     assert "Historical evidence: none\n" in text
     assert "Provenance destroyed: no\n" in text
-    assert text.count("Entry:") == 1
+    assert text.count("Entry:") == 2
+    assert "Entry: darwin-bsd-awk-project-argv-counting\n" in text
+    assert "Entry state: implemented\n" in text
+    assert (
+        "Implementation status: implemented with "
+        "73e20ef80b88700d5fcbc397cd8edd4fc425869f\n" in text
+    )
+    assert "Closure action: remove-from-active-ledger\n" in text

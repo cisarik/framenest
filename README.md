@@ -76,7 +76,7 @@ multi-source downloader UI.
 The repository also contains the first persistence, registry, media catalog,
 local media-analysis, AI suggestion-review, and quarantine upload-transport
 foundations: a centralized SQLite database path setting, synchronous SQLAlchemy
-Core engine helpers, packaged Alembic resources through schema head `0034`,
+Core engine helpers, packaged Alembic resources through schema head `0035`,
 including private Kronika records and administrator approval as implemented
 working-tree evidence that is not yet accepted, deployed, or published,
 explicit database commands, local device and library registry tables, durable

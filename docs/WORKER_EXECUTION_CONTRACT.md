@@ -46,9 +46,9 @@ environment manager, Python wrapper, workstation repair, or NUC change.
 Canonical Cursor Worker Python evidence uses the baseline-bound AP envelope:
 
 ```text
-./.ap/ap project check --root /home/agile/Projects/framenest --baseline <EXACT_AUTHORIZED_COMMIT>
-./.ap/ap exec --root /home/agile/Projects/framenest --baseline <EXACT_AUTHORIZED_COMMIT> --operation runtime-info
-./.ap/ap exec --root /home/agile/Projects/framenest --baseline <EXACT_AUTHORIZED_COMMIT> --operation test-focus -- <tests> -q -p no:cacheprovider
+./.ap/ap project check --root <physical-repository-root> --baseline <EXACT_AUTHORIZED_COMMIT>
+./.ap/ap exec --root <physical-repository-root> --baseline <EXACT_AUTHORIZED_COMMIT> --operation runtime-info
+./.ap/ap exec --root <physical-repository-root> --baseline <EXACT_AUTHORIZED_COMMIT> --operation test-focus -- <tests> -q -p no:cacheprovider
 ```
 
 `--baseline` is execution-contract authority. It does not replace worktree
@@ -79,9 +79,9 @@ pass that worktree as `--root` so `sourceRoot` resolves under the candidate.
 Validation and execution:
 
 ```text
-./.ap/ap project check --root /home/agile/Projects/framenest --candidate
-./.ap/ap project check --root /home/agile/Projects/framenest --baseline <commit>
-./.ap/ap exec --root /home/agile/Projects/framenest \
+./.ap/ap project check --root <physical-repository-root> --candidate
+./.ap/ap project check --root <physical-repository-root> --baseline <commit>
+./.ap/ap exec --root <physical-repository-root> \
   --baseline <commit> --operation <id> [-- <trailing argv>]
 ```
 
@@ -195,7 +195,7 @@ owner; this section is the Worker classification owner.
 The canonical project environment on this development host is:
 
 ```text
-/home/agile/Projects/framenest/.venv
+<physical-repository-root>/.venv
 ```
 
 Workers must not casually:
@@ -254,16 +254,16 @@ or, for exact-worktree provenance in that clean human shell only:
 
 ```text
 PYTHONPATH=<exact-worktree>/src \
-  /home/agile/Projects/framenest/.venv/bin/python -m pytest <selection>
+  <physical-repository-root>/.venv/bin/python -m pytest <selection>
 ```
 
 ```text
 cd <exact-worktree>
 PYTHONPATH=<exact-worktree>/src \
-  /home/agile/Projects/framenest/.venv/bin/python -m pytest <focused-tests>
+  <physical-repository-root>/.venv/bin/python -m pytest <focused-tests>
 
 PYTHONPATH=<exact-worktree>/src \
-  /home/agile/Projects/framenest/.venv/bin/python -m framenest.adapters.cli.catalog --help
+  <physical-repository-root>/.venv/bin/python -m framenest.adapters.cli.catalog --help
 ```
 
 Equivalent `-m` entry points exist for other console modules declared in
