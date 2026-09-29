@@ -189,7 +189,7 @@ function _attach_darwin_ambient_from_system
     set -l owner (
         env -u APPIMAGE -u APPDIR -u ARGV0 -u LD_LIBRARY_PATH -u LD_PRELOAD \
             PATH=$trusted_path \
-            $stat_bin -f %u "$sock" 2>/dev/null
+            $stat_bin -L -f %u "$sock" 2>/dev/null
     )
     if test $status -ne 0; or test -z "$owner"
         return 1

@@ -1177,6 +1177,39 @@ def test_ssh_gate_darwin_fallback_sets_socket_for_ssh_child(tmp_path: Path) -> N
     assert "true" in paths["ssh_log"].read_text(encoding="utf-8")
 
 
+def test_ssh_gate_darwin_ownership_follows_final_symlink(tmp_path: Path) -> None:
+    """Ownership stat follows a presented symlink onto the socket inode.
+
+    The link and the socket share this user's uid, so a live same-user probe
+    cannot tell link ownership from target ownership. The production command
+    shape is the check that fails while the gate still calls stat without -L.
+    """
+    socket_path = tmp_path / "Listeners"
+    presented = tmp_path / "agent-link"
+    agent = _bind_unix_socket(socket_path)
+    try:
+        presented.symlink_to(socket_path)
+        link_info = presented.lstat()
+        target_info = presented.stat()
+        assert stat.S_ISLNK(link_info.st_mode)
+        assert not stat.S_ISSOCK(link_info.st_mode)
+        assert stat.S_ISSOCK(target_info.st_mode)
+        assert link_info.st_ino != target_info.st_ino
+        assert link_info.st_uid == target_info.st_uid == os.getuid()
+    finally:
+        agent.close()
+
+    text = GATE_SCRIPT.read_text(encoding="utf-8")
+    start = text.index("function _attach_darwin_ambient_from_system")
+    end = text.index("\nfunction ", start + 1)
+    ownership = [
+        line.strip()
+        for line in text[start:end].splitlines()
+        if "$stat_bin" in line and "%u" in line
+    ]
+    assert ownership == ['$stat_bin -L -f %u "$sock" 2>/dev/null']
+
+
 def test_scripts_contain_no_forbidden_commands() -> None:
     for path in (BASH_SCRIPT, FISH_SCRIPT, GATE_SCRIPT):
         text = path.read_text(encoding="utf-8")
