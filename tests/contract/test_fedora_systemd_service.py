@@ -104,6 +104,7 @@ def test_systemd_service_directory_boundaries_are_mutable_state_cache_runtime_on
     text = _service_text()
 
     assert service["StateDirectory"] == "framenest"
+    assert service["StateDirectoryMode"] == "0700"
     assert service["CacheDirectory"] == "framenest"
     assert service["RuntimeDirectory"] == "framenest"
     assert "ConfigurationDirectory" not in service

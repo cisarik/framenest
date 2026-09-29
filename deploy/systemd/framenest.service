@@ -20,6 +20,7 @@ RestartSec=5s
 StandardOutput=journal
 StandardError=journal
 StateDirectory=framenest
+StateDirectoryMode=0700
 CacheDirectory=framenest
 RuntimeDirectory=framenest
 UMask=0077
