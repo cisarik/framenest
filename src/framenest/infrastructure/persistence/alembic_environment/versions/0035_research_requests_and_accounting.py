@@ -84,6 +84,11 @@ def upgrade() -> None:
         sa.Column("max_output_tokens", sa.Integer(), nullable=False),
         sa.Column("deadline_seconds", sa.Integer(), nullable=False),
         sa.Column("reservation_micro_usd", sa.Integer(), nullable=False),
+        sa.Column("tool_allowlist_json", sa.Text(), nullable=False),
+        sa.Column("background", sa.Integer(), nullable=False),
+        sa.Column("prompt_max_utf8_bytes", sa.Integer(), nullable=False),
+        sa.Column("answer_max_utf8_bytes", sa.Integer(), nullable=False),
+        sa.Column("citation_count_max", sa.Integer(), nullable=False),
         sa.Column("remote_handle_json", sa.Text(), nullable=True),
         sa.Column("checkpoint_json", sa.Text(), nullable=True),
         sa.Column("checkpoint_sha256", sa.Text(), nullable=True),
@@ -178,6 +183,26 @@ def upgrade() -> None:
         sa.CheckConstraint(
             "reservation_micro_usd >= 1 AND reservation_micro_usd <= 5000000",
             name="ck_research_requests_reservation",
+        ),
+        sa.CheckConstraint(
+            "tool_allowlist_json IN ('[\"web_search\"]')",
+            name="ck_research_requests_tool_allowlist",
+        ),
+        sa.CheckConstraint(
+            "background IN (0, 1)",
+            name="ck_research_requests_background",
+        ),
+        sa.CheckConstraint(
+            "prompt_max_utf8_bytes >= 1 AND prompt_max_utf8_bytes <= 16384",
+            name="ck_research_requests_prompt_max",
+        ),
+        sa.CheckConstraint(
+            "answer_max_utf8_bytes >= 1 AND answer_max_utf8_bytes <= 2097152",
+            name="ck_research_requests_answer_max",
+        ),
+        sa.CheckConstraint(
+            "citation_count_max >= 1 AND citation_count_max <= 200",
+            name="ck_research_requests_citation_max",
         ),
         sa.CheckConstraint(
             "remote_handle_json IS NULL OR "

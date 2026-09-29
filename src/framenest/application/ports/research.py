@@ -6,9 +6,11 @@ capture modules.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
 from framenest.domain.research import (
+    ApprovedResourceLimits,
     BudgetHold,
     BudgetReconciliation,
     BudgetReservation,
@@ -17,9 +19,15 @@ from framenest.domain.research import (
     ProviderHandle,
     ProviderObservation,
     ProviderRequest,
+    ResearchAccountingState,
+    ResearchErrorCode,
+    ResearchLifecycleState,
+    ResearchOperationKind,
+    ResearchRemoteCleanupState,
     ResearchRequestRecord,
     ResultCompletion,
     ResultCompletionReceipt,
+    ServerSelectedProfile,
 )
 
 
@@ -74,3 +82,83 @@ class ResearchResultCompletion(Protocol):
 
     def complete(self, completion: ResultCompletion) -> ResultCompletionReceipt:
         """Save the answer, citations, and request binding in one transaction."""
+
+
+@dataclass(frozen=True, slots=True)
+class ResearchRequestRow:
+    """Durable research request row.
+
+    Domain lifecycle values are carried by ``record``. Storage-only fields
+    (owner, client key, fingerprint, checkpoints, timestamps) stay apart so the
+    domain module never depends on persistence.
+    """
+
+    record: ResearchRequestRecord
+    owner_login_key: str
+    client_request_id: str
+    request_fingerprint: str
+    checkpoint_json: str | None
+    checkpoint_sha256: str | None
+    record_id: str | None
+    created_at_ms: int
+    admitted_at_ms: int
+    submitted_at_ms: int | None
+    finished_at_ms: int | None
+    updated_at_ms: int
+    cancel_requested_at_ms: int | None
+    cancellation_confirmed_at_ms: int | None
+
+    def with_record(self, record: ResearchRequestRecord) -> ResearchRequestRow:
+        """Return a copy carrying a different domain record."""
+        return ResearchRequestRow(
+            record=record,
+            owner_login_key=self.owner_login_key,
+            client_request_id=self.client_request_id,
+            request_fingerprint=self.request_fingerprint,
+            checkpoint_json=self.checkpoint_json,
+            checkpoint_sha256=self.checkpoint_sha256,
+            record_id=self.record_id,
+            created_at_ms=self.created_at_ms,
+            admitted_at_ms=self.admitted_at_ms,
+            submitted_at_ms=self.submitted_at_ms,
+            finished_at_ms=self.finished_at_ms,
+            updated_at_ms=self.updated_at_ms,
+            cancel_requested_at_ms=self.cancel_requested_at_ms,
+            cancellation_confirmed_at_ms=self.cancellation_confirmed_at_ms,
+        )
+
+
+class ResearchStoreError(RuntimeError):
+    """Sanitized durable-store refusal carrying one stable error code."""
+
+    def __init__(self, code: ResearchErrorCode) -> None:
+        super().__init__("research storage refused the operation.")
+        self.code = code
+
+
+@runtime_checkable
+class ResearchRuntimeRepository(Protocol):
+    """Durable runtime rows: admission, slot ownership, lifecycle saves."""
+
+    def get_request(self, operation_id: str) -> ResearchRequestRow | None:
+        """Return one stored request, or none when it is absent."""
+
+    def find_by_client(
+        self,
+        owner_login_key: str,
+        client_request_id: str,
+    ) -> ResearchRequestRow | None:
+        """Return the stored request for one client key, or none."""
+
+    def admit(
+        self,
+        row: ResearchRequestRow,
+        reservation: BudgetReservation,
+    ) -> ResearchRequestRow:
+        """Atomically reserve budget, acquire the slot, and persist the request."""
+
+    def save(self, row: ResearchRequestRow) -> ResearchRequestRow:
+        """Persist one lifecycle, cleanup, accounting, or checkpoint change."""
+
+    def active_slot_operation_id(self) -> str | None:
+        """Return the operation holding the single active slot, or none."""

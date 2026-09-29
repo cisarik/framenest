@@ -2552,6 +2552,11 @@ research_requests = Table(
     Column("max_output_tokens", Integer(), nullable=False),
     Column("deadline_seconds", Integer(), nullable=False),
     Column("reservation_micro_usd", Integer(), nullable=False),
+    Column("tool_allowlist_json", Text(), nullable=False),
+    Column("background", Integer(), nullable=False),
+    Column("prompt_max_utf8_bytes", Integer(), nullable=False),
+    Column("answer_max_utf8_bytes", Integer(), nullable=False),
+    Column("citation_count_max", Integer(), nullable=False),
     Column("remote_handle_json", Text(), nullable=True),
     Column("checkpoint_json", Text(), nullable=True),
     Column("checkpoint_sha256", Text(), nullable=True),
@@ -2643,6 +2648,26 @@ research_requests = Table(
     CheckConstraint(
         "reservation_micro_usd >= 1 AND reservation_micro_usd <= 5000000",
         name="ck_research_requests_reservation",
+    ),
+    CheckConstraint(
+        "tool_allowlist_json IN ('[\"web_search\"]')",
+        name="ck_research_requests_tool_allowlist",
+    ),
+    CheckConstraint(
+        "background IN (0, 1)",
+        name="ck_research_requests_background",
+    ),
+    CheckConstraint(
+        "prompt_max_utf8_bytes >= 1 AND prompt_max_utf8_bytes <= 16384",
+        name="ck_research_requests_prompt_max",
+    ),
+    CheckConstraint(
+        "answer_max_utf8_bytes >= 1 AND answer_max_utf8_bytes <= 2097152",
+        name="ck_research_requests_answer_max",
+    ),
+    CheckConstraint(
+        "citation_count_max >= 1 AND citation_count_max <= 200",
+        name="ck_research_requests_citation_max",
     ),
     CheckConstraint(
         "remote_handle_json IS NULL OR "

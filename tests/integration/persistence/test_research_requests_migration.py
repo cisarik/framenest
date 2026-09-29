@@ -63,12 +63,16 @@ def _insert_request(
             kind, prompt_text, prompt_utf8_bytes, lifecycle_state,
             provider_id, model_id, configuration_version, reasoning_effort,
             max_tool_calls, max_output_tokens, deadline_seconds,
-            reservation_micro_usd, cleanup_state, accounting_state,
+            reservation_micro_usd, tool_allowlist_json, background,
+            prompt_max_utf8_bytes, answer_max_utf8_bytes, citation_count_max,
+            cleanup_state, accounting_state,
             created_at_ms, admitted_at_ms, updated_at_ms
         ) VALUES (
             ?, 'alice@example.com', ?, ?, 'search', 'question?', 9, 'admitted',
             'openai-responses', 'gpt-5.5-2026-04-23', '3', 'low',
-            3, 4096, 180, 500000, 'not_required', 'reserved', 1, 2, 3
+            3, 4096, 180, 500000, '["web_search"]', 1,
+            16384, 2097152, 200,
+            'not_required', 'reserved', 1, 2, 3
         )
         """,
         (operation_id, client_request_id, fingerprint),
@@ -187,13 +191,17 @@ def test_request_constraints_reject_malformed_rows(tmp_path: Path) -> None:
                     kind, prompt_text, prompt_utf8_bytes, lifecycle_state,
                     provider_id, model_id, configuration_version, reasoning_effort,
                     max_tool_calls, max_output_tokens, deadline_seconds,
-                    reservation_micro_usd, cleanup_state, accounting_state,
+                    reservation_micro_usd, tool_allowlist_json, background,
+                    prompt_max_utf8_bytes, answer_max_utf8_bytes, citation_count_max,
+                    cleanup_state, accounting_state,
                     created_at_ms, admitted_at_ms, updated_at_ms
                 ) VALUES (
                     'op-byte-mismatch', 'alice@example.com', 'client-0002', ?,
                     'search', 'question?', 8, 'admitted',
                     'openai-responses', 'gpt-5.5-2026-04-23', '3', 'low',
-                    3, 4096, 180, 500000, 'not_required', 'reserved', 1, 2, 3
+                    3, 4096, 180, 500000, '["web_search"]', 1,
+                    16384, 2097152, 200,
+                    'not_required', 'reserved', 1, 2, 3
                 )
                 """,
                 (FINGERPRINT,),
