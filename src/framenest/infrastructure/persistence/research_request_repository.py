@@ -308,6 +308,35 @@ class SqliteResearchRequestRepository:
 
         return run_in_immediate_transaction(self._engine, operation)
 
+    def claim_submission(self, operation_id: str) -> ResearchRequestRow | None:
+        """Atomically claim ``ADMITTED`` to ``SUBMITTING``.
+
+        Only the single winner of the claim receives the row; every other
+        concurrent caller receives ``None`` and must not issue provider
+        creation.
+        """
+        now_ms = self._clock_ms()
+
+        def operation(connection: Connection) -> ResearchRequestRow | None:
+            result = connection.execute(
+                update(research_requests)
+                .where(
+                    research_requests.c.operation_id == operation_id,
+                    research_requests.c.lifecycle_state
+                    == ResearchLifecycleState.ADMITTED.value,
+                )
+                .values(
+                    lifecycle_state=ResearchLifecycleState.SUBMITTING.value,
+                    updated_at_ms=now_ms,
+                )
+            )
+            if result.rowcount != 1:
+                return None
+            row = _select_request(connection, operation_id=operation_id)
+            return None if row is None else _row_from_mapping(row)
+
+        return run_in_immediate_transaction(self._engine, operation)
+
     def active_slot_operation_id(self) -> str | None:
         def operation(connection: Connection) -> str | None:
             slot = connection.execute(

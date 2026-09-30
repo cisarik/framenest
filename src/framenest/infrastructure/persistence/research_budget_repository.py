@@ -10,13 +10,17 @@ from sqlalchemy import Engine, Connection, insert, select, update
 
 from framenest.application.ports.research import ResearchStoreError
 from framenest.domain.research import (
+    TERMINAL_RESEARCH_LIFECYCLE_STATES,
     BudgetHold,
     BudgetReconciliation,
     BudgetReservation,
     ResearchAccountingState,
     ResearchErrorCode,
 )
-from framenest.infrastructure.persistence.catalog_schema import research_budget_holds
+from framenest.infrastructure.persistence.catalog_schema import (
+    research_budget_holds,
+    research_requests,
+)
 from framenest.infrastructure.persistence.engine import (
     run_in_immediate_transaction,
     run_in_transaction,
@@ -155,6 +159,52 @@ class SqliteResearchBudgetLedger:
                 connection, reconciliation, now_ms=now_ms
             ),
         )
+
+    def blocking_accounting_state(self) -> ResearchErrorCode | None:
+        """Return the fail-closed accounting blocker, or ``None``.
+
+        Any unresolved unknown accounting, any recorded cost above its
+        reservation, and any terminal request whose hold is still reserved
+        (a crash between terminal persistence and reconciliation) block further
+        generation until an operator reconciles them.
+        """
+
+        def operation(connection: Connection) -> ResearchErrorCode | None:
+            rows = connection.execute(
+                select(
+                    research_budget_holds.c.state,
+                    research_budget_holds.c.reserved_usd_micros,
+                    research_budget_holds.c.accounted_usd_micros,
+                )
+            ).all()
+            for state, reserved, accounted in rows:
+                if state == ResearchAccountingState.UNKNOWN.value:
+                    return ResearchErrorCode.ACCOUNTING_UNKNOWN
+                if accounted is not None and int(accounted) > int(reserved):
+                    return ResearchErrorCode.BUDGET_EXCEEDED
+            terminal_states = tuple(
+                research_state.value
+                for research_state in TERMINAL_RESEARCH_LIFECYCLE_STATES
+            )
+            gap = connection.execute(
+                select(research_budget_holds.c.operation_id)
+                .join(
+                    research_requests,
+                    research_requests.c.operation_id
+                    == research_budget_holds.c.operation_id,
+                )
+                .where(
+                    research_budget_holds.c.state
+                    == ResearchAccountingState.RESERVED.value,
+                    research_requests.c.lifecycle_state.in_(terminal_states),
+                )
+                .limit(1)
+            ).first()
+            if gap is not None:
+                return ResearchErrorCode.ACCOUNTING_UNKNOWN
+            return None
+
+        return run_in_transaction(self._engine, operation)
 
     def consumed_micros(self, *, day_key: str, month_key: str) -> tuple[int, int]:
         """Read-only consumed totals for one UTC day and month."""

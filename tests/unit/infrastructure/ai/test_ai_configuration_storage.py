@@ -10,14 +10,17 @@ from pathlib import Path
 import pytest
 
 from framenest.infrastructure.ai.configuration import (
+    AiConfigConflictError,
     AiConfigurationError,
     AiServerConfig,
     AiStatusSnapshot,
     AiTestState,
     default_ai_config_path,
+    load_ai_server_config_snapshot,
     load_ai_status_snapshot,
     load_ai_server_config,
     load_ai_test_state,
+    mutate_ai_server_config,
     now_ms,
     write_ai_status_snapshot,
     write_ai_server_config,
@@ -645,3 +648,83 @@ def test_malformed_research_section_is_rejected(tmp_path: Path, mutation: str) -
         load_ai_server_config(path)
 
     assert secret not in str(caught.value)
+
+
+def test_snapshot_revision_tracks_content_and_absence(tmp_path: Path) -> None:
+    path = tmp_path / "ai.json"
+    assert load_ai_server_config_snapshot(path).revision == "absent"
+
+    write_ai_server_config(_declared_config(), path)
+    first = load_ai_server_config_snapshot(path)
+    assert first.revision != "absent"
+    assert first.config == _declared_config()
+
+    updated = mutate_ai_server_config(
+        path,
+        lambda current: replace(current, active_provider_id="vercel-ai-gateway"),
+        expected_revision=first.revision,
+    )
+    second = load_ai_server_config_snapshot(path)
+    assert second.revision != first.revision
+    assert second.config is not None
+    assert second.config.active_provider_id == "vercel-ai-gateway"
+    assert second.config.updated_at_ms > first.config.updated_at_ms
+    assert updated.updated_at_ms == second.config.updated_at_ms
+
+
+def test_direct_write_is_creation_only_and_cas_is_strict(tmp_path: Path) -> None:
+    path = tmp_path / "ai.json"
+    write_ai_server_config(_declared_config(), path)
+    with pytest.raises(AiConfigConflictError):
+        write_ai_server_config(_declared_config(), path)
+
+    revision = load_ai_server_config_snapshot(path).revision
+    with pytest.raises(AiConfigConflictError):
+        mutate_ai_server_config(path, lambda current: current, expected_revision="deadbeef")
+
+    # A fresh no-op with the correct revision succeeds without changing bytes.
+    before = path.read_bytes()
+    same = mutate_ai_server_config(
+        path,
+        lambda current: current,
+        expected_revision=revision,
+    )
+    assert path.read_bytes() == before
+    assert load_ai_server_config_snapshot(path).revision == revision
+    assert same.updated_at_ms == load_ai_server_config(path).updated_at_ms
+
+
+def test_research_save_preserves_media_and_media_save_preserves_research(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "ai.json"
+    research = default_research_configuration(enabled=False)
+    write_ai_server_config(replace(_declared_config(), research=research), path)
+
+    revision = load_ai_server_config_snapshot(path).revision
+    mutate_ai_server_config(
+        path,
+        lambda current: replace(
+            current,
+            research=replace(current.research, model_id="gpt-5.6-luna"),
+        ),
+        expected_revision=revision,
+    )
+    after_research = load_ai_server_config(path)
+    assert after_research is not None
+    assert after_research.providers == _declared_config().providers
+    assert after_research.provider_models == _declared_config().provider_models
+    assert after_research.active_provider_id == _declared_config().active_provider_id
+    assert after_research.research is not None
+    assert after_research.research.model_id == "gpt-5.6-luna"
+
+    revision = load_ai_server_config_snapshot(path).revision
+    mutate_ai_server_config(
+        path,
+        lambda current: replace(current, updated_at_ms=1234),
+        expected_revision=revision,
+    )
+    after_media = load_ai_server_config(path)
+    assert after_media is not None
+    assert after_media.research == after_research.research
+    assert after_media.providers == after_research.providers

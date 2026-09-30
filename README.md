@@ -19,11 +19,15 @@ Accepted target:
   records. Personal history is a separate view of questions and answers,
   including complete Research reports and the caller's unfinished work.
   Gallery remains a separate working view.
-- Search and Research use a provider-neutral application boundary. The first
-  provider is the OpenAI Responses API with fixed model `gpt-5.5-2026-04-23`
-  and native provider-managed research. FrameNest supervises that lifecycle.
-  There is no automatic fallback. The provider stays disabled until a later
-  slice.
+- Search and Research use a provider-neutral application boundary per
+  [ADR-0083](docs/adr/0083-modular-research-providers-and-administrator-curated-timeline.md),
+  with the [ADR-0084](docs/adr/0084-administrator-managed-research-settings-and-versioned-pricing.md)
+  correction. The first provider is the OpenAI Responses API with native
+  provider-managed research. FrameNest supervises that lifecycle. There is no
+  automatic fallback. Verified administrators select one of four exact catalog
+  models (`gpt-5.5-2026-04-23` remains the default) through server settings
+  only, and admission persists immutable versioned pricing. Research stays
+  disabled by default.
 - An authenticated application administrator can read all product records,
   including private and unfinished work. That access is application content
   only. Owners do not publish directly to the shared page; administrators
@@ -39,7 +43,10 @@ and deployment:
   parked. It is not the current Search or Research provider. Bounded ZIP
   activation stays parked with it.
 - S6 records and approval, S4-B research runtime and S7-P personal-history
-  and rendering APIs are implemented. Research stays disabled by default.
+  and rendering APIs are implemented. S9-R administrator-managed research
+  settings and versioned pricing are implemented as a candidate awaiting its
+  own independent audit, publication, NUC refresh and rendered acceptance.
+  Research stays disabled by default.
 - S8 is a local shell candidate: Timeline landing, separate personal history,
   Search and Research forms, completed-document viewing and administrator
   review. Focused tests are implementation evidence only. Rendered acceptance,

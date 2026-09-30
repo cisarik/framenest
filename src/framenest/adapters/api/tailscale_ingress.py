@@ -460,6 +460,18 @@ ROUTE_POLICIES: tuple[RoutePolicy, ...] = (
     ),
     RoutePolicy(
         method="GET",
+        template="/api/admin/ai/research-settings",
+        capability=CAPABILITY_PROVIDER_OPERATE,
+    ),
+    RoutePolicy(
+        method="PUT",
+        template="/api/admin/ai/research-settings",
+        capability=CAPABILITY_PROVIDER_OPERATE,
+        audit_action="ai.research.settings.update",
+        audit_target_type="research_settings",
+    ),
+    RoutePolicy(
+        method="GET",
         template="/api/media/{media_id}/automatic-analysis",
         capability=CAPABILITY_GALLERY_READ,
     ),

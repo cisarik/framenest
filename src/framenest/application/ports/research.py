@@ -156,6 +156,17 @@ class ResearchRequestRow:
         )
 
 
+@dataclass(frozen=True, slots=True)
+class ResearchAdmissionReceipt:
+    """Admission result distinguishing a new admission from a replay.
+
+    Only a newly admitted receipt may trigger a provider submission nudge.
+    """
+
+    row: ResearchRequestRow
+    newly_admitted: bool
+
+
 class ResearchStoreError(RuntimeError):
     """Sanitized durable-store refusal carrying one stable error code."""
 
@@ -187,6 +198,13 @@ class ResearchRuntimeRepository(Protocol):
 
     def save(self, row: ResearchRequestRow) -> ResearchRequestRow:
         """Persist one lifecycle, cleanup, accounting, or checkpoint change."""
+
+    def claim_submission(self, operation_id: str) -> ResearchRequestRow | None:
+        """Atomically claim ``ADMITTED`` to ``SUBMITTING``.
+
+        Returns the claimed row for the single winner, or ``None`` when another
+        caller already claimed it. Only a winner may issue provider creation.
+        """
 
     def active_slot_operation_id(self) -> str | None:
         """Return the operation holding the single active slot, or none."""

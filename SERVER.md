@@ -46,10 +46,30 @@ deployed or accepted release. The public composition stays off.
 FrameNest runs the supervisory runtime: authorize a submission, reserve
 budget, submit, poll, cancel, validate, save and reconcile cleanup. The model
 and web-search loop runs at the selected provider. The first provider is the
-OpenAI Responses API, id `openai-responses`, fixed model `gpt-5.5-2026-04-23`,
-with native provider-managed research and no automatic fallback. Research
-configuration is disabled by default. An absent research section means
-disabled. A disabled provider must not prevent ordinary application startup.
+OpenAI Responses API, id `openai-responses`, with native provider-managed
+research and no automatic fallback. Research configuration is disabled by
+default. An absent research section means disabled. A disabled provider must
+not prevent ordinary application startup.
+
+The persistent coordinator is built whenever the catalog engine exists,
+including a disabled start. Construction performs no credential provisioning
+and no provider contact. Admission and capabilities requests read a fresh
+validated configuration; saving settings never replaces the coordinator, and a
+process started disabled can be enabled without a restart. Disabling prevents
+new admissions and new submission claims while preserving history, polling,
+cancellation, cleanup and reservations. An atomic `ADMITTED` to `SUBMITTING`
+claim guarantees one provider creation per request.
+
+Verified administrators select one of the catalog models through
+`GET`/`PUT /api/admin/ai/research-settings`. Admission persists an immutable
+provider, model and profile identity that determines later pricing; a restart
+resolves pricing from that persisted identity, never from the current
+selection. Configuration writes share one concurrency contract: a per-path
+process lock plus a sibling OS advisory lock, a SHA-256 revision snapshot and
+strong `If-Match` compare-and-set. A research-only save preserves the media
+configuration subtree and a media-only save preserves the research subtree;
+JSON formatting, key order and `updated_at_ms` are not preserved
+byte-for-byte.
 
 Non-secret configuration stores the credential identifier
 `KRONIKA_RESEARCH_OPENAI_API_KEY` only. Production reads that one credential

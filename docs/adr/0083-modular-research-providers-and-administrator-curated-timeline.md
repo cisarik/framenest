@@ -8,6 +8,16 @@ Accepted by the Cooperator on 2026-09-26. This decision records architecture
 only. It does not implement a provider, change schema, call a provider,
 provision a credential, publish or deploy.
 
+> **Partial supersession (2026-09-30):**
+> [ADR-0084](0084-administrator-managed-research-settings-and-versioned-pricing.md)
+> supersedes only this ADR's fixed-model decision (the single model
+> `gpt-5.5-2026-04-23`) and the interpretation that every bounded administrator
+> adjustment requires another architecture decision. ADR-0084 preserves the
+> provider boundary, no automatic fallback, submission restrictions, privacy
+> and publication rules, capture parking, default-disabled behavior and the
+> accepted limits. The fixed-model wording below remains as historical
+> decision text.
+
 ## Decision Date
 
 2026-09-26

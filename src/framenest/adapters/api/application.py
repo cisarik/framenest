@@ -250,18 +250,21 @@ from framenest.configuration import (
 )
 from framenest.application.records import RecordService
 from framenest.application.research import ResearchCoordinator
-from framenest.domain.research import ResearchOperationKind
+from framenest.domain.research import ResearchErrorCode, ResearchOperationKind
 from framenest.infrastructure.ai.configuration import (
     default_ai_config_path,
     load_ai_server_config,
 )
 from framenest.infrastructure.ai.credentials import load_ai_credential
 from framenest.infrastructure.ai.openai_responses import (
-    OPENAI_RESPONSES_PRICE_SCHEDULE_2026_09_26,
     OpenAIResponsesAdapter,
 )
+from framenest.infrastructure.ai.research_models import (
+    admission_deadline_within_validity,
+    model_has_expired,
+    resolve_usage_price_schedule,
+)
 from framenest.infrastructure.ai.research_registry import (
-    ResearchSelectionError,
     select_research_provider,
 )
 from framenest.infrastructure.ai.transport import HttpsJsonTransport
@@ -410,45 +413,82 @@ def _research_credential_key(identifier: str) -> str | None:
 def build_research_runtime(
     *,
     engine,
-    configuration,
+    configuration=None,
+    configuration_provider=None,
     transport=None,
     recover: bool = True,
 ) -> ResearchCoordinator | None:
-    """Build the inert-by-default research runtime.
+    """Build the persistent research runtime whenever a catalog engine exists.
 
-    Returns ``None`` when research is disabled, unconfigured, or not
-    selectable. Construction performs no network I/O. ``recover`` classifies
-    stale local state and is guarded so an older catalogue never blocks
-    ordinary application startup.
+    Construction performs no credential provisioning and no provider contact,
+    including when research starts disabled. The runtime reads a fresh validated
+    configuration for every admission and capabilities request through
+    ``configuration_provider``; saving settings never replaces the coordinator.
+    ``recover`` classifies stale local state and is guarded so an older
+    catalogue never blocks ordinary application startup.
     """
-    if configuration is None or not getattr(configuration, "enabled", False):
+    if engine is None:
         return None
+    if configuration_provider is None:
+        static_configuration = configuration
+
+        def configuration_provider() -> object:
+            return static_configuration
+
+    def current_configuration():
+        try:
+            return configuration_provider()
+        except Exception:
+            return None
 
     def select(kind: ResearchOperationKind):
-        return select_research_provider(configuration, kind=kind)
+        return select_research_provider(current_configuration(), kind=kind)
 
-    try:
-        select(ResearchOperationKind.SEARCH)
-    except ResearchSelectionError:
+    def submission_enabled() -> bool:
+        current = current_configuration()
+        return current is not None and bool(getattr(current, "enabled", False))
+
+    def admission_guard(snapshot, now_ms: int):
+        deadline_ms = now_ms + int(snapshot.deadline_seconds) * 1000
+        if model_has_expired(snapshot.model_id, now_ms=now_ms):
+            return ResearchErrorCode.CAPABILITY_UNAVAILABLE
+        if not admission_deadline_within_validity(
+            snapshot.model_id, deadline_ms=deadline_ms, now_ms=now_ms
+        ):
+            return ResearchErrorCode.CAPABILITY_UNAVAILABLE
         return None
-    if transport is None:
-        transport = HttpsJsonTransport(
-            timeout_seconds=configuration.http_operation_timeout_seconds,
-            max_response_bytes=configuration.provider_response_max_bytes,
-        )
+
+    current_transport = transport
+    if current_transport is None:
+        initial = current_configuration()
+        if initial is not None:
+            current_transport = HttpsJsonTransport(
+                timeout_seconds=initial.http_operation_timeout_seconds,
+                max_response_bytes=initial.provider_response_max_bytes,
+            )
+        else:
+            current_transport = HttpsJsonTransport(
+                timeout_seconds=30,
+                max_response_bytes=8_388_608,
+            )
+
     adapter = OpenAIResponsesAdapter(
-        transport=transport,
-        api_key_supplier=lambda: _research_credential_key(
-            configuration.credential_identifier
+        transport=current_transport,
+        api_key_supplier=lambda: _current_research_credential_key(
+            current_configuration
         ),
     )
+    ledger = SqliteResearchBudgetLedger(engine)
     coordinator = ResearchCoordinator(
         provider=adapter,
         requests=SqliteResearchRequestRepository(engine),
-        ledger=SqliteResearchBudgetLedger(engine),
+        ledger=ledger,
         completion=SqliteResearchResultCompletion(engine),
         select=select,
-        price_schedule=OPENAI_RESPONSES_PRICE_SCHEDULE_2026_09_26,
+        resolve_price_schedule=resolve_usage_price_schedule,
+        admission_guard=admission_guard,
+        accounting_blocker=ledger.blocking_accounting_state,
+        submission_enabled=submission_enabled,
     )
     if recover:
         try:
@@ -456,6 +496,13 @@ def build_research_runtime(
         except Exception:
             return None
     return coordinator
+
+
+def _current_research_credential_key(current_configuration) -> str | None:
+    configuration = current_configuration()
+    if configuration is None:
+        return None
+    return _research_credential_key(configuration.credential_identifier)
 
 
 def create_app(
@@ -1580,19 +1627,20 @@ def create_app(
         }
 
     research_runtime: ResearchCoordinator | None = None
-    research_configuration = None
-    if owned_engine is not None:
+    research_configuration_path = default_ai_config_path()
+
+    def _read_research_configuration():
         try:
-            ai_server_config = load_ai_server_config(default_ai_config_path())
+            server_config = load_ai_server_config(research_configuration_path)
         except Exception:
-            ai_server_config = None
-        research_configuration = (
-            ai_server_config.research if ai_server_config is not None else None
-        )
+            return None
+        return server_config.research if server_config is not None else None
+
+    if owned_engine is not None:
         try:
             research_runtime = build_research_runtime(
                 engine=owned_engine,
-                configuration=research_configuration,
+                configuration_provider=_read_research_configuration,
             )
         except Exception:
             research_runtime = None
@@ -1609,7 +1657,7 @@ def create_app(
                 ResearchApiDependencies(
                     requests=SqliteResearchRequestRepository(owned_engine),
                     runtime=research_runtime,
-                    configuration=research_configuration,
+                    configuration_provider=_read_research_configuration,
                 )
             )
         )

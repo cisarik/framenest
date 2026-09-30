@@ -18,7 +18,6 @@ from framenest.application.ports.research import (
 )
 from framenest.domain.research import (
     CHATGPT_PAGE_PROVIDER_ID,
-    FIXED_OPENAI_RESPONSES_MODEL_ID,
     OPENAI_RESPONSES_PROVIDER_ID,
     RESEARCH_CONFIGURATION_VERSION,
     SELF_HOSTED_PROVIDER_EXTENSION,
@@ -39,6 +38,10 @@ from framenest.domain.research import (
 from framenest.infrastructure.ai.research_configuration import (
     ResearchConfiguration,
     ResearchOperationSettings,
+)
+from framenest.infrastructure.ai.research_models import (
+    RESEARCH_ADMISSION_PROFILE_VERSION,
+    is_known_selectable_model,
 )
 
 # Documented extension point only. It is not selectable and not imported.
@@ -138,8 +141,8 @@ def select_research_provider(
     if not isinstance(config, ResearchConfiguration):
         raise ResearchSelectionError(ResearchErrorCode.NOT_CONFIGURED)
     descriptor = require_selectable(config.provider_id, kind)
-    if config.model_id != FIXED_OPENAI_RESPONSES_MODEL_ID:
-        raise ResearchSelectionError(ResearchErrorCode.INVALID_REQUEST)
+    if not is_known_selectable_model(config.model_id):
+        raise ResearchSelectionError(ResearchErrorCode.CAPABILITY_UNAVAILABLE)
     settings = _settings_for(config, kind)
     profile = _profile_from(config, settings)
     limits = _limits_from(config, settings)
@@ -175,7 +178,7 @@ def _profile_from(
     return ServerSelectedProfile(
         provider_id=config.provider_id,
         model_id=config.model_id,
-        configuration_version=RESEARCH_CONFIGURATION_VERSION,
+        configuration_version=RESEARCH_ADMISSION_PROFILE_VERSION,
         reasoning_effort=settings.reasoning_effort,
         tool_allowlist=settings.tool_allowlist,
         background=config.background,

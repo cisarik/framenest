@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import os
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -16,12 +16,14 @@ from framenest.infrastructure.ai.activity_lock import (
     acquire_ai_activity_lock,
 )
 from framenest.infrastructure.ai.configuration import (
+    AiConfigConflictError,
     AiConfigurationError,
     AiServerConfig,
     AiTestState,
     default_ai_config_path,
     default_ai_test_state_path,
     load_ai_server_config,
+    load_ai_server_config_snapshot,
     load_ai_test_state,
     mutate_ai_server_config,
     now_ms,
@@ -29,6 +31,28 @@ from framenest.infrastructure.ai.configuration import (
     validate_provider_id,
     write_ai_test_state,
 )
+from framenest.infrastructure.ai.research_configuration import (
+    ResearchConfiguration,
+    ResearchConfigurationError,
+    default_research_configuration,
+)
+from framenest.infrastructure.ai.research_models import (
+    RESEARCH_MODEL_CATALOG,
+    is_known_selectable_model,
+    model_has_expired,
+    serialize_schedule_pricing,
+)
+from framenest.domain.identity_access import (
+    CAPABILITY_PROVIDER_OPERATE,
+    IdentityContext,
+)
+from framenest.domain.research import (
+    MAX_DAILY_BUDGET_MICRO_USD,
+    MAX_MONTHLY_BUDGET_MICRO_USD,
+    MAX_RESEARCH_RESERVATION_MICRO_USD,
+    MAX_SEARCH_RESERVATION_MICRO_USD,
+)
+from framenest.adapters.api.tailscale_ingress import SCOPE_IDENTITY
 from framenest.infrastructure.ai.constants import (
     BUILTIN_PROVIDER_IDS,
     VERCEL_AI_GATEWAY_PROVIDER_ID,
@@ -107,6 +131,21 @@ AI_PROVIDER_INVALID_RESPONSE_CODE = "AI_PROVIDER_INVALID_RESPONSE"
 AI_PROVIDER_INVALID_RESPONSE_MESSAGE = "The AI provider returned an invalid response."
 AI_PROVIDER_FAILED_CODE = "AI_PROVIDER_FAILED"
 AI_PROVIDER_FAILED_MESSAGE = "The AI provider request failed."
+
+AI_CONFIG_CONFLICT_CODE = "AI_CONFIG_CONFLICT"
+AI_CONFIG_CONFLICT_MESSAGE = "AI settings changed. Reload and review before saving again."
+AI_CONFIG_ABSENT_MESSAGE = (
+    "Set up the server AI configuration first, then reload Research settings."
+)
+RESEARCH_CAPABILITY_UNAVAILABLE_CODE = "E_CAPABILITY_UNAVAILABLE"
+RESEARCH_CAPABILITY_UNAVAILABLE_MESSAGE = "Choose a supported research model from the list."
+RESEARCH_NOT_CONFIGURED_CODE = "E_NOT_CONFIGURED"
+RESEARCH_CREDENTIAL_MISSING_MESSAGE = (
+    "Research credentials are not configured on the server."
+)
+RESEARCH_EXPIRED_PRICING_MESSAGE = (
+    "This model's pricing must be reviewed before research can be enabled."
+)
 
 _PROVIDER_ERROR_RESPONSES = {
     "authentication_failed": (
@@ -248,6 +287,38 @@ class AiPongResponse(BaseModel):
     model_id: str
 
 
+class ResearchSettingsBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool
+    model_id: str
+    daily_budget_usd_micros: int
+    monthly_budget_usd_micros: int
+    search_budget_reservation_usd_micros: int
+    research_budget_reservation_usd_micros: int
+
+
+class ResearchModelResponse(BaseModel):
+    model_id: str
+    display_name: str
+    pinning: str
+    selectable: bool
+    price_schedule_version: str
+    valid_until: str | None
+    pricing: dict[str, object]
+
+
+class ResearchSettingsResponse(BaseModel):
+    revision: str
+    configuration_present: bool
+    provider_id: str
+    settings: ResearchSettingsBody
+    credential_available: bool
+    models: list[ResearchModelResponse]
+    limits: dict[str, object]
+    changed: bool | None = None
+
+
 @dataclass(frozen=True, slots=True)
 class AiAdminApiDependencies:
     """Injected dependencies for administrator AI provider routes."""
@@ -318,7 +389,7 @@ def create_ai_admin_api_router(dependencies: AiAdminApiDependencies) -> APIRoute
                     ),
                 )
             )
-        return _json(
+        return _json_with_etag(
             AiProviderListResponse(
                 active_provider_id=resolved.provider_id,
                 active_model_id=resolved.model_id,
@@ -330,7 +401,8 @@ def create_ai_admin_api_router(dependencies: AiAdminApiDependencies) -> APIRoute
                     "max_models_per_provider": MAX_DECLARED_MODELS_PER_PROVIDER,
                     "max_config_bytes": MAX_AI_CONFIG_BYTES,
                 },
-            )
+            ),
+            _config_revision(config_path),
         )
 
     @router.put(
@@ -344,7 +416,8 @@ def create_ai_admin_api_router(dependencies: AiAdminApiDependencies) -> APIRoute
     )
     def put_ai_provider(
         provider_id: str,
-        request: AiProviderPutRequest,
+        body: AiProviderPutRequest,
+        http_request: Request,
     ) -> JSONResponse:
         try:
             validated_provider_id = validate_provider_identifier(provider_id)
@@ -353,7 +426,7 @@ def create_ai_admin_api_router(dependencies: AiAdminApiDependencies) -> APIRoute
         if validated_provider_id in BUILTIN_PROVIDER_IDS:
             return _error(409, AI_PROVIDER_BUILTIN_CODE, AI_PROVIDER_BUILTIN_MESSAGE)
         try:
-            validate_declared_protocol(request.protocol)
+            validate_declared_protocol(body.protocol)
         except AiProviderRecordError:
             return _error(
                 422,
@@ -361,16 +434,16 @@ def create_ai_admin_api_router(dependencies: AiAdminApiDependencies) -> APIRoute
                 AI_PROVIDER_PROTOCOL_UNSUPPORTED_MESSAGE,
             )
         payload = {
-            "name": request.name,
-            "protocol": request.protocol,
-            "base_url": request.base_url,
-            "credential_env": request.credential_env,
+            "name": body.name,
+            "protocol": body.protocol,
+            "base_url": body.base_url,
+            "credential_env": body.credential_env,
             "models": {
                 model_id: {
                     "name": model.name,
                     "capabilities": list(model.capabilities),
                 }
-                for model_id, model in request.models.items()
+                for model_id, model in body.models.items()
             },
         }
         try:
@@ -396,11 +469,16 @@ def create_ai_admin_api_router(dependencies: AiAdminApiDependencies) -> APIRoute
             providers[validated_provider_id] = record
             return replace(base, providers=providers)
 
-        try:
-            updated = mutate_ai_server_config(config_path, _upsert)
-        except AiConfigurationError:
-            return _error(503, AI_CONFIG_UNAVAILABLE_CODE, AI_CONFIG_UNAVAILABLE_MESSAGE)
-        return _json(_record_response(updated.providers[validated_provider_id]))
+        updated, conflict = _mutate_with_optional_if_match(
+            config_path, http_request, _upsert
+        )
+        if conflict is not None:
+            return conflict
+        assert updated is not None
+        return _json_with_etag(
+            _record_response(updated.providers[validated_provider_id]),
+            _config_revision(config_path),
+        )
 
     @router.delete(
         "/api/admin/ai/providers/{provider_id}",
@@ -411,7 +489,7 @@ def create_ai_admin_api_router(dependencies: AiAdminApiDependencies) -> APIRoute
             503: {"model": ErrorResponse},
         },
     )
-    def delete_ai_provider(provider_id: str) -> JSONResponse:
+    def delete_ai_provider(provider_id: str, http_request: Request) -> JSONResponse:
         try:
             validated_provider_id = validate_provider_identifier(provider_id)
         except AiProviderRecordError:
@@ -443,11 +521,15 @@ def create_ai_admin_api_router(dependencies: AiAdminApiDependencies) -> APIRoute
                 provider_models=provider_models,
             )
 
-        try:
-            mutate_ai_server_config(config_path, _remove)
-        except AiConfigurationError:
-            return _error(503, AI_CONFIG_UNAVAILABLE_CODE, AI_CONFIG_UNAVAILABLE_MESSAGE)
-        return _json({"removed_provider_id": validated_provider_id})
+        _updated, conflict = _mutate_with_optional_if_match(
+            config_path, http_request, _remove
+        )
+        if conflict is not None:
+            return conflict
+        return _json_with_etag(
+            {"removed_provider_id": validated_provider_id},
+            _config_revision(config_path),
+        )
 
     @router.put(
         "/api/admin/ai/active-selection",
@@ -458,10 +540,13 @@ def create_ai_admin_api_router(dependencies: AiAdminApiDependencies) -> APIRoute
             503: {"model": ErrorResponse},
         },
     )
-    def put_active_selection(request: AiActiveSelectionPutRequest) -> JSONResponse:
+    def put_active_selection(
+        body: AiActiveSelectionPutRequest,
+        http_request: Request,
+    ) -> JSONResponse:
         try:
-            selected_provider_id = validate_provider_id(request.provider_id)
-            selected_model_id = validate_model_id(request.model_id)
+            selected_provider_id = validate_provider_id(body.provider_id)
+            selected_model_id = validate_model_id(body.model_id)
         except AiConfigurationError as exc:
             return _error(422, AI_PROVIDER_INVALID_CODE, str(exc))
         config_path = _config_path(dependencies)
@@ -488,15 +573,17 @@ def create_ai_admin_api_router(dependencies: AiAdminApiDependencies) -> APIRoute
                 provider_models=provider_models,
             )
 
-        try:
-            mutate_ai_server_config(config_path, _activate)
-        except AiConfigurationError:
-            return _error(503, AI_CONFIG_UNAVAILABLE_CODE, AI_CONFIG_UNAVAILABLE_MESSAGE)
-        return _json(
+        _updated, conflict = _mutate_with_optional_if_match(
+            config_path, http_request, _activate
+        )
+        if conflict is not None:
+            return conflict
+        return _json_with_etag(
             AiActiveSelectionResponse(
                 active_provider_id=selected_provider_id,
                 active_model_id=selected_model_id,
-            )
+            ),
+            _config_revision(config_path),
         )
 
     @router.post(
@@ -658,7 +745,326 @@ def create_ai_admin_api_router(dependencies: AiAdminApiDependencies) -> APIRoute
         finally:
             lock.release()
 
+    def _research_identity(request: Request) -> tuple[IdentityContext | None, JSONResponse | None]:
+        identity = request.scope.get(SCOPE_IDENTITY)
+        if not isinstance(identity, IdentityContext) or not identity.login_key:
+            return None, _error(401, "IDENTITY_REQUIRED", "A verified identity is required.")
+        if not identity.has_capability(CAPABILITY_PROVIDER_OPERATE):
+            return None, _error(
+                403,
+                "CAPABILITY_DENIED",
+                "You do not have permission to manage research settings.",
+            )
+        return identity, None
+
+    def _research_credential_available(
+        configuration: ResearchConfiguration,
+        *,
+        resolved_identifier: str | None = None,
+    ) -> bool:
+        identifier = resolved_identifier or configuration.credential_identifier
+        try:
+            credential = load_ai_credential(identifier, _environ(dependencies))
+        except Exception:
+            return False
+        return credential is not None
+
+    def _research_limits_payload() -> dict[str, object]:
+        return {
+            "min_budget_usd_micros": 1,
+            "max_daily_budget_usd_micros": MAX_DAILY_BUDGET_MICRO_USD,
+            "max_monthly_budget_usd_micros": MAX_MONTHLY_BUDGET_MICRO_USD,
+            "max_search_reservation_usd_micros": MAX_SEARCH_RESERVATION_MICRO_USD,
+            "max_research_reservation_usd_micros": MAX_RESEARCH_RESERVATION_MICRO_USD,
+            "search": {
+                "max_tool_calls": 3,
+                "max_output_tokens": 4_096,
+                "deadline_seconds": 180,
+            },
+            "research": {
+                "max_tool_calls": 20,
+                "max_output_tokens": 32_768,
+                "deadline_seconds": 1_800,
+            },
+            "prompt_max_utf8_bytes": 16_384,
+            "provider_response_max_bytes": 8_388_608,
+            "answer_max_utf8_bytes": 2_097_152,
+            "citation_count_max": 200,
+            "concurrency": 1,
+        }
+
+    def _research_models_payload(*, now: int) -> list[ResearchModelResponse]:
+        entries: list[ResearchModelResponse] = []
+        for entry in RESEARCH_MODEL_CATALOG:
+            entries.append(
+                ResearchModelResponse(
+                    model_id=entry.model_id,
+                    display_name=entry.display_name,
+                    pinning=entry.pinning,
+                    selectable=entry.selectable
+                    and not model_has_expired(entry.model_id, now_ms=now),
+                    price_schedule_version=entry.price_schedule_version,
+                    valid_until=entry.valid_until,
+                    pricing=serialize_schedule_pricing(entry),
+                )
+            )
+        return entries
+
+    def _settings_body(configuration: ResearchConfiguration) -> ResearchSettingsBody:
+        return ResearchSettingsBody(
+            enabled=configuration.enabled,
+            model_id=configuration.model_id,
+            daily_budget_usd_micros=configuration.daily_budget_usd_micros,
+            monthly_budget_usd_micros=configuration.monthly_budget_usd_micros,
+            search_budget_reservation_usd_micros=(
+                configuration.search.budget_reservation_usd_micros
+            ),
+            research_budget_reservation_usd_micros=(
+                configuration.research.budget_reservation_usd_micros
+            ),
+        )
+
+    def _research_response(
+        *,
+        revision: str,
+        configuration_present: bool,
+        configuration: ResearchConfiguration,
+        credential_available: bool,
+        now: int,
+        changed: bool | None = None,
+    ) -> JSONResponse:
+        response = ResearchSettingsResponse(
+            revision=revision,
+            configuration_present=configuration_present,
+            provider_id=configuration.provider_id,
+            settings=_settings_body(configuration),
+            credential_available=credential_available,
+            models=_research_models_payload(now=now),
+            limits=_research_limits_payload(),
+            changed=changed,
+        )
+        return _json_with_etag(response, revision)
+
+    @router.get(
+        "/api/admin/ai/research-settings",
+        response_model=ResearchSettingsResponse,
+        responses={
+            401: {"model": ErrorResponse},
+            403: {"model": ErrorResponse},
+            503: {"model": ErrorResponse},
+        },
+    )
+    def get_research_settings(request: Request) -> JSONResponse:
+        _identity, denial = _research_identity(request)
+        if denial is not None:
+            return denial
+        config_path = _config_path(dependencies)
+        now = now_ms()
+        try:
+            snapshot = load_ai_server_config_snapshot(config_path)
+        except AiConfigurationError:
+            return _error(503, AI_CONFIG_UNAVAILABLE_CODE, AI_CONFIG_UNAVAILABLE_MESSAGE)
+        if snapshot.config is None:
+            configuration = default_research_configuration(enabled=False)
+            return _research_response(
+                revision=snapshot.revision,
+                configuration_present=False,
+                configuration=configuration,
+                credential_available=False,
+                now=now,
+            )
+        configuration = snapshot.config.research or default_research_configuration(
+            enabled=False
+        )
+        return _research_response(
+            revision=snapshot.revision,
+            configuration_present=True,
+            configuration=configuration,
+            credential_available=_research_credential_available(configuration),
+            now=now,
+        )
+
+    @router.put(
+        "/api/admin/ai/research-settings",
+        response_model=ResearchSettingsResponse,
+        responses={
+            401: {"model": ErrorResponse},
+            403: {"model": ErrorResponse},
+            409: {"model": ErrorResponse},
+            422: {"model": ErrorResponse},
+            503: {"model": ErrorResponse},
+        },
+    )
+    def put_research_settings(
+        request: Request, body: ResearchSettingsBody
+    ) -> JSONResponse:
+        _identity, denial = _research_identity(request)
+        if denial is not None:
+            return denial
+        expected_revision = _strong_if_match(request.headers.get("if-match"))
+        if expected_revision is None:
+            return _error(409, AI_CONFIG_CONFLICT_CODE, AI_CONFIG_CONFLICT_MESSAGE)
+        if (
+            body.daily_budget_usd_micros < 1
+            or body.daily_budget_usd_micros > MAX_DAILY_BUDGET_MICRO_USD
+            or body.monthly_budget_usd_micros < 1
+            or body.monthly_budget_usd_micros > MAX_MONTHLY_BUDGET_MICRO_USD
+            or body.daily_budget_usd_micros > body.monthly_budget_usd_micros
+            or body.search_budget_reservation_usd_micros < 1
+            or body.search_budget_reservation_usd_micros
+            > MAX_SEARCH_RESERVATION_MICRO_USD
+            or body.research_budget_reservation_usd_micros < 1
+            or body.research_budget_reservation_usd_micros
+            > MAX_RESEARCH_RESERVATION_MICRO_USD
+        ):
+            return _error(422, "VALIDATION_FAILED", "Request validation failed.")
+        if not is_known_selectable_model(body.model_id):
+            return _error(
+                422,
+                RESEARCH_CAPABILITY_UNAVAILABLE_CODE,
+                RESEARCH_CAPABILITY_UNAVAILABLE_MESSAGE,
+            )
+        config_path = _config_path(dependencies)
+        now = now_ms()
+        try:
+            snapshot = load_ai_server_config_snapshot(config_path)
+        except AiConfigurationError:
+            return _error(503, AI_CONFIG_UNAVAILABLE_CODE, AI_CONFIG_UNAVAILABLE_MESSAGE)
+        if snapshot.config is None:
+            return _error(503, AI_CONFIG_UNAVAILABLE_CODE, AI_CONFIG_ABSENT_MESSAGE)
+        if snapshot.revision != expected_revision:
+            return _error(409, AI_CONFIG_CONFLICT_CODE, AI_CONFIG_CONFLICT_MESSAGE)
+        existing = snapshot.config.research or default_research_configuration(
+            enabled=False
+        )
+        credential_available = _research_credential_available(existing)
+        if body.enabled:
+            if model_has_expired(body.model_id, now_ms=now):
+                return _error(
+                    503,
+                    RESEARCH_NOT_CONFIGURED_CODE,
+                    RESEARCH_EXPIRED_PRICING_MESSAGE,
+                )
+            if not credential_available:
+                return _error(
+                    503,
+                    RESEARCH_NOT_CONFIGURED_CODE,
+                    RESEARCH_CREDENTIAL_MISSING_MESSAGE,
+                )
+        try:
+            updated_research = _apply_research_settings(existing, body)
+        except ResearchConfigurationError:
+            return _error(422, "VALIDATION_FAILED", "Request validation failed.")
+        changed = _settings_body(updated_research) != _settings_body(existing)
+
+        def _set_research(
+            current_config: AiServerConfig | None,
+        ) -> AiServerConfig:
+            assert current_config is not None
+            return replace(current_config, research=updated_research)
+
+        try:
+            updated = mutate_ai_server_config(
+                config_path,
+                _set_research,
+                expected_revision=expected_revision,
+            )
+        except AiConfigConflictError:
+            return _error(409, AI_CONFIG_CONFLICT_CODE, AI_CONFIG_CONFLICT_MESSAGE)
+        except AiConfigurationError:
+            return _error(503, AI_CONFIG_UNAVAILABLE_CODE, AI_CONFIG_UNAVAILABLE_MESSAGE)
+        return _research_response(
+            revision=_config_revision(config_path),
+            configuration_present=True,
+            configuration=updated.research or updated_research,
+            credential_available=credential_available,
+            now=now,
+            changed=changed,
+        )
+
     return router
+
+
+def _mutate_with_optional_if_match(
+    config_path: Path,
+    http_request: Request,
+    mutator: Callable[[AiServerConfig | None], AiServerConfig],
+) -> tuple[AiServerConfig | None, JSONResponse | None]:
+    """Apply one read-modify-write mutation with an optional strong If-Match.
+
+    When the request carries an ``If-Match`` header it must be exactly one
+    strong revision; a stale revision or a malformed value conflicts without
+    writing. A missing header keeps the legacy unconditional behavior.
+    """
+    raw = http_request.headers.get("if-match")
+    expected: str | None = None
+    if raw is not None:
+        expected = _strong_if_match(raw)
+        if expected is None:
+            return None, _error(409, AI_CONFIG_CONFLICT_CODE, AI_CONFIG_CONFLICT_MESSAGE)
+    try:
+        if expected is None:
+            updated = mutate_ai_server_config(config_path, mutator)
+        else:
+            updated = mutate_ai_server_config(
+                config_path, mutator, expected_revision=expected
+            )
+    except AiConfigConflictError:
+        return None, _error(409, AI_CONFIG_CONFLICT_CODE, AI_CONFIG_CONFLICT_MESSAGE)
+    except AiConfigurationError:
+        return None, _error(
+            503, AI_CONFIG_UNAVAILABLE_CODE, AI_CONFIG_UNAVAILABLE_MESSAGE
+        )
+    return updated, None
+
+
+def _strong_if_match(value: str | None) -> str | None:
+    """Parse exactly one strong ETag value. Wildcards, lists and weak tags fail."""
+    if value is None:
+        return None
+    candidate = value.strip()
+    if not candidate or "," in candidate or candidate == "*":
+        return None
+    if candidate.startswith("W/"):
+        return None
+    if len(candidate) < 2 or not candidate.startswith('"') or not candidate.endswith('"'):
+        return None
+    inner = candidate[1:-1]
+    if not inner or '"' in inner:
+        return None
+    return inner
+
+
+def _apply_research_settings(
+    existing: ResearchConfiguration,
+    body: ResearchSettingsBody,
+) -> ResearchConfiguration:
+    return replace(
+        existing,
+        enabled=body.enabled,
+        model_id=body.model_id,
+        daily_budget_usd_micros=body.daily_budget_usd_micros,
+        monthly_budget_usd_micros=body.monthly_budget_usd_micros,
+        search=replace(
+            existing.search,
+            budget_reservation_usd_micros=(
+                body.search_budget_reservation_usd_micros
+            ),
+        ),
+        research=replace(
+            existing.research,
+            budget_reservation_usd_micros=(
+                body.research_budget_reservation_usd_micros
+            ),
+        ),
+    )
+
+
+def _config_revision(config_path: Path) -> str:
+    try:
+        return load_ai_server_config_snapshot(config_path).revision
+    except AiConfigurationError:
+        return "absent"
 
 
 def _config_path(dependencies: AiAdminApiDependencies) -> Path:
@@ -758,3 +1164,10 @@ def _error(status_code: int, code: str, message: str) -> JSONResponse:
 def _json(payload: BaseModel | dict) -> JSONResponse:
     content = payload.model_dump() if isinstance(payload, BaseModel) else payload
     return JSONResponse(status_code=200, content=content, headers=NO_STORE_HEADERS)
+
+
+def _json_with_etag(payload: BaseModel | dict, revision: str) -> JSONResponse:
+    content = payload.model_dump() if isinstance(payload, BaseModel) else payload
+    headers = dict(NO_STORE_HEADERS)
+    headers["ETag"] = f'"{revision}"'
+    return JSONResponse(status_code=200, content=content, headers=headers)

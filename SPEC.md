@@ -100,14 +100,23 @@ empty-catalog reset remain S9.
 
 Search and Research MUST use a provider-neutral application boundary. The
 first provider MUST be the OpenAI Responses API, provider id
-`openai-responses`, fixed model `gpt-5.5-2026-04-23`, with native
-provider-managed research. FrameNest MUST supervise submit, poll, cancel,
-validate, save and cleanup. The provider MUST execute the model and search
-loop. There MUST be no automatic fallback and no automatic generation retry.
-Clients MUST NOT supply endpoint, model, tool or credential fields. Research
-configuration MUST be disabled by default. An absent research section MUST
-mean disabled and MUST NOT prevent ordinary application startup. Media
-analysis provider selection MUST remain separate.
+`openai-responses`, with native provider-managed research. FrameNest MUST
+supervise submit, poll, cancel, validate, save and cleanup. The provider MUST
+execute the model and search loop. There MUST be no automatic fallback and no
+automatic generation retry. Clients MUST NOT supply endpoint, model, tool or
+credential fields. Research configuration MUST be disabled by default. An
+absent research section MUST mean disabled and MUST NOT prevent ordinary
+application startup. Media analysis provider selection MUST remain separate.
+
+Verified application administrators select the research model only through
+server settings and the approved catalog, per
+[ADR-0084](docs/adr/0084-administrator-managed-research-settings-and-versioned-pricing.md).
+Search and Research submissions MUST NOT select a provider, model, endpoint or
+tools. Admission MUST persist an immutable provider, model and profile identity
+that determines later pricing. Configuration changes MUST NOT reprice or
+regenerate an existing attempt. Fresh configuration MUST be disabled, and the
+accepted monetary defaults MUST also be upper bounds. Unknown accounting and
+threshold overruns MUST block further generation pending reconciliation.
 
 Only the submitted question text and fixed non-secret instructions MAY leave
 the host. Research MUST NOT accept an attachment. The application MUST NOT

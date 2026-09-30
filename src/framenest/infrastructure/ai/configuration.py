@@ -2,14 +2,18 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
+import stat
 import sys
 import tempfile
+import threading
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Any, Callable, Mapping
+from typing import Any, Callable, Iterator, Mapping
 
 from framenest.infrastructure.ai.constants import BUILTIN_PROVIDER_IDS
 from framenest.infrastructure.ai.research_configuration import (
@@ -61,6 +65,27 @@ SAFE_TEST_STATUSES = frozenset(
 
 class AiConfigurationError(RuntimeError):
     """Sanitized AI configuration failure."""
+
+
+class AiConfigConflictError(AiConfigurationError):
+    """A compare-and-set revision did not match the stored configuration."""
+
+    def __init__(self) -> None:
+        super().__init__("AI configuration changed.")
+
+
+ABSENT_REVISION = "absent"
+_UNSET = object()
+_PROCESS_LOCKS: dict[str, threading.Lock] = {}
+_PROCESS_LOCKS_GUARD = threading.Lock()
+
+
+@dataclass(frozen=True, slots=True)
+class AiServerConfigSnapshot:
+    """A validated configuration plus the revision of its bounded raw bytes."""
+
+    config: AiServerConfig | None
+    revision: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -209,8 +234,77 @@ def load_ai_server_config(path: Path) -> AiServerConfig | None:
     )
 
 
-def write_ai_server_config(config: AiServerConfig, path: Path) -> None:
-    """Atomically write one non-secret server AI config file."""
+def load_ai_server_config_snapshot(path: Path) -> AiServerConfigSnapshot:
+    """Return the validated config and the revision of its bounded raw bytes.
+
+    An absent file has revision ``"absent"``. The revision is a content hash, so
+    it changes whenever the stored bytes change and cannot drift from the
+    validated configuration.
+    """
+    normalized = _prepare_existing_or_missing_path(path)
+    if not normalized.exists():
+        return AiServerConfigSnapshot(config=None, revision=ABSENT_REVISION)
+    try:
+        raw = normalized.read_bytes()
+    except OSError:
+        raise AiConfigurationError("AI configuration is malformed.") from None
+    if len(raw) > MAX_AI_CONFIG_BYTES:
+        raise AiConfigurationError("AI configuration is malformed.")
+    revision = hashlib.sha256(raw).hexdigest()
+    return AiServerConfigSnapshot(
+        config=load_ai_server_config(path),
+        revision=revision,
+    )
+
+
+def write_ai_server_config(
+    config: AiServerConfig,
+    path: Path,
+    *,
+    expected_revision: object = _UNSET,
+) -> None:
+    """Atomically write one non-secret server AI config file.
+
+    A direct call without an expected revision is creation-only: replacing an
+    existing file requires the revision observed by a prior snapshot. Passing
+    ``ABSENT_REVISION`` asserts the file must not yet exist.
+    """
+    with _config_file_guard(path):
+        snapshot = load_ai_server_config_snapshot(path)
+        if expected_revision is _UNSET:
+            if snapshot.revision != ABSENT_REVISION:
+                raise AiConfigConflictError()
+        elif expected_revision != snapshot.revision:
+            raise AiConfigConflictError()
+        _write_ai_server_config_unlocked(config, path)
+
+
+def mutate_ai_server_config(
+    config_path: Path,
+    mutator: Callable[[AiServerConfig | None], AiServerConfig],
+    *,
+    expected_revision: object = _UNSET,
+) -> AiServerConfig:
+    """Read, compare, transform, and atomically write under one file guard."""
+    with _config_file_guard(config_path):
+        snapshot = load_ai_server_config_snapshot(config_path)
+        if expected_revision is not _UNSET and expected_revision != snapshot.revision:
+            raise AiConfigConflictError()
+        updated = mutator(snapshot.config)
+        if snapshot.config is not None and updated == snapshot.config:
+            # A fresh no-op returns success without rewriting or advancing the
+            # revision. A real change advances updated_at_ms monotonically.
+            return snapshot.config
+        previous_ms = 0 if snapshot.config is None else snapshot.config.updated_at_ms
+        refreshed = replace(
+            updated,
+            updated_at_ms=max(now_ms(), previous_ms + 1),
+        )
+        _write_ai_server_config_unlocked(refreshed, config_path)
+        return refreshed
+
+
+def _write_ai_server_config_unlocked(config: AiServerConfig, path: Path) -> None:
     provider_id = validate_provider_id(config.active_provider_id)
     try:
         providers = _validate_declared_providers(config.providers)
@@ -242,18 +336,6 @@ def write_ai_server_config(config: AiServerConfig, path: Path) -> None:
     if config.research is not None:
         payload["research"] = _serialize_research_section(config.research)
     _atomic_write_json(path, payload, max_payload_bytes=MAX_AI_CONFIG_BYTES)
-
-
-def mutate_ai_server_config(
-    config_path: Path,
-    mutator: Callable[[AiServerConfig | None], AiServerConfig],
-) -> AiServerConfig:
-    """Read, transform, and atomically write one non-secret AI config file."""
-    current = load_ai_server_config(config_path)
-    updated = mutator(current)
-    refreshed = replace(updated, updated_at_ms=now_ms())
-    write_ai_server_config(refreshed, config_path)
-    return refreshed
 
 
 def _accepted_schema_version(value: object) -> int:
@@ -430,6 +512,87 @@ def _prepare_existing_or_missing_path(path: Path) -> Path:
     if parent.exists() and parent.is_symlink():
         raise AiConfigurationError("AI configuration directory must not be a symlink.")
     return normalized
+
+
+def _process_lock(normalized: Path) -> threading.Lock:
+    key = str(normalized)
+    with _PROCESS_LOCKS_GUARD:
+        lock = _PROCESS_LOCKS.get(key)
+        if lock is None:
+            lock = threading.Lock()
+            _PROCESS_LOCKS[key] = lock
+        return lock
+
+
+def _open_lock_descriptor(lock_path: Path) -> int:
+    parent = lock_path.parent
+    parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    if lock_path.is_symlink():
+        raise AiConfigurationError("AI configuration lock must not be a symlink.")
+    if lock_path.exists() and not lock_path.is_file():
+        raise AiConfigurationError("AI configuration lock is invalid.")
+    try:
+        descriptor = os.open(lock_path, os.O_RDWR | os.O_CREAT, 0o600)
+    except OSError:
+        raise AiConfigurationError("AI configuration lock could not be created.") from None
+    try:
+        lock_stat = os.fstat(descriptor)
+    except OSError:
+        os.close(descriptor)
+        raise AiConfigurationError("AI configuration lock is invalid.") from None
+    if not stat.S_ISREG(lock_stat.st_mode):
+        os.close(descriptor)
+        raise AiConfigurationError("AI configuration lock is invalid.")
+    return descriptor
+
+
+def _acquire_os_lock(descriptor: int) -> None:
+    try:
+        if os.name == "nt":  # pragma: no cover - exercised on Windows only
+            import msvcrt
+
+            msvcrt.locking(descriptor, msvcrt.LK_LOCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(descriptor, fcntl.LOCK_EX)
+    except OSError:
+        raise AiConfigurationError("AI configuration lock could not be acquired.") from None
+
+
+def _release_os_lock(descriptor: int) -> None:
+    try:
+        if os.name == "nt":  # pragma: no cover - exercised on Windows only
+            import msvcrt
+
+            msvcrt.locking(descriptor, msvcrt.LK_UNLCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(descriptor, fcntl.LOCK_UN)
+    except OSError:
+        return
+
+
+@contextmanager
+def _config_file_guard(path: Path) -> Iterator[None]:
+    """Serialize one configuration path across threads and processes.
+
+    A per-canonical-path process lock composes with a stable sibling OS advisory
+    lock that the operating system releases on process exit. The lock file is
+    private, is never removed after release and rejects symlinks.
+    """
+    normalized = _prepare_existing_or_missing_path(path)
+    process_lock = _process_lock(normalized)
+    with process_lock:
+        lock_path = normalized.parent / f".{normalized.name}.lock"
+        descriptor = _open_lock_descriptor(lock_path)
+        _acquire_os_lock(descriptor)
+        try:
+            yield
+        finally:
+            _release_os_lock(descriptor)
+            os.close(descriptor)
 
 
 def _atomic_write_json(

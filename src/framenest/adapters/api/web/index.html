@@ -532,6 +532,53 @@
             <button id="ai-provider-pong-confirm-button" class="ai-provider-button ai-provider-button--primary" type="button">Send the color test</button>
           </div>
         </div>
+        <div id="research-settings-section" class="settings-dialog__section research-settings">
+          <h3 class="settings-dialog__section-title">Research settings</h3>
+          <p class="settings-dialog__note" id="research-settings-notice">These server settings apply to new Search and Research requests. People submitting questions cannot choose a model, endpoint or tools.</p>
+          <p class="settings-dialog__note" id="research-settings-history-note">Changing the model does not change requests already admitted. Disabling pauses new generation; existing requests can still be checked or cancelled.</p>
+          <p class="settings-dialog__note" id="research-settings-credential-note">Credentials are managed on the server. A saved configuration does not prove account access.</p>
+          <p id="research-settings-status" class="research-settings__status" role="status" aria-live="polite" aria-atomic="true"></p>
+          <p id="research-settings-loading" class="settings-dialog__note" hidden>Loading research settings…</p>
+          <form id="research-settings-form" class="research-settings__form" novalidate>
+            <label class="ai-provider-field" for="research-settings-enabled">
+              <span>Enable Search and Research</span>
+              <input id="research-settings-enabled" name="enabled" type="checkbox">
+            </label>
+            <label class="ai-provider-field" for="research-settings-model">
+              <span>Research model</span>
+              <select id="research-settings-model" name="model_id"></select>
+            </label>
+            <label class="ai-provider-field" for="research-settings-daily-budget">
+              <span>Daily budget (USD)</span>
+              <input id="research-settings-daily-budget" name="daily_budget_usd_micros" type="text" inputmode="decimal" autocomplete="off" spellcheck="false">
+            </label>
+            <label class="ai-provider-field" for="research-settings-monthly-budget">
+              <span>Monthly budget (USD)</span>
+              <input id="research-settings-monthly-budget" name="monthly_budget_usd_micros" type="text" inputmode="decimal" autocomplete="off" spellcheck="false">
+            </label>
+            <label class="ai-provider-field" for="research-settings-search-reservation">
+              <span>Search reservation (USD)</span>
+              <input id="research-settings-search-reservation" name="search_budget_reservation_usd_micros" type="text" inputmode="decimal" autocomplete="off" spellcheck="false">
+            </label>
+            <label class="ai-provider-field" for="research-settings-research-reservation">
+              <span>Research reservation (USD)</span>
+              <input id="research-settings-research-reservation" name="research_budget_reservation_usd_micros" type="text" inputmode="decimal" autocomplete="off" spellcheck="false">
+            </label>
+            <div class="ai-provider-actions">
+              <button id="research-settings-save" class="ai-provider-button ai-provider-button--primary" type="submit">Save research settings</button>
+              <button id="research-settings-reload" class="ai-provider-button" type="button">Reload</button>
+            </div>
+          </form>
+          <p id="research-settings-credential" class="settings-dialog__note"></p>
+          <ul id="research-settings-catalog" class="research-settings__catalog" aria-label="Available research models"></ul>
+        </div>
+        <div id="research-settings-confirm" class="ai-provider-confirm" hidden>
+          <p id="research-settings-confirm-note" class="ai-provider-confirm__note"></p>
+          <div class="ai-provider-confirm__actions">
+            <button id="research-settings-confirm-cancel" class="ai-provider-button" type="button">Cancel</button>
+            <button id="research-settings-confirm-button" class="ai-provider-button ai-provider-button--primary" type="button">Confirm</button>
+          </div>
+        </div>
       </div>
     </dialog>
 

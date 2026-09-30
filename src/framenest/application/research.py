@@ -16,6 +16,7 @@ from collections.abc import Callable
 from dataclasses import replace
 
 from framenest.application.ports.research import (
+    ResearchAdmissionReceipt,
     ResearchProvider,
     ResearchRequestRow,
     ResearchResultCompletion,
@@ -45,10 +46,15 @@ from framenest.domain.research import (
     UsagePriceSchedule,
     completion_error,
     is_terminal_lifecycle,
-    usage_cost_micro_usd,
+    usage_cost_micro_usd_or_none,
 )
 
 SelectResearchProvider = Callable[[ResearchOperationKind], ResearchSelectionSnapshot]
+ResolveUsagePriceSchedule = Callable[[str, str, str], UsagePriceSchedule | None]
+AdmissionGuard = Callable[[ResearchSelectionSnapshot, int], ResearchErrorCode | None]
+
+FINGERPRINT_VERSION = 2
+LEGACY_RESEARCH_PROFILE_VERSION = "3"
 
 _TERMINAL_BY_ERROR = {
     ResearchErrorCode.REFUSED: ResearchLifecycleState.REFUSED,
@@ -61,22 +67,21 @@ def research_request_fingerprint(
     owner_login_key: str,
     kind: ResearchOperationKind,
     prompt: str,
-    snapshot: ResearchSelectionSnapshot,
+    consent_version: str,
 ) -> str:
-    """Content fingerprint over owner, kind, prompt and the accepted policy."""
+    """Version-2 content fingerprint over owner, kind, prompt and consent.
+
+    Provider, model, budgets, resource limits and settings revision are
+    deliberately excluded so an identical replay still matches after any of
+    them change.
+    """
     payload = json.dumps(
         {
+            "fingerprint_version": FINGERPRINT_VERSION,
             "owner": owner_login_key,
             "kind": kind.value,
             "prompt": prompt,
-            "provider": snapshot.provider_id,
-            "model": snapshot.model_id,
-            "configuration_version": snapshot.profile.configuration_version,
-            "reasoning_effort": snapshot.profile.reasoning_effort,
-            "max_tool_calls": snapshot.profile.max_tool_calls,
-            "max_output_tokens": snapshot.profile.max_output_tokens,
-            "deadline_seconds": snapshot.profile.deadline_seconds,
-            "budget_reservation_usd_micros": snapshot.profile.budget_reservation_usd_micros,
+            "consent_version": consent_version,
         },
         sort_keys=True,
         separators=(",", ":"),
@@ -100,13 +105,18 @@ def _answer_checkpoint(answer: ResearchAnswer) -> str:
                 "refusal_marker": answer.evidence.refusal_marker,
                 "incomplete_marker": answer.evidence.incomplete_marker,
             },
-            "usage": {
-                "input_tokens": answer.usage.input_tokens,
-                "cached_input_tokens": answer.usage.cached_input_tokens,
-                "output_tokens": answer.usage.output_tokens,
-                "reasoning_tokens": answer.usage.reasoning_tokens,
-                "web_tool_calls": answer.usage.web_tool_calls,
-            },
+            "usage": (
+                None
+                if answer.usage is None
+                else {
+                    "input_tokens": answer.usage.input_tokens,
+                    "cached_input_tokens": answer.usage.cached_input_tokens,
+                    "output_tokens": answer.usage.output_tokens,
+                    "reasoning_tokens": answer.usage.reasoning_tokens,
+                    "web_tool_calls": answer.usage.web_tool_calls,
+                    "cache_write_input_tokens": answer.usage.cache_write_input_tokens,
+                }
+            ),
         },
         sort_keys=True,
         separators=(",", ":"),
@@ -125,7 +135,10 @@ class ResearchCoordinator:
         ledger: object,
         completion: ResearchResultCompletion,
         select: SelectResearchProvider,
-        price_schedule: UsagePriceSchedule | None = None,
+        resolve_price_schedule: ResolveUsagePriceSchedule | None = None,
+        admission_guard: AdmissionGuard | None = None,
+        accounting_blocker: Callable[[], ResearchErrorCode | None] | None = None,
+        submission_enabled: Callable[[], bool] | None = None,
         clock_ms: Callable[[], int] | None = None,
         new_operation_id: Callable[[], str] | None = None,
     ) -> None:
@@ -134,7 +147,10 @@ class ResearchCoordinator:
         self._ledger = ledger
         self._completion = completion
         self._select = select
-        self._price_schedule = price_schedule
+        self._resolve_price_schedule = resolve_price_schedule
+        self._admission_guard = admission_guard
+        self._accounting_blocker = accounting_blocker
+        self._submission_enabled = submission_enabled
         self._clock_ms = clock_ms or (lambda: time.time_ns() // 1_000_000)
         self._new_operation_id = new_operation_id or (
             lambda: f"op-{secrets.token_hex(16)}"
@@ -149,7 +165,8 @@ class ResearchCoordinator:
         client_request_id: str,
         kind: ResearchOperationKind,
         prompt: str,
-    ) -> ResearchRequestRow:
+        consent_version: str = "",
+    ) -> ResearchAdmissionReceipt:
         if not isinstance(kind, ResearchOperationKind):
             raise ResearchStoreError(ResearchErrorCode.INVALID_REQUEST)
         if not isinstance(prompt, str) or not prompt.strip():
@@ -158,22 +175,39 @@ class ResearchCoordinator:
             raise ResearchStoreError(ResearchErrorCode.INVALID_REQUEST)
         if not isinstance(client_request_id, str) or not client_request_id:
             raise ResearchStoreError(ResearchErrorCode.INVALID_REQUEST)
+        if not isinstance(consent_version, str):
+            raise ResearchStoreError(ResearchErrorCode.INVALID_REQUEST)
+        # Idempotency lookup precedes configuration, enablement and credential
+        # checks so an identical replay succeeds even after those change.
+        existing = self._requests.find_by_client(owner_login_key, client_request_id)
+        if existing is not None:
+            if self._replay_matches(
+                existing,
+                owner_login_key=owner_login_key,
+                kind=kind,
+                prompt=prompt,
+                consent_version=consent_version,
+            ):
+                return ResearchAdmissionReceipt(row=existing, newly_admitted=False)
+            raise ResearchStoreError(ResearchErrorCode.IDEMPOTENCY_CONFLICT)
+        blocker = self._accounting_blocker() if self._accounting_blocker else None
+        if blocker is not None:
+            raise ResearchStoreError(blocker)
         try:
             snapshot = self._select(kind)
         except ResearchSelectionError as exc:
             raise ResearchStoreError(exc.code) from None
+        now_ms = self._clock_ms()
+        if self._admission_guard is not None:
+            denial = self._admission_guard(snapshot, now_ms)
+            if denial is not None:
+                raise ResearchStoreError(denial)
         fingerprint = research_request_fingerprint(
             owner_login_key=owner_login_key,
             kind=kind,
             prompt=prompt,
-            snapshot=snapshot,
+            consent_version=consent_version,
         )
-        existing = self._requests.find_by_client(owner_login_key, client_request_id)
-        if existing is not None:
-            if existing.request_fingerprint == fingerprint:
-                return existing
-            raise ResearchStoreError(ResearchErrorCode.IDEMPOTENCY_CONFLICT)
-        now_ms = self._clock_ms()
         record = ResearchRequestRecord(
             operation_id=self._new_operation_id(),
             kind=kind,
@@ -210,39 +244,77 @@ class ResearchCoordinator:
             daily_limit_usd_micros=snapshot.daily_budget_usd_micros,
             monthly_limit_usd_micros=snapshot.monthly_budget_usd_micros,
         )
-        return self._requests.admit(row, reservation)
+        stored = self._requests.admit(row, reservation)
+        newly_admitted = (
+            stored.record.operation_id == record.operation_id
+            and stored.request_fingerprint == fingerprint
+        )
+        return ResearchAdmissionReceipt(row=stored, newly_admitted=newly_admitted)
+
+    def _replay_matches(
+        self,
+        existing: ResearchRequestRow,
+        *,
+        owner_login_key: str,
+        kind: ResearchOperationKind,
+        prompt: str,
+        consent_version: str,
+    ) -> bool:
+        """Return whether a stored request is an identical replay.
+
+        Legacy version-3 rows are compared on persisted owner, kind and prompt
+        because their fingerprint predates the version-2 object and their
+        consent value was never persisted.
+        """
+        if existing.owner_login_key != owner_login_key:
+            return False
+        if existing.record.kind is not kind or existing.record.prompt != prompt:
+            return False
+        if existing.record.profile.configuration_version == LEGACY_RESEARCH_PROFILE_VERSION:
+            return True
+        fingerprint = research_request_fingerprint(
+            owner_login_key=owner_login_key,
+            kind=kind,
+            prompt=prompt,
+            consent_version=consent_version,
+        )
+        return existing.request_fingerprint == fingerprint
 
     # -- submission --------------------------------------------------------
 
     def submit_pending(self) -> ResearchRequestRow | None:
-        """Submit the admitted request, if one is waiting."""
+        """Claim and submit the admitted request, if one is waiting.
+
+        Disabling research prevents new submission claims. The atomic
+        ``ADMITTED`` to ``SUBMITTING`` claim guarantees only one winner issues
+        provider creation even under concurrent nudges.
+        """
+        if self._submission_enabled is not None and not self._submission_enabled():
+            return None
         row = self._active_row()
         if row is None or row.record.state is not ResearchLifecycleState.ADMITTED:
             return None
-        marker = replace(
-            row,
-            record=replace(row.record, state=ResearchLifecycleState.SUBMITTING),
-            updated_at_ms=self._clock_ms(),
-        )
-        self._requests.save(marker)
+        claimed = self._requests.claim_submission(row.record.operation_id)
+        if claimed is None:
+            return None
         provider_request = ProviderRequest(
-            operation_id=row.record.operation_id,
-            kind=row.record.kind,
-            prompt=row.record.prompt,
-            profile=row.record.profile,
-            deadline_seconds=row.record.deadline_seconds,
-            resource_limits=row.record.resource_limits,
+            operation_id=claimed.record.operation_id,
+            kind=claimed.record.kind,
+            prompt=claimed.record.prompt,
+            profile=claimed.record.profile,
+            deadline_seconds=claimed.record.deadline_seconds,
+            resource_limits=claimed.record.resource_limits,
         )
         try:
             observation = self._provider.submit(provider_request)
         except Exception:
             return self._finish(
-                marker,
+                claimed,
                 ResearchLifecycleState.SUBMISSION_UNKNOWN,
                 ResearchErrorCode.SUBMISSION_UNKNOWN,
                 accounting=ResearchAccountingState.UNKNOWN,
             )
-        return self._apply_submit_observation(marker, observation)
+        return self._apply_submit_observation(claimed, observation)
 
     def recover(self) -> ResearchRequestRow | None:
         """Classify the active slot after a restart. Never resubmits blindly."""
@@ -462,20 +534,33 @@ class ResearchCoordinator:
         # The completion port owns the record binding; reload so the terminal
         # save cannot clobber storage fields it wrote.
         current = self._requests.get_request(row.record.operation_id) or row
-        if self._price_schedule is None:
+        schedule = self._schedule_for(current)
+        cost = usage_cost_micro_usd_or_none(answer.usage, schedule)
+        if cost is None:
             accounting = ResearchAccountingState.UNKNOWN
-            cost = None
+            reconciled_usage: ResearchUsage | None = None
         else:
             accounting = ResearchAccountingState.RECONCILED
-            cost = usage_cost_micro_usd(answer.usage, self._price_schedule)
+            reconciled_usage = answer.usage
         return self._finish(
             current,
             ResearchLifecycleState.SAVED,
             None,
             accounting=accounting,
-            usage=answer.usage if accounting is ResearchAccountingState.RECONCILED else None,
+            usage=reconciled_usage,
             cost=cost,
             keep_handle=True,
+        )
+
+    def _schedule_for(self, row: ResearchRequestRow) -> UsagePriceSchedule | None:
+        """Resolve pricing from the persisted request identity, never settings."""
+        if self._resolve_price_schedule is None:
+            return None
+        profile = row.record.profile
+        return self._resolve_price_schedule(
+            profile.provider_id,
+            profile.model_id,
+            profile.configuration_version,
         )
 
     # -- cancellation and cleanup -----------------------------------------
@@ -664,7 +749,20 @@ class ResearchCoordinator:
                 for item in data.get("citations", [])
             )
             evidence = data["evidence"]
-            usage = data["usage"]
+            usage_payload = data.get("usage")
+            usage: ResearchUsage | None = None
+            if usage_payload is not None:
+                cache_write = usage_payload.get("cache_write_input_tokens")
+                usage = ResearchUsage(
+                    input_tokens=int(usage_payload["input_tokens"]),
+                    cached_input_tokens=int(usage_payload["cached_input_tokens"]),
+                    output_tokens=int(usage_payload["output_tokens"]),
+                    reasoning_tokens=int(usage_payload["reasoning_tokens"]),
+                    web_tool_calls=int(usage_payload["web_tool_calls"]),
+                    cache_write_input_tokens=(
+                        None if cache_write is None else int(cache_write)
+                    ),
+                )
             return ResearchAnswer(
                 text=str(data["text"]),
                 citations=citations,
@@ -675,13 +773,7 @@ class ResearchCoordinator:
                     refusal_marker=bool(evidence["refusal_marker"]),
                     incomplete_marker=bool(evidence["incomplete_marker"]),
                 ),
-                usage=ResearchUsage(
-                    input_tokens=int(usage["input_tokens"]),
-                    cached_input_tokens=int(usage["cached_input_tokens"]),
-                    output_tokens=int(usage["output_tokens"]),
-                    reasoning_tokens=int(usage["reasoning_tokens"]),
-                    web_tool_calls=int(usage["web_tool_calls"]),
-                ),
+                usage=usage,
             )
         except (KeyError, TypeError, ValueError):
             return None

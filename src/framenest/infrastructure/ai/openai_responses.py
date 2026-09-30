@@ -129,6 +129,17 @@ def _status_error_code(status_code: int) -> ResearchErrorCode:
     return ResearchErrorCode.INVALID_REQUEST
 
 
+def _submit_status_error_code(status_code: int) -> ResearchErrorCode:
+    """Map a creation failure without masquerading as a missing response.
+
+    A 404 during creation is provider-side unavailability, not an expired
+    remote result. Only polling may interpret 404 as a released response.
+    """
+    if status_code == 404:
+        return ResearchErrorCode.PROVIDER_UNAVAILABLE
+    return _status_error_code(status_code)
+
+
 def _decode_payload(response: HttpsJsonResponse) -> Mapping[str, object] | None:
     try:
         payload = json.loads(response.body.decode("utf-8"))
@@ -184,7 +195,7 @@ class OpenAIResponsesAdapter:
         if response.status_code not in {200, 201, 202}:
             return ProviderObservation(
                 kind=ProviderObservationKind.FAILED,
-                error_code=_status_error_code(response.status_code),
+                error_code=_submit_status_error_code(response.status_code),
             )
         payload = _decode_payload(response)
         if payload is None:
@@ -418,22 +429,7 @@ def _parse_answer(payload: Mapping[str, object]) -> ResearchAnswer:
                         citations.append(ResearchCitation(url=url, title=title))
     text = "".join(text_parts)
     incomplete = bool(payload.get("incomplete_details"))
-    usage_payload = payload.get("usage")
-    if not isinstance(usage_payload, dict):
-        usage_payload = {}
-    input_details = usage_payload.get("input_tokens_details")
-    if not isinstance(input_details, dict):
-        input_details = {}
-    output_details = usage_payload.get("output_tokens_details")
-    if not isinstance(output_details, dict):
-        output_details = {}
-    usage = ResearchUsage(
-        input_tokens=_int_or_zero(usage_payload.get("input_tokens")),
-        cached_input_tokens=_int_or_zero(input_details.get("cached_tokens")),
-        output_tokens=_int_or_zero(usage_payload.get("output_tokens")),
-        reasoning_tokens=_int_or_zero(output_details.get("reasoning_tokens")),
-        web_tool_calls=web_search_calls,
-    )
+    usage = _parse_usage(payload, web_search_calls=web_search_calls)
     return ResearchAnswer(
         text=text,
         citations=tuple(citations),
@@ -448,10 +444,69 @@ def _parse_answer(payload: Mapping[str, object]) -> ResearchAnswer:
     )
 
 
-def _int_or_zero(value: object) -> int:
-    if isinstance(value, bool) or not isinstance(value, int):
-        return 0
-    return max(0, value)
+def _parse_usage(
+    payload: Mapping[str, object],
+    *,
+    web_search_calls: int,
+) -> ResearchUsage | None:
+    """Parse provider usage without inventing zeros.
+
+    ``input_tokens`` and ``output_tokens`` are required. A missing or invalid
+    required value, or an invalid optional value, makes accounting unknown
+    (``None``) instead of visible-as-zero. Cache-write tokens are retained only
+    when the provider reports them; absence stays absence.
+    """
+    usage_payload = payload.get("usage")
+    if not isinstance(usage_payload, dict):
+        return None
+    input_tokens = _non_negative_int(usage_payload.get("input_tokens"))
+    output_tokens = _non_negative_int(usage_payload.get("output_tokens"))
+    if input_tokens is None or output_tokens is None:
+        return None
+    input_details = usage_payload.get("input_tokens_details")
+    if input_details is None:
+        input_details = {}
+    elif not isinstance(input_details, dict):
+        return None
+    output_details = usage_payload.get("output_tokens_details")
+    if output_details is None:
+        output_details = {}
+    elif not isinstance(output_details, dict):
+        return None
+    cached = _optional_non_negative_int(input_details.get("cached_tokens"))
+    reasoning = _optional_non_negative_int(output_details.get("reasoning_tokens"))
+    cache_write = _optional_non_negative_int(input_details.get("cache_write_tokens"))
+    if cached is False or reasoning is False or cache_write is False:
+        return None
+    cached_tokens = 0 if cached is None else cached
+    reasoning_tokens = 0 if reasoning is None else reasoning
+    cache_write_tokens = None if cache_write is None else cache_write
+    try:
+        return ResearchUsage(
+            input_tokens=input_tokens,
+            cached_input_tokens=cached_tokens,
+            output_tokens=output_tokens,
+            reasoning_tokens=reasoning_tokens,
+            web_tool_calls=web_search_calls,
+            cache_write_input_tokens=cache_write_tokens,
+        )
+    except ResearchValueError:
+        return None
+
+
+def _non_negative_int(value: object) -> int | None:
+    if type(value) is not int or value < 0:
+        return None
+    return value
+
+
+def _optional_non_negative_int(value: object) -> int | None | bool:
+    """Return an int, ``None`` when absent, or ``False`` when invalid."""
+    if value is None:
+        return None
+    if type(value) is not int or value < 0:
+        return False
+    return value
 
 
 __all__ = [

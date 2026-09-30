@@ -401,13 +401,19 @@ class ProviderHandle:
 
 @dataclass(frozen=True, slots=True)
 class ResearchUsage:
-    """Token and tool counts. Reasoning tokens are a subset of output tokens."""
+    """Token and tool counts. Reasoning tokens are a subset of output tokens.
+
+    ``cache_write_input_tokens`` is optional because a provider may not report
+    the separate cache-write field. Absence is retained as absence; it is never
+    fabricated as zero.
+    """
 
     input_tokens: int
     cached_input_tokens: int
     output_tokens: int
     reasoning_tokens: int
     web_tool_calls: int
+    cache_write_input_tokens: int | None = None
 
     def __post_init__(self) -> None:
         _require_non_negative_int(self.input_tokens)
@@ -415,26 +421,67 @@ class ResearchUsage:
         _require_non_negative_int(self.output_tokens)
         _require_non_negative_int(self.reasoning_tokens)
         _require_non_negative_int(self.web_tool_calls)
+        if self.cache_write_input_tokens is not None:
+            _require_non_negative_int(self.cache_write_input_tokens)
         if self.cached_input_tokens > self.input_tokens:
             raise ResearchValueError
         if self.reasoning_tokens > self.output_tokens:
             raise ResearchValueError
+        if (
+            self.cache_write_input_tokens is not None
+            and self.cached_input_tokens + self.cache_write_input_tokens
+            > self.input_tokens
+        ):
+            raise ResearchValueError
+
+
+@dataclass(frozen=True, slots=True)
+class UsageTokenPrices:
+    """One tier of integer micro-USD prices per million tokens."""
+
+    input_micro_usd_per_million: int
+    cached_input_micro_usd_per_million: int
+    cache_write_input_micro_usd_per_million: int
+    output_micro_usd_per_million: int
+
+    def __post_init__(self) -> None:
+        _require_non_negative_int(self.input_micro_usd_per_million)
+        _require_non_negative_int(self.cached_input_micro_usd_per_million)
+        _require_non_negative_int(self.cache_write_input_micro_usd_per_million)
+        _require_non_negative_int(self.output_micro_usd_per_million)
 
 
 @dataclass(frozen=True, slots=True)
 class UsagePriceSchedule:
-    """Integer micro-USD prices per million tokens, plus web search per thousand."""
+    """Integer micro-USD prices per million tokens, plus web search per thousand.
+
+    The four original fields describe the short-context tier. New catalog
+    schedules add an explicit cache-write rate, a long-context threshold and a
+    long-context tier. The three added fields may be absent only for explicitly
+    supported legacy schedules. Web-search pricing stays on the parent schedule.
+    """
 
     input_micro_usd_per_million: int
     cached_input_micro_usd_per_million: int
     output_micro_usd_per_million: int
     web_search_micro_usd_per_thousand: int
+    cache_write_input_micro_usd_per_million: int | None = None
+    long_context_threshold_tokens: int | None = None
+    long_context: UsageTokenPrices | None = None
 
     def __post_init__(self) -> None:
         _require_non_negative_int(self.input_micro_usd_per_million)
         _require_non_negative_int(self.cached_input_micro_usd_per_million)
         _require_non_negative_int(self.output_micro_usd_per_million)
         _require_non_negative_int(self.web_search_micro_usd_per_thousand)
+        if self.cache_write_input_micro_usd_per_million is not None:
+            _require_non_negative_int(self.cache_write_input_micro_usd_per_million)
+        if self.long_context_threshold_tokens is not None:
+            _require_non_negative_int(self.long_context_threshold_tokens)
+        if self.long_context is not None and not isinstance(
+            self.long_context, UsageTokenPrices
+        ):
+            raise ResearchValueError
 
 
 @dataclass(frozen=True, slots=True)
@@ -500,7 +547,7 @@ class ResearchAnswer:
     text: str
     citations: tuple[ResearchCitation, ...]
     evidence: CompletionEvidence
-    usage: ResearchUsage
+    usage: ResearchUsage | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.text, str) or not self.text:
@@ -515,7 +562,7 @@ class ResearchAnswer:
             raise ResearchValueError
         if not isinstance(self.evidence, CompletionEvidence):
             raise ResearchValueError
-        if not isinstance(self.usage, ResearchUsage):
+        if self.usage is not None and not isinstance(self.usage, ResearchUsage):
             raise ResearchValueError
 
 
@@ -736,23 +783,86 @@ def add_micro_usd(*amounts: int) -> int:
     return total
 
 
+def select_token_prices(
+    schedule: UsagePriceSchedule,
+    input_tokens: int,
+) -> UsageTokenPrices | None:
+    """Return the tier prices selected by total input tokens.
+
+    ``None`` means the schedule does not cover that tier, so accounting is
+    unknown rather than silently clamped. A legacy schedule may set a long
+    threshold without a long tier.
+    """
+    if not isinstance(schedule, UsagePriceSchedule):
+        raise ResearchValueError
+    _require_non_negative_int(input_tokens)
+    threshold = schedule.long_context_threshold_tokens
+    if threshold is not None and input_tokens > threshold:
+        return schedule.long_context
+    return UsageTokenPrices(
+        input_micro_usd_per_million=schedule.input_micro_usd_per_million,
+        cached_input_micro_usd_per_million=schedule.cached_input_micro_usd_per_million,
+        cache_write_input_micro_usd_per_million=(
+            schedule.input_micro_usd_per_million
+            if schedule.cache_write_input_micro_usd_per_million is None
+            else schedule.cache_write_input_micro_usd_per_million
+        ),
+        output_micro_usd_per_million=schedule.output_micro_usd_per_million,
+    )
+
+
 def usage_cost_micro_usd(usage: ResearchUsage, schedule: UsagePriceSchedule) -> int:
     """Calculate integer micro-USD from reported usage.
 
-    Cached input is billed only at the cached rate. Reasoning tokens are a
-    subset of output tokens and are not added again. Callers must not call
-    this with missing usage and then store zero.
+    Cached input is billed only at the cached rate; cache-write input is billed
+    only at the write rate; reasoning tokens are a subset of output tokens and
+    are never added again. When the write rate differs from the ordinary input
+    rate and the write count is absent, or when the schedule does not cover the
+    selected tier, accounting is unknown and this raises instead of fabricating
+    a value. Callers must not store a zero for missing usage.
     """
     if not isinstance(usage, ResearchUsage) or not isinstance(schedule, UsagePriceSchedule):
         raise ResearchValueError
-    uncached_input = usage.input_tokens - usage.cached_input_tokens
+    prices = select_token_prices(schedule, usage.input_tokens)
+    if prices is None:
+        raise ResearchValueError
+    write_rate = prices.cache_write_input_micro_usd_per_million
+    if usage.cache_write_input_tokens is None:
+        if write_rate != prices.input_micro_usd_per_million:
+            raise ResearchValueError
+        write_tokens = 0
+    else:
+        write_tokens = usage.cache_write_input_tokens
+    if usage.cached_input_tokens + write_tokens > usage.input_tokens:
+        raise ResearchValueError
+    uncached_input = usage.input_tokens - usage.cached_input_tokens - write_tokens
     tool_cost = ceiling_div(
         usage.web_tool_calls * schedule.web_search_micro_usd_per_thousand,
         1000,
     )
     return add_micro_usd(
-        token_cost_micro_usd(uncached_input, schedule.input_micro_usd_per_million),
-        token_cost_micro_usd(usage.cached_input_tokens, schedule.cached_input_micro_usd_per_million),
-        token_cost_micro_usd(usage.output_tokens, schedule.output_micro_usd_per_million),
+        token_cost_micro_usd(uncached_input, prices.input_micro_usd_per_million),
+        token_cost_micro_usd(
+            usage.cached_input_tokens, prices.cached_input_micro_usd_per_million
+        ),
+        token_cost_micro_usd(write_tokens, write_rate),
+        token_cost_micro_usd(usage.output_tokens, prices.output_micro_usd_per_million),
         tool_cost,
     )
+
+
+def usage_cost_micro_usd_or_none(
+    usage: ResearchUsage | None,
+    schedule: UsagePriceSchedule | None,
+) -> int | None:
+    """Return the cost, or ``None`` when accounting is unknown.
+
+    Missing usage, a missing schedule and an uncovered tier are all explicit
+    unknown accounting rather than a fabricated zero.
+    """
+    if usage is None or schedule is None:
+        return None
+    try:
+        return usage_cost_micro_usd(usage, schedule)
+    except ResearchValueError:
+        return None

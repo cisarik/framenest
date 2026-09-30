@@ -308,7 +308,7 @@ def test_coordinator_with_real_completion_binds_the_record(database) -> None:
         client_request_id="client-coord-completion",
         kind=ResearchOperationKind.SEARCH,
         prompt="What is the synthetic question?",
-    )
+    ).row
     coordinator.submit_pending()
     saved = coordinator.poll_once()
     assert saved is not None

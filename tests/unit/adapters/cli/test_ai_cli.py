@@ -23,6 +23,7 @@ from framenest.infrastructure.ai.configuration import (
     AiConfigurationError,
     AiServerConfig,
     load_ai_server_config,
+    load_ai_server_config_snapshot,
     load_ai_status_snapshot,
     load_ai_test_state,
     write_ai_server_config,
@@ -143,6 +144,40 @@ def test_configure_persists_provider_model_but_no_secret(tmp_path: Path) -> None
     assert "secret" not in raw
     assert "API_KEY" not in raw
     assert any("AI_GATEWAY_API_KEY" in line for line in lines)
+
+
+def test_configure_interactive_refuses_a_stale_save(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.json"
+    _write_declared_config(config_path)
+    answers = iter(["1", "", "yes"])
+    lines: list[str] = []
+
+    def prompt(_prompt: str) -> str:
+        answer = next(answers)
+        if answer == "yes":
+            # A concurrent writer changes the file after the revision was
+            # captured but before the interactive save commits.
+            write_ai_server_config(
+                AiServerConfig(
+                    active_provider_id="vercel-ai-gateway",
+                    provider_models={},
+                    updated_at_ms=99,
+                ),
+                config_path,
+                expected_revision=load_ai_server_config_snapshot(config_path).revision,
+            )
+        return answer
+
+    with pytest.raises(AiConfigurationError):
+        ai.configure_command(
+            ai._CliContext(config_path=config_path),
+            prompt=prompt,
+            output=lines.append,
+        )
+    # The concurrent write survives; the stale interactive save did not clobber it.
+    stored = load_ai_server_config(config_path)
+    assert stored is not None
+    assert stored.updated_at_ms == 99
 
 
 def test_configure_non_interactive_persists_provider_model_but_no_secret(tmp_path: Path) -> None:

@@ -162,6 +162,12 @@ def context(tmp_path: Path):
     requests = SqliteResearchRequestRepository(engine, clock_ms=lambda: now[0])
     ledger = SqliteResearchBudgetLedger(engine, clock_ms=lambda: now[0])
     completion = FakeCompletion()
+    zero_schedule = UsagePriceSchedule(
+        input_micro_usd_per_million=0,
+        cached_input_micro_usd_per_million=0,
+        output_micro_usd_per_million=0,
+        web_search_micro_usd_per_thousand=0,
+    )
     coordinator = ResearchCoordinator(
         provider=provider,
         requests=requests,
@@ -170,12 +176,7 @@ def context(tmp_path: Path):
         select=lambda kind: select_research_provider(
             default_research_configuration(enabled=True), kind=kind
         ),
-        price_schedule=UsagePriceSchedule(
-            input_micro_usd_per_million=0,
-            cached_input_micro_usd_per_million=0,
-            output_micro_usd_per_million=0,
-            web_search_micro_usd_per_thousand=0,
-        ),
+        resolve_price_schedule=lambda provider_id, model_id, version: zero_schedule,
         clock_ms=lambda: now[0],
         new_operation_id=next_id,
     )
@@ -199,7 +200,7 @@ def _admit(context, *, client: str = "client-0001"):
         client_request_id=client,
         kind=ResearchOperationKind.SEARCH,
         prompt="What is the synthetic question?",
-    )
+    ).row
 
 
 def test_admit_persists_and_duplicate_returns_existing(context) -> None:
@@ -242,6 +243,90 @@ def test_admit_disabled_configuration_is_refused(context) -> None:
 
 def _raise_selection():
     raise ResearchSelectionError(ResearchErrorCode.DISABLED)
+
+
+def _coordinator(context, **overrides) -> ResearchCoordinator:
+    kwargs = {
+        "provider": context["provider"],
+        "requests": context["requests"],
+        "ledger": context["ledger"],
+        "completion": context["completion"],
+        "select": lambda kind: select_research_provider(
+            default_research_configuration(enabled=True), kind=kind
+        ),
+        "clock_ms": lambda: context["now"][0],
+        "new_operation_id": lambda: "op-coord-extra",
+    }
+    kwargs.update(overrides)
+    return ResearchCoordinator(**kwargs)
+
+
+def test_accounting_blocker_refuses_admission(context) -> None:
+    coordinator = _coordinator(
+        context,
+        accounting_blocker=lambda: ResearchErrorCode.ACCOUNTING_UNKNOWN,
+    )
+    with pytest.raises(ResearchStoreError) as caught:
+        coordinator.admit(
+            owner_login_key="alice@example.com",
+            client_request_id="client-blocked",
+            kind=ResearchOperationKind.SEARCH,
+            prompt="Question?",
+        )
+    assert caught.value.code is ResearchErrorCode.ACCOUNTING_UNKNOWN
+
+
+def test_admission_guard_refuses_expired_cutoff(context) -> None:
+    coordinator = _coordinator(
+        context,
+        admission_guard=lambda snapshot, now_ms: ResearchErrorCode.CAPABILITY_UNAVAILABLE,
+    )
+    with pytest.raises(ResearchStoreError) as caught:
+        coordinator.admit(
+            owner_login_key="alice@example.com",
+            client_request_id="client-expired",
+            kind=ResearchOperationKind.SEARCH,
+            prompt="Question?",
+        )
+    assert caught.value.code is ResearchErrorCode.CAPABILITY_UNAVAILABLE
+
+
+def test_disabled_submission_does_not_claim(context) -> None:
+    row = _admit(context, client="client-disabled")
+    coordinator = _coordinator(context, submission_enabled=lambda: False)
+    assert coordinator.submit_pending() is None
+    stored = context["requests"].get_request(row.record.operation_id)
+    assert stored is not None
+    assert stored.record.state is ResearchLifecycleState.ADMITTED
+
+
+def test_replay_matches_after_content_changes_and_is_new_once(context) -> None:
+    first = context["coordinator"].admit(
+        owner_login_key="alice@example.com",
+        client_request_id="client-replay",
+        kind=ResearchOperationKind.SEARCH,
+        prompt="Question?",
+        consent_version="2026-09",
+    )
+    assert first.newly_admitted is True
+    replay = context["coordinator"].admit(
+        owner_login_key="alice@example.com",
+        client_request_id="client-replay",
+        kind=ResearchOperationKind.SEARCH,
+        prompt="Question?",
+        consent_version="2026-09",
+    )
+    assert replay.newly_admitted is False
+    assert replay.row.record.operation_id == first.row.record.operation_id
+    with pytest.raises(ResearchStoreError) as caught:
+        context["coordinator"].admit(
+            owner_login_key="alice@example.com",
+            client_request_id="client-replay",
+            kind=ResearchOperationKind.SEARCH,
+            prompt="A different question?",
+            consent_version="2026-09",
+        )
+    assert caught.value.code is ResearchErrorCode.IDEMPOTENCY_CONFLICT
 
 
 def test_submit_transitions_to_running_and_refusal_finishes(context) -> None:

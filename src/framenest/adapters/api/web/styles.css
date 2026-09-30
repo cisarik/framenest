@@ -899,6 +899,32 @@ button {
   gap: 8px;
 }
 
+.research-settings__status {
+  margin: 0;
+  min-height: 1.2em;
+  color: var(--text-soft);
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+
+.research-settings__form {
+  display: grid;
+  gap: 12px;
+}
+
+.research-settings__catalog {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding-left: 18px;
+  color: var(--text-soft);
+  font-size: 0.8rem;
+}
+
+.research-settings-model {
+  line-height: 1.5;
+}
+
 /* --- Upload cockpit --- */
 
 .upload-action-button {
@@ -5330,11 +5356,19 @@ body[data-audience="public_published"] #admin-media-aliases-panel {
     flex-direction: column;
     align-items: stretch;
   }
+
+  .research-settings__form {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 @media (max-width: 360px) {
   .ai-provider-confirm__actions {
     flex-direction: column;
+  }
+
+  .research-settings__catalog {
+    padding-left: 12px;
   }
 }
 

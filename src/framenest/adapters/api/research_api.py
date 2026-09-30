@@ -7,6 +7,7 @@ cancellation refuse with ``E_DISABLED``, and history reads remain available.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from fastapi import APIRouter, Request
@@ -36,11 +37,17 @@ MAX_CONSENT_VERSION_LENGTH = 32
 
 @dataclass(frozen=True, slots=True)
 class ResearchApiDependencies:
-    """Runtime plus the durable request store used for history reads."""
+    """Runtime plus the durable request store used for history reads.
+
+    ``configuration_provider`` reads a fresh validated configuration so both
+    capabilities and admission reflect the current settings without restarting
+    the process.
+    """
 
     requests: object
     runtime: ResearchCoordinator | None
-    configuration: ResearchConfiguration | None
+    configuration: ResearchConfiguration | None = None
+    configuration_provider: Callable[[], ResearchConfiguration | None] | None = None
 
 
 class ResearchCreateRequest(BaseModel):
@@ -101,7 +108,22 @@ def _summary(row: ResearchRequestRow) -> dict[str, object]:
         "finished_at_ms": row.finished_at_ms,
         "updated_at_ms": row.updated_at_ms,
         "record_id": row.record_id,
+        "provider_id": record.profile.provider_id,
+        "model_id": record.profile.model_id,
+        "configuration_version": record.profile.configuration_version,
+        "accounting_state": record.accounting_state.value,
     }
+
+
+def _current_configuration(
+    dependencies: ResearchApiDependencies,
+) -> ResearchConfiguration | None:
+    if dependencies.configuration_provider is not None:
+        try:
+            return dependencies.configuration_provider()
+        except Exception:
+            return None
+    return dependencies.configuration
 
 
 def _page_params(request: Request) -> tuple[int, int]:
@@ -137,8 +159,12 @@ def create_research_api_router(dependencies: ResearchApiDependencies) -> APIRout
 
     @router.get("/api/research/capabilities")
     def research_capabilities() -> dict[str, object]:
-        configuration = dependencies.configuration
-        enabled = dependencies.runtime is not None and configuration is not None
+        configuration = _current_configuration(dependencies)
+        enabled = (
+            dependencies.runtime is not None
+            and configuration is not None
+            and configuration.enabled
+        )
         payload: dict[str, object] = {
             "enabled": enabled,
             "provider_id": None,
@@ -249,15 +275,19 @@ def create_research_api_router(dependencies: ResearchApiDependencies) -> APIRout
                 422, ResearchErrorCode.INVALID_REQUEST.value, "The request is invalid."
             )
         try:
-            row = runtime.admit(
+            receipt = runtime.admit(
                 owner_login_key=identity.login_key,
                 client_request_id=client_request_id,
                 kind=kind,
                 prompt=body.prompt,
+                consent_version=consent_version,
             )
         except ResearchStoreError as exc:
             return _store_refusal(exc)
-        if row.record.state.value == "admitted":
+        row = receipt.row
+        # Only a newly admitted request may trigger the submission nudge; an
+        # identical replay returns the original attempt untouched.
+        if receipt.newly_admitted and row.record.state.value == "admitted":
             try:
                 runtime.submit_pending()
                 runtime.release_remote_pending()

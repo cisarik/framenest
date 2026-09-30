@@ -678,6 +678,24 @@ const aiProviderPongConfirm = document.querySelector("#ai-provider-pong-confirm"
 const aiProviderPongConfirmNote = document.querySelector("#ai-provider-pong-confirm-note");
 const aiProviderPongCancelButton = document.querySelector("#ai-provider-pong-cancel");
 const aiProviderPongConfirmButton = document.querySelector("#ai-provider-pong-confirm-button");
+const researchSettingsSection = document.querySelector("#research-settings-section");
+const researchSettingsStatus = document.querySelector("#research-settings-status");
+const researchSettingsLoading = document.querySelector("#research-settings-loading");
+const researchSettingsForm = document.querySelector("#research-settings-form");
+const researchSettingsEnabled = document.querySelector("#research-settings-enabled");
+const researchSettingsModel = document.querySelector("#research-settings-model");
+const researchSettingsDailyBudget = document.querySelector("#research-settings-daily-budget");
+const researchSettingsMonthlyBudget = document.querySelector("#research-settings-monthly-budget");
+const researchSettingsSearchReservation = document.querySelector("#research-settings-search-reservation");
+const researchSettingsResearchReservation = document.querySelector("#research-settings-research-reservation");
+const researchSettingsCatalog = document.querySelector("#research-settings-catalog");
+const researchSettingsCredential = document.querySelector("#research-settings-credential");
+const researchSettingsSaveButton = document.querySelector("#research-settings-save");
+const researchSettingsReloadButton = document.querySelector("#research-settings-reload");
+const researchSettingsConfirm = document.querySelector("#research-settings-confirm");
+const researchSettingsConfirmNote = document.querySelector("#research-settings-confirm-note");
+const researchSettingsConfirmCancel = document.querySelector("#research-settings-confirm-cancel");
+const researchSettingsConfirmButton = document.querySelector("#research-settings-confirm-button");
 const uploadDialog = document.querySelector("#upload-dialog");
 const uploadDialogTitle = document.querySelector("#upload-dialog-title");
 const uploadCloseButton = document.querySelector("#upload-close-button");
@@ -12350,11 +12368,17 @@ async function openAiProvidersDialog() {
     : null;
   if (title && typeof title.focus === "function") title.focus();
   await loadAiProviders();
+  if (typeof openResearchSettings === "function") {
+    openResearchSettings();
+  }
 }
 
 function closeAiProvidersDialog() {
   if (!aiProvidersDialog) return;
   cancelAiProviderPong();
+  if (typeof closeResearchSettings === "function") {
+    closeResearchSettings();
+  }
   if (typeof aiProvidersDialog.close === "function") {
     aiProvidersDialog.close();
   } else {
@@ -12812,6 +12836,437 @@ if (aiProvidersDialog) {
     if (event.target === aiProvidersDialog) {
       closeAiProvidersDialog();
     }
+  });
+}
+
+/* --- Administrator research settings surface --- */
+
+const RESEARCH_SETTINGS_ENDPOINT = "/api/admin/ai/research-settings";
+const RESEARCH_SETTINGS_NOTICE =
+  "These server settings apply to new Search and Research requests. "
+  + "People submitting questions cannot choose a model, endpoint or tools.";
+const RESEARCH_SETTINGS_HISTORY_NOTE =
+  "Changing the model does not change requests already admitted. "
+  + "Disabling pauses new generation; existing requests can still be checked or cancelled.";
+const RESEARCH_SETTINGS_CREDENTIAL_NOTE =
+  "Credentials are managed on the server. A saved configuration does not prove account access.";
+
+let lastFocusedElementBeforeResearch = null;
+let researchSettingsState = {
+  loaded: false,
+  server: null,
+  revision: "",
+  configurationPresent: false,
+  credentialAvailable: false,
+  models: [],
+  limits: null,
+  draft: null,
+  dirty: false,
+  loading: false,
+  saving: false,
+  confirmArmed: false,
+  pendingDraft: null,
+  message: "",
+  errorMessage: "",
+  responseGeneration: 0,
+};
+
+function identityAllowsResearchSettings() {
+  return identityState.resolved
+    && identityState.available
+    && isWorkspaceAudience()
+    && identityHasCapability("provider.operate");
+}
+
+function researchSettingsModelById(modelId) {
+  return researchSettingsState.models.find((entry) => entry.model_id === modelId) || null;
+}
+
+function researchSettingsFormatUsd(micros) {
+  const value = Number(micros);
+  if (!Number.isInteger(value) || value < 0) return "";
+  const whole = Math.floor(value / 1000000);
+  const remainder = String(value % 1000000).padStart(6, "0").replace(/0+$/, "");
+  return remainder ? `${whole}.${remainder}` : String(whole);
+}
+
+function researchSettingsParseUsd(text) {
+  const value = String(text == null ? "" : text).trim();
+  const match = /^([0-9]+)(?:\.([0-9]{0,6}))?$/.exec(value);
+  if (!match) return null;
+  const whole = BigInt(match[1]);
+  const fraction = (match[2] || "").padEnd(6, "0");
+  const micros = whole * 1000000n + BigInt(fraction || "0");
+  if (micros > BigInt(Number.MAX_SAFE_INTEGER)) return null;
+  return Number(micros);
+}
+
+function researchSettingsDraftFromServer(settings) {
+  return {
+    enabled: settings.enabled === true,
+    model_id: typeof settings.model_id === "string" ? settings.model_id : "",
+    daily_budget_usd: researchSettingsFormatUsd(settings.daily_budget_usd_micros),
+    monthly_budget_usd: researchSettingsFormatUsd(settings.monthly_budget_usd_micros),
+    search_reservation_usd: researchSettingsFormatUsd(
+      settings.search_budget_reservation_usd_micros,
+    ),
+    research_reservation_usd: researchSettingsFormatUsd(
+      settings.research_budget_reservation_usd_micros,
+    ),
+  };
+}
+
+function researchSettingsPayloadFromDraft(draft) {
+  const daily = researchSettingsParseUsd(draft.daily_budget_usd);
+  const monthly = researchSettingsParseUsd(draft.monthly_budget_usd);
+  const searchReservation = researchSettingsParseUsd(draft.search_reservation_usd);
+  const researchReservation = researchSettingsParseUsd(draft.research_reservation_usd);
+  if (
+    daily === null
+    || monthly === null
+    || searchReservation === null
+    || researchReservation === null
+  ) {
+    return null;
+  }
+  return {
+    enabled: draft.enabled === true,
+    model_id: draft.model_id,
+    daily_budget_usd_micros: daily,
+    monthly_budget_usd_micros: monthly,
+    search_budget_reservation_usd_micros: searchReservation,
+    research_budget_reservation_usd_micros: researchReservation,
+  };
+}
+
+function researchSettingsRequiresConfirmation(previous, next) {
+  if (!previous || !next) return false;
+  return previous.model_id !== next.model_id
+    || previous.daily_budget_usd !== next.daily_budget_usd
+    || previous.monthly_budget_usd !== next.monthly_budget_usd
+    || previous.search_reservation_usd !== next.search_reservation_usd
+    || previous.research_reservation_usd !== next.research_reservation_usd;
+}
+
+function researchSettingsStatusMessage(code, fallback) {
+  switch (code) {
+    case "AI_CONFIG_CONFLICT":
+      return "AI settings changed. Reload and review before saving again.";
+    case "AI_CONFIG_UNAVAILABLE":
+      return "The AI provider configuration could not be read or saved.";
+    case "AI_PROVIDER_BUSY":
+      return "Another AI provider operation is already running.";
+    case "E_CAPABILITY_UNAVAILABLE":
+      return "Choose a supported research model from the list.";
+    case "E_NOT_CONFIGURED":
+      return "Research credentials are not configured on the server.";
+    case "VALIDATION_FAILED":
+      return "Request validation failed.";
+    case "IDENTITY_REQUIRED":
+      return "A verified identity is required.";
+    case "CAPABILITY_DENIED":
+      return "You do not have permission to manage research settings.";
+    default:
+      return fallback || "The research settings request failed.";
+  }
+}
+
+function researchSettingsResponseMessage(payload, fallback) {
+  const error = payload && payload.error;
+  if (error && typeof error.message === "string" && error.message.trim()) {
+    return error.message.trim();
+  }
+  const code = error && typeof error.code === "string" ? error.code : "";
+  return researchSettingsStatusMessage(code, fallback);
+}
+
+function applyResearchSettingsPayload(payload) {
+  researchSettingsState.server = payload;
+  researchSettingsState.revision = typeof payload.revision === "string" ? payload.revision : "";
+  researchSettingsState.configurationPresent = payload.configuration_present === true;
+  researchSettingsState.credentialAvailable = payload.credential_available === true;
+  researchSettingsState.models = Array.isArray(payload.models) ? payload.models : [];
+  researchSettingsState.limits = payload.limits || null;
+  if (payload.settings && typeof payload.settings === "object") {
+    researchSettingsState.draft = researchSettingsDraftFromServer(payload.settings);
+  }
+  researchSettingsState.dirty = false;
+  researchSettingsState.loaded = true;
+}
+
+function clearResearchSettingsProtectedState() {
+  researchSettingsState = {
+    loaded: false,
+    server: null,
+    revision: "",
+    configurationPresent: false,
+    credentialAvailable: false,
+    models: [],
+    limits: null,
+    draft: null,
+    dirty: false,
+    loading: false,
+    saving: false,
+    confirmArmed: false,
+    pendingDraft: null,
+    message: "",
+    errorMessage: "",
+    responseGeneration: 0,
+  };
+}
+
+function renderResearchSettings() {
+  if (!researchSettingsSection) return;
+  if (researchSettingsStatus) {
+    researchSettingsStatus.textContent = researchSettingsState.errorMessage
+      || researchSettingsState.message
+      || "";
+  }
+  if (researchSettingsLoading) {
+    researchSettingsLoading.hidden = !researchSettingsState.loading;
+  }
+  if (researchSettingsModel) {
+    researchSettingsModel.textContent = "";
+    for (const model of researchSettingsState.models) {
+      const option = document.createElement("option");
+      option.value = model.model_id;
+      option.textContent = `${model.display_name || model.model_id}`
+        + (model.selectable ? "" : " (unavailable)");
+      researchSettingsModel.appendChild(option);
+    }
+  }
+  const draft = researchSettingsState.draft;
+  if (researchSettingsEnabled) draft
+    ? (researchSettingsEnabled.checked = draft.enabled === true)
+    : (researchSettingsEnabled.checked = false);
+  if (researchSettingsModel) draft
+    ? (researchSettingsModel.value = draft.model_id)
+    : (researchSettingsModel.value = "");
+  if (researchSettingsDailyBudget) draft
+    ? (researchSettingsDailyBudget.value = draft.daily_budget_usd)
+    : (researchSettingsDailyBudget.value = "");
+  if (researchSettingsMonthlyBudget) draft
+    ? (researchSettingsMonthlyBudget.value = draft.monthly_budget_usd)
+    : (researchSettingsMonthlyBudget.value = "");
+  if (researchSettingsSearchReservation) draft
+    ? (researchSettingsSearchReservation.value = draft.search_reservation_usd)
+    : (researchSettingsSearchReservation.value = "");
+  if (researchSettingsResearchReservation) draft
+    ? (researchSettingsResearchReservation.value = draft.research_reservation_usd)
+    : (researchSettingsResearchReservation.value = "");
+  if (researchSettingsCatalog) {
+    researchSettingsCatalog.textContent = "";
+    for (const model of researchSettingsState.models) {
+      const row = document.createElement("li");
+      row.className = "research-settings-model";
+      row.textContent = `${model.display_name || model.model_id} (${model.model_id}) `
+        + `— ${model.pinning}, ${model.selectable ? "selectable" : "unavailable"}`;
+      researchSettingsCatalog.appendChild(row);
+    }
+  }
+  if (researchSettingsCredential) {
+    researchSettingsCredential.textContent = researchSettingsState.credentialAvailable
+      ? "Research credential available to the server."
+      : "Research credential is not configured on the server.";
+  }
+  if (researchSettingsConfirm) {
+    researchSettingsConfirm.hidden = !researchSettingsState.confirmArmed;
+  }
+}
+
+async function loadResearchSettings() {
+  clearResearchSettingsProtectedState();
+  researchSettingsState.loading = true;
+  researchSettingsState.draft = null;
+  renderResearchSettings();
+  const generation = researchSettingsState.responseGeneration;
+  try {
+    const response = await fetch(RESEARCH_SETTINGS_ENDPOINT, {
+      headers: { Accept: "application/json" },
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (generation !== researchSettingsState.responseGeneration) return;
+    if (!response.ok) {
+      researchSettingsState.errorMessage = researchSettingsResponseMessage(
+        payload,
+        "Research settings could not be loaded.",
+      );
+    } else {
+      applyResearchSettingsPayload(payload);
+      researchSettingsState.errorMessage = "";
+    }
+  } catch {
+    if (generation !== researchSettingsState.responseGeneration) return;
+    researchSettingsState.errorMessage = "The server is unreachable. Try loading research settings again.";
+  } finally {
+    if (generation === researchSettingsState.responseGeneration) {
+      researchSettingsState.loading = false;
+      renderResearchSettings();
+    }
+  }
+}
+
+function collectResearchSettingsDraft() {
+  return {
+    enabled: researchSettingsEnabled ? researchSettingsEnabled.checked : false,
+    model_id: researchSettingsModel ? researchSettingsModel.value : "",
+    daily_budget_usd: researchSettingsDailyBudget ? researchSettingsDailyBudget.value : "",
+    monthly_budget_usd: researchSettingsMonthlyBudget ? researchSettingsMonthlyBudget.value : "",
+    search_reservation_usd: researchSettingsSearchReservation
+      ? researchSettingsSearchReservation.value
+      : "",
+    research_reservation_usd: researchSettingsResearchReservation
+      ? researchSettingsResearchReservation.value
+      : "",
+  };
+}
+
+function researchSettingsConfirmNoteText(previous, next) {
+  return `Change the research model from ${previous.model_id} to ${next.model_id}? `
+    + `Daily budget ${next.daily_budget_usd} USD, monthly budget ${next.monthly_budget_usd} USD.`;
+}
+
+async function requestSaveResearchSettings() {
+  if (!identityAllowsResearchSettings() || researchSettingsState.saving) return;
+  const draft = collectResearchSettingsDraft();
+  const previous = researchSettingsState.draft;
+  if (researchSettingsRequiresConfirmation(previous, draft)) {
+    researchSettingsState.pendingDraft = draft;
+    researchSettingsState.confirmArmed = true;
+    if (researchSettingsConfirmNote) {
+      researchSettingsConfirmNote.textContent = researchSettingsConfirmNoteText(previous, draft);
+    }
+    renderResearchSettings();
+    return;
+  }
+  await saveResearchSettings(draft);
+}
+
+function cancelResearchSettingsConfirmation() {
+  researchSettingsState.confirmArmed = false;
+  researchSettingsState.pendingDraft = null;
+}
+
+async function confirmResearchSettingsChange() {
+  const draft = researchSettingsState.pendingDraft;
+  researchSettingsState.confirmArmed = false;
+  researchSettingsState.pendingDraft = null;
+  if (draft) {
+    await saveResearchSettings(draft);
+  }
+}
+
+async function saveResearchSettings(draft) {
+  const payload = researchSettingsPayloadFromDraft(draft);
+  if (payload === null) {
+    researchSettingsState.errorMessage = "Enter each budget as a decimal USD amount with at most six decimals.";
+    renderResearchSettings();
+    return;
+  }
+  researchSettingsState.saving = true;
+  const generation = researchSettingsState.responseGeneration;
+  try {
+    const response = await fetch(RESEARCH_SETTINGS_ENDPOINT, {
+      method: "PUT",
+      headers: framenestMutationHeaders({
+        Accept: "application/json",
+        "Content-Type": "application/json",
+        "If-Match": `"${researchSettingsState.revision}"`,
+      }),
+      body: JSON.stringify(payload),
+    });
+    const body = await response.json().catch(() => ({}));
+    if (generation !== researchSettingsState.responseGeneration) return;
+    if (response.status === 409) {
+      researchSettingsState.errorMessage = researchSettingsResponseMessage(
+        body,
+        "AI settings changed. Reload and review before saving again.",
+      );
+      researchSettingsState.dirty = true;
+    } else if (!response.ok) {
+      researchSettingsState.errorMessage = researchSettingsResponseMessage(
+        body,
+        "Research settings could not be saved.",
+      );
+    } else {
+      applyResearchSettingsPayload(body);
+      researchSettingsState.message = body.changed
+        ? "Research settings saved."
+        : "Research settings unchanged.";
+      researchSettingsState.errorMessage = "";
+    }
+  } catch {
+    if (generation !== researchSettingsState.responseGeneration) return;
+    researchSettingsState.errorMessage =
+      "The server is unreachable. Reload before trying another save.";
+  } finally {
+    if (generation === researchSettingsState.responseGeneration) {
+      researchSettingsState.saving = false;
+      renderResearchSettings();
+    }
+  }
+}
+
+function openResearchSettings() {
+  if (!identityAllowsResearchSettings() || !researchSettingsSection) return;
+  lastFocusedElementBeforeResearch = document.activeElement;
+  if (typeof researchSettingsSection.setAttribute === "function") {
+    researchSettingsSection.removeAttribute("hidden");
+  }
+  void loadResearchSettings();
+}
+
+function closeResearchSettings() {
+  researchSettingsState.responseGeneration += 1;
+  clearResearchSettingsProtectedState();
+  if (lastFocusedElementBeforeResearch && typeof lastFocusedElementBeforeResearch.focus === "function") {
+    lastFocusedElementBeforeResearch.focus();
+  }
+}
+
+if (researchSettingsSaveButton) {
+  researchSettingsSaveButton.addEventListener("click", (event) => {
+    if (typeof event.preventDefault === "function") event.preventDefault();
+    void requestSaveResearchSettings();
+  });
+}
+
+if (researchSettingsReloadButton) {
+  researchSettingsReloadButton.addEventListener("click", () => {
+    void loadResearchSettings();
+  });
+}
+
+if (researchSettingsConfirmCancel) {
+  researchSettingsConfirmCancel.addEventListener("click", cancelResearchSettingsConfirmation);
+}
+
+if (researchSettingsConfirmButton) {
+  researchSettingsConfirmButton.addEventListener("click", () => {
+    void confirmResearchSettingsChange();
+  });
+}
+
+for (const researchTextInput of [
+  researchSettingsDailyBudget,
+  researchSettingsMonthlyBudget,
+  researchSettingsSearchReservation,
+  researchSettingsResearchReservation,
+]) {
+  if (researchTextInput) {
+    researchTextInput.addEventListener("input", () => {
+      researchSettingsState.dirty = true;
+      researchSettingsState.confirmArmed = false;
+      researchSettingsState.pendingDraft = null;
+    });
+  }
+}
+
+if (researchSettingsModel) {
+  researchSettingsModel.addEventListener("change", () => {
+    researchSettingsState.dirty = true;
+    researchSettingsState.confirmArmed = false;
+    researchSettingsState.pendingDraft = null;
   });
 }
 

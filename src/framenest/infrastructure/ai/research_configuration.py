@@ -12,7 +12,6 @@ from typing import Any
 
 from framenest.domain.research import (
     ALLOWED_REASONING_EFFORTS,
-    FIXED_OPENAI_RESPONSES_MODEL_ID,
     MAX_ANSWER_UTF8_BYTES,
     MAX_CITATION_COUNT,
     MAX_DAILY_BUDGET_MICRO_USD,
@@ -35,6 +34,10 @@ from framenest.infrastructure.ai.provider_records import (
     validate_credential_environment_name,
     validate_model_identifier,
     validate_provider_identifier,
+)
+from framenest.infrastructure.ai.research_models import (
+    DEFAULT_RESEARCH_MODEL_ID,
+    is_known_selectable_model,
 )
 
 RESEARCH_CREDENTIAL_IDENTIFIER = "KRONIKA_RESEARCH_OPENAI_API_KEY"
@@ -133,7 +136,7 @@ class ResearchConfiguration:
             raise ResearchConfigurationError
         if self.provider_id != OPENAI_RESPONSES_PROVIDER_ID:
             raise ResearchConfigurationError
-        if self.model_id != FIXED_OPENAI_RESPONSES_MODEL_ID:
+        if not is_known_selectable_model(self.model_id):
             raise ResearchConfigurationError
         if not isinstance(self.search, ResearchOperationSettings):
             raise ResearchConfigurationError
@@ -189,7 +192,7 @@ def default_research_configuration(*, enabled: bool = False) -> ResearchConfigur
     return ResearchConfiguration(
         enabled=enabled,
         provider_id=OPENAI_RESPONSES_PROVIDER_ID,
-        model_id=FIXED_OPENAI_RESPONSES_MODEL_ID,
+        model_id=DEFAULT_RESEARCH_MODEL_ID,
         background=True,
         credential_identifier=RESEARCH_CREDENTIAL_IDENTIFIER,
         search=ResearchOperationSettings(
@@ -428,7 +431,7 @@ def _require_model_id(value: object) -> str:
         normalized = validate_model_identifier(value)
     except AiProviderRecordError:
         raise ResearchConfigurationError from None
-    if normalized != FIXED_OPENAI_RESPONSES_MODEL_ID:
+    if not is_known_selectable_model(normalized):
         raise ResearchConfigurationError
     return normalized
 

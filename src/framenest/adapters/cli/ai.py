@@ -25,6 +25,7 @@ from framenest.infrastructure.ai.configuration import (
     AiTestState,
     default_ai_config_path,
     load_ai_server_config,
+    load_ai_server_config_snapshot,
     now_ms,
     validate_model_id,
     validate_provider_id,
@@ -305,7 +306,9 @@ def configure_command(
     output: Output = print,
 ) -> int:
     """Interactively write non-secret provider/model selection."""
-    existing = load_ai_server_config(context.config_path)
+    snapshot = load_ai_server_config_snapshot(context.config_path)
+    existing = snapshot.config
+    revision = snapshot.revision
     provider_models = {} if existing is None else dict(existing.provider_models)
     definitions = provider_definitions(existing)
     ordered_provider_ids = _ordered_provider_ids(definitions)
@@ -346,7 +349,7 @@ def configure_command(
         providers={} if existing is None else dict(existing.providers),
         research=None if existing is None else existing.research,
     )
-    write_ai_server_config(config, context.config_path)
+    write_ai_server_config(config, context.config_path, expected_revision=revision)
     output("AI configuration saved.")
     output(f"Active provider: {provider_definition.display_name}")
     output(f"Model: {model_id}")
@@ -365,7 +368,8 @@ def configure_non_interactive_command(
     """Write non-secret provider/model selection for automation."""
     selected_provider_id = validate_provider_id(provider_id)
     selected_model_id = validate_model_id(model_id)
-    existing = load_ai_server_config(context.config_path)
+    snapshot = load_ai_server_config_snapshot(context.config_path)
+    existing = snapshot.config
     definitions = provider_definitions(existing)
     definition = definitions.get(selected_provider_id)
     if definition is None:
@@ -380,7 +384,9 @@ def configure_non_interactive_command(
         providers={} if existing is None else dict(existing.providers),
         research=None if existing is None else existing.research,
     )
-    write_ai_server_config(config, context.config_path)
+    write_ai_server_config(
+        config, context.config_path, expected_revision=snapshot.revision
+    )
     output("AI configuration saved.")
     output(f"Active provider: {definition.display_name}")
     output(f"Model: {selected_model_id}")
@@ -444,7 +450,8 @@ def provider_add_command(
         models=tuple(models),
         source="declared",
     )
-    existing = load_ai_server_config(context.config_path)
+    snapshot = load_ai_server_config_snapshot(context.config_path)
+    existing = snapshot.config
     providers = {} if existing is None else dict(existing.providers)
     updated = selected_provider_id in providers
     providers[selected_provider_id] = record
@@ -457,7 +464,9 @@ def provider_add_command(
         providers=providers,
         research=None if existing is None else existing.research,
     )
-    write_ai_server_config(config, context.config_path)
+    write_ai_server_config(
+        config, context.config_path, expected_revision=snapshot.revision
+    )
     output("AI provider record updated." if updated else "AI provider record saved.")
     output(f"Provider: {selected_name} ({selected_provider_id})")
     output(f"Protocol: {selected_protocol}")
@@ -506,7 +515,8 @@ def provider_remove_command(
     selected_provider_id = validate_provider_identifier(provider_id)
     if selected_provider_id in BUILTIN_PROVIDER_IDS:
         raise AiConfigurationError("Built-in AI providers cannot be removed.")
-    existing = load_ai_server_config(context.config_path)
+    snapshot = load_ai_server_config_snapshot(context.config_path)
+    existing = snapshot.config
     if existing is None or selected_provider_id not in existing.providers:
         raise AiConfigurationError("AI provider record was not found.")
     if existing.active_provider_id == selected_provider_id:
@@ -525,7 +535,9 @@ def provider_remove_command(
         providers=providers,
         research=existing.research,
     )
-    write_ai_server_config(config, context.config_path)
+    write_ai_server_config(
+        config, context.config_path, expected_revision=snapshot.revision
+    )
     output("AI provider record removed.")
     output(f"Provider: {selected_provider_id}")
     return 0

@@ -47,10 +47,13 @@ direction.
   new card and preserves any earlier successful result. Analysis does not
   bypass metadata-suggestion approval.
 - Search and Research use a provider-neutral boundary. The first provider is
-  the OpenAI Responses API with fixed model `gpt-5.5-2026-04-23` and native
-  provider-managed research. FrameNest supervises the lifecycle. There is no
-  automatic fallback. The chatgpt.com capture module stays parked and is not
-  this provider. Research accepts no attachment.
+  the OpenAI Responses API with native provider-managed research. FrameNest
+  supervises the lifecycle. There is no automatic fallback. A verified
+  administrator controls the model through server settings from a bounded
+  four-model catalog (`gpt-5.5-2026-04-23` default); people submitting
+  questions cannot choose a provider, model, endpoint or tools, and admission
+  persists immutable versioned pricing. The chatgpt.com capture module stays
+  parked and is not this provider. Research accepts no attachment.
 - Full text and Markdown are preserved. Rendering is sanitized, with no
   scripts and no external resources. Generated output is untrusted.
 - Shared Timeline order is newest approved entry first with stable ID

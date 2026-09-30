@@ -332,6 +332,19 @@ def test_reconcile_unknown_consumes_the_reservation(engine) -> None:
     )
 
 
+def test_claim_submission_has_one_winner(engine) -> None:
+    repository = SqliteResearchRequestRepository(engine)
+    repository.admit(
+        _row("op-claim-0001", client_request_id="client-claim"),
+        _reservation("op-claim-0001"),
+    )
+    first = repository.claim_submission("op-claim-0001")
+    assert first is not None
+    assert first.record.state is ResearchLifecycleState.SUBMITTING
+    assert repository.claim_submission("op-claim-0001") is None
+    assert repository.claim_submission("op-missing") is None
+
+
 def test_save_persists_checkpoint_handle_and_record_binding(engine) -> None:
     repository = SqliteResearchRequestRepository(engine)
     first = repository.admit(

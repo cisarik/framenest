@@ -602,11 +602,17 @@ def test_production_runtime_reconciles_completed_usage(
         assert transport.gets == ["https://api.openai.com/v1/responses/resp-price-1"]
         assert transport.deletes == []
 
-        from framenest.infrastructure.ai.openai_responses import (
-            OPENAI_RESPONSES_PRICE_SCHEDULE_2026_09_26,
+        from framenest.infrastructure.ai.research_models import (
+            RESEARCH_ADMISSION_PROFILE_VERSION,
+            resolve_usage_price_schedule,
         )
 
-        schedule = OPENAI_RESPONSES_PRICE_SCHEDULE_2026_09_26
+        schedule = resolve_usage_price_schedule(
+            "openai-responses",
+            "gpt-5.5-2026-04-23",
+            RESEARCH_ADMISSION_PROFILE_VERSION,
+        )
+        assert schedule is not None
         expected = usage_cost_micro_usd(usage, schedule)
         assert expected != 500_000
         moment = datetime.now(UTC)

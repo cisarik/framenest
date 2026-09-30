@@ -269,12 +269,16 @@ Cooperator handles real login; opaque profile backup/restore also belongs only
 to him, with the browser stopped for backup/restore. Parked capture uses the
 page as configured, without model or reasoning inspection or selection, and
 without falling back from that page to an external API. Search and Research
-do not use that capture path. They use the ADR-0083 provider boundary: the
-first provider is the OpenAI Responses API with fixed model
-`gpt-5.5-2026-04-23` and native provider-managed research, supervised locally,
-with no automatic fallback. Only expressly submitted question text may leave
-the host on that path. Generated output remains untrusted. Research stays
-disabled until a later slice implements it. Live calls and credential
+do not use that capture path. They use the ADR-0083 provider boundary with the
+[ADR-0084](docs/adr/0084-administrator-managed-research-settings-and-versioned-pricing.md)
+correction: the first provider is the OpenAI Responses API with native
+provider-managed research, supervised locally, with no automatic fallback.
+Verified administrators select one of four exact catalog models
+(`gpt-5.5-2026-04-23` remains the default) through server settings only;
+unknown and alias models fail before persistence, reservation or provider
+contact, and there is no network model discovery. Only expressly submitted
+question text may leave the host on that path. Generated output remains
+untrusted. Research remains disabled by default. Live calls and credential
 provisioning need their own authority.
 
 The accepted empty-database transition requires its own exact-object reset
