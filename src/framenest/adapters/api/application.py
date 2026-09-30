@@ -256,7 +256,10 @@ from framenest.infrastructure.ai.configuration import (
     load_ai_server_config,
 )
 from framenest.infrastructure.ai.credentials import load_ai_credential
-from framenest.infrastructure.ai.openai_responses import OpenAIResponsesAdapter
+from framenest.infrastructure.ai.openai_responses import (
+    OPENAI_RESPONSES_PRICE_SCHEDULE_2026_09_26,
+    OpenAIResponsesAdapter,
+)
 from framenest.infrastructure.ai.research_registry import (
     ResearchSelectionError,
     select_research_provider,
@@ -445,6 +448,7 @@ def build_research_runtime(
         ledger=SqliteResearchBudgetLedger(engine),
         completion=SqliteResearchResultCompletion(engine),
         select=select,
+        price_schedule=OPENAI_RESPONSES_PRICE_SCHEDULE_2026_09_26,
     )
     if recover:
         try:

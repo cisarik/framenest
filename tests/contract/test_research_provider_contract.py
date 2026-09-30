@@ -445,3 +445,175 @@ def test_research_runtime_wiring_builds_offline_objects_when_enabled() -> None:
     assert runtime is not None
     descriptor = runtime._provider.describe()
     assert descriptor.provider_id == "openai-responses"
+
+
+def _migrate_synthetic_catalog(database_path: Path) -> None:
+    from alembic import command
+
+    from framenest.infrastructure.persistence.migrations import _alembic_config
+    from framenest.infrastructure.persistence.engine import (
+        create_sqlite_engine,
+        dispose_engine,
+    )
+
+    database_path.parent.mkdir(parents=True, exist_ok=True)
+    engine = create_sqlite_engine(database_path)
+    try:
+        with engine.connect() as connection:
+            with _alembic_config(
+                "framenest.infrastructure.persistence.alembic_environment"
+            ) as config:
+                config.attributes["connection"] = connection
+                command.upgrade(config, "head")
+    finally:
+        dispose_engine(engine)
+
+
+def test_production_runtime_reconciles_completed_usage(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Completed usage through build_research_runtime becomes a reconciled hold.
+
+    Cached input and reasoning tokens are present so a double-counted cache or
+    an added reasoning charge cannot match usage_cost_micro_usd.
+    """
+    import json
+    from datetime import UTC, datetime
+
+    from framenest.infrastructure.ai.transport import HttpsJsonResponse
+    from framenest.infrastructure.persistence.engine import (
+        create_sqlite_engine,
+        dispose_engine,
+    )
+    from framenest.infrastructure.persistence.research_budget_repository import (
+        SqliteResearchBudgetLedger,
+    )
+
+    usage = ResearchUsage(
+        input_tokens=1_000_000,
+        cached_input_tokens=200_000,
+        output_tokens=10_000,
+        reasoning_tokens=4_000,
+        web_tool_calls=1,
+    )
+
+    class RecordingTransport:
+        def __init__(self) -> None:
+            self.posts: list[str] = []
+            self.gets: list[str] = []
+            self.deletes: list[str] = []
+
+        def post_json(self, url, *, headers, body, max_request_bytes):
+            self.posts.append(url)
+            del headers, body, max_request_bytes
+            return HttpsJsonResponse(
+                status_code=200,
+                body=json.dumps(
+                    {"id": "resp-price-1", "status": "queued"}
+                ).encode("utf-8"),
+                content_type="application/json",
+            )
+
+        def get_json(self, url, *, headers):
+            self.gets.append(url)
+            del headers
+            payload = {
+                "id": "resp-price-1",
+                "status": "completed",
+                "output": [
+                    {"type": "web_search_call", "id": "ws-1"},
+                    {
+                        "type": "message",
+                        "content": [
+                            {
+                                "type": "output_text",
+                                "text": "Synthetic reconciled answer.",
+                                "annotations": [
+                                    {
+                                        "type": "url_citation",
+                                        "url": "https://example.invalid/source",
+                                        "title": "Source",
+                                    }
+                                ],
+                            }
+                        ],
+                    },
+                ],
+                "usage": {
+                    "input_tokens": usage.input_tokens,
+                    "output_tokens": usage.output_tokens,
+                    "input_tokens_details": {
+                        "cached_tokens": usage.cached_input_tokens
+                    },
+                    "output_tokens_details": {
+                        "reasoning_tokens": usage.reasoning_tokens
+                    },
+                },
+            }
+            return HttpsJsonResponse(
+                status_code=200,
+                body=json.dumps(payload).encode("utf-8"),
+                content_type="application/json",
+            )
+
+        def delete_json(self, url, *, headers):
+            self.deletes.append(url)
+            del headers
+            raise AssertionError("completion does not release the remote response")
+
+    # Synthetic supplier only. The production adapter refuses to call the
+    # transport when no key is present; this does not read a credential.
+    monkeypatch.setattr(
+        "framenest.adapters.api.application._research_credential_key",
+        lambda identifier: "synthetic-test-key",
+    )
+    database = tmp_path / "research-price.sqlite3"
+    _migrate_synthetic_catalog(database)
+    engine = create_sqlite_engine(database)
+    transport = RecordingTransport()
+    try:
+        from framenest.adapters.api.application import build_research_runtime
+        from framenest.infrastructure.ai.research_configuration import (
+            default_research_configuration,
+        )
+
+        runtime = build_research_runtime(
+            engine=engine,
+            configuration=default_research_configuration(enabled=True),
+            transport=transport,
+            recover=False,
+        )
+        assert runtime is not None
+        assert transport.posts == [] and transport.gets == [] and transport.deletes == []
+        runtime.admit(
+            owner_login_key="alice@example.com",
+            client_request_id="client-price-0001",
+            kind=ResearchOperationKind.SEARCH,
+            prompt="What is the synthetic question?",
+        )
+        submitted = runtime.submit_pending()
+        assert submitted is not None
+        assert submitted.record.state is ResearchLifecycleState.RUNNING
+        saved = runtime.poll_once()
+        assert saved is not None
+        assert saved.record.state is ResearchLifecycleState.SAVED
+        assert saved.record.accounting_state is ResearchAccountingState.RECONCILED
+        assert transport.posts == ["https://api.openai.com/v1/responses"]
+        assert transport.gets == ["https://api.openai.com/v1/responses/resp-price-1"]
+        assert transport.deletes == []
+
+        from framenest.infrastructure.ai.openai_responses import (
+            OPENAI_RESPONSES_PRICE_SCHEDULE_2026_09_26,
+        )
+
+        schedule = OPENAI_RESPONSES_PRICE_SCHEDULE_2026_09_26
+        expected = usage_cost_micro_usd(usage, schedule)
+        assert expected != 500_000
+        moment = datetime.now(UTC)
+        consumed = SqliteResearchBudgetLedger(engine).consumed_micros(
+            day_key=moment.strftime("%Y-%m-%d"),
+            month_key=moment.strftime("%Y-%m"),
+        )
+        assert consumed == (expected, expected)
+    finally:
+        dispose_engine(engine)

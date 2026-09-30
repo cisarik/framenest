@@ -21,6 +21,7 @@ from framenest.domain.research import (
 )
 from framenest.infrastructure.ai.openai_responses import (
     DEFAULT_RESPONSES_ENDPOINT,
+    OPENAI_RESPONSES_PRICE_SCHEDULE_2026_09_26,
     OpenAIResponsesAdapter,
 )
 from framenest.infrastructure.ai.transport import (
@@ -138,6 +139,14 @@ def _completed_payload() -> dict:
             "output_tokens_details": {"reasoning_tokens": 140},
         },
     }
+
+
+def test_documented_price_schedule_pins_the_2026_09_26_rates() -> None:
+    schedule = OPENAI_RESPONSES_PRICE_SCHEDULE_2026_09_26
+    assert schedule.input_micro_usd_per_million == 5_000_000
+    assert schedule.cached_input_micro_usd_per_million == 500_000
+    assert schedule.output_micro_usd_per_million == 30_000_000
+    assert schedule.web_search_micro_usd_per_thousand == 10_000_000
 
 
 def test_describe_is_network_free_and_port_conformant() -> None:

@@ -27,6 +27,7 @@ from framenest.domain.research import (
     ResearchRemoteCleanupState,
     ResearchUsage,
     ResearchValueError,
+    UsagePriceSchedule,
     completion_error,
 )
 from framenest.infrastructure.ai.research_registry import (
@@ -46,6 +47,29 @@ from framenest.infrastructure.ai.transport import (
 
 DEFAULT_RESPONSES_ENDPOINT = "https://api.openai.com/v1/responses"
 _REQUEST_OVERHEAD_BYTES = 4096
+
+
+def _openai_responses_price_schedule_2026_09_26() -> UsagePriceSchedule:
+    """Documented OpenAI Responses usage prices for model gpt-5.5-2026-04-23.
+
+    Source: accepted kronika-one-product planning report, section 3, rates
+    retrieved 2026-09-26. Input is USD 5 per million tokens, cached input is
+    USD 0.50 per million, output is USD 30 per million, and web search is
+    USD 10 per 1,000 calls. The values below are integer micro-USD. Revalidate
+    these rates before any live provider activation.
+    """
+
+    return UsagePriceSchedule(
+        input_micro_usd_per_million=5_000_000,
+        cached_input_micro_usd_per_million=500_000,
+        output_micro_usd_per_million=30_000_000,
+        web_search_micro_usd_per_thousand=10_000_000,
+    )
+
+
+OPENAI_RESPONSES_PRICE_SCHEDULE_2026_09_26 = (
+    _openai_responses_price_schedule_2026_09_26()
+)
 
 
 @runtime_checkable
@@ -432,6 +456,7 @@ def _int_or_zero(value: object) -> int:
 
 __all__ = [
     "DEFAULT_RESPONSES_ENDPOINT",
+    "OPENAI_RESPONSES_PRICE_SCHEDULE_2026_09_26",
     "OpenAIResponsesAdapter",
     "ResearchJsonTransport",
 ]
