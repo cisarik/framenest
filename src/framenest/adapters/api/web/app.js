@@ -11908,6 +11908,7 @@ let aiProvidersState = {
   message: "",
   errorMessage: "",
   busy: false,
+  revision: "",
 };
 
 function identityAllowsProviderAdministration() {
@@ -12101,10 +12102,48 @@ function activeProviderEntry() {
   return providerById(aiProvidersState.activeProviderId);
 }
 
-function applyAiProvidersPayload(payload) {
+function framenestResponseRevision(response) {
+  if (!response || !response.headers || typeof response.headers.get !== "function") {
+    return "";
+  }
+  const raw = response.headers.get("etag");
+  if (typeof raw !== "string") return "";
+  const trimmed = raw.trim();
+  if (!trimmed.startsWith('"') || !trimmed.endsWith('"') || trimmed.length < 2) {
+    return "";
+  }
+  return trimmed.slice(1, -1);
+}
+
+function framenestRevisionHeader(revision) {
+  return typeof revision === "string" && revision ? { "If-Match": `"${revision}"` } : {};
+}
+
+function invalidateAiProvidersRevision() {
+  aiProvidersState.revision = "";
+}
+
+function applyAiProvidersRevision(response) {
+  const revision = framenestResponseRevision(response);
+  if (revision) {
+    aiProvidersState.revision = revision;
+  }
+  return revision;
+}
+
+function invalidateResearchSettingsRevision() {
+  if (typeof researchSettingsState === "undefined") return;
+  researchSettingsState.revision = "";
+  researchSettingsState.stale = true;
+}
+
+function applyAiProvidersPayload(payload, revision) {
   const providers = payload && Array.isArray(payload.providers) ? payload.providers : [];
   aiProvidersState.loaded = true;
   aiProvidersState.providers = providers;
+  if (typeof revision === "string" && revision) {
+    aiProvidersState.revision = revision;
+  }
   aiProvidersState.activeProviderId = payload && typeof payload.active_provider_id === "string"
     ? payload.active_provider_id
     : null;
@@ -12128,14 +12167,14 @@ async function fetchAiProvidersList() {
   if (!response.ok) {
     throw new Error(aiProviderResponseMessage(payload, "The AI provider list is unavailable."));
   }
-  return payload;
+  return { payload, revision: framenestResponseRevision(response) };
 }
 
 async function loadAiProviders() {
   aiProvidersState.errorMessage = "";
   try {
-    const payload = await fetchAiProvidersList();
-    applyAiProvidersPayload(payload);
+    const loaded = await fetchAiProvidersList();
+    applyAiProvidersPayload(loaded.payload, loaded.revision);
   } catch (error) {
     aiProvidersState.loaded = false;
     aiProvidersState.providers = [];
@@ -12547,6 +12586,7 @@ async function activateAiProvider(providerId) {
       headers: framenestMutationHeaders({
         Accept: "application/json",
         "Content-Type": "application/json",
+        ...framenestRevisionHeader(aiProvidersState.revision),
       }),
       body: JSON.stringify({ provider_id: provider.provider_id, model_id: modelId }),
     });
@@ -12557,6 +12597,10 @@ async function activateAiProvider(providerId) {
         "The provider selection could not be saved.",
       );
     } else {
+      applyAiProvidersRevision(response);
+      invalidateResearchSettingsRevision();
+      aiProvidersState.activeProviderId = provider.provider_id;
+      aiProvidersState.activeModelId = modelId;
       aiProvidersState.message =
         `Active provider: ${provider.display_name || provider.provider_id} (${modelId}).`;
       aiProvidersState.errorMessage = "";
@@ -12593,6 +12637,7 @@ async function saveAiProviderRecord(event) {
         headers: framenestMutationHeaders({
           Accept: "application/json",
           "Content-Type": "application/json",
+          ...framenestRevisionHeader(aiProvidersState.revision),
         }),
         body: JSON.stringify(record),
       },
@@ -12604,6 +12649,8 @@ async function saveAiProviderRecord(event) {
         "The provider record could not be saved.",
       );
     } else {
+      applyAiProvidersRevision(response);
+      invalidateResearchSettingsRevision();
       aiProvidersState.selectedProviderId = providerId;
       aiProvidersState.message = `Provider record saved: ${providerId}.`;
       aiProvidersState.errorMessage = "";
@@ -12636,7 +12683,10 @@ async function deleteAiProvider(providerId) {
       `${AI_ADMIN_PROVIDERS_ENDPOINT}/${encodeURIComponent(provider.provider_id)}`,
       {
         method: "DELETE",
-        headers: framenestMutationHeaders({ Accept: "application/json" }),
+        headers: framenestMutationHeaders({
+          Accept: "application/json",
+          ...framenestRevisionHeader(aiProvidersState.revision),
+        }),
       },
     );
     const payload = await response.json().catch(() => ({}));
@@ -12646,6 +12696,8 @@ async function deleteAiProvider(providerId) {
         "The provider record could not be removed.",
       );
     } else {
+      applyAiProvidersRevision(response);
+      invalidateResearchSettingsRevision();
       if (aiProvidersState.selectedProviderId === provider.provider_id) {
         aiProvidersState.selectedProviderId = "";
       }
@@ -12862,6 +12914,7 @@ let researchSettingsState = {
   limits: null,
   draft: null,
   dirty: false,
+  stale: false,
   loading: false,
   saving: false,
   confirmArmed: false,
@@ -12991,6 +13044,7 @@ function applyResearchSettingsPayload(payload) {
     researchSettingsState.draft = researchSettingsDraftFromServer(payload.settings);
   }
   researchSettingsState.dirty = false;
+  researchSettingsState.stale = false;
   researchSettingsState.loaded = true;
 }
 
@@ -13005,6 +13059,7 @@ function clearResearchSettingsProtectedState() {
     limits: null,
     draft: null,
     dirty: false,
+    stale: false,
     loading: false,
     saving: false,
     confirmArmed: false,
@@ -13163,6 +13218,16 @@ async function saveResearchSettings(draft) {
     renderResearchSettings();
     return;
   }
+  if (!researchSettingsState.revision) {
+    // A sibling media write invalidated this revision. Never silently adopt a
+    // new revision or send a save without one; require an explicit reload.
+    researchSettingsState.stale = true;
+    researchSettingsState.dirty = true;
+    researchSettingsState.errorMessage =
+      "AI settings changed. Reload and review before saving again.";
+    renderResearchSettings();
+    return;
+  }
   researchSettingsState.saving = true;
   const generation = researchSettingsState.responseGeneration;
   try {
@@ -13190,6 +13255,11 @@ async function saveResearchSettings(draft) {
       );
     } else {
       applyResearchSettingsPayload(body);
+      if (typeof invalidateAiProvidersRevision === "function") {
+        // A research write changes the shared configuration file, so the media
+        // section's captured revision is stale until it reloads.
+        invalidateAiProvidersRevision();
+      }
       researchSettingsState.message = body.changed
         ? "Research settings saved."
         : "Research settings unchanged.";

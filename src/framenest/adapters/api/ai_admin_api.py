@@ -309,6 +309,8 @@ class ResearchModelResponse(BaseModel):
 
 
 class ResearchSettingsResponse(BaseModel):
+    """Exactly the seven planned top-level fields returned by GET and PUT."""
+
     revision: str
     configuration_present: bool
     provider_id: str
@@ -316,7 +318,12 @@ class ResearchSettingsResponse(BaseModel):
     credential_available: bool
     models: list[ResearchModelResponse]
     limits: dict[str, object]
-    changed: bool | None = None
+
+
+class ResearchSettingsUpdateResponse(ResearchSettingsResponse):
+    """The GET representation plus the explicit ``changed`` flag on PUT."""
+
+    changed: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -831,19 +838,19 @@ def create_ai_admin_api_router(dependencies: AiAdminApiDependencies) -> APIRoute
         configuration: ResearchConfiguration,
         credential_available: bool,
         now: int,
-        changed: bool | None = None,
     ) -> JSONResponse:
-        response = ResearchSettingsResponse(
-            revision=revision,
-            configuration_present=configuration_present,
-            provider_id=configuration.provider_id,
-            settings=_settings_body(configuration),
-            credential_available=credential_available,
-            models=_research_models_payload(now=now),
-            limits=_research_limits_payload(),
-            changed=changed,
+        return _json_with_etag(
+            ResearchSettingsResponse(
+                revision=revision,
+                configuration_present=configuration_present,
+                provider_id=configuration.provider_id,
+                settings=_settings_body(configuration),
+                credential_available=credential_available,
+                models=_research_models_payload(now=now),
+                limits=_research_limits_payload(),
+            ),
+            revision,
         )
-        return _json_with_etag(response, revision)
 
     @router.get(
         "/api/admin/ai/research-settings",
@@ -886,7 +893,7 @@ def create_ai_admin_api_router(dependencies: AiAdminApiDependencies) -> APIRoute
 
     @router.put(
         "/api/admin/ai/research-settings",
-        response_model=ResearchSettingsResponse,
+        response_model=ResearchSettingsUpdateResponse,
         responses={
             401: {"model": ErrorResponse},
             403: {"model": ErrorResponse},
@@ -973,13 +980,19 @@ def create_ai_admin_api_router(dependencies: AiAdminApiDependencies) -> APIRoute
             return _error(409, AI_CONFIG_CONFLICT_CODE, AI_CONFIG_CONFLICT_MESSAGE)
         except AiConfigurationError:
             return _error(503, AI_CONFIG_UNAVAILABLE_CODE, AI_CONFIG_UNAVAILABLE_MESSAGE)
-        return _research_response(
-            revision=_config_revision(config_path),
-            configuration_present=True,
-            configuration=updated.research or updated_research,
-            credential_available=credential_available,
-            now=now,
-            changed=changed,
+        updated_revision = _config_revision(config_path)
+        return _json_with_etag(
+            ResearchSettingsUpdateResponse(
+                revision=updated_revision,
+                configuration_present=True,
+                provider_id=updated_research.provider_id,
+                settings=_settings_body(updated_research),
+                credential_available=credential_available,
+                models=_research_models_payload(now=now),
+                limits=_research_limits_payload(),
+                changed=changed,
+            ),
+            updated_revision,
         )
 
     return router

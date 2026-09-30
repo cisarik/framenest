@@ -259,3 +259,108 @@ def test_cancel_and_remote_release_outcomes() -> None:
     failed = _adapter(transport).release_remote(ProviderHandle("resp-500"))
     assert failed.state is ResearchRemoteCleanupState.FAILED
     assert failed.error_code is ResearchErrorCode.PROVIDER_UNAVAILABLE
+
+
+def _poll(usage_payload: object) -> ProviderObservation:
+    payload = _completed_payload()
+    if usage_payload is _MISSING:
+        payload.pop("usage")
+    else:
+        payload["usage"] = usage_payload
+    transport = FakeTransport()
+    transport.get_response = _json_response(200, payload)
+    return _adapter(transport).poll(ProviderHandle("resp-123"))
+
+
+class _Missing:
+    pass
+
+
+_MISSING = _Missing()
+
+
+def test_reported_cache_write_tokens_parse_into_cache_write_input_tokens() -> None:
+    observation = _poll(
+        {
+            "input_tokens": 1_000,
+            "output_tokens": 100,
+            "input_tokens_details": {"cached_tokens": 200, "cache_write_tokens": 300},
+            "output_tokens_details": {"reasoning_tokens": 10},
+        }
+    )
+    assert observation.kind is ProviderObservationKind.COMPLETE
+    usage = observation.answer.usage
+    assert usage is not None
+    assert usage.cache_write_input_tokens == 300
+    assert usage.input_tokens == 1_000
+    assert usage.cached_input_tokens == 200
+    # The partition stays internally consistent: cached + written <= input.
+    assert usage.cached_input_tokens + usage.cache_write_input_tokens <= usage.input_tokens
+
+
+def test_absent_cache_write_detail_stays_absent_rather_than_zero() -> None:
+    observation = _poll(
+        {
+            "input_tokens": 1_000,
+            "output_tokens": 100,
+            "input_tokens_details": {"cached_tokens": 200},
+        }
+    )
+    assert observation.kind is ProviderObservationKind.COMPLETE
+    assert observation.answer.usage.cache_write_input_tokens is None
+
+
+def test_missing_usage_is_unknown_not_a_zeroed_observation() -> None:
+    observation = _poll(_MISSING)
+    assert observation.kind is ProviderObservationKind.COMPLETE
+    # A complete answer may carry no trustworthy accounting.
+    assert observation.answer.usage is None
+
+
+@pytest.mark.parametrize(
+    "usage_payload",
+    [
+        {},
+        {"input_tokens": "1000", "output_tokens": 100},
+        {"input_tokens": 1_000},
+        {"input_tokens": -1, "output_tokens": 100},
+        {"input_tokens": True, "output_tokens": 100},
+        {"input_tokens": 1_000, "output_tokens": None},
+        {"input_tokens": 1_000, "output_tokens": 100, "input_tokens_details": "no"},
+        {"input_tokens": 1_000, "output_tokens": 100, "output_tokens_details": []},
+        {
+            "input_tokens": 1_000,
+            "output_tokens": 100,
+            "input_tokens_details": {"cached_tokens": -5},
+        },
+        {
+            "input_tokens": 1_000,
+            "output_tokens": 100,
+            "input_tokens_details": {"cached_tokens": 2_000},
+        },
+        {
+            "input_tokens": 1_000,
+            "output_tokens": 100,
+            "input_tokens_details": {"cached_tokens": 800, "cache_write_tokens": 400},
+        },
+    ],
+)
+def test_missing_or_invalid_usage_never_becomes_zero(usage_payload: dict) -> None:
+    observation = _poll(usage_payload)
+    assert observation.kind is ProviderObservationKind.COMPLETE
+    assert observation.answer.usage is None
+
+
+def test_submit_404_is_provider_unavailable_while_poll_404_is_expired() -> None:
+    submit_transport = FakeTransport()
+    submit_transport.post_response = _json_response(404, {"error": "not found"})
+    submitted = _adapter(submit_transport).submit(_request())
+    assert submitted.kind is ProviderObservationKind.FAILED
+    assert submitted.error_code is ResearchErrorCode.PROVIDER_UNAVAILABLE
+    assert submitted.error_code is not ResearchErrorCode.RESULT_EXPIRED
+
+    poll_transport = FakeTransport()
+    poll_transport.get_response = _json_response(404, {"error": "not found"})
+    polled = _adapter(poll_transport).poll(ProviderHandle("resp-404"))
+    assert polled.kind is ProviderObservationKind.FAILED
+    assert polled.error_code is ResearchErrorCode.RESULT_EXPIRED

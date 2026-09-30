@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import ast
 import inspect
+import json
 from pathlib import Path
 
 import pytest
+
+from framenest.infrastructure.ai.transport import HttpsJsonResponse
 
 from framenest.application.ports.research import (
     ResearchBudgetLedger,
@@ -621,5 +624,224 @@ def test_production_runtime_reconciles_completed_usage(
             month_key=moment.strftime("%Y-%m"),
         )
         assert consumed == (expected, expected)
+    finally:
+        dispose_engine(engine)
+
+
+class _SequenceTransport:
+    """Fake transport that hands out one completed response per poll."""
+
+    def __init__(self, usage: dict[str, object]) -> None:
+        self._usage = usage
+        self.posts: list[str] = []
+        self.gets: list[str] = []
+        self.deletes: list[str] = []
+
+    def post_json(self, url, *, headers, body, max_request_bytes):
+        self.posts.append(url)
+        return HttpsJsonResponse(
+            status_code=200,
+            body=json.dumps(
+                {"id": f"resp-{len(self.posts)}", "status": "queued"}
+            ).encode("utf-8"),
+            content_type="application/json",
+        )
+
+    def get_json(self, url, *, headers):
+        self.gets.append(url)
+        payload = {
+            "id": url.rsplit("/", 1)[-1],
+            "status": "completed",
+            "output": [
+                {"type": "web_search_call", "id": "ws-1"},
+                {
+                    "type": "message",
+                    "content": [
+                        {
+                            "type": "output_text",
+                            "text": "Synthetic refreshed answer.",
+                            "annotations": [
+                                {
+                                    "type": "url_citation",
+                                    "url": "https://example.invalid/source",
+                                    "title": "Source",
+                                }
+                            ],
+                        }
+                    ],
+                },
+            ],
+            "usage": self._usage,
+        }
+        return HttpsJsonResponse(
+            status_code=200,
+            body=json.dumps(payload).encode("utf-8"),
+            content_type="application/json",
+        )
+
+    def delete_json(self, url, *, headers):
+        self.deletes.append(url)
+        return HttpsJsonResponse(status_code=204, body=b"")
+
+
+def test_disabled_start_enables_without_restart_and_keeps_admitted_pricing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A disabled-start process activates, and admitted pricing is immutable.
+
+    This is a guard regression for behavior that already exists on the
+    candidate: the runtime is built while research is disabled, admission is
+    refused, the same process then admits after the saved configuration is
+    enabled, a later model change reaches only new admissions, and the first
+    request keeps its persisted model, schedule and reconciled cost across a
+    simulated restart.
+    """
+    import json
+    from dataclasses import replace
+    from datetime import UTC, datetime
+
+    from framenest.adapters.api.application import build_research_runtime
+    from framenest.application.ports.research import ResearchStoreError
+    from framenest.infrastructure.ai.research_models import (
+        RESEARCH_ADMISSION_PROFILE_VERSION,
+        resolve_usage_price_schedule,
+    )
+    from framenest.infrastructure.persistence.engine import (
+        create_sqlite_engine,
+        dispose_engine,
+    )
+    from framenest.infrastructure.persistence.research_budget_repository import (
+        SqliteResearchBudgetLedger,
+    )
+    from framenest.infrastructure.persistence.research_request_repository import (
+        SqliteResearchRequestRepository,
+    )
+
+    usage_payload = {
+        "input_tokens": 1_000,
+        "output_tokens": 100,
+        "input_tokens_details": {"cached_tokens": 200, "cache_write_tokens": 100},
+        "output_tokens_details": {"reasoning_tokens": 10},
+    }
+    # Synthetic supplier only; no credential is read.
+    monkeypatch.setattr(
+        "framenest.adapters.api.application._research_credential_key",
+        lambda identifier: "synthetic-test-key",
+    )
+
+    database = tmp_path / "research-refresh.sqlite3"
+    _migrate_synthetic_catalog(database)
+    engine = create_sqlite_engine(database)
+    transport = _SequenceTransport(usage_payload)
+    configuration = {"current": default_research_configuration(enabled=False)}
+    try:
+        # A persistent coordinator exists even though research starts disabled.
+        runtime = build_research_runtime(
+            engine=engine,
+            configuration_provider=lambda: configuration["current"],
+            transport=transport,
+            recover=False,
+        )
+        assert runtime is not None
+        assert transport.posts == [] and transport.gets == []
+
+        # A disabled start refuses new admission without a restart.
+        with pytest.raises(ResearchStoreError) as disabled:
+            runtime.admit(
+                owner_login_key="alice@example.com",
+                client_request_id="client-refresh-0",
+                kind=ResearchOperationKind.SEARCH,
+                prompt="What is the synthetic question?",
+            )
+        assert disabled.value.code is ResearchErrorCode.DISABLED
+
+        # The administrator enables the first model; no restart occurs.
+        configuration["current"] = replace(
+            default_research_configuration(enabled=True),
+            model_id="gpt-5.6-luna",
+        )
+        first = runtime.admit(
+            owner_login_key="alice@example.com",
+            client_request_id="client-refresh-1",
+            kind=ResearchOperationKind.SEARCH,
+            prompt="What is the synthetic question?",
+            consent_version="2026-09",
+        )
+        assert first.newly_admitted is True
+        assert first.row.record.profile.model_id == "gpt-5.6-luna"
+        assert runtime.submit_pending() is not None
+        saved = runtime.poll_once()
+        assert saved is not None
+        assert saved.record.state is ResearchLifecycleState.SAVED
+        assert saved.record.accounting_state is ResearchAccountingState.RECONCILED
+
+        admitted_usage = ResearchUsage(
+            input_tokens=1_000,
+            cached_input_tokens=200,
+            output_tokens=100,
+            reasoning_tokens=10,
+            web_tool_calls=1,
+            cache_write_input_tokens=100,
+        )
+        luna_schedule = resolve_usage_price_schedule(
+            "openai-responses",
+            "gpt-5.6-luna",
+            RESEARCH_ADMISSION_PROFILE_VERSION,
+        )
+        assert luna_schedule is not None
+        expected = usage_cost_micro_usd(admitted_usage, luna_schedule)
+
+        # A saved model change reaches the next admission only.
+        configuration["current"] = replace(
+            configuration["current"],
+            model_id="gpt-5.5-2026-04-23",
+        )
+        second = runtime.admit(
+            owner_login_key="alice@example.com",
+            client_request_id="client-refresh-2",
+            kind=ResearchOperationKind.SEARCH,
+            prompt="A second synthetic question?",
+            consent_version="2026-09",
+        )
+        assert second.row.record.profile.model_id == "gpt-5.5-2026-04-23"
+
+        repository = SqliteResearchRequestRepository(engine)
+        stored_first = repository.get_request(first.row.record.operation_id)
+        assert stored_first is not None
+        assert stored_first.record.profile.model_id == "gpt-5.6-luna"
+        assert stored_first.record.accounting_state is ResearchAccountingState.RECONCILED
+
+        # A restart keeps pricing bound to the persisted request identity.
+        restarted = build_research_runtime(
+            engine=engine,
+            configuration_provider=lambda: configuration["current"],
+            transport=transport,
+        )
+        assert restarted is not None
+        after_restart = repository.get_request(first.row.record.operation_id)
+        assert after_restart is not None
+        assert after_restart.record.profile.model_id == "gpt-5.6-luna"
+        assert after_restart.record.profile.configuration_version == (
+            RESEARCH_ADMISSION_PROFILE_VERSION
+        )
+        assert after_restart.record.accounting_state is ResearchAccountingState.RECONCILED
+
+        resolved = resolve_usage_price_schedule(
+            after_restart.record.profile.provider_id,
+            after_restart.record.profile.model_id,
+            after_restart.record.profile.configuration_version,
+        )
+        assert resolved == luna_schedule
+        moment = datetime.now(UTC)
+        consumed = SqliteResearchBudgetLedger(engine).consumed_micros(
+            day_key=moment.strftime("%Y-%m-%d"),
+            month_key=moment.strftime("%Y-%m"),
+        )
+        # The first request's reservation was reconciled to its Luna cost and
+        # the second admission is still reserved, so the day total is the sum.
+        assert consumed == (
+            expected + second.row.record.profile.budget_reservation_usd_micros,
+            expected + second.row.record.profile.budget_reservation_usd_micros,
+        )
     finally:
         dispose_engine(engine)

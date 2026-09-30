@@ -57,6 +57,15 @@ function response(payload, status = 200) {
   };
 }
 
+function revisionResponse(payload, revision, status = 200) {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    headers: { get: (name) => (name === "etag" ? `"${revision}"` : null) },
+    json: async () => payload,
+  };
+}
+
 function identityStateFor({ resolved, available, audience, capabilities }) {
   return {
     resolved,
@@ -156,7 +165,22 @@ function createAiProvidersHarness(fetchImpl, { identity } = {}) {
     'const AI_PROVIDER_BUILTIN_IDS = new Set(["nvidia-nim", "vercel-ai-gateway"]);',
     "let lastFocusedElementBeforeAiProviders = null;",
     "let aiProviderPongArmed = false;",
-    'let aiProvidersState = { loaded: false, providers: [], activeProviderId: null, activeModelId: null, configurationSource: "", selectedProviderId: "", message: "", errorMessage: "", busy: false };',
+    'let aiProvidersState = { loaded: false, providers: [], activeProviderId: null, activeModelId: null, configurationSource: "", selectedProviderId: "", message: "", errorMessage: "", busy: false, revision: "" };',
+    "let researchSettingsState = { loaded: true, revision: \"research-rev-1\", stale: false, dirty: false, draft: {}, saving: false, message: \"\", errorMessage: \"\", responseGeneration: 0 };",
+    extractFunction(APP_SOURCE, "identityHasCapability"),
+    extractFunction(APP_SOURCE, "isWorkspaceAudience"),
+    extractFunction(APP_SOURCE, "framenestMutationHeaders"),
+    extractFunction(APP_SOURCE, "framenestResponseRevision"),
+    extractFunction(APP_SOURCE, "framenestRevisionHeader"),
+    extractFunction(APP_SOURCE, "invalidateAiProvidersRevision"),
+    extractFunction(APP_SOURCE, "applyAiProvidersRevision"),
+    extractFunction(APP_SOURCE, "invalidateResearchSettingsRevision"),
+    "const RESEARCH_SETTINGS_ENDPOINT = \"/api/admin/ai/research-settings\";",
+    "function researchSettingsPayloadFromDraft(draft) { return { enabled: true, model_id: draft.model_id }; }",
+    "function researchSettingsResponseMessage(payload, fallback) { return (payload && payload.error && payload.error.message) || fallback; }",
+    "function applyResearchSettingsPayload(payload) { researchSettingsState.revision = payload.revision; }",
+    "function renderResearchSettings() {}",
+    extractFunction(APP_SOURCE, "saveResearchSettings"),
     extractFunction(APP_SOURCE, "identityHasCapability"),
     extractFunction(APP_SOURCE, "isWorkspaceAudience"),
     extractFunction(APP_SOURCE, "framenestMutationHeaders"),
@@ -572,4 +596,145 @@ test("styles reuse the settings dialog language and scope narrow-width rules", (
   assert.notEqual(narrowStart, -1);
   assert.ok(STYLES_SOURCE.slice(narrowStart, narrowStart + 400).includes("#ai-providers-dialog"));
   assert.ok(STYLES_SOURCE.slice(narrowStart).includes("@media (max-width: 360px)"));
+});
+
+test("media list captures the revision and media writes send If-Match", async () => {
+  const calls = [];
+  const context = createAiProvidersHarness(async (url, options) => {
+    const method = (options && options.method) || "GET";
+    calls.push({ url, method, headers: (options && options.headers) || {} });
+    if (method === "GET") {
+      return revisionResponse(
+        {
+          active_provider_id: null,
+          active_model_id: null,
+          configuration_source: "unconfigured",
+          providers: [],
+          supported_protocols: ["openai-chat-completions"],
+          limits: {},
+        },
+        "media-rev-1",
+      );
+    }
+    return revisionResponse({ provider_id: "opencode-go" }, "media-rev-2");
+  });
+
+  await vm.runInContext("openAiProvidersDialog()", context);
+  assert.equal(
+    vm.runInContext("aiProvidersState.revision", context),
+    "media-rev-1",
+  );
+
+  // A mutation response ETag is consumed directly.
+  vm.runInContext(
+    'applyAiProvidersRevision({ headers: { get: (name) => (name === "etag" ? "\\"media-rev-9\\"" : null) } })',
+    context,
+  );
+  assert.equal(
+    vm.runInContext("aiProvidersState.revision", context),
+    "media-rev-9",
+  );
+  vm.runInContext('aiProvidersState.revision = "media-rev-1"', context);
+
+  context.aiProviderIdInput.value = "opencode-go";
+  context.aiProviderNameInput.value = "OpenCode Go";
+  context.aiProviderBaseUrlInput.value = "https://opencode.ai/zen/go/v1";
+  context.aiProviderCredentialEnvInput.value = "OPENCODE_API_KEY";
+  await vm.runInContext(
+    'saveAiProviderRecord({ providerId: "opencode-go", baseUrl: "https://opencode.ai/zen/go/v1", credentialEnv: "OPENCODE_API_KEY", models: [{ modelId: "deepseek-v4-flash-vision-exp", displayName: "", visionInput: true }] })',
+    context,
+  );
+
+  const put = calls.find((call) => call.method === "PUT");
+  assert.ok(put, "the media record write must issue a PUT");
+  assert.equal(put.headers["If-Match"], '"media-rev-1"');
+  // The post-save list read re-syncs the captured revision.
+  assert.equal(
+    vm.runInContext("aiProvidersState.revision", context),
+    "media-rev-1",
+  );
+});
+
+test("a media write without a captured revision stays header-free and still valid", async () => {
+  const calls = [];
+  const context = createAiProvidersHarness(async (url, options) => {
+    const method = (options && options.method) || "GET";
+    calls.push({ url, method, headers: (options && options.headers) || {} });
+    if (method === "GET") return response({ providers: [], limits: {} });
+    return response({ provider_id: "opencode-go" });
+  });
+
+  await vm.runInContext("openAiProvidersDialog()", context);
+  assert.equal(vm.runInContext("aiProvidersState.revision", context), "");
+
+  context.aiProviderIdInput.value = "opencode-go";
+  await vm.runInContext(
+    'saveAiProviderRecord({ providerId: "opencode-go", baseUrl: "https://opencode.ai/zen/go/v1", credentialEnv: "OPENCODE_API_KEY", models: [] })',
+    context,
+  );
+  const put = calls.find((call) => call.method === "PUT");
+  assert.ok(put);
+  assert.equal(put.headers["If-Match"], undefined);
+});
+
+test("a successful media save invalidates the research settings revision", async () => {
+  const context = createAiProvidersHarness(async (url, options) => {
+    const method = (options && options.method) || "GET";
+    if (method === "GET") {
+      return revisionResponse({ providers: [], limits: {} }, "media-rev-1");
+    }
+    return revisionResponse({ provider_id: "opencode-go" }, "media-rev-2");
+  });
+
+  await vm.runInContext("openAiProvidersDialog()", context);
+  assert.equal(
+    vm.runInContext("researchSettingsState.revision", context),
+    "research-rev-1",
+  );
+
+  context.aiProviderIdInput.value = "opencode-go";
+  await vm.runInContext(
+    'saveAiProviderRecord({ providerId: "opencode-go", baseUrl: "https://opencode.ai/zen/go/v1", credentialEnv: "OPENCODE_API_KEY", models: [] })',
+    context,
+  );
+
+  const research = vm.runInContext("researchSettingsState", context);
+  assert.equal(research.revision, "", "the sibling revision must be dropped");
+  assert.equal(research.stale, true);
+});
+
+test("a successful research save invalidates the media revision", async () => {
+  const context = createAiProvidersHarness(async (url, options) => {
+    const method = (options && options.method) || "GET";
+    if (method === "GET") {
+      return revisionResponse({ providers: [], limits: {} }, "media-rev-1");
+    }
+    return revisionResponse(
+      {
+        revision: "research-rev-2",
+        configuration_present: true,
+        provider_id: "openai-responses",
+        settings: {},
+        credential_available: true,
+        models: [],
+        limits: {},
+        changed: true,
+      },
+      "research-rev-2",
+    );
+  });
+
+  await vm.runInContext("openAiProvidersDialog()", context);
+  assert.equal(vm.runInContext("aiProvidersState.revision", context), "media-rev-1");
+
+  await vm.runInContext(
+    'saveResearchSettings({ enabled: true, model_id: "gpt-5.6-luna", daily_budget_usd: "10", monthly_budget_usd: "30", search_reservation_usd: "0.5", research_reservation_usd: "5" })',
+    context,
+  );
+
+  assert.equal(
+    vm.runInContext("aiProvidersState.revision", context),
+    "",
+    "the media revision must be dropped after a research write",
+  );
 });

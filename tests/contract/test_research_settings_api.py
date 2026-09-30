@@ -379,3 +379,52 @@ def test_get_body_contains_no_secret_material(
     assert "bearer" not in text
     assert "api_key" not in text
     assert json.loads(response.text)["provider_id"] == "openai-responses"
+
+
+def test_get_returns_exactly_the_seven_planned_fields_and_put_adds_changed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    client, config_path = _client(tmp_path, monkeypatch, seed=True)
+    get_body = client.get("/api/admin/ai/research-settings").json()
+    assert sorted(get_body) == [
+        "configuration_present",
+        "credential_available",
+        "limits",
+        "models",
+        "provider_id",
+        "revision",
+        "settings",
+    ]
+    assert "changed" not in get_body
+
+    revision = load_ai_server_config_snapshot(config_path).revision
+    put_body = client.put(
+        "/api/admin/ai/research-settings",
+        headers={"If-Match": f'"{revision}"'},
+        json=_body(enabled=True, model_id="gpt-5.6-luna"),
+    ).json()
+    assert sorted(put_body) == sorted([*get_body, "changed"])
+    assert put_body["changed"] is True
+    assert isinstance(put_body["changed"], bool)
+
+    unchanged = client.put(
+        "/api/admin/ai/research-settings",
+        headers={"If-Match": f'"{put_body["revision"]}"'},
+        json=_body(enabled=True, model_id="gpt-5.6-luna"),
+    ).json()
+    assert unchanged["changed"] is False
+
+
+def test_settings_object_has_exactly_the_six_writable_fields(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    client, _ = _client(tmp_path, monkeypatch, seed=True)
+    settings = client.get("/api/admin/ai/research-settings").json()["settings"]
+    assert sorted(settings) == [
+        "daily_budget_usd_micros",
+        "enabled",
+        "model_id",
+        "monthly_budget_usd_micros",
+        "research_budget_reservation_usd_micros",
+        "search_budget_reservation_usd_micros",
+    ]
