@@ -260,6 +260,7 @@ def create_research_api_router(dependencies: ResearchApiDependencies) -> APIRout
         if row.record.state.value == "admitted":
             try:
                 runtime.submit_pending()
+                runtime.release_remote_pending()
             except Exception:
                 pass
             refreshed = dependencies.requests.get_request(row.record.operation_id)
@@ -283,6 +284,7 @@ def create_research_api_router(dependencies: ResearchApiDependencies) -> APIRout
             try:
                 if runtime.submit_pending() is None:
                     runtime.poll_once()
+                runtime.release_remote_pending()
             except Exception:
                 pass
             refreshed = dependencies.requests.get_request(operation_id)

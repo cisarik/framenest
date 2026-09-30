@@ -15,10 +15,14 @@ from framenest.adapters.api.research_api import (
 from framenest.application.research import ResearchCoordinator
 from framenest.configuration import FrameNestSettings
 from framenest.domain.research import (
+    CompletionEvidence,
     ProviderHandle,
     ProviderObservation,
     ProviderObservationKind,
+    ResearchAnswer,
+    ResearchCitation,
     ResearchErrorCode,
+    ResearchUsage,
 )
 from framenest.infrastructure.ai.research_configuration import (
     default_research_configuration,
@@ -46,7 +50,9 @@ HANDLE = ProviderHandle("api-handle-1")
 class FakeProvider:
     def __init__(self) -> None:
         self.poll_kind = ProviderObservationKind.RUNNING
+        self.answer = None
         self.cancelled = False
+        self.releases: list[ProviderHandle] = []
 
     def describe(self):
         raise AssertionError("not used")
@@ -58,7 +64,9 @@ class FakeProvider:
         )
 
     def poll(self, handle):
-        return ProviderObservation(kind=self.poll_kind, remote_handle=handle)
+        return ProviderObservation(
+            kind=self.poll_kind, remote_handle=handle, answer=self.answer
+        )
 
     def cancel(self, handle):
         self.cancelled = True
@@ -70,7 +78,29 @@ class FakeProvider:
     def release_remote(self, handle):
         from framenest.domain.research import CleanupOutcome, ResearchRemoteCleanupState
 
+        self.releases.append(handle)
         return CleanupOutcome(state=ResearchRemoteCleanupState.DELETED)
+
+
+def _answer() -> ResearchAnswer:
+    return ResearchAnswer(
+        text="Synthetic saved answer.",
+        citations=(ResearchCitation(url="https://example.invalid/a", title="A"),),
+        evidence=CompletionEvidence(
+            provider_terminal=True,
+            answer_complete=True,
+            web_search_executed=True,
+            refusal_marker=False,
+            incomplete_marker=False,
+        ),
+        usage=ResearchUsage(
+            input_tokens=100,
+            cached_input_tokens=0,
+            output_tokens=50,
+            reasoning_tokens=10,
+            web_tool_calls=1,
+        ),
+    )
 
 
 @pytest.fixture()
@@ -203,3 +233,38 @@ def test_disabled_runtime_refuses_submission_but_serves_capabilities(api) -> Non
     response = _submit(client, client_request_id="client-api-4")
     assert response.status_code == 503
     assert response.json()["error"]["code"] == "E_DISABLED"
+
+
+def test_nudge_releases_remote_after_validated_save(api) -> None:
+    provider = api["provider"]
+    coordinator = api["coordinator"]
+
+    created = _submit(api["client"], client_request_id="client-api-5")
+    assert created.status_code == 202
+    operation_id = created.json()["operation_id"]
+
+    provider.poll_kind = ProviderObservationKind.COMPLETE
+    provider.answer = _answer()
+    saved = coordinator.poll_once()
+    assert saved is not None
+    assert saved.record.state.value == "saved"
+    stored = api["repository"].get_request(operation_id)
+    assert stored.record.cleanup_state.value == "pending"
+    assert provider.releases == []
+
+    disabled = api["build_client"](runtime=None)
+    assert disabled.get(f"/api/research-requests/{operation_id}").status_code == 200
+    assert provider.releases == []
+    assert (
+        api["repository"].get_request(operation_id).record.cleanup_state.value
+        == "pending"
+    )
+
+    detail = api["client"].get(f"/api/research-requests/{operation_id}")
+    assert detail.status_code == 200
+    assert detail.json()["state"] == "saved"
+    assert provider.releases == [HANDLE]
+    assert (
+        api["repository"].get_request(operation_id).record.cleanup_state.value
+        == "deleted"
+    )
