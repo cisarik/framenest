@@ -13756,13 +13756,34 @@ function kronikaNewRequestId() {
   return `kronika-${Date.now()}`;
 }
 
-function kronikaFreezeAttempt(kind, prompt) {
-  if (
-    kronikaAttempt.id
-    && kronikaAttempt.kind === kind
-    && kronikaAttempt.prompt === prompt
-    && kronikaAttempt.consentVersion === KRONIKA_CONSENT_VERSION
-  ) {
+function kronikaReadStoredAttempt() {
+  try {
+    if (typeof sessionStorage === "undefined" || !sessionStorage) return null;
+    const raw = sessionStorage.getItem(KRONIKA_ATTEMPT_KEY);
+    if (!raw) return null;
+    const stored = JSON.parse(raw);
+    if (!stored || typeof stored !== "object") return null;
+    return stored;
+  } catch {
+    return null;
+  }
+}
+
+async function kronikaFreezeAttempt(kind, prompt) {
+  const fingerprint = await kronikaFingerprint([
+    kronikaLogin(),
+    kind,
+    prompt,
+    KRONIKA_CONSENT_VERSION,
+  ]);
+  const stored = kronikaReadStoredAttempt();
+  const storedFingerprint = stored && typeof stored.fingerprint === "string" ? stored.fingerprint : "";
+  const storedId = stored && typeof stored.id === "string" ? stored.id : "";
+  if (fingerprint && storedFingerprint && fingerprint === storedFingerprint && storedId) {
+    kronikaAttempt.id = storedId;
+    kronikaAttempt.kind = kind;
+    kronikaAttempt.prompt = prompt;
+    kronikaAttempt.consentVersion = KRONIKA_CONSENT_VERSION;
     return kronikaAttempt;
   }
   kronikaAttempt.id = kronikaNewRequestId();
@@ -13872,7 +13893,7 @@ async function kronikaSubmitQuestion(event) {
     return;
   }
   if (error) error.textContent = "";
-  const attempt = kronikaFreezeAttempt(kronikaRuntime.questionKind || "search", prompt);
+  const attempt = await kronikaFreezeAttempt(kronikaRuntime.questionKind || "search", prompt);
   await kronikaPostAttempt(attempt);
 }
 

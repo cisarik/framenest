@@ -208,11 +208,11 @@ function createHarness(fetchImpl, options = {}) {
   const detailsCalls = [];
   const catalogLoads = [];
   const timers = [];
-  const storage = new Map();
+  const storage = options.storage instanceof Map ? options.storage : new Map();
   const identityState = {
     resolved: true,
     audience: "trusted_loopback",
-    login: "alice",
+    login: options.login || "alice",
     capabilities: new Set(options.capabilities || ["research.run", "records.approve"]),
   };
   const location = {
@@ -612,4 +612,72 @@ test("identity loss clears private content and dirty navigation can be cancelled
   await harness.kronikaFollowHash();
   assert.equal(harness.location.hash, "#/timeline");
   assert.equal(harness.catalogLoads.length, 0);
+});
+
+test("reload recovery reuses the request id only when the fingerprint matches", async () => {
+  const storage = new Map();
+  const bodiesA = [];
+  const harnessA = createHarness(async (_url, init) => {
+    if (init && init.method === "POST") {
+      bodiesA.push(JSON.parse(init.body));
+      throw new Error("lost");
+    }
+    return jsonResponse({ items: [], total: 0, limit: 24, offset: 0 });
+  }, { storage });
+  harnessA.kronikaStartNavigation();
+  await settle();
+  harnessA.byId["kronika-question-input"].value = "Synthetic question";
+  harnessA.byId["kronika-consent"].checked = true;
+  await harnessA.kronikaSubmitQuestion({ preventDefault() {} });
+  assert.equal(bodiesA.length, 1);
+  const storedRaw = storage.get("kronika.research.attempt.v1");
+  const stored = JSON.parse(storedRaw);
+  assert.deepEqual(Object.keys(stored).sort(), ["fingerprint", "id", "operationId"]);
+  assert.equal(stored.operationId, "");
+  assert.equal(stored.fingerprint.length > 0, true);
+  assert.equal(storedRaw.includes("Synthetic question"), false);
+
+  async function recoveredContext(login, question) {
+    const bodies = [];
+    const harness = createHarness(async (_url, init) => {
+      if (init && init.method === "POST") {
+        bodies.push(JSON.parse(init.body));
+        return jsonResponse({ operation_id: "op-recovered", state: "running", record_id: null }, 202);
+      }
+      return jsonResponse({
+        enabled: true,
+        provider_id: "openai-responses",
+        retention_notice: "Answers are stored locally.",
+        search: { budget_reservation_usd_micros: 1 },
+      });
+    }, { storage: new Map(storage), login });
+    await harness.kronikaShowQuestion(harness.kronikaParseRoute("#/search"));
+    return { bodies, harness };
+  }
+
+  const same = await recoveredContext("alice", "Synthetic question");
+  assert.equal(same.bodies.length, 0);
+  assert.match(same.harness.byId["kronika-question-status"].textContent, /Re-enter the same question/);
+  same.harness.byId["kronika-question-input"].value = "Synthetic question";
+  same.harness.byId["kronika-consent"].checked = true;
+  await same.harness.kronikaSubmitQuestion({ preventDefault() {} });
+  assert.equal(same.bodies.length, 1);
+  assert.equal(same.bodies[0].client_request_id, bodiesA[0].client_request_id);
+  assert.equal(same.bodies[0].prompt, "Synthetic question");
+  assert.equal(same.bodies[0].consent_version, "kronika-research-v1");
+  assert.equal(same.bodies[0].kind, "search");
+
+  const changed = await recoveredContext("alice", "Different question");
+  changed.harness.byId["kronika-question-input"].value = "Different question";
+  changed.harness.byId["kronika-consent"].checked = true;
+  await changed.harness.kronikaSubmitQuestion({ preventDefault() {} });
+  assert.equal(changed.bodies.length, 1);
+  assert.notEqual(changed.bodies[0].client_request_id, bodiesA[0].client_request_id);
+
+  const otherLogin = await recoveredContext("bob", "Synthetic question");
+  otherLogin.harness.byId["kronika-question-input"].value = "Synthetic question";
+  otherLogin.harness.byId["kronika-consent"].checked = true;
+  await otherLogin.harness.kronikaSubmitQuestion({ preventDefault() {} });
+  assert.equal(otherLogin.bodies.length, 1);
+  assert.notEqual(otherLogin.bodies[0].client_request_id, bodiesA[0].client_request_id);
 });
