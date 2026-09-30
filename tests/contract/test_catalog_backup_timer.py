@@ -91,6 +91,7 @@ def test_catalog_backup_service_contract() -> None:
     assert service["TimeoutStartSec"] == "30min"
     assert service["ProtectSystem"] == "strict"
     assert service["StateDirectory"] == "framenest"
+    assert service["StateDirectoryMode"] == "0700"
     assert "ListenStream" not in service
     text = SERVICE_PATH.read_text(encoding="utf-8")
     assert "ListenStream" not in text

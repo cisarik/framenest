@@ -78,6 +78,7 @@ def test_offdevice_service_contract() -> None:
     assert service["TimeoutStartSec"] == "30min"
     assert service["ProtectSystem"] == "strict"
     assert service["StateDirectory"] == "framenest"
+    assert service["StateDirectoryMode"] == "0700"
     assert service["RestrictAddressFamilies"] == "AF_UNIX"
     assert service["IPAddressDeny"] == "any"
     assert service["InaccessiblePaths"] == "/srv/media"

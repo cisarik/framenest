@@ -19,6 +19,7 @@ KillSignal=SIGTERM
 StandardOutput=journal
 StandardError=journal
 StateDirectory=framenest
+StateDirectoryMode=0700
 UMask=0077
 NoNewPrivileges=true
 PrivateTmp=true
