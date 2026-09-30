@@ -88,6 +88,14 @@ default page size 24 and maximum 100. Filters MUST combine Search, Research
 and existing media categories. GIF MUST remain a technical format rather than
 replace Meme.
 
+The packaged shell implements this navigation as an S8 candidate: hash routes
+on the existing page, summary titles and list filters, and administrator
+review. Summary lists carry a bounded display title and category and do not
+carry answer text. Timeline titles for every caller come from the approved
+projection. That candidate is not accepted, published or deployed. Research
+submission stays disabled until S9. Live provider acceptance and the
+empty-catalog reset remain S9.
+
 ### Research Provider Contract and Resource Limits
 
 Search and Research MUST use a provider-neutral application boundary. The

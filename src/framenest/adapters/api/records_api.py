@@ -107,6 +107,28 @@ def _summary_payload(summary: object) -> dict[str, object]:
         "version": summary.version,
         "media_id": summary.media_id,
         "read_decision": summary.read_decision,
+        "display_title": summary.display_title,
+        "content_category": summary.content_category,
+    }
+
+
+def _optional_query(request: Request, name: str) -> str | None:
+    if name not in request.query_params:
+        return None
+    value = request.query_params.get(name)
+    if value is None or value == "":
+        return None
+    return value
+
+
+def _list_filters(request: Request, *, administrator: bool) -> dict[str, str | None]:
+    visibility = _optional_query(request, "visibility")
+    if visibility is not None and not administrator:
+        raise RecordValueError()
+    return {
+        "kind": _optional_query(request, "kind"),
+        "content_category": _optional_query(request, "content_category"),
+        "visibility": visibility if administrator else None,
     }
 
 
@@ -150,7 +172,17 @@ def create_records_api_router(dependencies: RecordsApiDependencies) -> APIRouter
             return denial
         assert identity is not None
         limit, offset = _page_params(request)
-        page = service.list_own_history(identity, limit=limit, offset=offset)
+        try:
+            filters = _list_filters(request, administrator=False)
+            page = service.list_own_history(
+                identity,
+                limit=limit,
+                offset=offset,
+                kind=filters["kind"],
+                content_category=filters["content_category"],
+            )
+        except RecordValueError:
+            return _error_response(422, "INVALID_REQUEST", "The list request is invalid.")
         return JSONResponse(status_code=200, content=_page_payload(page))
 
     @router.get("/api/timeline")
@@ -160,7 +192,17 @@ def create_records_api_router(dependencies: RecordsApiDependencies) -> APIRouter
             return denial
         assert identity is not None
         limit, offset = _page_params(request)
-        page = service.list_timeline(identity, limit=limit, offset=offset)
+        try:
+            filters = _list_filters(request, administrator=False)
+            page = service.list_timeline(
+                identity,
+                limit=limit,
+                offset=offset,
+                kind=filters["kind"],
+                content_category=filters["content_category"],
+            )
+        except RecordValueError:
+            return _error_response(422, "INVALID_REQUEST", "The list request is invalid.")
         return JSONResponse(status_code=200, content=_page_payload(page))
 
     @router.get("/api/admin/records")
@@ -170,7 +212,18 @@ def create_records_api_router(dependencies: RecordsApiDependencies) -> APIRouter
             return denial
         assert identity is not None
         limit, offset = _page_params(request)
-        page = service.list_admin_inventory(identity, limit=limit, offset=offset)
+        try:
+            filters = _list_filters(request, administrator=True)
+            page = service.list_admin_inventory(
+                identity,
+                limit=limit,
+                offset=offset,
+                kind=filters["kind"],
+                content_category=filters["content_category"],
+                visibility=filters["visibility"],
+            )
+        except RecordValueError:
+            return _error_response(422, "INVALID_REQUEST", "The list request is invalid.")
         return JSONResponse(status_code=200, content=_page_payload(page))
 
     @router.get("/api/records/{record_id}")

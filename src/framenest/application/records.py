@@ -18,8 +18,10 @@ from framenest.domain.records import (
     CompletedDocument,
     RecordConflictError,
     RecordId,
+    RecordKind,
     RecordNotFoundError,
     RecordValueError,
+    RecordVisibility,
     parse_owner_login_key,
 )
 
@@ -57,9 +59,20 @@ class RecordService:
         *,
         limit: int = DEFAULT_RECORD_PAGE_LIMIT,
         offset: int = 0,
+        kind: str | None = None,
+        content_category: str | None = None,
     ) -> RecordPage:
         caller = _require_identity(identity)
-        return self.repository.list_own_history(caller, _page(limit, offset))
+        return self.repository.list_own_history(
+            caller,
+            _query(
+                limit,
+                offset,
+                kind=kind,
+                content_category=content_category,
+                visibility=None,
+            ),
+        )
 
     def list_admin_inventory(
         self,
@@ -67,11 +80,23 @@ class RecordService:
         *,
         limit: int = DEFAULT_RECORD_PAGE_LIMIT,
         offset: int = 0,
+        kind: str | None = None,
+        content_category: str | None = None,
+        visibility: str | None = None,
     ) -> RecordPage:
         caller = _require_identity(identity)
         if not may_approve(caller):
             raise RecordNotFoundError()
-        return self.repository.list_admin_inventory(caller, _page(limit, offset))
+        return self.repository.list_admin_inventory(
+            caller,
+            _query(
+                limit,
+                offset,
+                kind=kind,
+                content_category=content_category,
+                visibility=visibility,
+            ),
+        )
 
     def list_timeline(
         self,
@@ -79,9 +104,20 @@ class RecordService:
         *,
         limit: int = DEFAULT_RECORD_PAGE_LIMIT,
         offset: int = 0,
+        kind: str | None = None,
+        content_category: str | None = None,
     ) -> RecordPage:
         caller = _require_identity(identity)
-        return self.repository.list_timeline(caller, _page(limit, offset))
+        return self.repository.list_timeline(
+            caller,
+            _query(
+                limit,
+                offset,
+                kind=kind,
+                content_category=content_category,
+                visibility=None,
+            ),
+        )
 
     def prepare_approval(self, identity: object, record_id: str) -> ApprovalCandidate:
         caller = _require_identity(identity)
@@ -137,6 +173,18 @@ def _require_login(identity: object) -> str:
     return parse_owner_login_key(caller.login_key)
 
 
+_KIND_FILTERS = {
+    "media": RecordKind.MEDIA,
+    "search": RecordKind.SEARCH,
+    "research": RecordKind.RESEARCH,
+}
+_CATEGORY_FILTERS = frozenset({"general", "meme", "movie", "youtube"})
+_VISIBILITY_FILTERS = {
+    "private": RecordVisibility.PRIVATE,
+    "family": RecordVisibility.FAMILY,
+}
+
+
 def _page(limit: int, offset: int) -> RecordPageQuery:
     if (
         isinstance(limit, bool)
@@ -149,3 +197,40 @@ def _page(limit: int, offset: int) -> RecordPageQuery:
     ):
         raise RecordValueError()
     return RecordPageQuery(limit=limit, offset=offset)
+
+
+def _query(
+    limit: int,
+    offset: int,
+    *,
+    kind: str | None,
+    content_category: str | None,
+    visibility: str | None,
+) -> RecordPageQuery:
+    page = _page(limit, offset)
+    parsed_kind = None
+    if kind is not None:
+        if not isinstance(kind, str) or kind not in _KIND_FILTERS:
+            raise RecordValueError()
+        parsed_kind = _KIND_FILTERS[kind]
+    parsed_category = None
+    if content_category is not None:
+        if (
+            not isinstance(content_category, str)
+            or content_category not in _CATEGORY_FILTERS
+            or parsed_kind is not RecordKind.MEDIA
+        ):
+            raise RecordValueError()
+        parsed_category = content_category
+    parsed_visibility = None
+    if visibility is not None:
+        if not isinstance(visibility, str) or visibility not in _VISIBILITY_FILTERS:
+            raise RecordValueError()
+        parsed_visibility = _VISIBILITY_FILTERS[visibility]
+    return RecordPageQuery(
+        limit=page.limit,
+        offset=page.offset,
+        kind=parsed_kind,
+        content_category=parsed_category,
+        visibility=parsed_visibility,
+    )

@@ -9,10 +9,11 @@ one Kronika built in this repository. No new repository or second product is
 planned. [ADR-0083](docs/adr/0083-modular-research-providers-and-administrator-curated-timeline.md)
 is the current target for Search, Research and the shared Timeline. The
 internal `framenest` package, migration history, HTTP headers and deployment
-identifiers remain; UI branding and the public repository rename belong to
-later slices. This documentation change does not implement them.
+identifiers remain. The shell now shows Kronika in the title, header label and
+wordmark while keeping the `FN` mark. Package, header, storage-key and
+repository rename remain S10.
 
-Accepted target, not yet implemented:
+Accepted target:
 
 - The Timeline is the main page and contains only administrator-approved
   records. Personal history is a separate view of questions and answers,
@@ -30,17 +31,23 @@ Accepted target, not yet implemented:
   The shared page is for verified household members only. Internet publication
   stays disabled.
 
-Implemented state at this documentation slice:
+Implemented foundations, still awaiting independent acceptance, publication
+and deployment:
 
 - MEME and Movie behavior already in the application remains.
 - The chatgpt.com capture module is present at `src/kronika_capture` and is
   parked. It is not the current Search or Research provider. Bounded ZIP
   activation stays parked with it.
-- Common records, personal history, administrator approval, the shared
-  Timeline and the research provider are not shipped.
-- The code and status descriptions below remain the pre-transition baseline,
-  including publication-based Gallery and administrator workflows. They are
-  not the target privacy policy.
+- S6 records and approval, S4-B research runtime and S7-P personal-history
+  and rendering APIs are implemented. Research stays disabled by default.
+- S8 is a local shell candidate: Timeline landing, separate personal history,
+  Search and Research forms, completed-document viewing and administrator
+  review. Focused tests are implementation evidence only. Rendered acceptance,
+  publication and NUC deployment are separate. Live provider acceptance and
+  the empty-catalog reset remain in S9.
+- The code and status descriptions below remain the pre-transition baseline
+  where they describe publication-based Gallery and administrator workflows.
+  They are not the target privacy policy for new records.
 
 The old databases contain unwanted test data. There is no import project;
 later authorized deployment uses an exact, stopped-writer empty-database reset

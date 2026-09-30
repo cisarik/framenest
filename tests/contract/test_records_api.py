@@ -22,6 +22,7 @@ from framenest.domain.research import CompletionEvidence
 from framenest.infrastructure.persistence.engine import (
     create_sqlite_engine,
     dispose_engine,
+    run_in_immediate_transaction,
 )
 from framenest.infrastructure.persistence.migrations import upgrade_database_to_head
 from framenest.infrastructure.persistence.record_repository import (
@@ -168,3 +169,99 @@ def test_anonymous_is_denied_everywhere(records) -> None:
     assert records["anonymous"].get("/api/timeline").status_code == 401
     assert records["anonymous"].get(f"/api/records/{record_id}").status_code == 401
     assert records["anonymous"].get("/api/admin/records").status_code == 401
+
+
+def test_summaries_keep_hostile_titles_and_omit_answers(records) -> None:
+    page = records["alice"].get("/api/my/records")
+    assert page.status_code == 200
+    item = page.json()["items"][0]
+    assert "<script>" in item["display_title"]
+    assert item["content_category"] is None
+    assert "answer_text" not in item
+    assert "stays safe" not in page.text
+    assert records["ada"].get("/api/my/records").json()["total"] == 0
+    assert records["bob"].get(f"/api/records/{records['record_id']}").status_code == 404
+    assert records["bob"].get(f"/api/records/{records['record_id']}/render").status_code == 404
+
+
+def test_timeline_membership_is_approved_for_every_caller(records) -> None:
+    record_id = records["record_id"]
+    for client in (records["alice"], records["bob"], records["ada"]):
+        assert client.get("/api/timeline").json()["total"] == 0
+    version = records["ada"].get(f"/api/records/{record_id}").json()["version"]
+    approval = records["ada"].post(
+        f"/api/admin/records/{record_id}/approval",
+        json={"action": "approve", "expected_version": version},
+    )
+    assert approval.status_code == 200
+    for client in (records["alice"], records["bob"], records["ada"]):
+        timeline = client.get("/api/timeline").json()
+        assert timeline["total"] == 1
+        assert timeline["items"][0]["read_decision"] == "approved"
+        assert timeline["items"][0]["display_title"]
+    stale = records["ada"].post(
+        f"/api/admin/records/{record_id}/approval",
+        json={"action": "withdraw", "expected_version": version},
+    )
+    assert stale.status_code == 409
+    current = records["ada"].get(f"/api/records/{record_id}").json()["version"]
+    withdrawn = records["ada"].post(
+        f"/api/admin/records/{record_id}/approval",
+        json={"action": "withdraw", "expected_version": current},
+    )
+    assert withdrawn.status_code == 200
+    for client in (records["alice"], records["bob"], records["ada"]):
+        assert client.get("/api/timeline").json()["total"] == 0
+    assert records["alice"].get("/api/my/records").json()["total"] == 1
+
+
+def test_record_list_filters_reject_invalid_combinations(records) -> None:
+    assert records["alice"].get("/api/timeline", params={"visibility": "family"}).status_code == 422
+    assert records["alice"].get(
+        "/api/my/records",
+        params={"content_category": "meme"},
+    ).status_code == 422
+    assert records["ada"].get("/api/admin/records", params={"kind": "nope"}).status_code == 422
+    private = records["ada"].get("/api/admin/records", params={"visibility": "private"})
+    assert private.status_code == 200
+    assert private.json()["total"] == 1
+    assert private.json()["items"][0]["display_title"]
+
+
+def test_unready_media_cannot_be_approved(tmp_path: Path) -> None:
+    settings = FrameNestSettings(
+        database_path=tmp_path / "records-api.sqlite3",
+        identity_map={"alice@example.com": "user", "ada@example.com": "admin"},
+        _env_file=None,
+    )
+    upgrade_database_to_head(settings)
+    engine = create_sqlite_engine(settings.database_path)
+    media_id = "55555555-5555-4555-8555-555555555555"
+    repository = SqliteRecordRepository(engine)
+    try:
+        def seed(connection) -> None:
+            connection.exec_driver_sql(
+                "INSERT INTO logical_media (id, media_kind, created_at_ms, updated_at_ms) "
+                "VALUES ('55555555-5555-4555-8555-555555555555', 'video', 10, 10)"
+            )
+            repository.bind_media_record(
+                connection,
+                record_id=RecordId.new(),
+                media_id=media_id,
+                owner_login_key="alice@example.com",
+                created_at_ms=10,
+            )
+
+        run_in_immediate_transaction(engine, seed)
+    finally:
+        dispose_engine(engine)
+    ada = _client(create_app(settings=settings), "ada@example.com", ROLE_ADMIN)
+    listed = ada.get("/api/admin/records")
+    assert listed.status_code == 200
+    item = listed.json()["items"][0]
+    denied = ada.post(
+        f"/api/admin/records/{item['record_id']}/approval",
+        json={"action": "approve", "expected_version": item["version"]},
+    )
+    assert denied.status_code == 409
+    assert denied.json()["error"]["code"] == "RECORD_CONFLICT"

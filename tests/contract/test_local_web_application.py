@@ -2868,3 +2868,28 @@ def test_javascript_upload_states_polling_cancel_and_gallery_boundaries_are_trut
     assert _evaluate_upload_should_poll(script, state="cancelled") is False
     assert _evaluate_upload_should_poll(script, state="expired") is False
     assert _evaluate_upload_should_poll(script, state=None) is False
+
+
+def test_kronika_shell_adds_timeline_without_replacing_gallery(client: TestClient) -> None:
+    html = client.get("/").text
+    script = client.get("/assets/app.js").text
+    header = html[html.index("app-header") : html.index("</header>")]
+    assert "<title>Kronika</title>" in html
+    assert ">Kronika<" in header
+    assert ">FN<" in header
+    assert ">FrameNest<" not in header
+    assert 'aria-label="Kronika application header"' in header
+    assert 'href="#main"' in html
+    assert 'tabindex="-1"' in html[html.index("<main") : html.index("<main") + 80]
+    assert 'id="catalog-browser"' in html
+    assert 'href="#/timeline"' in html
+    assert 'href="#/gallery"' in html
+    assert 'id="kronika-document-frame"' in html
+    assert 'sandbox=""' in html
+    assert 'referrerpolicy="no-referrer"' in html
+    assert "http://" not in html
+    assert "https://" not in html
+    assert "FrameNestCompanionWeb.onOpenDetails" in script
+    assert "openDetailsDialog({ media_id: mediaId }, detailsCloseButton)" in script
+    assert "default-src 'none'; style-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none'" in script
+    assert "kronikaStartNavigation" in script

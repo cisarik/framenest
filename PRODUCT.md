@@ -25,7 +25,7 @@ Downloading, cataloging, gallery presentation, metadata, storage awareness,
 transfer, playback, and server/client coordination are parts of one product
 direction.
 
-### Accepted Kronika Experience (Not Yet Implemented)
+### Accepted Kronika Experience
 
 - The Timeline is the landing page and contains only administrator-approved
   records. The existing dark/green design, Gallery, Details and playback
@@ -88,9 +88,12 @@ desktop/media horizon below is not added to the active S4-D through S10 scope.
 
 This section describes the implemented pre-transition foundation. In
 particular, published-only Gallery and administrator-wide review are current
-code behaviors that later slices must replace for Kronika records; they do not
-override the accepted privacy rules above. No new Timeline or common-record
-behavior is implemented by this documentation update.
+code behaviors for legacy media; they do not override the accepted privacy
+rules above. S6, S4-B and S7-P record, research and rendering foundations are
+implemented. The S8 shell candidate adds the Timeline, personal history,
+Search and Research forms and administrator review in the existing page.
+That candidate is not accepted, published or deployed. Research remains
+disabled, and S9 still holds live acceptance and the empty-catalog reset.
 
 FrameNest is currently in foundation-stage, pre-alpha development.
 

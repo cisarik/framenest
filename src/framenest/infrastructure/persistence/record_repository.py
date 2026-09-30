@@ -411,7 +411,7 @@ class SqliteRecordRepository:
             raise RecordNotFoundError()
 
         def operation(connection: Connection) -> RecordPage:
-            statement = select(kronika_records)
+            statement = select(kronika_records.c.id)
             if owner_login_key is not None:
                 statement = statement.where(
                     kronika_records.c.owner_login_key == owner_login_key
@@ -431,6 +431,30 @@ class SqliteRecordRepository:
                     kronika_records.c.created_at_ms.desc(),
                     kronika_records.c.id.asc(),
                 )
+                if owner_login_key is None and query.visibility is not None:
+                    statement = statement.where(
+                        kronika_records.c.visibility == query.visibility.value
+                    )
+            if query.kind is not None:
+                statement = statement.where(kronika_records.c.kind == query.kind.value)
+            if query.content_category is not None:
+                if timeline_only:
+                    statement = statement.where(
+                        kronika_records.c.id.in_(
+                            select(kronika_approved_media.c.record_id).where(
+                                kronika_approved_media.c.content_category
+                                == query.content_category
+                            )
+                        )
+                    )
+                else:
+                    statement = statement.where(
+                        kronika_records.c.media_id.in_(
+                            select(media_metadata.c.media_id).where(
+                                media_metadata.c.content_category == query.content_category
+                            )
+                        )
+                    )
             filtered = statement.subquery()
             total = connection.execute(
                 select(func.count()).select_from(filtered)
@@ -441,13 +465,26 @@ class SqliteRecordRepository:
                 .order_by(*order)
                 .limit(query.limit)
                 .offset(query.offset)
-            ).mappings()
-            items = tuple(
-                _summary(row, decide_bound_read(identity, _bound_view(row)))
-                for row in rows
-            )
+            ).mappings().all()
+            labels = _summary_labels(connection, rows, timeline_only=timeline_only)
+            items = []
+            for row in rows:
+                decision = (
+                    READ_APPROVED
+                    if timeline_only
+                    else decide_bound_read(identity, _bound_view(row))
+                )
+                title, category = labels.get(str(row["id"]), (None, None))
+                items.append(
+                    _summary(
+                        row,
+                        decision,
+                        display_title=title,
+                        content_category=category,
+                    )
+                )
             return RecordPage(
-                items=items,
+                items=tuple(items),
                 total=int(total),
                 limit=query.limit,
                 offset=query.offset,
@@ -535,7 +572,107 @@ def _bound_view(row: Mapping[str, object]) -> BoundRecordView:
     )
 
 
-def _summary(row: Mapping[str, object], decision: str) -> RecordSummary:
+_TITLE_CODE_POINTS = 240
+_CONTENT_CATEGORIES = frozenset({"general", "meme", "movie", "youtube"})
+
+
+def _question_display_title(question: object) -> str | None:
+    """Collapse whitespace and keep at most 240 code points, ellipsis included."""
+    if not isinstance(question, str):
+        return None
+    collapsed = " ".join(question.split())
+    if not collapsed:
+        return None
+    if len(collapsed) <= _TITLE_CODE_POINTS:
+        return collapsed
+    return collapsed[: _TITLE_CODE_POINTS - 1] + "…"
+
+
+def _media_display_title(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    stripped = value.strip()
+    return stripped or None
+
+
+def _category_value(value: object) -> str | None:
+    if not isinstance(value, str) or value not in _CONTENT_CATEGORIES:
+        return None
+    return value
+
+
+def _summary_labels(
+    connection: Connection,
+    rows: list[Mapping[str, object]],
+    *,
+    timeline_only: bool,
+) -> dict[str, tuple[str | None, str | None]]:
+    """Title and category columns only. Answers and locations stay unloaded."""
+    labels: dict[str, tuple[str | None, str | None]] = {}
+    if not rows:
+        return labels
+    ids = [str(row["id"]) for row in rows]
+    if timeline_only:
+        media_rows = connection.execute(
+            select(
+                kronika_approved_media.c.record_id,
+                kronika_approved_media.c.display_title,
+                kronika_approved_media.c.content_category,
+            ).where(kronika_approved_media.c.record_id.in_(ids))
+        ).mappings()
+        for item in media_rows:
+            labels[str(item["record_id"])] = (
+                _media_display_title(item["display_title"]),
+                _category_value(item["content_category"]),
+            )
+    else:
+        media_rows = connection.execute(
+            select(
+                kronika_records.c.id,
+                media_metadata.c.display_title,
+                media_metadata.c.content_category,
+            )
+            .select_from(
+                kronika_records.outerjoin(
+                    media_metadata,
+                    media_metadata.c.media_id == kronika_records.c.media_id,
+                )
+            )
+            .where(
+                kronika_records.c.id.in_(ids),
+                kronika_records.c.kind == RecordKind.MEDIA.value,
+            )
+        ).mappings()
+        for item in media_rows:
+            labels[str(item["id"])] = (
+                _media_display_title(item["display_title"]),
+                _category_value(item["content_category"]),
+            )
+    document_rows = connection.execute(
+        select(
+            kronika_records.c.id,
+            kronika_documents.c.question_text,
+        )
+        .select_from(
+            kronika_records.join(
+                kronika_documents,
+                kronika_documents.c.id == kronika_records.c.document_id,
+            )
+        )
+        .where(kronika_records.c.id.in_(ids))
+    ).mappings()
+    for item in document_rows:
+        labels[str(item["id"])] = (_question_display_title(item["question_text"]), None)
+    return labels
+
+
+def _summary(
+    row: Mapping[str, object],
+    decision: str,
+    *,
+    display_title: str | None = None,
+    content_category: str | None = None,
+) -> RecordSummary:
     return RecordSummary(
         record_id=str(row["id"]),
         kind=RecordKind(str(row["kind"])),
@@ -551,6 +688,8 @@ def _summary(row: Mapping[str, object], decision: str) -> RecordSummary:
         version=int(row["version"]),
         media_id=None if row["media_id"] is None else str(row["media_id"]),
         read_decision=decision,
+        display_title=display_title,
+        content_category=content_category,
     )
 
 

@@ -149,9 +149,15 @@ def _family(path: str) -> tuple[str, str, str, str]:
             "owner or administrator; admission is idempotent by client request id",
             "question history summary; answer text only through the completed record",
         )
+    if path.startswith("/api/timeline"):
+        return (
+            "verified caller or administrator",
+            "records.approve for administrator routes",
+            "approved family records only; denial is the unknown-record body",
+            "approved projection for every caller, including owner and administrator",
+        )
     if (
         path.startswith("/api/my/records")
-        or path.startswith("/api/timeline")
         or path.startswith("/api/records/")
         or path.startswith("/api/admin/records")
     ):

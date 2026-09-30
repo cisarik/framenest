@@ -4,16 +4,17 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="color-scheme" content="dark">
-    <title>FrameNest</title>
+    <title>Kronika</title>
     <link rel="stylesheet" href="/assets/styles.css">
     <script src="/assets/companion_host.js" defer></script>
     <script src="/assets/app.js" defer></script>
   </head>
   <body>
     <a class="skip-link" href="#main">Skip to main content</a>
-    <header class="app-header" aria-label="FrameNest application header">
-      <div class="brand" aria-label="FrameNest">
+    <header class="app-header" aria-label="Kronika application header">
+      <div class="brand" aria-label="Kronika">
         <span class="brand-mark" aria-hidden="true">FN</span>
+        <span class="brand-wordmark">Kronika</span>
       </div>
       <div class="header-search" role="search" aria-label="Search catalog">
         <div class="header-search__control">
@@ -730,7 +731,119 @@
       </div>
     </dialog>
 
-    <main id="main" class="app-shell">
+    <main id="main" class="app-shell" tabindex="-1">
+      <nav class="kronika-nav" aria-label="Primary" hidden>
+        <a id="kronika-nav-timeline" href="#/timeline" data-kronika-nav="timeline">Timeline</a>
+        <a id="kronika-nav-gallery" href="#/gallery" data-kronika-nav="gallery">Gallery</a>
+        <a id="kronika-nav-history" href="#/history" data-kronika-nav="history">History</a>
+        <a id="kronika-nav-search" href="#/search" data-kronika-nav="search">Search</a>
+        <a id="kronika-nav-research" href="#/research" data-kronika-nav="research">Research</a>
+        <a id="kronika-nav-review" href="#/review" data-kronika-nav="review" hidden>Review</a>
+      </nav>
+
+      <section id="kronika-timeline" class="kronika-section" data-kronika-view="timeline" aria-labelledby="kronika-timeline-heading" hidden>
+        <h1 id="kronika-timeline-heading" tabindex="-1">Timeline</h1>
+        <div id="kronika-timeline-filters" class="kronika-filters" role="group" aria-label="Timeline filters">
+          <button type="button" class="kronika-action" data-kronika-filter="all">All</button>
+          <button type="button" class="kronika-action" data-kronika-filter="search">Search</button>
+          <button type="button" class="kronika-action" data-kronika-filter="research">Research</button>
+          <button type="button" class="kronika-action" data-kronika-filter="media">Media</button>
+          <button type="button" class="kronika-action" data-kronika-filter="general">General</button>
+          <button type="button" class="kronika-action" data-kronika-filter="meme">Memes</button>
+          <button type="button" class="kronika-action" data-kronika-filter="movie">Movies</button>
+          <button type="button" class="kronika-action" data-kronika-filter="youtube">YouTube</button>
+        </div>
+        <p id="kronika-timeline-status" class="kronika-status" role="status" aria-live="polite"></p>
+        <div id="kronika-timeline-results" class="kronika-grid"></div>
+        <div class="kronika-pager">
+          <button id="kronika-timeline-prev" class="kronika-action" type="button">Previous</button>
+          <button id="kronika-timeline-next" class="kronika-action" type="button">Next</button>
+          <button id="kronika-timeline-retry" class="kronika-action" type="button" hidden>Retry</button>
+        </div>
+      </section>
+
+      <section id="kronika-history" class="kronika-section" data-kronika-view="history" aria-labelledby="kronika-history-heading" hidden>
+        <h1 id="kronika-history-heading" tabindex="-1">History</h1>
+        <div class="kronika-filters" role="group" aria-label="History">
+          <a id="kronika-history-questions" class="kronika-action" href="#/history">Questions</a>
+          <a id="kronika-history-records-tab" class="kronika-action" href="#/history/records">Records</a>
+        </div>
+        <p id="kronika-history-status" class="kronika-status" role="status" aria-live="polite"></p>
+        <div id="kronika-history-results" class="kronika-grid"></div>
+        <div class="kronika-pager">
+          <button id="kronika-history-prev" class="kronika-action" type="button">Previous</button>
+          <button id="kronika-history-next" class="kronika-action" type="button">Next</button>
+          <button id="kronika-history-retry" class="kronika-action" type="button" hidden>Retry</button>
+        </div>
+      </section>
+
+      <section id="kronika-question" class="kronika-section" data-kronika-view="question" aria-labelledby="kronika-question-heading" hidden>
+        <h1 id="kronika-question-heading" tabindex="-1">Search</h1>
+        <p id="kronika-capabilities-status" class="kronika-status" role="status" aria-live="polite"></p>
+        <p><a href="#/history">History</a></p>
+        <form id="kronika-question-form">
+          <label for="kronika-question-input">Question</label>
+          <textarea id="kronika-question-input" name="question" rows="6" aria-describedby="kronika-question-hint"></textarea>
+          <p id="kronika-question-hint">The question is sent only after you submit it. Acknowledgement is not stored as a separate setting.</p>
+          <label for="kronika-consent">
+            <input id="kronika-consent" type="checkbox">
+            I agree to send this question to the configured provider. The answer is stored locally; provider retention may still apply.
+          </label>
+          <p id="kronika-question-error" class="kronika-error" role="alert"></p>
+          <button id="kronika-question-submit" class="kronika-action" type="submit">Submit</button>
+          <button id="kronika-question-retry" class="kronika-action" type="button" hidden>Retry the same submission</button>
+        </form>
+        <p id="kronika-question-status" class="kronika-status" role="status" aria-live="polite"></p>
+      </section>
+
+      <section id="kronika-request" class="kronika-section" data-kronika-view="request" aria-labelledby="kronika-request-heading" hidden>
+        <h1 id="kronika-request-heading" tabindex="-1">Request</h1>
+        <p id="kronika-request-status" class="kronika-status" role="status" aria-live="polite"></p>
+        <p id="kronika-request-note">Processing continues while this page is open and visible. Closing the page pauses these updates.</p>
+        <button id="kronika-request-cancel" class="kronika-action" type="button" hidden>Cancel request</button>
+        <button id="kronika-request-resume" class="kronika-action" type="button" hidden>Resume updates</button>
+        <a id="kronika-request-open-answer" class="kronika-action" href="#/timeline" hidden>Open answer</a>
+      </section>
+
+      <section id="kronika-record" class="kronika-section" data-kronika-view="record" aria-labelledby="kronika-record-heading" hidden>
+        <h1 id="kronika-record-heading" tabindex="-1">Record</h1>
+        <p id="kronika-record-question"></p>
+        <p id="kronika-record-status" class="kronika-status" role="status" aria-live="polite"></p>
+        <button id="kronika-record-retry" class="kronika-action" type="button" hidden>Retry answer</button>
+        <ul id="kronika-record-citations"></ul>
+        <iframe id="kronika-document-frame" class="kronika-frame" title="Completed answer" sandbox="" referrerpolicy="no-referrer"></iframe>
+      </section>
+
+      <section id="kronika-review" class="kronika-section" data-kronika-view="review" aria-labelledby="kronika-review-heading" hidden>
+        <h1 id="kronika-review-heading" tabindex="-1">Review</h1>
+        <div class="kronika-filters" role="group" aria-label="Review">
+          <a id="kronika-review-private" class="kronika-action" href="#/review">Not on Timeline</a>
+          <a id="kronika-review-shared" class="kronika-action" href="#/review/shared">On Timeline</a>
+          <a id="kronika-review-requests" class="kronika-action" href="#/review/requests">Requests</a>
+        </div>
+        <p id="kronika-review-status" class="kronika-status" role="status" aria-live="polite"></p>
+        <div id="kronika-review-results" class="kronika-grid"></div>
+        <div class="kronika-pager">
+          <button id="kronika-review-prev" class="kronika-action" type="button">Previous</button>
+          <button id="kronika-review-next" class="kronika-action" type="button">Next</button>
+          <button id="kronika-review-retry" class="kronika-action" type="button" hidden>Retry</button>
+        </div>
+        <div id="kronika-review-detail" hidden>
+          <p id="kronika-review-version"></p>
+          <p id="kronika-review-readiness" hidden>The server still checks successful analysis and saved metadata readiness.</p>
+          <button id="kronika-review-approve" class="kronika-action" type="button">Approve for Timeline</button>
+          <button id="kronika-review-withdraw" class="kronika-action" type="button" hidden>Withdraw from Timeline</button>
+          <button id="kronika-review-reload" class="kronika-action" type="button" hidden>Reload</button>
+          <div id="kronika-review-media"></div>
+        </div>
+      </section>
+
+      <section id="kronika-unknown" class="kronika-section" data-kronika-view="unknown" aria-labelledby="kronika-unknown-heading" hidden>
+        <h1 id="kronika-unknown-heading" tabindex="-1">This address is unavailable</h1>
+        <p>Choose Timeline or Gallery.</p>
+        <p><a href="#/timeline">Timeline</a> <a href="#/gallery">Gallery</a></p>
+      </section>
+
       <section id="catalog-browser" class="catalog-browser" aria-label="Media browser">
         <div class="catalog-scope" role="group" aria-label="Catalog scope">
           <button id="catalog-scope-all" type="button" class="scope-active">All media</button>

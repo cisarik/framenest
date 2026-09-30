@@ -19,6 +19,9 @@ from framenest.domain.records import (
 class RecordPageQuery:
     limit: int
     offset: int
+    kind: RecordKind | None = None
+    content_category: str | None = None
+    visibility: RecordVisibility | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -33,6 +36,8 @@ class RecordSummary:
     version: int
     media_id: str | None
     read_decision: str
+    display_title: str | None = None
+    content_category: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

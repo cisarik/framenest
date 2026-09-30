@@ -36,7 +36,10 @@ privacy or capture deployment exists.
 The application owns one authoritative catalog, media, complete Search and
 Research documents, identity, administrator approval and the Timeline. There
 is no second server or deployment system. The existing `framenest` package,
-headers, migrations and service identities remain.
+headers, migrations and service identities remain. The workspace shell calls
+the existing record and research routes and does not add an HTTP route.
+Research stays disabled by default. The S8 shell is a local candidate, not a
+deployed or accepted release. The public composition stays off.
 
 ### Local supervision and the hosted research loop
 

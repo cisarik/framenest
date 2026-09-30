@@ -175,6 +175,17 @@ button {
   box-shadow: 0 0 18px rgba(0, 0, 0, 0.5);
 }
 
+.brand-wordmark {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text);
+  font-size: 1rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* --- Header command search --- */
 
 .header-search {
@@ -5324,5 +5335,143 @@ body[data-audience="public_published"] #admin-media-aliases-panel {
 @media (max-width: 360px) {
   .ai-provider-confirm__actions {
     flex-direction: column;
+  }
+}
+
+#main:focus {
+  outline: none;
+}
+
+#main:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.kronika-nav,
+.kronika-filters,
+.kronika-pager {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 16px;
+}
+
+.kronika-nav a,
+.kronika-action,
+.kronika-card {
+  min-height: 44px;
+  min-width: 44px;
+}
+
+.kronika-nav a,
+.kronika-filters a,
+.kronika-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  padding: 8px 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: var(--surface-solid);
+  color: var(--text);
+  font: inherit;
+  text-decoration: none;
+}
+
+.kronika-nav a[aria-current="page"],
+.kronika-filters a[aria-current="page"],
+.kronika-action[aria-pressed="true"] {
+  border-color: var(--accent-border);
+  color: var(--accent);
+}
+
+.kronika-section {
+  min-width: 0;
+  margin: 0 0 24px;
+}
+
+.kronika-section h1:focus {
+  outline: none;
+}
+
+.kronika-section h1:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 4px;
+}
+
+.kronika-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.kronika-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-solid);
+  color: var(--text);
+  overflow-wrap: anywhere;
+  text-align: left;
+  text-decoration: none;
+}
+
+.kronika-card small,
+.kronika-status,
+.kronika-error {
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
+.kronika-error {
+  color: var(--danger);
+}
+
+#kronika-question textarea,
+.kronika-section input[type="checkbox"] {
+  max-width: 100%;
+}
+
+#kronika-question textarea {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 120px;
+  margin: 8px 0;
+  padding: 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: var(--surface-input);
+  color: var(--text);
+  font: inherit;
+}
+
+.kronika-frame {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  height: min(70vh, 720px);
+  margin-top: 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--background);
+}
+
+.kronika-section a:focus-visible,
+.kronika-action:focus-visible,
+.kronika-card:focus-visible,
+#kronika-question textarea:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+@media (max-width: 720px) {
+  .kronika-grid {
+    grid-template-columns: minmax(0, 1fr);
   }
 }

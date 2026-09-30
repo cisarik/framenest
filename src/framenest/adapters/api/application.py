@@ -1557,6 +1557,18 @@ def create_app(
                 },
                 "capabilities": sorted(identity.capabilities),
             }
+        identity = request.scope.get(SCOPE_IDENTITY)
+        if isinstance(identity, IdentityContext) and identity.login_key:
+            return {
+                "audience": AUDIENCE_TRUSTED_LOOPBACK,
+                "identity": {
+                    "login": identity.login,
+                    "display_name": identity.display_name,
+                    "role": identity.role,
+                    "provenance": identity.provenance,
+                },
+                "capabilities": sorted(identity.capabilities),
+            }
         return {
             "audience": AUDIENCE_TRUSTED_LOOPBACK,
             "identity": None,
