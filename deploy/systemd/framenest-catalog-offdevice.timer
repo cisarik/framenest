@@ -1,6 +1,6 @@
 [Unit]
 Description=Daily FrameNest off-device catalog backup copy and restore verification
-Documentation=https://github.com/cisarik/framenest
+Documentation=https://github.com/cisarik/kronika
 Requires=framenest-catalog-offdevice.service
 
 [Timer]

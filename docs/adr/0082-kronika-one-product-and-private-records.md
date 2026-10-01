@@ -195,6 +195,11 @@ rename old `cisarik/kronika` to `kronika-capture-archive`, rename FrameNest to
 and release operation, then archive the old repository. Do not rewrite history
 or publish non-public predecessor history. Local paths need not be renamed.
 
+Execution note (2026-10-01): the Cooperator selected `cli_chatgpt` as the
+former capture repository's new name; `cisarik/framenest` was renamed to
+`cisarik/kronika`. The remaining S10 steps are unchanged; the original
+`kronika-capture-archive` wording above stays as the historical decision text.
+
 ## Relationship to Earlier Decisions
 
 Earlier ADR files and historical host observations remain unchanged. This

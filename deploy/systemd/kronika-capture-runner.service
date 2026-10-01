@@ -1,6 +1,6 @@
 [Unit]
 Description=Kronika capture browser runner
-Documentation=https://github.com/cisarik/framenest
+Documentation=https://github.com/cisarik/kronika
 After=kronika-capture-xvfb.service kronika-capture-bridge.service
 Requires=kronika-capture-xvfb.service
 

@@ -1,6 +1,6 @@
 [Unit]
 Description=Daily FrameNest catalog backup and restore verification
-Documentation=https://github.com/cisarik/framenest
+Documentation=https://github.com/cisarik/kronika
 Requires=framenest-catalog-backup.service
 
 [Timer]

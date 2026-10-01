@@ -1,6 +1,6 @@
 [Unit]
 Description=FrameNest local-first media library server
-Documentation=https://github.com/cisarik/framenest
+Documentation=https://github.com/cisarik/kronika
 After=network-online.target
 Wants=network-online.target
 

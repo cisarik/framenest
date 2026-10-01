@@ -40,7 +40,7 @@ S4-D -> S4-A -> S6 -> S4-B -> S7-P -> S8 -> S9 -> S10
 | S8 | Shared Timeline landing, personal history, Search and Research forms, administrator review and Kronika presentation. Gallery retained | Node behavior tests, safe rendering, Gallery, image, GIF and playback regressions; E2 |
 | S9 | Integrated acceptance on the new empty catalog, then a separately provisioned provider and household UX acceptance. Parked capture completion is not a gate | Fresh integrated review; separate publication, read-only host preflight, exact reset and live-call grants; Cooperator acceptance on the exact public-main NUC release; E3 |
 | S9-R | Administrator-managed research settings and versioned pricing: a bounded four-model catalog, immutable request pricing, shared configuration compare-and-set, atomic submission claims and fail-closed accounting | Focused catalog, arithmetic, refresh, replay, concurrency, preservation and authorization regressions; fresh independent audit, publication, NUC refresh and rendered acceptance |
-| S10 | Rename old Kronika to `kronika-capture-archive`, FrameNest to `kronika`, update source references and archive the former repository last | Explicit rename and publication authority, exact refs, history and release verification; no force or history rewrite |
+| S10 | Rename old Kronika to `cli_chatgpt`, FrameNest to `kronika`, update source references and archive the former repository last | Explicit rename and publication authority, exact refs, history and release verification; no force or history rewrite |
 
 S6, S4-B and S7-P have implementation foundations in this repository. S8 has a
 local shell candidate and focused automated validation; that validation is not

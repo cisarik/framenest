@@ -1,6 +1,6 @@
 [Unit]
 Description=FrameNest off-device catalog backup copy and restore verification
-Documentation=https://github.com/cisarik/framenest
+Documentation=https://github.com/cisarik/kronika
 After=local-fs.target
 RequiresMountsFor=/var/lib/framenest /mnt/framenest-catalog-offdevice
 

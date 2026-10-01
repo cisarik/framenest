@@ -1,6 +1,6 @@
 [Unit]
 Description=Kronika capture loopback bridge
-Documentation=https://github.com/cisarik/framenest
+Documentation=https://github.com/cisarik/kronika
 After=network-online.target
 Wants=network-online.target
 

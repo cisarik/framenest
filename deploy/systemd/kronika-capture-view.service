@@ -1,6 +1,6 @@
 [Unit]
 Description=Kronika capture loopback noVNC view
-Documentation=https://github.com/cisarik/framenest
+Documentation=https://github.com/cisarik/kronika
 After=kronika-capture-vnc.service
 
 [Service]
