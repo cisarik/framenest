@@ -8,10 +8,11 @@ FrameNest is a local-first, privacy-conscious, cross-platform library for video 
 one Kronika built in this repository. No new repository or second product is
 planned. [ADR-0083](docs/adr/0083-modular-research-providers-and-administrator-curated-timeline.md)
 is the current target for Search, Research and the shared Timeline. The
-internal `framenest` package, migration history, HTTP headers and deployment
-identifiers remain. The shell now shows Kronika in the title, header label and
-wordmark while keeping the `FN` mark. Package, header, storage-key and
-repository rename remain S10.
+internal `framenest` package, migration history, HTTP headers, storage keys
+and deployment identifiers remain. The shell now shows Kronika in the title,
+header label and wordmark while keeping the `FN` mark. The public repository
+is `cisarik/kronika`. The former capture repository is `cisarik/cli_chatgpt`
+and stays active.
 
 Accepted target:
 
@@ -35,32 +36,27 @@ Accepted target:
   The shared page is for verified household members only. Internet publication
   stays disabled.
 
-Implemented foundations, still awaiting independent acceptance, publication
-and deployment:
+Published on public `main`:
 
 - MEME and Movie behavior already in the application remains.
 - The chatgpt.com capture module is present at `src/kronika_capture` and is
   parked. It is not the current Search or Research provider. Bounded ZIP
   activation stays parked with it.
-- S6 records and approval, S4-B research runtime and S7-P personal-history
-  and rendering APIs are implemented. S9-R administrator-managed research
-  settings and versioned pricing are implemented as a candidate awaiting its
-  own independent audit, publication, NUC refresh and rendered acceptance.
-  Research stays disabled by default.
-- S8 is a local shell candidate: Timeline landing, separate personal history,
-  Search and Research forms, completed-document viewing and administrator
-  review. Focused tests are implementation evidence only. Rendered acceptance,
-  publication and NUC deployment are separate. Live provider acceptance and
-  the empty-catalog reset remain in S9.
+- S6 records and approval, S4-B research runtime, S7-P personal-history and
+  rendering APIs, and S9-R administrator-managed research settings and
+  versioned pricing are published. Research stays disabled by default.
+- S8 is on public main: Timeline landing, separate personal history, Search
+  and Research forms, completed-document viewing and administrator review.
+  S9 integrated acceptance, the empty-catalog reset and live-provider
+  acceptance are closed.
 - The code and status descriptions below remain the pre-transition baseline
   where they describe publication-based Gallery and administrator workflows.
   They are not the target privacy policy for new records.
 
-The old databases contain unwanted test data. There is no import project;
-later authorized deployment uses an exact, stopped-writer empty-database reset
-without deleting media or browser profiles. See [ROADMAP.md](ROADMAP.md) for
-the active order and the parked capture rows. No host readiness or live
-provider readiness is established here.
+The old databases contain unwanted test data. There is no import project.
+The S9 empty-catalog reset and live-provider acceptance are closed. See
+[ROADMAP.md](ROADMAP.md) for the closed active order and the parked capture
+rows.
 
 ## Status
 

@@ -22,8 +22,10 @@ system, family library or Git history. Do not perform a mass branding
 replacement.
 
 The internal `framenest` package, migration history, compatible HTTP headers
-and deployment identifiers remain. The active sequence after the documentation
-slice is S4-A, S6, S4-B, S7-P, S8, S9, then S10 in [ROADMAP.md](ROADMAP.md).
+and deployment identifiers remain. The S4-A through S10 sequence in
+[ROADMAP.md](ROADMAP.md) is complete. The public repository is
+`cisarik/kronika`. The former capture repository remains `cisarik/cli_chatgpt`
+and stays active.
 The S3 host remainder, capture-mode Search and Research, S5 ZIP activation and
 S7-C capture integration stay parked. One implementation grant covers one row;
 the roadmap itself grants no execution authority.

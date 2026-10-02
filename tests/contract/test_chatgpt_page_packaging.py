@@ -50,7 +50,8 @@ def test_provenance_covers_every_relocated_file() -> None:
     )
     assert manifest["schema_version"] == 1
     assert manifest["upstreams"] == [{
-        "repository": "https://github.com/cisarik/kronika.git",
+        "repository": "https://github.com/cisarik/cli_chatgpt.git",
+        "captured_as": "https://github.com/cisarik/kronika.git",
         "commit": "66c40d43c577276b0ad304a494fbbb1ffb6fc933",
         "tree": "848f247434deea4c217170c012612b39e41557f3",
     }]

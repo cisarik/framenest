@@ -197,8 +197,16 @@ or publish non-public predecessor history. Local paths need not be renamed.
 
 Execution note (2026-10-01): the Cooperator selected `cli_chatgpt` as the
 former capture repository's new name; `cisarik/framenest` was renamed to
-`cisarik/kronika`. The remaining S10 steps are unchanged; the original
-`kronika-capture-archive` wording above stays as the historical decision text.
+`cisarik/kronika`. The Cooperator also decided that the former repository
+remains active for continued development, so the archive step is waived. The
+original `kronika-capture-archive` wording and the archive-last step above
+stay as the historical decision text. On 2026-10-02 the capture provenance
+upstream was pointed at `https://github.com/cisarik/cli_chatgpt.git`, with
+the capture-time URL kept in `captured_as`: reusing the name `kronika` made
+the old upstream URL resolve to this repository. `ap.project.conf`
+`projectId` is `cisarik/kronika` because `ap project check` derives that
+identity from `remote.origin.url`. The `framenest` package, provenance module,
+migration history, HTTP headers and deployment identifiers stay.
 
 ## Relationship to Earlier Decisions
 

@@ -258,6 +258,11 @@ application integration. Each active row needs its own implementation grant.
 Acceptance, publication, host operations, credential provisioning and live
 calls stay separate.
 
+Execution note (2026-10-02): the sequence above is complete through S10.
+This repository is `cisarik/kronika`. The former capture repository is
+`cisarik/cli_chatgpt` and remains active. The end-goal sentence in Context
+and the sequence wording stay as the decision text.
+
 ## Relationship to Earlier Decisions
 
 | Earlier decision | Relationship |

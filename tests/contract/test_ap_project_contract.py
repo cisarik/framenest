@@ -19,7 +19,7 @@ import pytest
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 CONTRACT_PATH = PROJECT_ROOT / "ap.project.conf"
 
-EXPECTED_PROJECT_ID = "cisarik/framenest"
+EXPECTED_PROJECT_ID = "cisarik/kronika"
 EXPECTED_RUNTIME_INFO_CODE = (
     "import sys, framenest; "
     "print(sys.executable); "

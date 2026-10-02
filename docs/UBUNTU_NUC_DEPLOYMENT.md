@@ -87,9 +87,10 @@ empty catalog; migration history and the helper's explicit
 compatible empty database, not deleted test data.
 
 Cooperator rendered acceptance follows publication to exact public `main` and
-refresh of that candidate on NUC. S10 repository renames and source URL changes
-require later explicit authority, verified refs and release checks; local host
-paths and deployment identifiers need not be renamed. See
+refresh of that candidate on NUC. S10 is complete: the public repository is
+`cisarik/kronika`, and the former capture repository remains
+`cisarik/cli_chatgpt` without an archive. Local host paths and deployment
+identifiers stay unchanged. See
 [ROADMAP.md](../ROADMAP.md) for the active order and the parked capture rows.
 None of this authorizes host work now.
 

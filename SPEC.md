@@ -92,9 +92,8 @@ The packaged shell implements this navigation as an S8 candidate: hash routes
 on the existing page, summary titles and list filters, and administrator
 review. Summary lists carry a bounded display title and category and do not
 carry answer text. Timeline titles for every caller come from the approved
-projection. That candidate is not accepted, published or deployed. Research
-submission stays disabled until S9. Live provider acceptance and the
-empty-catalog reset remain S9.
+projection. S8 is on public main. Research configuration stays disabled by
+default. S9 live-provider acceptance and the empty-catalog reset are closed.
 
 ### Research Provider Contract and Resource Limits
 

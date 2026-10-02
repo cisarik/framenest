@@ -93,10 +93,12 @@ This section describes the implemented pre-transition foundation. In
 particular, published-only Gallery and administrator-wide review are current
 code behaviors for legacy media; they do not override the accepted privacy
 rules above. S6, S4-B and S7-P record, research and rendering foundations are
-implemented. The S8 shell candidate adds the Timeline, personal history,
+implemented. The S8 shell on public main adds the Timeline, personal history,
 Search and Research forms and administrator review in the existing page.
-That candidate is not accepted, published or deployed. Research remains
-disabled, and S9 still holds live acceptance and the empty-catalog reset.
+S9 integrated acceptance, the empty-catalog reset and live-provider acceptance
+are closed. S9-R is published. Research remains disabled by default. S10 is
+complete: the public repository is `cisarik/kronika`, and `cisarik/cli_chatgpt`
+remains active.
 
 FrameNest is currently in foundation-stage, pre-alpha development.
 
