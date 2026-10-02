@@ -76,7 +76,8 @@ Preserve the AP pin and upgrade ledger. Personal-photo AI, old-database import,
 native share apps, providers other than the selected OpenAI Responses provider
 and the parked capture module, internet publication and production hardening
 are outside this sequence. The existing release helper remains the only
-deployment system; no mass `framenest` rename is part of the transition.
+deployment system. ADR-0085 is the sole-identity authority; it is implemented as
+an ordered sequence of bounded cuts rather than a mass `framenest` rename.
 
 ## Earlier MacBook MVP Convergence (Foundation History)
 

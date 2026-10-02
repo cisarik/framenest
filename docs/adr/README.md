@@ -23,6 +23,13 @@ decisions remain accepted. ADR-0083 is current where they conflict.
 partially supersedes ADR-0083's fixed-model decision and the interpretation that
 every bounded administrator adjustment requires another architecture decision;
 it preserves the rest of ADR-0083.
+[ADR-0085](0085-kronika-sole-identity.md) partially supersedes ADR-0082 by
+citation, not by patch: the internal `framenest` package, migration history,
+compatible HTTP headers and deployment identifiers staying, and the exclusion of
+a mass `framenest` rename. It fixes Kronika as the sole product identity and
+names the frozen residues. The ADR-0082 historical reasoning stays in that
+file. Unaffected ADR-0082 decisions remain accepted. ADR-0085 is current where
+they conflict.
 
 Evidence packages such as [ARCHITECTURE_FOUNDATION_EVIDENCE.md](../ARCHITECTURE_FOUNDATION_EVIDENCE.md) collect primary-source research and provisional recommendations. Evidence packages are **not** accepted decisions. Only an ADR with status **Accepted** records project authority for an architecture choice.
 
@@ -125,3 +132,4 @@ An accepted ADR may only be changed by a later ADR that supersedes it. Editing a
 | 0082 | Kronika One Product and Private Records | Accepted; capture-only research, owner-only private reading, direct owner sharing and completion-triggered Timeline entry partially superseded by [ADR-0083](0083-modular-research-providers-and-administrator-curated-timeline.md) | 2026-09-23 | [0082-kronika-one-product-and-private-records.md](0082-kronika-one-product-and-private-records.md) |
 | 0083 | Modular Research Providers and Administrator-Curated Timeline | Accepted; fixed-model decision partially superseded by [ADR-0084](0084-administrator-managed-research-settings-and-versioned-pricing.md) | 2026-09-26 | [0083-modular-research-providers-and-administrator-curated-timeline.md](0083-modular-research-providers-and-administrator-curated-timeline.md) |
 | 0084 | Administrator-Managed Research Settings and Versioned Pricing | Accepted | 2026-09-30 | [0084-administrator-managed-research-settings-and-versioned-pricing.md](0084-administrator-managed-research-settings-and-versioned-pricing.md) |
+| 0085 | Kronika Sole Identity | Accepted; ADR-0082 staged hold of the `framenest` package, migration history, HTTP headers and deployment identifiers, and the no-mass-rename exclusion, partially superseded by this ADR | 2026-10-02 | [0085-kronika-sole-identity.md](0085-kronika-sole-identity.md) |

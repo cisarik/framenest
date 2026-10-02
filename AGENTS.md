@@ -18,11 +18,12 @@ media preparation, identity and deployment. Search and Research are added
 through a provider-neutral application boundary. The chatgpt.com capture
 module, package `kronika_capture` and command `kronika-capture`, remains one
 parked module on the loopback bridge. Do not port a second manager, account
-system, family library or Git history. Do not perform a mass branding
-replacement.
+system, family library or Git history. ADR-0085 is the sole-identity authority;
+it is implemented as an ordered sequence of bounded cuts, not as a mass
+branding replacement.
 
-The internal `framenest` package, migration history, compatible HTTP headers
-and deployment identifiers remain. The S4-A through S10 sequence in
+ADR-0085 is the sole-identity authority; the ordered identity cuts implement it.
+The S4-A through S10 sequence in
 [ROADMAP.md](ROADMAP.md) is complete. The public repository is
 `cisarik/kronika`. The former capture repository remains `cisarik/cli_chatgpt`
 and stays active.

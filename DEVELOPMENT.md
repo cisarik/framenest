@@ -36,8 +36,8 @@ existing FrameNest development launcher. They do not start a research provider,
 start the parked capture service, or prove browser or provider readiness.
 
 The capture module is `src/kronika_capture`, command `kronika-capture`, and
-stays parked. The internal `framenest` application, headers and migration
-history remain. The application and capture use separate processes: a web
+stays parked. ADR-0085 is the sole-identity authority; the ordered identity cuts
+implement it. The application and capture use separate processes: a web
 restart must not close the persistent capture browser. Do not port the source
 manager, local accounts or library.
 

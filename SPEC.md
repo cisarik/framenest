@@ -29,9 +29,10 @@ claim that the transition is implemented.
 
 ### Product, Ownership and Approval
 
-The existing repository MUST become one Kronika. The internal `framenest`
-package, migration history, compatible HTTP headers and deployment identifiers
-MUST remain during this stage. The capture module at `src/kronika_capture`,
+The existing repository MUST become one Kronika. ADR-0085 is the sole-identity
+authority, and the ordered identity cuts MUST implement it as a bounded cut
+sequence rather than a mass replacement. The capture module at
+`src/kronika_capture`,
 command `kronika-capture`, MUST remain one parked module. A second manager,
 account system, family library or Git history MUST NOT be ported. Existing
 FrameNest JPEG preparation, deterministic ZIP and budget calculations MUST
