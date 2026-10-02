@@ -46,12 +46,20 @@ from framenest.infrastructure.persistence.catalog_backup_transfer import (
 )
 
 MARKER_NAME = ".framenest-workstation-snapshot-store.json"
+COMPATIBLE_MARKER_NAME = ".kronika-workstation-snapshot-store.json"
+#: Accepted marker filenames, current writer spelling first.
+ACCEPTED_MARKER_NAMES = (MARKER_NAME, COMPATIBLE_MARKER_NAME)
 MARKER_PURPOSE = "framenest-workstation-snapshot-store"
+COMPATIBLE_MARKER_PURPOSE = "kronika-workstation-snapshot-store"
+ACCEPTED_MARKER_PURPOSES = frozenset({MARKER_PURPOSE, COMPATIBLE_MARKER_PURPOSE})
 MARKER_SCHEMA_VERSION = 1
 SNAPSHOTS_DIRNAME = "snapshots"
 RESTORE_VERIFY_DIRNAME = ".restore-verify"
 STAGE_PREFIX = ".framenest-pull-stage-"
 SNAPSHOT_NAME = "snapshot.json"
+SNAPSHOT_PURPOSE = "framenest-workstation-catalog-snapshot"
+COMPATIBLE_SNAPSHOT_PURPOSE = "kronika-workstation-catalog-snapshot"
+ACCEPTED_SNAPSHOT_PURPOSES = frozenset({SNAPSHOT_PURPOSE, COMPATIBLE_SNAPSHOT_PURPOSE})
 BUNDLE_DIRNAME = "bundle"
 STORE_ID_PATTERN = re.compile(r"^[0-9a-f]{32}$")
 PRIVATE_DIR_MODE = 0o700
@@ -151,7 +159,6 @@ def init_workstation_store(
                 "Workstation snapshot store mode is unsafe; tighten permissions before init.",
                 error_code="WORKSTATION_STORE_MODE_UNSAFE",
             )
-        marker = store / MARKER_NAME
         children = [child.name for child in store.iterdir()]
         if not children:
             store_id = secrets.token_hex(16)
@@ -164,7 +171,7 @@ def init_workstation_store(
             os.chmod(restore_root, PRIVATE_DIR_MODE)
             fsync_directory(store, fsync=probe.fsync)
             return InitStoreResult(store_id=store_id, created=True)
-        if MARKER_NAME in children:
+        if any(name in children for name in ACCEPTED_MARKER_NAMES):
             validated = validate_workstation_store(
                 store_root=store,
                 mount_root=mount,
@@ -206,6 +213,20 @@ def init_workstation_store(
     return InitStoreResult(store_id=store_id, created=True)
 
 
+def _accepted_marker(store: Path) -> Path | None:
+    """Return the accepted store marker path, or None when absent.
+
+    The current writer spelling wins when both spellings exist. An accepted name
+    that exists but is unsafe is returned as-is so the caller fails closed on
+    that spelling instead of silently reading the other one.
+    """
+    for name in ACCEPTED_MARKER_NAMES:
+        candidate = store / name
+        if candidate.is_symlink() or candidate.exists():
+            return candidate
+    return None
+
+
 def validate_workstation_store(
     *,
     store_root: Path,
@@ -236,8 +257,8 @@ def validate_workstation_store(
             "Workstation snapshot store mode is unsafe.",
             error_code="WORKSTATION_STORE_MODE_UNSAFE",
         )
-    marker = store / MARKER_NAME
-    if marker.is_symlink() or not marker.is_file():
+    marker = _accepted_marker(store)
+    if marker is None or marker.is_symlink() or not marker.is_file():
         raise WorkstationError(
             "Workstation snapshot store marker is missing or unsafe.",
             error_code="WORKSTATION_MARKER_INVALID",
@@ -275,7 +296,7 @@ def validate_workstation_store(
             "Workstation snapshot store marker is unsupported.",
             error_code="WORKSTATION_MARKER_UNSUPPORTED",
         )
-    if payload.get("purpose") != MARKER_PURPOSE:
+    if payload.get("purpose") not in ACCEPTED_MARKER_PURPOSES:
         raise WorkstationError(
             "Workstation snapshot store marker purpose mismatch.",
             error_code="WORKSTATION_MARKER_PURPOSE_MISMATCH",
@@ -908,7 +929,7 @@ def _load_snapshot_envelope(path: Path) -> dict[str, Any]:
             "Workstation snapshot envelope schema is unsupported.",
             error_code="WORKSTATION_SNAPSHOT_ENVELOPE_UNSUPPORTED",
         )
-    if payload.get("purpose") != SNAPSHOT_PURPOSE:
+    if payload.get("purpose") not in ACCEPTED_SNAPSHOT_PURPOSES:
         raise WorkstationError(
             "Workstation snapshot envelope purpose mismatch.",
             error_code="WORKSTATION_SNAPSHOT_ENVELOPE_PURPOSE_MISMATCH",

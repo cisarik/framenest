@@ -15,7 +15,7 @@ from framenest.application.ports.media_sidecar_store import (
     MediaSidecarStoreError,
     SidecarTargetKind,
     SidecarTargetObservation,
-    sidecar_filename,
+    accepted_sidecar_filenames,
 )
 from framenest.domain.libraries import LibraryPathFlavor, LibraryRoot
 from framenest.domain.media import MediaRelativePath
@@ -44,9 +44,13 @@ class FilesystemMediaSidecarStore:
         root: LibraryRoot,
         media_relative_path: MediaRelativePath,
     ) -> SidecarTargetObservation:
-        parent_fd, sidecar_name = _open_placement(root, media_relative_path)
+        parent_fd, sidecar_names = _open_placement(root, media_relative_path)
         try:
-            return _observe_named(parent_fd, sidecar_name, missing_ok=True)
+            for sidecar_name in sidecar_names:
+                observation = _observe_named(parent_fd, sidecar_name, missing_ok=True)
+                if observation.kind is not SidecarTargetKind.MISSING:
+                    return observation
+            return SidecarTargetObservation(kind=SidecarTargetKind.MISSING)
         finally:
             _close_fd(parent_fd)
 
@@ -93,7 +97,10 @@ def _native_flavor() -> LibraryPathFlavor:
     return LibraryPathFlavor.POSIX
 
 
-def _open_placement(root: LibraryRoot, media_relative_path: MediaRelativePath) -> tuple[int, str]:
+def _open_placement(
+    root: LibraryRoot,
+    media_relative_path: MediaRelativePath,
+) -> tuple[int, tuple[str, ...]]:
     if not isinstance(root, LibraryRoot) or root.flavor is not _native_flavor():
         raise MediaSidecarStoreError(_UNAVAILABLE_MESSAGE, error_code=SIDECAR_UNAVAILABLE)
     if not isinstance(media_relative_path, MediaRelativePath):
@@ -128,7 +135,7 @@ def _open_placement(root: LibraryRoot, media_relative_path: MediaRelativePath) -
             _close_fd(media_fd)
         owned = current_fd
         current_fd = -1
-        return owned, sidecar_filename(media_relative_path)
+        return owned, accepted_sidecar_filenames(media_relative_path)
     except Exception:
         if current_fd >= 0:
             _close_fd(current_fd)
@@ -191,7 +198,8 @@ def _install_adjacent(
 ) -> None:
     if not isinstance(payload, bytes) or len(payload) > MAX_SIDECAR_BYTES:
         raise MediaSidecarStoreError(_MALFORMED_MESSAGE, error_code=_MALFORMED)
-    parent_fd, sidecar_name = _open_placement(root, media_relative_path)
+    parent_fd, sidecar_names = _open_placement(root, media_relative_path)
+    sidecar_name = sidecar_names[0]
     temp_name = f"{_TEMP_PREFIX}{secrets.token_hex(8)}{_TEMP_SUFFIX}"
     temp_fd = -1
     try:

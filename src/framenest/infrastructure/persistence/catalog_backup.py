@@ -24,6 +24,11 @@ SHA256_PATTERN_LENGTH = 64
 MAX_CATALOG_SIZE_BYTES = 16 * 1024 * 1024 * 1024 * 1024
 TEMP_PREFIX = ".framenest-backup-"
 EXPECTED_BUNDLE_NAMES = frozenset({MANIFEST_NAME, CATALOG_NAME})
+APPLICATION_NAME = "framenest"
+#: Accepted read-only application names. Only the writer above emits
+#: ``APPLICATION_NAME`` until the durable-writer cut adopts the Kronika spelling.
+COMPATIBLE_APPLICATION_NAME = "kronika"
+ACCEPTED_APPLICATION_NAMES = frozenset({APPLICATION_NAME, COMPATIBLE_APPLICATION_NAME})
 APPLICATION_VERSION_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._+!-]{0,79}")
 ALEMBIC_REVISION_PATTERN = re.compile(r"[0-9]{4}")
 
@@ -235,7 +240,7 @@ def _build_manifest(
         "schema_version": FORMAT_VERSION,
         "created_at_utc": datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
         "application": {
-            "name": "framenest",
+            "name": APPLICATION_NAME,
             "version": _application_version(),
         },
         "algorithms": {
@@ -309,9 +314,15 @@ def _validate_manifest(payload: dict[str, object]) -> None:
         raise BackupError("Backup manifest version is unsupported.", error_code="MANIFEST_UNSUPPORTED")
     if not _is_canonical_utc_timestamp(payload["created_at_utc"]):
         raise BackupError("Backup manifest is malformed.", error_code="MANIFEST_MALFORMED")
-    _validate_string_map(payload["application"], {"name": "framenest", "version": None})
     application = payload["application"]
-    assert isinstance(application, dict)
+    if not isinstance(application, dict) or set(application) != {"name", "version"}:
+        raise BackupError("Backup manifest is malformed.", error_code="MANIFEST_MALFORMED")
+    for key in ("name", "version"):
+        item = application[key]
+        if not isinstance(item, str) or not item:
+            raise BackupError("Backup manifest is malformed.", error_code="MANIFEST_MALFORMED")
+    if application["name"] not in ACCEPTED_APPLICATION_NAMES:
+        raise BackupError("Backup manifest is malformed.", error_code="MANIFEST_MALFORMED")
     if not _is_application_version(application["version"]):
         raise BackupError("Backup manifest is malformed.", error_code="MANIFEST_MALFORMED")
     _validate_string_map(

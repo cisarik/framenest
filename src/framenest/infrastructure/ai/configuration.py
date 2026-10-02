@@ -34,6 +34,11 @@ from framenest.infrastructure.ai.provider_records import (
     validate_model_identifier,
     validate_provider_identifier,
 )
+from framenest.identity_env import (
+    COMPATIBLE_ENVIRONMENT_PREFIX,
+    IdentityEnvironmentConflictError,
+    lookup_env,
+)
 
 AI_CONFIG_SCHEMA_VERSION = 3
 AI_CONFIG_SCHEMA_VERSIONS = frozenset({1, 2, AI_CONFIG_SCHEMA_VERSION})
@@ -49,7 +54,9 @@ _V3_CONFIG_KEYS = frozenset(
 )
 AI_TEST_STATE_SCHEMA_VERSION = 1
 AI_STATUS_SNAPSHOT_SCHEMA_VERSION = 1
-AI_CONFIG_PATH_ENVIRONMENT_NAME = "FRAMENEST_AI_CONFIG_PATH"
+AI_CONFIG_PATH_ENVIRONMENT_NAME = f"{COMPATIBLE_ENVIRONMENT_PREFIX}AI_CONFIG_PATH"
+AI_CONFIG_PATH_ENVIRONMENT_SUFFIX = "AI_CONFIG_PATH"
+
 SAFE_TEST_STATUSES = frozenset(
     {
         "success",
@@ -150,7 +157,10 @@ def default_ai_config_path(
 ) -> Path:
     """Return the configured or platform default non-secret AI config path."""
     source = os.environ if environ is None else environ
-    override = source.get(AI_CONFIG_PATH_ENVIRONMENT_NAME)
+    try:
+        override = lookup_env(AI_CONFIG_PATH_ENVIRONMENT_SUFFIX, environ=source)
+    except IdentityEnvironmentConflictError as exc:
+        raise AiConfigurationError(str(exc)) from exc
     if override is not None and override.strip():
         return _validated_absolute_path(override)
     resolved_home = Path.home() if home is None else home

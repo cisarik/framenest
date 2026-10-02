@@ -21,6 +21,7 @@ from urllib.request import urlopen
 import webbrowser
 
 from framenest.configuration import FrameNestSettings
+from framenest.identity_env import IdentityEnvironmentConflictError, lookup_env
 from framenest.infrastructure.persistence.migrations import (
     inspect_database_migration_status,
     upgrade_database_to_head,
@@ -41,6 +42,14 @@ DATABASE_ENV = "FRAMENEST_DATABASE_PATH"
 PORT_ENV = "FRAMENEST_PORT"
 RUNTIME_DIR_ENV = "FRAMENEST_DEVELOPMENT_RUNTIME_DIR"
 LOG_DIR_ENV = "FRAMENEST_DEVELOPMENT_LOG_DIR"
+
+#: Setting-name suffixes for the same four development runtime variables. The
+#: constants above stay the exact names this module writes into the spawned
+#: server environment; these are the names it reads.
+DATABASE_ENV_SUFFIX = "DATABASE_PATH"
+PORT_ENV_SUFFIX = "PORT"
+RUNTIME_DIR_ENV_SUFFIX = "DEVELOPMENT_RUNTIME_DIR"
+LOG_DIR_ENV_SUFFIX = "DEVELOPMENT_LOG_DIR"
 
 StatusKind = Literal["running", "stopped", "stale", "unhealthy", "conflict"]
 
@@ -124,7 +133,7 @@ def resolve_development_paths(
 
 def selected_development_port(environ: dict[str, str] | None = None) -> int:
     env = os.environ if environ is None else environ
-    raw_port = env.get(PORT_ENV)
+    raw_port = _resolve_override(env, PORT_ENV_SUFFIX)
     if raw_port is None or raw_port == "":
         return DEFAULT_PORT
     try:
@@ -650,8 +659,19 @@ class DevelopmentRuntime:
         return False
 
 
+def _resolve_override(
+    env: os._Environ[str] | dict[str, str],
+    suffix: str,
+) -> str | None:
+    """Resolve one development override through the identity resolver."""
+    try:
+        return lookup_env(suffix, environ=env)
+    except IdentityEnvironmentConflictError as exc:
+        raise DevelopmentRuntimeError(str(exc)) from exc
+
+
 def _database_path(env: os._Environ[str] | dict[str, str], platform: str, home: Path) -> Path:
-    override = env.get(DATABASE_ENV)
+    override = _resolve_override(env, DATABASE_ENV_SUFFIX)
     if override:
         return _absolute_override(DATABASE_ENV, override)
     if platform == "darwin":
@@ -672,7 +692,7 @@ def _database_path(env: os._Environ[str] | dict[str, str], platform: str, home: 
 
 
 def _runtime_dir(env: os._Environ[str] | dict[str, str], platform: str, home: Path) -> Path:
-    override = env.get(RUNTIME_DIR_ENV)
+    override = _resolve_override(env, RUNTIME_DIR_ENV_SUFFIX)
     if override:
         return _absolute_override(RUNTIME_DIR_ENV, override)
     if platform == "darwin":
@@ -693,7 +713,7 @@ def _runtime_dir(env: os._Environ[str] | dict[str, str], platform: str, home: Pa
 
 
 def _log_path(env: os._Environ[str] | dict[str, str], platform: str, home: Path) -> Path:
-    override = env.get(LOG_DIR_ENV)
+    override = _resolve_override(env, LOG_DIR_ENV_SUFFIX)
     if override:
         return _absolute_override(LOG_DIR_ENV, override) / "server.log"
     if platform == "darwin":

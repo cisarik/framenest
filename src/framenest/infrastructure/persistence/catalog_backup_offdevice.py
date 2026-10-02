@@ -39,11 +39,18 @@ from framenest.infrastructure.persistence.catalog_backup_transfer import (
     identities_match,
     rename_noreplace as transfer_rename_noreplace,
 )
+from framenest.identity_env import IdentityEnvironmentConflictError, lookup_env
 
 DEFAULT_OFFDEVICE_ROOT = Path("/mnt/framenest-catalog-offdevice")
 MARKER_NAME = ".framenest-catalog-offdevice.json"
+COMPATIBLE_MARKER_NAME = ".kronika-catalog-offdevice.json"
+#: Accepted marker filenames, current writer spelling first. Only readers use
+#: the compatible spelling until the writer cut adopts it.
+ACCEPTED_MARKER_NAMES = (MARKER_NAME, COMPATIBLE_MARKER_NAME)
 BUNDLES_DIRNAME = "bundles"
 MARKER_PURPOSE = "framenest-catalog-offdevice"
+COMPATIBLE_MARKER_PURPOSE = "kronika-catalog-offdevice"
+ACCEPTED_MARKER_PURPOSES = frozenset({MARKER_PURPOSE, COMPATIBLE_MARKER_PURPOSE})
 MARKER_SCHEMA_VERSION = 1
 DESTINATION_ID_PATTERN = re.compile(r"^[0-9a-f]{32}$")
 STAGE_PREFIX = ".framenest-offdevice-stage-"
@@ -101,7 +108,10 @@ def parse_configured_destination_id(
 ) -> str | None:
     """Return the optional configured destination ID, or None when disabled."""
     env = os.environ if environ is None else environ
-    raw = env.get("FRAMENEST_CATALOG_OFFDEVICE_DESTINATION_ID")
+    try:
+        raw = lookup_env("CATALOG_OFFDEVICE_DESTINATION_ID", environ=env)
+    except IdentityEnvironmentConflictError as exc:
+        raise OffdeviceError(str(exc), error_code="OFFDEVICE_DESTINATION_ID_INVALID") from exc
     if raw is None or raw == "":
         return None
     value = raw.strip()
@@ -111,6 +121,20 @@ def parse_configured_destination_id(
             error_code="OFFDEVICE_DESTINATION_ID_INVALID",
         )
     return value
+
+
+def _accepted_marker(root: Path) -> Path | None:
+    """Return the accepted marker path for a destination root, or None.
+
+    The current writer spelling wins when both spellings exist. An accepted name
+    that exists but is unsafe is returned as-is so the caller fails closed on
+    that spelling instead of silently reading the other one.
+    """
+    for name in ACCEPTED_MARKER_NAMES:
+        candidate = root / name
+        if candidate.is_symlink() or candidate.exists():
+            return candidate
+    return None
 
 
 def validate_offdevice_destination(
@@ -152,8 +176,8 @@ def validate_offdevice_destination(
             error_code="OFFDEVICE_DESTINATION_SAME_DEVICE",
         )
 
-    marker = root / MARKER_NAME
-    if marker.is_symlink() or not marker.is_file():
+    marker = _accepted_marker(root)
+    if marker is None or marker.is_symlink() or not marker.is_file():
         raise OffdeviceError(
             "Off-device destination marker is missing or unsafe.",
             error_code="OFFDEVICE_MARKER_INVALID",
@@ -191,7 +215,7 @@ def validate_offdevice_destination(
             "Off-device destination marker is unsupported.",
             error_code="OFFDEVICE_MARKER_UNSUPPORTED",
         )
-    if payload.get("purpose") != MARKER_PURPOSE:
+    if payload.get("purpose") not in ACCEPTED_MARKER_PURPOSES:
         raise OffdeviceError(
             "Off-device destination marker purpose mismatch.",
             error_code="OFFDEVICE_MARKER_PURPOSE_MISMATCH",

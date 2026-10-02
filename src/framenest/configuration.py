@@ -7,11 +7,18 @@ import os
 from pathlib import Path
 import re
 import tempfile
-from typing import Any
+from typing import Any, Mapping
 import uuid
 
 from pydantic import Field, SecretStr, field_validator, model_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict, SettingsError
+from pydantic_settings import (
+    BaseSettings,
+    DotEnvSettingsSource,
+    EnvSettingsSource,
+    PydanticBaseSettingsSource,
+    SettingsConfigDict,
+    SettingsError,
+)
 
 from framenest.domain.identity_access import (
     ROLE_ADMIN,
@@ -22,8 +29,15 @@ from framenest.domain.media_analysis_runs import (
     DEFAULT_MAX_ANALYSIS_ATTEMPTS,
     MAX_CONFIGURED_ANALYSIS_ATTEMPTS,
 )
+from framenest.identity_env import (
+    COMPATIBLE_ENVIRONMENT_PREFIX,
+    IdentityEnvironmentConflictError,
+    canonical_identity_environment,
+    lookup_env,
+)
 
-ENV_FILE_ENVIRONMENT_VARIABLE = "FRAMENEST_ENV_FILE"
+ENV_FILE_ENVIRONMENT_VARIABLE = f"{COMPATIBLE_ENVIRONMENT_PREFIX}ENV_FILE"
+ENV_FILE_ENVIRONMENT_SUFFIX = "ENV_FILE"
 EXPLICIT_ENV_FILE_MESSAGE = (
     "The explicitly configured environment file is missing or unreadable."
 )
@@ -135,6 +149,71 @@ def _normalize_database_path(value: Any) -> Path:
     return path.resolve(strict=False)
 
 
+class _IdentityResolverFieldMixin:
+    """Shared identity-resolution field walk for the settings sources."""
+
+    settings_cls: type[BaseSettings]
+
+    def _identity_suffix(self, env_name: str) -> str | None:
+        """Return the setting-name suffix for one internal environment key."""
+        prefix = self._apply_case_sensitive(self.env_prefix)  # type: ignore[attr-defined]
+        if not env_name.startswith(prefix):
+            # An aliased field whose environment name is outside the internal
+            # prefix spelling has no unambiguous identity suffix. Refuse to
+            # resolve it rather than guess which variable was meant.
+            return None
+        return env_name[len(prefix) :].upper()
+
+    def _resolved_field_values(self, resolver_values: Mapping[str, str]) -> dict[str, str]:
+        resolved: dict[str, str] = {}
+        for field_name, field in self.settings_cls.model_fields.items():
+            for _field_key, env_name, _value_is_complex in self._extract_field_info(  # type: ignore[attr-defined]
+                field, field_name
+            ):
+                suffix = self._identity_suffix(env_name)
+                if suffix is None:
+                    continue
+                value = lookup_env(suffix, environ=resolver_values)
+                if value is not None:
+                    resolved[env_name] = value
+        return resolved
+
+
+class _DualPrefixEnvSettingsSource(_IdentityResolverFieldMixin, EnvSettingsSource):
+    """Environment source whose field values come from the identity resolver.
+
+    ``env_prefix`` stays as the internal key spelling only; it is no longer the
+    reader. Every field value is resolved by
+    :func:`framenest.identity_env.lookup_env`, so each field accepts
+    ``KRONIKA_<SUFFIX>`` and ``FRAMENEST_<SUFFIX>``, and a conflicting pair
+    fails closed inside source construction, before any field value is
+    assembled.
+
+    Everything the inherited implementation provides is unchanged: complex
+    field decoding, strict value coercion, case-insensitive field mapping, the
+    ``env_ignore_empty`` and ``env_parse_none_str`` handling, and the source
+    ordering that makes process environment override environment-file values.
+    """
+
+    def _load_env_vars(self) -> Mapping[str, str]:
+        return self._resolved_field_values(os.environ)
+
+
+class _DualPrefixDotEnvSettingsSource(_IdentityResolverFieldMixin, DotEnvSettingsSource):
+    """Environment-file source whose field values come from the resolver too.
+
+    The file keys the library already read are preserved exactly, and the
+    resolver adds the field values the file supplies under either accepted
+    prefix. ``env_file_encoding``, the ``env_prefix``-based extras handling, and
+    the source ordering are unchanged.
+    """
+
+    def _load_env_vars(self) -> Mapping[str, str]:
+        file_values = self._read_env_files()
+        resolved = self._resolved_field_values(canonical_identity_environment(file_values))
+        return {**file_values, **resolved}
+
+
 class FrameNestSettings(BaseSettings):
     """Typed application settings loaded outside the domain layer."""
 
@@ -144,6 +223,30 @@ class FrameNestSettings(BaseSettings):
         hide_input_in_errors=True,
         extra="ignore",
     )
+
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls: type[BaseSettings],
+        init_settings: PydanticBaseSettingsSource,
+        env_settings: PydanticBaseSettingsSource,
+        dotenv_settings: PydanticBaseSettingsSource,
+        file_secret_settings: PydanticBaseSettingsSource,
+    ) -> tuple[PydanticBaseSettingsSource, ...]:
+        """Route process-environment and environment-file reads through the resolver.
+
+        The returned order is the library default order: initialisation
+        arguments, then the process environment, then the environment file,
+        then file secrets. The process environment therefore keeps overriding
+        environment-file values.
+        """
+        assert isinstance(dotenv_settings, DotEnvSettingsSource)
+        return (
+            init_settings,
+            _DualPrefixEnvSettingsSource(settings_cls),
+            _DualPrefixDotEnvSettingsSource(settings_cls, env_file=dotenv_settings.env_file),
+            file_secret_settings,
+        )
 
     host: str = Field(default="127.0.0.1")
     port: int = Field(default=8000, ge=0, le=65535)
@@ -529,9 +632,11 @@ def load_settings(
     - an explicit ``env_file`` path is authoritative and must name a readable
       regular file;
     - ``env_file=None`` disables environment-file loading entirely;
-    - an omitted argument consults the ``FRAMENEST_ENV_FILE`` process
-      environment variable and, when set, treats it as an authoritative
-      explicit file; when unset or empty, no environment file is loaded.
+    - an omitted argument consults the ``ENV_FILE`` process environment
+      variable through the identity resolver, so both ``KRONIKA_ENV_FILE`` and
+      ``FRAMENEST_ENV_FILE`` select the file, and, when set to different values,
+      fails closed before the file is opened; when unset or empty, no
+      environment file is loaded.
 
     The caller's current working directory is never probed for an implicit
     ``.env`` file, so administrative and production commands behave
@@ -541,17 +646,31 @@ def load_settings(
     override environment-file values.
     """
     if isinstance(env_file, _EnvFileNotSpecified):
-        requested = os.environ.get(ENV_FILE_ENVIRONMENT_VARIABLE, "").strip()
+        try:
+            selected = lookup_env(ENV_FILE_ENVIRONMENT_SUFFIX)
+        except IdentityEnvironmentConflictError as exc:
+            raise FrameNestConfigurationError(str(exc)) from exc
+        requested = (selected or "").strip()
         if not requested:
-            return FrameNestSettings(_env_file=None)
+            return _build_settings(None)
         env_file = requested
     if env_file is None:
-        return FrameNestSettings(_env_file=None)
+        return _build_settings(None)
     explicit_path = _require_readable_env_file(env_file)
     try:
         return FrameNestSettings(_env_file=explicit_path)
+    except IdentityEnvironmentConflictError as exc:
+        raise FrameNestConfigurationError(str(exc)) from exc
     except (OSError, SettingsError) as exc:
         raise FrameNestConfigurationError(EXPLICIT_ENV_FILE_MESSAGE) from exc
+
+
+def _build_settings(env_file: Path | None) -> FrameNestSettings:
+    """Build settings from the process environment only, failing closed."""
+    try:
+        return FrameNestSettings(_env_file=env_file)
+    except IdentityEnvironmentConflictError as exc:
+        raise FrameNestConfigurationError(str(exc)) from exc
 
 
 def _require_readable_env_file(env_file: Path | str) -> Path:

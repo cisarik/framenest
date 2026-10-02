@@ -12,7 +12,19 @@ import stat
 import shutil
 import subprocess
 import sys
-from typing import Callable, Sequence
+from typing import Callable, Mapping, Sequence
+
+# Accepted identity environment prefixes for the operator SSH target this helper
+# reads. This is a local standard-library mirror of
+# ``framenest.identity_env.lookup_env``: the helper runs from the repository
+# deploy directory without the application package on ``sys.path``. The rule is
+# identical: one spelling wins, both unset means unset, an empty value means
+# unset, and both set to different values fails closed with status 2 and the two
+# variable names only.
+IDENTITY_ENVIRONMENT_PREFIX = "KRONIKA_"
+COMPATIBLE_ENVIRONMENT_PREFIX = "FRAMENEST_"
+SSH_TARGET_ENVIRONMENT_SUFFIX = "PRODUCTION_SSH_TARGET"
+IDENTITY_ENVIRONMENT_CONFLICT_EXIT = 2
 
 AI_CREDENTIAL_MAX_BYTES = 4096
 AI_DROPIN_TEMPLATE_MAX_BYTES = 1024
@@ -68,6 +80,41 @@ class DeploymentRollbackError(DeploymentCommandError):
     """Sanitized rollback failure with recovery material retained."""
 
 
+class IdentityEnvironmentConflictError(DeploymentInputError):
+    """Both accepted prefixes set one operator variable to different values.
+
+    The message names the two variable names only. No value, length, hash or
+    repr of either value appears in the message, the exception or any log.
+    """
+
+    def __init__(self, suffix: str) -> None:
+        self.suffix = suffix
+        super().__init__(
+            f"conflicting environment variables {IDENTITY_ENVIRONMENT_PREFIX}{suffix} "
+            f"and {COMPATIBLE_ENVIRONMENT_PREFIX}{suffix} are set to different values"
+        )
+
+
+def lookup_env(
+    suffix: str,
+    *,
+    environ: Mapping[str, str] | None = None,
+) -> str | None:
+    """Resolve one operator variable under both accepted identity prefixes."""
+    env = os.environ if environ is None else environ
+    primary = env.get(f"{IDENTITY_ENVIRONMENT_PREFIX}{suffix}")
+    compatible = env.get(f"{COMPATIBLE_ENVIRONMENT_PREFIX}{suffix}")
+    if primary == "":
+        primary = None
+    if compatible == "":
+        compatible = None
+    if primary is None:
+        return compatible
+    if compatible is None or primary == compatible:
+        return primary
+    raise IdentityEnvironmentConflictError(suffix)
+
+
 SANITIZED_COMMAND_ERRORS = {
     RETAINED_RECOVERY_EXIT: "retained recovery material exists; independent recovery is required",
     READINESS_TERMINAL_EXIT: "service entered terminal failed state",
@@ -111,7 +158,7 @@ def main(
     args = parser.parse_args(argv)
     command_runner = _subprocess_runner if runner is None else runner
     try:
-        target = args.target or os.environ.get("FRAMENEST_PRODUCTION_SSH_TARGET", "")
+        target = args.target or (lookup_env(SSH_TARGET_ENVIRONMENT_SUFFIX) or "")
         if not target:
             raise DeploymentInputError("SSH target is required.")
         secret = load_local_secret(
@@ -134,6 +181,9 @@ def main(
             health_url=args.health_url,
             runner=command_runner,
         )
+    except IdentityEnvironmentConflictError as exc:
+        print(f"FrameNest production AI deployment failed: {exc}", file=sys.stderr)
+        return IDENTITY_ENVIRONMENT_CONFLICT_EXIT
     except (DeploymentInputError, DeploymentCommandError) as exc:
         print(f"FrameNest production AI deployment failed: {exc}", file=sys.stderr)
         return 1

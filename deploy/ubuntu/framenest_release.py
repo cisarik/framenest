@@ -26,9 +26,41 @@ import sys
 import tarfile
 import tempfile
 import time
-from typing import Callable, Sequence
+from typing import Callable, Mapping, Sequence
 
 PROGRAM = "framenest-release"
+
+# Accepted identity environment prefixes for the operator variables this engine
+# reads. This is a local standard-library mirror of
+# ``framenest.identity_env.lookup_env``: this file runs from the Git checkout
+# under Ubuntu system Python without the installed package on ``sys.path``, and
+# it must not import the application package. The rule is identical: one spelling
+# wins, both unset means unset, an empty value means unset, and both set to
+# different values fails closed with status 2 and the two variable names only.
+IDENTITY_ENVIRONMENT_PREFIX = "KRONIKA_"
+COMPATIBLE_ENVIRONMENT_PREFIX = "FRAMENEST_"
+
+RELEASE_SHA_MARKER = ".framenest-release-sha"
+RELEASE_MANIFEST_MARKER = ".framenest-release-manifest.json"
+# Accepted read-only release marker spellings, current writer spelling first.
+# Routine writers still emit the former pair until the writer cut adopts the
+# Kronika pair; only these readers accept both.
+COMPATIBLE_RELEASE_SHA_MARKER = ".kronika-release-sha"
+COMPATIBLE_RELEASE_MANIFEST_MARKER = ".kronika-release-manifest.json"
+ACCEPTED_RELEASE_MANIFEST_MARKERS = (
+    RELEASE_MANIFEST_MARKER,
+    COMPATIBLE_RELEASE_MANIFEST_MARKER,
+)
+ACCEPTED_RELEASE_SHA_MARKERS = (
+    RELEASE_SHA_MARKER,
+    COMPATIBLE_RELEASE_SHA_MARKER,
+)
+RELEASE_SHA_MANIFEST_KEY = "framenest_release_sha"
+COMPATIBLE_RELEASE_SHA_MANIFEST_KEY = "kronika_release_sha"
+ACCEPTED_RELEASE_SHA_MANIFEST_KEYS = (
+    RELEASE_SHA_MANIFEST_KEY,
+    COMPATIBLE_RELEASE_SHA_MANIFEST_KEY,
+)
 
 # Accepted exact NUC tooling.
 SERVICE = "framenest.service"
@@ -121,6 +153,36 @@ class ReleaseError(Exception):
         self.remote_exit = remote_exit
 
 
+def lookup_env(
+    suffix: str,
+    *,
+    environ: Mapping[str, str] | None = None,
+) -> str | None:
+    """Resolve one operator variable under both accepted identity prefixes.
+
+    ``suffix`` is the part of the variable name after the prefix. An empty value
+    counts as unset. A pair of different values fails closed with
+    ``EXIT_USAGE`` and a message naming the two variable names only; no value,
+    length, hash or repr of either value appears in the message or the exit.
+    """
+    env = os.environ if environ is None else environ
+    primary = env.get(f"{IDENTITY_ENVIRONMENT_PREFIX}{suffix}")
+    compatible = env.get(f"{COMPATIBLE_ENVIRONMENT_PREFIX}{suffix}")
+    if primary == "":
+        primary = None
+    if compatible == "":
+        compatible = None
+    if primary is None:
+        return compatible
+    if compatible is None or primary == compatible:
+        return primary
+    raise ReleaseError(
+        f"conflicting environment variables {IDENTITY_ENVIRONMENT_PREFIX}{suffix} "
+        f"and {COMPATIBLE_ENVIRONMENT_PREFIX}{suffix} are set to different values",
+        EXIT_USAGE,
+    )
+
+
 # A command runner executes ``argv`` with optional stdin bytes and returns the
 # combined decoded output. It raises ReleaseError on non-zero exit. Tests inject
 # a fake runner; production uses subprocess.
@@ -193,7 +255,7 @@ def make_manifest(
         if not HEX64.match(digest):
             raise ReleaseError("capture runtime identity is invalid", EXIT_SOURCE_GATE)
     return {
-        "framenest_release_sha": release_sha,
+        RELEASE_SHA_MANIFEST_KEY: release_sha,
         "ap_gitlink": ap_pin,
         "superproject_archive_sha256": superproject_sha256,
         "ap_archive_sha256": ap_archive_sha256,
@@ -320,11 +382,11 @@ def cmd_remote_readlink_current() -> str:
 
 
 def cmd_remote_read_release_sha(path: str) -> str:
-    return f"sudo -n cat {shlex.quote(path)}/.framenest-release-sha"
+    return f"sudo -n cat {shlex.quote(path)}/{RELEASE_SHA_MARKER}"
 
 
 def cmd_remote_read_manifest(path: str) -> str:
-    return f"sudo -n cat {shlex.quote(path)}/.framenest-release-manifest.json"
+    return f"sudo -n cat {shlex.quote(path)}/{RELEASE_MANIFEST_MARKER}"
 
 
 def cmd_remote_probe_release_markers(path: str) -> str:
@@ -332,12 +394,16 @@ def cmd_remote_probe_release_markers(path: str) -> str:
 
     Returns a remote command whose stdout is exactly one of ``manifest``,
     ``sha``, or ``none`` when sudo succeeds. Absence is not ``test -e`` failure.
+    Both accepted marker spellings are probed, manifest before sha, so a tree
+    written by either identity is classified the same way.
     """
-    manifest = shlex.quote(f"{path}/.framenest-release-manifest.json")
-    sha = shlex.quote(f"{path}/.framenest-release-sha")
+    old_manifest, new_manifest = ACCEPTED_RELEASE_MANIFEST_MARKERS
+    old_sha, new_sha = ACCEPTED_RELEASE_SHA_MARKERS
     script = (
-        f"if test -e {manifest}; then echo manifest; "
-        f"elif test -e {sha}; then echo sha; "
+        f"if test -e {shlex.quote(f'{path}/{old_manifest}')}; then echo manifest; "
+        f"elif test -e {shlex.quote(f'{path}/{new_manifest}')}; then echo manifest; "
+        f"elif test -e {shlex.quote(f'{path}/{old_sha}')}; then echo sha; "
+        f"elif test -e {shlex.quote(f'{path}/{new_sha}')}; then echo sha; "
         f"else echo none; fi"
     )
     return f"sudo -n sh -c {shlex.quote(script)}"
@@ -958,6 +1024,16 @@ def remote_relocate_venv_shebangs(
 # Status and check read-only remote probes
 # ---------------------------------------------------------------------------
 
+def manifest_release_sha(manifest: object) -> object:
+    """Return the release SHA under either accepted manifest key, or None."""
+    if not isinstance(manifest, dict):
+        return None
+    for key in ACCEPTED_RELEASE_SHA_MANIFEST_KEYS:
+        if key in manifest:
+            return manifest[key]
+    return None
+
+
 def read_current_release(runner: Runner, transport: dict[str, str]) -> tuple[str, str, dict[str, object]]:
     raw = ssh(runner, **transport, remote_command=cmd_remote_readlink_current())
     current_path = raw.strip()
@@ -980,7 +1056,7 @@ def read_current_release(runner: Runner, transport: dict[str, str]) -> tuple[str
         ).strip()
         if not SHA_PATTERN.match(sha_raw):
             raise ReleaseError("current release SHA marker is invalid", EXIT_TRANSPORT)
-        return current_path, "", {"framenest_release_sha": sha_raw}
+        return current_path, "", {RELEASE_SHA_MANIFEST_KEY: sha_raw}
     if probe == "none":
         raise ReleaseError(
             "current release SHA marker and manifest are absent", EXIT_TRANSPORT
@@ -1000,7 +1076,7 @@ def read_optional_release_sha(
     manifest = parse_json_status(
         ssh(runner, **transport, remote_command=cmd_remote_read_manifest(raw))
     )
-    sha = manifest.get("framenest_release_sha")
+    sha = manifest_release_sha(manifest)
     if not isinstance(sha, str) or not SHA_PATTERN.match(sha):
         raise ReleaseError("referenced release identity is unreadable", EXIT_TRANSPORT)
     return sha
@@ -1114,9 +1190,9 @@ def _add_transport_args(parser: argparse.ArgumentParser) -> None:
 
 
 def _resolve_transport(args: argparse.Namespace) -> dict[str, str]:
-    target = args.target or os.environ.get("FRAMENEST_NUC_SSH_TARGET", "")
-    user = args.user or os.environ.get("FRAMENEST_NUC_SSH_USER", "")
-    identity = args.identity or os.environ.get("FRAMENEST_NUC_SSH_IDENTITY", "")
+    target = args.target or (lookup_env("NUC_SSH_TARGET") or "")
+    user = args.user or (lookup_env("NUC_SSH_USER") or "")
+    identity = args.identity or (lookup_env("NUC_SSH_IDENTITY") or "")
     if not target:
         raise ReleaseError("SSH target is required", EXIT_USAGE)
     if not user:
@@ -1169,7 +1245,7 @@ def _cmd_status(args: argparse.Namespace, runner: Runner) -> int:
     active = ssh(runner, **transport, remote_command=cmd_remote_service_is_active()).strip()
     db_revision = read_db_current_revision(runner, transport, current_path)
     backup = read_backup_readiness(runner, transport, current_path)
-    web_sha = str(manifest.get("framenest_release_sha", ""))
+    web_sha = str(manifest_release_sha(manifest) or "")
     capture_sha = read_optional_release_sha(runner, transport, CAPTURE_CURRENT)
     print("framenest-release status")
     print(f"active_release: {web_sha}")
@@ -1714,7 +1790,7 @@ def _cmd_capture_transition(args: argparse.Namespace, runner: Runner) -> int:
     manifest = parse_json_status(
         ssh(runner, **transport, remote_command=cmd_remote_read_manifest(target))
     )
-    if manifest.get("framenest_release_sha") != release_sha:
+    if manifest_release_sha(manifest) != release_sha:
         raise ReleaseError("installed release manifest does not match", EXIT_SOURCE_GATE)
     for key, expected in identity.items():
         if manifest.get(key) != expected:
@@ -1727,7 +1803,7 @@ def _cmd_capture_transition(args: argparse.Namespace, runner: Runner) -> int:
     web_manifest = parse_json_status(
         ssh(runner, **transport, remote_command=cmd_remote_read_manifest(web_path))
     )
-    web_sha = web_manifest.get("framenest_release_sha")
+    web_sha = manifest_release_sha(web_manifest)
     if not isinstance(web_sha, str) or not SHA_PATTERN.match(web_sha):
         raise ReleaseError("web release identity is unreadable", EXIT_TRANSPORT)
 

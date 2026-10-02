@@ -45,6 +45,7 @@ from framenest.infrastructure.persistence.catalog_backup_transfer import (
     identities_match,
     write_protocol_v1_stream,
 )
+from framenest.identity_env import lookup_env
 
 DEFAULT_BACKUP_ROOT = Path("/var/lib/framenest/catalog-backups")
 DEFAULT_RESTORE_VERIFY_ROOT = Path("/var/lib/framenest/catalog-restore-verify")
@@ -247,26 +248,26 @@ def load_catalog_backup_ops_config(
     """Load and validate operator configuration from process environment."""
     env = os.environ if environ is None else environ
     database_path = _absolute_path_from_env(
-        env.get("FRAMENEST_DATABASE_PATH"),
+        lookup_env("DATABASE_PATH", environ=env),
         default=DEFAULT_DATABASE_PATH,
         description="database path",
     )
     backup_root = _absolute_path_from_env(
-        env.get("FRAMENEST_CATALOG_BACKUP_ROOT"),
+        lookup_env("CATALOG_BACKUP_ROOT", environ=env),
         default=DEFAULT_BACKUP_ROOT,
         description="catalog backup root",
     )
     restore_verify_root = _absolute_path_from_env(
-        env.get("FRAMENEST_CATALOG_RESTORE_VERIFY_ROOT"),
+        lookup_env("CATALOG_RESTORE_VERIFY_ROOT", environ=env),
         default=DEFAULT_RESTORE_VERIFY_ROOT,
         description="catalog restore verification root",
     )
     ops_root = _absolute_path_from_env(
-        env.get("FRAMENEST_CATALOG_BACKUP_OPS_ROOT"),
+        lookup_env("CATALOG_BACKUP_OPS_ROOT", environ=env),
         default=DEFAULT_OPS_ROOT,
         description="catalog backup operator-state root",
     )
-    keep_auto = _parse_keep_auto(env.get("FRAMENEST_CATALOG_BACKUP_KEEP_AUTO"))
+    keep_auto = _parse_keep_auto(lookup_env("CATALOG_BACKUP_KEEP_AUTO", environ=env))
     config = CatalogBackupOpsConfig(
         database_path=database_path,
         backup_root=backup_root,
