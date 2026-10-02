@@ -17,17 +17,3 @@ Closure action: retain-active
 Historical evidence: none
 Provenance destroyed: no
 
-Entry: darwin-bsd-awk-project-argv-counting
-Entry state: implemented
-Entry authority: non-authorizing
-Summary: Project key counting used an awk NUL record separator that BSD/macOS awk does not implement, so ap project check and exec failed closed on macOS with a false newline error; AP now counts with a portable tr/wc pipeline.
-Evidence class: worker-observed
-Observed against: 7478ddb07d2c3911f79e1aa1441f0115a31c45d8
-Last revalidated against: 73e20ef80b88700d5fcbc397cd8edd4fc425869f
-Implementation task grant: none
-Implementation status: implemented with 73e20ef80b88700d5fcbc397cd8edd4fc425869f
-Disposition evidence: 73e20ef80b88700d5fcbc397cd8edd4fc425869f (.ap/ap; macOS 26.6.1 /usr/bin/awk reproduction)
-Promotion target: none
-Closure action: remove-from-active-ledger
-Historical evidence: 73e20ef80b88700d5fcbc397cd8edd4fc425869f
-Provenance destroyed: no
