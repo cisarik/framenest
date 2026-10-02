@@ -435,7 +435,7 @@ def _run_fish(
     if extra_env:
         env.update(extra_env)
     return subprocess.run(
-        [fish, str(script), *args],
+        [fish, "--no-config", str(script), *args],
         cwd=paths["cwd"],
         env=env,
         text=True,
@@ -870,6 +870,27 @@ def test_ssh_gate_rejects_missing_required_values(tmp_path: Path, missing: str) 
     assert result.returncode == 2
     assert messages[missing] in result.stderr
     assert paths["ssh_log"].read_text(encoding="utf-8") == ""
+
+
+def test_run_fish_ignores_injected_startup_configuration(tmp_path: Path) -> None:
+    config_home = tmp_path / "xdg-config"
+    fish_config = config_home / "fish"
+    fish_config.mkdir(parents=True)
+    (fish_config / "config.fish").write_text(
+        "echo HERMETIC_FISH_STARTUP_MARKER\n",
+        encoding="utf-8",
+    )
+    paths = _install_fakes(tmp_path)
+    result = _run_fish(
+        GATE_SCRIPT,
+        paths,
+        ["--help"],
+        extra_env={"XDG_CONFIG_HOME": str(config_home)},
+    )
+    combined = _combined(result)
+    assert "HERMETIC_FISH_STARTUP_MARKER" not in combined
+    assert result.returncode == 0, combined
+    assert "Usage: framenest_nuc_worker_gate.fish --probe" in result.stderr
 
 
 def test_ssh_gate_contains_no_private_values() -> None:
