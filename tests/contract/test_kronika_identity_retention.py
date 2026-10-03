@@ -219,12 +219,21 @@ PER_TREE_FRAMENEST_OCCURRENCE_COUNT = {
     # test_local_web_application +7, gallery_filter_controls +3,
     # youtube_acquisition_cockpit -1 (the vm preamble now reuses the shared
     # constant instead of repeating the literal).
-    "src": 2984,
-    "tests": 4505,
+    #
+    # KSI-CORR-05 dual-accepts the companion web protocol, so it moved three
+    # scalars and nothing else. `src` +1 and `extension` +1 are the single
+    # retired `framenest.companion.web.v1` spelling each new ordering-constraint
+    # comment names beside its protocol constant;
+    # `tests` +12 is companion_web_bridge +9 (the three acceptance cases, the
+    # emit-spelling test and the two new protocol constants it pins) and
+    # companion_review_extension +3 (the synthetic end-to-end delivery of the
+    # retired spelling in that test).
+    "src": 2985,
+    "tests": 4517,
     "deploy": 212,
     "scripts": 104,
     "docs": 1216,
-    "extension": 189,
+    "extension": 190,
 }
 
 # The exact tracked text paths, this ledger excluded, whose decoded content
@@ -994,7 +1003,11 @@ UNIT_ACCOUNT_OCCURRENCE_COUNT = {
 # (tailscale_identity_frontend +9, companion_review_extension +5,
 # test_local_web_application +2, x_companion_extension +1). The file count is
 # unmoved.
-CAPITALIZED_OCCURRENCE_COUNT = 3396
+#
+# KSI-CORR-05 moved this by +1: the one capitalized product name its new
+# `loadSidebarBridgeContext` helper returns alongside the bridge. The file count
+# is unmoved, because that file already carried the name.
+CAPITALIZED_OCCURRENCE_COUNT = 3397
 CAPITALIZED_FILE_COUNT = 482
 
 CONSOLE_SCRIPT_ENTRY_COUNT = 14

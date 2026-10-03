@@ -1,6 +1,17 @@
 (function () {
   const companion = globalThis.FrameNestCompanion;
+  // The companion web protocol below is a validated cross-boundary contract,
+  // not an internal identifier: the companion host served by the NUC gates on
+  // it as well, so renaming it on one side only would leave that host never
+  // seeing `host_hello`, keep it unhosted and make attach() answer
+  // "not_hosted", which breaks meme attach silently against every NUC that has
+  // not been refreshed. The receive side therefore accepts both spellings,
+  // while every send site below keeps emitting the retired
+  // `framenest.companion.web.v1` on purpose, because the host gates on exactly
+  // that spelling. The rename lands in the removal cut, on both sides at once.
   const WEB_PROTOCOL = "framenest.companion.web.v1";
+  const CURRENT_WEB_PROTOCOL = "kronika.companion.web.v1";
+  const ACCEPTED_WEB_PROTOCOLS = Object.freeze([WEB_PROTOCOL, CURRENT_WEB_PROTOCOL]);
   const WEB_TYPES = Object.freeze({
     WEB_READY: "web_ready",
     HOST_HELLO: "host_hello",
@@ -14,6 +25,10 @@
   let runtimeStale = false;
   let runtimeStaleHandler = function handleEarlyRuntimeStale() {};
 
+  function acceptCompanionWebProtocol(value) {
+    return ACCEPTED_WEB_PROTOCOLS.indexOf(value) !== -1;
+  }
+
   function acceptIncomingWebMessage(event, iframeWindow, storedOrigin) {
     if (!iframeWindow || !event || event.source !== iframeWindow) {
       return null;
@@ -25,7 +40,12 @@
       return null;
     }
     const data = event.data;
-    if (!data || typeof data !== "object" || data.v !== WEB_PROTOCOL || typeof data.type !== "string") {
+    if (
+      !data ||
+      typeof data !== "object" ||
+      !acceptCompanionWebProtocol(data.v) ||
+      typeof data.type !== "string"
+    ) {
       return null;
     }
     return data;
@@ -56,6 +76,9 @@
 
   globalThis.FrameNestSidebarBridge = {
     WEB_PROTOCOL,
+    CURRENT_WEB_PROTOCOL,
+    ACCEPTED_WEB_PROTOCOLS,
+    acceptCompanionWebProtocol,
     WEB_TYPES,
     acceptIncomingWebMessage,
     attachIdsFromWebRequest,

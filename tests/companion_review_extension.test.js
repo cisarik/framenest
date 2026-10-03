@@ -1286,15 +1286,33 @@ function sidebarShellNode(id, extra) {
   return node;
 }
 
-function loadSidebarShell() {
+function loadSidebarShell(options) {
+  const settings = options || {};
   const historyList = fakeListNode();
   historyList.addEventListener = function addTestListener() {};
   const expandedList = fakeListNode();
   expandedList.addEventListener = function addTestListener() {};
+  const framePosts = [];
+  const frameWindow = {
+    postMessage(message, targetOrigin) {
+      framePosts.push({ message: message, targetOrigin: targetOrigin });
+    },
+  };
+  const frameNode = sidebarShellNode("frame", { hidden: true });
+  // Only opt in, so the default harness keeps the iframe detached exactly as
+  // before and every existing assertion is unaffected.
+  if (settings.captureFrames === true) {
+    frameNode.contentWindow = frameWindow;
+  }
+  const windowListeners = {};
+  const storedOriginState = {};
+  if (typeof settings.storedOrigin === "string") {
+    storedOriginState[companion.STORAGE.origin.name] = settings.storedOrigin;
+  }
   const nodes = {
     origin: sidebarShellNode("origin"),
     "shell-status": sidebarShellNode("shell-status"),
-    frame: sidebarShellNode("frame", { hidden: true }),
+    frame: frameNode,
     "chrome-action": sidebarShellNode("chrome-action"),
     "settings-dialog": sidebarShellNode("settings-dialog"),
     "settings-open": sidebarShellNode("settings-open"),
@@ -1330,18 +1348,25 @@ function loadSidebarShell() {
         getURL(rel) {
           return "chrome-extension://abc/" + rel;
         },
-        sendMessage() {},
+        sendMessage(message, callback) {
+          if (typeof settings.sendMessageResponse === "function") {
+            settings.sendMessageResponse(message, callback);
+          }
+        },
       },
       storage: {
         local: {
           get(_keys, callback) {
-            callback({});
+            callback(Object.assign({}, storedOriginState));
           },
         },
       },
     },
     window: {
-      addEventListener() {},
+      addEventListener(type, fn) {
+        windowListeners[type] = windowListeners[type] || [];
+        windowListeners[type].push(fn);
+      },
     },
     Object,
     Boolean,
@@ -1360,7 +1385,26 @@ function loadSidebarShell() {
   context.globalThis = context;
   vm.createContext(context);
   vm.runInContext(sidebarSource, context);
-  return { nodes, inbox: context.FrameNestReviewInbox };
+  return {
+    nodes: nodes,
+    inbox: context.FrameNestReviewInbox,
+    framePosts: framePosts,
+    frameWindow: frameWindow,
+    storedOrigin: settings.storedOrigin,
+    windowListeners: windowListeners,
+    // Deliver one synthetic postMessage from the framed web host to the live
+    // window listener the sidebar registered, and report what it posted back.
+    deliverWebMessage(value, type, payload, origin) {
+      const listeners = windowListeners.message || [];
+      assert.equal(listeners.length, 1, "exactly one window message listener");
+      listeners[0]({
+        source: frameWindow,
+        origin: origin === undefined ? settings.storedOrigin : origin,
+        data: { v: value, type: type, payload: payload },
+      });
+      return framePosts.splice(0, framePosts.length);
+    },
+  };
 }
 
 test("history stays closed by default and only the toggle changes it across refreshes", () => {
@@ -1533,6 +1577,81 @@ test("ordinary own-history compact is newest five of any state", () => {
     nodes.historyList.childNodes[0].childNodes[0].className,
     /unopened/
   );
+});
+
+test("side panel accepts both web protocol spellings and still emits the retired one", async () => {
+  const retired = "framenest.companion.web.v1";
+  const current = "kronika.companion.web.v1";
+  const shell = loadSidebarShell({
+    storedOrigin: ORIGIN,
+    captureFrames: true,
+    sendMessageResponse(message, callback) {
+      callback({
+        v: companion.PROTOCOL,
+        type: message.type,
+        ok: false,
+        error: "composer_unbound",
+      });
+    },
+  });
+
+  // The retired spelling the NUC host still emits is accepted, and the reply
+  // the side panel posts back carries that same retired spelling.
+  const hello = shell.deliverWebMessage(retired, "web_ready");
+  assert.equal(hello.length, 1);
+  assert.equal(hello[0].message.v, retired);
+  assert.equal(hello[0].message.type, "host_hello");
+  assert.equal(hello[0].targetOrigin, ORIGIN);
+
+  // The current spelling is accepted too, and the reply is still the retired one.
+  const secondHello = shell.deliverWebMessage(current, "web_ready");
+  assert.equal(secondHello.length, 1);
+  assert.equal(secondHello[0].message.v, retired);
+  assert.equal(secondHello[0].message.type, "host_hello");
+
+  // A refused attach answers with the retired spelling as well.
+  const refused = shell.deliverWebMessage(retired, "attach_request", { mediaId: "not-a-uuid" });
+  assert.equal(refused.length, 1);
+  assert.equal(refused[0].message.v, retired);
+  assert.equal(refused[0].message.type, "attach_result");
+  assert.equal(refused[0].message.payload.ok, false);
+  assert.equal(refused[0].message.payload.error, "invalid_attach");
+
+  // And so does a real attach round trip, including the host_ack path.
+  const ack = shell.deliverWebMessage(current, "host_ack");
+  assert.deepEqual(ack, []);
+  const attached = shell.deliverWebMessage(current, "attach_request", {
+    mediaId: MEDIA_A,
+    locationId: MEDIA_B,
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(attached.length, 0);
+  const results = shell.framePosts.splice(0, shell.framePosts.length);
+  assert.equal(results.length, 1);
+  assert.equal(results[0].message.v, retired);
+  assert.equal(results[0].message.type, "attach_result");
+  assert.equal(results[0].message.payload.ok, false);
+  assert.equal(results[0].message.payload.error, "composer_unbound");
+  assert.equal(results[0].targetOrigin, ORIGIN);
+
+  // Anything that is neither spelling is refused, and nothing is posted back.
+  [
+    "framenest.companion.web.v2",
+    "kronika.companion.web.v2",
+    "framenest.companion.review.v1",
+    "",
+    null,
+    undefined,
+    7,
+    [retired],
+  ].forEach((value) => {
+    assert.deepEqual(shell.deliverWebMessage(value, "web_ready"), [], "refused " + String(value));
+    assert.deepEqual(
+      shell.deliverWebMessage(value, "attach_request", { mediaId: MEDIA_A, locationId: MEDIA_B }),
+      [],
+      "refused " + String(value)
+    );
+  });
 });
 
 test("analyzed history click posts opened then open_details; pending is hosted without opened", () => {

@@ -19,8 +19,22 @@ const appSource = fs.readFileSync(
 
 const PIN = "chrome-extension://omiihmnlkmieaafaphohakcgmbggppap";
 const ORIGIN = "https://nuc-1.example.ts.net";
+const RETIRED_WEB_PROTOCOL = "framenest.companion.web.v1";
+const CURRENT_WEB_PROTOCOL = "kronika.companion.web.v1";
 
-function loadSidebarBridge() {
+function countOccurrences(haystack, needle) {
+  return haystack.split(needle).length - 1;
+}
+
+function webMessage(iframeWindow, origin, value, type) {
+  return {
+    source: iframeWindow,
+    origin: origin,
+    data: { v: value, type: type },
+  };
+}
+
+function loadSidebarBridgeContext() {
   const context = {
     FrameNestCompanion: companion,
     document: {
@@ -39,7 +53,11 @@ function loadSidebarBridge() {
   };
   vm.createContext(context);
   vm.runInContext(sidebarSource, context);
-  return context.FrameNestSidebarBridge;
+  return context;
+}
+
+function loadSidebarBridge() {
+  return loadSidebarBridgeContext().FrameNestSidebarBridge;
 }
 
 test("web and shell share the companion web protocol and never use a wildcard target", () => {
@@ -238,6 +256,106 @@ test("shell accepts only the framed stored origin and UUID attach ids", () => {
   assert.equal(Object.prototype.hasOwnProperty.call(ids, "url"), false);
   assert.match(sidebarSource, /TYPES\.ATTACH_BEGIN/);
   assert.doesNotMatch(sidebarSource, /payload\.url/);
+});
+
+test("the extension accepts the retired companion web protocol the NUC host still emits", () => {
+  const bridge = loadSidebarBridge();
+  assert.equal(bridge.WEB_PROTOCOL, RETIRED_WEB_PROTOCOL);
+  assert.deepEqual(Array.from(bridge.ACCEPTED_WEB_PROTOCOLS), [
+    RETIRED_WEB_PROTOCOL,
+    CURRENT_WEB_PROTOCOL,
+  ]);
+  const iframeWindow = {};
+  const accepted = bridge.acceptIncomingWebMessage(
+    webMessage(iframeWindow, ORIGIN, RETIRED_WEB_PROTOCOL, bridge.WEB_TYPES.WEB_READY),
+    iframeWindow,
+    ORIGIN
+  );
+  assert.ok(accepted);
+  assert.equal(accepted.v, RETIRED_WEB_PROTOCOL);
+  assert.equal(accepted.type, bridge.WEB_TYPES.WEB_READY);
+  assert.equal(bridge.acceptCompanionWebProtocol(RETIRED_WEB_PROTOCOL), true);
+});
+
+test("the extension also accepts the current companion web protocol spelling", () => {
+  const bridge = loadSidebarBridge();
+  assert.equal(bridge.CURRENT_WEB_PROTOCOL, CURRENT_WEB_PROTOCOL);
+  const iframeWindow = {};
+  const accepted = bridge.acceptIncomingWebMessage(
+    webMessage(iframeWindow, ORIGIN, CURRENT_WEB_PROTOCOL, bridge.WEB_TYPES.WEB_READY),
+    iframeWindow,
+    ORIGIN
+  );
+  assert.ok(accepted);
+  assert.equal(accepted.v, CURRENT_WEB_PROTOCOL);
+  assert.equal(accepted.type, bridge.WEB_TYPES.WEB_READY);
+  assert.equal(bridge.acceptCompanionWebProtocol(CURRENT_WEB_PROTOCOL), true);
+});
+
+test("any other companion web protocol spelling is refused with the existing shape", () => {
+  const bridge = loadSidebarBridge();
+  const iframeWindow = {};
+  [
+    "framenest.companion.web.v2",
+    "kronika.companion.web.v2",
+    "framenest.companion.web",
+    "framenest.companion.review.v1",
+    "framenest.companion.v1",
+    "companion.web.v1",
+    "framenest.companion.web.v1 ",
+    " framenest.companion.web.v1",
+    "FRAMENEST.COMPANION.WEB.V1",
+    "",
+    null,
+    undefined,
+    1,
+    true,
+    [RETIRED_WEB_PROTOCOL],
+    { v: RETIRED_WEB_PROTOCOL },
+  ].forEach((value) => {
+    assert.equal(
+      bridge.acceptIncomingWebMessage(
+        webMessage(iframeWindow, ORIGIN, value, bridge.WEB_TYPES.WEB_READY),
+        iframeWindow,
+        ORIGIN
+      ),
+      null,
+      "refused " + JSON.stringify(value)
+    );
+    assert.equal(bridge.acceptCompanionWebProtocol(value), false, "refused " + String(value));
+  });
+});
+
+test("the extension and the NUC host both keep emitting the retired web protocol", () => {
+  const bridge = loadSidebarBridge();
+  assert.equal(webHost.PROTOCOL, RETIRED_WEB_PROTOCOL);
+  assert.equal(bridge.WEB_PROTOCOL, RETIRED_WEB_PROTOCOL);
+  // Every outbound protocol expression in the extension and in the host asset.
+  // A future one-sided rename of any of them breaks meme attach against any NUC
+  // or extension that has not been refreshed in the same commit.
+  const sidebarOutbound = sidebarSource.match(/v: [A-Za-z_][A-Za-z0-9_.]*/g) || [];
+  assert.deepEqual(sidebarOutbound, [
+    "v: WEB_PROTOCOL",
+    "v: companion.PROTOCOL",
+    "v: WEB_PROTOCOL",
+    "v: WEB_PROTOCOL",
+    "v: WEB_PROTOCOL",
+  ]);
+  const hostOutbound = hostSource.match(/v: [A-Za-z_][A-Za-z0-9_.]*/g) || [];
+  assert.deepEqual(hostOutbound, ["v: PROTOCOL", "v: PROTOCOL", "v: PROTOCOL"]);
+  // The current spelling exists only as the constant the receive side reads.
+  assert.equal(countOccurrences(sidebarSource, CURRENT_WEB_PROTOCOL), 1);
+  assert.match(
+    sidebarSource,
+    /const CURRENT_WEB_PROTOCOL = "kronika\.companion\.web\.v1";/
+  );
+  assert.equal(countOccurrences(hostSource, CURRENT_WEB_PROTOCOL), 0);
+  // Behavioural proof of one exported send site.
+  const inbox = loadSidebarBridgeContext().FrameNestReviewInbox;
+  assert.equal(
+    inbox.openDetailsMessage("11111111-1111-4111-8111-111111111111").v,
+    RETIRED_WEB_PROTOCOL
+  );
 });
 
 test("open_details opens hosted media-details from the pinned extension only", () => {

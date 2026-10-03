@@ -5,6 +5,15 @@
   }
   root.FrameNestCompanionWeb = api;
 })(typeof globalThis !== "undefined" ? globalThis : this, function (root) {
+  // The companion web protocol below is a validated cross-boundary contract,
+  // not an internal identifier, and this asset is served by the NUC while the
+  // extension holds the other side of it. Both sides gate on the spelling, so
+  // renaming it here alone would leave the extension's `host_hello` unread,
+  // keep `hosted` false and make attach() answer "not_hosted", which breaks
+  // meme attach silently against a refreshed extension. The host therefore
+  // keeps emitting the retired `framenest.companion.web.v1` on purpose while
+  // the extension accepts both spellings and also keeps sending this one; the
+  // rename lands in the removal cut, on both sides at once.
   const PROTOCOL = "framenest.companion.web.v1";
   const PINNED_EXTENSION_ORIGIN = "chrome-extension://omiihmnlkmieaafaphohakcgmbggppap";
   const UUID_PATTERN =
