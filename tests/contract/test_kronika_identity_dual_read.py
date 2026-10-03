@@ -183,6 +183,68 @@ def test_environment_file_still_applies_without_a_process_override(
     assert settings.port == 7003
 
 
+@pytest.mark.parametrize(
+    ("process_name", "process_value", "file_line", "expected"),
+    [
+        pytest.param(
+            f"{PRIMARY}PORT",
+            "7006",
+            f"{COMPATIBLE}PORT=7005\n",
+            7006,
+            id="identity-spelling-in-the-process-environment",
+        ),
+        pytest.param(
+            f"{COMPATIBLE}PORT",
+            "7008",
+            f"{PRIMARY}PORT=7007\n",
+            7008,
+            id="compatible-spelling-in-the-process-environment",
+        ),
+    ],
+)
+def test_the_conflict_rule_is_per_channel_and_the_process_environment_wins(
+    process_name: str,
+    process_value: str,
+    file_line: str,
+    expected: int,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A cross-channel pair is not a conflict, in either arrangement.
+
+    The conflict check runs once per source over that source's mapping only, so
+    one spelling in the process environment and the other spelling in the
+    environment file never meet in one call. Reaching this assertion is the
+    evidence that no conflict was raised.
+    """
+    env_file = tmp_path / "framenest.env"
+    env_file.write_text(file_line, encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv(process_name, process_value)
+
+    settings = load_settings(env_file=env_file)
+
+    assert settings.port == expected
+
+
+def test_the_two_spellings_inside_one_channel_still_fail_closed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The silent cross-channel resolution must not weaken the same-channel rule."""
+    env_file = tmp_path / "framenest.env"
+    env_file.write_text(f"{PRIMARY}PORT=7009\n{COMPATIBLE}PORT=7010\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    with pytest.raises(FrameNestConfigurationError) as excinfo:
+        load_settings(env_file=env_file)
+
+    assert "PORT" in str(excinfo.value)
+    assert "7009" not in str(excinfo.value)
+    assert "7010" not in str(excinfo.value)
+    assert excinfo.value.exit_status == 2
+
+
 def test_extra_ignore_is_preserved(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.chdir(tmp_path)
     env_file = tmp_path / "framenest.env"

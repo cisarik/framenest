@@ -192,6 +192,17 @@ def test_environment_file_matches_the_stock_source_for_every_field(tmp_path: Pat
     assert not mismatches, "environment-file parity broken:\n" + "\n".join(mismatches)
 
 
+def test_the_matrix_subject_is_pinned_to_the_compatible_prefix_value() -> None:
+    """The matrix builds its variable names from the constant, so pin its value.
+
+    Without this guard a later cut that changed the constant's *value* would
+    change the subject of every comparison above, and the parity claim would
+    become vacuous with nothing failing.
+    """
+    assert COMPATIBLE_ENVIRONMENT_PREFIX == "FRAMENEST_"
+    assert FrameNestSettings.model_config["env_prefix"] == "FRAMENEST_"
+
+
 def test_the_matrix_reaches_every_field_and_every_value() -> None:
     cases = list(_matrix())
 

@@ -29,6 +29,21 @@ environment file and existing systemd ``Environment=`` handling keep their
 current meaning. That rule exists for the ``ENV_FILE`` selector, which reads a
 path rather than a field value, and for the direct reader call sites.
 
+The table is a rule about **one mapping**, and the conflict check is
+**per channel**. :func:`lookup_env` is called once per source over that source's
+mapping only: the process environment is one channel and the environment file is
+the other. ``KRONIKA_<SUFFIX>`` in the process environment together with
+``FRAMENEST_<SUFFIX>`` in the environment file therefore raises no conflict, and
+the process-environment source is ordered first, so the process-environment
+value wins; the reverse arrangement resolves the same way.
+
+There is deliberately no cross-channel conflict check. A global rule would fail
+closed on the ordinary case of an environment file that supplies a value and a
+process environment that overrides it, which the installed ``EnvironmentFile=``
+and ``Environment=`` handling treats as normal operation rather than a
+misconfiguration. This is a deliberate silent resolution, not an oversight, and
+it is a divergence from a global conflict rule.
+
 One settings *field* needs a wider rule than a direct reader, and
 :func:`lookup_field_value` states it. A settings field is matched against a
 variable name, not read as a whole setting, so the two behaviours a field must
@@ -133,6 +148,11 @@ def lookup_env(
     the caller's own default. Raises
     :class:`IdentityEnvironmentConflictError` when both spellings are set to
     different values, before either value is returned.
+
+    The check covers exactly the mapping passed in, so it is per channel. A
+    caller that reads two channels calls this once per channel, and two
+    spellings of one suffix split across the two channels never meet in one
+    call. The module docstring states that rule and why it exists.
     """
     env = os.environ if environ is None else environ
     primary = env.get(f"{PRIMARY_ENVIRONMENT_PREFIX}{suffix}")
@@ -190,15 +210,39 @@ def lookup_field_value(
 
     ``case_folded`` is accepted so a caller that resolves many fields folds the
     mapping once. :func:`lookup_env` runs for every field, so the cross-prefix
-    conflict check stays exactly as strict as before and raises before any layer
-    returns.
+    conflict check stays exactly as strict as before within that one mapping, and
+    raises before any layer returns.
 
-    When both prefixes are present and differ in case from the canonical
-    spelling, layers 2 and 3 never collide with each other: the compatible
-    spelling is consulted first, so the identity spelling cannot be shadowed by
-    a case variant of the compatible one. The reverse is not true, and is
-    deliberate: a case-exact ``KRONIKA_<SUFFIX>`` outranks a case variant of the
-    compatible spelling rather than being silently ignored by it.
+    What the layer order means, measured on one mapping:
+
+    - A case-exact ``KRONIKA_<SUFFIX>`` carrying a non-empty value is answered
+      by layer 1 and short-circuits, so it is shadowed neither by a case variant
+      of the compatible spelling nor by a case variant of itself.
+    - When both spellings are present only as case variants, layer 2 answers
+      first, so the compatible spelling wins and a case variant of the identity
+      spelling **can** be shadowed by a case variant of the compatible one:
+      ``kronika_port=9998`` beside ``framenest_port=9999`` resolves to ``9999``
+      and raises nothing.
+    - An empty identity spelling counts as unset in layer 1 and in layer 3
+      alike, so ``KRONIKA_PORT=`` beside ``framenest_port=9999`` resolves to
+      ``9999``.
+
+    The compatible layer sits ahead of the identity layer deliberately. Before
+    this resolver existed the compatible prefix was the only prefix the library
+    read, so a case variant of the compatible spelling is what configured a
+    field then; the differential parity matrix in
+    ``tests/contract/test_kronika_settings_parity.py`` measures that reading
+    case by case against the pre-cut source. Keeping layer 2 ahead therefore
+    reproduces the pre-cut result for an input whose identity spelling is a
+    case variant, and changes nothing for an input that carries no identity
+    spelling at all. A case-exact ``KRONIKA_<SUFFIX>`` is the deliberate
+    divergence: layer 1 answers it, where the pre-cut library read the
+    compatible spelling instead.
+
+    The cross-prefix conflict check is unaffected by any of this. It stays
+    case-exact, because it compares the two canonical names only, and it runs
+    unconditionally before any layer decides, because :func:`lookup_env` is
+    called first. It is per mapping like everything else here.
     """
     values = os.environ if environ is None else environ
     folded = folded_identity_environment(values) if case_folded is None else case_folded

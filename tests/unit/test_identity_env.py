@@ -10,6 +10,7 @@ from framenest.identity_env import (
     PRIMARY_ENVIRONMENT_PREFIX,
     IdentityEnvironmentConflictError,
     lookup_env,
+    lookup_field_value,
 )
 
 SUFFIX = "DATABASE_PATH"
@@ -132,3 +133,57 @@ def test_accepted_prefixes_are_exactly_the_recorded_identity_pair() -> None:
         "KRONIKA_",
         "FRAMENEST_",
     )
+
+
+# ---------------------------------------------------------------------------
+# The field layer order, in both halves
+# ---------------------------------------------------------------------------
+
+
+def test_a_case_exact_identity_spelling_short_circuits_every_other_layer() -> None:
+    """Layer 1 answers, so no case variant displaces the canonical name."""
+    assert (
+        lookup_field_value("PORT", environ={"KRONIKA_PORT": "9998", "framenest_port": "9999"})
+        == "9998"
+    )
+    assert (
+        lookup_field_value("PORT", environ={"KRONIKA_PORT": "9998", "kronika_port": "9999"})
+        == "9998"
+    )
+
+
+def test_a_case_variant_of_the_identity_spelling_loses_to_the_compatible_layer() -> None:
+    """Layer 2 precedes layer 3, so the case variant of the identity name loses."""
+    assert (
+        lookup_field_value("PORT", environ={"kronika_port": "9998", "framenest_port": "9999"})
+        == "9999"
+    )
+    assert (
+        lookup_field_value(
+            "PORT",
+            environ={"kronika_port": "9998", "Framenest_Port": "9999"},
+        )
+        == "9999"
+    )
+
+
+def test_an_empty_identity_spelling_is_unset_in_both_identity_layers() -> None:
+    """Layers 1 and 3 agree that an empty identity value carries no value."""
+    assert (
+        lookup_field_value("PORT", environ={"KRONIKA_PORT": "", "framenest_port": "9999"})
+        == "9999"
+    )
+    assert (
+        lookup_field_value("PORT", environ={"kronika_port": "", "framenest_port": "9999"})
+        == "9999"
+    )
+    assert lookup_field_value("PORT", environ={"KRONIKA_PORT": ""}) is None
+    assert lookup_field_value("PORT", environ={"kronika_port": ""}) is None
+
+
+def test_the_cross_prefix_conflict_check_precedes_every_field_layer() -> None:
+    """The check runs first, so it also outranks the case-exact short-circuit."""
+    with pytest.raises(IdentityEnvironmentConflictError):
+        lookup_field_value(
+            "PORT", environ={"KRONIKA_PORT": "9998", "FRAMENEST_PORT": "9999"}
+        )

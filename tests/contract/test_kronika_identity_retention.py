@@ -200,17 +200,17 @@ PER_TREE_FRAMENEST_FILE_COUNT = {
 # actually detect a missed content rename. See the `fn-production-env-deploy`
 # case, whose filename is clean while its content names `framenest`.
 PER_TREE_FRAMENEST_OCCURRENCE_COUNT = {
-    "src": 2981,
-    "tests": 4434,
+    "src": 2984,
+    "tests": 4446,
     "deploy": 212,
     "scripts": 104,
     "docs": 1216,
     "extension": 199,
 }
 
-ENV_PREFIX_TOKEN_COUNT = 642
+ENV_PREFIX_TOKEN_COUNT = 643
 ENV_PREFIX_DISTINCT_NAME_COUNT = 101
-ENV_PREFIX_BARE_SPELLING_COUNT = 18
+ENV_PREFIX_BARE_SPELLING_COUNT = 21
 
 MUTATION_HEADER = "X-FrameNest-Request"
 MUTATION_HEADER_OCCURRENCE_COUNT = 59
@@ -229,7 +229,7 @@ UNIT_ACCOUNT_OCCURRENCE_COUNT = {
     "Group=framenest": 5,
 }
 
-CAPITALIZED_OCCURRENCE_COUNT = 3379
+CAPITALIZED_OCCURRENCE_COUNT = 3381
 CAPITALIZED_FILE_COUNT = 482
 
 CONSOLE_SCRIPT_ENTRY_COUNT = 14
