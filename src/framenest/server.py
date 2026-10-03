@@ -17,6 +17,7 @@ from framenest.configuration import (
     INGRESS_MODE_TAILSCALE_UDS,
     FrameNestConfigurationError,
     FrameNestSettings,
+    IdentityEnvironmentConfigurationError,
     load_settings,
 )
 from framenest.structured_logging import build_uvicorn_log_config, get_logger
@@ -144,7 +145,12 @@ def main() -> None:
         return
     except FrameNestConfigurationError as exc:
         print(f"FrameNest configuration error: {exc}", file=sys.stderr)
-        raise SystemExit(1) from None
+        status = (
+            exc.exit_status
+            if isinstance(exc, IdentityEnvironmentConfigurationError)
+            else 1
+        )
+        raise SystemExit(status) from None
 
 
 if __name__ == "__main__":

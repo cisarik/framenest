@@ -14,7 +14,7 @@ from framenest.application.media_sidecar import (
     SidecarCompareResult,
     SidecarExportResult,
 )
-from framenest.configuration import load_settings
+from framenest.configuration import IdentityEnvironmentConfigurationError, load_settings
 from framenest.domain.identities import FrameNestIdentityError, MediaId, MediaLocationId
 from framenest.infrastructure.filesystem.media_sidecar import FilesystemMediaSidecarStore
 from framenest.infrastructure.persistence.engine import create_sqlite_engine, dispose_engine
@@ -98,6 +98,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     except _CatalogNotReadyError:
         _write_error(operation=operation, error_code=CATALOG_NOT_READY_CODE, message=CATALOG_NOT_READY_MESSAGE)
         return 1
+    except IdentityEnvironmentConfigurationError as exc:
+        _write_error(operation=operation, error_code=UNAVAILABLE_CODE, message=str(exc))
+        return exc.exit_status
     except _UnavailableError:
         _write_error(operation=operation, error_code=UNAVAILABLE_CODE, message=UNAVAILABLE_MESSAGE)
         return 1
@@ -172,6 +175,8 @@ def _with_catalog_service(callback: Callable[[MediaSidecarService], Any]) -> Any
     try:
         settings = load_settings()
         status = inspect_database_migration_status(settings)
+    except IdentityEnvironmentConfigurationError:
+        raise
     except Exception:
         raise _UnavailableError() from None
     if status.state != "at_head":

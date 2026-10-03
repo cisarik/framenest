@@ -21,7 +21,11 @@ from urllib.request import urlopen
 import webbrowser
 
 from framenest.configuration import FrameNestSettings
-from framenest.identity_env import IdentityEnvironmentConflictError, lookup_env
+from framenest.identity_env import (
+    IdentityEnvironmentConflictError,
+    IdentityEnvironmentConflictFailure,
+    lookup_env,
+)
 from framenest.infrastructure.persistence.migrations import (
     inspect_database_migration_status,
     upgrade_database_to_head,
@@ -60,6 +64,20 @@ class DevelopmentRuntimeError(Exception):
 
 class RuntimeLockError(DevelopmentRuntimeError):
     """Raised when another runtime operation is already in progress."""
+
+
+class IdentityEnvironmentDevelopmentError(
+    IdentityEnvironmentConflictFailure,
+    DevelopmentRuntimeError,
+):
+    """Launcher failure caused by one setting name set under both prefixes.
+
+    The development runtime resolves its own overrides and builds settings
+    through the same identity resolver as every other command, so a conflicting
+    pair is translated into this sanitized launcher failure instead of escaping
+    as an unhandled resolver error. The message names the two variable suffixes
+    only.
+    """
 
 
 @dataclass(frozen=True)
@@ -448,12 +466,15 @@ class DevelopmentRuntime:
         )
 
     def _migrate_database(self) -> Any:
-        settings = FrameNestSettings(
-            host=LOOPBACK_HOST,
-            port=self._port,
-            database_path=self._paths.database_path,
-            _env_file=None,
-        )
+        try:
+            settings = FrameNestSettings(
+                host=LOOPBACK_HOST,
+                port=self._port,
+                database_path=self._paths.database_path,
+                _env_file=None,
+            )
+        except IdentityEnvironmentConflictError as exc:
+            raise IdentityEnvironmentDevelopmentError(str(exc)) from exc
         return upgrade_database_to_head(settings)
 
     def _database_state(self) -> str:
@@ -667,7 +688,7 @@ def _resolve_override(
     try:
         return lookup_env(suffix, environ=env)
     except IdentityEnvironmentConflictError as exc:
-        raise DevelopmentRuntimeError(str(exc)) from exc
+        raise IdentityEnvironmentDevelopmentError(str(exc)) from exc
 
 
 def _database_path(env: os._Environ[str] | dict[str, str], platform: str, home: Path) -> Path:

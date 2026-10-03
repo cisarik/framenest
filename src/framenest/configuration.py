@@ -32,6 +32,7 @@ from framenest.domain.media_analysis_runs import (
 from framenest.identity_env import (
     COMPATIBLE_ENVIRONMENT_PREFIX,
     IdentityEnvironmentConflictError,
+    IdentityEnvironmentConflictFailure,
     canonical_identity_environment,
     lookup_env,
 )
@@ -603,6 +604,21 @@ class FrameNestConfigurationError(Exception):
     """Sanitized configuration failure safe for operator-facing output."""
 
 
+class IdentityEnvironmentConfigurationError(
+    FrameNestConfigurationError,
+    IdentityEnvironmentConflictFailure,
+):
+    """Configuration failure caused by one setting name set under both prefixes.
+
+    ``FrameNestSettings`` is never built when the two accepted spellings of one
+    setting-name suffix carry different values, so this type is raised instead of
+    returning a validated settings object. Every command line entry point catches
+    it ahead of its generic configuration failure, reports it in that command's
+    own output shape, and returns the single fail-closed ``exit_status`` this
+    class carries. The message names the two variable suffixes only.
+    """
+
+
 class _EnvFileNotSpecified:
     """Sentinel marking an omitted ``env_file`` argument."""
 
@@ -644,12 +660,18 @@ def load_settings(
     is missing, unreadable, or unloadable fails closed with
     ``FrameNestConfigurationError``. Process environment variables always
     override environment-file values.
+
+    A conflict between the two accepted spellings of one setting-name suffix
+    raises :class:`IdentityEnvironmentConfigurationError`, a
+    :class:`FrameNestConfigurationError` subtype carrying the same sanitized
+    message, so every command line entry point can map exactly this failure to
+    its own output shape and to the one fail-closed exit status.
     """
     if isinstance(env_file, _EnvFileNotSpecified):
         try:
             selected = lookup_env(ENV_FILE_ENVIRONMENT_SUFFIX)
         except IdentityEnvironmentConflictError as exc:
-            raise FrameNestConfigurationError(str(exc)) from exc
+            raise IdentityEnvironmentConfigurationError(str(exc)) from exc
         requested = (selected or "").strip()
         if not requested:
             return _build_settings(None)
@@ -660,7 +682,7 @@ def load_settings(
     try:
         return FrameNestSettings(_env_file=explicit_path)
     except IdentityEnvironmentConflictError as exc:
-        raise FrameNestConfigurationError(str(exc)) from exc
+        raise IdentityEnvironmentConfigurationError(str(exc)) from exc
     except (OSError, SettingsError) as exc:
         raise FrameNestConfigurationError(EXPLICIT_ENV_FILE_MESSAGE) from exc
 
@@ -670,7 +692,7 @@ def _build_settings(env_file: Path | None) -> FrameNestSettings:
     try:
         return FrameNestSettings(_env_file=env_file)
     except IdentityEnvironmentConflictError as exc:
-        raise FrameNestConfigurationError(str(exc)) from exc
+        raise IdentityEnvironmentConfigurationError(str(exc)) from exc
 
 
 def _require_readable_env_file(env_file: Path | str) -> Path:

@@ -5,14 +5,24 @@ that run without the application package on ``sys.path``. These tests prove thei
 local mirror of the resolver fails closed with exit status 2 and the two variable
 names only, and that release markers and manifest keys are read under both
 accepted spellings while their writers stay unchanged.
+
+The second part covers every in-package command line entry point. One
+identity-environment conflict must exit 2 everywhere it can surface, name the two
+variable suffixes only, and change no other exit status. The enumeration is
+derived from the declared console scripts, so a newly declared script fails the
+classification test instead of escaping the ledger.
 """
 
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import json
+import os
 from pathlib import Path
+import subprocess
 import sys
+import tomllib
 from typing import Any
 
 import pytest
@@ -294,3 +304,408 @@ def test_json_manifest_key_reader_is_used_for_the_current_release_fallback(
     payload = json.loads(json.dumps({"kronika_release_sha": "b" * 40}))
 
     assert release_helper.manifest_release_sha(payload) == "b" * 40
+
+
+# ---------------------------------------------------------------------------
+# In-package entry points: one uniform fail-closed exit status
+# ---------------------------------------------------------------------------
+
+#: One setting-name suffix every entry point below resolves, so a single
+#: conflicting pair is enough to exercise each command's own settings or
+#: operator-configuration reader.
+CONFLICT_SUFFIX = "DATABASE_PATH"
+CONFLICT_PRIMARY_VALUE = "alpha-conflict-value"
+CONFLICT_COMPATIBLE_VALUE = "beta-conflict-value"
+
+CONFLICT_SENTENCE_MARKER = "Conflicting environment variables "
+CONFLICT_SENTENCE_END = "are set to different values."
+
+#: Symbols that would let a module reach the dual-prefix reader. A module that
+#: carries none of them cannot surface the conflict, whatever its arguments are.
+#: ``Settings`` stands for the settings class, whose full name repeats the
+#: product spelling this repository still counts occurrence by occurrence.
+SETTINGS_SURFACE_SYMBOLS = (
+    "load_settings",
+    "Settings",
+    "IdentityEnvironmentConflictError",
+    "IdentityEnvironmentConfigurationError",
+    "lookup_env",
+    "identity_env",
+    "load_catalog_backup_ops_config",
+    "default_ai_config_path",
+)
+
+DECLARED_CONSOLE_SCRIPTS: dict[str, str] = tomllib.loads(
+    (REPOSITORY_ROOT / "pyproject.toml").read_text(encoding="utf-8")
+)["project"]["scripts"]
+
+#: Entry-point module paths, under the distribution package, that construct
+#: settings or operator configuration and therefore can surface the conflict.
+#: Each case states the exact arguments used and the ordinary exit status of the
+#: same arguments without a conflict, so a status change fails here too.
+ENTRY_POINT_CASES: dict[str, dict[str, Any]] = {
+    "server": {
+        "arguments": (),
+        # The ordinary path of this entry point is a long-running server, so the
+        # non-conflicting run uses an unreadable environment file instead, which
+        # is its ordinary configuration failure.
+        "normal_environment": (("{COMPATIBLE}ENV_FILE", "{TMP}/absent.env"),),
+        "normal_status": 1,
+    },
+    "infrastructure.persistence.cli": {
+        "arguments": ("status",),
+        "normal_status": 0,
+    },
+    "infrastructure.runtime.production": {
+        "arguments": ("check-database-ready",),
+        "normal_status": 4,
+    },
+    "adapters.cli.ai": {
+        "arguments": ("--config-path", "{TMP}/ai.json", "status", "--no-write"),
+        "normal_status": 0,
+    },
+    "adapters.cli.backup": {
+        "arguments": ("status",),
+        "environment": (
+            ("{COMPATIBLE}CATALOG_BACKUP_ROOT", "{TMP}/backups"),
+            ("{COMPATIBLE}CATALOG_BACKUP_OPS_ROOT", "{TMP}/ops"),
+            ("{COMPATIBLE}CATALOG_RESTORE_VERIFY_ROOT", "{TMP}/restore"),
+        ),
+        "normal_status": 0,
+    },
+    "adapters.cli.catalog": {
+        "arguments": ("device", "list"),
+        "normal_status": 4,
+    },
+    "adapters.cli.covers": {
+        "arguments": ("status",),
+        "normal_status": 4,
+    },
+    "adapters.cli.development": {
+        "arguments": ("status",),
+        "environment": (("{COMPATIBLE}DEVELOPMENT_RUNTIME_DIR", "{TMP}/dev"),),
+        "normal_status": 3,
+    },
+    "adapters.cli.library": {
+        "arguments": ("status",),
+        "normal_status": 4,
+    },
+    "adapters.cli.previews": {
+        "arguments": ("status",),
+        "normal_status": 4,
+    },
+    "adapters.cli.sidecar": {
+        "arguments": (
+            "export",
+            "--media-id",
+            "12345678-1234-4234-9234-123456789abc",
+            "--location-id",
+            "abcdefab-cdef-4abc-8def-abcdefabcdef",
+        ),
+        "normal_status": 1,
+    },
+    "adapters.cli.youtube": {
+        "arguments": ("status", "12345678-1234-4234-9234-123456789abc"),
+        "normal_status": 5,
+    },
+}
+
+#: The one declared entry point that resolves no setting name, so a conflicting
+#: pair cannot change its status.
+SETTINGS_FREE_ENTRY_POINT = "adapters.cli.recovery"
+
+#: Both parked capture scripts target ``kronika_capture.cli``, whose module path
+#: under the distribution package is therefore just ``cli``.
+CAPTURE_MODULE_KEY = "cli"
+CAPTURE_SOURCE_ROOT = REPOSITORY_ROOT / "src" / "kronika_capture"
+
+INVALID_ARGUMENTS = ("not-a-declared-command",)
+
+#: Cases whose entry point takes arguments, and therefore has an existing
+#: invalid-command status that the conflict handler must not claim. The
+#: server entry point takes none and is absent by construction.
+INVALID_COMMAND_CASES = tuple(
+    sorted(key for key, case in ENTRY_POINT_CASES.items() if case["arguments"])
+)
+
+
+def _module_key(target: str) -> str:
+    """Return the entry-point module path under its distribution package."""
+    return target.partition(":")[0].split(".", 1)[-1]
+
+
+def _script_name(module_key: str) -> str:
+    """Return the declared console script that owns one entry-point module."""
+    for name, target in DECLARED_CONSOLE_SCRIPTS.items():
+        if _module_key(target) == module_key:
+            return name
+    raise AssertionError(f"no declared console script for {module_key}")
+
+
+def _expand(values: tuple[str, ...], tmp_path: Path) -> tuple[str, ...]:
+    return tuple(
+        value.format(TMP=tmp_path, PRIMARY=PRIMARY, COMPATIBLE=COMPATIBLE)
+        for value in values
+    )
+
+
+def _environment(entries: tuple[tuple[str, str], ...], tmp_path: Path) -> dict[str, str]:
+    return {
+        name.format(PRIMARY=PRIMARY, COMPATIBLE=COMPATIBLE): value.format(
+            TMP=tmp_path, PRIMARY=PRIMARY, COMPATIBLE=COMPATIBLE
+        )
+        for name, value in entries
+    }
+
+
+def _isolated_environment(
+    tmp_path: Path,
+    *,
+    extra: dict[str, str],
+    conflicting: bool,
+    database_path: Path,
+) -> dict[str, str]:
+    """Return a sanitized environment for one console-script run.
+
+    Every accepted-prefix variable is removed first, so an inherited value from
+    the surrounding run cannot decide the result.
+    """
+    environment = {
+        name: value
+        for name, value in os.environ.items()
+        if not name.startswith((PRIMARY, COMPATIBLE))
+    }
+    if conflicting:
+        environment[f"{PRIMARY}{CONFLICT_SUFFIX}"] = CONFLICT_PRIMARY_VALUE
+        environment[f"{COMPATIBLE}{CONFLICT_SUFFIX}"] = CONFLICT_COMPATIBLE_VALUE
+    else:
+        environment[f"{COMPATIBLE}{CONFLICT_SUFFIX}"] = str(database_path)
+    environment.update(extra)
+    return environment
+
+
+def _run_entry_point(
+    script_name: str,
+    arguments: tuple[str, ...],
+    environment: dict[str, str],
+) -> subprocess.CompletedProcess[str]:
+    script = Path(sys.executable).parent / script_name
+    assert script.is_file(), f"expected installed console script at {script}"
+    return subprocess.run(
+        [str(script), *arguments],
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+
+
+def _reported_conflict_sentence(combined_output: str) -> str:
+    start = combined_output.index(CONFLICT_SENTENCE_MARKER)
+    end = combined_output.index(CONFLICT_SENTENCE_END, start)
+    return combined_output[start : end + len(CONFLICT_SENTENCE_END)]
+
+
+def test_every_declared_console_script_is_classified() -> None:
+    """A newly declared entry point must be classified, never silently skipped."""
+    classified = (
+        set(ENTRY_POINT_CASES)
+        | {SETTINGS_FREE_ENTRY_POINT}
+        | {CAPTURE_MODULE_KEY}
+    )
+
+    assert classified == {_module_key(target) for target in DECLARED_CONSOLE_SCRIPTS.values()}
+
+
+def test_the_parked_capture_package_cannot_surface_the_conflict() -> None:
+    """The capture package resolves no setting name, so it cannot reach exit 2."""
+    offenders = sorted(
+        path.relative_to(CAPTURE_SOURCE_ROOT).as_posix()
+        for path in CAPTURE_SOURCE_ROOT.rglob("*.py")
+        if any(
+            symbol in path.read_text(encoding="utf-8", errors="replace")
+            for symbol in SETTINGS_SURFACE_SYMBOLS
+        )
+    )
+
+    assert offenders == []
+
+
+@pytest.mark.parametrize("module_key", sorted(ENTRY_POINT_CASES))
+def test_identity_conflict_exits_two_and_discloses_no_value(
+    module_key: str,
+    tmp_path: Path,
+) -> None:
+    """One conflicting pair exits 2 at every entry point that can surface it."""
+    case = ENTRY_POINT_CASES[module_key]
+    script_name = _script_name(module_key)
+    arguments = _expand(case["arguments"], tmp_path)
+
+    result = _run_entry_point(
+        script_name,
+        arguments,
+        _isolated_environment(
+            tmp_path,
+            extra=_environment(case.get("environment", ()), tmp_path),
+            conflicting=True,
+            database_path=tmp_path / "catalog.sqlite3",
+        ),
+    )
+    combined = result.stdout + result.stderr
+
+    assert result.returncode == 2, f"{script_name}: {combined}"
+    sentence = _reported_conflict_sentence(combined)
+    assert f"{PRIMARY}{CONFLICT_SUFFIX}" in sentence
+    assert f"{COMPATIBLE}{CONFLICT_SUFFIX}" in sentence
+    assert "Traceback" not in combined
+    for value in (CONFLICT_PRIMARY_VALUE, CONFLICT_COMPATIBLE_VALUE):
+        assert value not in combined
+        assert value not in sentence
+        assert str(len(value)) not in sentence
+        assert hashlib.sha256(value.encode("utf-8")).hexdigest()[:12] not in sentence
+        assert repr(value) not in sentence
+
+
+@pytest.mark.parametrize("module_key", sorted(ENTRY_POINT_CASES))
+def test_ordinary_status_of_the_same_arguments_is_unchanged(
+    module_key: str,
+    tmp_path: Path,
+) -> None:
+    """The same arguments without a conflict keep their documented status."""
+    case = ENTRY_POINT_CASES[module_key]
+    script_name = _script_name(module_key)
+    arguments = _expand(case["arguments"], tmp_path)
+    extra = dict(case.get("environment", ())) | dict(case.get("normal_environment", ()))
+
+    result = _run_entry_point(
+        script_name,
+        arguments,
+        _isolated_environment(
+            tmp_path,
+            extra=_environment(tuple(extra.items()), tmp_path),
+            conflicting=False,
+            database_path=tmp_path / "catalog.sqlite3",
+        ),
+    )
+    combined = result.stdout + result.stderr
+
+    assert result.returncode == case["normal_status"], f"{script_name}: {combined}"
+    assert CONFLICT_SENTENCE_MARKER not in combined
+    assert "Traceback" not in combined
+
+
+@pytest.mark.parametrize("module_key", INVALID_COMMAND_CASES)
+def test_invalid_command_status_is_identical_with_and_without_the_conflict(
+    module_key: str,
+    tmp_path: Path,
+) -> None:
+    """An existing failure status is not claimed by the conflict handler."""
+    script_name = _script_name(module_key)
+
+    ordinary = _run_entry_point(
+        script_name,
+        INVALID_ARGUMENTS,
+        _isolated_environment(
+            tmp_path,
+            extra={},
+            conflicting=False,
+            database_path=tmp_path / "catalog.sqlite3",
+        ),
+    )
+    conflicting = _run_entry_point(
+        script_name,
+        INVALID_ARGUMENTS,
+        _isolated_environment(
+            tmp_path,
+            extra={},
+            conflicting=True,
+            database_path=tmp_path / "catalog.sqlite3",
+        ),
+    )
+
+    assert ordinary.returncode == conflicting.returncode
+    assert CONFLICT_SENTENCE_MARKER not in conflicting.stdout + conflicting.stderr
+
+
+def test_the_settings_free_entry_point_keeps_its_status_under_a_conflict(
+    tmp_path: Path,
+) -> None:
+    """An entry point that resolves no setting name is inert here."""
+    script_name = _script_name(SETTINGS_FREE_ENTRY_POINT)
+    arguments = (
+        "list",
+        "--store-root",
+        str(tmp_path / "store"),
+        "--mount-root",
+        str(tmp_path),
+        "--expected-store-id",
+        "0" * 32,
+    )
+
+    ordinary = _run_entry_point(
+        script_name,
+        arguments,
+        _isolated_environment(
+            tmp_path,
+            extra={},
+            conflicting=False,
+            database_path=tmp_path / "catalog.sqlite3",
+        ),
+    )
+    conflicting = _run_entry_point(
+        script_name,
+        arguments,
+        _isolated_environment(
+            tmp_path,
+            extra={},
+            conflicting=True,
+            database_path=tmp_path / "catalog.sqlite3",
+        ),
+    )
+
+    assert ordinary.returncode == conflicting.returncode == 1
+    assert CONFLICT_SENTENCE_MARKER not in conflicting.stdout + conflicting.stderr
+
+
+def test_an_empty_primary_value_still_behaves_as_unset_at_an_entry_point(
+    tmp_path: Path,
+) -> None:
+    """The correction cannot turn the empty-string rule into a conflict."""
+    script_name = _script_name("infrastructure.persistence.cli")
+
+    result = _run_entry_point(
+        script_name,
+        ("status",),
+        _isolated_environment(
+            tmp_path,
+            extra={f"{PRIMARY}{CONFLICT_SUFFIX}": ""},
+            conflicting=False,
+            database_path=tmp_path / "catalog.sqlite3",
+        ),
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert CONFLICT_SENTENCE_MARKER not in result.stdout + result.stderr
+
+
+def test_identical_values_in_both_prefixes_still_succeed_at_an_entry_point(
+    tmp_path: Path,
+) -> None:
+    """The correction cannot turn the identical-value rule into a failure."""
+    script_name = _script_name("infrastructure.persistence.cli")
+    database_path = str(tmp_path / "catalog.sqlite3")
+
+    result = _run_entry_point(
+        script_name,
+        ("status",),
+        _isolated_environment(
+            tmp_path,
+            extra={f"{PRIMARY}{CONFLICT_SUFFIX}": database_path},
+            conflicting=False,
+            database_path=tmp_path / "catalog.sqlite3",
+        ),
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert CONFLICT_SENTENCE_MARKER not in result.stdout + result.stderr

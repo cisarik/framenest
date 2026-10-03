@@ -52,10 +52,11 @@ def test_catalog_backup_ops_config_treats_an_empty_value_as_unset(tmp_path: Path
 def test_catalog_backup_ops_config_fails_closed_on_a_conflict(tmp_path: Path) -> None:
     from framenest.identity_env import IdentityEnvironmentConflictError
     from framenest.infrastructure.persistence.catalog_backup_ops import (
+        CatalogBackupIdentityEnvironmentConflictError,
         load_catalog_backup_ops_config,
     )
 
-    with pytest.raises(IdentityEnvironmentConflictError) as excinfo:
+    with pytest.raises(CatalogBackupIdentityEnvironmentConflictError) as excinfo:
         load_catalog_backup_ops_config(
             {
                 "KRONIKA_CATALOG_BACKUP_ROOT": str(tmp_path / "a"),
@@ -63,7 +64,11 @@ def test_catalog_backup_ops_config_fails_closed_on_a_conflict(tmp_path: Path) ->
             }
         )
 
-    assert excinfo.value.suffix == "CATALOG_BACKUP_ROOT"
+    cause = excinfo.value.__cause__
+    assert isinstance(cause, IdentityEnvironmentConflictError)
+    assert cause.suffix == "CATALOG_BACKUP_ROOT"
+    assert excinfo.value.exit_status == 2
+    assert "CATALOG_BACKUP_ROOT" in str(excinfo.value)
     assert str(tmp_path / "a") not in str(excinfo.value)
     assert str(tmp_path / "b") not in str(excinfo.value)
 
@@ -107,6 +112,7 @@ def test_offdevice_destination_id_fails_closed_on_a_conflict() -> None:
         )
 
     assert excinfo.value.error_code == "OFFDEVICE_DESTINATION_ID_INVALID"
+    assert excinfo.value.exit_status == 2
     rendered = str(excinfo.value)
     assert "CATALOG_OFFDEVICE_DESTINATION_ID" in rendered
     assert "0" * 32 not in rendered
@@ -197,6 +203,7 @@ def test_development_port_reads_either_prefix() -> None:
             {"KRONIKA_PORT": "9103", "FRAMENEST_PORT": "9104"}
         )
 
+    assert excinfo.value.exit_status == 2
     rendered = str(excinfo.value)
     assert "PORT" in rendered
     assert "9103" not in rendered

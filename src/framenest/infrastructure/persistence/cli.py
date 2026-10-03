@@ -8,7 +8,11 @@ import sys
 from collections.abc import Sequence
 from typing import NoReturn
 
-from framenest.configuration import FrameNestConfigurationError, load_settings
+from framenest.configuration import (
+    FrameNestConfigurationError,
+    IdentityEnvironmentConfigurationError,
+    load_settings,
+)
 from framenest.infrastructure.persistence.errors import FrameNestPersistenceError
 from framenest.infrastructure.persistence.migrations import (
     MigrationStatus,
@@ -52,6 +56,13 @@ def main(argv: Sequence[str] | None = None) -> int:
             message="Database command failed.",
         )
         return 2
+    except IdentityEnvironmentConfigurationError as exc:
+        _write_error(
+            operation=operation,
+            error_code=CONFIGURATION_ERROR_CODE,
+            message=str(exc),
+        )
+        return exc.exit_status
     except FrameNestConfigurationError:
         _write_error(
             operation=operation,

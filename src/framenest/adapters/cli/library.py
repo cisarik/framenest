@@ -30,7 +30,11 @@ from framenest.application.library_workflow import (
     LibraryWorkflowReservedRootConflictError,
     ServerLibraryWorkflow,
 )
-from framenest.configuration import FrameNestSettings, load_settings
+from framenest.configuration import (
+    FrameNestSettings,
+    IdentityEnvironmentConfigurationError,
+    load_settings,
+)
 from framenest.domain import (
     DeviceId,
     FrameNestIdentityError,
@@ -116,6 +120,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     except _DeclinedError:
         print("No durable changes made.")
         return 0
+    except IdentityEnvironmentConfigurationError as exc:
+        _write_error(str(exc))
+        return exc.exit_status
     except (
         FrameNestPersistenceError,
         LibraryScanFailedError,

@@ -10,6 +10,7 @@ from framenest.infrastructure.runtime.development import (
     DEFAULT_LOG_LINES,
     DevelopmentRuntime,
     DevelopmentRuntimeError,
+    IdentityEnvironmentDevelopmentError,
     RuntimeResult,
     RuntimeStatus,
 )
@@ -79,6 +80,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             return _print_logs(runtime, follow=args.follow, lines=args.lines)
     except DevelopmentRuntimeError as exc:
         print(f"FrameNest launcher error: {exc}", file=sys.stderr)
+        if isinstance(exc, IdentityEnvironmentDevelopmentError):
+            return exc.exit_status
         return EXIT_ERROR
     return EXIT_USAGE
 

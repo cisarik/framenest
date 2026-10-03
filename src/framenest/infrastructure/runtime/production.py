@@ -13,6 +13,7 @@ from typing import NoReturn
 from framenest.configuration import (
     INGRESS_MODE_TAILSCALE_UDS,
     FrameNestSettings,
+    IdentityEnvironmentConfigurationError,
     load_settings,
 )
 from framenest.infrastructure.persistence.errors import FrameNestPersistenceError
@@ -85,6 +86,13 @@ def main(argv: Sequence[str] | None = None) -> int:
             message="FrameNest health check failed.",
         )
         return 5
+    except IdentityEnvironmentConfigurationError as exc:
+        _write_error(
+            operation=operation,
+            error_code=COMMAND_ERROR_CODE,
+            message=str(exc),
+        )
+        return exc.exit_status
     except (FrameNestPersistenceError, Exception):
         _write_error(
             operation=operation,

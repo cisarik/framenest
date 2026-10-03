@@ -39,7 +39,11 @@ from framenest.infrastructure.persistence.catalog_backup_transfer import (
     identities_match,
     rename_noreplace as transfer_rename_noreplace,
 )
-from framenest.identity_env import IdentityEnvironmentConflictError, lookup_env
+from framenest.identity_env import (
+    IdentityEnvironmentConflictError,
+    IdentityEnvironmentConflictFailure,
+    lookup_env,
+)
 
 DEFAULT_OFFDEVICE_ROOT = Path("/mnt/framenest-catalog-offdevice")
 MARKER_NAME = ".framenest-catalog-offdevice.json"
@@ -67,6 +71,19 @@ OffdeviceReadiness = Literal[
 
 class OffdeviceError(BackupError):
     """Sanitized off-device catalog copy failure."""
+
+
+class OffdeviceIdentityEnvironmentConflictError(
+    IdentityEnvironmentConflictFailure,
+    OffdeviceError,
+):
+    """Off-device failure caused by one setting name set under both prefixes.
+
+    The off-device destination identifier is resolved through the same identity
+    resolver as the settings boundary, so a conflicting pair keeps the existing
+    off-device error code while gaining the uniform fail-closed exit status. The
+    message names the two variable suffixes only.
+    """
 
 
 @dataclass(frozen=True, slots=True)
@@ -111,7 +128,10 @@ def parse_configured_destination_id(
     try:
         raw = lookup_env("CATALOG_OFFDEVICE_DESTINATION_ID", environ=env)
     except IdentityEnvironmentConflictError as exc:
-        raise OffdeviceError(str(exc), error_code="OFFDEVICE_DESTINATION_ID_INVALID") from exc
+        raise OffdeviceIdentityEnvironmentConflictError(
+            str(exc),
+            error_code="OFFDEVICE_DESTINATION_ID_INVALID",
+        ) from exc
     if raw is None or raw == "":
         return None
     value = raw.strip()

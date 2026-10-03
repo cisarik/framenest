@@ -17,7 +17,11 @@ from framenest.infrastructure.ai.still_frame_smoke import (
     build_still_frame_smoke_request,
     prepare_still_frame_smoke_images,
 )
-from framenest.configuration import FrameNestConfigurationError, load_settings
+from framenest.configuration import (
+    FrameNestConfigurationError,
+    IdentityEnvironmentConfigurationError,
+    load_settings,
+)
 from framenest.infrastructure.ai.configuration import (
     AiConfigurationError,
     AiServerConfig,
@@ -212,9 +216,9 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
-    config_path = args.config_path or default_ai_config_path()
-    context = _CliContext(config_path=config_path)
     try:
+        config_path = args.config_path or default_ai_config_path()
+        context = _CliContext(config_path=config_path)
         if args.command == "status":
             return status_command(context, write_snapshot=not args.no_write)
         if args.command == "configure":
@@ -709,6 +713,8 @@ def still_frame_smoke_command(
 def _resolve(context: _CliContext) -> ResolvedAiProvider:
     try:
         settings = load_settings()
+    except IdentityEnvironmentConfigurationError as exc:
+        raise AiConfigurationError(str(exc)) from exc
     except FrameNestConfigurationError as exc:
         raise AiConfigurationError(
             "FrameNest configuration could not be loaded."

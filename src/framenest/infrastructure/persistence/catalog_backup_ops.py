@@ -45,7 +45,11 @@ from framenest.infrastructure.persistence.catalog_backup_transfer import (
     identities_match,
     write_protocol_v1_stream,
 )
-from framenest.identity_env import lookup_env
+from framenest.identity_env import (
+    IdentityEnvironmentConflictError,
+    IdentityEnvironmentConflictFailure,
+    lookup_env,
+)
 
 DEFAULT_BACKUP_ROOT = Path("/var/lib/framenest/catalog-backups")
 DEFAULT_RESTORE_VERIFY_ROOT = Path("/var/lib/framenest/catalog-restore-verify")
@@ -77,6 +81,20 @@ _LOCK_STATE = threading.local()
 
 class CatalogBackupOpsError(BackupError):
     """Sanitized catalog backup operations failure."""
+
+
+class CatalogBackupIdentityEnvironmentConflictError(
+    IdentityEnvironmentConflictFailure,
+    CatalogBackupOpsError,
+):
+    """Backup-operations failure caused by one setting name set under both prefixes.
+
+    The scheduled operations configuration resolves its own overrides through
+    the same identity resolver as the settings boundary, so a conflicting pair
+    is translated into this sanitized operations failure instead of escaping as
+    an unhandled resolver error. The message names the two variable suffixes
+    only.
+    """
 
 
 @dataclass(frozen=True, slots=True)
@@ -247,27 +265,30 @@ def load_catalog_backup_ops_config(
 ) -> CatalogBackupOpsConfig:
     """Load and validate operator configuration from process environment."""
     env = os.environ if environ is None else environ
-    database_path = _absolute_path_from_env(
-        lookup_env("DATABASE_PATH", environ=env),
-        default=DEFAULT_DATABASE_PATH,
-        description="database path",
-    )
-    backup_root = _absolute_path_from_env(
-        lookup_env("CATALOG_BACKUP_ROOT", environ=env),
-        default=DEFAULT_BACKUP_ROOT,
-        description="catalog backup root",
-    )
-    restore_verify_root = _absolute_path_from_env(
-        lookup_env("CATALOG_RESTORE_VERIFY_ROOT", environ=env),
-        default=DEFAULT_RESTORE_VERIFY_ROOT,
-        description="catalog restore verification root",
-    )
-    ops_root = _absolute_path_from_env(
-        lookup_env("CATALOG_BACKUP_OPS_ROOT", environ=env),
-        default=DEFAULT_OPS_ROOT,
-        description="catalog backup operator-state root",
-    )
-    keep_auto = _parse_keep_auto(lookup_env("CATALOG_BACKUP_KEEP_AUTO", environ=env))
+    try:
+        database_path = _absolute_path_from_env(
+            lookup_env("DATABASE_PATH", environ=env),
+            default=DEFAULT_DATABASE_PATH,
+            description="database path",
+        )
+        backup_root = _absolute_path_from_env(
+            lookup_env("CATALOG_BACKUP_ROOT", environ=env),
+            default=DEFAULT_BACKUP_ROOT,
+            description="catalog backup root",
+        )
+        restore_verify_root = _absolute_path_from_env(
+            lookup_env("CATALOG_RESTORE_VERIFY_ROOT", environ=env),
+            default=DEFAULT_RESTORE_VERIFY_ROOT,
+            description="catalog restore verification root",
+        )
+        ops_root = _absolute_path_from_env(
+            lookup_env("CATALOG_BACKUP_OPS_ROOT", environ=env),
+            default=DEFAULT_OPS_ROOT,
+            description="catalog backup operator-state root",
+        )
+        keep_auto = _parse_keep_auto(lookup_env("CATALOG_BACKUP_KEEP_AUTO", environ=env))
+    except IdentityEnvironmentConflictError as exc:
+        raise CatalogBackupIdentityEnvironmentConflictError(str(exc)) from exc
     config = CatalogBackupOpsConfig(
         database_path=database_path,
         backup_root=backup_root,

@@ -14,7 +14,11 @@ from framenest.application.gallery_preview import (
     GalleryPreviewService,
     GalleryPreviewUnavailableError,
 )
-from framenest.configuration import FrameNestSettings, load_settings
+from framenest.configuration import (
+    FrameNestSettings,
+    IdentityEnvironmentConfigurationError,
+    load_settings,
+)
 from framenest.domain import FrameNestIdentityError, LibraryId
 from framenest.infrastructure.filesystem.media_content import LocalMediaContentReader
 from framenest.infrastructure.media_analysis import LocalMediaAnalysisAdapter
@@ -78,6 +82,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     except _DeclinedError:
         print("No durable changes made.")
         return 0
+    except IdentityEnvironmentConfigurationError as exc:
+        _write_error(str(exc))
+        return exc.exit_status
     except (FrameNestPersistenceError, GalleryPreviewFailedError, Exception):
         _write_error(COMMAND_FAILED_MESSAGE)
         return 1

@@ -17,6 +17,7 @@ from framenest.infrastructure.persistence.catalog_backup import (
     verify_catalog_backup,
 )
 from framenest.infrastructure.persistence.catalog_backup_ops import (
+    CatalogBackupIdentityEnvironmentConflictError,
     CatalogBackupOpsConfig,
     CatalogBackupOpsError,
     build_retention_plan,
@@ -30,7 +31,10 @@ from framenest.infrastructure.persistence.catalog_backup_ops import (
     run_scheduled_catalog_backup,
     verify_restore_bundle,
 )
-from framenest.infrastructure.persistence.catalog_backup_offdevice import OffdeviceError
+from framenest.infrastructure.persistence.catalog_backup_offdevice import (
+    OffdeviceError,
+    OffdeviceIdentityEnvironmentConflictError,
+)
 from framenest.infrastructure.persistence.catalog_backup_transfer import TransferError
 
 INVALID_INPUT_CODE = "FRAMENEST_BACKUP_INVALID_INPUT"
@@ -84,6 +88,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         return 2
     except CatalogBackupOpsError as exc:
+        if isinstance(exc, CatalogBackupIdentityEnvironmentConflictError):
+            _write_error(
+                operation=operation,
+                error_code=COMMAND_FAILED_CODE,
+                message=str(exc),
+            )
+            return exc.exit_status
         if exc.error_code == BUSY_CODE:
             _write_error(
                 operation=operation,
@@ -112,6 +123,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         return 1
     except OffdeviceError as exc:
+        if isinstance(exc, OffdeviceIdentityEnvironmentConflictError):
+            _write_error(
+                operation=operation,
+                error_code=exc.error_code,
+                message=str(exc),
+            )
+            return exc.exit_status
         message = "Off-device catalog copy failed."
         if exc.error_code == "OFFDEVICE_DISABLED":
             message = "Off-device catalog copy is disabled."

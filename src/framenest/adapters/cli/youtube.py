@@ -15,6 +15,7 @@ from typing import NoReturn, Protocol
 from framenest.configuration import (
     FrameNestConfigurationError,
     FrameNestSettings,
+    IdentityEnvironmentConfigurationError,
     load_settings,
 )
 from framenest.domain.identities import (
@@ -174,6 +175,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             "YouTube operator ingestion is not configured.",
         )
         return 3
+    except IdentityEnvironmentConfigurationError as exc:
+        _write_error(
+            "YOUTUBE_CONFIGURATION_FAILED",
+            str(exc),
+        )
+        return exc.exit_status
     except FrameNestConfigurationError:
         _write_error(
             "YOUTUBE_CONFIGURATION_FAILED",

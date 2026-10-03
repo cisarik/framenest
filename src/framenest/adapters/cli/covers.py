@@ -18,7 +18,11 @@ from framenest.application.ports.cover_storage import (
     CoverStorageError,
     CoverThumbnailUnavailableError,
 )
-from framenest.configuration import FrameNestSettings, load_settings
+from framenest.configuration import (
+    FrameNestSettings,
+    IdentityEnvironmentConfigurationError,
+    load_settings,
+)
 from framenest.domain import FrameNestIdentityError, LibraryId
 from framenest.infrastructure.filesystem.cover_storage import (
     FilesystemCoverThumbnailCache,
@@ -79,6 +83,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     except _DeclinedError:
         print("No durable changes made.")
         return 0
+    except IdentityEnvironmentConfigurationError as exc:
+        _write_error(str(exc))
+        return exc.exit_status
     except (FrameNestPersistenceError, CoverFailedError, Exception):
         _write_error(COMMAND_FAILED_MESSAGE)
         return 1

@@ -53,7 +53,11 @@ from framenest.application.ports.library_repository import (
     LibraryRepository,
     LibraryRootAlreadyRegisteredError,
 )
-from framenest.configuration import FrameNestSettings, load_settings
+from framenest.configuration import (
+    FrameNestSettings,
+    IdentityEnvironmentConfigurationError,
+    load_settings,
+)
 from framenest.domain import (
     Device,
     DeviceId,
@@ -340,6 +344,13 @@ def main(argv: Sequence[str] | None = None) -> int:
             message=SUGGESTION_PROVIDER_INVALID_RESPONSE_MESSAGE,
         )
         return 7
+    except IdentityEnvironmentConfigurationError as exc:
+        _write_error(
+            operation=operation,
+            error_code=COMMAND_FAILED_CODE,
+            message=str(exc),
+        )
+        return exc.exit_status
     except (
         FrameNestPersistenceError,
         FrameNestDeviceRepositoryError,

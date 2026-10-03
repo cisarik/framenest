@@ -47,6 +47,23 @@ COMPATIBLE_ENVIRONMENT_PREFIX = "FRAMENEST_"
 EXIT_IDENTITY_ENVIRONMENT_CONFLICT = 2
 
 
+class IdentityEnvironmentConflictFailure:
+    """Marker mixin for a command's sanitized failure caused by a conflict.
+
+    An in-package entry point translates :class:`IdentityEnvironmentConflictError`
+    into its own sanitized error type and mixes this class in. The fail-closed
+    process exit status then has exactly one in-package source instead of a
+    literal repeated in every command, so two handlers cannot drift apart. The
+    two standard-library-only deploy engines keep their own local constant,
+    because a standard-library-only mirror cannot import this module.
+    """
+
+    @property
+    def exit_status(self) -> int:
+        """Return the fail-closed exit status for an identity-environment conflict."""
+        return EXIT_IDENTITY_ENVIRONMENT_CONFLICT
+
+
 class IdentityEnvironmentConflictError(Exception):
     """Both accepted prefixes set one setting name to different values.
 
