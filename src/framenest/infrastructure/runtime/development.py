@@ -24,6 +24,7 @@ from framenest.configuration import FrameNestSettings
 from framenest.identity_env import (
     IdentityEnvironmentConflictError,
     IdentityEnvironmentConflictFailure,
+    drop_identity_environment_spellings,
     lookup_env,
 )
 from framenest.infrastructure.persistence.migrations import (
@@ -44,16 +45,31 @@ DEFAULT_LOG_LINES = 80
 
 DATABASE_ENV = "FRAMENEST_DATABASE_PATH"
 PORT_ENV = "FRAMENEST_PORT"
+HOST_ENV = "FRAMENEST_HOST"
 RUNTIME_DIR_ENV = "FRAMENEST_DEVELOPMENT_RUNTIME_DIR"
 LOG_DIR_ENV = "FRAMENEST_DEVELOPMENT_LOG_DIR"
 
-#: Setting-name suffixes for the same four development runtime variables. The
-#: constants above stay the exact names this module writes into the spawned
-#: server environment; these are the names it reads.
+#: Setting-name suffixes for the same five development runtime variables. The
+#: constants above stay the exact names of the variables; the first three are the
+#: ones this module writes into the spawned server environment, and all five are
+#: read through :func:`_resolve_override`.
 DATABASE_ENV_SUFFIX = "DATABASE_PATH"
 PORT_ENV_SUFFIX = "PORT"
 RUNTIME_DIR_ENV_SUFFIX = "DEVELOPMENT_RUNTIME_DIR"
 LOG_DIR_ENV_SUFFIX = "DEVELOPMENT_LOG_DIR"
+HOST_ENV_SUFFIX = "HOST"
+
+#: Every setting-name suffix whose resolved value the launcher writes into the
+#: spawned server environment. The launcher is authoritative for exactly these
+#: three settings, so the alternate spelling of each one is dropped from the
+#: child environment first. Without that, an inherited ``KRONIKA_*`` spelling
+#: would reach the child beside the value written here, and the child would exit
+#: on a conflict the launcher created itself.
+SPAWNED_SETTING_SUFFIXES = (
+    HOST_ENV_SUFFIX,
+    PORT_ENV_SUFFIX,
+    DATABASE_ENV_SUFFIX,
+)
 
 StatusKind = Literal["running", "stopped", "stale", "unhealthy", "conflict"]
 
@@ -495,9 +511,10 @@ class DevelopmentRuntime:
         self._paths.log_path.parent.mkdir(parents=True, exist_ok=True)
         _private_directory(self._paths.runtime_dir)
         env = dict(self._environ)
-        env["FRAMENEST_HOST"] = LOOPBACK_HOST
-        env["FRAMENEST_PORT"] = str(self._port)
-        env["FRAMENEST_DATABASE_PATH"] = str(self._paths.database_path)
+        drop_identity_environment_spellings(env, SPAWNED_SETTING_SUFFIXES)
+        env[HOST_ENV] = LOOPBACK_HOST
+        env[PORT_ENV] = str(self._port)
+        env[DATABASE_ENV] = str(self._paths.database_path)
         log_file = self._paths.log_path.open("ab")
         try:
             return self._spawn_process(

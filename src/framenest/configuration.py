@@ -34,7 +34,9 @@ from framenest.identity_env import (
     IdentityEnvironmentConflictError,
     IdentityEnvironmentConflictFailure,
     canonical_identity_environment,
+    folded_identity_environment,
     lookup_env,
+    lookup_field_value,
 )
 
 ENV_FILE_ENVIRONMENT_VARIABLE = f"{COMPATIBLE_ENVIRONMENT_PREFIX}ENV_FILE"
@@ -166,6 +168,7 @@ class _IdentityResolverFieldMixin:
         return env_name[len(prefix) :].upper()
 
     def _resolved_field_values(self, resolver_values: Mapping[str, str]) -> dict[str, str]:
+        case_folded = folded_identity_environment(resolver_values)
         resolved: dict[str, str] = {}
         for field_name, field in self.settings_cls.model_fields.items():
             for _field_key, env_name, _value_is_complex in self._extract_field_info(  # type: ignore[attr-defined]
@@ -174,7 +177,11 @@ class _IdentityResolverFieldMixin:
                 suffix = self._identity_suffix(env_name)
                 if suffix is None:
                     continue
-                value = lookup_env(suffix, environ=resolver_values)
+                value = lookup_field_value(
+                    suffix,
+                    environ=resolver_values,
+                    case_folded=case_folded,
+                )
                 if value is not None:
                     resolved[env_name] = value
         return resolved
@@ -185,13 +192,13 @@ class _DualPrefixEnvSettingsSource(_IdentityResolverFieldMixin, EnvSettingsSourc
 
     ``env_prefix`` stays as the internal key spelling only; it is no longer the
     reader. Every field value is resolved by
-    :func:`framenest.identity_env.lookup_env`, so each field accepts
-    ``KRONIKA_<SUFFIX>`` and ``FRAMENEST_<SUFFIX>``, and a conflicting pair
-    fails closed inside source construction, before any field value is
-    assembled.
+    :func:`framenest.identity_env.lookup_field_value`, so each field accepts
+    ``KRONIKA_<SUFFIX>`` and ``FRAMENEST_<SUFFIX>`` under any case, and a
+    conflicting pair of the two canonical names fails closed inside source
+    construction, before any field value is assembled.
 
-    Everything the inherited implementation provides is unchanged: complex
-    field decoding, strict value coercion, case-insensitive field mapping, the
+    Everything the inherited implementation provides is unchanged: complex field
+    decoding, strict value coercion, case-insensitive field mapping, the
     ``env_ignore_empty`` and ``env_parse_none_str`` handling, and the source
     ordering that makes process environment override environment-file values.
     """

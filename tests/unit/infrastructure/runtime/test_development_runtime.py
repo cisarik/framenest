@@ -2,13 +2,16 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import json
+import os
 from pathlib import Path
 import signal
 import subprocess
 from typing import Any
+from unittest import mock
 
 import pytest
 
+from framenest.configuration import FrameNestSettings
 from framenest.infrastructure.runtime import development
 from framenest.infrastructure.runtime.development import (
     DevelopmentRuntime,
@@ -382,6 +385,91 @@ def test_spawn_environment_enforces_loopback_and_disposable_database(
     assert env["FRAMENEST_DATABASE_PATH"] == str(tmp_path / "data" / "catalog.sqlite3")
     assert env["NVIDIA_API_KEY"] == "synthetic-nvidia-key"
     assert env["AI_GATEWAY_API_KEY"] == "synthetic-gateway-key"
+
+
+def test_every_spawned_setting_name_is_covered_by_the_normalised_suffix_list() -> None:
+    """The written names and the dropped spellings must not drift apart."""
+    source = Path(development.__file__).read_text(encoding="utf-8")
+
+    assert set(development.SPAWNED_SETTING_SUFFIXES) == {"HOST", "PORT", "DATABASE_PATH"}
+    for suffix in development.SPAWNED_SETTING_SUFFIXES:
+        assert f'"FRAMENEST_{suffix}"' in source
+    assert "drop_identity_environment_spellings(env, SPAWNED_SETTING_SUFFIXES)" in source
+
+
+@pytest.mark.parametrize("spelling", ["primary", "lower", "mixed"])
+@pytest.mark.parametrize("suffix", ["HOST", "PORT", "DATABASE_PATH"])
+def test_spawned_environment_carries_no_alternate_spelling_of_a_written_setting(
+    suffix: str,
+    spelling: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The child must never receive a pair the launcher manufactured itself.
+
+    The parent environment carries exactly one spelling of the setting, so the
+    launcher resolves it without a conflict of its own; the conflict this proves
+    absent is the one the launcher would create while writing its own value.
+    """
+    captured: dict[str, Any] = {}
+
+    def spawn(*args: Any, **kwargs: Any) -> _Process:
+        captured.update(kwargs)
+        return _Process(6061)
+
+    canonical = f"FRAMENEST_{suffix}"
+    inherited_value = {
+        "HOST": "203.0.113.9",
+        "PORT": "48199",
+        "DATABASE_PATH": str(tmp_path / "other" / "catalog.sqlite3"),
+    }[suffix]
+    runtime_env = _env(tmp_path)
+    runtime_env.pop(canonical, None)
+    if spelling == "primary":
+        inherited = f"KRONIKA_{suffix}"
+    elif spelling == "lower":
+        inherited = canonical.lower()
+    else:
+        inherited = "".join(
+            character.upper() if index % 2 else character.lower()
+            for index, character in enumerate(canonical)
+        )
+    runtime_env[inherited] = inherited_value
+    runtime = DevelopmentRuntime(environ=runtime_env, spawn_process=spawn)
+    monkeypatch.setattr(runtime, "_migrate_database", lambda: _Migration("at_head"))
+    monkeypatch.setattr(
+        runtime,
+        "_wait_for_process_snapshot",
+        lambda pid: ProcessSnapshot(pid=pid, start_identity="same", command="python -m framenest.server"),
+    )
+    monkeypatch.setattr(runtime, "_wait_for_health", lambda: True)
+
+    result = runtime.start(open_after_start=False)
+
+    assert result.ok is True
+    env = captured["env"]
+    assert [name for name in env if name.upper() == canonical] == [canonical]
+    assert inherited not in env or inherited == canonical
+    with mock.patch.dict(os.environ, env, clear=True):
+        settings = FrameNestSettings(_env_file=None)
+
+    assert settings.host == "127.0.0.1"
+    assert settings.port == runtime._port
+    assert settings.database_path == runtime.paths.database_path
+
+
+def test_a_conflicting_parent_pair_is_rejected_before_anything_is_spawned(
+    tmp_path: Path,
+) -> None:
+    """The launcher's own fail-closed check is unchanged by the normalisation."""
+    runtime_env = _env(tmp_path)
+    runtime_env["KRONIKA_PORT"] = "48199"
+
+    with pytest.raises(development.IdentityEnvironmentDevelopmentError) as excinfo:
+        DevelopmentRuntime(environ=runtime_env)
+
+    assert "PORT" in str(excinfo.value)
+    assert excinfo.value.exit_status == 2
 
 
 def test_no_sigkill_literal_in_runtime_source() -> None:

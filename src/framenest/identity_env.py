@@ -26,7 +26,15 @@ set                          set, different             fail closed
 
 A variable set to the empty string counts as unset, so the installed
 environment file and existing systemd ``Environment=`` handling keep their
-current meaning.
+current meaning. That rule exists for the ``ENV_FILE`` selector, which reads a
+path rather than a field value, and for the direct reader call sites.
+
+One settings *field* needs a wider rule than a direct reader, and
+:func:`lookup_field_value` states it. A settings field is matched against a
+variable name, not read as a whole setting, so the two behaviours a field must
+keep are the case-insensitive name matching and the fail-closed coercion that
+``pydantic-settings`` performed before this resolver existed. See that function
+for the three layers and their order.
 
 The fail-closed path raises :class:`IdentityEnvironmentConflictError`, which
 carries the setting-name suffix only. It never carries, derives, or logs a
@@ -36,6 +44,7 @@ partially resolved pair.
 
 from __future__ import annotations
 
+from collections.abc import Iterable, MutableMapping
 import os
 from typing import Mapping
 
@@ -137,3 +146,89 @@ def lookup_env(
     if compatible is None or primary == compatible:
         return primary
     raise IdentityEnvironmentConflictError(suffix)
+
+
+def folded_identity_environment(values: Mapping[str, str]) -> dict[str, str]:
+    """Return one mapping whose names are upper-cased, later entries winning.
+
+    ``pydantic-settings`` folds the mapping it reads from the process
+    environment before it matches names against fields, so before this resolver
+    existed a variable configured a field whatever its case. This reproduces
+    that one rule, over the same mapping and with the same collision outcome: a
+    later entry replaces an earlier one whose name differs only in case, exactly
+    as the library's own comprehension did.
+
+    Only names carrying an accepted identity prefix are ever consulted for a
+    field, so folding does not widen the set of ambient names a field accepts.
+    """
+    return {name.upper(): value for name, value in values.items()}
+
+
+def lookup_field_value(
+    suffix: str,
+    *,
+    environ: Mapping[str, str] | None = None,
+    case_folded: Mapping[str, str] | None = None,
+) -> str | None:
+    """Return the value one settings field takes from an environment mapping.
+
+    :func:`lookup_env` resolves a whole setting name and is right for the
+    ``ENV_FILE`` selector and for the direct reader call sites. A settings field
+    additionally has to match a variable *name*, so this function resolves in
+    three layers, in this order:
+
+    1. the case-exact identity spelling, when it carries a non-empty value. The
+       case-exact spelling wins outright because it is the spelling the identity
+       authority names.
+    2. the compatible spelling from the case-folded view, raw, including an
+       explicitly empty value. This is what ``pydantic-settings`` produced for
+       the field before this resolver existed, so an old-spelling name
+       configures the field whatever its case and an unparseable value still
+       fails closed instead of silently becoming the default.
+    3. the identity spelling from the case-folded view, with an empty value
+       counting as unset, because that is the identity prefix's documented rule.
+
+    ``case_folded`` is accepted so a caller that resolves many fields folds the
+    mapping once. :func:`lookup_env` runs for every field, so the cross-prefix
+    conflict check stays exactly as strict as before and raises before any layer
+    returns.
+
+    When both prefixes are present and differ in case from the canonical
+    spelling, layers 2 and 3 never collide with each other: the compatible
+    spelling is consulted first, so the identity spelling cannot be shadowed by
+    a case variant of the compatible one. The reverse is not true, and is
+    deliberate: a case-exact ``KRONIKA_<SUFFIX>`` outranks a case variant of the
+    compatible spelling rather than being silently ignored by it.
+    """
+    values = os.environ if environ is None else environ
+    folded = folded_identity_environment(values) if case_folded is None else case_folded
+    resolved = lookup_env(suffix, environ=values)
+    if values.get(f"{PRIMARY_ENVIRONMENT_PREFIX}{suffix}"):
+        return resolved
+    compatible = folded.get(f"{COMPATIBLE_ENVIRONMENT_PREFIX}{suffix}")
+    if compatible is not None:
+        return compatible
+    primary = folded.get(f"{PRIMARY_ENVIRONMENT_PREFIX}{suffix}")
+    if primary:
+        return primary
+    return resolved
+
+
+def drop_identity_environment_spellings(
+    environ: MutableMapping[str, str],
+    suffixes: Iterable[str],
+) -> None:
+    """Remove every accepted and case-variant spelling of the given suffixes.
+
+    A caller that writes one resolved value per suffix into a child environment
+    calls this first, so the child cannot receive a conflicting pair no matter
+    what spelling the parent environment carried. The mapping is mutated in
+    place; the caller then writes exactly one name per suffix.
+    """
+    folded_names = {
+        f"{prefix}{suffix}".upper()
+        for suffix in suffixes
+        for prefix in (PRIMARY_ENVIRONMENT_PREFIX, COMPATIBLE_ENVIRONMENT_PREFIX)
+    }
+    for name in [name for name in environ if name.upper() in folded_names]:
+        del environ[name]
