@@ -6,6 +6,10 @@ const vm = require("node:vm");
 
 const REPO = path.resolve(__dirname, "..");
 const companion = require(path.join(REPO, "extension/shared/messages.js"));
+const messagesSource = fs.readFileSync(
+  path.join(REPO, "extension/shared/messages.js"),
+  "utf8"
+);
 const workerSource = fs.readFileSync(
   path.join(REPO, "extension/background/service_worker.js"),
   "utf8"
@@ -70,7 +74,18 @@ function createChromeFake(options) {
     installed: [],
     startup: [],
     alarmListeners: [],
+    messageListeners: [],
+    connectedPorts: [],
+    mediaBody:
+      (options && options.mediaBody) || new Uint8Array([1, 2, 3, 4]),
+    mediaStatus: (options && options.mediaStatus) || 200,
+    mediaContentLength:
+      options && options.mediaContentLength !== undefined
+        ? options.mediaContentLength
+        : 4,
     inboxStatus: (options && options.inboxStatus) || 200,
+    companionMediaStatus: (options && options.companionMediaStatus) || 200,
+    companionMediaBody: (options && options.companionMediaBody) || null,
     inboxBody:
       (options && options.inboxBody) || {
         items: [],
@@ -136,10 +151,34 @@ function createChromeFake(options) {
         },
       },
       onMessage: {
-        addListener() {},
+        addListener(fn) {
+          state.messageListeners.push(fn);
+        },
       },
       onConnect: {
         addListener() {},
+      },
+    },
+    tabs: {
+      connect(_tabId, info) {
+        const port = {
+          name: (info && info.name) || "",
+          posted: [],
+          disconnected: false,
+          onMessage: { addListener() {}, removeListener() {} },
+          onDisconnect: { addListener() {} },
+          postMessage(message) {
+            port.posted.push(message);
+          },
+          disconnect() {
+            port.disconnected = true;
+          },
+        };
+        state.connectedPorts.push(port);
+        return port;
+      },
+      sendMessage() {
+        return Promise.resolve({ ok: true });
       },
     },
     sidePanel: {
@@ -201,9 +240,54 @@ function createChromeFake(options) {
     },
   };
 
+  function mediaResponse() {
+    const status = state.mediaStatus;
+    const body = state.mediaBody;
+    return {
+      ok: status >= 200 && status < 300,
+      status,
+      arrayBuffer: async () => body.buffer.slice(body.byteOffset, body.byteOffset + body.byteLength),
+      body: {
+        getReader() {
+          let sent = false;
+          return {
+            read() {
+              if (sent) {
+                return Promise.resolve({ done: true, value: undefined });
+              }
+              sent = true;
+              return Promise.resolve({ done: false, value: body });
+            },
+            cancel() {},
+          };
+        },
+      },
+      headers: {
+        get(name) {
+          if (String(name).toLowerCase() === "content-length") {
+            return state.mediaContentLength === null ? null : String(state.mediaContentLength);
+          }
+          if (String(name).toLowerCase() === "content-type") {
+            return "application/octet-stream";
+          }
+          return null;
+        },
+      },
+    };
+  }
+
   async function fetchImpl(url, init) {
     state.fetchCalls.push({ url: String(url), init: init || {} });
     const href = String(url);
+    if (/\/api\/media\/[^/]+\/locations\/[^/]+\/(content|gallery-preview)(?:\?|$)/.test(href)) {
+      return mediaResponse();
+    }
+    if (href.indexOf("/api/x/companion/media") !== -1) {
+      return jsonResponse(
+        state.companionMediaStatus,
+        state.companionMediaBody || { companion_api_version: companion.API_VERSION, items: [] }
+      );
+    }
     if (href.indexOf("/api/identity/me") !== -1) {
       return jsonResponse(state.identityStatus, state.identityBody);
     }
@@ -251,6 +335,7 @@ function loadWorker(options) {
     setTimeout,
     clearTimeout,
     AbortController,
+    btoa: global.btoa || ((value) => Buffer.from(value, "binary").toString("base64")),
     URL,
     URLSearchParams,
     JSON,
@@ -2080,4 +2165,227 @@ test("review receipts render tag sources without replacing field receipts", () =
   assert.match(reviewSource, /getElementById\("receipts"\)/);
   assert.match(reviewSource, /tag_sources/);
   assert.doesNotMatch(reviewSource, /review-inbox-list/);
+});
+
+// ---------------------------------------------------------------------------
+// KSI-IMPL-C2 - identity compatibility window
+// ---------------------------------------------------------------------------
+
+function headerSpellings(init) {
+  const headers = (init && init.headers) || {};
+  return {
+    retired: headers["X-FrameNest-Request"],
+    current: headers["X-Kronika-Request"],
+  };
+}
+
+test("Class 1: every extension send site carries both mutation header spellings", async () => {
+  const fetchJsonWorker = loadWorker({ storage: { frameNestOrigin: ORIGIN } });
+  await fetchJsonWorker.context.handle({
+    v: companion.PROTOCOL,
+    type: companion.TYPES.IDENTITY,
+  });
+  const jsonCall = fetchJsonWorker.state.fetchCalls[fetchJsonWorker.state.fetchCalls.length - 1];
+  assert.deepEqual(headerSpellings(jsonCall.init), { retired: "1", current: "1" });
+
+  const previewWorker = loadWorker({ storage: { frameNestOrigin: ORIGIN } });
+  const preview = await previewWorker.context.handle({
+    v: companion.PROTOCOL,
+    type: companion.TYPES.PREVIEW_FETCH,
+    payload: {
+      mediaId: MEDIA_A,
+      locationId: MEDIA_B,
+    },
+  });
+  assert.equal(preview.ok, true);
+  const previewCall = previewWorker.state.fetchCalls[previewWorker.state.fetchCalls.length - 1];
+  assert.deepEqual(headerSpellings(previewCall.init), { retired: "1", current: "1" });
+
+  const attachWorker = loadWorker({ storage: { frameNestOrigin: ORIGIN } });
+  attachWorker.state.messageListeners[0](
+    { v: companion.PROTOCOL, type: companion.TYPES.IDENTITY },
+    { tab: { id: 7 }, origin: "https://x.com" },
+    () => {}
+  );
+  await attachWorker.context.transferAttach(attachWorker.state.connectedPorts[0], {
+    mediaId: MEDIA_A,
+    locationId: MEDIA_B,
+    filename: "attach.bin",
+  });
+  const attachCall = attachWorker.state.fetchCalls[attachWorker.state.fetchCalls.length - 1];
+  assert.deepEqual(headerSpellings(attachCall.init), { retired: "1", current: "1" });
+
+  assert.equal(
+    (workerSource.match(/"X-FrameNest-Request": "1"/g) || []).length,
+    1,
+    "the retired header spelling must exist only in the shared constant"
+  );
+  assert.equal(
+    (workerSource.match(/"X-Kronika-Request": "1"/g) || []).length,
+    1,
+    "the current header spelling must exist only in the shared constant"
+  );
+  assert.equal(
+    (workerSource.match(/MUTATION_REQUEST_HEADERS/g) || []).length,
+    4,
+    "the declaration plus the three send sites"
+  );
+});
+
+test("Class 2: the retired companion API version is accepted", async () => {
+  const worker = loadWorker({
+    storage: { frameNestOrigin: ORIGIN },
+    companionMediaBody: { companion_api_version: "framenest-companion.v1", items: [] },
+  });
+  const result = await worker.context.handle({
+    v: companion.PROTOCOL,
+    type: companion.TYPES.PICKER_QUERY,
+    payload: {},
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.page.companion_api_version, "framenest-companion.v1");
+});
+
+test("Class 2: the current companion API version is accepted", async () => {
+  const worker = loadWorker({
+    storage: { frameNestOrigin: ORIGIN },
+    companionMediaBody: { companion_api_version: "kronika-companion.v1", items: [] },
+  });
+  const result = await worker.context.handle({
+    v: companion.PROTOCOL,
+    type: companion.TYPES.PICKER_QUERY,
+    payload: {},
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.page.companion_api_version, "kronika-companion.v1");
+});
+
+test("Class 2: any other companion API version still disables the picker", async () => {
+  for (const version of ["framenest-companion.v2", "kronika-companion.v0", "", null, undefined, 7]) {
+    const worker = loadWorker({
+      storage: { frameNestOrigin: ORIGIN },
+      companionMediaBody: { companion_api_version: version, items: [] },
+    });
+    const result = await worker.context.handle({
+      v: companion.PROTOCOL,
+      type: companion.TYPES.PICKER_QUERY,
+      payload: {},
+    });
+    assert.equal(result.ok, false, String(version));
+    assert.equal(result.error, "version_skew", String(version));
+    assert.equal(result.disable, true, String(version));
+  }
+});
+
+test("Class 3: the internal protocol names carry the current spelling and no retired copy", () => {
+  assert.equal(companion.PROTOCOL, "kronika.companion.v1");
+  assert.equal(companion.REVIEW_OVERLAY.protocol, "kronika.companion.review.v1");
+  const bundle = [
+    workerSource,
+    sidebarSource,
+    reviewSource,
+    fs.readFileSync(path.join(REPO, "extension/content/x_adapter.js"), "utf8"),
+    fs.readFileSync(path.join(REPO, "extension/shared/messages.js"), "utf8"),
+    fs.readFileSync(path.join(REPO, "extension/ui/picker.js"), "utf8"),
+    fs.readFileSync(path.join(REPO, "extension/ui/save.js"), "utf8"),
+  ].join("\n");
+  assert.doesNotMatch(bundle, /"framenest\.companion\.v1"/);
+  assert.doesNotMatch(bundle, /"framenest\.companion\.review\.v1"/);
+  assert.match(messagesSource, /const PROTOCOL = "kronika\.companion\.v1";/);
+});
+
+test("Class 4: the origin key is read from the retired spelling only when the current one is absent", async () => {
+  const retiredOnly = loadWorker({ storage: { frameNestOrigin: ORIGIN } });
+  const identity = await retiredOnly.context.handle({
+    v: companion.PROTOCOL,
+    type: companion.TYPES.IDENTITY,
+  });
+  assert.equal(identity.ok, true);
+  assert.ok(
+    retiredOnly.state.fetchCalls.some((call) => call.url.indexOf(ORIGIN) === 0),
+    "a retired-only origin must still authorise a request"
+  );
+
+  const both = loadWorker({
+    storage: { frameNestOrigin: "https://retired.example.ts.net", kronikaOrigin: ORIGIN },
+  });
+  const preferred = await both.context.handle({
+    v: companion.PROTOCOL,
+    type: companion.TYPES.IDENTITY,
+  });
+  assert.equal(preferred.ok, true);
+  assert.ok(
+    both.state.fetchCalls.every((call) => call.url.indexOf("https://retired.example.ts.net") !== 0),
+    "the current spelling wins when both are present"
+  );
+});
+
+test("Class 4: configuring the origin writes the current key and leaves the retired key untouched", async () => {
+  const worker = loadWorker({ storage: { frameNestOrigin: "https://retired.example.ts.net" } });
+  const result = await worker.context.handle({
+    v: companion.PROTOCOL,
+    type: companion.TYPES.CONFIGURE_ORIGIN,
+    payload: { origin: ORIGIN },
+  });
+  assert.equal(result.ok, true);
+  assert.equal(worker.state.storage.kronikaOrigin, ORIGIN);
+  assert.equal(
+    worker.state.storage.frameNestOrigin,
+    "https://retired.example.ts.net",
+    "the retired entry must survive the write untouched"
+  );
+});
+
+test("Class 4: an explicit reset removes the retired origin and the retired alarm", async () => {
+  const worker = loadWorker({ storage: { frameNestOrigin: ORIGIN } });
+  assert.equal(worker.state.storage.kronikaOrigin, undefined);
+  await worker.context.handle({ v: companion.PROTOCOL, type: companion.TYPES.RESET });
+  assert.equal(worker.state.storage.frameNestOrigin, undefined);
+  assert.equal(worker.state.alarms["framenest.review-inbox"], undefined);
+});
+
+test("Class 4: the review-inbox alarm is created under the current name and the retired name still refreshes", async () => {
+  const worker = loadWorker({ storage: { frameNestOrigin: ORIGIN } });
+  await worker.context.ensureReviewInboxAlarm();
+  assert.equal(worker.state.alarms["kronika.review-inbox"].periodInMinutes, 1);
+  worker.state.alarms["framenest.review-inbox"] = {
+    name: "framenest.review-inbox",
+    periodInMinutes: 1,
+  };
+  const before = worker.state.fetchCalls.length;
+  worker.state.alarmListeners[0]({ name: "framenest.review-inbox" });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.ok(
+    worker.state.fetchCalls.length > before,
+    "the retired alarm name must still drive the badge refresh"
+  );
+});
+
+test("Order independence: both spellings are authorised by the pre-C1 gate and by the C1 gate", () => {
+  // Modelled from tailscale_ingress: the pre-C1 gate compares only its own
+  // spelling and ignores any other header; the C1 gate accepts either spelling
+  // and requires both to be 1 when both are present.
+  function preC1Gate(headers) {
+    const names = Object.keys(headers).map((name) => name.toLowerCase());
+    return !names.includes("x-kronika-request") || headers["X-Kronika-Request"] === "1";
+  }
+  function c1Gate(headers) {
+    const present = ["X-FrameNest-Request", "X-Kronika-Request"].filter(
+      (name) => Object.prototype.hasOwnProperty.call(headers, name)
+    );
+    if (!present.length) {
+      return false;
+    }
+    return present.every((name) => headers[name] === "1");
+  }
+
+  const sent = { "X-FrameNest-Request": "1", "X-Kronika-Request": "1", Accept: "application/json" };
+  assert.equal(preC1Gate(sent), true, "the pre-C1 gate must still authorise the request");
+  assert.equal(c1Gate(sent), true, "the C1 gate must authorise the request");
+  assert.equal(c1Gate({ "X-Kronika-Request": "1" }), true, "a C1-era sender stays authorised");
+  assert.equal(
+    preC1Gate({ "X-FrameNest-Request": "1" }),
+    true,
+    "the pre-cut extension stays authorised against the pre-C1 gate"
+  );
 });

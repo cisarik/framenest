@@ -5,8 +5,13 @@
   }
   root.FrameNestCompanion = api;
 })(typeof globalThis !== "undefined" ? globalThis : this, function () {
-  const PROTOCOL = "framenest.companion.v1";
-  const API_VERSION = "framenest-companion.v1";
+  const PROTOCOL = "kronika.companion.v1";
+  // The server keeps emitting the retired spelling until a later cut moves
+  // COMPANION_API_VERSION, so both spellings are accepted and only a value that
+  // is neither one still counts as version skew.
+  const API_VERSION = "kronika-companion.v1";
+  const RETIRED_API_VERSION = "framenest-companion.v1";
+  const ACCEPTED_API_VERSIONS = Object.freeze([API_VERSION, RETIRED_API_VERSION]);
   const MAX_ATTACH_BYTES = 32 * 1024 * 1024;
   const FETCH_TIMEOUT_MS = 60 * 1000;
   const CHUNK_BYTES = 24 * 1024;
@@ -46,7 +51,7 @@
   const REVIEW_APPLY_FIELDS = Object.freeze(["display_title", "tags", "description"]);
   const TAG_KEY_PATTERN = /^[a-z][a-z0-9-]{0,63}$/;
   const REVIEW_OVERLAY = Object.freeze({
-    protocol: "framenest.companion.review.v1",
+    protocol: "kronika.companion.review.v1",
     types: Object.freeze({
       CLOSE: "close",
       FORBIDDEN: "forbidden",
@@ -54,7 +59,8 @@
     }),
   });
   const REVIEW_INBOX = Object.freeze({
-    alarmName: "framenest.review-inbox",
+    alarmName: "kronika.review-inbox",
+    retiredAlarmName: "framenest.review-inbox",
     explicitCollapsedKey: "reviewInboxExplicitCollapsed",
     seenRunIdKey: "reviewInboxSeenRunId",
     awaitingKey: "reviewInboxAwaitingAnalysis",
@@ -66,6 +72,55 @@
     badgeLimit: 1,
     maxLimit: 100,
   });
+
+  // Persisted browser identifiers keep the retired spelling readable until the
+  // removal cut. A reader takes the current name when it is present and the
+  // retired name only when the current one is absent; a writer writes the
+  // current name and never touches the retired one. Nothing here ever deletes a
+  // retired entry, so an upgrade cannot lose state that predates it.
+  const STORAGE = Object.freeze({
+    origin: Object.freeze({
+      name: "kronikaOrigin",
+      retiredName: "frameNestOrigin",
+    }),
+  });
+
+  function storageKeyRequest(entry) {
+    return entry.retiredName ? [entry.name, entry.retiredName] : [entry.name];
+  }
+
+  // `chrome.storage.local.get` omits absent keys, so an absent current name
+  // reads as `undefined` here whether the backing store omits the key or returns
+  // it with an undefined value.
+  function storageValue(stored, entry) {
+    if (!stored || typeof stored !== "object") {
+      return undefined;
+    }
+    if (stored[entry.name] !== undefined) {
+      return stored[entry.name];
+    }
+    if (entry.retiredName && stored[entry.retiredName] !== undefined) {
+      return stored[entry.retiredName];
+    }
+    return undefined;
+  }
+
+  function storageChangeFor(changes, entry) {
+    if (!changes || typeof changes !== "object") {
+      return null;
+    }
+    if (Object.prototype.hasOwnProperty.call(changes, entry.name)) {
+      return changes[entry.name];
+    }
+    if (entry.retiredName && Object.prototype.hasOwnProperty.call(changes, entry.retiredName)) {
+      return changes[entry.retiredName];
+    }
+    return null;
+  }
+
+  function acceptCompanionApiVersion(value) {
+    return ACCEPTED_API_VERSIONS.indexOf(value) !== -1;
+  }
 
   function isProtocolMessage(value) {
     return Boolean(
@@ -641,6 +696,9 @@
   return {
     PROTOCOL,
     API_VERSION,
+    RETIRED_API_VERSION,
+    ACCEPTED_API_VERSIONS,
+    acceptCompanionApiVersion,
     MAX_ATTACH_BYTES,
     FETCH_TIMEOUT_MS,
     CHUNK_BYTES,
@@ -651,6 +709,10 @@
     REVIEW_INBOX,
     REVIEW_OVERLAY,
     REVIEW_APPLY_FIELDS,
+    STORAGE,
+    storageKeyRequest,
+    storageValue,
+    storageChangeFor,
     isProtocolMessage,
     dropUnknown,
     isUuid,

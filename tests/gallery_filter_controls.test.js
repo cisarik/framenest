@@ -488,3 +488,42 @@ test("Quick-filter layout and active styles are FrameNest-owned rather than nati
   assert.match(tagActiveBlock, /var\(--accent-strong\)/);
   assert.match(tagActiveBlock, /rgba\(0, 255, 65, 0\.22\)/);
 });
+
+test("Class 4: the catalog page-size key reads the retired spelling only when the current one is absent", () => {
+  const storage = new Map();
+  const context = { window: { localStorage: null }, JSON, Number, console };
+  vm.createContext(context);
+  vm.runInContext(`
+    const CATALOG_PAGE_SIZE_STORAGE_KEY = "framenest.catalog.pageSize";
+    const KRONIKA_CATALOG_PAGE_SIZE_STORAGE_KEY = "kronika.catalog.pageSize";
+    const CATALOG_PAGE_SIZE_OPTIONS = [10, 30, 60, 90];
+    const CATALOG_PAGE_SIZE = 30;
+    ${productionFunction("readMigratedStorageItem")}
+    ${productionFunction("restoredCatalogPageSize")}
+  `, context, { filename: APP_PATH });
+  context.window.localStorage = {
+    getItem(key) {
+      return storage.has(key) ? storage.get(key) : null;
+    },
+    setItem(key, value) {
+      storage.set(key, String(value));
+    },
+    removeItem(key) {
+      storage.delete(key);
+    },
+  };
+
+  assert.equal(context.restoredCatalogPageSize(), 30, "no stored value keeps the default");
+
+  storage.set("framenest.catalog.pageSize", "60");
+  assert.equal(context.restoredCatalogPageSize(), 60, "retired only");
+
+  storage.set("kronika.catalog.pageSize", "90");
+  assert.equal(context.restoredCatalogPageSize(), 90, "both present: the current key wins");
+
+  storage.set("framenest.catalog.pageSize", "10");
+  assert.equal(context.restoredCatalogPageSize(), 90, "the current key still wins");
+
+  storage.set("kronika.catalog.pageSize", "7");
+  assert.equal(context.restoredCatalogPageSize(), 30, "an unusable current value is not silently replaced");
+});

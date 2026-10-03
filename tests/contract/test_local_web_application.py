@@ -2759,8 +2759,14 @@ def test_javascript_upload_uses_capability_registry_and_no_file_byte_persistence
     assert 'const UPLOADS_ENDPOINT = "/api/uploads";' in script
     assert 'const UPLOAD_CAPABILITY_ENDPOINT = "/api/uploads/capability";' in script
     assert "framenest.upload.recovery.v1" in script
-    assert "window.localStorage.setItem(UPLOAD_RECOVERY_STORAGE_KEY" in upload_block
-    assert "window.localStorage.getItem(UPLOAD_RECOVERY_STORAGE_KEY" in upload_block
+    assert (
+        "window.localStorage.setItem(KRONIKA_UPLOAD_RECOVERY_STORAGE_KEY" in upload_block
+    )
+    assert "readMigratedStorageItem(" in upload_block
+    assert "KRONIKA_UPLOAD_RECOVERY_STORAGE_KEY," in upload_block
+    assert "UPLOAD_RECOVERY_STORAGE_KEY," in upload_block
+    assert "window.localStorage.setItem(UPLOAD_RECOVERY_STORAGE_KEY," not in upload_block
+    assert "window.localStorage.getItem(UPLOAD_RECOVERY_STORAGE_KEY" not in upload_block
     for recovery_field in (
         "upload_id",
         "file_name_hint",
@@ -2893,3 +2899,65 @@ def test_kronika_shell_adds_timeline_without_replacing_gallery(client: TestClien
     assert "openDetailsDialog({ media_id: mediaId }, detailsCloseButton)" in script
     assert "default-src 'none'; style-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none'" in script
     assert "kronikaStartNavigation" in script
+
+
+# ---------------------------------------------------------------------------
+# KSI-IMPL-C2 - served web shell identity compatibility
+# ---------------------------------------------------------------------------
+
+
+def test_served_shell_sends_both_mutation_header_spellings(client: TestClient) -> None:
+    script = client.get("/assets/app.js").text
+    helper = _javascript_function(script, "framenestMutationHeaders")
+
+    assert script.count('"X-FrameNest-Request"') == 1, "the retired spelling stays single"
+    assert script.count('"X-Kronika-Request"') == 1, "the current spelling is single too"
+    assert 'merged["X-Kronika-Request"] = "1";' in helper
+    assert 'Object.assign({ "X-FrameNest-Request": "1" }, headers)' in helper
+    assert helper.index("Object.assign") < helper.index('merged["X-Kronika-Request"]'), (
+        "the current spelling is applied after the merge so a caller cannot weaken the gate"
+    )
+    wrapped = script.count("headers: framenestMutationHeaders(")
+    unsafe = len(re.findall(r'method: "(?:POST|PUT|PATCH|DELETE)"', script))
+    assert unsafe > 0
+    assert wrapped == unsafe, "every unsafe fetch call site still uses the shared helper"
+
+
+def test_served_shell_persisted_keys_read_the_retired_spelling_and_write_the_current_one(
+    client: TestClient,
+) -> None:
+    script = client.get("/assets/app.js").text
+
+    for retired, current in (
+        ("framenest.youtube.currentClaim.v1", "kronika.youtube.currentClaim.v1"),
+        ("framenest.catalog.pageSize", "kronika.catalog.pageSize"),
+        ("framenest.upload.recovery.v1", "kronika.upload.recovery.v1"),
+    ):
+        assert retired in script, retired
+        assert current in script, current
+
+    assert 'const KRONIKA_YOUTUBE_CLAIM_RECOVERY_STORAGE_KEY = "kronika.youtube.currentClaim.v1";' in script
+    assert 'const KRONIKA_CATALOG_PAGE_SIZE_STORAGE_KEY = "kronika.catalog.pageSize";' in script
+    assert 'const KRONIKA_UPLOAD_RECOVERY_STORAGE_KEY = "kronika.upload.recovery.v1";' in script
+
+    reader = _javascript_function(script, "readMigratedStorageItem")
+    assert "storage.getItem(currentKey)" in reader
+    assert reader.index("currentKey") < reader.index("return storage.getItem(retiredKey);")
+    assert reader.count("getItem") == 2, "exactly one read per spelling"
+
+    clearer = _javascript_function(script, "clearMigratedStorageItem")
+    assert "storage.removeItem(currentKey);" in clearer
+    assert "storage.removeItem(retiredKey);" in clearer
+
+    writes = re.findall(r"\.setItem\((\w+),", script)
+    assert "KRONIKA_UPLOAD_RECOVERY_STORAGE_KEY" in writes
+    assert "KRONIKA_CATALOG_PAGE_SIZE_STORAGE_KEY" in writes
+    assert "KRONIKA_YOUTUBE_CLAIM_RECOVERY_STORAGE_KEY" in writes
+    for retired_constant in (
+        "UPLOAD_RECOVERY_STORAGE_KEY",
+        "CATALOG_PAGE_SIZE_STORAGE_KEY",
+        "YOUTUBE_CLAIM_RECOVERY_STORAGE_KEY",
+    ):
+        assert retired_constant not in writes, (
+            f"{retired_constant} must never be a write target again"
+        )

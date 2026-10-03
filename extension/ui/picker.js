@@ -322,17 +322,21 @@
   previewPrev.addEventListener("click", () => moveSelection(-1));
   previewNext.addEventListener("click", () => moveSelection(1));
   attachSelected.addEventListener("click", () => attachCurrent());
-  chrome.storage.local.get("frameNestOrigin", (stored) => {
-    const origin = stored.frameNestOrigin || "";
+  chrome.storage.local.get(companion.storageKeyRequest(companion.STORAGE.origin), (stored) => {
+    const origin = companion.storageValue(stored, companion.STORAGE.origin) || "";
     if (applyOrigin(origin)) {
       void refresh();
     }
   });
   chrome.storage.onChanged.addListener((changes, areaName) => {
-    if (areaName !== "local" || !changes.frameNestOrigin) {
+    if (areaName !== "local") {
       return;
     }
-    const origin = changes.frameNestOrigin.newValue || "";
+    const change = companion.storageChangeFor(changes, companion.STORAGE.origin);
+    if (!change) {
+      return;
+    }
+    const origin = change.newValue || "";
     if (applyOrigin(origin)) {
       void refresh();
     }

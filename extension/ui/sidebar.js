@@ -1057,9 +1057,9 @@
   frame.addEventListener("error", onFrameError);
   window.addEventListener("message", onWindowMessage);
   chrome.storage.local.get(
-    ["frameNestOrigin"],
+    companion.storageKeyRequest(companion.STORAGE.origin),
     (stored) => {
-      const origin = stored.frameNestOrigin || "";
+      const origin = companion.storageValue(stored, companion.STORAGE.origin) || "";
       if (companion.acceptFrameNestOrigin(origin)) {
         storedOrigin = origin;
         originInput.value = origin;

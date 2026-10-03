@@ -18,6 +18,7 @@ const STYLES_SOURCE = fs.readFileSync(
 );
 
 const RECOVERY_KEY = "framenest.youtube.currentClaim.v1";
+const RECOVERY_KEY_CURRENT = "kronika.youtube.currentClaim.v1";
 const VIDEO_ID = "AbCdEf123_-";
 const CREATE_CONFIRMATION_MESSAGE = "FrameNest will start the acquisition in the background. Closing the cockpit will not cancel it. Acquired media remains unpublished until it is reviewed and published in Manage media.";
 
@@ -628,7 +629,10 @@ test("claim recovery stores only the opaque claim ID in session storage", () => 
   const storage = new Map();
   const context = evaluate(
     [
-      "const YOUTUBE_CLAIM_RECOVERY_STORAGE_KEY = \"framenest.youtube.currentClaim.v1\";",
+      `const YOUTUBE_CLAIM_RECOVERY_STORAGE_KEY = "${RECOVERY_KEY}";`,
+      `const KRONIKA_YOUTUBE_CLAIM_RECOVERY_STORAGE_KEY = "${RECOVERY_KEY_CURRENT}";`,
+      extractFunction(APP_SOURCE, "readMigratedStorageItem"),
+      extractFunction(APP_SOURCE, "clearMigratedStorageItem"),
       "let youtubeClaimState = { claimId: \"claim-opaque-1\", message: \"\" };",
       extractFunction(APP_SOURCE, "youtubeClaimStorage"),
       extractFunction(APP_SOURCE, "saveYouTubeClaimRecovery"),
@@ -651,12 +655,86 @@ test("claim recovery stores only the opaque claim ID in session storage", () => 
     },
   };
   vm.runInContext("saveYouTubeClaimRecovery()", context);
-  assert.equal(storage.get(RECOVERY_KEY), "claim-opaque-1");
-  assert.equal(storage.get(RECOVERY_KEY).includes("youtube.com"), false);
+  assert.equal(storage.get(RECOVERY_KEY_CURRENT), "claim-opaque-1");
+  assert.equal(storage.get(RECOVERY_KEY_CURRENT).includes("youtube.com"), false);
   assert.equal(vm.runInContext("loadYouTubeClaimRecovery()", context), "claim-opaque-1");
   vm.runInContext("clearYouTubeClaimRecovery()", context);
-  assert.equal(storage.has(RECOVERY_KEY), false);
+  assert.equal(storage.has(RECOVERY_KEY_CURRENT), false);
 });
+
+test("claim recovery reads the retired session key only when the current key is absent", () => {
+  const storage = new Map();
+  const context = claimRecoveryContext(storage);
+
+  storage.set(RECOVERY_KEY, "claim-retired-only");
+  assert.equal(context.run("loadYouTubeClaimRecovery()"), "claim-retired-only");
+
+  storage.set(RECOVERY_KEY_CURRENT, "claim-current-only");
+  assert.equal(context.run("loadYouTubeClaimRecovery()"), "claim-current-only");
+
+  storage.set(RECOVERY_KEY, "claim-retired-only");
+  assert.equal(context.run("loadYouTubeClaimRecovery()"), "claim-current-only");
+
+  context.run('saveYouTubeClaimRecovery("claim-written")');
+  assert.equal(storage.get(RECOVERY_KEY_CURRENT), "claim-written");
+  assert.equal(storage.get(RECOVERY_KEY), "claim-retired-only");
+});
+
+test("claim recovery write creates the current key and leaves a retired-only key untouched", () => {
+  const storage = new Map();
+  const context = claimRecoveryContext(storage);
+
+  storage.set(RECOVERY_KEY, "claim-retired-only");
+  context.run('saveYouTubeClaimRecovery("claim-written")');
+  assert.equal(storage.get(RECOVERY_KEY_CURRENT), "claim-written");
+  assert.equal(storage.get(RECOVERY_KEY), "claim-retired-only");
+});
+
+test("claim recovery consume removes both spellings so the fallback cannot resurrect the claim", () => {
+  const storage = new Map();
+  const context = claimRecoveryContext(storage);
+
+  storage.set(RECOVERY_KEY, "claim-retired-only");
+  context.run("clearYouTubeClaimRecovery()");
+  assert.equal(storage.has(RECOVERY_KEY), false);
+  assert.equal(storage.has(RECOVERY_KEY_CURRENT), false);
+  assert.equal(context.run("loadYouTubeClaimRecovery()"), null);
+});
+
+function claimRecoveryContext(storage) {
+  const context = evaluate(
+    [
+      `const YOUTUBE_CLAIM_RECOVERY_STORAGE_KEY = "${RECOVERY_KEY}";`,
+      `const KRONIKA_YOUTUBE_CLAIM_RECOVERY_STORAGE_KEY = "${RECOVERY_KEY_CURRENT}";`,
+      extractFunction(APP_SOURCE, "readMigratedStorageItem"),
+      extractFunction(APP_SOURCE, "clearMigratedStorageItem"),
+      "let youtubeClaimState = { claimId: \"claim-opaque-1\", message: \"\" };",
+      extractFunction(APP_SOURCE, "youtubeClaimStorage"),
+      extractFunction(APP_SOURCE, "saveYouTubeClaimRecovery"),
+      extractFunction(APP_SOURCE, "clearYouTubeClaimRecovery"),
+      extractFunction(APP_SOURCE, "loadYouTubeClaimRecovery"),
+    ].join("\n"),
+    "",
+  );
+  context.window = {
+    sessionStorage: {
+      setItem(key, value) {
+        storage.set(key, String(value));
+      },
+      getItem(key) {
+        return storage.has(key) ? storage.get(key) : null;
+      },
+      removeItem(key) {
+        storage.delete(key);
+      },
+    },
+  };
+  return {
+    run(code) {
+      return vm.runInContext(code, context);
+    },
+  };
+}
 
 test("claim lifecycle uses the Phase A endpoints and interactive confirmation", () => {
   assert.match(APP_SOURCE, /const YOUTUBE_CLAIMS_ENDPOINT = "\/api\/admin\/youtube\/claims";/);

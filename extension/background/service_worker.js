@@ -3,8 +3,17 @@ importScripts(chrome.runtime.getURL("shared/messages.js"));
 
 const companion = self.FrameNestCompanion;
 let boundTabId = null;
+// The mutation gate is the one server contract this extension depends on. Both
+// spellings are sent on every request so that the extension keeps working
+// against a server that predates the dual-read cut as well as one that has it:
+// a server compares only the spelling it knows and ignores the extra header.
+const MUTATION_REQUEST_HEADERS = Object.freeze({
+  "X-FrameNest-Request": "1",
+  "X-Kronika-Request": "1",
+});
 const STORAGE_KEYS = Object.freeze({
-  origin: "frameNestOrigin",
+  origin: companion.STORAGE.origin.name,
+  retiredOrigin: companion.STORAGE.origin.retiredName,
   inflight: "inflightClaims",
   acknowledged: "adapterAcknowledged",
   explicitCollapsed: companion.REVIEW_INBOX.explicitCollapsedKey,
@@ -12,6 +21,8 @@ const STORAGE_KEYS = Object.freeze({
   awaiting: companion.REVIEW_INBOX.awaitingKey,
 });
 const REVIEW_INBOX_ALARM = companion.REVIEW_INBOX.alarmName;
+const RETIRED_REVIEW_INBOX_ALARM = companion.REVIEW_INBOX.retiredAlarmName;
+const REVIEW_INBOX_ALARMS = Object.freeze([REVIEW_INBOX_ALARM, RETIRED_REVIEW_INBOX_ALARM]);
 const SUCCESSFUL_CLAIM_STATES = Object.freeze({
   completed: true,
   completed_partial: true,
@@ -55,7 +66,7 @@ chrome.runtime.onStartup.addListener(() => {
 });
 if (chrome.alarms && chrome.alarms.onAlarm) {
   chrome.alarms.onAlarm.addListener((alarm) => {
-    if (!alarm || alarm.name !== REVIEW_INBOX_ALARM) {
+    if (!alarm || REVIEW_INBOX_ALARMS.indexOf(alarm.name) === -1) {
       return;
     }
     void refreshReviewInboxBadge();
@@ -166,8 +177,10 @@ async function configureOrigin(payload) {
 }
 
 async function resetState() {
-  const stored = await chrome.storage.local.get(STORAGE_KEYS.origin);
-  const origin = stored[STORAGE_KEYS.origin];
+  const stored = await chrome.storage.local.get(
+    companion.storageKeyRequest(companion.STORAGE.origin)
+  );
+  const origin = companion.storageValue(stored, companion.STORAGE.origin);
   if (origin) {
     try {
       await chrome.permissions.remove({ origins: [origin + "/*"] });
@@ -175,6 +188,10 @@ async function resetState() {
       /* optional */
     }
   }
+  // An explicit reset is the one place a retired spelling is removed, and it has
+  // to remove both. STORAGE_KEYS carries the retired origin name, so removing its
+  // values covers both spellings; leaving the retired origin behind would let the
+  // fallback read re-configure a companion the operator just disconnected.
   await chrome.storage.local.remove(Object.values(STORAGE_KEYS));
   await clearReviewInboxAlarmAndBadge();
   return { ok: true };
@@ -280,7 +297,7 @@ async function pickerQuery(payload) {
   if (!response.ok) {
     return response;
   }
-  if (response.body.companion_api_version !== companion.API_VERSION) {
+  if (!companion.acceptCompanionApiVersion(response.body.companion_api_version)) {
     return { ok: false, error: "version_skew", disable: true };
   }
   return { ok: true, page: response.body };
@@ -404,8 +421,10 @@ async function dropInflight(claimId) {
 }
 
 async function configuredOrigin() {
-  const stored = await chrome.storage.local.get(STORAGE_KEYS.origin);
-  const origin = stored[STORAGE_KEYS.origin];
+  const stored = await chrome.storage.local.get(
+    companion.storageKeyRequest(companion.STORAGE.origin)
+  );
+  const origin = companion.storageValue(stored, companion.STORAGE.origin);
   if (!companion.acceptFrameNestOrigin(origin)) {
     return null;
   }
@@ -451,10 +470,12 @@ async function clearBadgeText() {
 
 async function clearReviewInboxAlarmAndBadge() {
   if (chrome.alarms && typeof chrome.alarms.clear === "function") {
-    try {
-      await Promise.resolve(chrome.alarms.clear(REVIEW_INBOX_ALARM));
-    } catch {
-      /* alarm may already be absent */
+    for (const name of REVIEW_INBOX_ALARMS) {
+      try {
+        await Promise.resolve(chrome.alarms.clear(name));
+      } catch {
+        /* alarm may already be absent */
+      }
     }
   }
   await clearBadgeText();
@@ -759,7 +780,7 @@ async function previewFetch(payload) {
   try {
     const response = await fetch(origin + path, {
       method: "GET",
-      headers: { "X-FrameNest-Request": "1" },
+      headers: Object.assign({}, MUTATION_REQUEST_HEADERS),
       signal: controller.signal,
     });
     if (!response.ok) {
@@ -801,7 +822,7 @@ async function fetchJson(pathName, options) {
   }
   const method = (options && options.method) || "GET";
   const suffix = (options && options.suffix) || "";
-  const headers = { "X-FrameNest-Request": "1" };
+  const headers = Object.assign({}, MUTATION_REQUEST_HEADERS);
   const init = { method, headers };
   if (options && options.body) {
     headers["Content-Type"] = "application/json";
@@ -929,7 +950,7 @@ async function transferAttach(port, payload) {
   try {
     const response = await fetch(origin + path, {
       method: "GET",
-      headers: { "X-FrameNest-Request": "1" },
+      headers: Object.assign({}, MUTATION_REQUEST_HEADERS),
       signal: controller.signal,
     });
     const lengthHeader = response.headers.get("content-length");

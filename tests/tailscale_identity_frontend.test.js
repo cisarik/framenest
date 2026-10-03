@@ -304,6 +304,81 @@ test("mutation helper always injects the FrameNest mutation header", () => {
   assert.equal(merged["Upload-Offset"], "7");
 });
 
+test("Class 1: the web shell mutation helper injects both header spellings", () => {
+  const context = createIdentityHarness(async () => response({}, 404));
+  const merged = vm.runInContext(
+    'framenestMutationHeaders({ Accept: "application/json", "Upload-Offset": "7" })',
+    context,
+  );
+  assert.equal(merged["X-FrameNest-Request"], "1");
+  assert.equal(merged["X-Kronika-Request"], "1");
+  assert.equal(merged.Accept, "application/json");
+  assert.equal(merged["Upload-Offset"], "7");
+
+  const hostile = vm.runInContext(
+    'framenestMutationHeaders({ "X-Kronika-Request": "0", "X-FrameNest-Request": "0" })',
+    context,
+  );
+  assert.equal(
+    hostile["X-FrameNest-Request"],
+    "0",
+    "a caller may still override the retired spelling, as before this cut"
+  );
+  assert.equal(
+    hostile["X-Kronika-Request"],
+    "1",
+    "the current spelling is applied after the merge so a caller cannot weaken the gate"
+  );
+
+  const bare = vm.runInContext("framenestMutationHeaders()", context);
+  assert.equal(bare["X-FrameNest-Request"], "1");
+  assert.equal(bare["X-Kronika-Request"], "1");
+
+  assert.ok(
+    APP_SOURCE.includes('Object.assign({ "X-FrameNest-Request": "1" }, headers)'),
+    "the retired spelling stays pinned in the shared helper"
+  );
+  assert.equal((APP_SOURCE.match(/"X-FrameNest-Request"/g) || []).length, 1);
+  assert.equal((APP_SOURCE.match(/X-Kronika-Request/g) || []).length, 1);
+});
+
+test("Order independence: the shell request is authorised by the pre-C1 gate and by the C1 gate", () => {
+  const context = createIdentityHarness(async () => response({}, 404));
+  const sent = vm.runInContext(
+    'framenestMutationHeaders({ Accept: "application/json" })',
+    context,
+  );
+
+  // Modelled from tailscale_ingress before the dual-read cut: only its own
+  // spelling is compared and an unknown header is ignored.
+  function preC1Gate(headers) {
+    const names = Object.keys(headers).map((name) => name.toLowerCase());
+    return !names.includes("x-kronika-request") || headers["X-Kronika-Request"] === "1";
+  }
+
+  // Modelled from tailscale_ingress after the dual-read cut: either spelling
+  // authorises, and both must be 1 when both are present.
+  function c1Gate(headers) {
+    const present = ["X-FrameNest-Request", "X-Kronika-Request"].filter(
+      (name) => Object.prototype.hasOwnProperty.call(headers, name),
+    );
+    if (!present.length) {
+      return false;
+    }
+    return present.every((name) => headers[name] === "1");
+  }
+
+  assert.equal(preC1Gate(sent), true, "a pre-C1 server still authorises this shell");
+  assert.equal(c1Gate(sent), true, "a C1 server authorises this shell");
+  assert.equal(
+    preC1Gate({ "X-FrameNest-Request": "1" }),
+    true,
+    "the pre-cut shell stays authorised against a pre-C1 server"
+  );
+  assert.equal(c1Gate({ "X-FrameNest-Request": "1" }), true, "the pre-cut shell stays authorised against C1");
+  assert.equal(c1Gate(sent), preC1Gate(sent), "the two gates agree on this shell");
+});
+
 test("every unsafe fetch call site sends the mutation header", () => {
   const mutationSites = APP_SOURCE.match(/method: "(?:POST|PUT|PATCH|DELETE)"/g) || [];
   const wrappedSites = APP_SOURCE.match(/headers: framenestMutationHeaders\(/g) || [];

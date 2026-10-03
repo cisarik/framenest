@@ -21,6 +21,14 @@ const YOUTUBE_CLAIM_RECOVERY_STORAGE_KEY = "framenest.youtube.currentClaim.v1";
 const CATALOG_PAGE_SIZE_OPTIONS = [10, 30, 60, 90];
 const CATALOG_PAGE_SIZE_STORAGE_KEY = "framenest.catalog.pageSize";
 const UPLOAD_RECOVERY_STORAGE_KEY = "framenest.upload.recovery.v1";
+// Persisted browser keys read the retired spelling only when the current name is
+// absent, are written only under the current name, and never rewrite or migrate
+// the retired entry away. The explicit consume paths are the one exception and
+// remove both spellings, because a consumed retired entry left behind would be
+// resurrected by the fallback read on the next load.
+const KRONIKA_YOUTUBE_CLAIM_RECOVERY_STORAGE_KEY = "kronika.youtube.currentClaim.v1";
+const KRONIKA_CATALOG_PAGE_SIZE_STORAGE_KEY = "kronika.catalog.pageSize";
+const KRONIKA_UPLOAD_RECOVERY_STORAGE_KEY = "kronika.upload.recovery.v1";
 const CATALOG_PAGE_SIZE = 30;
 const ADMIN_MEDIA_PAGE_SIZE = 24;
 const WORKSPACE_MEDIA_PAGE_SIZE = 24;
@@ -412,8 +420,28 @@ function applyAudienceDocument(audience) {
   }
 }
 
+function readMigratedStorageItem(storage, currentKey, retiredKey) {
+  const current = storage.getItem(currentKey);
+  if (current !== null && current !== undefined) {
+    return current;
+  }
+  return storage.getItem(retiredKey);
+}
+
+function clearMigratedStorageItem(storage, currentKey, retiredKey) {
+  storage.removeItem(currentKey);
+  storage.removeItem(retiredKey);
+}
+
 function framenestMutationHeaders(headers) {
-  return Object.assign({ "X-FrameNest-Request": "1" }, headers);
+  const merged = Object.assign({ "X-FrameNest-Request": "1" }, headers);
+  // The mutation gate is the one server contract this shell depends on. Both
+  // spellings are sent on every request so the shell keeps working against a
+  // server that predates the dual-read cut as well as one that has it: a server
+  // compares only the spelling it knows and ignores the extra header. The gate
+  // value is applied after the merge so a caller cannot weaken it.
+  merged["X-Kronika-Request"] = "1";
+  return merged;
 }
 
 async function loadIdentity() {
@@ -600,7 +628,9 @@ function renderIdentityBadge() {
 
 function restoredCatalogPageSize() {
   try {
-    const stored = Number(window.localStorage.getItem(CATALOG_PAGE_SIZE_STORAGE_KEY));
+    const stored = Number(
+      readMigratedStorageItem(window.localStorage, KRONIKA_CATALOG_PAGE_SIZE_STORAGE_KEY, CATALOG_PAGE_SIZE_STORAGE_KEY),
+    );
     if (CATALOG_PAGE_SIZE_OPTIONS.includes(stored)) {
       return stored;
     }
@@ -1109,7 +1139,7 @@ function saveYouTubeClaimRecovery(claimId = youtubeClaimState.claimId) {
   if (typeof claimId !== "string" || !claimId) return;
   try {
     const storage = youtubeClaimStorage();
-    if (storage) storage.setItem(YOUTUBE_CLAIM_RECOVERY_STORAGE_KEY, claimId);
+    if (storage) storage.setItem(KRONIKA_YOUTUBE_CLAIM_RECOVERY_STORAGE_KEY, claimId);
   } catch {
     youtubeClaimState.message = "Claim recovery could not be saved in this browser.";
   }
@@ -1118,7 +1148,7 @@ function saveYouTubeClaimRecovery(claimId = youtubeClaimState.claimId) {
 function clearYouTubeClaimRecovery() {
   try {
     const storage = youtubeClaimStorage();
-    if (storage) storage.removeItem(YOUTUBE_CLAIM_RECOVERY_STORAGE_KEY);
+    if (storage) clearMigratedStorageItem(storage, KRONIKA_YOUTUBE_CLAIM_RECOVERY_STORAGE_KEY, YOUTUBE_CLAIM_RECOVERY_STORAGE_KEY);
   } catch {
     // The in-memory claim remains authoritative for this browser view.
   }
@@ -1127,7 +1157,9 @@ function clearYouTubeClaimRecovery() {
 function loadYouTubeClaimRecovery() {
   try {
     const storage = youtubeClaimStorage();
-    const claimId = storage ? storage.getItem(YOUTUBE_CLAIM_RECOVERY_STORAGE_KEY) : null;
+    const claimId = storage
+      ? readMigratedStorageItem(storage, KRONIKA_YOUTUBE_CLAIM_RECOVERY_STORAGE_KEY, YOUTUBE_CLAIM_RECOVERY_STORAGE_KEY)
+      : null;
     if (
       typeof claimId !== "string"
       || !claimId
@@ -2705,7 +2737,7 @@ function uploadContextStillCurrent(context, { allowMissingUploadId = false } = {
 
 function clearUploadRecovery() {
   try {
-    window.localStorage.removeItem(UPLOAD_RECOVERY_STORAGE_KEY);
+    clearMigratedStorageItem(window.localStorage, KRONIKA_UPLOAD_RECOVERY_STORAGE_KEY, UPLOAD_RECOVERY_STORAGE_KEY);
   } catch {
     // The in-memory upload state remains authoritative for this browser view.
   }
@@ -3036,7 +3068,7 @@ function saveUploadRecovery(snapshot = activeUploadSnapshot()) {
     last_known_state: snapshot.state,
   };
   try {
-    window.localStorage.setItem(UPLOAD_RECOVERY_STORAGE_KEY, JSON.stringify(recovery));
+    window.localStorage.setItem(KRONIKA_UPLOAD_RECOVERY_STORAGE_KEY, JSON.stringify(recovery));
   } catch {
     uploadState.message = "Upload recovery could not be saved in this browser.";
   }
@@ -3044,7 +3076,11 @@ function saveUploadRecovery(snapshot = activeUploadSnapshot()) {
 
 function loadUploadRecovery() {
   try {
-    const raw = window.localStorage.getItem(UPLOAD_RECOVERY_STORAGE_KEY);
+    const raw = readMigratedStorageItem(
+      window.localStorage,
+      KRONIKA_UPLOAD_RECOVERY_STORAGE_KEY,
+      UPLOAD_RECOVERY_STORAGE_KEY,
+    );
     if (!raw) return null;
     if (raw.length > 4096) {
       clearUploadRecovery();
@@ -10045,7 +10081,7 @@ if (catalogPageSizeSelect) {
     catalogState.offset = 0;
     syncCatalogPageSizeControl();
     try {
-      window.localStorage.setItem(CATALOG_PAGE_SIZE_STORAGE_KEY, String(catalogState.limit));
+      window.localStorage.setItem(KRONIKA_CATALOG_PAGE_SIZE_STORAGE_KEY, String(catalogState.limit));
     } catch {
       // Ignore unavailable localStorage; the in-memory selection still applies.
     }

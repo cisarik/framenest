@@ -9,6 +9,7 @@ const INDEX_PATH = path.resolve(__dirname, "../src/framenest/adapters/api/web/in
 const APP_SOURCE = fs.readFileSync(APP_PATH, "utf8");
 const INDEX_SOURCE = fs.readFileSync(INDEX_PATH, "utf8");
 const RECOVERY_KEY = "framenest.upload.recovery.v1";
+const RECOVERY_KEY_CURRENT = "kronika.upload.recovery.v1";
 
 const UPLOAD_A = "11111111-1111-4111-8111-111111111111";
 const UPLOAD_B = "22222222-2222-4222-8222-222222222222";
@@ -612,7 +613,7 @@ function stateOf(harness) {
     cancelLabel: document.querySelector("#upload-cancel-button").textContent,
     duplicateKeepLabel: document.querySelector("#upload-duplicate-keep-button").textContent,
     duplicateDiscardLabel: document.querySelector("#upload-duplicate-discard-button").textContent,
-    recovery: window.localStorage.getItem("${RECOVERY_KEY}"),
+    recovery: window.localStorage.getItem("${RECOVERY_KEY_CURRENT}"),
   })`);
 }
 
@@ -3740,4 +3741,97 @@ test("active poll 404 clears stale recovery without server cancel and preserves 
   assert.notEqual(state.recovery, null);
   assert.equal(state.hasPollOwner, true);
   assert.match(state.message, /temporarily unavailable/i);
+});
+
+test("Class 4: upload recovery reads the retired key only when the current key is absent", async () => {
+  const h = await createHarness();
+  const record = (state) =>
+    JSON.stringify({
+      upload_id: UPLOAD_A,
+      file_name_hint: "sample.gif",
+      expected_size_bytes: 8,
+      last_modified_hint: 1,
+      last_known_state: state,
+    });
+
+  h.context.localStorage.setItem(RECOVERY_KEY, record("receiving"));
+  assert.equal(h.run("loadUploadRecovery().upload_id"), UPLOAD_A, "retired only");
+
+  h.context.localStorage.setItem(RECOVERY_KEY_CURRENT, record("publish_pending"));
+  assert.equal(
+    h.run("loadUploadRecovery().last_known_state"),
+    "publish_pending",
+    "both present: the current key wins"
+  );
+
+  h.context.localStorage.setItem(RECOVERY_KEY, record("receiving"));
+  assert.equal(
+    h.run("loadUploadRecovery().last_known_state"),
+    "publish_pending",
+    "the current key still wins"
+  );
+});
+
+test("Class 4: a rejected recovery removes both spellings so the fallback cannot resurrect it", async () => {
+  const h = await createHarness();
+  h.context.localStorage.setItem(RECOVERY_KEY, "{bad json");
+  h.context.localStorage.setItem(RECOVERY_KEY_CURRENT, "{bad json");
+  assert.equal(h.run("loadUploadRecovery()"), null);
+  assert.equal(h.context.localStorage.getItem(RECOVERY_KEY), null);
+  assert.equal(h.context.localStorage.getItem(RECOVERY_KEY_CURRENT), null);
+
+  h.context.localStorage.setItem(RECOVERY_KEY, JSON.stringify({
+    upload_id: UPLOAD_A,
+    file_name_hint: "sample.gif",
+    expected_size_bytes: 8,
+    last_known_state: "published",
+  }));
+  assert.equal(h.run("loadUploadRecovery()"), null);
+  assert.equal(h.context.localStorage.getItem(RECOVERY_KEY), null);
+  assert.equal(h.context.localStorage.getItem(RECOVERY_KEY_CURRENT), null);
+});
+
+test("Class 4: upload recovery writes the current key and leaves the retired key untouched", async () => {
+  const h = await createHarness();
+  const seeded = JSON.stringify({
+    upload_id: UPLOAD_A,
+    file_name_hint: "seeded.gif",
+    expected_size_bytes: 8,
+    last_modified_hint: 1,
+    last_known_state: "receiving",
+  });
+  const persist = (id, received) => {
+    h.context.__snapshot = snapshot(id, "receiving", received, 8, "written.gif");
+    h.run(`
+      uploadState.uploadId = __snapshot.id;
+      uploadState.fileNameHint = __snapshot.display_filename;
+      uploadState.expectedSizeBytes = __snapshot.declared_size_bytes;
+      saveUploadRecovery(__snapshot);
+    `);
+  };
+
+  h.context.localStorage.setItem(RECOVERY_KEY, seeded);
+  persist(UPLOAD_B, 2);
+  assert.equal(
+    JSON.parse(h.context.localStorage.getItem(RECOVERY_KEY_CURRENT)).upload_id,
+    UPLOAD_B,
+    "a write when only the retired key existed creates the current key"
+  );
+  assert.equal(
+    h.context.localStorage.getItem(RECOVERY_KEY),
+    seeded,
+    "and does not modify the retired key"
+  );
+
+  h.context.localStorage.setItem(RECOVERY_KEY, "{stale retired copy}");
+  persist(UPLOAD_B, 4);
+  assert.equal(
+    h.context.localStorage.getItem(RECOVERY_KEY),
+    "{stale retired copy}",
+    "a write when both keys exist still does not touch the retired key"
+  );
+  assert.equal(
+    JSON.parse(h.context.localStorage.getItem(RECOVERY_KEY_CURRENT)).upload_id,
+    UPLOAD_B
+  );
 });

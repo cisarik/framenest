@@ -2563,3 +2563,64 @@ test("Save overlay pathFor uses companion seed surface and preselects X once", a
   const absent = await loadSaveOverlay({ tags: [{ key: "meme", display_name: "Meme" }] });
   assert.deepEqual(absent.chipLabels(), []);
 });
+
+test("Class 4: the shared origin resolver takes the current key, then the retired key, then nothing", () => {
+  const entry = companion.STORAGE.origin;
+  assert.equal(entry.name, "kronikaOrigin");
+  assert.equal(entry.retiredName, "frameNestOrigin");
+  assert.deepEqual(companion.storageKeyRequest(entry), ["kronikaOrigin", "frameNestOrigin"]);
+
+  assert.equal(
+    companion.storageValue({ frameNestOrigin: "https://retired.example.ts.net" }, entry),
+    "https://retired.example.ts.net",
+    "retired only"
+  );
+  assert.equal(
+    companion.storageValue(
+      { frameNestOrigin: "https://retired.example.ts.net", kronikaOrigin: "https://now.example.ts.net" },
+      entry,
+    ),
+    "https://now.example.ts.net",
+    "both present: the current key wins"
+  );
+  assert.equal(companion.storageValue({}, entry), undefined, "neither present");
+  assert.equal(companion.storageValue(null, entry), undefined, "no store at all");
+  assert.equal(
+    companion.storageValue({ kronikaOrigin: undefined, frameNestOrigin: "https://retired.example.ts.net" }, entry),
+    "https://retired.example.ts.net",
+    "an absent current key falls through to the retired key"
+  );
+  assert.equal(
+    companion.storageValue({ kronikaOrigin: "https://now.example.ts.net", frameNestOrigin: undefined }, entry),
+    "https://now.example.ts.net"
+  );
+});
+
+test("Class 4: the picker and the side panel both read the origin through the shared resolver", () => {
+  const pickerSource = fs.readFileSync(path.join(REPO, "extension/ui/picker.js"), "utf8");
+  const sidebarSource = fs.readFileSync(path.join(REPO, "extension/ui/sidebar.js"), "utf8");
+  for (const [name, source] of [["picker", pickerSource], ["sidebar", sidebarSource]]) {
+    assert.match(source, /storageKeyRequest\(companion\.STORAGE\.origin\)/, name);
+    assert.match(source, /storageValue\(stored, companion\.STORAGE\.origin\)/, name);
+  }
+  assert.match(
+    pickerSource,
+    /storageChangeFor\(changes, companion\.STORAGE\.origin\)/,
+    "the picker must react to a write under either spelling"
+  );
+  assert.doesNotMatch(pickerSource, /changes\.frameNestOrigin/);
+  assert.doesNotMatch(sidebarSource, /stored\.frameNestOrigin/);
+  assert.doesNotMatch(sidebarSource, /\["frameNestOrigin"\]/);
+});
+
+test("Extension version is at least the dual-send revision so a reload is observable", () => {
+  const parts = String(manifest.version).split(".");
+  assert.equal(parts.length, 3, "the manifest version stays a three-part release version");
+  const [major, minor] = parts.map((part) => Number(part));
+  assert.ok(Number.isInteger(major) && Number.isInteger(minor), manifest.version);
+  assert.ok(
+    major > 0 || minor >= 2,
+    "the dual-send revision must be distinguishable from the pre-cut 0.1.0 in the browser extension page"
+  );
+  assert.equal(manifest.name, "FrameNest X Companion", "the display name is a deferred Cooperator decision");
+});

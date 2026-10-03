@@ -202,12 +202,29 @@ PER_TREE_FRAMENEST_FILE_COUNT = {
 # actually detect a missed content rename. See the `fn-production-env-deploy`
 # case, whose filename is clean while its content names `framenest`.
 PER_TREE_FRAMENEST_OCCURRENCE_COUNT = {
+    # KSI-IMPL-C2 moved `extension` by -10 and `tests` by +59, and nothing else.
+    #
+    # `extension` -10, per file: `background/service_worker.js` -3 (the inline
+    # `frameNestOrigin` key gave way to `companion.STORAGE.origin`, and the three
+    # inline mutation-header literals collapsed into one shared constant);
+    # `shared/messages.js` -1 (the two internal protocol literals became
+    # `kronika.*`, while `framenest-companion.v1` and `framenest.review-inbox`
+    # each survive once as the retained retired spelling);
+    # `ui/picker.js` -4 and `ui/sidebar.js` -2 (the `frameNestOrigin` literals
+    # gave way to the shared resolver, which retains the retired name once).
+    #
+    # `tests` +59 is entirely the new Class 1 to Class 4 assertions, which name
+    # the retired spellings they pin. Per file: companion_review +27,
+    # tailscale_identity_frontend +13, x_companion_extension +10,
+    # test_local_web_application +7, gallery_filter_controls +3,
+    # youtube_acquisition_cockpit -1 (the vm preamble now reuses the shared
+    # constant instead of repeating the literal).
     "src": 2984,
-    "tests": 4446,
+    "tests": 4505,
     "deploy": 212,
     "scripts": 104,
     "docs": 1216,
-    "extension": 199,
+    "extension": 189,
 }
 
 # The exact tracked text paths, this ledger excluded, whose decoded content
@@ -948,8 +965,15 @@ ENV_PREFIX_DISTINCT_NAME_COUNT = 101
 ENV_PREFIX_BARE_SPELLING_COUNT = 21
 
 MUTATION_HEADER = "X-FrameNest-Request"
-MUTATION_HEADER_OCCURRENCE_COUNT = 59
-MUTATION_HEADER_FILE_COUNT = 29
+# KSI-IMPL-C2 kept every occurrence that existed before it and added 14:
+# -2 where the service worker's three inline literals became one shared constant,
+# +9 in tests/tailscale_identity_frontend.test.js, +5 in
+# tests/companion_review_extension.test.js, and +2 in
+# tests/contract/test_local_web_application.py for the new dual-send and
+# order-independence assertions. The file count moved 29 -> 30 only because that
+# last file now names the header for the first time.
+MUTATION_HEADER_OCCURRENCE_COUNT = 73
+MUTATION_HEADER_FILE_COUNT = 30
 
 HOST_PATH_OCCURRENCE_COUNT = {
     "/opt/framenest": 204,
@@ -964,7 +988,13 @@ UNIT_ACCOUNT_OCCURRENCE_COUNT = {
     "Group=framenest": 5,
 }
 
-CAPITALIZED_OCCURRENCE_COUNT = 3381
+# KSI-IMPL-C2 moved this by +15: -2 where the service worker stopped spelling the
+# retired origin key and the header inline, and +17 across the four test files
+# whose new test names and messages name the brand they pin
+# (tailscale_identity_frontend +9, companion_review_extension +5,
+# test_local_web_application +2, x_companion_extension +1). The file count is
+# unmoved.
+CAPITALIZED_OCCURRENCE_COUNT = 3396
 CAPITALIZED_FILE_COUNT = 482
 
 CONSOLE_SCRIPT_ENTRY_COUNT = 14
